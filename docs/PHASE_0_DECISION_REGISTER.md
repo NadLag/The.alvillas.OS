@@ -10,7 +10,7 @@ Authoritative sources reviewed:
 
 Status values used here: `OPEN`, `PROPOSED`, `AWAITING_EXTERNAL_ADVICE`, `DECIDED`, `BLOCKED`.
 
-Only P0-13 is marked `DECIDED`, based on explicit business-owner approval recorded on October 9, 2026. All other Phase 0 items remain undecided.
+P0-13 and P0-14 are marked `DECIDED`, based on explicit business-owner approval recorded on October 9, 2026. All other Phase 0 items remain undecided.
 
 ## Phase 0 Exit Gate
 
@@ -29,7 +29,7 @@ Current exit-gate result: `BLOCKED` for completion, because Phase 0 still has un
 ## Source Gaps And Ambiguities
 
 - P0-13, ALVILLAS-only clean-room boundary: the active checklist now requires ALVILLAS OS to be independent from Orbix, HostNow, and legacy projects. The Master Specification describes ALVILLAS OS as the private operating system for ALVILLAS SARL and does not define any dependency on those projects.
-- P0-14, build-vs-buy for calendar sync and guest messaging: the Build Checklist requires a build-vs-buy check, while the Master Specification only states iCal-first reservation integration, adapter architecture, WhatsApp as the human channel, generated links initially, and API later if justified.
+- P0-14, build-vs-buy for calendar sync and guest messaging: resolved by owner decision on October 9, 2026. V1 uses iCal-first scheduled calendar synchronization, an ALVILLAS-owned normalized reservation model, duplicate/conflict detection, synchronization monitoring and failure handling, Airbnb settlement CSV/import as separate financial data, manual WhatsApp communication and generated Guest Hub links, no internal messaging system, and no PMS or channel-manager purchase, integration, or research in V1.
 - P0-15, first 90-day MVP: the Build Checklist suggests `reservation -> tasks -> field app -> owner ledger`, while the Master Specification development strategy starts with Slice 1 property onboarding before reservations, field app, and financial engine. This is a sequencing ambiguity, not enough evidence for an approved MVP boundary.
 - P0-23, signature approach: Technology Decisions v1.1 says Documenso is the selected V1 signature provider and recommends self-hosted Documenso initially, but Phase 0 still requires confirmation of self-hosted vs hosted operation and a maintainer. Legal signature level and certificate requirements also remain unresolved.
 - P0-25, monthly V1 infrastructure cost ceiling: Technology Decisions v1.1 supports a low-recurring-cost philosophy and lists lean services, but no numeric monthly ceiling is specified.
@@ -198,13 +198,14 @@ Current exit-gate result: `BLOCKED` for completion, because Phase 0 still has un
 
 - Requirement/question: Run a build-vs-buy check on calendar sync and guest messaging against buying a channel manager / PMS.
 - Sources: Build Checklist Phase 0 product decisions; `CHECKLIST_STATE.md` P0-14; Master Specification sections 37-38; Technology Decisions v1.1 sections 6, 9, 21.
-- Current status: `OPEN`
-- Decision owner: technical owner
-- Source-supported options: build iCal-first reservation sync with adapters; add OTA APIs later; use manual WhatsApp plus generated links initially; use WhatsApp Business API/provider later if volume justifies it; buy channel manager / PMS instead of building where justified.
-- Recommendation: PROPOSED — NOT APPROVED: keep iCal-first and adapter-based architecture as the default technical direction while completing the required build-vs-buy analysis before implementation.
-- Evidence or approval required: build-vs-buy analysis, selected vendor or build decision, cost/operations comparison, integration risks, and business approval.
-- Date decided:
-- Dependencies and implementation gates: blocks reservation adapter scope, guest messaging design, background job requirements, and potential PMS/channel-manager integration work.
+- Current status: `DECIDED`
+- Decision owner: business owner
+- Approved outcome: ALVILLAS OS V1 uses iCal-first scheduled calendar synchronization; an ALVILLAS-owned normalized reservation model; duplicate detection, conflict detection, synchronization monitoring, and failure handling; Airbnb settlement CSV/import as a separate financial data source; manual WhatsApp communication and generated Guest Hub links; no internal messaging system; no PMS or channel-manager purchase, integration, or research in V1; and extensible provider/reservation adapters for future needs without implementing unnecessary integrations.
+- Source-supported options considered: build iCal-first reservation sync with adapters; add OTA APIs later if justified; use manual WhatsApp plus generated links initially; use WhatsApp Business API/provider later if volume justifies it; buy a channel manager / PMS if justified.
+- Rejected for V1: PMS/channel-manager purchase, integration, or vendor research.
+- Evidence: Explicit business-owner approval recorded in this ChatGPT conversation on October 9, 2026, following `docs/P0_14_BUILD_VS_BUY_ANALYSIS.md`.
+- Decision date: `2026-10-09`
+- Dependencies and implementation gates: clears the V1 build-vs-buy decision for calendar sync and guest messaging. Implementation remains gated by Phase 0 completion, the three Phase 1 blueprints, technical confirmation of provider/adapters where required, and the relevant legal/accounting/compliance decisions for dependent production workflows.
 
 ### P0-15 - First 90-day MVP cut
 

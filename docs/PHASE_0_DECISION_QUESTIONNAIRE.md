@@ -4,6 +4,8 @@ This questionnaire consolidates every unanswered Phase 0 decision from `docs/PHA
 
 P0-13 is excluded because the business owner approved it on 2026-10-09. Technical verification for clean-room compliance remains a separate implementation/compliance requirement.
 
+P0-14 is excluded because the business owner approved the V1 iCal-first decision on 2026-10-09: iCal-first scheduled calendar synchronization, ALVILLAS-owned reservation normalization, duplicate/conflict detection, sync monitoring and failure handling, Airbnb settlement CSV/import as a separate financial source, manual WhatsApp plus generated Guest Hub links, no internal messaging system, no PMS or channel-manager purchase/integration/research in V1, and extensible adapters for future needs.
+
 No answer should be treated as a legal or accounting conclusion unless it comes from the qualified professional owner listed for that question.
 
 ## Business/Product Owner
@@ -94,26 +96,22 @@ No answer should be treated as a legal or accounting conclusion unless it comes 
    - Source-supported options: configurable tax hooks; no hard-coded Moroccan tax logic; accountant-owned actual configuration.
    - Consequence if unresolved: Phase 2/Phase 7 financial architecture cannot be approved.
 
-2. P0-14 / Decision Register P0-14: What is the build-vs-buy result for calendar sync and guest messaging?
-   - Source-supported options: build iCal-first plus adapters; buy channel manager / PMS; hybrid; manual WhatsApp/generated links first; WhatsApp Business API/provider later if volume justifies it.
-   - Consequence if unresolved: reservation adapter scope, guest messaging architecture, background jobs, and external integration budget remain blocked.
-
-3. P0-21 / Decision Register P0-21: Do you confirm the V1 application stack?
+2. P0-21 / Decision Register P0-21: Do you confirm the V1 application stack?
    - Source-supported options: Next.js, React, TypeScript, Tailwind, shadcn/ui, Radix, Lucide, PostgreSQL, Prisma, Zod, React Hook Form, TanStack Table/Query, Recharts or lightweight equivalent, Vitest, Playwright.
    - Consequence if unresolved: Phase 2 repository setup, component conventions, database access, validation, forms, tables, charts, and testing cannot start cleanly.
 
-4. P0-22 / Decision Register P0-22: Do you confirm the V1 managed services and service ownership?
+3. P0-22 / Decision Register P0-22: Do you confirm the V1 managed services and service ownership?
    - Source-supported options: Vercel, managed PostgreSQL, Cloudflare R2, Resend, Inngest, Sentry, Auth.js/mature auth, provider-agnostic database layer.
    - Consequence if unresolved: deployment, storage, email, jobs, monitoring, auth, backups, and cost planning remain blocked.
 
-5. P0-23 / Decision Register P0-23: What Documenso deployment mode and maintenance owner are approved, assuming legal advice permits Documenso?
+4. P0-23 / Decision Register P0-23: What Documenso deployment mode and maintenance owner are approved, assuming legal advice permits Documenso?
    - Source-supported options: self-hosted Documenso initially; hosted Documenso if approved; alternative provider only if required by legal/accounting advice; ALVILLAS owns PDF generation; Documenso owns signature workflow.
    - Consequence if unresolved: SignatureProvider implementation, document signing, signed PDF archive, certificate/security plan, and operational maintenance remain blocked.
 
-6. P0-24 / Decision Register P0-24: Do you confirm provider abstractions as mandatory V1 architectural boundaries?
+5. P0-24 / Decision Register P0-24: Do you confirm provider abstractions as mandatory V1 architectural boundaries?
    - Source-supported options: `StorageProvider`, `EmailProvider`, `SignatureProvider`, `PaymentProvider`, reservation adapters including `ICalAdapter`, `AirbnbAdapter`, `BookingComAdapter`, `VrboAdapter`, `DirectBookingAdapter`, and `CSVAdapter`.
    - Consequence if unresolved: provider SDK usage may leak into business logic and make future service/provider changes more expensive.
 
-7. P0-25 / Decision Register P0-25: What is the estimated V1 monthly cost for the proposed stack under the business owner's cost ceiling?
+6. P0-25 / Decision Register P0-25: What is the estimated V1 monthly cost for the proposed stack under the business owner's cost ceiling?
    - Source-supported inputs: lean architecture; pay for reliability; avoid expensive enterprise tools; Vercel, managed PostgreSQL, R2, Resend, Inngest, Sentry, Documenso deployment, Auth.js/mature auth.
    - Consequence if unresolved: the business owner cannot approve the monthly infrastructure ceiling or service tiers.
