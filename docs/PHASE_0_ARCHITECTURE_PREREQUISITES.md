@@ -1,6 +1,6 @@
 # Phase 0 Architecture Prerequisites
 
-Status: documentation-only gate review. This file records which Phase 0 decisions can support technical design and which unresolved items still block dependent workflows or implementation gates. It does not mark Phase 0 complete.
+Status: documentation-only gate review. This file records which Phase 0 decisions can support technical design and which unresolved items still block implementation gates. It does not mark Phase 0 complete.
 
 ## Approved Decisions Available For Design
 
@@ -26,27 +26,65 @@ Approved effect:
 - Airbnb settlement CSV/import is a separate financial data source.
 - Guest communication uses manual WhatsApp communication and generated Guest Hub links.
 - No internal messaging system is built.
-- No PMS or channel-manager purchase, integration, or vendor research is approved for V1.
+- No PMS/channel-manager purchase, integration, or vendor research is approved for V1.
 - Provider and reservation adapters stay extensible for future needs without implementing unnecessary integrations.
 
-## Remaining Decisions Essential Before Application Coding
+### Prompt 009 Decisions And Technical Confirmations
 
-These remaining Phase 0 decisions are essential before Phase 2 application coding or infrastructure setup can safely begin. Technical design may draft against source-supported assumptions, but those assumptions are not approvals.
+Recorded on 2026-10-10 during the Prompt 009 review.
+
+Approved effect:
+
+- P0-11: V1 tax architecture uses configurable tax hooks and does not hard-code Moroccan tax logic. Accountant-approved tax values remain unresolved under P0-09.
+- P0-15: ALVILLAS OS remains the complete production-ready specification across all 17 phases. The 90-day MVP wording is not a scope reduction.
+- P0-16: V1 language scope is French and English, with Arabic/RTL architecture ready.
+- P0-17: MAD is primary, with multicurrency-capable money models and no single-currency assumption.
+- P0-18: V1 payment methods are Airbnb settlement, cash, PayPal, bank transfer, and manual payment recording. Stripe is not a V1 dependency.
+- P0-19: Create separate configurable initial templates for Villa 405 and Sultan's House without inventing real property data.
+- P0-20: Implement every Master Specification KPI with configurable targets.
+- P0-21: Use the Master Specification application stack.
+- P0-22: Use the Master Specification managed-service architecture, subject to later paid-service approvals.
+- P0-24: Provider abstractions and reservation/source adapters are mandatory V1 boundaries.
+- P0-25: No fixed monthly infrastructure cost ceiling; approve infrastructure expenses case by case and track estimates in `docs/INFRASTRUCTURE_COST_REGISTER.md`.
+
+### P0-23 - Partial Signature Preference
+
+Recorded on 2026-10-10 by the business owner.
+
+Approved effect:
+
+- Preferred deployment is self-hosted Documenso, subject to Moroccan legal validation.
+- ALVILLAS owns PDF generation.
+- Documenso handles the signature workflow through `SignatureProvider`.
+- Provider replacement remains possible.
+
+Still unresolved:
+
+- Moroccan legal signature level and Documenso acceptability.
+- Certificate/trust requirements.
+- Security operations owner.
+- Maintenance owner.
+- Backup/update plan.
+- Final deployment readiness.
+
+## Remaining Phase 0 Gate Requirements Before Application Coding
+
+These unresolved Phase 0 items are essential before Phase 2 application coding or infrastructure setup can safely begin. Technical design may draft against approved sources, but the Phase 0 exit gate is not passed.
 
 | ID | Decision | Why it matters before coding | Allowed design assumption |
 |---|---|---|---|
-| P0-11 | Confirm configurable V1 tax engine | A tax hook shape affects transaction, service, invoice, owner statement, and export models. | Design `TaxRule`, `TaxRate`, `TaxCategory`, effective dates, and scoped tax configuration. Do not hard-code Moroccan tax rules. |
-| P0-15 | Lock first 90-day MVP cut | Controls slice order, acceptance tests, and what "build first" means. | Draft blueprints for the full specified system and call out `reservation -> tasks -> field app -> owner ledger` as checklist-suggested but not approved. |
-| P0-16 | Lock V1 languages | Affects i18n, document generation, staff UX, owner portal, Guest Hub, and public site. | Design French + English with Arabic/RTL architecture-ready support, matching the Master Specification. |
-| P0-17 | Lock currency approach | Affects every money field, ledger, reconciliation, report, and export. | Design MAD as primary while avoiding single-currency assumptions. |
-| P0-18 | Lock V1 payment methods | Affects `PaymentProvider`, cash custody, settlement imports, reconciliation, and ledgers. | Design for Airbnb settlement, cash, PayPal, bank transfer, manual, and future provider extension without making Stripe a V1 dependency. |
-| P0-19 | Choose first property templates | Needed for property onboarding defaults and for Phase 1 paper testing against Villa 405 and Villa Sultan. | Design template inheritance and property overrides; do not invent actual Villa 405 or Villa Sultan defaults. |
-| P0-20 | Define V1 success metrics | Affects KPI priority, Command Center acceptance, and MVP proof. | Use the KPI categories from the Master Specification; do not invent target values. |
-| P0-21 | Confirm application stack | Blocks repository setup, framework choices, UI conventions, validation, testing, and charts. | Use the Master Specification stack as the design target: Next.js, React, TypeScript, Tailwind, shadcn/ui, Radix, Lucide, PostgreSQL, Prisma, Zod, React Hook Form, TanStack Table/Query, Recharts or equivalent, Vitest, Playwright. |
-| P0-22 | Confirm managed services | Blocks production/staging service setup and operational ownership. | Design provider boundaries for Vercel, managed PostgreSQL, Cloudflare R2, Resend, Inngest, Sentry, and Auth.js/mature auth. |
-| P0-23 | Confirm Documenso deployment and maintainer | Blocks actual signature deployment and security ownership. | Design `SignatureProvider`, ALVILLAS-owned PDF generation, signed PDF archive, and Documenso as the source-supported V1 provider, pending legal/certificate confirmation. |
-| P0-24 | Confirm provider abstractions | Blocks clean implementation boundaries. | Treat `StorageProvider`, `EmailProvider`, `SignatureProvider`, `PaymentProvider`, and reservation adapters as mandatory architectural boundaries in the blueprint drafts. |
-| P0-25 | Set monthly V1 infrastructure cost ceiling | Blocks paid tiers, deployment sizing, and service selection tradeoffs. | Keep designs lean and provider-abstracted; do not choose paid tiers or claim budget approval. |
+| P0-01 | Confirm incorporation and registration evidence | Phase 0 requires real company evidence before production legal/financial assumptions. | Do not assume registration, tax IDs, social security registration, or bank accounts are complete. |
+| P0-02 | Legal frame for owner money held by ALVILLAS | Owner ledger, owner portal money views, payouts, and custody/reconciliation need legal validation. | Model ownership vs custody and audit trails, but do not activate production owner-money handling. |
+| P0-03 | Final owner management agreement | Owner onboarding and agreement signing need lawyer-reviewed wording. | Model versioned agreements/documents, but do not use final legal text. |
+| P0-04 | Final guest agreement and house rules | Guest Hub legal flows need approved wording. | Model guest agreement and house-rule acceptance, but do not activate final production legal content. |
+| P0-05 | CNDP/Law 09-08 guest data and ID obligations | Guest data and ID storage need privacy/legal validation. | Model restricted sensitive document storage and retention hooks. |
+| P0-06 | Guest registration and ID storage rules | Required fields, access limits, retention, and deletion need legal advice. | Model configurable forms and sensitive-document access controls. |
+| P0-07 | Moroccan signature level and provider acceptability | P0-23 depends on this; owner/guest signing cannot be production-ready without it. | Keep `SignatureProvider` and Documenso preference abstracted and replaceable. |
+| P0-08 | Retention and privacy/legal compliance policies | Storage, signed URLs, backups, deletion, and archive behavior need policy. | Model retention-policy hooks; do not hard-code unapproved retention periods. |
+| P0-09 | VAT, commission invoicing, tourist tax, owner-statement treatment | Production tax/accounting configuration needs accountant validation. | Build configurable tax/accounting hooks only. |
+| P0-10 | Accountant export formats | Export contracts and accounting handoff need accountant acceptance. | Draft export groups from the Master Specification; final fields need accountant approval. |
+| P0-12 | Monthly closing and locking rules | Ledger finalization, adjustments, reopening, and statements need accountant-approved rules. | Model close/lock state machines; do not enforce unapproved accounting policy. |
+| P0-23 | Documenso legal/security/maintenance completion | Signature deployment, certificates, maintainer, and security operations remain unresolved. | Design `SignatureProvider`, ALVILLAS PDF generation, and signed PDF archive with replacement path. |
 
 ## Legal, Accounting, And Compliance Blockers For Dependent Production Workflows
 
@@ -65,24 +103,26 @@ These items do not prevent documentation-only architecture drafting, but they bl
 | P0-09 | Accountant | VAT, commission invoicing, tourist tax, owner-statement treatment, and production tax/accounting configuration. |
 | P0-10 | Accountant | Final accountant export formats, field definitions, report grouping, and accounting handoff. |
 | P0-12 | Accountant | Monthly close rules, locking, adjustments, reopening rules, and finalized owner statements/accountant exports. |
+| P0-23 | Lawyer and technical owner | Signature legal validation, certificate/trust requirements, maintainer assignment, security operations, backups, updates, and final deployment readiness. |
 
 ## Proposed Implementation Assumptions, Not Approvals
 
-- The blueprints can use the Master Specification and Technology & Architecture Decisions v1.1 as design defaults.
+- The blueprints can use the Master Specification, Technology & Architecture Decisions v1.1, and recorded Prompt 009 decisions as design defaults.
 - Financial models can define configurable hooks, immutable movements, ownership vs custody, and reconciliation patterns, but must not encode unapproved legal/tax treatment.
 - Guest ID/document entities can be modeled with restricted access and retention hooks, but exact retention and storage behavior remains blocked by legal/privacy decisions.
 - Agreement/document entities can be modeled with versions and signature abstractions, but final contract wording and signature assurance remain blocked.
 - The P0-14 iCal decision is approved; richer OTA APIs and WhatsApp Business API remain future extension points, not V1 build requirements.
+- P0-25 approves the budget policy only; it does not approve paid services, tiers, subscriptions, purchases, or production deployment.
 
 ## Gate Result
 
-- Phase 0 exit gate: not passed. Phase 0 still has unresolved legal, accounting, product, and technology decisions.
-- Phase 1 documents: can be drafted from approved sources in this commit, but Phase 1 should not be marked complete until the three blueprints are reviewed and tested on paper against real Villa 405 and Villa Sultan data.
+- Phase 0 exit gate: not passed. Phase 0 still has unresolved legal, privacy, accounting, incorporation, and P0-23 signature maintenance/security blockers.
+- Phase 1 documents: can be drafted and verified from approved sources in this commit, but Phase 1 should not be marked complete until the blueprints are reviewed with the people who do the work and tested on paper against real Villa 405 and Sultan's House data.
 - Application code: must not start until Phase 0 approval and the three Phase 1 blueprints are complete.
 
 ## Acceptance Criteria For This Prerequisite Review
 
-- P0-14 is recorded as DECIDED/DONE with evidence and date.
+- P0-13 through P0-25 decisions that are genuinely resolved are recorded with evidence and date.
 - Remaining blockers are separated into architecture/coding blockers and later production/compliance blockers.
 - Proposed assumptions are explicitly labeled as assumptions, not approvals.
 - No legal advice, accountant approval, tax rule, compliance clearance, provider pricing, test result, deployment success, or owner approval is fabricated.

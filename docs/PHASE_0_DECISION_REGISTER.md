@@ -10,7 +10,13 @@ Authoritative sources reviewed:
 
 Status values used here: `OPEN`, `PROPOSED`, `AWAITING_EXTERNAL_ADVICE`, `DECIDED`, `BLOCKED`.
 
-P0-13 and P0-14 are marked `DECIDED`, based on explicit business-owner approval recorded on October 9, 2026. All other Phase 0 items remain undecided.
+P0-13 and P0-14 are marked `DECIDED`, based on explicit business-owner approval recorded on October 9, 2026.
+
+P0-15, P0-19, P0-20, and P0-25 are marked `DECIDED`, based on explicit business-owner approval recorded in Prompt 009 on October 10, 2026.
+
+P0-11, P0-16, P0-17, P0-18, P0-21, P0-22, and P0-24 are marked `DECIDED`, based on the locked Master Specification and embedded Technology & Architecture Decisions v1.1, with technical confirmation recorded during the Prompt 009 review on October 10, 2026. These entries do not claim legal, tax, accounting, deployment, or paid-service approval.
+
+P0-23 has an approved owner preference for self-hosted Documenso, but the complete decision remains blocked by legal signature validation, certificate/security requirements, and maintenance ownership.
 
 ## Phase 0 Exit Gate
 
@@ -24,15 +30,17 @@ Phase 0 is not complete until all of the following are true:
 - Every closed decision has evidence traceable to source documents, professional advice, owner approval, or a recorded technical decision.
 - No Phase 1 or later implementation gate is treated as passed before its required evidence exists.
 
-Current exit-gate result: `BLOCKED` for completion, because Phase 0 still has unresolved decisions and the Phase 0 checklist exit test remains TODO.
+Current exit-gate result: `BLOCKED` for completion, because Phase 0 still has unresolved legal, privacy, accounting, signature, and incorporation evidence gates. Application coding must not start until Phase 0 and Phase 1 gates genuinely pass.
 
 ## Source Gaps And Ambiguities
 
 - P0-13, ALVILLAS-only clean-room boundary: the active checklist now requires ALVILLAS OS to be independent from Orbix, HostNow, and legacy projects. The Master Specification describes ALVILLAS OS as the private operating system for ALVILLAS SARL and does not define any dependency on those projects.
 - P0-14, build-vs-buy for calendar sync and guest messaging: resolved by owner decision on October 9, 2026. V1 uses iCal-first scheduled calendar synchronization, an ALVILLAS-owned normalized reservation model, duplicate/conflict detection, synchronization monitoring and failure handling, Airbnb settlement CSV/import as separate financial data, manual WhatsApp communication and generated Guest Hub links, no internal messaging system, and no PMS or channel-manager purchase, integration, or research in V1.
-- P0-15, first 90-day MVP: the Build Checklist suggests `reservation -> tasks -> field app -> owner ledger`, while the Master Specification development strategy starts with Slice 1 property onboarding before reservations, field app, and financial engine. This is a sequencing ambiguity, not enough evidence for an approved MVP boundary.
-- P0-23, signature approach: Technology Decisions v1.1 says Documenso is the selected V1 signature provider and recommends self-hosted Documenso initially, but Phase 0 still requires confirmation of self-hosted vs hosted operation and a maintainer. Legal signature level and certificate requirements also remain unresolved.
-- P0-25, monthly V1 infrastructure cost ceiling: Technology Decisions v1.1 supports a low-recurring-cost philosophy and lists lean services, but no numeric monthly ceiling is specified.
+- P0-15, delivery scope: resolved by owner decision on October 10, 2026. ALVILLAS OS is the complete production-ready specification across all 17 phases. The 90-day MVP language is not an approved scope reduction; implementation milestones are dependency-aware delivery organization only.
+- P0-19, first property templates: resolved by owner decision on October 10, 2026. Create separate initial property templates for Villa 405 and Sultan's House, with configurable property-specific settings, workflows, services, inventory, financial agreements, and overrides. Real property details remain unknown and must not be invented.
+- P0-20, KPIs: resolved by owner decision on October 10, 2026. Implement every KPI defined in the Master Specification, with configurable targets. Numeric target values remain configurable and may be populated later from actual operating data.
+- P0-23, signature approach: Technology Decisions v1.1 says Documenso is the selected V1 signature provider, and the owner approved a self-hosted Documenso preference on October 10, 2026. Complete P0-23 closure still requires legal signature validation, certificate/trust requirements, security operations, maintenance ownership, backups/updates, and final deployment readiness.
+- P0-25, infrastructure budget policy: resolved by owner decision on October 10, 2026. There is no fixed monthly infrastructure cost ceiling. Infrastructure and service expenses require case-by-case approval before purchase or subscription. Recurring-cost tracking is maintained in `docs/INFRASTRUCTURE_COST_REGISTER.md`.
 
 ## Decision Register
 
@@ -160,12 +168,13 @@ Current exit-gate result: `BLOCKED` for completion, because Phase 0 still has un
 
 - Requirement/question: Confirm tax stays configurable in V1 and is not hard-coded.
 - Sources: Build Checklist Phase 0 accounting and tax; `CHECKLIST_STATE.md` P0-11; Master Specification sections 76, 83, 84; Technology Decisions v1.1 section 14.
-- Current status: `PROPOSED`
+- Current status: `DECIDED`
 - Decision owner: technical owner
+- Approved outcome: V1 implements tax as configurable rules/rates/categories/effective dates and does not hard-code Moroccan tax logic. Accountant-approved tax values and treatments remain separate unresolved accounting inputs under P0-09.
 - Source-supported options: `TaxRule`, `TaxRate`, `TaxCategory`, effective dates, property, service, and transaction type; no hard-coded Moroccan tax logic in V1.
-- Recommendation: PROPOSED — NOT APPROVED: implement configurable tax hooks in V1 and leave actual Moroccan tax configuration to accountant-approved setup.
-- Evidence or approval required: technical confirmation in architecture notes plus accountant agreement that the configurable model covers required tax treatment.
-- Date decided:
+- Recommendation: APPROVED for technical architecture only: implement configurable tax hooks in V1 and leave actual Moroccan tax configuration to accountant-approved setup.
+- Evidence: Master Specification section 76 and Technology & Architecture Decisions v1.1 section 14 require configurable tax architecture; technical confirmation recorded during Prompt 009 review on October 10, 2026.
+- Decision date: `2026-10-10`
 - Dependencies and implementation gates: blocks financial engine schema/configuration, service tax rules, owner statements, accountant exports, and production accounting setup.
 
 ### P0-12 - Monthly closing and locking rules
@@ -207,100 +216,108 @@ Current exit-gate result: `BLOCKED` for completion, because Phase 0 still has un
 - Decision date: `2026-10-09`
 - Dependencies and implementation gates: clears the V1 build-vs-buy decision for calendar sync and guest messaging. Implementation remains gated by Phase 0 completion, the three Phase 1 blueprints, technical confirmation of provider/adapters where required, and the relevant legal/accounting/compliance decisions for dependent production workflows.
 
-### P0-15 - First 90-day MVP cut
+### P0-15 - Delivery scope and implementation milestones
 
-- Requirement/question: Lock the first 90-day MVP cut.
+- Requirement/question: Clarify the first 90-day MVP wording and lock the approved delivery scope.
 - Sources: Build Checklist Phase 0 product decisions; `CHECKLIST_STATE.md` P0-15; Master Specification section 80 development strategy; Build Checklist phases 4-7.
-- Current status: `PROPOSED`
+- Current status: `DECIDED`
 - Decision owner: business owner
+- Approved outcome: Build the complete production-ready ALVILLAS OS specification across all 17 phases. The 90-day MVP language is not an approved final product scope or a scope reduction. Use dependency-aware implementation milestones only to organize delivery.
 - Source-supported options: suggested checklist cut is `reservation -> tasks -> field app -> owner ledger`; Master Specification slice sequence starts with property onboarding, then reservations, field app, and financial engine.
-- Recommendation: PROPOSED — NOT APPROVED: use the checklist's suggested MVP cut only after resolving whether property onboarding is included in the first 90 days or treated as prerequisite setup.
-- Evidence or approval required: business-approved MVP scope, explicit inclusions/exclusions, success criteria, and any deferred Phase 4 onboarding work.
-- Date decided:
-- Dependencies and implementation gates: blocks sprint planning, Phase 1 blueprint prioritization, slice ordering, and acceptance tests.
+- Recommendation: APPROVED: preserve the full Master Specification scope and use milestones only as sequencing aids.
+- Evidence: Explicit business-owner approval recorded in Prompt 009 on October 10, 2026.
+- Decision date: `2026-10-10`
+- Dependencies and implementation gates: clears the delivery-scope ambiguity. Application coding still depends on Phase 0 exit, Phase 1 blueprint review/paper testing, and unresolved legal/accounting gates.
 
 ### P0-16 - V1 languages
 
 - Requirement/question: Lock V1 languages.
 - Sources: Build Checklist Phase 0 product decisions; `CHECKLIST_STATE.md` P0-16; Master Specification baseline status and section 6; Phase 2 and Phase 13 checklist i18n items.
-- Current status: `PROPOSED`
+- Current status: `DECIDED`
 - Decision owner: business owner
+- Approved outcome: V1 ships French and English; Arabic/RTL structure is architecture-ready.
 - Source-supported options: French and English at minimum for V1; Arabic architecture-ready with RTL support.
-- Recommendation: PROPOSED — NOT APPROVED: V1 ships French + English, with Arabic architecture-ready / RTL structure but not necessarily full Arabic content unless separately approved.
-- Evidence or approval required: business approval of V1 language scope, owner/guest/staff language expectations, and RTL readiness requirement.
-- Date decided:
+- Recommendation: APPROVED: implement FR/EN in V1 and keep Arabic/RTL architecture ready without inventing unapproved Arabic copy.
+- Evidence: Master Specification section 6 locks French and English minimum V1 output with Arabic architecture-ready support; Prompt 009 reuses this established product baseline on October 10, 2026.
+- Decision date: `2026-10-10`
 - Dependencies and implementation gates: blocks i18n architecture, content scope, document/email generation, field app labels, and public website language scope.
 
 ### P0-17 - Currency approach
 
 - Requirement/question: Lock currency approach.
 - Sources: Build Checklist Phase 0 product decisions; `CHECKLIST_STATE.md` P0-17; Master Specification baseline status and section 79 scalability.
-- Current status: `PROPOSED`
+- Current status: `DECIDED`
 - Decision owner: business owner
+- Approved outcome: MAD is the primary currency, and all money models must remain multicurrency-capable with no single-currency assumptions.
 - Source-supported options: MAD primary; no single-currency assumptions in the model.
-- Recommendation: PROPOSED — NOT APPROVED: use MAD as the primary currency while designing all money models to avoid single-currency assumptions.
-- Evidence or approval required: business/accounting approval of MAD primary currency, multi-currency data model requirements, rounding/display rules, and any exchange-rate policy if needed.
-- Date decided:
+- Recommendation: APPROVED for product/architecture scope: use MAD primary while designing all money models to avoid single-currency assumptions.
+- Evidence: Master Specification baseline names MAD as primary currency and section 79 requires no one-currency assumption; Prompt 009 reuses this established product baseline on October 10, 2026.
+- Decision date: `2026-10-10`
 - Dependencies and implementation gates: blocks transaction schema, ledger formulas, reports, payment adapters, owner statements, and exports.
 
 ### P0-18 - V1 payment methods
 
 - Requirement/question: Lock V1 payment methods.
 - Sources: Build Checklist Phase 0 product decisions; `CHECKLIST_STATE.md` P0-18; Master Specification sections 26-29, 53; Technology Decisions v1.1 sections 8-13 and 30.
-- Current status: `PROPOSED`
+- Current status: `DECIDED`
 - Decision owner: business owner
+- Approved outcome: V1 supports Airbnb settlement, cash, PayPal, bank transfer, and manual payment recording through provider/adaptor boundaries. Stripe is not a V1 dependency.
 - Source-supported options: Airbnb settlement, cash, PayPal, bank transfer, manual; future provider; Stripe future only if direct-booking strategy requires it.
-- Recommendation: PROPOSED — NOT APPROVED: support Airbnb settlement, cash, PayPal, bank transfer, and manual payments in V1 through `PaymentProvider` and provider adapters; do not make Stripe a V1 dependency.
-- Evidence or approval required: business approval of V1 payment methods, accountant confirmation of recording/reconciliation needs, and technical confirmation of adapter boundaries.
-- Date decided:
+- Recommendation: APPROVED for V1 payment-method scope: support Airbnb settlement, cash, PayPal, bank transfer, and manual payments in V1 through `PaymentProvider` and provider adapters; do not make Stripe a V1 dependency.
+- Evidence: Technology & Architecture Decisions v1.1 sections 8-13 and 30 define the V1 payment approach; Prompt 009 reuses this established product baseline on October 10, 2026.
+- Decision date: `2026-10-10`
 - Dependencies and implementation gates: blocks PaymentProvider design, cash custody, Airbnb settlement reconciliation, owner ledger, and payout/accounting exports.
 
 ### P0-19 - First property templates
 
 - Requirement/question: Choose the first property templates based on Villa 405 and Villa Sultan.
 - Sources: Build Checklist Phase 0 product decisions; `CHECKLIST_STATE.md` P0-19; Master Specification sections 5, 42; Phase 4 and Phase 9 checklist property/inventory template items.
-- Current status: `OPEN`
+- Current status: `DECIDED`
 - Decision owner: business owner
+- Approved outcome: Create separate initial property templates for Villa 405 and Sultan's House, each supporting configurable property-specific settings, workflows, services, inventory, financial agreements, and overrides.
 - Source-supported options: Villa 405-based template; Villa Sultan-based template; standard property template with property-specific overrides; custom setup.
-- Recommendation: none; source requires choosing the first templates but does not define their contents.
-- Evidence or approval required: approved starting templates, operating profiles, inventory/service/workflow defaults, and known overrides for Villa 405 and Villa Sultan.
-- Date decided:
-- Dependencies and implementation gates: blocks property onboarding wizard defaults, workflows, inventory templates, services, owner onboarding package, and Phase 1 real-data blueprint tests.
+- Recommendation: APPROVED for template selection only: build two separate configurable templates; do not invent real Villa 405 or Sultan's House operating details.
+- Evidence: Explicit business-owner approval recorded in Prompt 009 on October 10, 2026.
+- Decision date: `2026-10-10`
+- Dependencies and implementation gates: clears the template-selection decision. Actual template contents, property data, workflows, inventory defaults, service availability, and financial-agreement values must be provided or configured during Phase 4 without fabrication.
 
 ### P0-20 - V1 success metrics
 
 - Requirement/question: Define success metrics tied to the north star, "run tomorrow's operation in minutes, not hours."
 - Sources: Build Checklist Phase 0 product decisions; `CHECKLIST_STATE.md` P0-20; Master Specification section 1 north star and section 59 KPI architecture.
-- Current status: `OPEN`
+- Current status: `DECIDED`
 - Decision owner: business owner
+- Approved outcome: Implement every KPI defined in the Master Specification, with configurable targets.
 - Source-supported options: metrics listed in the KPI architecture include occupancy, ADR, RevPAR, gross revenue, net revenue, OTA fees, commission, owner net, service revenue, service margin, expense per stay, laundry cost, inventory consumption, staff productivity, turnaround time, maintenance, variance rate, and cash position. No numeric targets are specified.
-- Recommendation: none; source provides KPI categories but not measurable V1 targets.
-- Evidence or approval required: measurable V1 success metrics, baselines, target values, measurement method, and acceptance criteria for the MVP and Golden Path.
-- Date decided:
-- Dependencies and implementation gates: blocks MVP acceptance, dashboard/report priority, Command Center criteria, and Phase 15 release validation.
+- Recommendation: APPROVED: KPI coverage is not reduced; numeric target values remain configurable and may be populated later from actual operating data.
+- Evidence: Explicit business-owner approval recorded in Prompt 009 on October 10, 2026.
+- Decision date: `2026-10-10`
+- Dependencies and implementation gates: clears KPI coverage scope. Numeric targets, baselines, and operating-data calibration remain future configuration work and do not reduce the required KPI set.
 
 ### P0-21 - Application stack
 
 - Requirement/question: Confirm the stack: Next.js, React, TypeScript, Tailwind, shadcn/ui, Radix, Lucide, PostgreSQL, Prisma, Zod, React Hook Form, TanStack Table/Query, Recharts.
 - Sources: Build Checklist Phase 0 technology decisions; `CHECKLIST_STATE.md` P0-21; Master Specification section 73; Technology Decisions v1.1 sections 2, 27, 29, 30.
-- Current status: `PROPOSED`
+- Current status: `DECIDED`
 - Decision owner: technical owner
+- Approved outcome: V1 uses the Master Specification stack: Next.js, React, TypeScript, Tailwind, shadcn/ui, Radix, Lucide, PostgreSQL, Prisma, Zod, React Hook Form, TanStack Table/Query, Recharts or lightweight equivalent, Vitest, and Playwright.
 - Source-supported options: named stack above; Recharts or lightweight equivalent in Master Specification section 73; PostgreSQL + Prisma locked in Technology Decisions v1.1.
-- Recommendation: PROPOSED — NOT APPROVED: confirm the listed stack, with Recharts as the V1 chart default unless a lightweight equivalent is explicitly approved.
-- Evidence or approval required: technical approval record and any documented exceptions.
-- Date decided:
+- Recommendation: APPROVED for technical architecture: use the listed stack, with Recharts as the default V1 charting choice unless a lightweight equivalent is explicitly selected during implementation.
+- Evidence: Master Specification section 73 and Technology & Architecture Decisions v1.1 sections 2, 27, 29, and 30 define the stack; technical confirmation recorded during Prompt 009 review on October 10, 2026.
+- Decision date: `2026-10-10`
 - Dependencies and implementation gates: blocks Phase 2 foundation, repository setup, component conventions, database access, forms, validation, tables, charts, and tests.
 
 ### P0-22 - Hosting and managed services
 
 - Requirement/question: Confirm services: Vercel, managed PostgreSQL, Cloudflare R2, Resend, Inngest, Sentry, Auth.js.
 - Sources: Build Checklist Phase 0 technology decisions; `CHECKLIST_STATE.md` P0-22; Master Specification section 73; Technology Decisions v1.1 sections 3-6, 16, 24, 27, 29, 30.
-- Current status: `PROPOSED`
+- Current status: `DECIDED`
 - Decision owner: technical owner
+- Approved outcome: V1 targets Vercel, managed PostgreSQL, Cloudflare R2, Resend, Inngest, Sentry, and Auth.js/mature auth through provider-aware boundaries. Exact paid tiers, account ownership, production environment setup, and purchases remain separate approval gates.
 - Source-supported options: Vercel for app hosting; managed PostgreSQL provider rather than self-maintained database server; Cloudflare R2 for object storage; Resend for email; Inngest for background jobs; Sentry for monitoring; Auth.js/mature auth. Provider-agnostic database layer should remain possible.
-- Recommendation: PROPOSED — NOT APPROVED: confirm the listed services for V1 while keeping provider boundaries where v1.1 requires them.
-- Evidence or approval required: technical approval, cost review against P0-25, selected managed PostgreSQL provider, service ownership, and any account/security requirements.
-- Date decided:
+- Recommendation: APPROVED for service architecture: confirm the listed services for V1 while keeping provider boundaries where v1.1 requires them.
+- Evidence: Master Specification section 73 and Technology & Architecture Decisions v1.1 sections 3-6, 16, 24, 27, 29, and 30 define the service architecture; technical confirmation recorded during Prompt 009 review on October 10, 2026.
+- Decision date: `2026-10-10`
 - Dependencies and implementation gates: blocks Phase 2 deployment, storage, email, jobs, monitoring, auth, backups, and production readiness.
 
 ### P0-23 - Documenso deployment approach and maintainer
@@ -308,33 +325,37 @@ Current exit-gate result: `BLOCKED` for completion, because Phase 0 still has un
 - Requirement/question: Confirm signature approach, Documenso self-hosted vs hosted, and who maintains it.
 - Sources: Build Checklist Phase 0 technology decisions; `CHECKLIST_STATE.md` P0-23; Master Specification section 84; Technology Decisions v1.1 section 7 and sections 19-20.
 - Current status: `AWAITING_EXTERNAL_ADVICE`
-- Decision owner: technical owner
+- Decision owner: business owner for deployment preference; lawyer and technical owner for unresolved legal/security/maintenance dependencies.
+- Approved partial outcome: Owner preference is self-hosted Documenso, subject to Moroccan legal validation. ALVILLAS owns PDF generation; Documenso handles the signature workflow through `SignatureProvider`; provider replacement must remain possible.
 - Source-supported options: Documenso as selected V1 signature provider; self-hosted Documenso initially; hosted Documenso if approved; alternative provider only if required by legal/accounting advice; ALVILLAS owns PDF generation and Documenso owns signature workflow.
-- Recommendation: PROPOSED — NOT APPROVED: keep Documenso as the V1 provider and decide only the deployment mode, certificate/trust level, security owner, and maintainer.
-- Evidence or approval required: P0-07 legal advice, deployment-mode decision, maintainer assignment, security/certificate plan, cost estimate, backup/update plan, and acceptance of operational responsibility.
-- Date decided:
+- Recommendation: PARTIALLY APPROVED: use self-hosted Documenso as the preferred V1 deployment path if legal and security validation allow it.
+- Evidence: Owner deployment preference explicitly approved in Prompt 009 on October 10, 2026; Technology & Architecture Decisions v1.1 section 7 selects Documenso behind `SignatureProvider`.
+- Owner preference date: `2026-10-10`
+- Evidence or approval still required: P0-07 legal advice on Moroccan signature level and Documenso acceptability; certificate/trust requirements; security operations plan; maintainer assignment; backup/update plan; deployment readiness; and any paid-service or hosting approval.
 - Dependencies and implementation gates: blocks SignatureProvider implementation, document signing, signed PDF archive, security ownership, and Documenso operating procedures.
 
 ### P0-24 - Provider abstractions
 
 - Requirement/question: Confirm provider abstractions are mandatory.
 - Sources: Build Checklist Phase 0 technology decisions; `CHECKLIST_STATE.md` P0-24; Master Specification sections 38, 73; Technology Decisions v1.1 sections 4-5, 7-9, 13, 29, 30.
-- Current status: `PROPOSED`
+- Current status: `DECIDED`
 - Decision owner: technical owner
+- Approved outcome: Provider abstractions are mandatory V1 architectural boundaries for storage, email, signatures, payments, and reservation/source adapters.
 - Source-supported options: `StorageProvider`, `EmailProvider`, `SignatureProvider`, `PaymentProvider`, and reservation adapters such as `ICalAdapter`, `AirbnbAdapter`, `BookingComAdapter`, `VrboAdapter`, `DirectBookingAdapter`, and `CSVAdapter`.
-- Recommendation: PROPOSED — NOT APPROVED: make these provider interfaces and adapters mandatory architectural boundaries for V1.
-- Evidence or approval required: technical approval in Phase 1 architecture, interface list, ownership, and code-review rule that business logic does not hard-code provider SDKs.
-- Date decided:
+- Recommendation: APPROVED: make these provider interfaces and adapters mandatory architectural boundaries for V1.
+- Evidence: Master Specification section 38 and Technology & Architecture Decisions v1.1 sections 4-5, 7-9, 13, 29, and 30 require external integrations to pass through adapters/provider boundaries; technical confirmation recorded during Prompt 009 review on October 10, 2026.
+- Decision date: `2026-10-10`
 - Dependencies and implementation gates: blocks Phase 2 provider interfaces, integration adapters, service replacement strategy, and financial/reservation/document architecture.
 
-### P0-25 - Monthly V1 infrastructure cost ceiling
+### P0-25 - Infrastructure budget policy
 
-- Requirement/question: Set a monthly infrastructure cost ceiling for V1.
+- Requirement/question: Set a monthly infrastructure cost ceiling or budget policy for V1.
 - Sources: Build Checklist Phase 0 technology decisions; `CHECKLIST_STATE.md` P0-25; Technology Decisions v1.1 sections 1, 3, 26, 27; identified gap: no numeric ceiling is specified in the sources.
-- Current status: `OPEN`
+- Current status: `DECIDED`
 - Decision owner: business owner
+- Approved outcome: No fixed monthly infrastructure cost ceiling. Infrastructure and service expenses will be approved case by case.
 - Source-supported options: low recurring cost without sacrificing architecture/performance; pay for reliability where it matters; use open source where it saves money without operational complexity; avoid expensive enterprise tools initially; pay for Vercel, managed PostgreSQL, R2, Resend, Inngest, Sentry, self-hosted Documenso initially, and Auth.js/mature auth where justified.
-- Recommendation: none; source supports cost philosophy but no amount.
-- Evidence or approval required: numeric monthly V1 cost ceiling, service budget assumptions, free-tier/paid-tier policy, Documenso hosting cost assumption, and approval of tradeoffs if the selected stack exceeds the ceiling.
-- Date decided:
-- Dependencies and implementation gates: blocks managed-service selection, Documenso hosting choice, monitoring tier, email/job/storage sizing, and production budget approval.
+- Recommendation: APPROVED: maintain an estimated recurring-cost register and require owner approval before any paid purchase, subscription, or tier commitment.
+- Evidence: Explicit business-owner approval recorded in Prompt 009 on October 10, 2026; cost tracking started in `docs/INFRASTRUCTURE_COST_REGISTER.md`.
+- Decision date: `2026-10-10`
+- Dependencies and implementation gates: clears the fixed-ceiling question. Individual paid services, tiers, subscriptions, and purchases remain separate future approval gates.

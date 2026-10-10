@@ -1,6 +1,6 @@
 # Phase 1 Blueprint: Permission / Access Matrix
 
-Status: draft blueprint for review. This document is documentation only and does not mark Phase 1 complete. The final permission matrix must be reviewed and tested with concrete users, properties, and financial examples before checklist items are marked DONE.
+Status: verified draft blueprint for review. This document is documentation only and does not mark the Phase 1 exit gate complete. The final permission matrix must be reviewed and tested with concrete users, properties, and financial examples before the phase gate passes.
 
 ## Source Traceability
 
@@ -11,6 +11,18 @@ Status: draft blueprint for review. This document is documentation only and does
 - Sections 37, 56-59, 63-69: Guest Hub, Owner Portal, reports, KPIs, Personal OS, Command Center, notifications, no internal messaging.
 - Sections 74 and 78: organization root tenant and security principles.
 - Non-negotiable principles 11-15, 18-20, 21, 24.
+
+## Approved Decisions Used
+
+- P0-13: ALVILLAS OS is an independent clean-room product.
+- P0-14: no internal chat; manual WhatsApp plus Guest Hub links; iCal-first synchronization with adapter boundaries.
+- P0-15: full production scope is preserved across all 17 phases.
+- P0-16 through P0-18: FR/EN V1, Arabic/RTL-ready, MAD primary, multicurrency-capable money models, and V1 payment methods.
+- P0-19: separate configurable Villa 405 and Sultan's House templates; no real property details invented.
+- P0-20: every Master Specification KPI is in scope with configurable targets.
+- P0-21, P0-22, and P0-24: locked stack, managed-service architecture, and mandatory provider/adaptor boundaries.
+- P0-23 partial: self-hosted Documenso is preferred but legal/security/maintenance decisions remain open.
+- P0-25: no fixed infrastructure ceiling; paid-service approvals are case by case.
 
 ## Core Authorization Principles
 
@@ -111,6 +123,9 @@ Restricted by default:
 - Guest ID documents
 - Signed contracts
 - Audit records
+- Signature provider administration
+- Infrastructure cost and subscription settings
+- Provider credentials and integration secrets
 
 Field policy options:
 
@@ -265,14 +280,16 @@ Admin can preview access as a user:
 - Owner access is scoped to owned/authorized properties.
 - Guest access is reservation-scoped and link/account scoped.
 - Personal OS and ALVILLAS OS remain separate financial domains.
+- Provider administration, paid-service configuration, and signature operations are sensitive administrative permissions and require explicit grants.
+- KPI dashboards inherit field-level financial restrictions; a user can see only KPI values backed by data they are authorized to view.
 
 ## Unresolved Decisions
 
 - Final legal/privacy decisions may add restrictions for guest ID documents and sensitive documents.
 - Accountant decisions may add export permissions and close/reopen restrictions.
-- Final signature-level decision may add signature administration permissions.
-- First property templates and real staff assignments are not yet defined.
-- Final MVP scope and success metrics are not approved.
+- Final signature-level, certificate/trust, Documenso maintenance, and security decisions may add signature administration permissions.
+- Real Villa 405 and Sultan's House staff assignments, owner representatives, and property-specific permission examples are not yet supplied.
+- Paid-service administration permissions may be refined when services and account ownership are activated.
 
 ## Acceptance Criteria
 

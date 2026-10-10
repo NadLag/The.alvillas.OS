@@ -1,6 +1,6 @@
 # Phase 1 Blueprint: Domain Model / Database Architecture
 
-Status: draft blueprint for review. This document is documentation only and does not create schema, migrations, dependencies, infrastructure, or application code.
+Status: verified draft blueprint for review. This document is documentation only and does not create schema, migrations, dependencies, infrastructure, or application code.
 
 ## Source Traceability
 
@@ -13,6 +13,7 @@ Status: draft blueprint for review. This document is documentation only and does
 - Sections 73-79: technology stack, organization root tenancy, database principles, configuration, event architecture, security, scalability.
 - Technology & Architecture Decisions v1.1 sections 2-6, 8-21, 29-30.
 - P0-14 approved owner decision: iCal-first V1, no PMS/channel manager in V1.
+- Prompt 009 decisions recorded on 2026-10-10: full production scope across all 17 phases; FR/EN V1 with Arabic/RTL-ready architecture; MAD primary with multicurrency-capable money models; V1 payment methods; separate configurable Villa 405 and Sultan's House templates; complete KPI coverage with configurable targets; no fixed infrastructure ceiling; self-hosted Documenso preference subject to legal/security/maintenance validation.
 
 ## Architecture Principles
 
@@ -26,6 +27,7 @@ Status: draft blueprint for review. This document is documentation only and does
 - Money ownership is separate from physical money location/custody.
 - Expected -> Actual -> Variance -> Reason -> Action is the reconciliation pattern.
 - Offline operations use a local queue, server validation, conflict detection, commit, and acknowledgement.
+- Milestones sequence delivery but do not reduce the Master Specification scope.
 
 ## Tenancy And Identity Entities
 
@@ -55,13 +57,15 @@ Design note: RoleAssignment must support multiple active roles per person and co
 | Property | Managed villa/property. | Belongs to Organization, City, Owner relationship. |
 | PropertyOwner | Many-to-many owner/property link. | Supports multiple owners if needed. |
 | PropertyTemplate | Reusable setup defaults. | Applied to Property with overrides. |
+| PropertyTemplateProfile | Named initial template profile for Villa 405 or Sultan's House. | Stores configurable defaults without inventing real values. |
+| PropertyTemplateOverride | Property-specific override from a template. | Versioned, scoped, audited. |
 | OperatingProfile | Services/workflow configuration for a property. | Belongs to Property and versioned config. |
 | ManagementAgreement | Commercial/legal agreement shell. | Belongs to Owner/Property, versioned. |
 | AgreementVersion | Immutable agreement version/effective dates. | Links DocumentVersion and rule snapshots. |
 | OwnerApprovalRule | Configurable approval requirement. | Scoped by Owner/Property/category/threshold. |
 | PayoutRule | Configurable payout schedule/model. | Scoped by Owner/Property/agreement. |
 
-Unresolved: final agreement wording, legal approval, and property templates for Villa 405/Villa Sultan.
+Unresolved: final agreement wording, legal approval, and real Villa 405/Sultan's House template values.
 
 ## Reservation And Calendar Entities
 
@@ -154,6 +158,7 @@ Offline operation examples:
 | Wallet | Person wallet as movement ledger. | Links Person and wallet movements. |
 | TransactionGroup | Groups related financial movements. | Reservation, service order, payout, reconciliation, adjustment. |
 | Transaction | Immutable financial event. | date, amount, account, owner, property, reservation, guest, person, supplier, category, source, payment method, ownership, status, document, approval, group, audit. |
+| MoneyAmount | Amount with currency, precision, and display metadata. | Used by transactions, ledgers, service prices, payouts, reports, and imports. |
 | EconomicOwner | Who money belongs to. | Owner, ALVILLAS, supplier, staff/person, other configured party. |
 | MoneyCustodyTransfer | Movement of physical/custody location. | guest -> staff -> ALVILLAS, bank -> wallet, bank -> owner. |
 | PaymentMethod | Airbnb settlement, cash, PayPal, bank transfer, manual, future provider. | Referenced by transactions. |
@@ -175,6 +180,7 @@ Financial invariants:
 - Transactions are voided or adjusted, not deleted or silently edited.
 - Each reservation keeps the financial rule snapshot applicable at the time.
 - Owner ledger and ALVILLAS ledger remain distinct.
+- MAD is the primary currency, but no model assumes one currency forever.
 
 ## Documents, Signatures, Audit, And Reporting Entities
 
@@ -217,6 +223,27 @@ Configurable areas:
 - service pricing
 - tax hooks
 - operating rules
+
+## Automation Rule Syntax
+
+Automation follows `event -> rule -> action`.
+
+Draft rule shape:
+
+| Field | Purpose |
+|---|---|
+| `rule_id` | Stable identifier for versioning and audit. |
+| `organization_id` | Tenant root. |
+| `scope` | Organization, city, property, owner, reservation, service, task, team, wallet, or document scope. |
+| `event_type` | Domain event name, for example `ReservationConfirmed` or `InventoryBelowMinimum`. |
+| `conditions` | Structured predicates over event payload and scoped configuration. |
+| `actions` | One or more allowed actions, for example create task, request approval, notify, generate document, create financial snapshot. |
+| `effective_from` / `effective_to` | Versioned activation window. |
+| `priority` | Deterministic ordering when multiple rules match. |
+| `enabled` | Explicit activation state. |
+| `created_by` / `approved_by` | Audit and governance. |
+
+Rules must be evaluated server-side, audited, scoped, and never embedded as hard-coded business policy.
 
 ## State Machines
 
@@ -355,9 +382,18 @@ High-frequency indexes should cover:
 - approval status
 - audit target/action/timestamp
 
-## API And Report Contracts To Define Next
+## Draft API And Report Contracts
 
-Draft API contract groups:
+Draft API contract groups must share these conventions:
+
+- Organization-scoped path or tenant context.
+- Server-side authorization on every route/action.
+- Zod validation on every input boundary.
+- Idempotency keys for imports, syncs, payments, payouts, document generation, and offline sync.
+- Audit/correlation ID for sensitive actions.
+- No provider SDK types leak into domain API contracts.
+
+Contract groups:
 
 - CRM/lead intake
 - Property onboarding
@@ -374,50 +410,45 @@ Draft API contract groups:
 
 Report templates:
 
-- Owner monthly statement
-- Owner annual statement
-- Property P&L
-- Occupancy/ADR/RevPAR
-- ALVILLAS company P&L
-- Team productivity/compensation
-- Inventory/laundry variance
-- Bank reconciliation
-- Accountant exports
+- Owner monthly statement: opening balance, revenue, services, reimbursements, commission, expenses, payouts, adjustments, closing balance, money held, and source transactions.
+- Owner annual statement: yearly rollup of monthly statement categories and payouts.
+- Property P&L: occupancy, ADR, RevPAR, revenue, expenses, service revenue, operating costs, and variance summaries.
+- ALVILLAS company P&L: commissions, margins, company expenses, cash position, receivables/payables, and portfolio performance.
+- Team productivity/compensation: completed jobs, workload, compensation, wallet movements, and performance indicators.
+- Inventory/laundry variance: expected, actual, difference, reason, action, resolved by, date.
+- Bank reconciliation: imported statement lines, expected transactions, matches, unmatched items, variances, and resolution status.
+- Accountant exports: CSV, Excel, PDF, transaction exports, income, expenses, owner statements, bank reconciliation, supplier payments, and staff payments.
+- KPI views: every Master Specification KPI, filtered by property, owner, team member, role, supplier, booking source, month, quarter, year, and portfolio, with configurable targets.
 
-## Backup And Disaster Recovery Parameters To Define
+## Backup And Disaster Recovery Parameters
 
-The final backup/DR parameters are not approved yet. Design must support:
+The final provider-specific backup/DR setup is not approved yet. Design must support:
 
-- PostgreSQL backups and tested restore.
-- Object storage backup/retention strategy.
-- Document and signed PDF preservation.
-- Audit log preservation.
-- Recovery of scheduled jobs/sync state.
-- Recovery test evidence before production.
+- PostgreSQL automated backups and a tested restore before production launch.
+- Point-in-time recovery if the selected managed PostgreSQL provider and approved budget support it.
+- Object storage backup, retention, and versioning strategy for contracts, guest documents, photos, invoices, reports, and signed PDFs.
+- Audit log preservation and restore validation.
+- Recovery of scheduled jobs, sync state, settlement imports, and idempotency records.
+- Restore drill evidence before production readiness is claimed.
+- Retention periods and deletion/archive behavior controlled by legal/privacy decisions, not hard-coded.
+- Paid backup, replication, or retention services require case-by-case owner approval under P0-25.
 
 ## Assumptions
 
-- PostgreSQL + Prisma are the design target from the Master Specification, pending final P0-21 approval.
-- Provider abstractions are treated as required in the blueprint, pending P0-24 approval.
+- PostgreSQL + Prisma are the approved design target from the Master Specification and Prompt 009 review.
+- Provider abstractions are required architectural boundaries.
 - V1 reservation synchronization is iCal-first and no PMS/channel manager is used.
 - Tax/accounting rules are modeled as configurable hooks, not hard-coded rules.
 - Legal/privacy decisions will refine document retention, guest ID handling, and signature requirements.
+- The self-hosted Documenso preference is not a complete production signature decision until legal, certificate/trust, security, and maintenance requirements are resolved.
 
 ## Unresolved Decisions
 
-- P0-11 tax confirmation and accountant validation.
-- P0-15 MVP cut.
-- P0-16 languages.
-- P0-17 currency approval.
-- P0-18 payment methods approval.
-- P0-19 first property templates.
-- P0-20 success metrics.
-- P0-21 stack confirmation.
-- P0-22 services confirmation.
-- P0-23 signature deployment and maintainer.
-- P0-24 provider abstractions confirmation.
-- P0-25 infrastructure cost ceiling.
-- Legal/accounting decisions P0-01 through P0-10 and P0-12 where dependent.
+- Accountant validation of actual tax treatment and export fields.
+- Legal/privacy decisions for owner agreements, guest agreements, guest registration, guest ID handling, CNDP/Law 09-08 obligations, retention, and privacy policy.
+- P0-23 signature legal validation, certificate/trust level, maintainer, security operations, backup/update plan, and final deployment readiness.
+- Real Villa 405 and Sultan's House template values.
+- Case-by-case paid-service approvals before any purchase, subscription, or production deployment.
 
 ## Acceptance Criteria
 
@@ -431,4 +462,4 @@ The final backup/DR parameters are not approved yet. Design must support:
 - Configuration, agreements, price lists, and documents are versioned.
 - Index plan covers high-frequency queries.
 - API/report/backups are identified for detailed specification.
-- Blueprint is reviewed and paper-tested against real Villa 405 and Villa Sultan data before checklist completion.
+- Blueprint is reviewed and paper-tested against real Villa 405 and Sultan's House data before checklist completion.

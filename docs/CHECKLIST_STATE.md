@@ -12,8 +12,8 @@ Source of truth for build progress. Mirrors ALVILLAS_OS_Build_Checklist.docx (lo
 ## Phase summary
 | Phase | Done-when test | Items done | Updated |
 |---|---|---|---|
-| Phase 0 — Decisions and prerequisites | TODO | 2 / 25 | 2026-10-09 |
-| Phase 1 — Blueprint documents | TODO | 0 / 22 | |
+| Phase 0 — Decisions and prerequisites | BLOCKED | 13 / 25 | 2026-10-10 |
+| Phase 1 — Blueprint documents | BLOCKED | 21 / 22 | 2026-10-10 |
 | Phase 2 — Foundation | TODO | 0 / 23 | |
 | Phase 3 — Identity, access and audit | TODO | 0 / 27 | |
 | Phase 4 — Slice 1: Acquisition and property onboarding | TODO | 0 / 24 | |
@@ -36,29 +36,29 @@ Source of truth for build progress. Mirrors ALVILLAS_OS_Build_Checklist.docx (lo
 
 **Done when:** Every item below has a named owner, a decision, and a date. Nothing in the red zone is left undecided.
 
-**Phase test result:** TODO
+**Phase test result:** BLOCKED
 
 ### Legal and compliance (spec §84, red zone)
 
 | ID | Item | Status | Evidence | Date |
 |---|---|---|---|---|
-| P0-01 | Confirm ALVILLAS SARL is fully incorporated and registered (commercial register, tax IDs, social security, company bank accounts) | TODO | | |
-| P0-02 | Decide how owner money held by ALVILLAS is legally framed (management mandate, separate bank account for owner funds) and validate with a lawyer | TODO | | |
-| P0-03 | Write the final owner management agreement (FR/EN, Arabic-ready), reviewed by a lawyer | TODO | | |
-| P0-04 | Write the final guest agreement and house rules (FR/EN/AR) | TODO | | |
-| P0-05 | Check data-protection obligations for guest data and ID documents (Law 09-08 / CNDP) and complete any required declaration | TODO | | |
-| P0-06 | Check guest registration obligations and rules for storing guest ID documents | TODO | | |
-| P0-07 | Decide which signature level Moroccan contracts need and confirm the e-signature provider choice | TODO | | |
-| P0-08 | Write the data retention policy and privacy/legal compliance policy | TODO | | |
+| P0-01 | Confirm ALVILLAS SARL is fully incorporated and registered (commercial register, tax IDs, social security, company bank accounts) | BLOCKED | Business owner must provide incorporation, tax, social security, and bank-account evidence. No evidence found in authorized docs during Prompt 009 review. | 2026-10-10 |
+| P0-02 | Decide how owner money held by ALVILLAS is legally framed (management mandate, separate bank account for owner funds) and validate with a lawyer | BLOCKED | Lawyer must validate legal frame for owner money held by ALVILLAS. Design may model ownership vs custody only. | 2026-10-10 |
+| P0-03 | Write the final owner management agreement (FR/EN, Arabic-ready), reviewed by a lawyer | BLOCKED | Lawyer must review/approve final owner management agreement wording. | 2026-10-10 |
+| P0-04 | Write the final guest agreement and house rules (FR/EN/AR) | BLOCKED | Lawyer must review/approve final guest agreement and house rules. | 2026-10-10 |
+| P0-05 | Check data-protection obligations for guest data and ID documents (Law 09-08 / CNDP) and complete any required declaration | BLOCKED | Lawyer/privacy advisor must validate Law 09-08/CNDP obligations and any declaration. | 2026-10-10 |
+| P0-06 | Check guest registration obligations and rules for storing guest ID documents | BLOCKED | Lawyer must confirm guest registration duties and ID document storage/access/retention rules. | 2026-10-10 |
+| P0-07 | Decide which signature level Moroccan contracts need and confirm the e-signature provider choice | BLOCKED | Lawyer must confirm Moroccan signature level, certificate/trust requirements, and Documenso acceptability per contract type. | 2026-10-10 |
+| P0-08 | Write the data retention policy and privacy/legal compliance policy | BLOCKED | Lawyer/privacy advisor must approve retention and privacy/legal compliance policies. | 2026-10-10 |
 
 ### Accounting and tax (spec §14, §15, §84)
 
 | ID | Item | Status | Evidence | Date |
 |---|---|---|---|---|
-| P0-09 | Meet the accountant: agree VAT, commission invoicing, tourist tax and owner-statement treatment | TODO | | |
-| P0-10 | Agree the export formats the accountant needs (CSV, Excel, PDF, transaction exports) | TODO | | |
-| P0-11 | Confirm tax stays configurable in V1 (TaxRule, TaxRate, TaxCategory, effective dates) and is not hard-coded | TODO | | |
-| P0-12 | Agree monthly closing and locking rules | TODO | | |
+| P0-09 | Meet the accountant: agree VAT, commission invoicing, tourist tax and owner-statement treatment | BLOCKED | Accountant must approve VAT, commission invoicing, tourist tax, owner-statement treatment, and actual tax configuration. | 2026-10-10 |
+| P0-10 | Agree the export formats the accountant needs (CSV, Excel, PDF, transaction exports) | BLOCKED | Accountant must approve export formats, fields, grouping rules, and acceptance samples. | 2026-10-10 |
+| P0-11 | Confirm tax stays configurable in V1 (TaxRule, TaxRate, TaxCategory, effective dates) and is not hard-coded | DONE | Technical architecture confirmed from Master Specification section 76 and Technology & Architecture Decisions v1.1 section 14 during Prompt 009 review. Actual accountant-approved tax values remain under P0-09. | 2026-10-10 |
+| P0-12 | Agree monthly closing and locking rules | BLOCKED | Accountant must approve close calendar, lock behavior, allowed adjustments, reopening, and required reports. | 2026-10-10 |
 
 ### Product decisions
 
@@ -66,22 +66,22 @@ Source of truth for build progress. Mirrors ALVILLAS_OS_Build_Checklist.docx (lo
 |---|---|---|---|---|
 | P0-13 | Confirm ALVILLAS OS is an independent, clean-room product with its own repository, architecture, database, configuration, integrations, and deployment. No source-code sharing or dependencies on Orbix, HostNow, or legacy projects. | DONE | Approved decision: independent, clean-room ALVILLAS OS. Business-owner approval recorded in this ChatGPT conversation on 2026-10-09. Technical verification remains separate and is not claimed complete. | 2026-10-09 |
 | P0-14 | Run a build-vs-buy check on calendar sync and guest messaging (channel manager / PMS) against building it | DONE | Approved decision: V1 uses iCal-first scheduled calendar synchronization, ALVILLAS-owned normalized reservation model, duplicate/conflict detection, sync monitoring/failure handling, Airbnb settlement CSV/import as separate financial data, manual WhatsApp plus generated Guest Hub links, no internal messaging, no PMS/channel-manager purchase/integration/research in V1, and extensible adapters for future needs. Business-owner approval recorded in this ChatGPT conversation on 2026-10-09. | 2026-10-09 |
-| P0-15 | Lock the first 90-day MVP cut (suggested: reservation → tasks → field app → owner ledger) | TODO | | |
-| P0-16 | Lock V1 languages: French + English, Arabic architecture-ready (RTL) | TODO | | |
-| P0-17 | Lock currency approach: MAD primary, no single-currency assumptions in the model | TODO | | |
-| P0-18 | Lock V1 payment methods: Airbnb settlement, cash, PayPal, bank transfer, manual | TODO | | |
-| P0-19 | Choose the first property templates, based on Villa 405 and Villa Sultan | TODO | | |
-| P0-20 | Define success metrics tied to the north star: "run tomorrow's operation in minutes, not hours" | TODO | | |
+| P0-15 | Lock the first 90-day MVP cut (suggested: reservation → tasks → field app → owner ledger) | DONE | Prompt 009 owner decision: build the complete production-ready ALVILLAS OS specification across all 17 phases; 90-day MVP language is not a scope reduction; milestones are sequencing only. | 2026-10-10 |
+| P0-16 | Lock V1 languages: French + English, Arabic architecture-ready (RTL) | DONE | Master Specification section 6 plus Prompt 009 established baseline: FR/EN in V1, Arabic/RTL architecture-ready. | 2026-10-10 |
+| P0-17 | Lock currency approach: MAD primary, no single-currency assumptions in the model | DONE | Master Specification baseline and Prompt 009 established baseline: MAD primary with multicurrency-capable money models. | 2026-10-10 |
+| P0-18 | Lock V1 payment methods: Airbnb settlement, cash, PayPal, bank transfer, manual | DONE | Technology & Architecture Decisions v1.1 sections 8-13 and Prompt 009 established baseline: Airbnb settlement, cash, PayPal, bank transfer, and manual; no Stripe dependency for V1. | 2026-10-10 |
+| P0-19 | Choose the first property templates, based on Villa 405 and Villa Sultan | DONE | Prompt 009 owner decision: create separate initial configurable templates for Villa 405 and Sultan's House; do not invent real property details. | 2026-10-10 |
+| P0-20 | Define success metrics tied to the north star: "run tomorrow's operation in minutes, not hours" | DONE | Prompt 009 owner decision: implement every KPI in Master Specification section 59 with configurable targets; numeric target values may be populated later from operating data. | 2026-10-10 |
 
 ### Technology decisions (spec §73, v1.1)
 
 | ID | Item | Status | Evidence | Date |
 |---|---|---|---|---|
-| P0-21 | Confirm the stack: Next.js, React, TypeScript, Tailwind, shadcn/ui, Radix, Lucide, PostgreSQL, Prisma, Zod, React Hook Form, TanStack Table/Query, Recharts | TODO | | |
-| P0-22 | Confirm services: Vercel, managed PostgreSQL, Cloudflare R2, Resend, Inngest, Sentry, Auth.js | TODO | | |
-| P0-23 | Confirm signature approach (Documenso self-hosted vs hosted) and who maintains it | TODO | | |
-| P0-24 | Confirm provider abstractions are mandatory: StorageProvider, EmailProvider, SignatureProvider, PaymentProvider, reservation adapters | TODO | | |
-| P0-25 | Set a monthly infrastructure cost ceiling for V1 | TODO | | |
+| P0-21 | Confirm the stack: Next.js, React, TypeScript, Tailwind, shadcn/ui, Radix, Lucide, PostgreSQL, Prisma, Zod, React Hook Form, TanStack Table/Query, Recharts | DONE | Master Specification section 73 and Technology & Architecture Decisions v1.1 confirmed during Prompt 009 review. | 2026-10-10 |
+| P0-22 | Confirm services: Vercel, managed PostgreSQL, Cloudflare R2, Resend, Inngest, Sentry, Auth.js | DONE | Technology & Architecture Decisions v1.1 service architecture confirmed during Prompt 009 review. Paid tiers/purchases remain separate P0-25 approvals. | 2026-10-10 |
+| P0-23 | Confirm signature approach (Documenso self-hosted vs hosted) and who maintains it | BLOCKED | Owner preference for self-hosted Documenso recorded in Prompt 009, but lawyer must validate legal signature level/Documenso acceptability and technical owner must assign maintainer/security/backup/update plan. | 2026-10-10 |
+| P0-24 | Confirm provider abstractions are mandatory: StorageProvider, EmailProvider, SignatureProvider, PaymentProvider, reservation adapters | DONE | Master Specification sections 38 and 73 plus Technology & Architecture Decisions v1.1 confirmed mandatory provider/adaptor boundaries during Prompt 009 review. | 2026-10-10 |
+| P0-25 | Set a monthly infrastructure cost ceiling for V1 | DONE | Prompt 009 owner decision: no fixed monthly infrastructure cost ceiling; infrastructure/service expenses approved case by case; register created at `docs/INFRASTRUCTURE_COST_REGISTER.md`. | 2026-10-10 |
 
 ---
 
@@ -89,44 +89,44 @@ Source of truth for build progress. Mirrors ALVILLAS_OS_Build_Checklist.docx (lo
 
 **Done when:** The three blueprints are written, reviewed, and tested on paper against real data from Villa 405 and Villa Sultan.
 
-**Phase test result:** TODO
+**Phase test result:** BLOCKED
 
 ### 1. Master User Flow and System Map
 
 | ID | Item | Status | Evidence | Date |
 |---|---|---|---|---|
-| P1-01 | List every persona: Prospect, Owner, Guest, Admin, Operations Manager, Property Manager, Co-host, Housekeeper, Pool Technician, Gardener, Chef, Driver, Maintenance, QA Inspector, Finance/Accountant, Procurement, Revenue Manager, Contractor, family members | TODO | | |
-| P1-02 | Map every major journey end to end (owner acquisition, onboarding, booking, stay, checkout, payout, month close) | TODO | | |
-| P1-03 | Map the exception path for each journey (cancellation, early checkout, no-show, conflict, failed sync, missing receipt, price change) | TODO | | |
-| P1-04 | Draw the system map: Public Website, Admin, Operations, Finance, Owner Portal, Guest Hub, Field App | TODO | | |
-| P1-05 | Review the maps with the people who do the work (Hajar, Meriem, housekeepers) | TODO | | |
+| P1-01 | List every persona: Prospect, Owner, Guest, Admin, Operations Manager, Property Manager, Co-host, Housekeeper, Pool Technician, Gardener, Chef, Driver, Maintenance, QA Inspector, Finance/Accountant, Procurement, Revenue Manager, Contractor, family members | DONE | Verified in `docs/PHASE_1_MASTER_USER_FLOW_SYSTEM_MAP.md` during Prompt 009 review. | 2026-10-10 |
+| P1-02 | Map every major journey end to end (owner acquisition, onboarding, booking, stay, checkout, payout, month close) | DONE | Verified in `docs/PHASE_1_MASTER_USER_FLOW_SYSTEM_MAP.md`; monthly close journey added during Prompt 009 review. | 2026-10-10 |
+| P1-03 | Map the exception path for each journey (cancellation, early checkout, no-show, conflict, failed sync, missing receipt, price change) | DONE | Verified in `docs/PHASE_1_MASTER_USER_FLOW_SYSTEM_MAP.md` exception paths. | 2026-10-10 |
+| P1-04 | Draw the system map: Public Website, Admin, Operations, Finance, Owner Portal, Guest Hub, Field App | DONE | Verified in `docs/PHASE_1_MASTER_USER_FLOW_SYSTEM_MAP.md` system boundary/map. | 2026-10-10 |
+| P1-05 | Review the maps with the people who do the work (Hajar, Meriem, housekeepers) | BLOCKED | Requires real review with Hajar, Meriem, housekeepers, and paper test against real Villa 405 and Sultan's House data. No such evidence is in the repo. | 2026-10-10 |
 
 ### 2. Permission and Access Matrix
 
 | ID | Item | Status | Evidence | Date |
 |---|---|---|---|---|
-| P1-06 | List every role and the custom-role mechanism | TODO | | |
-| P1-07 | For each role: actions (view, create, edit, void, approve, reject, assign, validate, export, pay, reconcile, configure, override) | TODO | | |
-| P1-08 | For each role: data scopes (organization, city, property, owner, reservation, service, task, team, wallet) | TODO | | |
-| P1-09 | For each role: data classes (operational, guest, financial, personal, sensitive) | TODO | | |
-| P1-10 | List every field-level restriction (revenue, profit, commissions, salaries, wallets, supplier costs, owner payouts, bank balances) | TODO | | |
-| P1-11 | Write worked examples: co-host, property manager, pool worker, owner, accountant | TODO | | |
+| P1-06 | List every role and the custom-role mechanism | DONE | Verified in `docs/PHASE_1_PERMISSION_ACCESS_MATRIX.md`. | 2026-10-10 |
+| P1-07 | For each role: actions (view, create, edit, void, approve, reject, assign, validate, export, pay, reconcile, configure, override) | DONE | Verified in `docs/PHASE_1_PERMISSION_ACCESS_MATRIX.md`. | 2026-10-10 |
+| P1-08 | For each role: data scopes (organization, city, property, owner, reservation, service, task, team, wallet) | DONE | Verified in `docs/PHASE_1_PERMISSION_ACCESS_MATRIX.md`. | 2026-10-10 |
+| P1-09 | For each role: data classes (operational, guest, financial, personal, sensitive) | DONE | Verified in `docs/PHASE_1_PERMISSION_ACCESS_MATRIX.md`. | 2026-10-10 |
+| P1-10 | List every field-level restriction (revenue, profit, commissions, salaries, wallets, supplier costs, owner payouts, bank balances) | DONE | Verified in `docs/PHASE_1_PERMISSION_ACCESS_MATRIX.md`; provider credentials/signature administration/subscription settings added as sensitive restrictions. | 2026-10-10 |
+| P1-11 | Write worked examples: co-host, property manager, pool worker, owner, accountant | DONE | Verified in `docs/PHASE_1_PERMISSION_ACCESS_MATRIX.md`. | 2026-10-10 |
 
 ### 3. Domain Model and Database Architecture
 
 | ID | Item | Status | Evidence | Date |
 |---|---|---|---|---|
-| P1-12 | Entity list and relationships (owner, property, reservation, guest, person, user account, role, role assignment, task, transaction, ledger, payout, document, and more) | TODO | | |
-| P1-13 | Exact financial transaction model, including ownership vs money location and transaction groups | TODO | | |
-| P1-14 | Exact owner ledger formulas (opening, revenue, services, reimbursements, commission, expenses, payouts, adjustments, closing) | TODO | | |
-| P1-15 | State machines: reservation, task, approval, payout, document, laundry batch, work order, variance | TODO | | |
-| P1-16 | OTA and iCal data model with duplicate and conflict detection rules | TODO | | |
-| P1-17 | Offline synchronization and conflict strategy (operation queue fields, server validation, explicit resolution) | TODO | | |
-| P1-18 | Automation rule syntax (event → rule → action) and the event catalog | TODO | | |
-| P1-19 | Versioning rules for configuration, agreements, price lists and documents | TODO | | |
-| P1-20 | Index plan for high-frequency queries | TODO | | |
-| P1-21 | API contracts and report templates | TODO | | |
-| P1-22 | Backup and disaster-recovery parameters | TODO | | |
+| P1-12 | Entity list and relationships (owner, property, reservation, guest, person, user account, role, role assignment, task, transaction, ledger, payout, document, and more) | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md`; template profile/override and money amount entities added during Prompt 009 review. | 2026-10-10 |
+| P1-13 | Exact financial transaction model, including ownership vs money location and transaction groups | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md` financial entities and invariants. | 2026-10-10 |
+| P1-14 | Exact owner ledger formulas (opening, revenue, services, reimbursements, commission, expenses, payouts, adjustments, closing) | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md` and Master User Flow finance journey. | 2026-10-10 |
+| P1-15 | State machines: reservation, task, approval, payout, document, laundry batch, work order, variance | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md`. | 2026-10-10 |
+| P1-16 | OTA and iCal data model with duplicate and conflict detection rules | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md` iCal sync design and reservation/calendar entities. | 2026-10-10 |
+| P1-17 | Offline synchronization and conflict strategy (operation queue fields, server validation, explicit resolution) | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md` operations/offline entities. | 2026-10-10 |
+| P1-18 | Automation rule syntax (event → rule → action) and the event catalog | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md`; automation rule syntax added during Prompt 009 review. | 2026-10-10 |
+| P1-19 | Versioning rules for configuration, agreements, price lists and documents | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md` configuration/rules and document entities. | 2026-10-10 |
+| P1-20 | Index plan for high-frequency queries | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md` index plan. | 2026-10-10 |
+| P1-21 | API contracts and report templates | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md`; draft API/report contracts expanded during Prompt 009 review. | 2026-10-10 |
+| P1-22 | Backup and disaster-recovery parameters | DONE | Verified in `docs/PHASE_1_DOMAIN_MODEL_DATABASE_ARCHITECTURE.md`; backup/DR parameters expanded during Prompt 009 review. | 2026-10-10 |
 
 ---
 

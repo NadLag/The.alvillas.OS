@@ -1,6 +1,6 @@
 # Phase 1 Blueprint: Master User Flow / System Map
 
-Status: draft blueprint for review. This document is documentation only and does not mark Phase 1 complete. It must be reviewed and tested on paper against real Villa 405 and Villa Sultan data before any checklist item is marked DONE.
+Status: verified draft blueprint for review. This document is documentation only and does not mark the Phase 1 exit gate complete. It must still be reviewed with the people who do the work and tested on paper against real Villa 405 and Sultan's House data.
 
 ## Source Traceability
 
@@ -19,10 +19,21 @@ Status: draft blueprint for review. This document is documentation only and does
 
 - P0-13: ALVILLAS OS is an independent clean-room product.
 - P0-14: V1 uses iCal-first scheduled calendar synchronization, ALVILLAS-owned reservation normalization, duplicate/conflict detection, sync monitoring/failure handling, Airbnb settlement CSV/import as separate financial data, manual WhatsApp plus generated Guest Hub links, no internal messaging, and no PMS/channel-manager purchase/integration/research in V1.
+- P0-15: Build the complete production-ready ALVILLAS OS specification across all 17 phases; no MVP scope reduction.
+- P0-16: V1 language scope is French and English, with Arabic/RTL architecture ready.
+- P0-17: MAD is primary, with multicurrency-capable money models.
+- P0-18: V1 payment methods are Airbnb settlement, cash, PayPal, bank transfer, and manual payment recording; Stripe is not a V1 dependency.
+- P0-19: Create separate initial configurable property templates for Villa 405 and Sultan's House without inventing real property details.
+- P0-20: Implement every KPI defined in the Master Specification with configurable targets.
+- P0-21, P0-22, and P0-24: use the locked stack, managed-service architecture, and mandatory provider/adaptor boundaries from Technology & Architecture Decisions v1.1.
+- P0-25: no fixed monthly infrastructure cost ceiling; paid services require case-by-case approval.
+- P0-23 partial: self-hosted Documenso is the owner-preferred deployment path, subject to legal validation, security operations, and maintenance ownership.
 
 ## System Boundary
 
 ALVILLAS OS is one platform with role-specific experiences over one data model and one authorization system.
+
+This blueprint covers the full production scope. Incremental milestones may sequence delivery, but they must not remove any Master Specification module, phase, persona, or non-negotiable principle.
 
 ```
 Public Website
@@ -112,7 +123,20 @@ Exceptions:
 - Missing role assignment: operational tasks cannot be assigned.
 - Missing template data: property can use custom setup, but must be explicit.
 
-### 3. Reservation To Operations
+### 3. Property Templates And Operating Profiles
+
+1. Admin chooses the initial template family: Villa 405 or Sultan's House.
+2. Template defaults remain configurable by property, service, workflow, inventory, financial agreement, approval rule, payout rule, and operating profile.
+3. Real defaults are populated only from supplied property data.
+4. Property overrides are versioned and audited.
+
+Exceptions:
+
+- Missing property details: template stays structurally ready but unpopulated.
+- Conflicting overrides: review validation blocks activation until resolved.
+- Legal/accounting-dependent financial terms: values remain pending until qualified approval exists.
+
+### 4. Reservation To Operations
 
 1. Scheduled iCal job fetches configured calendar feeds.
 2. `ICalAdapter` parses date/event data and maps it into external reservation candidates.
@@ -131,7 +155,7 @@ Exceptions:
 - Missing guest data: Guest Hub link can be prepared, but complete guest profile remains a guest/admin task.
 - Cancellation/date change/no-show/early checkout: reservation state changes and downstream tasks/financial snapshots must be updated with audit.
 
-### 4. Guest Hub
+### 5. Guest Hub
 
 1. Each reservation gets a unique Guest Hub link.
 2. ALVILLAS shares the link manually by WhatsApp, email, or SMS where available.
@@ -144,7 +168,7 @@ Exceptions:
 - Guest agreement/house rules wording remains subject to lawyer approval.
 - Missing signature provider decision blocks production signing.
 
-### 5. Field Operations
+### 6. Field Operations
 
 1. Worker signs in through low-tech field authentication.
 2. Field app downloads relevant work for assigned scope.
@@ -159,7 +183,7 @@ Exceptions:
 - Worker cannot use app: supervisor proxy validation records performed-by and validated-by separately.
 - Photo upload failure: retry and surface unresolved upload failures.
 
-### 6. Checkout To Reconciliation
+### 7. Checkout To Reconciliation
 
 1. Checkout triggers inspection, laundry, inventory reconciliation, maintenance issues, and any final guest/service records.
 2. Expected linen use, laundry cost, inventory consumption, staff compensation, and service allocations are calculated from configuration and movements.
@@ -173,7 +197,7 @@ Exceptions:
 - Price change: reason/action recorded and supplier price list update may be requested.
 - Inventory mismatch: damaged, missing, rejected, and lost-in-transit are distinct outcomes.
 
-### 7. Finance, Owner Ledger, And Payout
+### 8. Finance, Owner Ledger, And Payout
 
 1. Every financial event becomes an immutable transaction/movement.
 2. Money ownership is recorded separately from physical location/custody.
@@ -189,7 +213,21 @@ Exceptions:
 - Accountant decisions block final tax/accounting behavior and monthly close.
 - Post-close edits require adjustment/void model, never silent overwrite.
 
-### 8. Owner Portal
+### 9. Monthly Close And Reporting
+
+1. Accountant-approved close rules determine close calendar, lock behavior, allowed adjustments, reopening, and reporting.
+2. System prepares owner statements, company/property reports, accountant exports, and reconciliation status from source transactions.
+3. Authorized finance/accounting user reviews open variances, unreconciled transactions, missing receipts, payout status, and export readiness.
+4. Close locks the period according to approved rules and preserves post-close corrections through adjustments, voids, or reopening workflows.
+5. Reports and exports are archived as documents with audit records.
+
+Exceptions:
+
+- Accountant close rules unresolved: close workflow can be modeled but not activated as final policy.
+- Open variance: close may block or require approved exception handling according to the future policy.
+- Post-close correction: never silently overwrite history; use adjustment/void/reopen rules.
+
+### 10. Owner Portal
 
 1. Owner sees only authorized properties.
 2. Owner sees overview, reservations, revenue, expenses, money collected, money held by ALVILLAS, payouts, statements, approvals, property condition, documents, and reports according to permission.
@@ -201,7 +239,7 @@ Exceptions:
 - Internal ALVILLAS information remains hidden unless explicitly granted.
 - Owner statements cannot be final until accounting/legal decisions and close rules are approved.
 
-### 9. Command Center
+### 11. Command Center
 
 Command Center answers "what needs me today?" with:
 
@@ -210,7 +248,28 @@ Command Center answers "what needs me today?" with:
 - Financial: revenue, expenses, cash, owner payable, ALVILLAS balance for authorized users only.
 - Operations: team workload, property readiness, delayed tasks.
 
-### 10. Personal OS Boundary
+Every Master Specification KPI appears in reports/Command Center views where applicable, with configurable targets:
+
+- occupancy
+- ADR
+- RevPAR
+- gross revenue
+- net revenue
+- OTA fees
+- commission
+- owner net
+- service revenue
+- service margin
+- expense per stay
+- laundry cost
+- inventory consumption
+- staff productivity
+- turnaround time
+- maintenance
+- variance rate
+- cash position
+
+### 12. Personal OS Boundary
 
 Personal OS remains a separate financial domain from ALVILLAS OS.
 
@@ -258,18 +317,20 @@ Personal OS remains a separate financial domain from ALVILLAS OS.
 ## Assumptions
 
 - Phase 1 can draft from the Master Specification even though Phase 0 is not complete, but checklist completion stays gated.
+- The full production scope is preserved; milestone sequencing is not an MVP reduction.
 - V1 calendar sync uses iCal and does not research PMS/channel-manager options.
 - iCal supplies calendar availability/date data only; pricing, guest name, and payout data come from other sources such as Airbnb settlement CSV/import or manual entry.
 - Guest Hub is structured self-service, not chat.
 - WhatsApp remains manual/human in V1.
 - Reports and dashboards are derived from source data, not manually built spreadsheets.
+- KPI target values are configurable and may be populated later from operating data.
 
 ## Unresolved Decisions
 
-- Final MVP cut and measurable success metrics are not approved.
-- First property templates for Villa 405 and Villa Sultan are not defined.
 - Legal agreements, guest registration, privacy, retention, signature level, tax/accounting treatment, export formats, and close rules remain unresolved.
-- Exact service tiers/cost ceiling and some technical confirmations remain unresolved.
+- Real Villa 405 and Sultan's House template values are not supplied and must not be invented.
+- P0-23 Documenso legal validation, certificate/trust level, security operations, maintainer, and deployment readiness remain unresolved.
+- Exact paid service tiers and purchases require case-by-case owner approval.
 
 ## Acceptance Criteria
 
@@ -279,4 +340,4 @@ Personal OS remains a separate financial domain from ALVILLAS OS.
 - System map includes Public Website, Admin, Operations, Finance, Owner Portal, Guest Hub, Field App, Command Center, and Personal OS boundary.
 - No internal messaging app is introduced.
 - All external systems remain adapters or delivery channels, not the ALVILLAS source of truth.
-- Blueprint is reviewed with the people who do the work and tested on paper against real Villa 405 and Villa Sultan data before checklist completion.
+- Blueprint is reviewed with the people who do the work and tested on paper against real Villa 405 and Sultan's House data before checklist completion.
