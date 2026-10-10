@@ -12,7 +12,7 @@ Source of truth for build progress. Mirrors ALVILLAS_OS_Build_Checklist.docx (lo
 ## Phase summary
 | Phase | Done-when test | Items done | Updated |
 |---|---|---|---|
-| Phase 0 — Decisions and prerequisites | TODO | 0 / 25 | |
+| Phase 0 — Decisions and prerequisites | TODO | 1 / 25 | 2026-10-09 |
 | Phase 1 — Blueprint documents | TODO | 0 / 22 | |
 | Phase 2 — Foundation | TODO | 0 / 23 | |
 | Phase 3 — Identity, access and audit | TODO | 0 / 27 | |
@@ -64,7 +64,7 @@ Source of truth for build progress. Mirrors ALVILLAS_OS_Build_Checklist.docx (lo
 
 | ID | Item | Status | Evidence | Date |
 |---|---|---|---|---|
-| P0-13 | Decide how AlVillas OS relates to Orbix and HostNow: separate product, internal instance, or shared codebase for ledger, roles and field app | TODO | | |
+| P0-13 | Confirm ALVILLAS OS is an independent, clean-room product with its own repository, architecture, database, configuration, integrations, and deployment. No source-code sharing or dependencies on Orbix, HostNow, or legacy projects. | DONE | Approved decision: independent, clean-room ALVILLAS OS. Business-owner approval recorded in this ChatGPT conversation on 2026-10-09. Technical verification remains separate and is not claimed complete. | 2026-10-09 |
 | P0-14 | Run a build-vs-buy check on calendar sync and guest messaging (channel manager / PMS) against building it | TODO | | |
 | P0-15 | Lock the first 90-day MVP cut (suggested: reservation → tasks → field app → owner ledger) | TODO | | |
 | P0-16 | Lock V1 languages: French + English, Arabic architecture-ready (RTL) | TODO | | |
