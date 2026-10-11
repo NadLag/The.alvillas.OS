@@ -2,12 +2,25 @@ name: Promote Production
 
 on:
   workflow_dispatch:
+    inputs:
+      owner_approval_reference:
+        description: "Owner approval/ticket reference for production promotion"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
+  disabled:
+    if: ${{ vars.PRODUCTION_PROMOTION_ENABLED != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "Production promotion is disabled. Set PRODUCTION_PROMOTION_ENABLED=true only after owner approval."
+
   promote:
+    if: ${{ vars.PRODUCTION_PROMOTION_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: production
     env:

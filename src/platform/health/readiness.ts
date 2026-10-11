@@ -1,10 +1,12 @@
 import { PrismaClient } from "@prisma/client";
 import { readServiceInfo, type ServiceInfo, type ServiceInfoEnv } from "./service-info";
+import { readProviderStatuses } from "@/platform/providers/status";
 
 export type ReadinessCheck = {
   name: string;
   status: "ok" | "missing" | "error";
   detail?: string;
+  required?: boolean;
 };
 
 export type ReadinessResult = {
@@ -17,8 +19,16 @@ type MigrationSummary = {
   migrationCount: number;
 };
 
+type ReadinessEnv = ServiceInfoEnv &
+  Record<string, string | undefined> & {
+    DATABASE_URL?: string;
+    AUTH_SECRET?: string;
+    ALVILLAS_STRICT_READINESS?: string;
+    NODE_ENV?: string;
+  };
+
 type ReadinessOptions = {
-  env?: ServiceInfoEnv & { DATABASE_URL?: string };
+  env?: ReadinessEnv;
   now?: Date;
   migrationSummary?: () => Promise<MigrationSummary>;
 };
@@ -42,6 +52,7 @@ export async function checkReadiness(options: ReadinessOptions = {}): Promise<Re
   const env = options.env ?? process.env;
   const checks: ReadinessCheck[] = [];
   const migrationSummary = options.migrationSummary ?? readMigrationSummary;
+  const strictReadiness = env.ALVILLAS_STRICT_READINESS === "1";
 
   if (!env.DATABASE_URL) {
     checks.push({
@@ -69,8 +80,28 @@ export async function checkReadiness(options: ReadinessOptions = {}): Promise<Re
     }
   }
 
+  if (!env.AUTH_SECRET && env.NODE_ENV === "production") {
+    checks.push({
+      name: "auth_secret",
+      status: "missing",
+      detail: "AUTH_SECRET is required in production",
+      required: true
+    });
+  }
+
+  for (const provider of readProviderStatuses(env)) {
+    checks.push({
+      name: `provider:${provider.name}`,
+      status: provider.status === "configured" ? "ok" : "missing",
+      detail: provider.detail,
+      required: strictReadiness
+    });
+  }
+
   return {
-    status: checks.every((check) => check.status === "ok") ? "ready" : "not_ready",
+    status: checks.every((check) => check.status === "ok" || check.required === false)
+      ? "ready"
+      : "not_ready",
     service: readServiceInfo(env, options.now),
     checks
   };

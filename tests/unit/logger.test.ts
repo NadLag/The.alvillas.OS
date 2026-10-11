@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { StructuredLogger } from "@/platform/observability/logger";
+import { StructuredLogger, redactSensitiveData } from "@/platform/observability/logger";
 
 describe("StructuredLogger", () => {
   it("writes JSON logs with request and organization context", () => {
@@ -36,6 +36,16 @@ describe("StructuredLogger", () => {
     expect(parsed.data).toEqual({
       email: "[redacted]",
       nested: { apiToken: "[redacted]" }
+    });
+  });
+
+  it("exports the same redaction helper for non-log observability payloads", () => {
+    expect(
+      redactSensitiveData({ password: "secret", safe: "value", nested: { phone: "+212600000000" } })
+    ).toEqual({
+      password: "[redacted]",
+      safe: "value",
+      nested: { phone: "[redacted]" }
     });
   });
 });

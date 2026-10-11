@@ -49,6 +49,7 @@ jobs:
       - run: npm run check:progress
       - run: npm run test:unit
       - run: npm run test:integration
+      - run: npm run rehearse:restore
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
@@ -73,15 +74,59 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Validate staging credentials
+        run: |
+          test -n "${VERCEL_ORG_ID:?GitHub staging variable VERCEL_ORG_ID is required}"
+          test -n "${VERCEL_PROJECT_ID:?GitHub staging variable VERCEL_PROJECT_ID is required}"
+          test -n "${VERCEL_TOKEN:?GitHub staging secret VERCEL_TOKEN is required}"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       - name: Install Vercel CLI
         run: npm install -g "vercel@${VERCEL_CLI_VERSION:?set VERCEL_CLI_VERSION}"
       - name: Pull staging environment
         run: vercel pull --yes --environment=preview
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      - name: Apply staging migrations
+        run: vercel env run --environment=preview -- npm run prisma:migrate:deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      - name: Bootstrap first staging admin
+        run: vercel env run --environment=preview -- npm run bootstrap:first-admin
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       - name: Build staging
         run: vercel build
       - name: Deploy staging
-        run: vercel deploy --prebuilt --target=preview
+        id: deploy
+        run: |
+          deployment_url="$(vercel deploy --prebuilt --target=preview)"
+          DEPLOYMENT_URL="$deployment_url" node --input-type=module -e '
+            const value = process.env.DEPLOYMENT_URL;
+            const url = new URL(value);
+            if (url.protocol !== "https:" || url.origin !== value || !url.hostname.endsWith(".vercel.app")) {
+              throw new Error("Vercel deploy did not return an https://*.vercel.app origin");
+            }
+          '
+          printf 'url=%s\n' "$deployment_url" >> "$GITHUB_OUTPUT"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      - name: Smoke staging deployment
+        run: |
+          curl --fail --show-error --silent "${DEPLOYMENT_URL}/api/health" > /tmp/health.json
+          curl --fail --show-error --silent "${DEPLOYMENT_URL}/api/readiness" > /tmp/readiness.json
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const health = JSON.parse(readFileSync("/tmp/health.json", "utf8"));
+            const readiness = JSON.parse(readFileSync("/tmp/readiness.json", "utf8"));
+            if (health.service?.service !== "alvillas-os") throw new Error("Unexpected health payload");
+            if (!["ready", "not_ready"].includes(readiness.status)) throw new Error("Unexpected readiness status");
+            console.log(JSON.stringify({
+              deployment: process.env.DEPLOYMENT_URL,
+              health: health.status,
+              readiness: readiness.status,
+              checks: readiness.checks?.map((check) => `${check.name}:${check.status}`).join(",")
+            }));
+          '
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}

@@ -72,11 +72,18 @@ describe("dispatchOutboxBatch", () => {
 
   it("marks events failed when handlers throw", async () => {
     const { db } = runner([outboxEvent("evt-1", "reservation.created")]);
+    const errorReporter = vi.fn(() => Promise.resolve());
 
     await expect(
-      dispatchOutboxBatch(db, organizationId, {
-        "reservation.created": vi.fn(() => Promise.reject(new Error("boom")))
-      })
+      dispatchOutboxBatch(
+        db,
+        organizationId,
+        {
+          "reservation.created": vi.fn(() => Promise.reject(new Error("boom")))
+        },
+        { errorReporter }
+      )
     ).resolves.toMatchObject({ dispatched: 0, failed: 1, skipped: 0 });
+    expect(errorReporter).toHaveBeenCalledOnce();
   });
 });

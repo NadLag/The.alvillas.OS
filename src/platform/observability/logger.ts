@@ -24,9 +24,9 @@ export type LoggerSink = {
 
 const sensitiveKeyPattern = /(authorization|cookie|email|password|phone|secret|token|key)$/iu;
 
-function redact(value: unknown): unknown {
+export function redactSensitiveData(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map((item) => redact(item));
+    return value.map((item) => redactSensitiveData(item));
   }
 
   if (!value || typeof value !== "object") {
@@ -36,7 +36,7 @@ function redact(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, nested]) => [
       key,
-      sensitiveKeyPattern.test(key) ? "[redacted]" : redact(nested)
+      sensitiveKeyPattern.test(key) ? "[redacted]" : redactSensitiveData(nested)
     ])
   );
 }
@@ -57,7 +57,7 @@ export class StructuredLogger {
       message,
       time: this.now().toISOString(),
       ...context,
-      ...(data === undefined ? {} : { data: redact(data) })
+      ...(data === undefined ? {} : { data: redactSensitiveData(data) })
     };
     const line = JSON.stringify(record);
 
