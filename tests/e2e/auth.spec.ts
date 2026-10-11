@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { expect, test } from "@playwright/test";
 
@@ -6,16 +5,6 @@ const adminEmail = process.env.ADMIN_EMAIL ?? "admin@example.test";
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 let prisma: PrismaClient | undefined;
-
-function runNpx(args: string[], env: NodeJS.ProcessEnv): void {
-  const command = process.platform === "win32" ? "cmd.exe" : "npx";
-  const commandArgs = process.platform === "win32" ? ["/d", "/s", "/c", "npx.cmd", ...args] : args;
-
-  execFileSync(command, commandArgs, {
-    env,
-    stdio: "inherit"
-  });
-}
 
 test("switches login between English and French", async ({ page }) => {
   await page.goto("/en/login");
@@ -38,14 +27,6 @@ test.describe("admin authentication", () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(() => {
-    const env = {
-      ...process.env,
-      ADMIN_EMAIL: adminEmail,
-      ADMIN_PASSWORD: adminPassword
-    };
-
-    runNpx(["prisma", "migrate", "deploy"], env);
-    runNpx(["tsx", "prisma/bootstrap-admin.ts"], env);
     prisma = new PrismaClient();
   });
 

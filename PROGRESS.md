@@ -8,15 +8,15 @@ F-FND-01 | DONE PR #1 d1f1b81 | CI: `npm run lint`, `npm run typecheck`, `npm ru
 F-FND-02 | DONE PR #1 d1f1b81 | CI: `npm run check:organization-id`, `npm run check:schema-drift`, `tests/integration/postgres-migration.test.ts`.
 F-FND-03 | DONE PR #1 d1f1b81 | CI: `tests/integration/postgres-migration.test.ts`, `npm run check:schema-drift`.
 F-FND-04 | DONE PR #1 d1f1b81 | CI workflow ran `lint`, `typecheck`, policy checks, unit, integration, build and Playwright.
-F-FND-05 | IN-PROGRESS | Env schema and `.env.example` exist; real staging/prod values pending owner.
-F-FND-06 | IN-PROGRESS | `vercel.json` guard exists; Vercel project/env and live staging pending owner-provided project link.
+F-FND-05 | IN-PROGRESS | Env schema and `.env.example` exist; Preview Neon DB and staging app secrets configured separately from Production; production values/provider completion pending owner.
+F-FND-06 | IN-PROGRESS | `vercel.json` guard exists; Preview Neon staging resource `the-alvillas-os-staging` provisioned and migrations applied; S1 PR/CI/merge blocked by GitHub write permission.
 F-FND-07 | DONE PR #1 d1f1b81 | CI: `tests/unit/health.test.ts`, `tests/e2e/health.spec.ts`.
 F-FND-08 | IN-PROGRESS | Structured logger covered by `tests/unit/logger.test.ts`; Sentry wiring pending.
 F-FND-09 | IN-PROGRESS | Outbox covered by `tests/unit/outbox-dispatcher.test.ts`; Inngest wiring pending.
 F-FND-10 | DONE PR #1 d1f1b81 | CI: `tests/unit/fake-providers.test.ts`; fakes listed in `docs/STUBS.md`.
 F-FND-11 | DONE PR #1 d1f1b81 | CI: `tests/unit/money.test.ts`, `npm run check:ledger`, `tests/integration/postgres-migration.test.ts`.
 F-FND-12 | DONE PR #1 d1f1b81 | CI: `tests/unit/reference-number.test.ts`, `tests/integration/postgres-migration.test.ts`.
-F-FND-13 | IN-PROGRESS | Bootstrap covered by `tests/unit/bootstrap-admin.test.ts` and local auth E2E; staging execution pending.
+F-FND-13 | IN-PROGRESS | Bootstrap covered by `tests/unit/bootstrap-admin.test.ts` and auth E2E; staging bootstrap executed and tenant admin count verified; PR/CI/merge still pending.
 F-FND-14 | IN-PROGRESS | Demo seed covered by `tests/unit/demo-seed.test.ts`; full demo dataset pending.
 F-FND-15 | IN-PROGRESS | Runbooks exist; managed PostgreSQL backup/restore rehearsal pending.
 F-FND-16 | IN-PROGRESS | Rate limiter covered by `tests/unit/rate-limiter.test.ts`; login adoption pending.
@@ -83,8 +83,8 @@ F-CFG-07 | TODO |
 F-CFG-08 | TODO |
 F-ORG-01 | TODO |
 F-ORG-02 | TODO |
-F-ORG-03 | TODO |
-F-ORG-04 | TODO |
+F-ORG-03 | IN-PROGRESS | Authenticated owner create/list/detail slice with scoped service/repository, validation, audit event and EN/FR UI added on `f-org-03-04-owners-properties`; representatives and encrypted payout details still pending.
+F-ORG-04 | IN-PROGRESS | Authenticated property create/list/detail slice with owner link, capacity, amenities, photos-as-URLs, timezone, scoped service/repository, validation, audit event and EN/FR UI added; richer photo storage/onboarding profile still pending.
 F-ORG-05 | TODO |
 F-ORG-06 | TODO |
 F-ORG-07 | TODO |

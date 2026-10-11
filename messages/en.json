@@ -36,12 +36,96 @@
     "eyebrow": "Admin workspace",
     "title": "ALVILLAS OS",
     "logout": "Log out",
+    "owners": "Owners",
+    "properties": "Properties",
     "todayLabel": "Today",
     "welcome": "Welcome, {name}",
-    "summary": "The security spine is online: authenticated shell, scoped session, locale switch, and production tokens.",
+    "summary": "The security spine now carries the first core records: authenticated owners and properties, scoped by organization and audited on create.",
     "sessionLabel": "Session",
     "signedInAs": "Signed in as",
     "sessionScope": "Scope",
     "organizationScope": "Organization"
+  },
+  "Core": {
+    "common": {
+      "backToWorkspace": "Workspace",
+      "notProvided": "Not provided",
+      "noContact": "No contact yet",
+      "saving": "Saving...",
+      "yes": "Yes",
+      "no": "No"
+    },
+    "forms": {
+      "validation": "Check the highlighted fields and try again.",
+      "unauthorized": "Sign in again to continue.",
+      "forbidden": "You do not have access to perform this action.",
+      "notFound": "The linked record was not found in this organization.",
+      "generic": "The record could not be saved. Try again."
+    },
+    "owners": {
+      "eyebrow": "Core domain",
+      "title": "Owners",
+      "subtitle": "Create and review owner contacts inside the current organization scope.",
+      "listLabel": "Owner register",
+      "createLabel": "Create owner",
+      "detailEyebrow": "Owner record",
+      "backToOwners": "Owners",
+      "empty": "No owners have been created for this organization yet.",
+      "count": "{count, plural, one {# owner} other {# owners}}",
+      "propertyCount": "{count, plural, one {# property} other {# properties}}",
+      "properties": "Properties",
+      "noLegalName": "No legal name recorded",
+      "form": {
+        "displayName": "Display name",
+        "legalName": "Legal name",
+        "email": "Email",
+        "phone": "Phone",
+        "preferredLocale": "Preferred language",
+        "notes": "Notes",
+        "saveOwner": "Create owner"
+      }
+    },
+    "properties": {
+      "eyebrow": "Core domain",
+      "title": "Properties",
+      "subtitle": "Create property profiles with owner links, capacity, amenities, and operating timezone.",
+      "listLabel": "Property register",
+      "createLabel": "Create property",
+      "detailEyebrow": "Property record",
+      "backToProperties": "Properties",
+      "empty": "No properties have been created for this organization yet.",
+      "count": "{count, plural, one {# property} other {# properties}}",
+      "rowMeta": "{type} in {city}",
+      "statusLabel": "Status",
+      "status": {
+        "DRAFT": "Draft",
+        "ONBOARDING": "Onboarding",
+        "ACTIVE": "Active",
+        "PAUSED": "Paused",
+        "OFFBOARDED": "Offboarded"
+      },
+      "form": {
+        "owner": "Primary owner",
+        "noOwners": "Create an owner before adding a property.",
+        "name": "Property name",
+        "addressLine1": "Address line 1",
+        "addressLine2": "Address line 2",
+        "city": "City",
+        "region": "Region",
+        "countryCode": "Country",
+        "propertyType": "Property type",
+        "bedrooms": "Bedrooms",
+        "bathrooms": "Bathrooms",
+        "livingSpaces": "Living spaces",
+        "maxGuests": "Max guests",
+        "parkingSpaces": "Parking",
+        "timezone": "Timezone",
+        "hasPool": "Pool",
+        "hasGarden": "Garden",
+        "amenities": "Amenities",
+        "photoUrls": "Photo URLs",
+        "saveProperty": "Create property"
+      }
+    }
   }
 }

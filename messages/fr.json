@@ -36,12 +36,96 @@
     "eyebrow": "Espace admin",
     "title": "ALVILLAS OS",
     "logout": "Deconnexion",
+    "owners": "Proprietaires",
+    "properties": "Proprietes",
     "todayLabel": "Aujourd'hui",
     "welcome": "Bienvenue, {name}",
-    "summary": "Le socle de securite est en ligne: session authentifiee, portee limitee, changement de langue et tokens de production.",
+    "summary": "Le socle de securite porte maintenant les premiers dossiers coeur: proprietaires et proprietes authentifies, limites par organisation et audites a la creation.",
     "sessionLabel": "Session",
     "signedInAs": "Connecte en tant que",
     "sessionScope": "Portee",
     "organizationScope": "Organisation"
+  },
+  "Core": {
+    "common": {
+      "backToWorkspace": "Espace",
+      "notProvided": "Non renseigne",
+      "noContact": "Aucun contact",
+      "saving": "Enregistrement...",
+      "yes": "Oui",
+      "no": "Non"
+    },
+    "forms": {
+      "validation": "Verifiez les champs indiques puis reessayez.",
+      "unauthorized": "Reconnectez-vous pour continuer.",
+      "forbidden": "Vous n'avez pas acces a cette action.",
+      "notFound": "Le dossier lie est introuvable dans cette organisation.",
+      "generic": "Le dossier n'a pas pu etre enregistre. Reessayez."
+    },
+    "owners": {
+      "eyebrow": "Domaine coeur",
+      "title": "Proprietaires",
+      "subtitle": "Creez et consultez les contacts proprietaires dans la portee de l'organisation.",
+      "listLabel": "Registre proprietaires",
+      "createLabel": "Creer un proprietaire",
+      "detailEyebrow": "Dossier proprietaire",
+      "backToOwners": "Proprietaires",
+      "empty": "Aucun proprietaire n'a encore ete cree pour cette organisation.",
+      "count": "{count, plural, one {# proprietaire} other {# proprietaires}}",
+      "propertyCount": "{count, plural, one {# propriete} other {# proprietes}}",
+      "properties": "Proprietes",
+      "noLegalName": "Aucun nom legal renseigne",
+      "form": {
+        "displayName": "Nom affiche",
+        "legalName": "Nom legal",
+        "email": "Email",
+        "phone": "Telephone",
+        "preferredLocale": "Langue preferee",
+        "notes": "Notes",
+        "saveOwner": "Creer le proprietaire"
+      }
+    },
+    "properties": {
+      "eyebrow": "Domaine coeur",
+      "title": "Proprietes",
+      "subtitle": "Creez les profils de proprietes avec proprietaire, capacite, equipements et fuseau horaire.",
+      "listLabel": "Registre proprietes",
+      "createLabel": "Creer une propriete",
+      "detailEyebrow": "Dossier propriete",
+      "backToProperties": "Proprietes",
+      "empty": "Aucune propriete n'a encore ete creee pour cette organisation.",
+      "count": "{count, plural, one {# propriete} other {# proprietes}}",
+      "rowMeta": "{type} a {city}",
+      "statusLabel": "Statut",
+      "status": {
+        "DRAFT": "Brouillon",
+        "ONBOARDING": "Onboarding",
+        "ACTIVE": "Active",
+        "PAUSED": "En pause",
+        "OFFBOARDED": "Sortie"
+      },
+      "form": {
+        "owner": "Proprietaire principal",
+        "noOwners": "Creez un proprietaire avant d'ajouter une propriete.",
+        "name": "Nom de la propriete",
+        "addressLine1": "Adresse ligne 1",
+        "addressLine2": "Adresse ligne 2",
+        "city": "Ville",
+        "region": "Region",
+        "countryCode": "Pays",
+        "propertyType": "Type de propriete",
+        "bedrooms": "Chambres",
+        "bathrooms": "Salles de bain",
+        "livingSpaces": "Espaces de vie",
+        "maxGuests": "Voyageurs max",
+        "parkingSpaces": "Parking",
+        "timezone": "Fuseau horaire",
+        "hasPool": "Piscine",
+        "hasGarden": "Jardin",
+        "amenities": "Equipements",
+        "photoUrls": "URLs photos",
+        "saveProperty": "Creer la propriete"
+      }
+    }
   }
 }
