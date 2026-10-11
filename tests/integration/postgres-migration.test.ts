@@ -6,7 +6,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationNotFoundError,
+  completeAssignedFieldTask,
   createManualReservation,
+  listAssignedFieldTasks,
   listOperationTasks
 } from "@/modules/reservations/application/reservation-service";
 import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
@@ -75,6 +77,7 @@ function appRoleUrl(databaseUrl: string): string {
 }
 
 const integrationActorId = "018f0a0b-0000-7000-9000-000000000701";
+const integrationPersonId = "018f0a0b-0000-7000-9000-000000000702";
 
 function actorForOrganization(
   organizationId: string,
@@ -82,7 +85,8 @@ function actorForOrganization(
     permissionKey("reservation", "view"),
     permissionKey("reservation", "create"),
     permissionKey("task", "view"),
-    permissionKey("task", "create")
+    permissionKey("task", "create"),
+    permissionKey("task", "edit")
   ])
 ): ReservationActorContext {
   const authContext: AuthContext = {
@@ -94,6 +98,7 @@ function actorForOrganization(
   return {
     organizationId,
     actorId: integrationActorId,
+    personId: integrationPersonId,
     authContext
   };
 }
@@ -269,6 +274,24 @@ describe("PostgreSQL baseline", () => {
       prisma as unknown as TenantTransactionRunner,
       orgA.id,
       async (tx) => {
+        const actorPerson = await tx.person.create({
+          data: {
+            id: integrationPersonId,
+            organizationId: orgA.id,
+            displayName: "Integration Field Worker",
+            email: `integration-worker-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        await tx.userAccount.create({
+          data: {
+            id: integrationActorId,
+            organizationId: orgA.id,
+            personId: actorPerson.id,
+            email: `integration-worker-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
         const owner = await tx.owner.create({
           data: {
             organizationId: orgA.id,
@@ -398,7 +421,23 @@ describe("PostgreSQL baseline", () => {
                     fr: "Preparation arrivee"
                   },
                   due: "CHECK_IN",
-                  priority: "NORMAL"
+                  priority: "NORMAL",
+                  checklist: [
+                    {
+                      key: "bedrooms",
+                      label: {
+                        en: "Bedrooms ready",
+                        fr: "Chambres pretes"
+                      }
+                    },
+                    {
+                      key: "bathrooms",
+                      label: {
+                        en: "Bathrooms ready",
+                        fr: "Salles de bain pretes"
+                      }
+                    }
+                  ]
                 },
                 {
                   key: "checkout",
@@ -408,7 +447,23 @@ describe("PostgreSQL baseline", () => {
                     fr: "Menage depart"
                   },
                   due: "CHECK_OUT",
-                  priority: "NORMAL"
+                  priority: "NORMAL",
+                  checklist: [
+                    {
+                      key: "linen",
+                      label: {
+                        en: "Linen collected",
+                        fr: "Linge collecte"
+                      }
+                    },
+                    {
+                      key: "cleaning",
+                      label: {
+                        en: "Cleaning completed",
+                        fr: "Menage termine"
+                      }
+                    }
+                  ]
                 }
               ]
             },
@@ -483,6 +538,31 @@ describe("PostgreSQL baseline", () => {
       db: prisma as unknown as TenantTransactionRunner
     });
     expect(tasks).toHaveLength(4);
+    expect(tasks.every((task) => task.assignedToUserAccountId === integrationActorId)).toBe(true);
+
+    const fieldTasks = await listAssignedFieldTasks(ctx, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    expect(fieldTasks).toHaveLength(4);
+    expect(fieldTasks[0]?.checklistItems).toHaveLength(2);
+
+    const completed = await completeAssignedFieldTask(
+      ctx,
+      {
+        taskId: fieldTasks[0].id,
+        checklistItemIds: fieldTasks[0].checklistItems.map((item) => item.id),
+        note: "Integration field completion"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-field-complete",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(completed.state).toBe("COMPLETED");
+    expect(completed.completedByUserAccountId).toBe(integrationActorId);
+    expect(completed.checklistItems.every((item) => item.completedAt)).toBe(true);
 
     const counts = await withTenant(
       prisma as unknown as TenantTransactionRunner,
@@ -490,13 +570,14 @@ describe("PostgreSQL baseline", () => {
       async (tx) => ({
         reservations: await tx.reservation.count({ where: { propertyId: property.id } }),
         tasks: await tx.operationTask.count({ where: { propertyId: property.id } }),
+        checkItems: await tx.operationTaskChecklistItem.count({ where: { organizationId: orgA.id } }),
         conflicts: await tx.reservationConflict.count({
           where: { reservationId: overlapping.reservation.id }
         }),
         audits: await tx.auditLog.findMany({
           where: {
             action: {
-              in: ["reservation.create", "reservation.conflict.detected", "task.create"]
+              in: ["reservation.create", "reservation.conflict.detected", "task.create", "task.complete"]
             }
           },
           select: { action: true },
@@ -508,12 +589,14 @@ describe("PostgreSQL baseline", () => {
     expect(counts).toMatchObject({
       reservations: 2,
       tasks: 4,
+      checkItems: 8,
       conflicts: 1
     });
     expect(counts.audits.map((audit) => audit.action).sort()).toEqual([
       "reservation.conflict.detected",
       "reservation.create",
       "reservation.create",
+      "task.complete",
       "task.create",
       "task.create",
       "task.create",
@@ -533,10 +616,29 @@ describe("PostgreSQL baseline", () => {
     const conflictVisibleWithoutTenant = await prisma.reservationConflict.findFirst({
       where: { reservationId: overlapping.reservation.id }
     });
+    const checklistVisibleWithoutTenant = await prisma.operationTaskChecklistItem.findFirst({
+      where: { taskId: completed.id }
+    });
 
     expect(reservationVisibleToOrgB).toBeNull();
     expect(taskVisibleToOrgB).toBeNull();
     expect(conflictVisibleWithoutTenant).toBeNull();
+    expect(checklistVisibleWithoutTenant).toBeNull();
+
+    await expect(
+      completeAssignedFieldTask(
+        actorForOrganization(orgB.id),
+        {
+          taskId: completed.id,
+          checklistItemIds: completed.checklistItems.map((item) => item.id)
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-field-cross-tenant",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(ReservationNotFoundError);
 
     await expect(
       createManualReservation(actorForOrganization(orgB.id), firstInput, {

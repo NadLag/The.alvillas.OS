@@ -65,5 +65,21 @@ test.describe("manual reservation to operations tasks journey", () => {
     await expect(propertyTasks).toHaveCount(2);
     await expect(propertyTasks.filter({ hasText: "Arrival preparation" })).toHaveCount(1);
     await expect(propertyTasks.filter({ hasText: "Checkout cleaning" })).toHaveCount(1);
+
+    await page.goto("/en/app/field");
+    const fieldTask = page.getByTestId("field-task-card").filter({ hasText: propertyName }).first();
+    await expect(fieldTask).toBeVisible();
+    await fieldTask.click();
+    await expect(page.getByTestId("field-task-page")).toBeVisible();
+    await expect(page.getByTestId("field-task-title")).toContainText(/Arrival preparation|Checkout cleaning/u);
+
+    const checklistItems = page.getByTestId("field-checklist-item");
+    await expect(checklistItems).toHaveCount(3);
+    for (let index = 0; index < 3; index += 1) {
+      await checklistItems.nth(index).check();
+    }
+    await page.getByTestId("field-task-complete").click();
+    await expect(page).toHaveURL(/\/en\/app\/field/u);
+    await expect(page.getByTestId("field-task-card").filter({ hasText: propertyName })).toHaveCount(1);
   });
 });

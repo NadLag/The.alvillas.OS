@@ -7,8 +7,11 @@ import { reservationActorContextFromSession } from "@/modules/reservations/appli
 import {
   ReservationAuthorizationError,
   ReservationConfigError,
+  ReservationConflictError,
   ReservationNotFoundError,
+  completeAssignedFieldTask,
   createManualReservation,
+  parseCompleteTaskInput,
   parseManualReservationInput
 } from "@/modules/reservations/application/reservation-service";
 import { auth } from "@/platform/auth/session";
@@ -16,7 +19,13 @@ import { routing, type AppLocale } from "@/i18n/routing";
 
 export type ReservationFormState = {
   status: "idle" | "error";
-  messageKey?: "validation" | "unauthorized" | "forbidden" | "notFound" | "config" | "generic";
+  messageKey?: "validation" | "unauthorized" | "forbidden" | "notFound" | "config" | "conflict" | "generic";
+  fieldErrors?: Record<string, string[]>;
+};
+
+export type FieldTaskFormState = {
+  status: "idle" | "error";
+  messageKey?: "validation" | "unauthorized" | "forbidden" | "notFound" | "config" | "conflict" | "generic";
   fieldErrors?: Record<string, string[]>;
 };
 
@@ -28,7 +37,7 @@ function formValue(formData: FormData, key: string): FormDataEntryValue | undefi
   return formData.get(key) ?? undefined;
 }
 
-function flattenZodError(error: ZodError): ReservationFormState {
+function flattenZodError(error: ZodError): ReservationFormState | FieldTaskFormState {
   return {
     status: "error",
     messageKey: "validation",
@@ -36,7 +45,7 @@ function flattenZodError(error: ZodError): ReservationFormState {
   };
 }
 
-function actionErrorState(error: unknown): ReservationFormState {
+function actionErrorState(error: unknown): ReservationFormState | FieldTaskFormState {
   if (error instanceof ReservationAuthorizationError) {
     return { status: "error", messageKey: "forbidden" };
   }
@@ -47,6 +56,10 @@ function actionErrorState(error: unknown): ReservationFormState {
 
   if (error instanceof ReservationConfigError) {
     return { status: "error", messageKey: "config" };
+  }
+
+  if (error instanceof ReservationConflictError) {
+    return { status: "error", messageKey: "conflict" };
   }
 
   return { status: "error", messageKey: "generic" };
@@ -91,4 +104,38 @@ export async function createManualReservationAction(
   revalidatePath(`/${appLocale}/app/reservations`);
   revalidatePath(`/${appLocale}/app/operations`);
   redirect(`/${appLocale}/app/operations`);
+}
+
+export async function completeFieldTaskAction(
+  locale: string,
+  _state: FieldTaskFormState,
+  formData: FormData
+): Promise<FieldTaskFormState> {
+  const appLocale = safeLocale(locale);
+  const session = await auth();
+  const ctx = reservationActorContextFromSession(session);
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parseCompleteTaskInput({
+    taskId: formValue(formData, "taskId"),
+    checklistItemIds: formData.getAll("checklistItemIds"),
+    note: formValue(formData, "note")
+  });
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await completeAssignedFieldTask(ctx, parsed.data);
+  } catch (error) {
+    return actionErrorState(error);
+  }
+
+  revalidatePath(`/${appLocale}/app/field`);
+  revalidatePath(`/${appLocale}/app/field/${parsed.data.taskId}`);
+  redirect(`/${appLocale}/app/field`);
 }

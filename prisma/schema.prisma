@@ -8,11 +8,11 @@ datasource db {
 }
 
 model Organization {
-  id                   String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  id                   String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   name                 String
-  baseCurrency         String                 @default("MAD") @map("base_currency") @db.Char(3)
-  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  baseCurrency         String                       @default("MAD") @map("base_currency") @db.Char(3)
+  createdAt            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   configRules          ConfigRule[]
   outboxEvents         OutboxEvent[]
   auditLogs            AuditLog[]
@@ -30,22 +30,26 @@ model Organization {
   reservations         Reservation[]
   reservationConflicts ReservationConflict[]
   operationTasks       OperationTask[]
+  taskChecklistItems   OperationTaskChecklistItem[]
 
   @@map("organization")
 }
 
 model Person {
-  id              String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId  String        @map("organization_id") @db.Uuid
-  displayName     String        @map("display_name")
+  id              String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String                       @map("organization_id") @db.Uuid
+  displayName     String                       @map("display_name")
   email           String?
   phone           String?
-  preferredLocale String        @default("en") @map("preferred_locale") @db.Char(2)
-  archivedAt      DateTime?     @map("archived_at") @db.Timestamptz(6)
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  preferredLocale String                       @default("en") @map("preferred_locale") @db.Char(2)
+  archivedAt      DateTime?                    @map("archived_at") @db.Timestamptz(6)
+  createdAt       DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   userAccounts    UserAccount[]
+  assignedTasks   OperationTask[]              @relation("OperationTaskAssignedPerson")
+  completedTasks  OperationTask[]              @relation("OperationTaskCompletedPerson")
+  completedChecks OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedPerson")
 
   @@unique([organizationId, email], map: "person_org_email_unique")
   @@index([organizationId, displayName], map: "person_org_display_name_idx")
@@ -53,17 +57,20 @@ model Person {
 }
 
 model UserAccount {
-  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  personId       String       @map("person_id") @db.Uuid
-  email          String?
-  passwordHash   String?      @map("password_hash")
-  status         String       @default("ACTIVE")
-  lastLoginAt    DateTime?    @map("last_login_at") @db.Timestamptz(6)
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  person         Person       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id              String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String                       @map("organization_id") @db.Uuid
+  personId        String                       @map("person_id") @db.Uuid
+  email           String?
+  passwordHash    String?                      @map("password_hash")
+  status          String                       @default("ACTIVE")
+  lastLoginAt     DateTime?                    @map("last_login_at") @db.Timestamptz(6)
+  createdAt       DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person          Person                       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  assignedTasks   OperationTask[]              @relation("OperationTaskAssignedAccount")
+  completedTasks  OperationTask[]              @relation("OperationTaskCompletedAccount")
+  completedChecks OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
 
   @@unique([organizationId, email], map: "user_account_org_email_unique")
   @@index([organizationId, personId], map: "user_account_org_person_idx")
@@ -207,29 +214,63 @@ model ReservationConflict {
 }
 
 model OperationTask {
-  id                String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId    String       @map("organization_id") @db.Uuid
-  propertyId        String       @map("property_id") @db.Uuid
-  reservationId     String?      @map("reservation_id") @db.Uuid
-  type              String
-  state             String       @default("PLANNED")
-  priority          String       @default("NORMAL")
-  dueDate           DateTime     @map("due_date") @db.Date
-  titleTranslations Json         @map("title_translations")
-  idempotencyKey    String       @map("idempotency_key")
-  archivedAt        DateTime?    @map("archived_at") @db.Timestamptz(6)
-  createdBy         String?      @map("created_by") @db.Uuid
-  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  property          Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  reservation       Reservation? @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                       String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId           String                       @map("organization_id") @db.Uuid
+  propertyId               String                       @map("property_id") @db.Uuid
+  reservationId            String?                      @map("reservation_id") @db.Uuid
+  assignedToUserAccountId  String?                      @map("assigned_to_user_account_id") @db.Uuid
+  assignedToPersonId       String?                      @map("assigned_to_person_id") @db.Uuid
+  completedByUserAccountId String?                      @map("completed_by_user_account_id") @db.Uuid
+  completedByPersonId      String?                      @map("completed_by_person_id") @db.Uuid
+  type                     String
+  state                    String                       @default("PLANNED")
+  priority                 String                       @default("NORMAL")
+  dueDate                  DateTime                     @map("due_date") @db.Date
+  titleTranslations        Json                         @map("title_translations")
+  idempotencyKey           String                       @map("idempotency_key")
+  completedAt              DateTime?                    @map("completed_at") @db.Timestamptz(6)
+  archivedAt               DateTime?                    @map("archived_at") @db.Timestamptz(6)
+  createdBy                String?                      @map("created_by") @db.Uuid
+  createdAt                DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property                 Property                     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation              Reservation?                 @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  assignedToUserAccount    UserAccount?                 @relation("OperationTaskAssignedAccount", fields: [assignedToUserAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  assignedToPerson         Person?                      @relation("OperationTaskAssignedPerson", fields: [assignedToPersonId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  completedByUserAccount   UserAccount?                 @relation("OperationTaskCompletedAccount", fields: [completedByUserAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  completedByPerson        Person?                      @relation("OperationTaskCompletedPerson", fields: [completedByPersonId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  checklistItems           OperationTaskChecklistItem[]
 
   @@unique([organizationId, idempotencyKey], map: "operation_task_org_idempotency_unique")
   @@index([organizationId, dueDate, state], map: "operation_task_org_due_state_idx")
   @@index([organizationId, propertyId, dueDate], map: "operation_task_org_property_due_idx")
   @@index([organizationId, reservationId], map: "operation_task_org_reservation_idx")
+  @@index([organizationId, assignedToUserAccountId, state, dueDate], map: "operation_task_org_assignee_state_due_idx")
+  @@index([organizationId, completedAt], map: "operation_task_org_completed_at_idx")
   @@map("operation_task")
+}
+
+model OperationTaskChecklistItem {
+  id                       String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId           String        @map("organization_id") @db.Uuid
+  taskId                   String        @map("task_id") @db.Uuid
+  key                      String
+  labelTranslations        Json          @map("label_translations")
+  sortOrder                Int           @map("sort_order")
+  completedAt              DateTime?     @map("completed_at") @db.Timestamptz(6)
+  completedByUserAccountId String?       @map("completed_by_user_account_id") @db.Uuid
+  completedByPersonId      String?       @map("completed_by_person_id") @db.Uuid
+  createdAt                DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task                     OperationTask @relation(fields: [taskId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  completedByUserAccount   UserAccount?  @relation("OperationTaskChecklistCompletedAccount", fields: [completedByUserAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  completedByPerson        Person?       @relation("OperationTaskChecklistCompletedPerson", fields: [completedByPersonId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, taskId, key], map: "operation_task_check_org_task_key_unique")
+  @@index([organizationId, taskId, sortOrder], map: "operation_task_check_org_task_order_idx")
+  @@map("operation_task_checklist_item")
 }
 
 model LedgerAccount {

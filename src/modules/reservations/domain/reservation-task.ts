@@ -39,6 +39,15 @@ export const taskTypeSchema = z.enum([
 
 export const taskDueAnchorSchema = z.enum(["CHECK_IN", "CHECK_OUT"]);
 
+export const taskChecklistTemplateSchema = z.object({
+  key: z.string().trim().min(1).max(80).regex(/^[a-z0-9_.-]+$/u),
+  label: z.object({
+    en: requiredText(120),
+    fr: requiredText(120),
+    ar: optionalText(120)
+  })
+});
+
 export const reservationTaskTemplateSchema = z.object({
   key: z.string().trim().min(1).max(80).regex(/^[a-z0-9_.-]+$/u),
   type: taskTypeSchema,
@@ -48,7 +57,8 @@ export const reservationTaskTemplateSchema = z.object({
     ar: optionalText(120)
   }),
   due: taskDueAnchorSchema,
-  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL")
+  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
+  checklist: z.array(taskChecklistTemplateSchema).max(24).default([])
 });
 
 export const reservationTaskConfigSchema = z.object({
@@ -104,6 +114,7 @@ export type ReservationSummary = {
 
 export type OperationTaskSummary = {
   id: string;
+  propertyId: string;
   propertyName: string;
   reservationReference: string | null;
   guestName: string | null;
@@ -112,7 +123,21 @@ export type OperationTaskSummary = {
   priority: string;
   dueDate: Date;
   title: Record<string, string>;
+  assignedToUserAccountId: string | null;
+  completedByUserAccountId: string | null;
+  completedAt: Date | null;
   createdAt: Date;
+};
+
+export type OperationTaskChecklistItemSummary = {
+  id: string;
+  key: string;
+  label: Record<string, string>;
+  completedAt: Date | null;
+};
+
+export type FieldTaskSummary = OperationTaskSummary & {
+  checklistItems: OperationTaskChecklistItemSummary[];
 };
 
 export type ManualReservationResult = {
@@ -137,3 +162,18 @@ export function localizedTaskTitle(
 ): string {
   return title[locale] ?? title.en ?? Object.values(title)[0] ?? "";
 }
+
+export function localizedChecklistLabel(
+  label: Record<string, string>,
+  locale: string
+): string {
+  return label[locale] ?? label.en ?? Object.values(label)[0] ?? "";
+}
+
+export const completeTaskInputSchema = z.object({
+  taskId: z.string().uuid(),
+  checklistItemIds: z.array(z.string().uuid()).min(1).max(50),
+  note: optionalText(1000)
+});
+
+export type CompleteTaskInput = z.infer<typeof completeTaskInputSchema>;

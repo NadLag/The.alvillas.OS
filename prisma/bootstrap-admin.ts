@@ -102,7 +102,33 @@ export async function bootstrapFirstAdmin(
                   ar: "Arrival preparation"
                 },
                 due: "CHECK_IN",
-                priority: "NORMAL"
+                priority: "NORMAL",
+                checklist: [
+                  {
+                    key: "bedrooms",
+                    label: {
+                      en: "Bedrooms ready",
+                      fr: "Chambres pretes",
+                      ar: "Bedrooms ready"
+                    }
+                  },
+                  {
+                    key: "bathrooms",
+                    label: {
+                      en: "Bathrooms ready",
+                      fr: "Salles de bain pretes",
+                      ar: "Bathrooms ready"
+                    }
+                  },
+                  {
+                    key: "supplies",
+                    label: {
+                      en: "Guest supplies placed",
+                      fr: "Fournitures voyageurs en place",
+                      ar: "Guest supplies placed"
+                    }
+                  }
+                ]
               },
               {
                 key: "checkout",
@@ -113,7 +139,33 @@ export async function bootstrapFirstAdmin(
                   ar: "Checkout cleaning"
                 },
                 due: "CHECK_OUT",
-                priority: "NORMAL"
+                priority: "NORMAL",
+                checklist: [
+                  {
+                    key: "linen",
+                    label: {
+                      en: "Linen collected",
+                      fr: "Linge collecte",
+                      ar: "Linen collected"
+                    }
+                  },
+                  {
+                    key: "cleaning",
+                    label: {
+                      en: "Cleaning completed",
+                      fr: "Menage termine",
+                      ar: "Cleaning completed"
+                    }
+                  },
+                  {
+                    key: "inspection",
+                    label: {
+                      en: "Damage check completed",
+                      fr: "Controle dommages termine",
+                      ar: "Damage check completed"
+                    }
+                  }
+                ]
               }
             ]
           },

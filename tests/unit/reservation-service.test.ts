@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationAuthorizationError,
+  completeAssignedFieldTask,
   createManualReservation,
   listOperationTasks,
   listReservations,
@@ -20,6 +21,7 @@ function actor(authContext: AuthContext): ReservationActorContext {
   return {
     organizationId: authContext.organizationId,
     actorId: "018f0a0b-0000-7000-9000-000000000711",
+    personId: "018f0a0b-0000-7000-9000-000000000712",
     authContext
   };
 }
@@ -74,6 +76,25 @@ describe("reservation service authorization and validation", () => {
     await expect(createManualReservation(ctx, parsed.data, { db: deniedDb })).rejects.toBeInstanceOf(
       ReservationAuthorizationError
     );
+  });
+
+  it("denies assigned task completion before reaching the repository", async () => {
+    const ctx = actor({
+      organizationId: "018f0a0b-0000-7000-9000-000000000001",
+      permissions: new Set([permissionKey("task", "view")]),
+      scopes: [{ organizationId: "018f0a0b-0000-7000-9000-000000000001" }]
+    });
+
+    await expect(
+      completeAssignedFieldTask(
+        ctx,
+        {
+          taskId: "018f0a0b-0000-7000-9000-000000000501",
+          checklistItemIds: ["018f0a0b-0000-7000-9000-000000000601"]
+        },
+        { db: deniedDb }
+      )
+    ).rejects.toBeInstanceOf(ReservationAuthorizationError);
   });
 
   it("validates that check-out is after check-in", () => {
