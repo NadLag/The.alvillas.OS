@@ -14,7 +14,7 @@
 4. **Read order for a new session:** `AGENTS.md` → `PROGRESS.md` → Part D (Definition of Done) → the phase you are in (Part E) → the relevant parts of F/G/H.
 
 ### A.1 Existing code policy
-An earlier codebase may exist (repository `NadLag/alvillas`). The new local build is the source of truth. Existing modules may be **mined** (copied and adapted) only if they: (a) match this handbook, (b) pass the Definition of Done in Part D including tests, and (c) are listed in an ADR (`docs/adr/`) saying what was reused. Never import whole subsystems on trust. Known issues in that code to avoid repeating: currency enum limited to MAD; French only on the public site; no way to create the first admin; 18 tables without `organization_id`; only one Playwright test.
+ALVILLAS OS is an independent, clean-room product with no shared code, data or infrastructure. The new local build is the source of truth. Never import whole subsystems on trust.
 
 ---
 

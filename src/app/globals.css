@@ -1,12 +1,15 @@
 :root {
   color-scheme: light;
-  --background: #f7f4ef;
-  --foreground: #1d2528;
-  --muted: #5e6a70;
+  --background: #f5f6f2;
+  --foreground: #182326;
+  --muted: #5c666b;
   --surface: #ffffff;
-  --border: #d9d3c9;
-  --accent: #0f766e;
+  --surface-muted: #eef3ef;
+  --border: #d6ddd7;
+  --accent: #0b6b5f;
   --accent-foreground: #ffffff;
+  --warning: #9f3f1b;
+  --ink-soft: #304045;
 }
 
 * {
@@ -38,7 +41,7 @@ a {
 
 .shell {
   min-height: 100vh;
-  padding: 32px;
+  padding: 28px;
 }
 
 .home {
@@ -79,4 +82,232 @@ a {
   padding: 10px 12px;
   font-size: 0.875rem;
   color: var(--muted);
+}
+
+.auth-page,
+.app-shell {
+  min-height: calc(100vh - 56px);
+  width: min(1120px, 100%);
+  margin-inline: auto;
+}
+
+.auth-page {
+  display: grid;
+  align-content: center;
+  gap: 18px;
+}
+
+.locale-switch,
+.app-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.locale-switch a,
+.secondary-button,
+.primary-button {
+  min-height: 44px;
+  border-radius: 8px;
+  font: inherit;
+  text-decoration: none;
+}
+
+.locale-switch a,
+.secondary-button {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink-soft);
+  padding: 0 14px;
+}
+
+.auth-panel {
+  width: min(440px, 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 28px;
+  box-shadow: 0 18px 50px rgb(24 35 38 / 8%);
+}
+
+.eyebrow,
+.panel-label {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.auth-panel h1,
+.app-header h1,
+.workspace-main h2 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.auth-panel h1 {
+  font-size: 1.75rem;
+  line-height: 1.15;
+}
+
+.auth-panel p,
+.workspace-main p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.auth-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.field input {
+  min-height: 46px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+  color: var(--foreground);
+  font: inherit;
+  padding: 0 12px;
+}
+
+.field input:focus-visible,
+.primary-button:focus-visible,
+.secondary-button:focus-visible,
+.locale-switch a:focus-visible {
+  outline: 3px solid rgb(11 107 95 / 25%);
+  outline-offset: 2px;
+}
+
+.form-error {
+  margin: 0;
+  border: 1px solid rgb(159 63 27 / 28%);
+  border-radius: 8px;
+  background: #fff4ef;
+  color: var(--warning);
+  padding: 10px 12px;
+}
+
+.primary-button {
+  border: 0;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 0 16px;
+}
+
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.app-shell {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+}
+
+.app-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 18px;
+}
+
+.app-header h1 {
+  font-size: 1.65rem;
+}
+
+.app-actions {
+  align-items: center;
+}
+
+.app-actions form {
+  margin: 0;
+}
+
+.secondary-button {
+  cursor: pointer;
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
+}
+
+.workspace-main,
+.workspace-side {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 22px;
+}
+
+.workspace-main {
+  min-height: 280px;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-muted) 100%);
+}
+
+.workspace-main h2 {
+  font-size: 1.45rem;
+}
+
+.workspace-side dl {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+}
+
+.workspace-side dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.workspace-side dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .shell {
+    padding: 18px;
+  }
+
+  .app-header,
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .app-header {
+    display: grid;
+  }
+
+  .app-actions,
+  .locale-switch {
+    justify-content: flex-start;
+  }
+
+  .auth-panel {
+    padding: 22px;
+  }
 }

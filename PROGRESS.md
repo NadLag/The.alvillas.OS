@@ -2,32 +2,32 @@
 
 Format: one line per handbook feature ID as `F-ID | TODO | IN-PROGRESS | DONE <PR/commit evidence>`.
 
-Legacy checklist evidence remains in `docs/CHECKLIST_STATE.md`; it is not converted to feature `DONE` status unless the handbook Definition of Done is verified.
+Archived checklist evidence remains in `docs/archive/`; it is not converted to feature `DONE` status unless the handbook Definition of Done is verified.
 
-F-FND-01 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: Next.js app skeleton, `src/` layout, module boundary README, local lint/typecheck/build/unit/E2E pass. Missing PR/CI/staging and full import-boundary enforcement.
-F-FND-02 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: Prisma baseline, UUID v7 DB defaults, tenant tables, stronger `organization_id`/RLS migration policy script. Full future business-table coverage still incomplete.
-F-FND-03 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: forward migration and migrate script added. Local real-Postgres run blocked by Docker daemon/no local test DB credentials; CI not verified.
-F-FND-04 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: CI workflow and local scripts added. CI/preview not verified.
-F-FND-05 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: env schema and `.env.example` added. Actual dev/staging/prod environment provisioning not verified.
-F-FND-06 | TODO |
-F-FND-07 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: `/api/health` endpoint verified by Playwright locally. Deployment/staging readiness not verified.
-F-FND-08 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: structured JSON logger with request/org/user/job context and metadata redaction added. Sentry frontend/backend/jobs wiring incomplete.
-F-FND-09 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: outbox table/type, tenant-scoped dispatcher, idempotency key column, and unit tests added. Inngest wiring and real job verification incomplete.
-F-FND-10 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: provider interfaces and dev-only fakes added; fakes recorded in `docs/STUBS.md`. Concrete provider wiring and admin not-configured indicators incomplete.
-F-FND-11 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: `Money` value object, currency and FX tables, runtime no-JS-number guard, and unit tests added. Full monetary-row enforcement and real-Postgres checks incomplete.
-F-FND-12 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: tenant-scoped `reference_sequence` table and atomic reference allocator added. Real-Postgres concurrency/RLS verification, PR/CI/staging incomplete.
-F-FND-13 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: idempotent first-admin bootstrap script from `ADMIN_EMAIL`/`ADMIN_PASSWORD`, no default password, and password hash tests added. Login/MFA/passkeys and real-Postgres execution incomplete.
-F-FND-14 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: production-blocked deterministic demo seed added for foundation org. Real-Postgres execution and full demo dataset incomplete.
-F-FND-15 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: restore and rollback runbooks added. Actual backup/restore rehearsal against managed PostgreSQL incomplete.
-F-FND-16 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: tenant-scoped PostgreSQL rate-limit bucket schema, hashed-key consume helper, provider implementation, and unit tests added. Real login/invitation/public-form adoption incomplete.
+F-FND-01 | DONE PR #1 d1f1b81 | CI: `npm run lint`, `npm run typecheck`, `npm run build`, `npm run check:boundaries`, `tests/e2e/health.spec.ts`.
+F-FND-02 | DONE PR #1 d1f1b81 | CI: `npm run check:organization-id`, `npm run check:schema-drift`, `tests/integration/postgres-migration.test.ts`.
+F-FND-03 | DONE PR #1 d1f1b81 | CI: `tests/integration/postgres-migration.test.ts`, `npm run check:schema-drift`.
+F-FND-04 | DONE PR #1 d1f1b81 | CI workflow ran `lint`, `typecheck`, policy checks, unit, integration, build and Playwright.
+F-FND-05 | IN-PROGRESS | Env schema and `.env.example` exist; real staging/prod values pending owner.
+F-FND-06 | IN-PROGRESS | `vercel.json` guard exists; Vercel project/env and live staging pending owner-provided project link.
+F-FND-07 | DONE PR #1 d1f1b81 | CI: `tests/unit/health.test.ts`, `tests/e2e/health.spec.ts`.
+F-FND-08 | IN-PROGRESS | Structured logger covered by `tests/unit/logger.test.ts`; Sentry wiring pending.
+F-FND-09 | IN-PROGRESS | Outbox covered by `tests/unit/outbox-dispatcher.test.ts`; Inngest wiring pending.
+F-FND-10 | DONE PR #1 d1f1b81 | CI: `tests/unit/fake-providers.test.ts`; fakes listed in `docs/STUBS.md`.
+F-FND-11 | DONE PR #1 d1f1b81 | CI: `tests/unit/money.test.ts`, `npm run check:ledger`, `tests/integration/postgres-migration.test.ts`.
+F-FND-12 | DONE PR #1 d1f1b81 | CI: `tests/unit/reference-number.test.ts`, `tests/integration/postgres-migration.test.ts`.
+F-FND-13 | IN-PROGRESS | Bootstrap covered by `tests/unit/bootstrap-admin.test.ts` and local auth E2E; staging execution pending.
+F-FND-14 | IN-PROGRESS | Demo seed covered by `tests/unit/demo-seed.test.ts`; full demo dataset pending.
+F-FND-15 | IN-PROGRESS | Runbooks exist; managed PostgreSQL backup/restore rehearsal pending.
+F-FND-16 | IN-PROGRESS | Rate limiter covered by `tests/unit/rate-limiter.test.ts`; login adoption pending.
 F-IDN-01 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: tenant-scoped Person table added for first-admin bootstrap. Full lifecycle/profile model incomplete.
-F-IDN-02 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: tenant-scoped UserAccount table with password hash field added. Multiple auth methods, sessions, MFA/passkeys incomplete.
+F-IDN-02 | IN-PROGRESS | Auth.js credentials login with argon2id covered by `tests/e2e/auth.spec.ts`; MFA/passkeys incomplete.
 F-IDN-03 | TODO |
 F-IDN-04 | TODO |
 F-IDN-05 | TODO |
 F-IDN-06 | TODO |
 F-IDN-07 | TODO |
-F-IDN-08 | TODO |
+F-IDN-08 | IN-PROGRESS | Auth.js JWT session and logout covered by `tests/e2e/auth.spec.ts`; device list/revoke incomplete.
 F-IDN-09 | TODO |
 F-IDN-10 | TODO |
 F-IDN-11 | TODO |
@@ -52,12 +52,12 @@ F-I18-01 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: locale-prefixed 
 F-I18-02 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: EN/FR/AR message catalogs and key-parity check added. Full string extraction incomplete.
 F-I18-03 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: `dir` support and RTL-safe CSS guard added. Full component/icon mirroring coverage incomplete.
 F-I18-04 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: locale-aware date, number, currency, and plural formatter utilities with unit tests added. Full app adoption incomplete.
-F-I18-05 | TODO |
+F-I18-05 | IN-PROGRESS | EN/FR switch in login/app shell; persisted per-user preference incomplete.
 F-I18-06 | TODO |
 F-I18-07 | TODO |
-F-DSN-01 | TODO |
+F-DSN-01 | IN-PROGRESS | Base CSS tokens applied to login/app shell; full token/component package incomplete.
 F-DSN-02 | TODO |
-F-DSN-03 | TODO |
+F-DSN-03 | IN-PROGRESS | Authenticated admin shell covered by `tests/e2e/auth.spec.ts`; dense admin navigation incomplete.
 F-DSN-04 | TODO |
 F-DSN-05 | TODO |
 F-DSN-06 | TODO |

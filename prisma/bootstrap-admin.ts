@@ -3,8 +3,9 @@ import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../src/platform/auth/password";
 import { withTenant, type TenantTransactionRunner } from "../src/platform/db/tenant";
 import { readEnv, type AppEnv } from "../src/platform/env/env";
+import { bootstrapOrganizationId } from "../src/platform/identity/bootstrap";
 
-export const bootstrapOrganizationId = "018f0a0b-0000-7000-9000-000000000001";
+export { bootstrapOrganizationId };
 
 type BootstrapClient = TenantTransactionRunner & {
   organization: {
