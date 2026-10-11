@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
+  AirbnbSettlementAuthorizationError,
+  importAirbnbSettlementCsv,
+  reverseAirbnbSettlement
+} from "@/modules/finance/application/airbnb-settlement-service";
+import {
+  buildActualAirbnbReceiptPostings,
+  buildExpectedAirbnbSettlementPostings,
+  parseAirbnbSettlementCsv,
+  settlementVariance
+} from "@/modules/finance/domain/airbnb-settlement";
+import {
   ReservationRevenueAuthorizationError,
   recordReservationAccommodationRevenue,
   reverseReservationAccommodationRevenue
@@ -103,6 +114,63 @@ describe("reservation revenue posting domain", () => {
   });
 });
 
+describe("Airbnb settlement reconciliation domain", () => {
+  it("parses Airbnb payout CSV rows with source identifiers and amounts", () => {
+    const rows = parseAirbnbSettlementCsv(`source_reservation_id,source_payout_id,source_transaction_id,currency,gross_amount,platform_fee,expected_payout,actual_receipt,reason,action
+HMABC123,PO-100,TX-100,MAD,5500.00,300.00,5200.00,5150.00,Bank fee,Review payout`);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      sourceReservationId: "HMABC123",
+      sourcePayoutId: "PO-100",
+      sourceTransactionId: "TX-100",
+      currency: "MAD",
+      grossAmount: "5500.00",
+      platformFee: "300.00",
+      expectedPayout: "5200.00",
+      actualReceipt: "5150.00",
+      reason: "Bank fee",
+      action: "Review payout"
+    });
+  });
+
+  it("builds balanced Airbnb expected and actual receipt postings with a 50 MAD variance", () => {
+    const expectedPayout = Money.of("5200.00", "MAD");
+    const actualReceipt = Money.of("5150.00", "MAD");
+    const variance = settlementVariance(expectedPayout, actualReceipt);
+    const expectedPostings = buildExpectedAirbnbSettlementPostings({
+      otaClearingAccountId: "ota-clearing",
+      ownerPayableAccountId: "owner-payable",
+      grossAmount: Money.of("5500.00", "MAD"),
+      platformFee: Money.of("300.00", "MAD"),
+      expectedPayout,
+      dimensions: {}
+    });
+    const actualPostings = buildActualAirbnbReceiptPostings({
+      receivedAccountId: "bank",
+      otaClearingAccountId: "ota-clearing",
+      varianceSuspenseAccountId: "variance-suspense",
+      expectedPayout,
+      actualReceipt,
+      dimensions: {}
+    });
+
+    expect(variance.toJSON()).toEqual({ amount: "50.00", currency: "MAD" });
+    expect(() => assertFinancePostingsBalanced(expectedPostings)).not.toThrow();
+    expect(() => assertFinancePostingsBalanced(actualPostings)).not.toThrow();
+    expect(expectedPostings.map((posting) => [posting.side, posting.bucket, posting.amount.toJSON().amount])).toEqual([
+      ["DEBIT", "OTA_SETTLEMENT", "5200.00"],
+      ["DEBIT", "OTA_FEE", "300.00"],
+      ["CREDIT", "OWNER_REVENUE", "5500.00"]
+    ]);
+    expect(actualPostings.map((posting) => [posting.side, posting.bucket, posting.amount.toJSON().amount])).toEqual([
+      ["DEBIT", "OTA_RECEIPT", "5150.00"],
+      ["DEBIT", "VARIANCE", "50.00"],
+      ["CREDIT", "OTA_SETTLEMENT", "5200.00"]
+    ]);
+  });
+});
+
 describe("reservation revenue authorization", () => {
   it("denies revenue posting before reaching the database without financial create access", async () => {
     const ctx = actor({
@@ -147,5 +215,53 @@ describe("reservation revenue authorization", () => {
         { db: deniedDb }
       )
     ).rejects.toBeInstanceOf(ReservationRevenueAuthorizationError);
+  });
+
+  it("denies Airbnb settlement import before reaching the database without reconcile access", async () => {
+    const ctx = actor({
+      organizationId: "018f0a0b-0000-7000-9000-000000000001",
+      permissions: new Set([
+        permissionKey("reservation", "view"),
+        permissionKey("financial_transaction", "view"),
+        permissionKey("financial_transaction", "create")
+      ]),
+      scopes: [{ organizationId: "018f0a0b-0000-7000-9000-000000000001" }]
+    });
+
+    await expect(
+      importAirbnbSettlementCsv(
+        ctx,
+        {
+          csv: "source_reservation_id,source_payout_id,source_transaction_id,currency,gross_amount,platform_fee,expected_payout,actual_receipt,reason,action\nHMABC123,PO-100,TX-100,MAD,5500.00,300.00,5200.00,5150.00,Bank fee,Review payout",
+          receivedAccountId: "018f0a0b-0000-7000-9000-000000000902",
+          idempotencyKey: "018f0a0b-0000-7000-9000-000000000905"
+        },
+        { db: deniedDb }
+      )
+    ).rejects.toBeInstanceOf(AirbnbSettlementAuthorizationError);
+  });
+
+  it("denies Airbnb settlement reversal before reaching the database without void access", async () => {
+    const ctx = actor({
+      organizationId: "018f0a0b-0000-7000-9000-000000000001",
+      permissions: new Set([
+        permissionKey("reservation", "view"),
+        permissionKey("financial_transaction", "view"),
+        permissionKey("financial_transaction", "reconcile")
+      ]),
+      scopes: [{ organizationId: "018f0a0b-0000-7000-9000-000000000001" }]
+    });
+
+    await expect(
+      reverseAirbnbSettlement(
+        ctx,
+        {
+          settlementId: "018f0a0b-0000-7000-9000-000000000906",
+          reason: "Test reversal",
+          idempotencyKey: "018f0a0b-0000-7000-9000-000000000907"
+        },
+        { db: deniedDb }
+      )
+    ).rejects.toBeInstanceOf(AirbnbSettlementAuthorizationError);
   });
 });

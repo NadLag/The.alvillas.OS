@@ -160,6 +160,7 @@
       "guestName": "Nom du voyageur",
       "guestEmail": "Email du voyageur",
       "source": "Source",
+      "externalId": "ID source",
       "checkIn": "Arrivee",
       "checkOut": "Depart",
       "adultCount": "Adultes",
@@ -167,6 +168,14 @@
       "notes": "Notes",
       "saveReservation": "Creer la reservation",
       "saving": "Enregistrement..."
+    },
+    "sources": {
+      "MANUAL": "Manuelle",
+      "DIRECT": "Directe",
+      "AGENCY": "Agence",
+      "AIRBNB": "Airbnb",
+      "BOOKING": "Booking.com",
+      "VRBO": "Vrbo"
     },
     "revenue": {
       "amount": "Revenu hebergement",
@@ -176,6 +185,27 @@
       "recordRevenue": "Poster",
       "recordingRevenue": "Posting...",
       "revenuePosted": "Revenu poste"
+    },
+    "settlement": {
+      "title": "Reconciliation Airbnb",
+      "subtitle": "Importez les lignes de payout et rapprochez le montant attendu du montant recu.",
+      "csv": "CSV transaction/payout",
+      "csvHint": "source_reservation_id,source_payout_id,source_transaction_id,currency,gross_amount,platform_fee,expected_payout,actual_receipt,reason,action",
+      "account": "Compte de reception",
+      "noAccounts": "Ajoutez un compte banque ou caisse actif avant d'importer les reconciliations.",
+      "import": "Importer CSV",
+      "importing": "Import...",
+      "variances": "Attendu -> Recu -> Ecart -> Raison -> Action",
+      "noVariances": "Aucun ecart Airbnb ouvert.",
+      "expected": "Attendu",
+      "actual": "Recu",
+      "variance": "Ecart",
+      "reason": "Raison",
+      "action": "Action",
+      "notFound": "Un identifiant source du CSV ne correspond a aucune reservation de cette organisation.",
+      "config": "L'import requiert un compte de reception actif et des lignes dans la devise de base.",
+      "conflict": "Cette transaction source Airbnb a deja ete importee differemment.",
+      "generic": "Le CSV Airbnb n'a pas pu etre importe. Reessayez."
     }
   },
   "Operations": {

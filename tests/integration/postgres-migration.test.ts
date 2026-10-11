@@ -18,6 +18,14 @@ import {
   recordReservationAccommodationRevenue,
   reverseReservationAccommodationRevenue
 } from "@/modules/finance/application/reservation-revenue-service";
+import {
+  AirbnbSettlementAuthorizationError,
+  AirbnbSettlementConflictError,
+  AirbnbSettlementNotFoundError,
+  importAirbnbSettlementCsv,
+  listAirbnbSettlementVariances,
+  reverseAirbnbSettlement
+} from "@/modules/finance/application/airbnb-settlement-service";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationNotFoundError,
@@ -1623,6 +1631,394 @@ describe("PostgreSQL baseline", () => {
         }
       )
     ).rejects.toBeInstanceOf(ReservationRevenueConflictError);
+  });
+
+  it("imports and reconciles Airbnb settlement CSV rows without duplicate postings", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Airbnb Settlement A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Airbnb Settlement B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const financePermissions = new Set([
+      permissionKey("reservation", "view"),
+      permissionKey("reservation", "create"),
+      permissionKey("task", "view"),
+      permissionKey("task", "create"),
+      permissionKey("financial_transaction", "view"),
+      permissionKey("financial_transaction", "create"),
+      permissionKey("financial_transaction", "void"),
+      permissionKey("financial_transaction", "reconcile")
+    ]);
+    const externalId = `HM-${randomUUID()}`;
+    const sourceTransactionId = `TX-${randomUUID()}`;
+    const fixture = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const owner = await tx.owner.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "S7 Airbnb Owner",
+            email: `s7-airbnb-owner-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const property = await tx.property.create({
+          data: {
+            organizationId: orgA.id,
+            name: "Villa S7 Airbnb",
+            addressLine1: "Route de Fes",
+            city: "Marrakech",
+            countryCode: "MA",
+            propertyType: "Villa",
+            bedrooms: 4,
+            bathrooms: 4,
+            livingSpaces: 2,
+            maxGuests: 8,
+            timezone: "Africa/Casablanca",
+            amenities: ["pool"],
+            photoUrls: [],
+            propertyOwners: {
+              create: {
+                organizationId: orgA.id,
+                ownerId: owner.id,
+                shareBps: 10000,
+                isPrimary: true,
+                createdBy: integrationActorId
+              }
+            },
+            createdBy: integrationActorId
+          }
+        });
+        const bank = await tx.ledgerAccount.create({
+          data: {
+            organizationId: orgA.id,
+            code: "BANK_S7_AIRBNB",
+            name: "S7 Airbnb settlement bank",
+            accountType: "ASSET_LOCATION",
+            normalSide: "DEBIT"
+          }
+        });
+        await tx.configRule.create({
+          data: {
+            organizationId: orgA.id,
+            key: "ops.reservation_task_templates",
+            scopeType: "organization",
+            scopeId: null,
+            value: {
+              tasks: [
+                {
+                  key: "arrival",
+                  type: "ARRIVAL_PREPARATION",
+                  title: {
+                    en: "Arrival preparation",
+                    fr: "Preparation arrivee"
+                  },
+                  due: "CHECK_IN",
+                  priority: "NORMAL",
+                  checklist: []
+                }
+              ]
+            },
+            effectiveFrom: new Date("2000-01-01T00:00:00.000Z"),
+            version: 1,
+            createdBy: integrationActorId,
+            reason: "S7 task templates"
+          }
+        });
+
+        return { owner, property, bank };
+      }
+    );
+    const ctx = actorForOrganization(orgA.id, financePermissions);
+    const reservation = await createManualReservation(
+      ctx,
+      {
+        propertyId: fixture.property.id,
+        guestName: "S7 Airbnb Guest",
+        guestEmail: "s7.airbnb.guest@example.test",
+        source: "AIRBNB",
+        externalId,
+        checkIn: "2028-05-10",
+        checkOut: "2028-05-14",
+        adultCount: 2,
+        childCount: 0,
+        notes: "S7 Airbnb settlement reconciliation",
+        idempotencyKey: randomUUID()
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-s7-reservation",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const csv = [
+      "source_reservation_id,source_payout_id,source_transaction_id,currency,gross_amount,platform_fee,expected_payout,actual_receipt,reason,action",
+      `${externalId},PO-S7,${sourceTransactionId},MAD,5500.00,300.00,5200.00,5150.00,Bank fee,Review payout`
+    ].join("\n");
+    const importInput = {
+      csv,
+      receivedAccountId: fixture.bank.id,
+      idempotencyKey: randomUUID()
+    };
+
+    await expect(
+      importAirbnbSettlementCsv(
+        actorForOrganization(
+          orgA.id,
+          new Set([
+            permissionKey("reservation", "view"),
+            permissionKey("financial_transaction", "view"),
+            permissionKey("financial_transaction", "create")
+          ])
+        ),
+        importInput,
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-s7-denied",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(AirbnbSettlementAuthorizationError);
+
+    const imported = await importAirbnbSettlementCsv(ctx, importInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-s7-import",
+      ipAddress: "127.0.0.1"
+    });
+    const importedItem = imported.imported[0];
+
+    expect(importedItem?.idempotent).toBe(false);
+    expect(importedItem?.reservationId).toBe(reservation.reservation.id);
+    expect(importedItem?.expectedPayout.toJSON().amount).toBe("5200.00");
+    expect(importedItem?.actualReceipt.toJSON().amount).toBe("5150.00");
+    expect(importedItem?.varianceAmount.toJSON().amount).toBe("50.00");
+    expect(importedItem?.varianceId).not.toBeNull();
+    const varianceId = importedItem.varianceId;
+    if (!varianceId) {
+      throw new Error("Expected Airbnb settlement import to create a variance");
+    }
+
+    const afterImport = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => ({
+        transactionCount: await tx.financialTransaction.count({
+          where: { organizationId: orgA.id }
+        }),
+        settlementCount: await tx.airbnbSettlement.count({
+          where: { organizationId: orgA.id }
+        }),
+        varianceCount: await tx.variance.count({
+          where: { organizationId: orgA.id, sourceType: "AIRBNB_SETTLEMENT" }
+        }),
+        postings: await tx.posting.findMany({
+          where: {
+            transactionId: {
+              in: [importedItem.expectedTransactionId, importedItem.receiptTransactionId]
+            }
+          },
+          include: {
+            ledgerAccount: true
+          }
+        }),
+        balances: await tx.$queryRaw<Array<{ transactionId: string; balance: string }>>`
+          SELECT
+            transaction_id AS "transactionId",
+            sum(CASE WHEN side = 'DEBIT' THEN amount ELSE -amount END)::text AS balance
+          FROM posting
+          WHERE organization_id = ${orgA.id}::uuid
+            AND transaction_id IN (${importedItem.expectedTransactionId}::uuid, ${importedItem.receiptTransactionId}::uuid)
+          GROUP BY transaction_id
+        `
+      })
+    );
+
+    expect(afterImport.transactionCount).toBe(2);
+    expect(afterImport.settlementCount).toBe(1);
+    expect(afterImport.varianceCount).toBe(1);
+    expect(afterImport.balances).toHaveLength(2);
+    expect(afterImport.balances.every((row) => new Decimal(row.balance).eq(0))).toBe(true);
+    expect(
+      afterImport.postings.find(
+        (posting) =>
+          posting.ledgerAccount.code === "OTA_CLEARING_AIRBNB" &&
+          posting.side === "DEBIT" &&
+          posting.bucket === "OTA_SETTLEMENT"
+      )?.amount.toString()
+    ).toBe("5200");
+    expect(
+      afterImport.postings.find(
+        (posting) =>
+          posting.ledgerAccount.code === "OWNER_PAYABLE" &&
+          posting.side === "DEBIT" &&
+          posting.bucket === "OTA_FEE"
+      )?.amount.toString()
+    ).toBe("300");
+    expect(
+      afterImport.postings.find(
+        (posting) =>
+          posting.ledgerAccount.code === "OWNER_PAYABLE" &&
+          posting.side === "CREDIT" &&
+          posting.bucket === "OWNER_REVENUE"
+      )?.amount.toString()
+    ).toBe("5500");
+    expect(
+      afterImport.postings.find(
+        (posting) =>
+          posting.ledgerAccount.code === "BANK_S7_AIRBNB" &&
+          posting.side === "DEBIT" &&
+          posting.bucket === "OTA_RECEIPT"
+      )?.amount.toString()
+    ).toBe("5150");
+    expect(
+      afterImport.postings.find(
+        (posting) =>
+          posting.ledgerAccount.code === "VARIANCE_SUSPENSE" &&
+          posting.side === "DEBIT" &&
+          posting.bucket === "VARIANCE"
+      )?.amount.toString()
+    ).toBe("50");
+
+    const variances = await listAirbnbSettlementVariances(ctx, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    expect(variances).toHaveLength(1);
+    expect(variances[0]?.expectedAmount.toJSON().amount).toBe("5200.00");
+    expect(variances[0]?.actualAmount.toJSON().amount).toBe("5150.00");
+    expect(variances[0]?.varianceAmount.toJSON().amount).toBe("50.00");
+    expect(variances[0]?.reason).toBe("Bank fee");
+    expect(variances[0]?.action).toBe("Review payout");
+
+    const replay = await importAirbnbSettlementCsv(ctx, importInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-s7-import-replay",
+      ipAddress: "127.0.0.1"
+    });
+    const transactionCountAfterReplay = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => tx.financialTransaction.count({ where: { organizationId: orgA.id } })
+    );
+
+    expect(replay.imported[0]?.idempotent).toBe(true);
+    expect(transactionCountAfterReplay).toBe(2);
+    await expect(
+      importAirbnbSettlementCsv(
+        ctx,
+        {
+          ...importInput,
+          csv: csv.replace("5150.00", "5140.00"),
+          idempotencyKey: randomUUID()
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-s7-import-conflict",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(AirbnbSettlementConflictError);
+
+    await expect(
+      importAirbnbSettlementCsv(actorForOrganization(orgB.id, financePermissions), importInput, {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-s7-cross-tenant",
+        ipAddress: "127.0.0.1"
+      })
+    ).rejects.toBeInstanceOf(AirbnbSettlementNotFoundError);
+
+    const settlementVisibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.airbnbSettlement.findFirst({ where: { id: importedItem.settlementId } })
+    );
+    const varianceVisibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.variance.findFirst({ where: { id: varianceId } })
+    );
+
+    expect(settlementVisibleToOrgB).toBeNull();
+    expect(varianceVisibleToOrgB).toBeNull();
+
+    const reversalInput = {
+      settlementId: importedItem.settlementId,
+      reason: "Integration S7 reversal",
+      idempotencyKey: randomUUID()
+    };
+    await expect(
+      reverseAirbnbSettlement(
+        actorForOrganization(
+          orgA.id,
+          new Set([
+            permissionKey("financial_transaction", "view"),
+            permissionKey("financial_transaction", "reconcile")
+          ])
+        ),
+        reversalInput,
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-s7-reversal-denied",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(AirbnbSettlementAuthorizationError);
+
+    const postingToMutate = afterImport.postings[0];
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.posting.update({
+          where: { id: postingToMutate.id },
+          data: { amount: "1.00" }
+        })
+      )
+    ).rejects.toThrow();
+
+    const reversed = await reverseAirbnbSettlement(ctx, reversalInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-s7-reversal",
+      ipAddress: "127.0.0.1"
+    });
+    const transactionCountAfterReverse = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => tx.financialTransaction.count({ where: { organizationId: orgA.id } })
+    );
+
+    expect(reversed.idempotent).toBe(false);
+    expect(reversed.reversalTransactionIds).toHaveLength(2);
+    expect(transactionCountAfterReverse).toBe(4);
+
+    const reversalReplay = await reverseAirbnbSettlement(ctx, reversalInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-s7-reversal-replay",
+      ipAddress: "127.0.0.1"
+    });
+    const transactionCountAfterReversalReplay = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => tx.financialTransaction.count({ where: { organizationId: orgA.id } })
+    );
+
+    expect(reversalReplay.idempotent).toBe(true);
+    expect(transactionCountAfterReversalReplay).toBe(4);
+    await expect(
+      reverseAirbnbSettlement(
+        ctx,
+        {
+          ...reversalInput,
+          idempotencyKey: randomUUID()
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-s7-reversal-conflict",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(AirbnbSettlementConflictError);
   });
 
   it("allocates tenant-scoped reference numbers under RLS", async () => {

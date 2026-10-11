@@ -83,6 +83,7 @@ export async function createManualReservationAction(
     guestName: formValue(formData, "guestName"),
     guestEmail: formValue(formData, "guestEmail"),
     source: formValue(formData, "source") ?? "MANUAL",
+    externalId: formValue(formData, "externalId"),
     checkIn: formValue(formData, "checkIn"),
     checkOut: formValue(formData, "checkOut"),
     adultCount: formValue(formData, "adultCount") ?? "1",

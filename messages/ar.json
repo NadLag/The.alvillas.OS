@@ -160,6 +160,7 @@
       "guestName": "Guest name",
       "guestEmail": "Guest email",
       "source": "Source",
+      "externalId": "Source ID",
       "checkIn": "Check-in",
       "checkOut": "Check-out",
       "adultCount": "Adults",
@@ -167,6 +168,14 @@
       "notes": "Notes",
       "saveReservation": "Create reservation",
       "saving": "Saving..."
+    },
+    "sources": {
+      "MANUAL": "Manual",
+      "DIRECT": "Direct",
+      "AGENCY": "Agency",
+      "AIRBNB": "Airbnb",
+      "BOOKING": "Booking.com",
+      "VRBO": "Vrbo"
     },
     "revenue": {
       "amount": "Accommodation revenue",
@@ -176,6 +185,27 @@
       "recordRevenue": "Post",
       "recordingRevenue": "Posting...",
       "revenuePosted": "Revenue posted"
+    },
+    "settlement": {
+      "title": "Airbnb settlement",
+      "subtitle": "Import payout rows and reconcile expected settlement against actual receipt.",
+      "csv": "Transaction/payout CSV",
+      "csvHint": "source_reservation_id,source_payout_id,source_transaction_id,currency,gross_amount,platform_fee,expected_payout,actual_receipt,reason,action",
+      "account": "Actual receipt account",
+      "noAccounts": "Add an active bank or cash ledger account before importing settlements.",
+      "import": "Import CSV",
+      "importing": "Importing...",
+      "variances": "Expected -> Actual -> Variance -> Reason -> Action",
+      "noVariances": "No open Airbnb settlement variances.",
+      "expected": "Expected",
+      "actual": "Actual",
+      "variance": "Variance",
+      "reason": "Reason",
+      "action": "Action",
+      "notFound": "A CSV source identifier could not be matched in this organization.",
+      "config": "Settlement import needs an active receiving account and base-currency rows.",
+      "conflict": "This Airbnb source transaction was already imported differently.",
+      "generic": "The Airbnb settlement CSV could not be imported. Try again."
     }
   },
   "Operations": {

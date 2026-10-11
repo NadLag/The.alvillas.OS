@@ -78,6 +78,7 @@ export const manualReservationInputSchema = z
     guestName: requiredText(160),
     guestEmail: optionalEmail,
     source: reservationSourceSchema.default("MANUAL"),
+    externalId: optionalText(160),
     checkIn: dateStringSchema,
     checkOut: dateStringSchema,
     adultCount: z.coerce.number().int().min(0).default(1),

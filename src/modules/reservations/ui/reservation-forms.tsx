@@ -27,6 +27,8 @@ type ReservationLabels = FormLabels & {
   guestName: string;
   guestEmail: string;
   source: string;
+  externalId: string;
+  sources: Record<string, string>;
   checkIn: string;
   checkOut: string;
   adultCount: string;
@@ -429,7 +431,6 @@ export function ManualReservationForm({
   return (
     <form className="resource-form" action={formAction} data-testid="reservation-create-form">
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
-      <input name="source" type="hidden" value="MANUAL" />
       <label className="field">
         <span>{labels.property}</span>
         <select data-testid="reservation-property" name="propertyId" required disabled={!hasProperties}>
@@ -452,6 +453,23 @@ export function ManualReservationForm({
         <input autoComplete="email" data-testid="reservation-guest-email" name="guestEmail" type="email" />
         <ErrorText testId="reservation-guest-email-error">{fieldError(state, "guestEmail")}</ErrorText>
       </label>
+      <div className="form-grid two">
+        <label className="field">
+          <span>{labels.source}</span>
+          <select data-testid="reservation-source" name="source" required defaultValue="MANUAL">
+            {Object.entries(labels.sources).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>{labels.externalId}</span>
+          <input data-testid="reservation-external-id" name="externalId" />
+          <ErrorText testId="reservation-external-id-error">{fieldError(state, "externalId")}</ErrorText>
+        </label>
+      </div>
       <div className="form-grid two">
         <label className="field">
           <span>{labels.checkIn}</span>

@@ -224,6 +224,7 @@ export class ReservationRepository {
         propertyId: input.propertyId,
         reference,
         source: input.source,
+        externalId: input.externalId,
         status: "CONFIRMED",
         guestName: input.guestName,
         guestEmail: input.guestEmail,
