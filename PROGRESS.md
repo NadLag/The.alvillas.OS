@@ -9,7 +9,7 @@ F-FND-02 | DONE PR #1 d1f1b81 | CI: `npm run check:organization-id`, `npm run ch
 F-FND-03 | DONE PR #1 d1f1b81 | CI: `tests/integration/postgres-migration.test.ts`, `npm run check:schema-drift`.
 F-FND-04 | DONE PR #1 d1f1b81 | CI workflow ran `lint`, `typecheck`, policy checks, unit, integration, build and Playwright.
 F-FND-05 | IN-PROGRESS | Env schema and `.env.example` exist; Preview Neon DB and staging app secrets configured separately from Production; production values/provider completion pending owner.
-F-FND-06 | IN-PROGRESS | `vercel.json` guard exists; Preview Neon staging resource `the-alvillas-os-staging` provisioned and migrations applied; S1 PR/CI/merge blocked by GitHub write permission.
+F-FND-06 | IN-PROGRESS | `vercel.json` guard exists; Preview Neon staging resource `the-alvillas-os-staging` provisioned and migrations applied. S7 proved production Git auto-deploy is blocked: Vercel project production branch is `main`, ignored-build command skips `VERCEL_ENV=production`, and merge-triggered production deployment `dpl_FdX9AFK6zZrgFkf27erhptEMhxpy` was canceled. GitHub `deploy-staging` run `38165949728` failed because staging `VERCEL_TOKEN`/`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID` are unset; owner/environment setup pending.
 F-FND-07 | DONE PR #1 d1f1b81 | CI: `tests/unit/health.test.ts`, `tests/e2e/health.spec.ts`.
 F-FND-08 | IN-PROGRESS | Structured logger covered by `tests/unit/logger.test.ts`; Sentry wiring pending.
 F-FND-09 | IN-PROGRESS | Outbox covered by `tests/unit/outbox-dispatcher.test.ts`; Inngest wiring pending.
@@ -110,7 +110,7 @@ F-RES-01 | IN-PROGRESS | Branch `f-res-ops-01-manual-reservations-tasks` merged 
 F-RES-02 | TODO |
 F-RES-03 | TODO |
 F-RES-04 | TODO |
-F-RES-05 | IN-PROGRESS | S7 adds Airbnb transaction/payout CSV import with source identifiers, reservation matching, idempotent import and Playwright coverage on branch `s7-airbnb-settlement-reconciliation`; PR/CI/staging pending.
+F-RES-05 | DONE PR #13 808f30e | Airbnb transaction/payout CSV import merged with source identifiers, reservation matching and idempotency. Evidence: PR CI run `38165698273` green; local `npm run verify`, real-PostgreSQL integration and Playwright passed; independent protected Preview staging `dpl_3FyTpoF7qoHs8mVwmVEei6KBQfMy` verified Airbnb CSV import for reservation `HM-s7-chromium-1791745688593`.
 F-RES-06 | TODO |
 F-RES-07 | IN-PROGRESS | Manual reservation UI/action/service slice added. Evidence: `tests/unit/reservation-service.test.ts` > `denies reservation reads before reaching the repository`, `denies task reads before reaching the repository`, `denies manual reservation creation unless both reservation and task creation are allowed`, `validates that check-out is after check-in`; `tests/e2e/reservations-tasks.spec.ts` > `manual reservation to operations tasks journey` > `creates a manual reservation and displays generated arrival and checkout tasks` passed in CI for chromium and field-mobile. Protected Preview/staging browser verification on 2026-10-11 created `Staging Villa staging-s3-1791728260199` and confirmed 2 generated tasks. Keep IN-PROGRESS because direct/agency booking entry and full feature DoD remain broader than this S3 slice.
 F-RES-08 | TODO |
@@ -168,7 +168,7 @@ F-FIN-06 | TODO |
 F-FIN-07 | TODO |
 F-FIN-08 | TODO |
 F-FIN-09 | TODO |
-F-FIN-10 | IN-PROGRESS | S7 adds Airbnb expected payout, platform fee, actual receipt and variance ledger postings using append-only transactions; PR/CI/staging pending.
+F-FIN-10 | DONE PR #13 808f30e | Airbnb settlement postings merged: 5,500.00 MAD gross, 300.00 MAD platform fee, 5,200.00 MAD expected payout, 5,150.00 MAD actual receipt and 50.00 MAD variance posted through append-only ledger transactions. Evidence: PR CI run `38165698273` green; staging `dpl_3FyTpoF7qoHs8mVwmVEei6KBQfMy` verified settlement `01a12c60-3cef-7355-ad4c-c3333c650088`, variance `01a12c60-4332-73a8-801d-2f16a3b2fb53`, transaction count `2`.
 F-FIN-11 | TODO |
 F-FIN-12 | TODO |
 F-FIN-13 | IN-PROGRESS | S6 reservation accommodation revenue posting merged via PR #12 `543fee1`: authorized UI records 8000.00 MAD manual reservation revenue and creates balanced append-only owner revenue postings exactly once. Evidence: CI run `38158574875` green including real PostgreSQL and Playwright; protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified `STAGING_S6_REVENUE_POSTED=true`.
@@ -190,8 +190,8 @@ F-FIN-28 | TODO |
 F-FIN-29 | TODO |
 F-FIN-30 | TODO |
 F-FIN-31 | TODO |
-F-FIN-32 | IN-PROGRESS | S7 adds reconciliation framework rows for Airbnb settlements and expected-vs-actual variance computation; broader bank/laundry/staff/owner/inventory reconciliation pending.
-F-FIN-33 | IN-PROGRESS | S7 adds open Variance Center rows and UI chain for Expected -> Actual -> Variance -> Reason -> Action on Airbnb settlements; assignment/resolution/aging still pending.
+F-FIN-32 | IN-PROGRESS | S7 merged reconciliation framework rows for Airbnb settlements and expected-vs-actual variance computation via PR #13 `808f30e`; staging `dpl_3FyTpoF7qoHs8mVwmVEei6KBQfMy` verified 5,200.00 expected vs 5,150.00 actual. Broader bank/laundry/staff/owner/inventory reconciliation pending.
+F-FIN-33 | IN-PROGRESS | S7 merged open Variance Center rows and UI chain for Expected -> Actual -> Variance -> Reason -> Action on Airbnb settlements via PR #13 `808f30e`; staging verified 50.00 MAD reason `Bank fee` and action `Review payout`. Assignment/resolution/aging still pending.
 F-FIN-34 | TODO |
 F-FIN-35 | TODO |
 F-FIN-36 | TODO |
