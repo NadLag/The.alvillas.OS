@@ -106,15 +106,15 @@ F-TEM-05 | TODO |
 F-TEM-06 | TODO |
 F-TEM-07 | TODO |
 F-TEM-08 | TODO |
-F-RES-01 | IN-PROGRESS | Branch `f-res-ops-01-manual-reservations-tasks`: tenant-scoped reservation/conflict schema, repository and service added. Evidence: `npm run verify` passed locally on 2026-10-11 (lint, typecheck, checks, 18 unit files / 61 tests, build). CI/merge/staging verification pending.
+F-RES-01 | IN-PROGRESS | Branch `f-res-ops-01-manual-reservations-tasks` merged via PR #4 `c42c225`; Vercel Prisma-generation fix merged via PR #5 `a847e38`. Tenant-scoped reservation/conflict schema, repository and service added. Evidence: local `npm run verify` passed on 2026-10-11 (lint, typecheck, checks, 18 unit files / 61 tests, build); CI runs `38145733738` and `38146068422` green. Protected Preview/staging deployment `dpl_954katAyDEWP9kQdEq8VJUdbC7Vw` ready at commit `a847e38`; readiness reported 11 migrations applied.
 F-RES-02 | TODO |
 F-RES-03 | TODO |
 F-RES-04 | TODO |
 F-RES-05 | TODO |
 F-RES-06 | TODO |
-F-RES-07 | IN-PROGRESS | Manual reservation UI/action/service slice added. Evidence: `tests/unit/reservation-service.test.ts` > `denies reservation reads before reaching the repository`, `denies task reads before reaching the repository`, `denies manual reservation creation unless both reservation and task creation are allowed`, `validates that check-out is after check-in`; `tests/e2e/reservations-tasks.spec.ts` > `manual reservation to operations tasks journey` > `creates a manual reservation and displays generated arrival and checkout tasks` (listed for chromium and field-mobile; owner-provided S3 provisional run: 18/18 Playwright passed against real PostgreSQL). Keep IN-PROGRESS until PR, CI, merge and staging task-generation check pass.
+F-RES-07 | IN-PROGRESS | Manual reservation UI/action/service slice added. Evidence: `tests/unit/reservation-service.test.ts` > `denies reservation reads before reaching the repository`, `denies task reads before reaching the repository`, `denies manual reservation creation unless both reservation and task creation are allowed`, `validates that check-out is after check-in`; `tests/e2e/reservations-tasks.spec.ts` > `manual reservation to operations tasks journey` > `creates a manual reservation and displays generated arrival and checkout tasks` passed in CI for chromium and field-mobile. Protected Preview/staging browser verification on 2026-10-11 created `Staging Villa staging-s3-1791728260199` and confirmed 2 generated tasks. Keep IN-PROGRESS because direct/agency booking entry and full feature DoD remain broader than this S3 slice.
 F-RES-08 | TODO |
-F-RES-09 | IN-PROGRESS | Overlapping manual reservations create `reservation_conflict` rows with audit event. Coverage added in `tests/integration/postgres-migration.test.ts` > `creates manual reservations with idempotent task generation, overlap detection, and tenant isolation`; local rerun blocked on 2026-10-11 because Docker Desktop Linux engine is unavailable. Command Center exception surfacing still pending.
+F-RES-09 | IN-PROGRESS | Overlapping manual reservations create `reservation_conflict` rows with audit event. Evidence: CI `tests/integration/postgres-migration.test.ts` > `creates manual reservations with idempotent task generation, overlap detection, and tenant isolation` passed in run `38145733738`; local rerun blocked on 2026-10-11 because Docker Desktop Linux engine is unavailable. Command Center exception surfacing still pending.
 F-RES-10 | TODO |
 F-RES-11 | TODO |
 F-RES-12 | TODO |
@@ -122,8 +122,8 @@ F-RES-13 | TODO |
 F-RES-14 | TODO |
 F-RES-15 | TODO |
 F-RES-16 | TODO |
-F-OPS-01 | IN-PROGRESS | Tenant-scoped `operation_task` model with state, priority, due date, reservation link, idempotency key and list view added. Evidence: `tests/e2e/reservations-tasks.spec.ts` > `creates a manual reservation and displays generated arrival and checkout tasks`; full task history still pending.
-F-OPS-02 | IN-PROGRESS | Config-driven reservation task generation currently covers arrival preparation and checkout cleaning. Coverage added in `tests/integration/postgres-migration.test.ts` > `creates manual reservations with idempotent task generation, overlap detection, and tenant isolation`; local rerun blocked on 2026-10-11 because Docker Desktop Linux engine is unavailable. Broader task type catalog pending.
+F-OPS-01 | IN-PROGRESS | Tenant-scoped `operation_task` model with state, priority, due date, reservation link, idempotency key and list view added. Evidence: CI `tests/e2e/reservations-tasks.spec.ts` > `creates a manual reservation and displays generated arrival and checkout tasks` passed in chromium and field-mobile; protected Preview/staging verification confirmed 2 tasks for `Staging Villa staging-s3-1791728260199`. Full task history still pending.
+F-OPS-02 | IN-PROGRESS | Config-driven reservation task generation currently covers arrival preparation and checkout cleaning. Evidence: CI `tests/integration/postgres-migration.test.ts` > `creates manual reservations with idempotent task generation, overlap detection, and tenant isolation` passed in run `38145733738`; protected Preview/staging verification confirmed exactly one arrival preparation and one checkout cleaning task. Broader task type catalog pending.
 F-OPS-03 | TODO |
 F-OPS-04 | TODO |
 F-OPS-05 | TODO |
