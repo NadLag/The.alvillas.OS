@@ -10,5 +10,38 @@
     "phase": "Fondation phase 0",
     "tenant": "Limite par organisation",
     "i18n": "EN, FR, AR pret"
+  },
+  "Login": {
+    "language": "Langue",
+    "switch": {
+      "en": "English",
+      "fr": "Francais"
+    },
+    "eyebrow": "Acces securise",
+    "title": "Connexion a ALVILLAS OS",
+    "subtitle": "Utilisez le compte administrateur configure pour cet environnement.",
+    "email": "Email",
+    "password": "Mot de passe",
+    "submit": "Se connecter",
+    "invalid": "Email ou mot de passe incorrect.",
+    "rateLimited": "Trop de tentatives. Attendez une minute puis reessayez.",
+    "generic": "Connexion impossible. Reessayez."
+  },
+  "AppShell": {
+    "actions": "Actions de l'espace",
+    "switch": {
+      "en": "EN",
+      "fr": "FR"
+    },
+    "eyebrow": "Espace admin",
+    "title": "ALVILLAS OS",
+    "logout": "Deconnexion",
+    "todayLabel": "Aujourd'hui",
+    "welcome": "Bienvenue, {name}",
+    "summary": "Le socle de securite est en ligne: session authentifiee, portee limitee, changement de langue et tokens de production.",
+    "sessionLabel": "Session",
+    "signedInAs": "Connecte en tant que",
+    "sessionScope": "Portee",
+    "organizationScope": "Organisation"
   }
 }

@@ -34,7 +34,7 @@ Current exit-gate result: `BLOCKED` for completion, because Phase 0 still has un
 
 ## Source Gaps And Ambiguities
 
-- P0-13, ALVILLAS-only clean-room boundary: the active checklist now requires ALVILLAS OS to be independent from Orbix, HostNow, and legacy projects. The Master Specification describes ALVILLAS OS as the private operating system for ALVILLAS SARL and does not define any dependency on those projects.
+- P0-13, ALVILLAS-only clean-room boundary: the active checklist now requires ALVILLAS OS to be an independent, clean-room product with no shared code, data or infrastructure. The Master Specification describes ALVILLAS OS as the private operating system for ALVILLAS SARL.
 - P0-14, build-vs-buy for calendar sync and guest messaging: resolved by owner decision on October 9, 2026. V1 uses iCal-first scheduled calendar synchronization, an ALVILLAS-owned normalized reservation model, duplicate/conflict detection, synchronization monitoring and failure handling, Airbnb settlement CSV/import as separate financial data, manual WhatsApp communication and generated Guest Hub links, no internal messaging system, and no PMS or channel-manager purchase, integration, or research in V1.
 - P0-15, delivery scope: resolved by owner decision on October 10, 2026. ALVILLAS OS is the complete production-ready specification across all 17 phases. The 90-day MVP language is not an approved scope reduction; implementation milestones are dependency-aware delivery organization only.
 - P0-19, first property templates: resolved by owner decision on October 10, 2026. Create separate initial property templates for Villa 405 and Sultan's House, with configurable property-specific settings, workflows, services, inventory, financial agreements, and overrides. Real property details remain unknown and must not be invented.
@@ -191,12 +191,12 @@ Current exit-gate result: `BLOCKED` for completion, because Phase 0 still has un
 
 ### P0-13 - ALVILLAS-only clean-room product boundary
 
-- Requirement/question: Confirm ALVILLAS OS is an independent, clean-room product with its own repository, architecture, database, configuration, integrations, and deployment. No source-code sharing or dependencies on Orbix, HostNow, or legacy projects.
+- Requirement/question: Confirm ALVILLAS OS is an independent, clean-room product with no shared code, data or infrastructure.
 - Sources: Build Checklist Phase 0 product decisions; `CHECKLIST_STATE.md` P0-13; Master Specification sections 0, 2, 73, and 84.
 - Current status: `DECIDED`
 - Decision owner: Business owner
 - Approved outcome: Independent, clean-room ALVILLAS OS
-- Source-supported options: confirm independent clean-room product boundary; record a blocker if any dependency on Orbix, HostNow, or a legacy project exists.
+- Source-supported options: confirm independent clean-room product boundary; record a blocker if any shared code, data or infrastructure exists.
 - Recommendation: APPROVED for owner decision only: ALVILLAS OS is independent and clean-room.
 - Evidence: Explicit business-owner approval recorded in this ChatGPT conversation on October 9, 2026.
 - Decision date: `2026-10-09`

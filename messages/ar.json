@@ -10,5 +10,38 @@
     "phase": "Phase 0 foundation",
     "tenant": "Organization scoped",
     "i18n": "EN, FR, AR ready"
+  },
+  "Login": {
+    "language": "Language",
+    "switch": {
+      "en": "English",
+      "fr": "Francais"
+    },
+    "eyebrow": "Secure access",
+    "title": "Sign in to ALVILLAS OS",
+    "subtitle": "Use the bootstrap admin account configured for this environment.",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign in",
+    "invalid": "Email or password is incorrect.",
+    "rateLimited": "Too many attempts. Wait a minute and try again.",
+    "generic": "Sign in failed. Try again."
+  },
+  "AppShell": {
+    "actions": "Workspace actions",
+    "switch": {
+      "en": "EN",
+      "fr": "FR"
+    },
+    "eyebrow": "Admin workspace",
+    "title": "ALVILLAS OS",
+    "logout": "Log out",
+    "todayLabel": "Today",
+    "welcome": "Welcome, {name}",
+    "summary": "The security spine is online: authenticated shell, scoped session, locale switch, and production tokens.",
+    "sessionLabel": "Session",
+    "signedInAs": "Signed in as",
+    "sessionScope": "Scope",
+    "organizationScope": "Organization"
   }
 }

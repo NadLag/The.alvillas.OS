@@ -11,7 +11,7 @@ Approved on 2026-10-09 by the business owner in this ChatGPT conversation.
 Approved effect:
 
 - ALVILLAS OS is independent and clean-room.
-- No source-code sharing or dependency on Orbix, HostNow, `D:\alvillas`, `D:\alvillas.com`, or legacy projects.
+- Independent, clean-room product with no shared code, data or infrastructure.
 - The architecture, database, configuration, integrations, deployment, and repository remain ALVILLAS-owned.
 
 ### P0-14 - iCal-First Calendar Synchronization
