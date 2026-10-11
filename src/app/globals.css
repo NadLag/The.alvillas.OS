@@ -527,6 +527,84 @@ a {
   overflow-wrap: anywhere;
 }
 
+.statement-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.statement-summary div,
+.statement-buckets div {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px;
+}
+
+.statement-summary span,
+.statement-buckets span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.statement-summary strong,
+.statement-buckets strong {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+.statement-table {
+  display: grid;
+  gap: 8px;
+}
+
+.statement-table-head,
+.statement-table-row {
+  display: grid;
+  grid-template-columns: 130px 150px minmax(0, 1fr) 140px;
+  gap: 12px;
+  align-items: center;
+}
+
+.statement-table-head {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.statement-table-row {
+  min-height: 60px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 12px;
+}
+
+.statement-table-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.statement-table-row small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.statement-side-list {
+  margin-bottom: 18px;
+}
+
+.statement-buckets {
+  display: grid;
+  gap: 10px;
+}
+
 @media (max-width: 760px) {
   .shell {
     padding: 18px;
@@ -539,7 +617,10 @@ a {
   .form-grid.two,
   .form-grid.three,
   .form-grid.five,
-  .detail-grid {
+  .detail-grid,
+  .statement-summary,
+  .statement-table-head,
+  .statement-table-row {
     grid-template-columns: 1fr;
   }
 
