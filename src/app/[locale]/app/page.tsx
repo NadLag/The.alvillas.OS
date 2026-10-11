@@ -39,6 +39,12 @@ export default async function AppPage({
           <h1>{t("title")}</h1>
         </div>
         <nav className="app-actions" aria-label={t("actions")}>
+          <Link className="secondary-button" href={`/${appLocale}/app/owners`}>
+            {t("owners")}
+          </Link>
+          <Link className="secondary-button" href={`/${appLocale}/app/properties`}>
+            {t("properties")}
+          </Link>
           <Link className="secondary-button" href={`/${switchLocale}/app`}>
             {t(`switch.${switchLocale}`)}
           </Link>

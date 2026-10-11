@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { readServiceInfo } from "@/platform/health/service-info";
 
 test("health endpoint returns service status", async ({ request }) => {
   const response = await request.get("/api/health");
@@ -11,13 +12,15 @@ test("health endpoint returns service status", async ({ request }) => {
 
 test("version endpoint returns deployment metadata shape", async ({ request }) => {
   const response = await request.get("/api/version");
+  const expected = readServiceInfo(process.env);
+
   expect(response.ok()).toBe(true);
   await expect(response.json()).resolves.toMatchObject({
-    service: "alvillas-os",
-    environment: "development",
-    version: "local",
-    commitRef: "local",
-    deploymentId: null
+    service: expected.service,
+    environment: expected.environment,
+    version: expected.version,
+    commitRef: expected.commitRef,
+    deploymentId: expected.deploymentId
   });
 });
 

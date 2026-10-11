@@ -24,6 +24,9 @@ model Organization {
   rateLimitBuckets   RateLimitBucket[]
   persons            Person[]
   userAccounts       UserAccount[]
+  owners             Owner[]
+  properties         Property[]
+  propertyOwners     PropertyOwner[]
 
   @@map("organization")
 }
@@ -62,6 +65,83 @@ model UserAccount {
   @@unique([organizationId, email], map: "user_account_org_email_unique")
   @@index([organizationId, personId], map: "user_account_org_person_idx")
   @@map("user_account")
+}
+
+model Owner {
+  id              String          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String          @map("organization_id") @db.Uuid
+  displayName     String          @map("display_name")
+  legalName       String?         @map("legal_name")
+  email           String?
+  phone           String?
+  preferredLocale String          @default("fr") @map("preferred_locale") @db.Char(2)
+  notes           String?
+  archivedAt      DateTime?       @map("archived_at") @db.Timestamptz(6)
+  createdBy       String?         @map("created_by") @db.Uuid
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  propertyOwners  PropertyOwner[]
+
+  @@unique([organizationId, email], map: "owner_org_email_unique")
+  @@index([organizationId, displayName], map: "owner_org_display_name_idx")
+  @@index([organizationId, archivedAt], map: "owner_org_archived_idx")
+  @@map("owner")
+}
+
+model Property {
+  id              String          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String          @map("organization_id") @db.Uuid
+  name            String
+  addressLine1    String          @map("address_line_1")
+  addressLine2    String?         @map("address_line_2")
+  city            String
+  region          String?
+  countryCode     String          @default("MA") @map("country_code") @db.Char(2)
+  propertyType    String          @map("property_type")
+  bedrooms        Int
+  bathrooms       Int
+  livingSpaces    Int             @default(1) @map("living_spaces")
+  hasPool         Boolean         @default(false) @map("has_pool")
+  hasGarden       Boolean         @default(false) @map("has_garden")
+  parkingSpaces   Int             @default(0) @map("parking_spaces")
+  maxGuests       Int             @map("max_guests")
+  timezone        String          @default("Africa/Casablanca")
+  amenities       Json
+  photoUrls       Json            @map("photo_urls")
+  status          String          @default("DRAFT")
+  archivedAt      DateTime?       @map("archived_at") @db.Timestamptz(6)
+  createdBy       String?         @map("created_by") @db.Uuid
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  propertyOwners  PropertyOwner[]
+
+  @@index([organizationId, city, name], map: "property_org_city_name_idx")
+  @@index([organizationId, status], map: "property_org_status_idx")
+  @@index([organizationId, archivedAt], map: "property_org_archived_idx")
+  @@map("property")
+}
+
+model PropertyOwner {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  propertyId     String       @map("property_id") @db.Uuid
+  ownerId        String       @map("owner_id") @db.Uuid
+  shareBps       Int          @default(10000) @map("share_bps")
+  isPrimary      Boolean      @default(true) @map("is_primary")
+  archivedAt     DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdBy      String?      @map("created_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property       Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  owner          Owner        @relation(fields: [ownerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, propertyId, ownerId], map: "property_owner_org_property_owner_unique")
+  @@index([organizationId, ownerId], map: "property_owner_org_owner_idx")
+  @@index([organizationId, propertyId], map: "property_owner_org_property_idx")
+  @@map("property_owner")
 }
 
 model LedgerAccount {

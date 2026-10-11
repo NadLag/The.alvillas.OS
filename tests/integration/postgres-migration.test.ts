@@ -223,6 +223,83 @@ describe("PostgreSQL baseline", () => {
     expect(visibleWithoutTenant).toBeNull();
   });
 
+  it("enforces owner and property tenant isolation with PostgreSQL RLS", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: "ALVILLAS Core RLS A", baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: "ALVILLAS Core RLS B", baseCurrency: "MAD" }
+      })
+    ]);
+
+    const created = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const owner = await tx.owner.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Scoped Owner",
+            email: "scoped-owner@example.test",
+            preferredLocale: "en"
+          }
+        });
+        const property = await tx.property.create({
+          data: {
+            organizationId: orgA.id,
+            name: "Villa Scoped",
+            addressLine1: "Route de Fes",
+            city: "Marrakech",
+            countryCode: "MA",
+            propertyType: "Villa",
+            bedrooms: 4,
+            bathrooms: 4,
+            livingSpaces: 2,
+            maxGuests: 8,
+            timezone: "Africa/Casablanca",
+            amenities: ["pool", "garden"],
+            photoUrls: [],
+            propertyOwners: {
+              create: {
+                organizationId: orgA.id,
+                ownerId: owner.id,
+                shareBps: 10000,
+                isPrimary: true
+              }
+            }
+          }
+        });
+
+        return { owner, property };
+      }
+    );
+
+    const ownerVisibleToOrgA = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => tx.owner.findFirst({ where: { id: created.owner.id } })
+    );
+    const ownerVisibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.owner.findFirst({ where: { id: created.owner.id } })
+    );
+    const propertyVisibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.property.findFirst({ where: { id: created.property.id } })
+    );
+    const linkVisibleWithoutTenant = await prisma.propertyOwner.findFirst({
+      where: { propertyId: created.property.id }
+    });
+
+    expect(ownerVisibleToOrgA?.id).toBe(created.owner.id);
+    expect(ownerVisibleToOrgB).toBeNull();
+    expect(propertyVisibleToOrgB).toBeNull();
+    expect(linkVisibleWithoutTenant).toBeNull();
+  });
+
   it("allocates tenant-scoped reference numbers under RLS", async () => {
     const org = await prisma.organization.create({
       data: { name: "ALVILLAS References", baseCurrency: "MAD" }
