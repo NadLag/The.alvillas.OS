@@ -1,6 +1,11 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import {
+  listReservationsWithActiveRevenue,
+  listRevenuePostingAccounts
+} from "@/modules/finance/application/reservation-revenue-service";
+import { ReservationRevenueForm } from "@/modules/finance/ui/reservation-revenue-form";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import {
   listReservationPropertyOptions,
@@ -8,6 +13,7 @@ import {
 } from "@/modules/reservations/application/reservation-service";
 import { ManualReservationForm } from "@/modules/reservations/ui/reservation-forms";
 import { auth } from "@/platform/auth/session";
+import { permissionKey } from "@/platform/authz/authorize";
 import { routing, type AppLocale } from "@/i18n/routing";
 
 export const dynamic = "force-dynamic";
@@ -32,11 +38,17 @@ export default async function ReservationsPage({
     redirect(`/${appLocale}/login`);
   }
 
-  const [t, reservations, properties] = await Promise.all([
+  const canPostRevenue =
+    ctx.authContext.permissions.has(permissionKey("financial_transaction", "create")) &&
+    ctx.authContext.permissions.has(permissionKey("financial_transaction", "view"));
+  const [t, reservations, properties, revenueAccounts, postedRevenueReservationIds] = await Promise.all([
     getTranslations("Reservations"),
     listReservations(ctx),
-    listReservationPropertyOptions(ctx)
+    listReservationPropertyOptions(ctx),
+    canPostRevenue ? listRevenuePostingAccounts(ctx) : Promise.resolve([]),
+    canPostRevenue ? listReservationsWithActiveRevenue(ctx) : Promise.resolve([])
   ]);
+  const postedRevenueReservations = new Set(postedRevenueReservationIds);
 
   return (
     <section className="resource-page" data-testid="reservations-page">
@@ -64,22 +76,50 @@ export default async function ReservationsPage({
           ) : (
             <div className="resource-list">
               {reservations.map((reservation) => (
-                <div className="resource-row" data-testid="reservation-row" key={reservation.id}>
-                  <span>
-                    <strong>{reservation.reference}</strong>
-                    <small>
-                      {t("rowMeta", {
-                        property: reservation.propertyName,
-                        guest: reservation.guestName
+                <div className="resource-row reservation-row" data-testid="reservation-row" key={reservation.id}>
+                  <div className="reservation-row-main">
+                    <span>
+                      <strong>{reservation.reference}</strong>
+                      <small>
+                        {t("rowMeta", {
+                          property: reservation.propertyName,
+                          guest: reservation.guestName
+                        })}
+                      </small>
+                    </span>
+                    <span>
+                      {t("stayDates", {
+                        checkIn: reservation.checkIn,
+                        checkOut: reservation.checkOut
                       })}
-                    </small>
-                  </span>
-                  <span>
-                    {t("stayDates", {
-                      checkIn: reservation.checkIn,
-                      checkOut: reservation.checkOut
-                    })}
-                  </span>
+                    </span>
+                  </div>
+                  {canPostRevenue ? (
+                    <ReservationRevenueForm
+                      locale={appLocale}
+                      reservationId={reservation.id}
+                      idempotencyKey={crypto.randomUUID()}
+                      accounts={revenueAccounts}
+                      posted={postedRevenueReservations.has(reservation.id)}
+                      labels={{
+                        amount: t("revenue.amount"),
+                        currency: t("revenue.currency"),
+                        account: t("revenue.account"),
+                        noAccounts: t("revenue.noAccounts"),
+                        recordRevenue: t("revenue.recordRevenue"),
+                        recordingRevenue: t("revenue.recordingRevenue"),
+                        revenuePosted: t("revenue.revenuePosted"),
+                        saving: t("form.saving"),
+                        validation: t("forms.validation"),
+                        unauthorized: t("forms.unauthorized"),
+                        forbidden: t("forms.forbidden"),
+                        notFound: t("forms.notFound"),
+                        config: t("forms.financeConfig"),
+                        conflict: t("forms.revenueConflict"),
+                        generic: t("forms.financeGeneric")
+                      }}
+                    />
+                  ) : null}
                 </div>
               ))}
             </div>

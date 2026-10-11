@@ -150,6 +150,9 @@
       "forbidden": "You do not have access to perform this action.",
       "notFound": "The selected property was not found in this organization.",
       "config": "Reservation task rules are not configured for this organization.",
+      "financeConfig": "Revenue posting needs configured commission rules and an active receiving account.",
+      "revenueConflict": "Revenue has already been posted for this reservation.",
+      "financeGeneric": "The reservation revenue could not be posted. Try again.",
       "generic": "The reservation could not be saved. Try again."
     },
     "form": {
@@ -165,6 +168,15 @@
       "notes": "Notes",
       "saveReservation": "Create reservation",
       "saving": "Saving..."
+    },
+    "revenue": {
+      "amount": "Accommodation revenue",
+      "currency": "Currency",
+      "account": "Received in",
+      "noAccounts": "Add an active bank or cash ledger account before posting revenue.",
+      "recordRevenue": "Post",
+      "recordingRevenue": "Posting...",
+      "revenuePosted": "Revenue posted"
     }
   },
   "Operations": {

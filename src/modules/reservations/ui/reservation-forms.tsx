@@ -50,7 +50,9 @@ type ChecklistItemOption = {
 const initialReservationFormState: ReservationFormState = { status: "idle" };
 const initialFieldTaskFormState: FieldTaskFormState = { status: "idle" };
 
-function messageForState(state: ReservationFormState, labels: FormLabels): string | null {
+type FormState = ReservationFormState | FieldTaskFormState;
+
+function messageForState(state: FormState, labels: FormLabels): string | null {
   switch (state.messageKey) {
     case "validation":
       return labels.validation;
@@ -390,7 +392,7 @@ export function FieldTaskCompletionForm({
   );
 }
 
-function fieldError(state: ReservationFormState, field: string): string | null {
+function fieldError(state: FormState, field: string): string | null {
   return state.fieldErrors?.[field]?.[0] ?? null;
 }
 

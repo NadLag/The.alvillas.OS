@@ -11,6 +11,13 @@ import {
   listOwnerPortalProperties,
   OwnerPortalAuthorizationError
 } from "@/modules/owner-portal/application/owner-portal-service";
+import {
+  ReservationRevenueAuthorizationError,
+  ReservationRevenueConflictError,
+  ReservationRevenueNotFoundError,
+  recordReservationAccommodationRevenue,
+  reverseReservationAccommodationRevenue
+} from "@/modules/finance/application/reservation-revenue-service";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationNotFoundError,
@@ -1188,6 +1195,434 @@ describe("PostgreSQL baseline", () => {
 
     expect(revenueVisibleToOrgB).toBeNull();
     expect(audit?.resourceId).toBe(fixture.property.id);
+  });
+
+  it("posts manual reservation revenue to owner and ALVILLAS ledgers exactly once", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Revenue Posting A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Revenue Posting B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const financePermissions = new Set([
+      permissionKey("reservation", "view"),
+      permissionKey("reservation", "create"),
+      permissionKey("task", "view"),
+      permissionKey("task", "create"),
+      permissionKey("financial_transaction", "view"),
+      permissionKey("financial_transaction", "create"),
+      permissionKey("financial_transaction", "void")
+    ]);
+    const ownerUser = {
+      personId: randomUUID(),
+      userAccountId: randomUUID(),
+      email: `s6-owner-${randomUUID()}@example.test`
+    };
+    const fixture = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const ownerPerson = await tx.person.create({
+          data: {
+            id: ownerUser.personId,
+            organizationId: orgA.id,
+            displayName: "S6 Owner Portal Owner",
+            email: ownerUser.email,
+            preferredLocale: "en"
+          }
+        });
+        const ownerAccount = await tx.userAccount.create({
+          data: {
+            id: ownerUser.userAccountId,
+            organizationId: orgA.id,
+            personId: ownerPerson.id,
+            email: ownerUser.email,
+            status: "ACTIVE"
+          }
+        });
+        const owner = await tx.owner.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "S6 Revenue Owner",
+            email: ownerUser.email,
+            preferredLocale: "en"
+          }
+        });
+        const property = await tx.property.create({
+          data: {
+            organizationId: orgA.id,
+            name: "Villa S6 Revenue",
+            addressLine1: "Route de Fes",
+            city: "Marrakech",
+            countryCode: "MA",
+            propertyType: "Villa",
+            bedrooms: 4,
+            bathrooms: 4,
+            livingSpaces: 2,
+            maxGuests: 8,
+            timezone: "Africa/Casablanca",
+            amenities: ["pool"],
+            photoUrls: [],
+            propertyOwners: {
+              create: {
+                organizationId: orgA.id,
+                ownerId: owner.id,
+                shareBps: 10000,
+                isPrimary: true,
+                createdBy: integrationActorId
+              }
+            },
+            createdBy: integrationActorId
+          }
+        });
+        await tx.ownerPortalAccess.create({
+          data: {
+            organizationId: orgA.id,
+            ownerId: owner.id,
+            userAccountId: ownerAccount.id
+          }
+        });
+        const bank = await tx.ledgerAccount.create({
+          data: {
+            organizationId: orgA.id,
+            code: "BANK_S6_REVENUE",
+            name: "S6 operating bank",
+            accountType: "ASSET_LOCATION",
+            normalSide: "DEBIT"
+          }
+        });
+        await tx.configRule.create({
+          data: {
+            organizationId: orgA.id,
+            key: "ops.reservation_task_templates",
+            scopeType: "organization",
+            scopeId: null,
+            value: {
+              tasks: [
+                {
+                  key: "arrival",
+                  type: "ARRIVAL_PREPARATION",
+                  title: {
+                    en: "Arrival preparation",
+                    fr: "Preparation arrivee"
+                  },
+                  due: "CHECK_IN",
+                  priority: "NORMAL",
+                  checklist: []
+                }
+              ]
+            },
+            effectiveFrom: new Date("2000-01-01T00:00:00.000Z"),
+            version: 1,
+            createdBy: integrationActorId,
+            reason: "S6 task templates"
+          }
+        });
+        await tx.configRule.create({
+          data: {
+            organizationId: orgA.id,
+            key: "finance.commission",
+            scopeType: "organization",
+            scopeId: null,
+            value: {
+              rate_bps: 1000,
+              basis: "GROSS_ACCOMMODATION",
+              accrual_event: "ON_RECEIPT"
+            },
+            effectiveFrom: new Date("2000-01-01T00:00:00.000Z"),
+            version: 1,
+            createdBy: integrationActorId,
+            reason: "S6 organization commission fallback"
+          }
+        });
+        const propertyCommissionRule = await tx.configRule.create({
+          data: {
+            organizationId: orgA.id,
+            key: "finance.commission",
+            scopeType: "property",
+            scopeId: property.id,
+            value: {
+              rate_bps: 2000,
+              basis: "GROSS_ACCOMMODATION",
+              accrual_event: "ON_RECEIPT"
+            },
+            effectiveFrom: new Date("2000-01-01T00:00:00.000Z"),
+            version: 1,
+            createdBy: integrationActorId,
+            reason: "S6 property commission"
+          }
+        });
+        await tx.configRule.create({
+          data: {
+            organizationId: orgA.id,
+            key: "finance.commission",
+            scopeType: "property",
+            scopeId: property.id,
+            value: {
+              rate_bps: 3000,
+              basis: "GROSS_ACCOMMODATION",
+              accrual_event: "ON_RECEIPT"
+            },
+            effectiveFrom: new Date("2099-01-01T00:00:00.000Z"),
+            version: 2,
+            createdBy: integrationActorId,
+            reason: "S6 future commission change"
+          }
+        });
+
+        return {
+          owner,
+          property,
+          bank,
+          propertyCommissionRule
+        };
+      }
+    );
+    const ctx = actorForOrganization(orgA.id, financePermissions);
+    const reservation = await createManualReservation(
+      ctx,
+      {
+        propertyId: fixture.property.id,
+        guestName: "S6 Revenue Guest",
+        guestEmail: "s6.revenue.guest@example.test",
+        source: "MANUAL",
+        checkIn: "2028-04-10",
+        checkOut: "2028-04-14",
+        adultCount: 2,
+        childCount: 0,
+        notes: "S6 reservation revenue posting",
+        idempotencyKey: randomUUID()
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-s6-reservation",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const recordInput = {
+      reservationId: reservation.reservation.id,
+      amount: "8000.00",
+      currency: "MAD",
+      receivedAccountId: fixture.bank.id,
+      idempotencyKey: randomUUID()
+    };
+
+    await expect(
+      recordReservationAccommodationRevenue(
+        actorForOrganization(
+          orgA.id,
+          new Set([permissionKey("reservation", "view"), permissionKey("financial_transaction", "view")])
+        ),
+        recordInput,
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-s6-denied",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(ReservationRevenueAuthorizationError);
+
+    const posted = await recordReservationAccommodationRevenue(ctx, recordInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-s6-record",
+      ipAddress: "127.0.0.1"
+    });
+
+    expect(posted.idempotent).toBe(false);
+    expect(posted.commissionTotal.toJSON().amount).toBe("1600.00");
+    expect(posted.ownerNetTotal.toJSON().amount).toBe("6400.00");
+
+    const afterPost = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => ({
+        transactionCount: await tx.financialTransaction.count({
+          where: { organizationId: orgA.id }
+        }),
+        snapshot: await tx.commissionSnapshot.findFirstOrThrow({
+          where: {
+            reservationId: reservation.reservation.id,
+            ownerId: fixture.owner.id
+          }
+        }),
+        postings: await tx.posting.findMany({
+          where: {
+            transactionId: {
+              in: [posted.revenueTransactionId, posted.commissionTransactionId!]
+            }
+          },
+          include: {
+            ledgerAccount: true
+          }
+        }),
+        balances: await tx.$queryRaw<Array<{ transactionId: string; balance: string }>>`
+          SELECT
+            transaction_id AS "transactionId",
+            sum(CASE WHEN side = 'DEBIT' THEN amount ELSE -amount END)::text AS balance
+          FROM posting
+          WHERE organization_id = ${orgA.id}::uuid
+            AND transaction_id IN (${posted.revenueTransactionId}::uuid, ${posted.commissionTransactionId!}::uuid)
+          GROUP BY transaction_id
+        `
+      })
+    );
+
+    expect(afterPost.transactionCount).toBe(2);
+    expect(afterPost.snapshot.configRuleId).toBe(fixture.propertyCommissionRule.id);
+    expect(afterPost.snapshot.commissionRateBps).toBe(2000);
+    expect(afterPost.snapshot.commissionBasis).toBe("GROSS_ACCOMMODATION");
+    expect(afterPost.balances.every((row) => new Decimal(row.balance).eq(0))).toBe(true);
+    expect(
+      afterPost.postings.find(
+        (posting) => posting.ledgerAccount.code === "BANK_S6_REVENUE" && posting.side === "DEBIT"
+      )?.amount.toString()
+    ).toBe("8000");
+    expect(
+      afterPost.postings.find(
+        (posting) =>
+          posting.ledgerAccount.code === "OWNER_PAYABLE" &&
+          posting.bucket === "OWNER_REVENUE" &&
+          posting.side === "CREDIT"
+      )?.amount.toString()
+    ).toBe("8000");
+    expect(
+      afterPost.postings.find(
+        (posting) =>
+          posting.ledgerAccount.code === "OWNER_PAYABLE" &&
+          posting.bucket === "COMMISSION" &&
+          posting.side === "DEBIT"
+      )?.amount.toString()
+    ).toBe("1600");
+    expect(
+      afterPost.postings.find(
+        (posting) =>
+          posting.ledgerAccount.code === "ALVILLAS_COMMISSION_REVENUE" &&
+          posting.side === "CREDIT"
+      )?.amount.toString()
+    ).toBe("1600");
+
+    const replay = await recordReservationAccommodationRevenue(ctx, recordInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-s6-record-replay",
+      ipAddress: "127.0.0.1"
+    });
+    const transactionCountAfterReplay = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => tx.financialTransaction.count({ where: { organizationId: orgA.id } })
+    );
+
+    expect(replay.idempotent).toBe(true);
+    expect(transactionCountAfterReplay).toBe(2);
+    await expect(
+      recordReservationAccommodationRevenue(
+        ctx,
+        {
+          ...recordInput,
+          idempotencyKey: randomUUID()
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-s6-record-conflict",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(ReservationRevenueConflictError);
+
+    const ownerCtx = await ownerPortalActorContextFromSession(
+      sessionForOwnerPortal({
+        organizationId: orgA.id,
+        userAccountId: ownerUser.userAccountId,
+        personId: ownerUser.personId,
+        email: ownerUser.email
+      }),
+      {
+        db: prisma as unknown as TenantTransactionRunner
+      }
+    );
+    expect(ownerCtx).not.toBeNull();
+    const postedStatement = await getOwnerStatement(
+      ownerCtx!,
+      fixture.property.id,
+      { from: "2000-01-01", to: "2099-12-31" },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-s6-statement-posted",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(postedStatement.closingBalance.toJSON().amount).toBe("6400.00");
+
+    await expect(
+      recordReservationAccommodationRevenue(actorForOrganization(orgB.id, financePermissions), recordInput, {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-s6-cross-tenant",
+        ipAddress: "127.0.0.1"
+      })
+    ).rejects.toBeInstanceOf(ReservationRevenueNotFoundError);
+
+    const reversalInput = {
+      reservationId: reservation.reservation.id,
+      reason: "Integration S6 reversal",
+      idempotencyKey: randomUUID()
+    };
+    const reversed = await reverseReservationAccommodationRevenue(ctx, reversalInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-s6-reversal",
+      ipAddress: "127.0.0.1"
+    });
+    const transactionCountAfterReverse = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => tx.financialTransaction.count({ where: { organizationId: orgA.id } })
+    );
+
+    expect(reversed.idempotent).toBe(false);
+    expect(reversed.reversalTransactionIds).toHaveLength(2);
+    expect(transactionCountAfterReverse).toBe(4);
+    const reversedStatement = await getOwnerStatement(
+      ownerCtx!,
+      fixture.property.id,
+      { from: "2000-01-01", to: "2099-12-31" },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-s6-statement-reversed",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(reversedStatement.closingBalance.toJSON().amount).toBe("0.00");
+
+    const reversalReplay = await reverseReservationAccommodationRevenue(ctx, reversalInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-s6-reversal-replay",
+      ipAddress: "127.0.0.1"
+    });
+    const transactionCountAfterReversalReplay = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => tx.financialTransaction.count({ where: { organizationId: orgA.id } })
+    );
+
+    expect(reversalReplay.idempotent).toBe(true);
+    expect(transactionCountAfterReversalReplay).toBe(4);
+    await expect(
+      reverseReservationAccommodationRevenue(
+        ctx,
+        {
+          ...reversalInput,
+          idempotencyKey: randomUUID()
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-s6-reversal-conflict",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(ReservationRevenueConflictError);
   });
 
   it("allocates tenant-scoped reference numbers under RLS", async () => {
