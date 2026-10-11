@@ -41,6 +41,7 @@
     "reservations": "Reservations",
     "operations": "Operations",
     "field": "Terrain",
+    "ownerPortal": "Portail proprietaire",
     "todayLabel": "Aujourd'hui",
     "welcome": "Bienvenue, {name}",
     "summary": "Le socle de securite porte maintenant les premiers dossiers coeur: proprietaires et proprietes authentifies, limites par organisation et audites a la creation.",
@@ -206,6 +207,53 @@
       "notFound": "Cette tache assignee est introuvable.",
       "conflict": "Completez chaque element de la checklist avant de terminer.",
       "generic": "La tache n'a pas pu etre terminee. Reessayez."
+    }
+  },
+  "OwnerPortal": {
+    "switch": {
+      "en": "EN",
+      "fr": "FR"
+    },
+    "eyebrow": "Portail proprietaire",
+    "title": "Portail proprietaire",
+    "subtitle": "Selectionnez une propriete autorisee pour consulter les soldes et lignes issus du grand livre.",
+    "backToWorkspace": "Espace de travail",
+    "propertiesLabel": "Proprietes autorisees",
+    "propertyCount": "{count, plural, one {# propriete} other {# proprietes}}",
+    "empty": "Aucune propriete proprietaire n'est liee a ce compte.",
+    "propertyMeta": "{owner} - {city}",
+    "openStatement": "Ouvrir le releve",
+    "statementEyebrow": "Releve en direct",
+    "statementPeriod": "{from} a {to}",
+    "backToProperties": "Proprietes",
+    "balanceSummary": "Resume du solde",
+    "openingBalance": "Solde initial",
+    "periodCredits": "Credits",
+    "periodDebits": "Debits",
+    "closingBalance": "Solde final",
+    "statementLines": "Lignes du releve",
+    "lineCount": "{count, plural, one {# ligne} other {# lignes}}",
+    "emptyStatement": "Aucune ecriture ledger pour cette periode.",
+    "heldByAlvillas": "Argent detenu par ALVILLAS",
+    "remainingPayable": "Reste payable",
+    "bucketSummary": "Resume par rubrique",
+    "noSource": "Sans source",
+    "unallocated": "Mouvements non alloues",
+    "columns": {
+      "date": "Date",
+      "bucket": "Rubrique",
+      "reference": "Reference",
+      "amount": "Montant"
+    },
+    "buckets": {
+      "OWNER_REVENUE": "Revenu proprietaire",
+      "OWNER_SERVICES": "Services proprietaire",
+      "REIMBURSEMENT": "Remboursement",
+      "COMMISSION": "Commission",
+      "OTA_FEE": "Frais OTA",
+      "OWNER_EXPENSE": "Depense proprietaire",
+      "PAYOUT": "Paiement",
+      "ADJUSTMENT": "Ajustement"
     }
   }
 }

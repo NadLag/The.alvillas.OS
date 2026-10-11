@@ -41,6 +41,7 @@
     "reservations": "Reservations",
     "operations": "Operations",
     "field": "Field",
+    "ownerPortal": "Owner portal",
     "todayLabel": "Today",
     "welcome": "Welcome, {name}",
     "summary": "The security spine now carries the first core records: authenticated owners and properties, scoped by organization and audited on create.",
@@ -206,6 +207,53 @@
       "notFound": "This assigned task was not found.",
       "conflict": "Complete every checklist item before finishing.",
       "generic": "The task could not be completed. Try again."
+    }
+  },
+  "OwnerPortal": {
+    "switch": {
+      "en": "EN",
+      "fr": "FR"
+    },
+    "eyebrow": "Owner portal",
+    "title": "Owner portal",
+    "subtitle": "Select an authorized property to review ledger-derived balances and statement lines.",
+    "backToWorkspace": "Workspace",
+    "propertiesLabel": "Authorized properties",
+    "propertyCount": "{count, plural, one {# property} other {# properties}}",
+    "empty": "No owner properties are linked to this account.",
+    "propertyMeta": "{owner} - {city}",
+    "openStatement": "Open statement",
+    "statementEyebrow": "Live statement",
+    "statementPeriod": "{from} to {to}",
+    "backToProperties": "Properties",
+    "balanceSummary": "Balance summary",
+    "openingBalance": "Opening balance",
+    "periodCredits": "Credits",
+    "periodDebits": "Debits",
+    "closingBalance": "Closing balance",
+    "statementLines": "Statement lines",
+    "lineCount": "{count, plural, one {# line} other {# lines}}",
+    "emptyStatement": "No ledger postings were found for this period.",
+    "heldByAlvillas": "Money held by ALVILLAS",
+    "remainingPayable": "Remaining payable",
+    "bucketSummary": "Bucket summary",
+    "noSource": "No source",
+    "unallocated": "Unallocated movements",
+    "columns": {
+      "date": "Date",
+      "bucket": "Bucket",
+      "reference": "Reference",
+      "amount": "Amount"
+    },
+    "buckets": {
+      "OWNER_REVENUE": "Owner revenue",
+      "OWNER_SERVICES": "Owner services",
+      "REIMBURSEMENT": "Reimbursement",
+      "COMMISSION": "Commission",
+      "OTA_FEE": "OTA fee",
+      "OWNER_EXPENSE": "Owner expense",
+      "PAYOUT": "Payout",
+      "ADJUSTMENT": "Adjustment"
     }
   }
 }

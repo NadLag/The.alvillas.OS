@@ -2,7 +2,15 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
+import Decimal from "decimal.js";
+import type { Session } from "next-auth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
+import {
+  getOwnerStatement,
+  listOwnerPortalProperties,
+  OwnerPortalAuthorizationError
+} from "@/modules/owner-portal/application/owner-portal-service";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationNotFoundError,
@@ -102,6 +110,30 @@ function actorForOrganization(
     personId: integrationPersonId,
     authContext
   };
+}
+
+function sessionForOwnerPortal(input: {
+  organizationId: string;
+  userAccountId: string;
+  personId: string;
+  email: string;
+}): Session {
+  return {
+    user: {
+      id: input.userAccountId,
+      personId: input.personId,
+      organizationId: input.organizationId,
+      preferredLocale: "en",
+      email: input.email,
+      name: input.email
+    },
+    expires: new Date("2099-01-01T00:00:00.000Z").toISOString()
+  };
+}
+
+function signedLedgerAmount(row: { side: string; amount: string }): Decimal {
+  const amount = new Decimal(row.amount);
+  return row.side === "CREDIT" ? amount : amount.negated();
 }
 
 async function configureAppRole(databaseUrl: string): Promise<string> {
@@ -691,6 +723,471 @@ describe("PostgreSQL baseline", () => {
         ipAddress: "127.0.0.1"
       })
     ).rejects.toBeInstanceOf(ReservationNotFoundError);
+  });
+
+  it("derives owner portal statements from PostgreSQL ledger postings and owner scopes", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Owner Portal A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Owner Portal B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const ownerUser = {
+      personId: randomUUID(),
+      userAccountId: randomUUID(),
+      email: `owner-a-${randomUUID()}@example.test`
+    };
+    const otherOwnerUser = {
+      personId: randomUUID(),
+      userAccountId: randomUUID(),
+      email: `owner-b-${randomUUID()}@example.test`
+    };
+    const tenantUser = {
+      personId: randomUUID(),
+      userAccountId: randomUUID(),
+      email: `tenant-${randomUUID()}@example.test`
+    };
+    const orgBUser = {
+      personId: randomUUID(),
+      userAccountId: randomUUID(),
+      email: `owner-org-b-${randomUUID()}@example.test`
+    };
+
+    const fixture = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const ownerPerson = await tx.person.create({
+          data: {
+            id: ownerUser.personId,
+            organizationId: orgA.id,
+            displayName: "Owner Portal Owner",
+            email: ownerUser.email,
+            preferredLocale: "en"
+          }
+        });
+        const ownerAccount = await tx.userAccount.create({
+          data: {
+            id: ownerUser.userAccountId,
+            organizationId: orgA.id,
+            personId: ownerPerson.id,
+            email: ownerUser.email,
+            status: "ACTIVE"
+          }
+        });
+        const otherPerson = await tx.person.create({
+          data: {
+            id: otherOwnerUser.personId,
+            organizationId: orgA.id,
+            displayName: "Other Owner Portal Owner",
+            email: otherOwnerUser.email,
+            preferredLocale: "en"
+          }
+        });
+        const otherAccount = await tx.userAccount.create({
+          data: {
+            id: otherOwnerUser.userAccountId,
+            organizationId: orgA.id,
+            personId: otherPerson.id,
+            email: otherOwnerUser.email,
+            status: "ACTIVE"
+          }
+        });
+        const tenantPerson = await tx.person.create({
+          data: {
+            id: tenantUser.personId,
+            organizationId: orgA.id,
+            displayName: "Tenant User Without Owner Scope",
+            email: tenantUser.email,
+            preferredLocale: "en"
+          }
+        });
+        await tx.userAccount.create({
+          data: {
+            id: tenantUser.userAccountId,
+            organizationId: orgA.id,
+            personId: tenantPerson.id,
+            email: tenantUser.email,
+            status: "ACTIVE"
+          }
+        });
+        const [owner, otherOwner] = await Promise.all([
+          tx.owner.create({
+            data: {
+              organizationId: orgA.id,
+              displayName: "Owner Portal Owner",
+              email: ownerUser.email,
+              preferredLocale: "en"
+            }
+          }),
+          tx.owner.create({
+            data: {
+              organizationId: orgA.id,
+              displayName: "Other Owner",
+              email: otherOwnerUser.email,
+              preferredLocale: "en"
+            }
+          })
+        ]);
+        const [property, otherProperty] = await Promise.all([
+          tx.property.create({
+            data: {
+              organizationId: orgA.id,
+              name: "Villa Ledger Scope",
+              addressLine1: "Route de Fes",
+              city: "Marrakech",
+              countryCode: "MA",
+              propertyType: "Villa",
+              bedrooms: 4,
+              bathrooms: 4,
+              livingSpaces: 2,
+              maxGuests: 8,
+              timezone: "Africa/Casablanca",
+              amenities: [],
+              photoUrls: [],
+              propertyOwners: {
+                create: {
+                  organizationId: orgA.id,
+                  ownerId: owner.id,
+                  shareBps: 10000,
+                  isPrimary: true
+                }
+              }
+            }
+          }),
+          tx.property.create({
+            data: {
+              organizationId: orgA.id,
+              name: "Villa Other Owner",
+              addressLine1: "Route de Fes",
+              city: "Marrakech",
+              countryCode: "MA",
+              propertyType: "Villa",
+              bedrooms: 5,
+              bathrooms: 5,
+              livingSpaces: 2,
+              maxGuests: 10,
+              timezone: "Africa/Casablanca",
+              amenities: [],
+              photoUrls: [],
+              propertyOwners: {
+                create: {
+                  organizationId: orgA.id,
+                  ownerId: otherOwner.id,
+                  shareBps: 10000,
+                  isPrimary: true
+                }
+              }
+            }
+          })
+        ]);
+        await Promise.all([
+          tx.ownerPortalAccess.create({
+            data: {
+              organizationId: orgA.id,
+              ownerId: owner.id,
+              userAccountId: ownerAccount.id
+            }
+          }),
+          tx.ownerPortalAccess.create({
+            data: {
+              organizationId: orgA.id,
+              ownerId: otherOwner.id,
+              userAccountId: otherAccount.id
+            }
+          })
+        ]);
+        const [bank, ownerPayable, commissionRevenue] = await Promise.all([
+          tx.ledgerAccount.create({
+            data: {
+              organizationId: orgA.id,
+              code: "BANK_A_INTERNAL",
+              name: "Operating bank",
+              accountType: "ASSET_LOCATION",
+              normalSide: "DEBIT"
+            }
+          }),
+          tx.ledgerAccount.create({
+            data: {
+              organizationId: orgA.id,
+              code: "OWNER_PAYABLE",
+              name: "Owner payable",
+              accountType: "CLAIM_OWNERSHIP",
+              normalSide: "CREDIT"
+            }
+          }),
+          tx.ledgerAccount.create({
+            data: {
+              organizationId: orgA.id,
+              code: "ALVILLAS_COMMISSION_REVENUE",
+              name: "ALVILLAS commission revenue",
+              accountType: "ALVILLAS_OWN",
+              normalSide: "CREDIT"
+            }
+          })
+        ]);
+        const dimensions = {
+          owner_id: owner.id,
+          property_id: property.id,
+          reservation_reference: "RES-OWNER-PORTAL",
+          source: "DIRECT"
+        };
+
+        async function createOwnerPostingTransaction(input: {
+          reference: string;
+          occurredAt: Date;
+          ownerSide: "DEBIT" | "CREDIT";
+          amount: string;
+          bucket: string;
+          offsetAccountId: string;
+          offsetSide: "DEBIT" | "CREDIT";
+        }) {
+          return tx.financialTransaction.create({
+            data: {
+              organizationId: orgA.id,
+              reference: input.reference,
+              occurredAt: input.occurredAt,
+              description: input.bucket,
+              postings: {
+                create: [
+                  {
+                    organizationId: orgA.id,
+                    ledgerAccountId: input.offsetAccountId,
+                    side: input.offsetSide,
+                    amount: input.amount,
+                    currency: "MAD",
+                    bucket: input.bucket,
+                    dimensions
+                  },
+                  {
+                    organizationId: orgA.id,
+                    ledgerAccountId: ownerPayable.id,
+                    side: input.ownerSide,
+                    amount: input.amount,
+                    currency: "MAD",
+                    bucket: input.bucket,
+                    dimensions
+                  }
+                ]
+              }
+            },
+            include: {
+              postings: true
+            }
+          });
+        }
+
+        await createOwnerPostingTransaction({
+          reference: "TX-OPENING",
+          occurredAt: new Date("2027-03-25T12:00:00.000Z"),
+          ownerSide: "CREDIT",
+          amount: "1000.00",
+          bucket: "OWNER_REVENUE",
+          offsetAccountId: bank.id,
+          offsetSide: "DEBIT"
+        });
+        const revenue = await createOwnerPostingTransaction({
+          reference: "TX-REVENUE",
+          occurredAt: new Date("2027-04-05T12:00:00.000Z"),
+          ownerSide: "CREDIT",
+          amount: "8000.00",
+          bucket: "OWNER_REVENUE",
+          offsetAccountId: bank.id,
+          offsetSide: "DEBIT"
+        });
+        await createOwnerPostingTransaction({
+          reference: "TX-SERVICE",
+          occurredAt: new Date("2027-04-06T12:00:00.000Z"),
+          ownerSide: "CREDIT",
+          amount: "500.00",
+          bucket: "OWNER_SERVICES",
+          offsetAccountId: bank.id,
+          offsetSide: "DEBIT"
+        });
+        await createOwnerPostingTransaction({
+          reference: "TX-COMMISSION",
+          occurredAt: new Date("2027-04-07T12:00:00.000Z"),
+          ownerSide: "DEBIT",
+          amount: "1600.00",
+          bucket: "COMMISSION",
+          offsetAccountId: commissionRevenue.id,
+          offsetSide: "CREDIT"
+        });
+        await createOwnerPostingTransaction({
+          reference: "TX-EXPENSE",
+          occurredAt: new Date("2027-04-08T12:00:00.000Z"),
+          ownerSide: "DEBIT",
+          amount: "600.00",
+          bucket: "OWNER_EXPENSE",
+          offsetAccountId: bank.id,
+          offsetSide: "CREDIT"
+        });
+        await createOwnerPostingTransaction({
+          reference: "TX-PAYOUT",
+          occurredAt: new Date("2027-04-20T12:00:00.000Z"),
+          ownerSide: "DEBIT",
+          amount: "2000.00",
+          bucket: "PAYOUT",
+          offsetAccountId: bank.id,
+          offsetSide: "CREDIT"
+        });
+
+        const revenueOwnerPostingId = revenue.postings.find(
+          (posting) => posting.ledgerAccountId === ownerPayable.id
+        )?.id;
+
+        if (!revenueOwnerPostingId) {
+          throw new Error("Owner payable posting was not created");
+        }
+
+        return {
+          owner,
+          property,
+          otherProperty,
+          revenueOwnerPostingId
+        };
+      }
+    );
+
+    const ownerSession = sessionForOwnerPortal({
+      organizationId: orgA.id,
+      userAccountId: ownerUser.userAccountId,
+      personId: ownerUser.personId,
+      email: ownerUser.email
+    });
+    const ownerCtx = await ownerPortalActorContextFromSession(ownerSession, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+
+    expect(ownerCtx).not.toBeNull();
+
+    const properties = await listOwnerPortalProperties(ownerCtx!, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    expect(properties.map((property) => property.propertyId)).toEqual([fixture.property.id]);
+
+    const statement = await getOwnerStatement(
+      ownerCtx!,
+      fixture.property.id,
+      { from: "2027-04-01", to: "2027-04-30" },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-owner-statement",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(statement.openingBalance.toJSON().amount).toBe("1000.00");
+    expect(statement.periodCreditTotal.toJSON().amount).toBe("8500.00");
+    expect(statement.periodDebitTotal.toJSON().amount).toBe("4200.00");
+    expect(statement.closingBalance.toJSON().amount).toBe("5300.00");
+    expect(statement.lines.map((line) => line.bucket).sort()).toEqual([
+      "COMMISSION",
+      "OWNER_EXPENSE",
+      "OWNER_REVENUE",
+      "OWNER_SERVICES",
+      "PAYOUT"
+    ]);
+
+    const postingRows = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        tx.$queryRaw<Array<{ side: string; amount: string }>>`
+          SELECT p.side, p.amount::text AS amount
+          FROM posting p
+          INNER JOIN ledger_account la ON la.id = p.ledger_account_id
+          INNER JOIN financial_transaction ft ON ft.id = p.transaction_id
+          WHERE p.organization_id = ${orgA.id}::uuid
+            AND la.code = 'OWNER_PAYABLE'
+            AND p.dimensions @> jsonb_build_object(
+              'owner_id', ${fixture.owner.id},
+              'property_id', ${fixture.property.id}
+            )
+            AND ft.occurred_at >= ${new Date("2027-04-01T00:00:00.000Z")}
+            AND ft.occurred_at < ${new Date("2027-05-01T00:00:00.000Z")}
+        `
+    );
+    const postingCreditTotal = postingRows
+      .filter((row) => row.side === "CREDIT")
+      .reduce((sum, row) => sum.plus(row.amount), new Decimal(0));
+    const postingDebitTotal = postingRows
+      .filter((row) => row.side === "DEBIT")
+      .reduce((sum, row) => sum.plus(row.amount), new Decimal(0));
+    const postingNet = postingRows
+      .map(signedLedgerAmount)
+      .reduce((sum, amount) => sum.plus(amount), new Decimal(1000));
+
+    expect(statement.periodCreditTotal.toJSON().amount).toBe(postingCreditTotal.toFixed(2));
+    expect(statement.periodDebitTotal.toJSON().amount).toBe(postingDebitTotal.toFixed(2));
+    expect(statement.closingBalance.toJSON().amount).toBe(postingNet.toFixed(2));
+
+    await expect(
+      getOwnerStatement(
+        ownerCtx!,
+        fixture.otherProperty.id,
+        { from: "2027-04-01", to: "2027-04-30" },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-owner-statement-other-owner",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(OwnerPortalAuthorizationError);
+
+    const tenantSession = sessionForOwnerPortal({
+      organizationId: orgA.id,
+      userAccountId: tenantUser.userAccountId,
+      personId: tenantUser.personId,
+      email: tenantUser.email
+    });
+    await expect(
+      ownerPortalActorContextFromSession(tenantSession, {
+        db: prisma as unknown as TenantTransactionRunner
+      })
+    ).resolves.toBeNull();
+
+    await withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, async (tx) => {
+      const person = await tx.person.create({
+        data: {
+          id: orgBUser.personId,
+          organizationId: orgB.id,
+          displayName: "Org B Owner",
+          email: orgBUser.email,
+          preferredLocale: "en"
+        }
+      });
+      await tx.userAccount.create({
+        data: {
+          id: orgBUser.userAccountId,
+          organizationId: orgB.id,
+          personId: person.id,
+          email: orgBUser.email,
+          status: "ACTIVE"
+        }
+      });
+    });
+    const revenueVisibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.posting.findFirst({ where: { id: fixture.revenueOwnerPostingId } })
+    );
+    const audit = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        tx.auditLog.findFirst({
+          where: {
+            action: "owner_statement.view",
+            resourceId: fixture.property.id
+          }
+        })
+    );
+
+    expect(revenueVisibleToOrgB).toBeNull();
+    expect(audit?.resourceId).toBe(fixture.property.id);
   });
 
   it("allocates tenant-scoped reference numbers under RLS", async () => {

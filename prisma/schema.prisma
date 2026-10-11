@@ -25,6 +25,7 @@ model Organization {
   persons              Person[]
   userAccounts         UserAccount[]
   owners               Owner[]
+  ownerPortalAccesses  OwnerPortalAccess[]
   properties           Property[]
   propertyOwners       PropertyOwner[]
   reservations         Reservation[]
@@ -59,21 +60,22 @@ model Person {
 }
 
 model UserAccount {
-  id              String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId  String                       @map("organization_id") @db.Uuid
-  personId        String                       @map("person_id") @db.Uuid
-  email           String?
-  passwordHash    String?                      @map("password_hash")
-  status          String                       @default("ACTIVE")
-  lastLoginAt     DateTime?                    @map("last_login_at") @db.Timestamptz(6)
-  createdAt       DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization    Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  person          Person                       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  assignedTasks   OperationTask[]              @relation("OperationTaskAssignedAccount")
-  completedTasks  OperationTask[]              @relation("OperationTaskCompletedAccount")
-  completedChecks OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
-  syncOps         SyncOp[]                     @relation("SyncOpActorAccount")
+  id                  String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String                       @map("organization_id") @db.Uuid
+  personId            String                       @map("person_id") @db.Uuid
+  email               String?
+  passwordHash        String?                      @map("password_hash")
+  status              String                       @default("ACTIVE")
+  lastLoginAt         DateTime?                    @map("last_login_at") @db.Timestamptz(6)
+  createdAt           DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person              Person                       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  assignedTasks       OperationTask[]              @relation("OperationTaskAssignedAccount")
+  completedTasks      OperationTask[]              @relation("OperationTaskCompletedAccount")
+  completedChecks     OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
+  syncOps             SyncOp[]                     @relation("SyncOpActorAccount")
+  ownerPortalAccesses OwnerPortalAccess[]
 
   @@unique([organizationId, email], map: "user_account_org_email_unique")
   @@index([organizationId, personId], map: "user_account_org_person_idx")
@@ -81,25 +83,45 @@ model UserAccount {
 }
 
 model Owner {
-  id              String          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId  String          @map("organization_id") @db.Uuid
-  displayName     String          @map("display_name")
-  legalName       String?         @map("legal_name")
-  email           String?
-  phone           String?
-  preferredLocale String          @default("fr") @map("preferred_locale") @db.Char(2)
-  notes           String?
-  archivedAt      DateTime?       @map("archived_at") @db.Timestamptz(6)
-  createdBy       String?         @map("created_by") @db.Uuid
-  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  propertyOwners  PropertyOwner[]
+  id                  String              @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String              @map("organization_id") @db.Uuid
+  displayName         String              @map("display_name")
+  legalName           String?             @map("legal_name")
+  email               String?
+  phone               String?
+  preferredLocale     String              @default("fr") @map("preferred_locale") @db.Char(2)
+  notes               String?
+  archivedAt          DateTime?           @map("archived_at") @db.Timestamptz(6)
+  createdBy           String?             @map("created_by") @db.Uuid
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  propertyOwners      PropertyOwner[]
+  ownerPortalAccesses OwnerPortalAccess[]
 
   @@unique([organizationId, email], map: "owner_org_email_unique")
   @@index([organizationId, displayName], map: "owner_org_display_name_idx")
   @@index([organizationId, archivedAt], map: "owner_org_archived_idx")
   @@map("owner")
+}
+
+model OwnerPortalAccess {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  ownerId        String       @map("owner_id") @db.Uuid
+  userAccountId  String       @map("user_account_id") @db.Uuid
+  archivedAt     DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdBy      String?      @map("created_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  owner          Owner        @relation(fields: [ownerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount    UserAccount  @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, ownerId, userAccountId], map: "owner_portal_access_org_owner_user_unique")
+  @@index([organizationId, userAccountId, archivedAt], map: "owner_portal_access_org_user_idx")
+  @@index([organizationId, ownerId, archivedAt], map: "owner_portal_access_org_owner_idx")
+  @@map("owner_portal_access")
 }
 
 model Property {
@@ -357,6 +379,7 @@ model Posting {
 
   @@index([organizationId, transactionId], map: "posting_org_transaction_idx")
   @@index([organizationId, ledgerAccountId], map: "posting_org_account_idx")
+  @@index([dimensions(ops: JsonbPathOps)], type: Gin, map: "posting_dimensions_gin_idx")
   @@map("posting")
 }
 
