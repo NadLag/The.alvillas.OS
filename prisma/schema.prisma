@@ -34,6 +34,8 @@ model Organization {
   operationTasks       OperationTask[]
   taskChecklistItems   OperationTaskChecklistItem[]
   syncOps              SyncOp[]
+  airbnbSettlements    AirbnbSettlement[]
+  variances            Variance[]
 
   @@map("organization")
 }
@@ -157,6 +159,8 @@ model Property {
   ReservationConflict ReservationConflict[]
   OperationTask       OperationTask[]
   commissionSnapshots CommissionSnapshot[]
+  airbnbSettlements   AirbnbSettlement[]
+  variances           Variance[]
 
   @@index([organizationId, city, name], map: "property_org_city_name_idx")
   @@index([organizationId, status], map: "property_org_status_idx")
@@ -212,6 +216,8 @@ model Reservation {
   conflicts           ReservationConflict[] @relation("ReservationConflictReservation")
   conflictingWith     ReservationConflict[] @relation("ReservationConflictOther")
   commissionSnapshots CommissionSnapshot[]
+  airbnbSettlements   AirbnbSettlement[]
+  variances           Variance[]
 
   @@unique([organizationId, reference], map: "reservation_org_reference_unique")
   @@unique([organizationId, idempotencyKey], map: "reservation_org_idempotency_unique")
@@ -419,13 +425,15 @@ model ReferenceSequence {
 }
 
 model Currency {
-  code              String         @id @db.Char(3)
+  code              String             @id @db.Char(3)
   name              String
-  minorUnit         Int            @default(2) @map("minor_unit")
-  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  exchangeRatesFrom ExchangeRate[] @relation("ExchangeRateFromCurrency")
-  exchangeRatesTo   ExchangeRate[] @relation("ExchangeRateToCurrency")
+  minorUnit         Int                @default(2) @map("minor_unit")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  exchangeRatesFrom ExchangeRate[]     @relation("ExchangeRateFromCurrency")
+  exchangeRatesTo   ExchangeRate[]     @relation("ExchangeRateToCurrency")
   postings          Posting[]
+  airbnbSettlements AirbnbSettlement[]
+  variances         Variance[]
 
   @@map("currency")
 }
@@ -493,6 +501,65 @@ model CommissionSnapshot {
   @@index([organizationId, reservationId], map: "commission_snapshot_org_reservation_idx")
   @@index([organizationId, ownerId, propertyId], map: "commission_snapshot_org_owner_property_idx")
   @@map("commission_snapshot")
+}
+
+model AirbnbSettlement {
+  id                  String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String       @map("organization_id") @db.Uuid
+  reservationId       String       @map("reservation_id") @db.Uuid
+  propertyId          String       @map("property_id") @db.Uuid
+  sourceReservationId String       @map("source_reservation_id")
+  sourcePayoutId      String       @map("source_payout_id")
+  sourceTransactionId String       @map("source_transaction_id")
+  currency            String       @db.Char(3)
+  grossAmount         Decimal      @map("gross_amount") @db.Decimal(18, 2)
+  platformFee         Decimal      @map("platform_fee") @db.Decimal(18, 2)
+  expectedPayout      Decimal      @map("expected_payout") @db.Decimal(18, 2)
+  actualReceipt       Decimal      @map("actual_receipt") @db.Decimal(18, 2)
+  idempotencyKey      String       @map("idempotency_key")
+  importedBy          String       @map("imported_by") @db.Uuid
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation         Reservation  @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property            Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  currencyRef         Currency     @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, sourceTransactionId], map: "airbnb_settlement_org_source_transaction_unique")
+  @@unique([organizationId, idempotencyKey], map: "airbnb_settlement_org_idempotency_unique")
+  @@index([organizationId, reservationId, createdAt], map: "airbnb_settlement_org_reservation_created_idx")
+  @@index([organizationId, propertyId, createdAt], map: "airbnb_settlement_org_property_created_idx")
+  @@map("airbnb_settlement")
+}
+
+model Variance {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  sourceType     String       @map("source_type")
+  sourceId       String       @map("source_id") @db.Uuid
+  propertyId     String?      @map("property_id") @db.Uuid
+  reservationId  String?      @map("reservation_id") @db.Uuid
+  expectedAmount Decimal      @map("expected_amount") @db.Decimal(18, 2)
+  actualAmount   Decimal      @map("actual_amount") @db.Decimal(18, 2)
+  varianceAmount Decimal      @map("variance_amount") @db.Decimal(18, 2)
+  currency       String       @db.Char(3)
+  reason         String
+  action         String
+  status         String       @default("OPEN")
+  assignedTo     String?      @map("assigned_to") @db.Uuid
+  resolvedBy     String?      @map("resolved_by") @db.Uuid
+  resolvedAt     DateTime?    @map("resolved_at") @db.Timestamptz(6)
+  createdBy      String       @map("created_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property       Property?    @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation    Reservation? @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  currencyRef    Currency     @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organizationId, status, createdAt], map: "variance_org_status_created_idx")
+  @@index([organizationId, sourceType, sourceId], map: "variance_org_source_idx")
+  @@index([organizationId, propertyId, status], map: "variance_org_property_status_idx")
+  @@map("variance")
 }
 
 model OutboxEvent {

@@ -17,7 +17,8 @@ const bootstrapReservationPermissions = new Set([
   permissionKey("task", "validate"),
   permissionKey("financial_transaction", "view"),
   permissionKey("financial_transaction", "create"),
-  permissionKey("financial_transaction", "void")
+  permissionKey("financial_transaction", "void"),
+  permissionKey("financial_transaction", "reconcile")
 ]);
 
 export function reservationActorContextFromSession(

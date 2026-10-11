@@ -110,7 +110,7 @@ F-RES-01 | IN-PROGRESS | Branch `f-res-ops-01-manual-reservations-tasks` merged 
 F-RES-02 | TODO |
 F-RES-03 | TODO |
 F-RES-04 | TODO |
-F-RES-05 | TODO |
+F-RES-05 | IN-PROGRESS | S7 adds Airbnb transaction/payout CSV import with source identifiers, reservation matching, idempotent import and Playwright coverage on branch `s7-airbnb-settlement-reconciliation`; PR/CI/staging pending.
 F-RES-06 | TODO |
 F-RES-07 | IN-PROGRESS | Manual reservation UI/action/service slice added. Evidence: `tests/unit/reservation-service.test.ts` > `denies reservation reads before reaching the repository`, `denies task reads before reaching the repository`, `denies manual reservation creation unless both reservation and task creation are allowed`, `validates that check-out is after check-in`; `tests/e2e/reservations-tasks.spec.ts` > `manual reservation to operations tasks journey` > `creates a manual reservation and displays generated arrival and checkout tasks` passed in CI for chromium and field-mobile. Protected Preview/staging browser verification on 2026-10-11 created `Staging Villa staging-s3-1791728260199` and confirmed 2 generated tasks. Keep IN-PROGRESS because direct/agency booking entry and full feature DoD remain broader than this S3 slice.
 F-RES-08 | TODO |
@@ -168,7 +168,7 @@ F-FIN-06 | TODO |
 F-FIN-07 | TODO |
 F-FIN-08 | TODO |
 F-FIN-09 | TODO |
-F-FIN-10 | TODO |
+F-FIN-10 | IN-PROGRESS | S7 adds Airbnb expected payout, platform fee, actual receipt and variance ledger postings using append-only transactions; PR/CI/staging pending.
 F-FIN-11 | TODO |
 F-FIN-12 | TODO |
 F-FIN-13 | IN-PROGRESS | S6 reservation accommodation revenue posting merged via PR #12 `543fee1`: authorized UI records 8000.00 MAD manual reservation revenue and creates balanced append-only owner revenue postings exactly once. Evidence: CI run `38158574875` green including real PostgreSQL and Playwright; protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified `STAGING_S6_REVENUE_POSTED=true`.
@@ -190,8 +190,8 @@ F-FIN-28 | TODO |
 F-FIN-29 | TODO |
 F-FIN-30 | TODO |
 F-FIN-31 | TODO |
-F-FIN-32 | TODO |
-F-FIN-33 | TODO |
+F-FIN-32 | IN-PROGRESS | S7 adds reconciliation framework rows for Airbnb settlements and expected-vs-actual variance computation; broader bank/laundry/staff/owner/inventory reconciliation pending.
+F-FIN-33 | IN-PROGRESS | S7 adds open Variance Center rows and UI chain for Expected -> Actual -> Variance -> Reason -> Action on Airbnb settlements; assignment/resolution/aging still pending.
 F-FIN-34 | TODO |
 F-FIN-35 | TODO |
 F-FIN-36 | TODO |

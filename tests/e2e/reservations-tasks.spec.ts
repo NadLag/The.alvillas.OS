@@ -167,4 +167,86 @@ test.describe("manual reservation to operations tasks journey", () => {
     await expect(page.getByTestId("owner-bucket-total").filter({ hasText: "Owner revenue" })).toBeVisible();
     await expect(page.getByTestId("owner-bucket-total").filter({ hasText: "Commission" })).toBeVisible();
   });
+
+  test("imports an Airbnb settlement CSV and shows the payout variance", async ({ page }, testInfo) => {
+    const suffix = `s7-${testInfo.project.name}-${Date.now()}`
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/gu, "-");
+    const ownerName = `S7 Airbnb Owner ${suffix}`;
+    const ownerEmail = `s7-airbnb-owner-${suffix}@example.test`;
+    const propertyName = `S7 Airbnb Villa ${suffix}`;
+    const guestName = `S7 Airbnb Guest ${suffix}`;
+    const loginEmail = e2eEmail(`s7-airbnb-${suffix}`, testInfo.project.name);
+    const sourceTransactionId = `TX-${suffix}`;
+
+    await ensureE2EAdmin(loginEmail, adminPassword);
+
+    await page.goto("/en/login");
+    await page.getByTestId("login-email").fill(loginEmail);
+    await page.getByTestId("login-password").fill(adminPassword);
+    await page.getByTestId("login-submit").click();
+    await expect(page).toHaveURL(/\/en\/app/u);
+
+    await page.goto("/en/app/owners");
+    await page.getByTestId("owner-display-name").fill(ownerName);
+    await page.getByTestId("owner-email").fill(ownerEmail);
+    await page.getByTestId("owner-preferred-locale").selectOption("en");
+    await page.getByTestId("owner-submit").click();
+    await expect(page.getByRole("heading", { name: ownerName })).toBeVisible();
+
+    await page.goto("/en/app/properties");
+    await page.getByTestId("property-owner").selectOption({ label: ownerName });
+    await page.getByTestId("property-name").fill(propertyName);
+    await page.getByTestId("property-type").fill("Villa");
+    await page.getByTestId("property-address").fill("Route de Fes");
+    await page.getByTestId("property-city").fill("Marrakech");
+    await page.getByTestId("property-bedrooms").fill("4");
+    await page.getByTestId("property-bathrooms").fill("4");
+    await page.getByTestId("property-max-guests").fill("8");
+    await page.getByTestId("property-submit").click();
+    await expect(page.getByRole("heading", { name: propertyName })).toBeVisible();
+
+    const financeSetup = await ensureReservationRevenuePostingSetup({
+      ownerEmail,
+      propertyName,
+      password: adminPassword
+    });
+
+    await page.goto("/en/app/reservations");
+    await expect(page.getByTestId("reservations-page")).toBeVisible();
+    await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - Marrakech` });
+    await page.getByTestId("reservation-guest-name").fill(guestName);
+    await page.getByTestId("reservation-guest-email").fill(`guest-${suffix}@example.test`);
+    await page.getByTestId("reservation-source").selectOption("AIRBNB");
+    await page.getByTestId("reservation-external-id").fill(`HM-${suffix}`);
+    await page.getByTestId("reservation-check-in").fill("2028-05-10");
+    await page.getByTestId("reservation-check-out").fill("2028-05-14");
+    await page.getByTestId("reservation-adults").fill("2");
+    await page.getByTestId("reservation-children").fill("0");
+    await page.getByTestId("reservation-submit").click();
+    await expect(page).toHaveURL(/\/en\/app\/operations/u);
+
+    await page.goto("/en/app/reservations");
+    const reservationRow = page.getByTestId("reservation-row").filter({ hasText: guestName });
+    await expect(reservationRow).toBeVisible();
+    await page.getByTestId("airbnb-settlement-account").selectOption({
+      label: financeSetup.bankName
+    });
+    await page.getByTestId("airbnb-settlement-csv").fill(
+      [
+        "source_reservation_id,source_payout_id,source_transaction_id,currency,gross_amount,platform_fee,expected_payout,actual_receipt,reason,action",
+        `HM-${suffix},PO-${suffix},${sourceTransactionId},MAD,5500.00,300.00,5200.00,5150.00,Bank fee,Review payout`
+      ].join("\n")
+    );
+    await page.getByTestId("airbnb-settlement-submit").click();
+
+    const variance = page.getByTestId("airbnb-settlement-variance").filter({ hasText: propertyName });
+    await expect(variance).toBeVisible();
+    await expect(variance).toHaveAttribute("data-expected", "5200.00");
+    await expect(variance).toHaveAttribute("data-actual", "5150.00");
+    await expect(variance).toHaveAttribute("data-variance", "50.00");
+    await expect(variance.getByTestId("airbnb-settlement-variance-amount")).toContainText("50.00 MAD");
+    await expect(variance).toContainText("Bank fee");
+    await expect(variance).toContainText("Review payout");
+  });
 });

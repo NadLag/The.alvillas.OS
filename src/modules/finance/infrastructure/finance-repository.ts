@@ -54,6 +54,26 @@ type ActiveRevenueRow = {
   reservationId: string;
 };
 
+type SettlementVarianceRow = {
+  id: string;
+  settlementId: string;
+  reservationId: string | null;
+  reservationReference: string | null;
+  propertyId: string | null;
+  propertyName: string | null;
+  sourceReservationId: string | null;
+  sourcePayoutId: string | null;
+  sourceTransactionId: string | null;
+  expectedAmount: string;
+  actualAmount: string;
+  varianceAmount: string;
+  currency: string;
+  reason: string;
+  action: string;
+  status: string;
+  createdAt: Date;
+};
+
 function ownerSharesFromReservation(reservation: ReservationWithFinanceContext): PropertyOwnerShare[] {
   return reservation.property.propertyOwners.map((propertyOwner) => ({
     ownerId: propertyOwner.ownerId,
@@ -164,6 +184,47 @@ export class FinanceRepository {
         archivedAt: true
       }
     });
+  }
+
+  async findAirbnbReservationBySourceIdentifier(sourceReservationId: string): Promise<{
+    id: string;
+    reference: string;
+    source: string;
+    externalId: string | null;
+    propertyId: string;
+    propertyName: string;
+  } | null> {
+    const reservation = await this.tx.reservation.findFirst({
+      where: {
+        organizationId: this.organizationId,
+        source: "AIRBNB",
+        archivedAt: null,
+        OR: [
+          {
+            externalId: sourceReservationId
+          },
+          {
+            reference: sourceReservationId
+          }
+        ]
+      },
+      include: {
+        property: true
+      }
+    });
+
+    if (!reservation || reservation.property.archivedAt) {
+      return null;
+    }
+
+    return {
+      id: reservation.id,
+      reference: reservation.reference,
+      source: reservation.source,
+      externalId: reservation.externalId,
+      propertyId: reservation.propertyId,
+      propertyName: reservation.property.name
+    };
   }
 
   async listRevenuePostingAccounts(): Promise<Array<{ id: string; name: string; code: string }>> {
@@ -349,6 +410,170 @@ export class FinanceRepository {
         postings: true,
         reversedByTransactions: true
       }
+    });
+  }
+
+  async findAirbnbSettlementBySourceTransactionId(sourceTransactionId: string) {
+    return this.tx.airbnbSettlement.findUnique({
+      where: {
+        organizationId_sourceTransactionId: {
+          organizationId: this.organizationId,
+          sourceTransactionId
+        }
+      }
+    });
+  }
+
+  async findAirbnbSettlement(settlementId: string) {
+    return this.tx.airbnbSettlement.findFirst({
+      where: {
+        id: settlementId,
+        organizationId: this.organizationId
+      },
+      include: {
+        reservation: true,
+        property: true
+      }
+    });
+  }
+
+  async createAirbnbSettlement(input: {
+    reservationId: string;
+    propertyId: string;
+    sourceReservationId: string;
+    sourcePayoutId: string;
+    sourceTransactionId: string;
+    currency: string;
+    grossAmount: string;
+    platformFee: string;
+    expectedPayout: string;
+    actualReceipt: string;
+    idempotencyKey: string;
+    importedBy: string;
+  }) {
+    return this.tx.airbnbSettlement.create({
+      data: {
+        organizationId: this.organizationId,
+        reservationId: input.reservationId,
+        propertyId: input.propertyId,
+        sourceReservationId: input.sourceReservationId,
+        sourcePayoutId: input.sourcePayoutId,
+        sourceTransactionId: input.sourceTransactionId,
+        currency: input.currency,
+        grossAmount: input.grossAmount,
+        platformFee: input.platformFee,
+        expectedPayout: input.expectedPayout,
+        actualReceipt: input.actualReceipt,
+        idempotencyKey: input.idempotencyKey,
+        importedBy: input.importedBy
+      }
+    });
+  }
+
+  async createVariance(input: {
+    sourceType: string;
+    sourceId: string;
+    propertyId: string;
+    reservationId: string;
+    expectedAmount: string;
+    actualAmount: string;
+    varianceAmount: string;
+    currency: string;
+    reason: string;
+    action: string;
+    createdBy: string;
+  }) {
+    return this.tx.variance.create({
+      data: {
+        organizationId: this.organizationId,
+        sourceType: input.sourceType,
+        sourceId: input.sourceId,
+        propertyId: input.propertyId,
+        reservationId: input.reservationId,
+        expectedAmount: input.expectedAmount,
+        actualAmount: input.actualAmount,
+        varianceAmount: input.varianceAmount,
+        currency: input.currency,
+        reason: input.reason,
+        action: input.action,
+        createdBy: input.createdBy
+      }
+    });
+  }
+
+  async listOpenAirbnbSettlementVariances(): Promise<SettlementVarianceRow[]> {
+    return this.tx.$queryRaw<SettlementVarianceRow[]>(Prisma.sql`
+      SELECT
+        v.id,
+        v.source_id AS "settlementId",
+        v.reservation_id AS "reservationId",
+        r.reference AS "reservationReference",
+        v.property_id AS "propertyId",
+        p.name AS "propertyName",
+        s.source_reservation_id AS "sourceReservationId",
+        s.source_payout_id AS "sourcePayoutId",
+        s.source_transaction_id AS "sourceTransactionId",
+        v.expected_amount::text AS "expectedAmount",
+        v.actual_amount::text AS "actualAmount",
+        v.variance_amount::text AS "varianceAmount",
+        v.currency,
+        v.reason,
+        v.action,
+        v.status,
+        v.created_at AS "createdAt"
+      FROM variance v
+      LEFT JOIN airbnb_settlement s
+        ON s.id = v.source_id
+       AND s.organization_id = v.organization_id
+      LEFT JOIN reservation r
+        ON r.id = v.reservation_id
+       AND r.organization_id = v.organization_id
+      LEFT JOIN property p
+        ON p.id = v.property_id
+       AND p.organization_id = v.organization_id
+      WHERE v.organization_id = ${this.organizationId}::uuid
+        AND v.source_type = 'AIRBNB_SETTLEMENT'
+        AND v.status = 'OPEN'
+      ORDER BY v.created_at DESC
+      LIMIT 100
+    `);
+  }
+
+  async findPostingTransactionsForAirbnbSettlement(settlementId: string): Promise<PostingTransaction[]> {
+    const rows = await this.tx.$queryRaw<TransactionIdRow[]>(Prisma.sql`
+      SELECT DISTINCT ft.id
+      FROM financial_transaction ft
+      INNER JOIN posting p
+        ON p.transaction_id = ft.id
+       AND p.organization_id = ft.organization_id
+      WHERE ft.organization_id = ${this.organizationId}::uuid
+        AND ft.reverses_transaction_id IS NULL
+        AND p.dimensions @> jsonb_build_object('airbnb_settlement_id', ${settlementId})
+      ORDER BY ft.id ASC
+    `);
+    const ids = rows.map((row) => row.id);
+
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const transactions = await this.tx.financialTransaction.findMany({
+      where: {
+        organizationId: this.organizationId,
+        id: {
+          in: ids
+        }
+      },
+      include: {
+        postings: true,
+        reversedByTransactions: true
+      }
+    });
+    const byId = new Map(transactions.map((transaction) => [transaction.id, transaction]));
+
+    return ids.flatMap((id) => {
+      const transaction = byId.get(id);
+      return transaction ? [transaction] : [];
     });
   }
 

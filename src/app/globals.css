@@ -425,6 +425,74 @@ a {
   flex: 0 1 560px;
 }
 
+.settlement-panel {
+  display: grid;
+  gap: 16px;
+  margin-top: 22px;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+
+.settlement-import-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(260px, 1.3fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.settlement-csv-field textarea {
+  min-height: 128px;
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.84rem;
+}
+
+.settlement-variance-list {
+  display: grid;
+  gap: 10px;
+}
+
+.settlement-variance-row {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 14px;
+}
+
+.settlement-variance-row > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settlement-variance-row small {
+  color: var(--muted);
+}
+
+.settlement-chain {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settlement-chain span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border-inline-start: 3px solid var(--border);
+  padding-inline-start: 10px;
+}
+
+.settlement-chain strong {
+  overflow-wrap: anywhere;
+}
+
 .resource-row span {
   display: grid;
   gap: 4px;
@@ -640,6 +708,8 @@ a {
   .form-grid.five,
   .reservation-row-main,
   .reservation-revenue-form,
+    .settlement-import-form,
+    .settlement-chain,
   .detail-grid,
   .statement-summary,
   .statement-table-head,
