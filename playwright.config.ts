@@ -12,7 +12,7 @@ export default defineConfig({
     trace: "on-first-retry"
   },
   webServer: {
-    command: "npm run dev -- --hostname 127.0.0.1 --port 3000",
+    command: "npx next dev --hostname=127.0.0.1 --port=3000",
     url: "http://127.0.0.1:3000/en",
     reuseExistingServer: !process.env.CI,
     timeout: 120000
