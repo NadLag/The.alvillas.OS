@@ -176,9 +176,9 @@ F-FIN-14 | TODO |
 F-FIN-15 | TODO |
 F-FIN-16 | TODO |
 F-FIN-17 | TODO |
-F-FIN-18 | IN-PROGRESS | S5 owner portal live balance on branch `s5-owner-portal-live-balance`: owner ledger opening/credits/debits/closing derived from `OWNER_PAYABLE` postings only. Evidence: `tests/unit/owner-statement.test.ts`, `tests/integration/postgres-migration.test.ts` owner portal statement case, `tests/e2e/owner-portal-statement.spec.ts` passed in chromium and field-mobile against real PostgreSQL on 2026-10-11.
+F-FIN-18 | IN-PROGRESS | S5 owner portal live balance merged via PR #10 `8996606`: owner ledger opening/credits/debits/closing derived from `OWNER_PAYABLE` postings only. Evidence: CI runs `38154596499` and `38154822044` green, including real PostgreSQL integration and Playwright; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified owner statement closing `5300.00` for `Owner Ledger Villa staging-s5-1791735861339`.
 F-FIN-19 | TODO |
-F-FIN-20 | IN-PROGRESS | S5 shows remaining owner payable and posting-derived held-location breakdown without exposing internal bank account codes. Evidence: `tests/e2e/owner-portal-statement.spec.ts` asserts money held equals PostgreSQL owner-payable closing balance and internal ledger account codes are absent; broader collected/allocated/used/reconciliation workflows pending.
+F-FIN-20 | IN-PROGRESS | S5 shows remaining owner payable and posting-derived held-location breakdown without exposing internal bank account codes. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified `owner-money-held` equals PostgreSQL owner-payable closing `5300.00`. Broader collected/allocated/used/reconciliation workflows pending.
 F-FIN-21 | TODO |
 F-FIN-22 | TODO |
 F-FIN-23 | TODO |
@@ -200,7 +200,7 @@ F-FIN-38 | TODO |
 F-FIN-39 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: central serializer masks financial fields by data class. Full financial endpoint adoption and negative tests incomplete.
 F-FIN-40 | TODO |
 F-FIN-41 | TODO |
-F-FIN-42 | IN-PROGRESS | S5 statement data generator added for period, opening, lines by bucket, credits/debits and closing from postings. Evidence: local `npm run verify`, `npm run test:integration`, `npm run check:schema-drift`, and Playwright owner portal statement passed on 2026-10-11; PDF/CSV reuse pending.
+F-FIN-42 | IN-PROGRESS | S5 statement data generator added for period, opening, lines by bucket, credits/debits and closing from postings. Evidence: PR #10 `8996606`; local `npm run verify`, `npm run test:integration`, `npm run check:schema-drift`, and `npm run test:e2e -- owner-portal-statement.spec.ts` passed on 2026-10-11; CI runs `38154596499`/`38154822044` green; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified 5 ledger lines. PDF/CSV reuse pending.
 F-DOC-01 | TODO |
 F-DOC-02 | TODO |
 F-DOC-03 | TODO |
@@ -285,12 +285,12 @@ F-SUP-02 | TODO |
 F-SUP-03 | TODO |
 F-SUP-04 | TODO |
 F-SUP-05 | TODO |
-F-OWN-01 | IN-PROGRESS | S5 owner portal entry `/app/owner-portal` lists only properties linked through tenant-scoped `owner_portal_access`. Evidence: Playwright `owner portal live balance and statement` asserts owner-only list, other-owner denial, and tenant/no-owner denial in EN/FR.
+F-OWN-01 | IN-PROGRESS | S5 owner portal entry `/app/owner-portal` lists only properties linked through tenant-scoped `owner_portal_access`. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified owner-only property list, cross-owner 404, and tenant/no-owner 404.
 F-OWN-02 | TODO |
-F-OWN-03 | IN-PROGRESS | S5 owner revenue, commission, expenses, services and payouts are visible as statement bucket totals derived from ledger postings. Evidence: unit/integration/Playwright statement tests assert bucket lines and totals; broader revenue/expense portal views pending.
-F-OWN-04 | IN-PROGRESS | S5 owner money held by ALVILLAS appears as remaining payable from `OWNER_PAYABLE` closing balance. Evidence: Playwright compares UI `owner-money-held` with PostgreSQL posting totals; full collected/allocated/used/paid drilldown pending.
+F-OWN-03 | IN-PROGRESS | S5 owner revenue, commission, expenses, services and payouts are visible as statement bucket totals derived from ledger postings. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified 5 statement lines from ledger postings. Broader revenue/expense portal views pending.
+F-OWN-04 | IN-PROGRESS | S5 owner money held by ALVILLAS appears as remaining payable from `OWNER_PAYABLE` closing balance. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified UI `owner-money-held` equals PostgreSQL posting total `5300.00`. Full collected/allocated/used/paid drilldown pending.
 F-OWN-05 | TODO |
-F-OWN-06 | IN-PROGRESS | S5 monthly statement screen added with EN/FR display and ledger-derived opening/closing balances. Evidence: Playwright verifies EN/FR statement page; PDF and CSV generation remain pending.
+F-OWN-06 | IN-PROGRESS | S5 monthly statement screen added with EN/FR display and ledger-derived opening/closing balances. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified owner login -> property selection -> statement. PDF and CSV generation remain pending.
 F-OWN-07 | TODO |
 F-OWN-08 | TODO |
 F-OWN-09 | TODO |
