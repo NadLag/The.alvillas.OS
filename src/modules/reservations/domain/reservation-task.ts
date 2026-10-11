@@ -125,6 +125,7 @@ export type OperationTaskSummary = {
   title: Record<string, string>;
   assignedToUserAccountId: string | null;
   completedByUserAccountId: string | null;
+  completionIdempotencyKey: string | null;
   completedAt: Date | null;
   createdAt: Date;
 };
@@ -172,6 +173,7 @@ export function localizedChecklistLabel(
 
 export const completeTaskInputSchema = z.object({
   taskId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
   checklistItemIds: z.array(z.string().uuid()).min(1).max(50),
   note: optionalText(1000)
 });

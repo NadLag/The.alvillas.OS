@@ -31,6 +31,7 @@ model Organization {
   reservationConflicts ReservationConflict[]
   operationTasks       OperationTask[]
   taskChecklistItems   OperationTaskChecklistItem[]
+  syncOps              SyncOp[]
 
   @@map("organization")
 }
@@ -50,6 +51,7 @@ model Person {
   assignedTasks   OperationTask[]              @relation("OperationTaskAssignedPerson")
   completedTasks  OperationTask[]              @relation("OperationTaskCompletedPerson")
   completedChecks OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedPerson")
+  syncOps         SyncOp[]                     @relation("SyncOpActorPerson")
 
   @@unique([organizationId, email], map: "person_org_email_unique")
   @@index([organizationId, displayName], map: "person_org_display_name_idx")
@@ -71,6 +73,7 @@ model UserAccount {
   assignedTasks   OperationTask[]              @relation("OperationTaskAssignedAccount")
   completedTasks  OperationTask[]              @relation("OperationTaskCompletedAccount")
   completedChecks OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
+  syncOps         SyncOp[]                     @relation("SyncOpActorAccount")
 
   @@unique([organizationId, email], map: "user_account_org_email_unique")
   @@index([organizationId, personId], map: "user_account_org_person_idx")
@@ -222,6 +225,7 @@ model OperationTask {
   assignedToPersonId       String?                      @map("assigned_to_person_id") @db.Uuid
   completedByUserAccountId String?                      @map("completed_by_user_account_id") @db.Uuid
   completedByPersonId      String?                      @map("completed_by_person_id") @db.Uuid
+  completionIdempotencyKey String?                      @map("completion_idempotency_key") @db.Uuid
   type                     String
   state                    String                       @default("PLANNED")
   priority                 String                       @default("NORMAL")
@@ -243,6 +247,7 @@ model OperationTask {
   checklistItems           OperationTaskChecklistItem[]
 
   @@unique([organizationId, idempotencyKey], map: "operation_task_org_idempotency_unique")
+  @@unique([organizationId, completionIdempotencyKey], map: "operation_task_org_completion_idempotency_unique")
   @@index([organizationId, dueDate, state], map: "operation_task_org_due_state_idx")
   @@index([organizationId, propertyId, dueDate], map: "operation_task_org_property_due_idx")
   @@index([organizationId, reservationId], map: "operation_task_org_reservation_idx")
@@ -271,6 +276,31 @@ model OperationTaskChecklistItem {
   @@unique([organizationId, taskId, key], map: "operation_task_check_org_task_key_unique")
   @@index([organizationId, taskId, sortOrder], map: "operation_task_check_org_task_order_idx")
   @@map("operation_task_checklist_item")
+}
+
+model SyncOp {
+  id                 String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String       @map("organization_id") @db.Uuid
+  deviceId           String       @map("device_id")
+  clientOpId         String       @map("client_op_id") @db.Uuid
+  type               String
+  status             String
+  payload            Json
+  result             Json?
+  errorCode          String?      @map("error_code")
+  actorUserAccountId String?      @map("actor_user_account_id") @db.Uuid
+  actorPersonId      String?      @map("actor_person_id") @db.Uuid
+  clientCreatedAt    DateTime?    @map("client_created_at") @db.Timestamptz(6)
+  appliedAt          DateTime?    @map("applied_at") @db.Timestamptz(6)
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  actorUserAccount   UserAccount? @relation("SyncOpActorAccount", fields: [actorUserAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  actorPerson        Person?      @relation("SyncOpActorPerson", fields: [actorPersonId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, deviceId, clientOpId], map: "sync_op_org_device_client_unique")
+  @@index([organizationId, status, createdAt], map: "sync_op_org_status_created_idx")
+  @@map("sync_op")
 }
 
 model LedgerAccount {

@@ -121,6 +121,7 @@ export async function completeFieldTaskAction(
 
   const parsed = parseCompleteTaskInput({
     taskId: formValue(formData, "taskId"),
+    idempotencyKey: formValue(formData, "idempotencyKey"),
     checklistItemIds: formData.getAll("checklistItemIds"),
     note: formValue(formData, "note")
   });

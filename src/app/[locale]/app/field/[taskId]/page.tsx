@@ -1,6 +1,7 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { randomUUID } from "node:crypto";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationNotFoundError,
@@ -81,9 +82,16 @@ export default async function FieldTaskPage({
           generic: t("forms.generic"),
           complete: t("complete"),
           completing: t("completing"),
-          note: t("note")
+          note: t("note"),
+          offlineQueued: t("offlineQueued"),
+          offlineSyncing: t("offlineSyncing"),
+          offlineSynced: t("offlineSynced"),
+          offlineConflict: t("offlineConflict"),
+          offlineRejected: t("offlineRejected")
         }}
         locale={appLocale}
+        idempotencyKey={randomUUID()}
+        userId={ctx.actorId}
         taskId={task.id}
       />
     </section>

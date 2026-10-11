@@ -108,6 +108,7 @@ function taskToSummary(task: TaskWithRelations): OperationTaskSummary {
     title: toStringRecord(task.titleTranslations),
     assignedToUserAccountId: task.assignedToUserAccountId,
     completedByUserAccountId: task.completedByUserAccountId,
+    completionIdempotencyKey: task.completionIdempotencyKey,
     completedAt: task.completedAt,
     createdAt: task.createdAt
   };
@@ -477,7 +478,8 @@ export class ReservationRepository {
   async completeFieldTask(
     task: FieldTaskSummary,
     checklistItemIds: string[],
-    actor: { userAccountId: string; personId: string }
+    actor: { userAccountId: string; personId: string },
+    idempotencyKey: string
   ): Promise<FieldTaskSummary> {
     const completedAt = new Date();
     const allowedIds = new Set(task.checklistItems.map((item) => item.id));
@@ -510,7 +512,8 @@ export class ReservationRepository {
         state: "COMPLETED",
         completedAt,
         completedByUserAccountId: actor.userAccountId,
-        completedByPersonId: actor.personId
+        completedByPersonId: actor.personId,
+        completionIdempotencyKey: idempotencyKey
       }
     });
 

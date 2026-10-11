@@ -78,7 +78,10 @@ test.describe("manual reservation to operations tasks journey", () => {
     for (let index = 0; index < 3; index += 1) {
       await checklistItems.nth(index).check();
     }
+    await page.context().setOffline(true);
     await page.getByTestId("field-task-complete").click();
+    await expect(page.getByTestId("field-task-sync-status")).toContainText("Saved offline");
+    await page.context().setOffline(false);
     await expect(page).toHaveURL(/\/en\/app\/field/u);
     await expect(page.getByTestId("field-task-card").filter({ hasText: propertyName })).toHaveCount(1);
   });
