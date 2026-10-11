@@ -1,0 +1,82 @@
+:root {
+  color-scheme: light;
+  --background: #f7f4ef;
+  --foreground: #1d2528;
+  --muted: #5e6a70;
+  --surface: #ffffff;
+  --border: #d9d3c9;
+  --accent: #0f766e;
+  --accent-foreground: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+a {
+  color: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  padding: 32px;
+}
+
+.home {
+  display: grid;
+  min-height: calc(100vh - 64px);
+  align-content: center;
+  gap: 32px;
+  max-width: 920px;
+  margin-inline: auto;
+}
+
+.home h1 {
+  margin: 0;
+  max-width: 760px;
+  font-size: clamp(2.5rem, 6vw, 5rem);
+  line-height: 1;
+  letter-spacing: 0;
+}
+
+.home p {
+  margin: 0;
+  max-width: 680px;
+  color: var(--muted);
+  font-size: 1.125rem;
+  line-height: 1.7;
+}
+
+.status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.status-chip {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px 12px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
