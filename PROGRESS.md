@@ -141,10 +141,10 @@ F-AUT-06 | TODO |
 F-AUT-07 | TODO |
 F-FLD-01 | TODO |
 F-FLD-02 | TODO |
-F-FLD-03 | TODO |
-F-FLD-04 | TODO |
-F-FLD-05 | TODO |
-F-FLD-06 | TODO |
+F-FLD-03 | IN-PROGRESS | S4 online field slice on branch `f-fld-01-assigned-task-checklist`: authenticated field entry at `/app/field` lists current assigned work. Evidence: local `npm run verify` passed on 2026-10-11 (lint, typecheck, i18n, RTL CSS, boundaries, organization-id, ledger, audit, progress, 18 unit files / 62 tests, build). CI/staging pending.
+F-FLD-04 | IN-PROGRESS | My Jobs view filters server-side to tasks assigned to the current user account. Evidence: `tests/integration/postgres-migration.test.ts` > `creates manual reservations with idempotent task generation, overlap detection, and tenant isolation` now asserts assigned tasks, field list, checklist RLS isolation and wrong-tenant completion rejection. Local integration rerun on 2026-10-11 blocked because Docker Desktop Linux engine was unavailable; CI/staging pending.
+F-FLD-05 | IN-PROGRESS | Field job detail route `/app/field/[taskId]` opens only assigned tasks and returns not-found for unassigned/wrong-tenant access. Evidence: `tests/e2e/reservations-tasks.spec.ts` > `manual reservation to operations tasks journey` > `creates a manual reservation and displays generated arrival and checkout tasks` now opens an assigned field task. Local Playwright on 2026-10-11 passed 8 health/auth tests and skipped 10 DB-backed tests because no local database was configured; CI/staging pending.
+F-FLD-06 | IN-PROGRESS | Checklist instance table, generated checklist items, large completion button, performer recording and `task.complete` audit event added. Evidence: `tests/unit/reservation-service.test.ts` > `denies assigned task completion before reaching the repository`; `tests/e2e/reservations-tasks.spec.ts` now checks all checklist items and completes one assigned job; `tests/integration/postgres-migration.test.ts` now asserts `completedByUserAccountId`, checklist completion and `task.complete` audit. Offline queue remains next.
 F-FLD-07 | TODO |
 F-FLD-08 | TODO |
 F-FLD-09 | TODO |

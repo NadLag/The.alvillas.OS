@@ -19,6 +19,7 @@ const credentialsSchema = z.object({
 
 type AuthorizedUser = {
   id: string;
+  personId: string;
   email: string;
   name: string;
   organizationId: string;
@@ -91,6 +92,7 @@ async function authorizeCredentials(
 
   return {
     id: account.id,
+    personId: account.personId,
     email: account.email ?? email,
     name: account.person.displayName,
     organizationId: account.organizationId,
@@ -126,6 +128,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         const authorizedUser = user as AuthorizedUser;
         token.userId = authorizedUser.id;
+        token.personId = authorizedUser.personId;
         token.organizationId = authorizedUser.organizationId;
         token.preferredLocale = authorizedUser.preferredLocale;
       }
@@ -135,6 +138,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     session({ session, token }) {
       if (session.user) {
         session.user.id = tokenString(token.userId, tokenString(token.sub, ""));
+        session.user.personId = tokenString(token.personId, "");
         session.user.organizationId = tokenString(token.organizationId, "");
         session.user.preferredLocale = tokenString(token.preferredLocale, "en");
       }

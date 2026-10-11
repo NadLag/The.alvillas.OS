@@ -40,6 +40,7 @@
     "properties": "Proprietes",
     "reservations": "Reservations",
     "operations": "Operations",
+    "field": "Terrain",
     "todayLabel": "Aujourd'hui",
     "welcome": "Bienvenue, {name}",
     "summary": "Le socle de securite porte maintenant les premiers dossiers coeur: proprietaires et proprietes authentifies, limites par organisation et audites a la creation.",
@@ -176,5 +177,30 @@
     "rowMeta": "{property} - {reservation}",
     "dueDate": "{dueDate, date, medium}",
     "noReservation": "Sans reservation"
+  },
+  "Field": {
+    "eyebrow": "Application terrain",
+    "title": "Mes taches",
+    "subtitle": "Uniquement le travail assigne, avec la checklist necessaire pour terminer.",
+    "backToWorkspace": "Espace de travail",
+    "backToJobs": "Mes taches",
+    "empty": "Aucune tache ne vous est assignee pour le moment.",
+    "rowMeta": "{property} - {reservation}",
+    "detailMeta": "{reservation} - {guest}",
+    "checklistCount": "{count, plural, one {# element checklist} other {# elements checklist}}",
+    "noReservation": "Sans reservation",
+    "noGuest": "Sans voyageur",
+    "complete": "Terminer la tache",
+    "completing": "Finalisation...",
+    "saving": "Enregistrement...",
+    "note": "Note de fin",
+    "forms": {
+      "validation": "Completez chaque element de la checklist avant de terminer.",
+      "unauthorized": "Reconnectez-vous pour continuer.",
+      "forbidden": "Cette tache ne vous est pas assignee.",
+      "notFound": "Cette tache assignee est introuvable.",
+      "conflict": "Completez chaque element de la checklist avant de terminer.",
+      "generic": "La tache n'a pas pu etre terminee. Reessayez."
+    }
   }
 }

@@ -322,6 +322,66 @@ a {
   gap: 10px;
 }
 
+.field-page {
+  display: grid;
+  gap: 20px;
+  max-width: 760px;
+}
+
+.field-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.field-task-list,
+.field-checklist,
+.field-checklist-items {
+  display: grid;
+  gap: 12px;
+}
+
+.field-task-card,
+.field-checklist-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 64px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  padding: 14px;
+  text-decoration: none;
+}
+
+.field-task-card span:first-child,
+.field-checklist-item span {
+  display: grid;
+  gap: 4px;
+}
+
+.field-task-card small {
+  color: var(--muted);
+}
+
+.field-checklist-item {
+  justify-content: flex-start;
+  min-height: 56px;
+}
+
+.field-checklist-item input {
+  inline-size: 24px;
+  block-size: 24px;
+  flex: 0 0 auto;
+}
+
+.field-complete-button {
+  min-height: 56px;
+}
+
 .resource-row {
   display: flex;
   align-items: center;
@@ -492,6 +552,15 @@ a {
 
   .app-actions form .secondary-button {
     width: 100%;
+  }
+
+  .field-header {
+    display: grid;
+  }
+
+  .field-task-card {
+    align-items: flex-start;
+    display: grid;
   }
 
   .auth-panel {

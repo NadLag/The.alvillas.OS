@@ -40,6 +40,7 @@
     "properties": "Properties",
     "reservations": "Reservations",
     "operations": "Operations",
+    "field": "Field",
     "todayLabel": "Today",
     "welcome": "Welcome, {name}",
     "summary": "The security spine now carries the first core records: authenticated owners and properties, scoped by organization and audited on create.",
@@ -177,5 +178,30 @@
     "rowMeta": "{property} - {reservation}",
     "dueDate": "{dueDate, date, medium}",
     "noReservation": "No reservation"
+  },
+  "Field": {
+    "eyebrow": "Field app",
+    "title": "My jobs",
+    "subtitle": "Assigned work only, with the checklist needed to finish the job.",
+    "backToWorkspace": "Workspace",
+    "backToJobs": "My jobs",
+    "empty": "No jobs are assigned to you right now.",
+    "rowMeta": "{property} - {reservation}",
+    "detailMeta": "{reservation} - {guest}",
+    "checklistCount": "{count, plural, one {# checklist item} other {# checklist items}}",
+    "noReservation": "No reservation",
+    "noGuest": "No guest",
+    "complete": "Complete task",
+    "completing": "Completing...",
+    "saving": "Saving...",
+    "note": "Completion note",
+    "forms": {
+      "validation": "Complete every checklist item before finishing.",
+      "unauthorized": "Sign in again to continue.",
+      "forbidden": "This task is not assigned to you.",
+      "notFound": "This assigned task was not found.",
+      "conflict": "Complete every checklist item before finishing.",
+      "generic": "The task could not be completed. Try again."
+    }
   }
 }

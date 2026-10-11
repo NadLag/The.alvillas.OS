@@ -1,7 +1,9 @@
 import { Prisma } from "@prisma/client";
 import type {
   ManualReservationInput,
+  OperationTaskChecklistItemSummary,
   OperationTaskSummary,
+  FieldTaskSummary,
   ReservationSummary,
   ReservationTaskConfig,
   ReservationTaskTemplate
@@ -31,6 +33,18 @@ type TaskWithRelations = Prisma.OperationTaskGetPayload<{
   };
 }>;
 
+type FieldTaskWithRelations = Prisma.OperationTaskGetPayload<{
+  include: {
+    property: true;
+    reservation: true;
+    checklistItems: {
+      orderBy: {
+        sortOrder: "asc";
+      };
+    };
+  };
+}>;
+
 type ConfigRuleRow = {
   value: Prisma.JsonValue;
 };
@@ -48,6 +62,16 @@ function toStringRecord(value: Prisma.JsonValue): Record<string, string> {
 function taskTitleJson(template: ReservationTaskTemplate): Prisma.InputJsonObject {
   return Object.fromEntries(
     Object.entries(template.title).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string"
+    )
+  );
+}
+
+function checklistLabelJson(
+  item: ReservationTaskTemplate["checklist"][number]
+): Prisma.InputJsonObject {
+  return Object.fromEntries(
+    Object.entries(item.label).filter(
       (entry): entry is [string, string] => typeof entry[1] === "string"
     )
   );
@@ -73,6 +97,7 @@ function reservationToSummary(reservation: ReservationWithProperty): Reservation
 function taskToSummary(task: TaskWithRelations): OperationTaskSummary {
   return {
     id: task.id,
+    propertyId: task.propertyId,
     propertyName: task.property.name,
     reservationReference: task.reservation?.reference ?? null,
     guestName: task.reservation?.guestName ?? null,
@@ -81,7 +106,28 @@ function taskToSummary(task: TaskWithRelations): OperationTaskSummary {
     priority: task.priority,
     dueDate: task.dueDate,
     title: toStringRecord(task.titleTranslations),
+    assignedToUserAccountId: task.assignedToUserAccountId,
+    completedByUserAccountId: task.completedByUserAccountId,
+    completedAt: task.completedAt,
     createdAt: task.createdAt
+  };
+}
+
+function checklistItemToSummary(
+  item: FieldTaskWithRelations["checklistItems"][number]
+): OperationTaskChecklistItemSummary {
+  return {
+    id: item.id,
+    key: item.key,
+    label: toStringRecord(item.labelTranslations),
+    completedAt: item.completedAt
+  };
+}
+
+function fieldTaskToSummary(task: FieldTaskWithRelations): FieldTaskSummary {
+  return {
+    ...taskToSummary(task),
+    checklistItems: task.checklistItems.map(checklistItemToSummary)
   };
 }
 
@@ -291,7 +337,7 @@ export class ReservationRepository {
   async ensureTask(
     reservation: ReservationSummary,
     template: ReservationTaskTemplate,
-    actorId: string
+    actor: { userAccountId: string; personId: string }
   ): Promise<{ task: OperationTaskSummary; created: boolean }> {
     const idempotencyKey = `${reservation.id}:${template.key}`;
     const existing = await this.tx.operationTask.findUnique({
@@ -317,12 +363,22 @@ export class ReservationRepository {
         propertyId: reservation.propertyId,
         reservationId: reservation.id,
         type: template.type,
+        assignedToUserAccountId: actor.userAccountId,
+        assignedToPersonId: actor.personId,
         state: "PLANNED",
         priority: template.priority,
         dueDate: template.due === "CHECK_IN" ? reservation.checkIn : reservation.checkOut,
         titleTranslations: taskTitleJson(template),
         idempotencyKey,
-        createdBy: actorId
+        createdBy: actor.userAccountId,
+        checklistItems: {
+          create: template.checklist.map((item, index) => ({
+            organizationId: this.organizationId,
+            key: item.key,
+            labelTranslations: checklistLabelJson(item),
+            sortOrder: index
+          }))
+        }
       },
       include: {
         property: true,
@@ -365,5 +421,105 @@ export class ReservationRepository {
     });
 
     return tasks.map(taskToSummary);
+  }
+
+  async listFieldTasks(assignedToUserAccountId: string): Promise<FieldTaskSummary[]> {
+    const tasks = await this.tx.operationTask.findMany({
+      where: {
+        organizationId: this.organizationId,
+        assignedToUserAccountId,
+        archivedAt: null,
+        state: {
+          notIn: ["COMPLETED", "CANCELLED", "SKIPPED"]
+        }
+      },
+      orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
+      include: {
+        property: true,
+        reservation: true,
+        checklistItems: {
+          orderBy: {
+            sortOrder: "asc"
+          }
+        }
+      },
+      take: 50
+    });
+
+    return tasks.map(fieldTaskToSummary);
+  }
+
+  async findAssignedFieldTask(
+    taskId: string,
+    assignedToUserAccountId: string
+  ): Promise<FieldTaskSummary | null> {
+    const task = await this.tx.operationTask.findFirst({
+      where: {
+        id: taskId,
+        organizationId: this.organizationId,
+        assignedToUserAccountId,
+        archivedAt: null
+      },
+      include: {
+        property: true,
+        reservation: true,
+        checklistItems: {
+          orderBy: {
+            sortOrder: "asc"
+          }
+        }
+      }
+    });
+
+    return task ? fieldTaskToSummary(task) : null;
+  }
+
+  async completeFieldTask(
+    task: FieldTaskSummary,
+    checklistItemIds: string[],
+    actor: { userAccountId: string; personId: string }
+  ): Promise<FieldTaskSummary> {
+    const completedAt = new Date();
+    const allowedIds = new Set(task.checklistItems.map((item) => item.id));
+    const selectedIds = checklistItemIds.filter((id) => allowedIds.has(id));
+
+    if (selectedIds.length !== checklistItemIds.length) {
+      throw new Error("Checklist item does not belong to this task");
+    }
+
+    await this.tx.operationTaskChecklistItem.updateMany({
+      where: {
+        organizationId: this.organizationId,
+        taskId: task.id,
+        id: {
+          in: selectedIds
+        }
+      },
+      data: {
+        completedAt,
+        completedByUserAccountId: actor.userAccountId,
+        completedByPersonId: actor.personId
+      }
+    });
+
+    await this.tx.operationTask.update({
+      where: {
+        id: task.id
+      },
+      data: {
+        state: "COMPLETED",
+        completedAt,
+        completedByUserAccountId: actor.userAccountId,
+        completedByPersonId: actor.personId
+      }
+    });
+
+    const completed = await this.findAssignedFieldTask(task.id, actor.userAccountId);
+
+    if (!completed) {
+      throw new Error("Completed task could not be reloaded");
+    }
+
+    return completed;
   }
 }

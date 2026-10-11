@@ -1,6 +1,9 @@
 import { headers } from "next/headers";
 import {
   manualReservationInputSchema,
+  completeTaskInputSchema,
+  type CompleteTaskInput,
+  type FieldTaskSummary,
   type ManualReservationInput,
   type ManualReservationResult,
   type OperationTaskSummary,
@@ -35,6 +38,13 @@ export class ReservationConfigError extends Error {
   }
 }
 
+export class ReservationConflictError extends Error {
+  constructor(message = "Reservation task cannot be completed") {
+    super(message);
+    this.name = "ReservationConflictError";
+  }
+}
+
 type ReservationServiceDeps = {
   db?: TenantTransactionRunner;
   requestId?: string;
@@ -48,7 +58,7 @@ type AuditMeta = {
 
 function assertAllowed(
   ctx: ReservationActorContext,
-  action: "view" | "create",
+  action: "view" | "create" | "edit",
   resource: "reservation" | "task",
   id?: string
 ): void {
@@ -85,6 +95,10 @@ function db(deps: ReservationServiceDeps): TenantTransactionRunner {
 
 export function parseManualReservationInput(input: unknown) {
   return manualReservationInputSchema.safeParse(input);
+}
+
+export function parseCompleteTaskInput(input: unknown) {
+  return completeTaskInputSchema.safeParse(input);
 }
 
 async function auditReservationCreate(
@@ -193,7 +207,10 @@ export async function createManualReservation(
 
     const tasks: OperationTaskSummary[] = [];
     for (const template of taskConfig.tasks) {
-      const result = await repository.ensureTask(reservation, template, ctx.actorId);
+      const result = await repository.ensureTask(reservation, template, {
+        userAccountId: ctx.actorId,
+        personId: ctx.personId
+      });
       tasks.push(result.task);
       if (result.created) {
         await auditTaskCreate(tx, ctx, meta, result.task, reservation.propertyId);
@@ -243,4 +260,94 @@ export async function listOperationTasks(
   return withTenant(db(deps), ctx.organizationId, async (tx) =>
     new ReservationRepository(tx, ctx.organizationId).listTasks()
   );
+}
+
+export async function listAssignedFieldTasks(
+  ctx: ReservationActorContext,
+  deps: ReservationServiceDeps = {}
+): Promise<FieldTaskSummary[]> {
+  assertAllowed(ctx, "view", "task");
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) =>
+    new ReservationRepository(tx, ctx.organizationId).listFieldTasks(ctx.actorId)
+  );
+}
+
+export async function getAssignedFieldTask(
+  ctx: ReservationActorContext,
+  taskId: string,
+  deps: ReservationServiceDeps = {}
+): Promise<FieldTaskSummary> {
+  assertAllowed(ctx, "view", "task", taskId);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const task = await new ReservationRepository(tx, ctx.organizationId).findAssignedFieldTask(
+      taskId,
+      ctx.actorId
+    );
+
+    if (!task) {
+      throw new ReservationNotFoundError("Task is not assigned to this worker");
+    }
+
+    return task;
+  });
+}
+
+export async function completeAssignedFieldTask(
+  ctx: ReservationActorContext,
+  input: CompleteTaskInput,
+  deps: ReservationServiceDeps = {}
+): Promise<FieldTaskSummary> {
+  assertAllowed(ctx, "edit", "task", input.taskId);
+  const meta = await auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new ReservationRepository(tx, ctx.organizationId);
+    const before = await repository.findAssignedFieldTask(input.taskId, ctx.actorId);
+
+    if (!before) {
+      throw new ReservationNotFoundError("Task is not assigned to this worker");
+    }
+
+    if (before.state === "COMPLETED") {
+      return before;
+    }
+
+    const checklistItemIds = new Set(input.checklistItemIds);
+    const hasAllChecklistItems =
+      checklistItemIds.size === before.checklistItems.length &&
+      before.checklistItems.every((item) => checklistItemIds.has(item.id));
+
+    if (!hasAllChecklistItems) {
+      throw new ReservationConflictError("All checklist items must be completed before finishing");
+    }
+
+    const completed = await repository.completeFieldTask(before, [...checklistItemIds], {
+      userAccountId: ctx.actorId,
+      personId: ctx.personId
+    });
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "task.complete",
+      resourceType: "task",
+      resourceId: completed.id,
+      ipAddress: meta.ipAddress,
+      propertyScopeId: completed.propertyId,
+      before,
+      after: {
+        ...completed,
+        performedByUserAccountId: ctx.actorId,
+        performedByPersonId: ctx.personId,
+        completedChecklistItemIds: [...checklistItemIds]
+      },
+      reason: input.note ?? "S4 field task completion",
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
+
+    return completed;
+  });
 }

@@ -1,8 +1,14 @@
 "use client";
 
 import { useActionState } from "react";
-import type { ReservationFormState } from "@/modules/reservations/application/reservation-actions";
-import { createManualReservationAction } from "@/modules/reservations/application/reservation-actions";
+import type {
+  FieldTaskFormState,
+  ReservationFormState
+} from "@/modules/reservations/application/reservation-actions";
+import {
+  completeFieldTaskAction,
+  createManualReservationAction
+} from "@/modules/reservations/application/reservation-actions";
 
 type FormLabels = {
   saving: string;
@@ -11,6 +17,7 @@ type FormLabels = {
   forbidden: string;
   notFound: string;
   config: string;
+  conflict?: string;
   generic: string;
 };
 
@@ -34,7 +41,14 @@ type PropertyOption = {
   city: string;
 };
 
+type ChecklistItemOption = {
+  id: string;
+  label: Record<string, string>;
+  completed: boolean;
+};
+
 const initialReservationFormState: ReservationFormState = { status: "idle" };
+const initialFieldTaskFormState: FieldTaskFormState = { status: "idle" };
 
 function messageForState(state: ReservationFormState, labels: FormLabels): string | null {
   switch (state.messageKey) {
@@ -48,11 +62,79 @@ function messageForState(state: ReservationFormState, labels: FormLabels): strin
       return labels.notFound;
     case "config":
       return labels.config;
+    case "conflict":
+      return labels.conflict ?? labels.generic;
     case "generic":
       return labels.generic;
     default:
       return null;
   }
+}
+
+type FieldTaskLabels = FormLabels & {
+  complete: string;
+  completing: string;
+  note: string;
+};
+
+function localizedLabel(label: Record<string, string>, locale: string): string {
+  return label[locale] ?? label.en ?? Object.values(label)[0] ?? "";
+}
+
+export function FieldTaskCompletionForm({
+  locale,
+  taskId,
+  checklistItems,
+  labels
+}: {
+  locale: string;
+  taskId: string;
+  checklistItems: ChecklistItemOption[];
+  labels: FieldTaskLabels;
+}) {
+  const [state, formAction, pending] = useActionState(
+    completeFieldTaskAction.bind(null, locale),
+    initialFieldTaskFormState
+  );
+  const message = messageForState(state, labels);
+
+  return (
+    <form className="field-checklist" action={formAction} data-testid="field-task-complete-form">
+      <input name="taskId" type="hidden" value={taskId} />
+      <div className="field-checklist-items">
+        {checklistItems.map((item) => (
+          <label className="field-checklist-item" key={item.id}>
+            <input
+              data-testid="field-checklist-item"
+              defaultChecked={item.completed}
+              disabled={item.completed}
+              name="checklistItemIds"
+              type="checkbox"
+              value={item.id}
+            />
+            <span>{localizedLabel(item.label, locale)}</span>
+          </label>
+        ))}
+      </div>
+      <label className="field">
+        <span>{labels.note}</span>
+        <textarea name="note" rows={3} />
+      </label>
+      {message ? (
+        <p className="form-error" data-testid="field-task-form-error" role="alert">
+          {message}
+        </p>
+      ) : null}
+      <button
+        className="primary-button field-complete-button"
+        data-testid="field-task-complete"
+        disabled={pending}
+        type="submit"
+      >
+        {pending ? labels.completing : labels.complete}
+      </button>
+    </form>
+  );
 }
 
 function fieldError(state: ReservationFormState, field: string): string | null {
