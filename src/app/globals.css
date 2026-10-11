@@ -404,6 +404,27 @@ a {
   text-decoration: none;
 }
 
+.reservation-row {
+  align-items: stretch;
+}
+
+.reservation-row-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.reservation-revenue-form {
+  display: grid;
+  grid-template-columns: minmax(96px, 1fr) 74px minmax(140px, 1.2fr) auto;
+  align-items: end;
+  gap: 10px;
+  flex: 0 1 560px;
+}
+
 .resource-row span {
   display: grid;
   gap: 4px;
@@ -617,6 +638,8 @@ a {
   .form-grid.two,
   .form-grid.three,
   .form-grid.five,
+  .reservation-row-main,
+  .reservation-revenue-form,
   .detail-grid,
   .statement-summary,
   .statement-table-head,
@@ -650,6 +673,14 @@ a {
 
   .field-task-card {
     align-items: flex-start;
+    display: grid;
+  }
+
+  .reservation-row {
+    display: grid;
+  }
+
+  .reservation-row-main {
     display: grid;
   }
 

@@ -149,6 +149,9 @@
       "forbidden": "Vous n'avez pas acces a cette action.",
       "notFound": "La propriete selectionnee est introuvable dans cette organisation.",
       "config": "Les regles de taches reservation ne sont pas configurees pour cette organisation.",
+      "financeConfig": "Le posting du revenu requiert des regles de commission et un compte d'encaissement actif.",
+      "revenueConflict": "Le revenu a deja ete poste pour cette reservation.",
+      "financeGeneric": "Le revenu de reservation n'a pas pu etre poste. Reessayez.",
       "generic": "La reservation n'a pas pu etre enregistree. Reessayez."
     },
     "form": {
@@ -164,6 +167,15 @@
       "notes": "Notes",
       "saveReservation": "Creer la reservation",
       "saving": "Enregistrement..."
+    },
+    "revenue": {
+      "amount": "Revenu hebergement",
+      "currency": "Devise",
+      "account": "Encaisse sur",
+      "noAccounts": "Ajoutez un compte banque ou caisse actif avant de poster le revenu.",
+      "recordRevenue": "Poster",
+      "recordingRevenue": "Posting...",
+      "revenuePosted": "Revenu poste"
     }
   },
   "Operations": {
