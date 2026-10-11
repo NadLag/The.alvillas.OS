@@ -16,6 +16,12 @@
 ### A.1 Existing code policy
 ALVILLAS OS is an independent, clean-room product with no shared code, data or infrastructure. The new local build is the source of truth. Never import whole subsystems on trust.
 
+### A.2 Mission and scope guard
+The mission is the **complete, production-ready ALVILLAS OS** (all 355 features, 14 phases, 30-step Golden Path, load/pen-test/restore drills, empty `docs/STUBS.md`). It is **not an MVP**. `MISSION.md` states the scope guard rules and the finish line; they bind every session. Feature IDs are locked in `docs/FEATURE_IDS.lock`; removing, merging or renaming one requires the owner's written approval. A blocked feature stays `IN-PROGRESS` with the reason; blocked never means skipped.
+
+### A.3 Increments versus phases
+Work may be delivered in increments (for example "reservations to tasks", "owner portal balance") so that something real is always live. Increments are an **order**, never a scope reduction. Each phase's exit gate (Part E) must still pass in full, and a module is finished only when every feature ID of that module is `DONE`. Prefer completing a module over starting a new one. Before building on top of an area (for example the Owner portal on the ledger), its prerequisites in earlier phases (identity, authorization, audit, i18n) must be `DONE`, or the dependency must be recorded as phase debt and closed first.
+
 ---
 
 ## PART B — The product in one page
@@ -103,6 +109,7 @@ These close the "needs detailed design" gaps. Changing one requires an ADR appro
 - **Small PRs** (one feature or tightly related group), but complete ones. Prefer one PR per feature ID cluster over many fix-up PRs.
 - **Do not:** write audit/gap/status documents; rewrite code that already passes tests; weaken or delete tests to pass; leave placeholders marked done; add dependencies that duplicate the locked stack; hard-code business rules; put secrets in the repo or chat.
 - **Stop and ask the owner only for:** (1) legal/tax/accounting/data-protection decisions, (2) credentials/accounts only the owner can create (list them once, batched), (3) production data/migration approval and production promotion, (4) a change that would break a principle in B.1 or a `DEC` decision, (5) deleting or rewriting existing financial data.
+- **Token and time discipline:** read `AGENTS.md` and `MISSION.md` once per session; find a feature by grepping its ID in this handbook and read only that section and the design notes it names; never re-read whole documents; show only the last ~20 lines of command output; batch file writes and run targeted tests while working, full `verify` once before the PR; update `PROGRESS.md` with a small script, not by hand; digests are at most 12 lines (IDs closed, test names, CI link, blockers, next module).
 - **Decide everything else yourself**, record non-trivial choices as short ADRs, and keep going.
 
 ---
@@ -120,7 +127,7 @@ Order is chosen so that (a) something real is online from the first phase, (b) p
 
 ### Phase 1 — Identity, authorization, audit, i18n, design system  *(XL)*
 **Goal:** the security spine. Nothing business-related is built before this passes.
-**Build:** F-IDN-*, F-AUZ-*, F-AUD-*, F-I18-*, F-DSN-*, F-NTF-01…03 (email provider, in-app notification store, template system). Person / UserAccount / Role / RoleAssignment; custom roles; multiple scoped assignments; RBAC + ABAC + data scope + field-level masking; permission simulator; invitation flow (single-use short-lived codes, phone verification, PIN); admin passkey + MFA; owner password/passkey; sessions, lockout, recovery; audit log; locale routing EN/FR with RTL scaffolding; ALVILLAS Design System tokens and base components; app shells for Admin, Owner, Guest, Field.
+**Build:** F-IDN-*, F-AUZ-*, F-AUD-*, F-I18-*, F-DSN-*, F-NTF-01…03 (email provider, in-app notification store, template system). Person / UserAccount / Role / RoleAssignment; custom roles; multiple scoped assignments; RBAC + ABAC + data scope + field-level masking; permission simulator; invitation flow (single-use short-lived codes, phone verification, PIN); admin passkey + MFA; owner password/passkey; sessions, lockout, recovery; audit log; locale routing EN/FR with RTL scaffolding; ALVILLAS Design System tokens and base components; app shells for Admin, Owner, Guest, Field. Visual and UX direction, tokens, screen inventory and the UI quality checklist are in `DESIGN_BRIEF.md`; it is mandatory reading before any UI work.
 **Exit gate:** automated permission-matrix tests (Part H) pass for every standard role; cross-tenant and cross-scope negative tests pass; co-host example from spec §13 proven (cannot see revenue, other properties, other wallets); simulator never mutates permissions; invitation abuse tests (reuse, expiry, brute force) pass; audit rows exist for all spec §61 events; every screen exists in EN and FR.
 
 ### Phase 2 — Core domain: organization, owners, properties, configuration, team  *(L)*
@@ -704,6 +711,7 @@ Occupancy = occupied nights ÷ available nights (blocks excluded; configurable) 
 - **Merge to `main`:** auto-deploy to **staging** with migrations; smoke + Golden Path subset.
 - **Production:** manual promotion; migrations run before traffic with a verified backup point; expand/contract only (no destructive change in the same release as the code that stops using the column).
 - **Rollback:** redeploy previous build; migrations are forward-compatible by rule; restore procedure documented and rehearsed.
+- **Hosting facts:** production branch is `main`; pull requests get previews only. Choose the function region closest to users and the database (Morocco → Frankfurt `fra1` or Paris `cdg1`) and keep the database in the same region. Vercel *Hobby* is for non-commercial use: move to a paid plan before real owner or guest data. Preview URLs are behind Vercel Deployment Protection by default; use a share link or a stable staging domain to show them to others. Production database migrations are manual and need the owner's approval.
 - **Seeds:** the demo seed is blocked in production by a guard; production only gets the organization and first-admin bootstrap.
 
 ### K.3 Alerts and runbooks
@@ -750,6 +758,10 @@ Build behind interfaces with fakes, flag in `docs/STUBS.md`, and keep going. **N
 13. **One giant PR** → one feature cluster per PR with tests.
 14. **Time zones** → property timezone for stay dates; UTC for instants; test around DST-free Morocco rules and server-time edge cases.
 15. **PDF in Arabic** → react-pdf does not shape Arabic properly; plan the renderer swap early (DEC-14).
+16. **Shrinking scope by increment:** increments are an order, never a reduction; "minimum", "basic", "MVP" or "lite" next to a feature in the ledger is a red flag.
+17. **Building on missing foundations:** do not stack features on unfinished identity, authorization, audit or i18n; close that phase debt first.
+18. **Marking DONE early:** a feature with a stub, a demo-only path or no passing test names stays `IN-PROGRESS`.
+19. **Generic UI:** screens that tick a box but look like a template fail the design checklist and must be fixed before merge.
 
 ---
 

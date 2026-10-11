@@ -4,16 +4,25 @@ You are the lead engineer for **ALVILLAS OS**, a production system that runs a v
 
 **ALVILLAS OS is an independent web application:** its own repository, database, hosting project, accounts, domain and design system. It shares no code, data or infrastructure with any other product, and nothing in this build may depend on one.
 
-## Read first, in this order
-1. `ALVILLAS_OS_BUILD_HANDBOOK.md` — rules, decisions (`DEC-xx`), roadmap, features, detailed design, tests, operations.
-2. `ALVILLAS_OS_Master_Specification.docx` — locked product spec. Spec + handbook decisions are authoritative; if they conflict, ask the owner.
-3. `PROGRESS.md` — the only tracker. Continue from the first `TODO` feature in phase order.
+## Read first (once per session, then work from them)
+1. `MISSION.md` — the goal (complete product, not an MVP), the scope guard, the finish line.
+2. `ALVILLAS_OS_BUILD_HANDBOOK.md` — rules, decisions (`DEC-xx`), roadmap, features, detailed design, tests, operations. Do not re-read it whole: grep a feature ID and read that section.
+3. `ALVILLAS_OS_Master_Specification.docx` — locked product spec. Spec + handbook decisions are authoritative; if they conflict, ask the owner.
+4. `DESIGN_BRIEF.md` — mandatory before any UI work.
+5. `PROGRESS.md` — the only tracker (355 IDs, locked in `docs/FEATURE_IDS.lock`).
 
 ## How you work
+- Work module by module: finish every feature ID of a module before starting another. First close `IN-PROGRESS` items to `DONE` or state the exact blocker, then take the next `TODO`.
 - Loop: take next `TODO` feature → branch → implement with tests → run lint, typecheck, unit, integration (real PostgreSQL) and Playwright **locally** → PR → CI green → merge → verify on staging → update `PROGRESS.md` → next. **Do not wait for the owner between features.**
 - A feature is `DONE` only when the Definition of Done (handbook Part D.2) is fully met. Stubs, placeholders, mockups and seed-only data never count; list stubs in `docs/STUBS.md`.
 - Run real commands and look at real output before claiming anything works. Never weaken or delete a test to make it pass.
 - Small, complete PRs named with feature IDs. ADR in `docs/adr/` for non-trivial decisions.
+
+## Efficiency (saves time and tokens, never scope)
+- Batch file writes, run targeted tests while working, full `npm run verify` once before the PR; show only the last ~20 lines of output.
+- No status reports, audits or registers. Digest at most 12 lines: IDs closed, test names, CI link, blockers, next module. Update `PROGRESS.md` with a script.
+- Reuse existing helpers (`authorize`, `present`, `withTenant`, `Money`, audit writer, outbox). No parallel versions.
+- Never describe a feature as "minimum", "basic", "MVP" or "lite". Scope is unchanged: all 355 features remain required.
 
 ## Never
 - Write audit, gap-list or status-report documents. Quality comes from the Definition of Done and CI.

@@ -8,26 +8,26 @@ F-FND-01 | DONE PR #1 d1f1b81 | CI: `npm run lint`, `npm run typecheck`, `npm ru
 F-FND-02 | DONE PR #1 d1f1b81 | CI: `npm run check:organization-id`, `npm run check:schema-drift`, `tests/integration/postgres-migration.test.ts`.
 F-FND-03 | DONE PR #1 d1f1b81 | CI: `tests/integration/postgres-migration.test.ts`, `npm run check:schema-drift`.
 F-FND-04 | DONE PR #1 d1f1b81 | CI workflow ran `lint`, `typecheck`, policy checks, unit, integration, build and Playwright.
-F-FND-05 | IN-PROGRESS | Env schema and `.env.example` exist; Preview Neon DB and staging app secrets configured separately from Production; production values/provider completion pending owner.
-F-FND-06 | IN-PROGRESS | `vercel.json` guard exists; Preview Neon staging resource `the-alvillas-os-staging` provisioned and migrations applied. S7 proved production Git auto-deploy is blocked: Vercel project production branch is `main`, ignored-build command skips `VERCEL_ENV=production`, and merge-triggered production deployment `dpl_FdX9AFK6zZrgFkf27erhptEMhxpy` was canceled. GitHub `deploy-staging` run `38165949728` failed because staging `VERCEL_TOKEN`/`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID` are unset; owner/environment setup pending.
+F-FND-05 | IN-PROGRESS | Env schema and .env.example exist and Preview/Staging/Production separation is designed. Exact blocker: owner-managed secret stores are not fully configured or verifiable yet; GitHub staging VERCEL_TOKEN, VERCEL_ORG_ID and VERCEL_PROJECT_ID are unset, and production approval/secret setup is owner-controlled.
+F-FND-06 | IN-PROGRESS | Vercel ignored-build production guard was proven in S7: merge-triggered production deployment dpl_FdX9AFK6zZrgFkf27erhptEMhxpy was canceled. Exact blocker: GitHub deploy-staging cannot pass until owner configures staging VERCEL_TOKEN, VERCEL_ORG_ID and VERCEL_PROJECT_ID; production promotion still requires owner approval.
 F-FND-07 | DONE PR #1 d1f1b81 | CI: `tests/unit/health.test.ts`, `tests/e2e/health.spec.ts`.
-F-FND-08 | IN-PROGRESS | Structured logger covered by `tests/unit/logger.test.ts`; Sentry wiring pending.
-F-FND-09 | IN-PROGRESS | Outbox covered by `tests/unit/outbox-dispatcher.test.ts`; Inngest wiring pending.
-F-FND-10 | DONE PR #1 d1f1b81 | CI: `tests/unit/fake-providers.test.ts`; fakes listed in `docs/STUBS.md`.
+F-FND-08 | IN-PROGRESS | Structured logger with request/org context is covered by tests/unit/logger.test.ts. Exact blocker: Sentry frontend, backend and jobs wiring is not implemented or verifiable until the owner provides a Sentry project/DSN and related CI/provider credentials.
+F-FND-09 | IN-PROGRESS | Outbox dispatcher is covered by tests/unit/outbox-dispatcher.test.ts. Exact blocker: Inngest provider wiring, worker execution, signing/event credentials and retry observability are not configured; downstream jobs still use only the local dispatcher abstraction.
+F-FND-10 | IN-PROGRESS | Provider interfaces and dev/test fakes exist, with production-use guard coverage in tests/unit/fake-providers.test.ts. Exact blocker: docs/STUBS.md still lists src/platform/providers/fakes.ts; real provider wiring and admin not-configured indicators are missing for email, signature, payment, storage, reservation adapter, notification channel, PDF renderer and rate limiter.
 F-FND-11 | DONE PR #1 d1f1b81 | CI: `tests/unit/money.test.ts`, `npm run check:ledger`, `tests/integration/postgres-migration.test.ts`.
 F-FND-12 | DONE PR #1 d1f1b81 | CI: `tests/unit/reference-number.test.ts`, `tests/integration/postgres-migration.test.ts`.
-F-FND-13 | IN-PROGRESS | Bootstrap covered by `tests/unit/bootstrap-admin.test.ts` and auth E2E; staging bootstrap executed and tenant admin count verified; PR/CI/merge still pending.
-F-FND-14 | IN-PROGRESS | Demo seed covered by `tests/unit/demo-seed.test.ts`; full demo dataset pending.
-F-FND-15 | IN-PROGRESS | Runbooks exist; managed PostgreSQL backup/restore rehearsal pending.
-F-FND-16 | IN-PROGRESS | Rate limiter covered by `tests/unit/rate-limiter.test.ts`; login adoption pending.
-F-IDN-01 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: tenant-scoped Person table added for first-admin bootstrap. Full lifecycle/profile model incomplete.
-F-IDN-02 | IN-PROGRESS | Auth.js credentials login with argon2id covered by `tests/e2e/auth.spec.ts`; MFA/passkeys incomplete.
+F-FND-13 | IN-PROGRESS | First-admin bootstrap creates the organization, person, account and initial reservation task template idempotently from env; covered by tests/unit/bootstrap-admin.test.ts and auth E2E. Exact blocker: current M1 PR CI and post-merge staging verification are not attached yet, so the handbook DoD is not complete.
+F-FND-14 | IN-PROGRESS | Demo seed is production-blocked and deterministic for the demo organization, covered by tests/unit/demo-seed.test.ts. Exact blocker: complete deterministic demo data for owners, properties, reservations, tasks, ledger and EN/FR paths is not built.
+F-FND-15 | IN-PROGRESS | Runbook files exist. Exact blocker: managed PostgreSQL backup and restore rehearsal has not been executed with captured evidence; staging/production database access and rehearsal timing are owner-controlled.
+F-FND-16 | IN-PROGRESS | Postgres RateLimiter and login adoption are covered by tests/unit/rate-limiter.test.ts and tests/e2e/auth.spec.ts. Exact blocker: DEC-22 adoption is incomplete for PIN login, invitation redemption, public lead form, Guest Hub links and exports because those endpoint features are still TODO.
+F-IDN-01 | IN-PROGRESS | Tenant-scoped Person table exists for bootstrap. Exact blocker: complete person lifecycle/profile model, duplicate handling, contact management, owner/field-staff relationships and UI are not implemented.
+F-IDN-02 | IN-PROGRESS | Auth.js credentials login with argon2id is covered by tests/e2e/auth.spec.ts. Exact blocker: multiple authentication methods, admin/finance MFA, passkeys and account recovery flows are not implemented.
 F-IDN-03 | TODO |
 F-IDN-04 | TODO |
 F-IDN-05 | TODO |
 F-IDN-06 | TODO |
 F-IDN-07 | TODO |
-F-IDN-08 | IN-PROGRESS | Auth.js JWT session and logout covered by `tests/e2e/auth.spec.ts`; device list/revoke incomplete.
+F-IDN-08 | IN-PROGRESS | Auth.js JWT session and logout are covered by tests/e2e/auth.spec.ts. Exact blocker: session device list, visible rotation metadata and remote revoke UI/API are not implemented.
 F-IDN-09 | TODO |
 F-IDN-10 | TODO |
 F-IDN-11 | TODO |
@@ -36,28 +36,28 @@ F-AUZ-02 | TODO |
 F-AUZ-03 | TODO |
 F-AUZ-04 | TODO |
 F-AUZ-05 | TODO |
-F-AUZ-06 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: deny-by-default `authorize` primitive with unit tests added. Not yet wired through every entry point.
+F-AUZ-06 | IN-PROGRESS | Deny-by-default authorize primitive is covered by tests/unit/authorize.test.ts. Exact blocker: authorize() is not enforced by every server action, API route, job and repository entry point, and full standard-role matrix tests are missing.
 F-AUZ-07 | TODO |
-F-AUZ-08 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: central `present(resource, ctx)` serializer with data-class field masking and unit tests added. Not yet adopted across real resources/endpoints.
-F-AUZ-09 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: Prisma tenant columns, ENABLE/FORCE RLS policies, policy check, and `withTenant` session helper added. Repository adoption and real-Postgres RLS verification incomplete.
+F-AUZ-08 | IN-PROGRESS | present(resource, ctx) serializer and data-class masking are covered by unit tests. Exact blocker: real resource serializers and endpoints do not consistently use data classes/masking, and financial/personal/sensitive negative tests are missing.
+F-AUZ-09 | IN-PROGRESS | Prisma tenant columns, ENABLE/FORCE RLS policies, policy check and withTenant helper exist. Exact blocker: repository adoption and real-Postgres cross-tenant tests do not yet cover every business model.
 F-AUZ-10 | TODO |
 F-AUZ-11 | TODO |
 F-AUZ-12 | TODO |
-F-AUD-01 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: `audit_log` table, append-only trigger migration, service-layer writer, grant revocation migration, and audit CI guard added. Full event coverage and real-Postgres verification incomplete.
+F-AUD-01 | IN-PROGRESS | audit_log table, append-only trigger/grants and audit CI guard exist. Exact blocker: required audit event coverage across all spec section 61 events and application entry points is incomplete.
 F-AUD-02 | TODO |
-F-AUD-03 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: audit schema and writer include who/what/when/where/before/after/reason/request id fields. Redaction and full app coverage incomplete.
+F-AUD-03 | IN-PROGRESS | Audit schema and writer include who, what, when, where, before, after, reason and request id fields. Exact blocker: central secret/PII redaction and before/after coverage are not enforced for every audit writer.
 F-AUD-04 | TODO |
 F-AUD-05 | TODO |
-F-I18-01 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: locale-prefixed `/en`, `/fr`, `/ar` routes, localized metadata, and middleware added. Full app coverage incomplete.
-F-I18-02 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: EN/FR/AR message catalogs and key-parity check added. Full string extraction incomplete.
-F-I18-03 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: `dir` support and RTL-safe CSS guard added. Full component/icon mirroring coverage incomplete.
-F-I18-04 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: locale-aware date, number, currency, and plural formatter utilities with unit tests added. Full app adoption incomplete.
-F-I18-05 | IN-PROGRESS | EN/FR switch in login/app shell; persisted per-user preference incomplete.
+F-I18-01 | IN-PROGRESS | Locale-prefixed /en, /fr and /ar routes, localized metadata and middleware exist. Exact blocker: localized routing, errors and metadata are not proven across every screen/action.
+F-I18-02 | IN-PROGRESS | EN/FR/AR catalogs and key-parity check exist. Exact blocker: hard-coded UI strings remain possible in feature screens; extraction enforcement and full screen coverage are incomplete.
+F-I18-03 | IN-PROGRESS | dir support and RTL-safe CSS guard exist. Exact blocker: component-level RTL validation, icon mirroring and Playwright coverage for RTL screens are incomplete.
+F-I18-04 | IN-PROGRESS | Locale-aware date, number, currency and plural formatter utilities are covered by tests/unit/i18n-format.test.ts. Exact blocker: full app adoption and localized validation messages are incomplete.
+F-I18-05 | IN-PROGRESS | EN/FR switch exists in login/app shell and preferred_locale is partially modeled. Exact blocker: persisted per-user/per-owner language preference is not wired through settings, auth redirects and owner portal notifications.
 F-I18-06 | TODO |
 F-I18-07 | TODO |
-F-DSN-01 | IN-PROGRESS | Base CSS tokens applied to login/app shell; full token/component package incomplete.
+F-DSN-01 | IN-PROGRESS | Base CSS tokens are applied to login/app shell. Exact blocker: full token/component package, states, motion and accessibility checklist coverage are incomplete.
 F-DSN-02 | TODO |
-F-DSN-03 | IN-PROGRESS | Authenticated admin shell covered by `tests/e2e/auth.spec.ts`; dense admin navigation incomplete.
+F-DSN-03 | IN-PROGRESS | Authenticated admin shell is covered by tests/e2e/auth.spec.ts. Exact blocker: dense admin navigation/information architecture for 500+ properties, breadcrumbs/search/command patterns and responsive states are incomplete.
 F-DSN-04 | TODO |
 F-DSN-05 | TODO |
 F-DSN-06 | TODO |
@@ -78,8 +78,8 @@ F-CFG-02 | TODO |
 F-CFG-03 | TODO |
 F-CFG-04 | TODO |
 F-CFG-05 | TODO |
-F-CFG-06 | IN-PROGRESS | S6 uses tenant-scoped `finance.commission` config rules to resolve property > owner > organization commission rules for reservation revenue posting. Evidence: PR #12 `543fee1`, CI run `38158574875` green, protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified 20% property rule on an 8000.00 MAD reservation.
-F-CFG-07 | IN-PROGRESS | S6 snapshots the selected commission rule, owner share, basis and accrual event into immutable `commission_snapshot` rows before posting. Evidence: PR #12 `543fee1`; CI `tests/integration/postgres-migration.test.ts` asserts the snapshotted property rule/version and future rule isolation.
+F-CFG-06 | IN-PROGRESS | S6 uses tenant-scoped finance.commission config rules for property, owner and organization commission resolution. Exact blocker: a generic immutable snapshot function for reservation rules is not extracted/reused beyond commission posting.
+F-CFG-07 | IN-PROGRESS | S6 snapshots selected commission rule, owner share, basis and accrual event into immutable commission_snapshot rows. Exact blocker: full key catalog is not implemented for OTA fee, expense treatment, approval thresholds, payout schedule, staff compensation, laundry pricing, inventory minimums, workflows, service pricing, tax, operating rules and mid-stay threshold.
 F-CFG-08 | TODO |
 F-ORG-01 | TODO |
 F-ORG-02 | TODO |
