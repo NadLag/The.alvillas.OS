@@ -1,0 +1,14 @@
+{
+  "Metadata": {
+    "title": "ALVILLAS OS",
+    "description": "Systeme d'exploitation prive pour ALVILLAS SARL"
+  },
+  "Home": {
+    "title": "ALVILLAS OS",
+    "subtitle": "Le systeme d'exploitation prive de la gestion de villas, concu pour les acces limites, l'argent auditable, le terrain hors ligne et une source de verite unique.",
+    "statusLabel": "Statut de la fondation",
+    "phase": "Fondation phase 0",
+    "tenant": "Limite par organisation",
+    "i18n": "EN, FR, AR pret"
+  }
+}

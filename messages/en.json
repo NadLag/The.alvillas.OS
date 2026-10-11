@@ -1,0 +1,14 @@
+{
+  "Metadata": {
+    "title": "ALVILLAS OS",
+    "description": "Private operating system for ALVILLAS SARL"
+  },
+  "Home": {
+    "title": "ALVILLAS OS",
+    "subtitle": "The private operating system for villa management, built around scoped access, auditable money, offline field work, and one source of truth.",
+    "statusLabel": "Foundation status",
+    "phase": "Phase 0 foundation",
+    "tenant": "Organization scoped",
+    "i18n": "EN, FR, AR ready"
+  }
+}

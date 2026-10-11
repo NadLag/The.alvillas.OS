@@ -1,0 +1,236 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id                 String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  name               String
+  baseCurrency       String                 @default("MAD") @map("base_currency") @db.Char(3)
+  createdAt          DateTime               @default(now()) @map("created_at")
+  updatedAt          DateTime               @updatedAt @map("updated_at")
+  configRules        ConfigRule[]
+  outboxEvents       OutboxEvent[]
+  auditLogs          AuditLog[]
+  referenceSequences ReferenceSequence[]
+  exchangeRates      ExchangeRate[]
+  ledgerAccounts     LedgerAccount[]
+  transactions       FinancialTransaction[]
+  postings           Posting[]
+  rateLimitBuckets   RateLimitBucket[]
+  persons            Person[]
+  userAccounts       UserAccount[]
+
+  @@map("organization")
+}
+
+model Person {
+  id              String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  displayName     String        @map("display_name")
+  email           String?
+  phone           String?
+  preferredLocale String        @default("en") @map("preferred_locale") @db.Char(2)
+  archivedAt      DateTime?     @map("archived_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  userAccounts    UserAccount[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId, displayName])
+  @@map("person")
+}
+
+model UserAccount {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  personId       String       @map("person_id") @db.Uuid
+  email          String?
+  passwordHash   String?      @map("password_hash")
+  status         String       @default("ACTIVE")
+  lastLoginAt    DateTime?    @map("last_login_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  person         Person       @relation(fields: [personId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, email])
+  @@index([organizationId, personId])
+  @@map("user_account")
+}
+
+model LedgerAccount {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  code           String
+  name           String
+  accountType    String       @map("account_type")
+  normalSide     String       @map("normal_side")
+  archivedAt     DateTime?    @map("archived_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  postings       Posting[]
+
+  @@unique([organizationId, code])
+  @@map("ledger_account")
+}
+
+model FinancialTransaction {
+  id                     String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId         String                 @map("organization_id") @db.Uuid
+  reference              String
+  occurredAt             DateTime               @map("occurred_at")
+  description            String?
+  reversesTransactionId  String?                @map("reverses_transaction_id") @db.Uuid
+  createdBy              String?                @map("created_by") @db.Uuid
+  createdAt              DateTime               @default(now()) @map("created_at")
+  organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  postings               Posting[]
+  reversesTransaction    FinancialTransaction?  @relation("FinancialTransactionReversal", fields: [reversesTransactionId], references: [id], onDelete: Restrict)
+  reversedByTransactions FinancialTransaction[] @relation("FinancialTransactionReversal")
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, occurredAt])
+  @@map("financial_transaction")
+}
+
+model Posting {
+  id              String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String               @map("organization_id") @db.Uuid
+  transactionId   String               @map("transaction_id") @db.Uuid
+  ledgerAccountId String               @map("ledger_account_id") @db.Uuid
+  side            String
+  amount          Decimal              @db.Decimal(18, 2)
+  currency        String               @db.Char(3)
+  bucket          String?
+  dimensions      Json?
+  createdAt       DateTime             @default(now()) @map("created_at")
+  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  transaction     FinancialTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  ledgerAccount   LedgerAccount        @relation(fields: [ledgerAccountId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, transactionId])
+  @@index([organizationId, ledgerAccountId])
+  @@map("posting")
+}
+
+model RateLimitBucket {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  keyHash        String       @map("key_hash")
+  windowStart    DateTime     @map("window_start")
+  windowSeconds  Int          @map("window_seconds")
+  count          Int          @default(0)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, keyHash, windowStart, windowSeconds])
+  @@index([organizationId, windowStart])
+  @@map("rate_limit_bucket")
+}
+
+model ReferenceSequence {
+  organizationId String       @map("organization_id") @db.Uuid
+  prefix         String
+  nextValue      BigInt       @default(1) @map("next_value")
+  width          Int          @default(4)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@id([organizationId, prefix])
+  @@map("reference_sequence")
+}
+
+model Currency {
+  code      String   @id @db.Char(3)
+  name      String
+  minorUnit Int      @default(2) @map("minor_unit")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("currency")
+}
+
+model ExchangeRate {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  fromCurrency   String       @map("from_currency") @db.Char(3)
+  toCurrency     String       @map("to_currency") @db.Char(3)
+  rate           Decimal      @db.Decimal(18, 8)
+  source         String
+  effectiveAt    DateTime     @map("effective_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, fromCurrency, toCurrency, effectiveAt])
+  @@map("exchange_rate")
+}
+
+model ConfigRule {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  key            String
+  scopeType      String       @map("scope_type")
+  scopeId        String?      @map("scope_id") @db.Uuid
+  value          Json
+  effectiveFrom  DateTime     @map("effective_from")
+  effectiveTo    DateTime?    @map("effective_to")
+  version        Int
+  createdBy      String?      @map("created_by") @db.Uuid
+  reason         String
+  archivedAt     DateTime?    @map("archived_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, key, scopeType, effectiveFrom])
+  @@map("config_rule")
+}
+
+model OutboxEvent {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  type           String
+  payload        Json
+  status         String       @default("PENDING")
+  idempotencyKey String       @map("idempotency_key")
+  occurredAt     DateTime     @default(now()) @map("occurred_at")
+  processedAt    DateTime?    @map("processed_at")
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, status, occurredAt])
+  @@map("outbox_event")
+}
+
+model AuditLog {
+  id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  actorId         String?      @map("actor_id") @db.Uuid
+  action          String
+  resourceType    String       @map("resource_type")
+  resourceId      String?      @map("resource_id") @db.Uuid
+  ipAddress       String?      @map("ip_address")
+  deviceId        String?      @map("device_id")
+  propertyScopeId String?      @map("property_scope_id") @db.Uuid
+  before          Json?
+  after           Json?
+  reason          String?
+  requestId       String       @map("request_id")
+  occurredAt      DateTime     @default(now()) @map("occurred_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, occurredAt])
+  @@index([organizationId, resourceType, resourceId])
+  @@map("audit_log")
+}
