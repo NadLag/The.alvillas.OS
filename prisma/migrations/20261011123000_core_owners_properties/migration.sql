@@ -12,12 +12,9 @@ CREATE TABLE owner (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT owner_preferred_locale_check CHECK (preferred_locale IN ('en', 'fr', 'ar')),
-  CONSTRAINT owner_email_lowercase_check CHECK (email IS NULL OR email = lower(email))
+  CONSTRAINT owner_email_lowercase_check CHECK (email IS NULL OR email = lower(email)),
+  CONSTRAINT owner_org_email_unique UNIQUE (organization_id, email)
 );
-
-CREATE UNIQUE INDEX owner_org_email_unique
-  ON owner (organization_id, email)
-  WHERE email IS NOT NULL;
 
 CREATE INDEX owner_org_display_name_idx
   ON owner (organization_id, display_name);
@@ -43,8 +40,8 @@ CREATE TABLE property (
   parking_spaces integer NOT NULL DEFAULT 0,
   max_guests integer NOT NULL,
   timezone text NOT NULL DEFAULT 'Africa/Casablanca',
-  amenities jsonb NOT NULL DEFAULT '[]'::jsonb,
-  photo_urls jsonb NOT NULL DEFAULT '[]'::jsonb,
+  amenities jsonb NOT NULL,
+  photo_urls jsonb NOT NULL,
   status text NOT NULL DEFAULT 'DRAFT',
   archived_at timestamptz,
   created_by uuid,
