@@ -29,6 +29,8 @@
     "check:ledger": "tsx tests/scripts/check-ledger.ts",
     "check:audit": "tsx tests/scripts/check-audit.ts",
     "check:progress": "tsx tests/scripts/check-progress.ts",
+    "progress:report": "tsx tests/scripts/progress-report.ts",
+    "progress:set": "tsx tests/scripts/set-progress-note.ts",
     "verify": "npm run lint && npm run typecheck && npm run check:i18n && npm run check:rtl-css && npm run check:boundaries && npm run check:organization-id && npm run check:ledger && npm run check:audit && npm run check:progress && npm run test:unit && npm run build"
   },
   "dependencies": {
