@@ -2,6 +2,24 @@ import { describe, expect, it, vi } from "vitest";
 import { bootstrapFirstAdmin, bootstrapOrganizationId } from "../../prisma/bootstrap-admin";
 import type { TenantTransaction, TenantTransactionRunner } from "@/platform/db/tenant";
 
+type ConfigRuleFindFirstArgs = {
+  where: {
+    organizationId: string;
+    key: string;
+    scopeType: string;
+    scopeId: null;
+    archivedAt: null;
+  };
+};
+
+type ConfigRuleCreateArgs = {
+  data: {
+    organizationId: string;
+    key: string;
+    createdBy: string;
+  };
+};
+
 describe("first-admin bootstrap", () => {
   it("requires explicit admin credentials", async () => {
     await expect(
@@ -17,12 +35,23 @@ describe("first-admin bootstrap", () => {
       upsert: vi.fn(() => Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000002" }))
     };
     const userAccount = {
-      upsert: vi.fn(() => Promise.resolve({}))
+      upsert: vi.fn(() => Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000003" }))
+    };
+    const configRule = {
+      findFirst: vi.fn((args: ConfigRuleFindFirstArgs) => {
+        void args;
+        return Promise.resolve(null);
+      }),
+      create: vi.fn((args: ConfigRuleCreateArgs) => {
+        void args;
+        return Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000004" });
+      })
     };
     const tx = {
       $executeRaw: vi.fn(() => Promise.resolve(1)),
       person,
-      userAccount
+      userAccount,
+      configRule
     };
     const client: TenantTransactionRunner & { organization: typeof organization } = {
       organization,
@@ -50,5 +79,20 @@ describe("first-admin bootstrap", () => {
       })
     );
     expect(userAccount.upsert).toHaveBeenCalledOnce();
+    expect(configRule.findFirst).toHaveBeenCalledWith({
+      where: {
+        organizationId: bootstrapOrganizationId,
+        key: "ops.reservation_task_templates",
+        scopeType: "organization",
+        scopeId: null,
+        archivedAt: null
+      }
+    });
+    expect(configRule.create).toHaveBeenCalledOnce();
+    expect(configRule.create.mock.calls[0]?.[0].data).toMatchObject({
+      organizationId: bootstrapOrganizationId,
+      key: "ops.reservation_task_templates",
+      createdBy: "018f0a0b-0000-7000-9000-000000000003"
+    });
   });
 });

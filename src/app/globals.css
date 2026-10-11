@@ -101,6 +101,7 @@ a {
 .locale-switch,
 .app-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 10px;
 }
@@ -248,6 +249,7 @@ a {
 
 .app-actions {
   align-items: center;
+  max-width: 100%;
 }
 
 .app-actions form {
@@ -255,7 +257,9 @@ a {
 }
 
 .secondary-button {
+  justify-content: center;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .workspace-grid,
@@ -478,6 +482,16 @@ a {
   .app-actions,
   .locale-switch {
     justify-content: flex-start;
+    width: 100%;
+  }
+
+  .app-actions .secondary-button,
+  .app-actions form {
+    flex: 1 1 140px;
+  }
+
+  .app-actions form .secondary-button {
+    width: 100%;
   }
 
   .auth-panel {

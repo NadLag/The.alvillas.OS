@@ -25,15 +25,35 @@ test("version endpoint returns deployment metadata shape", async ({ request }) =
 });
 
 test("readiness endpoint reports database status", async ({ request }) => {
-  const response = await request.get("/api/readiness");
-  const body = (await response.json()) as {
-    service: { service: string };
-    checks: Array<{ name: string }>;
-  };
+  await expect
+    .poll(
+      async () => {
+        const response = await request.get("/api/readiness");
+        const contentType = response.headers()["content-type"] ?? "";
 
-  expect([200, 503]).toContain(response.status());
-  expect(body).toMatchObject({
-    service: { service: "alvillas-os" },
-    checks: [expect.objectContaining({ name: "database" })]
-  });
+        if (!contentType.includes("application/json")) {
+          return {
+            ok: false,
+            status: response.status(),
+            contentType
+          };
+        }
+
+        const body = (await response.json()) as {
+          service?: { service?: string };
+          checks?: Array<{ name?: string }>;
+        };
+
+        return {
+          ok:
+            [200, 503].includes(response.status()) &&
+            body.service?.service === "alvillas-os" &&
+            Boolean(body.checks?.some((check) => check.name === "database")),
+          status: response.status(),
+          contentType
+        };
+      },
+      { timeout: 10000 }
+    )
+    .toMatchObject({ ok: true });
 });

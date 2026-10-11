@@ -1,7 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { expect, test } from "@playwright/test";
+import { e2eEmail, ensureE2EAdmin } from "./support/auth";
 
-const adminEmail = process.env.ADMIN_EMAIL ?? "admin@example.test";
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 let prisma: PrismaClient | undefined;
@@ -44,9 +44,12 @@ test.describe("admin authentication", () => {
     await expect(page).toHaveURL(/\/en\/login/u);
   });
 
-  test("logs in and logs out the bootstrap admin", async ({ page }) => {
+  test("logs in and logs out the bootstrap admin", async ({ page }, testInfo) => {
+    const loginEmail = e2eEmail("auth-login", testInfo.project.name);
+    await ensureE2EAdmin(loginEmail, adminPassword);
+
     await page.goto("/en/login");
-    await page.getByTestId("login-email").fill(adminEmail);
+    await page.getByTestId("login-email").fill(loginEmail);
     await page.getByTestId("login-password").fill(adminPassword);
     await page.getByTestId("login-submit").click();
 
@@ -58,11 +61,15 @@ test.describe("admin authentication", () => {
     await expect(page).toHaveURL(/\/en\/login/u);
   });
 
-  test("rejects wrong passwords and rate limits repeated attempts", async ({ page }) => {
+  test("rejects wrong passwords and rate limits repeated attempts", async ({ page }, testInfo) => {
+    const rejectedEmail = `blocked-${testInfo.project.name}-${Date.now()}@example.test`
+      .toLowerCase()
+      .replace(/[^a-z0-9@.-]+/gu, "-");
+
     await page.goto("/en/login");
 
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      await page.getByTestId("login-email").fill(adminEmail);
+      await page.getByTestId("login-email").fill(rejectedEmail);
       await page.getByTestId("login-password").fill(`wrong-password-${attempt}`);
       await Promise.all([
         page.waitForResponse(

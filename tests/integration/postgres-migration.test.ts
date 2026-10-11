@@ -1,7 +1,15 @@
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
+import {
+  ReservationNotFoundError,
+  createManualReservation,
+  listOperationTasks
+} from "@/modules/reservations/application/reservation-service";
+import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
 let prisma: PrismaClient;
@@ -64,6 +72,30 @@ function appRoleUrl(databaseUrl: string): string {
   url.username = "alvillas_app_test";
   url.password = "alvillas_app_test";
   return url.toString();
+}
+
+const integrationActorId = "018f0a0b-0000-7000-9000-000000000701";
+
+function actorForOrganization(
+  organizationId: string,
+  permissions = new Set([
+    permissionKey("reservation", "view"),
+    permissionKey("reservation", "create"),
+    permissionKey("task", "view"),
+    permissionKey("task", "create")
+  ])
+): ReservationActorContext {
+  const authContext: AuthContext = {
+    organizationId,
+    permissions,
+    scopes: [{ organizationId }]
+  };
+
+  return {
+    organizationId,
+    actorId: integrationActorId,
+    authContext
+  };
 }
 
 async function configureAppRole(databaseUrl: string): Promise<string> {
@@ -298,6 +330,221 @@ describe("PostgreSQL baseline", () => {
     expect(ownerVisibleToOrgB).toBeNull();
     expect(propertyVisibleToOrgB).toBeNull();
     expect(linkVisibleWithoutTenant).toBeNull();
+  });
+
+  it("creates manual reservations with idempotent task generation, overlap detection, and tenant isolation", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Reservations A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Reservations B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+
+    const property = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const owner = await tx.owner.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Reservation Owner",
+            email: `reservation-owner-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const createdProperty = await tx.property.create({
+          data: {
+            organizationId: orgA.id,
+            name: "Villa Reservation Flow",
+            addressLine1: "Route de Fes",
+            city: "Marrakech",
+            countryCode: "MA",
+            propertyType: "Villa",
+            bedrooms: 4,
+            bathrooms: 4,
+            livingSpaces: 2,
+            maxGuests: 8,
+            timezone: "Africa/Casablanca",
+            amenities: ["pool"],
+            photoUrls: [],
+            propertyOwners: {
+              create: {
+                organizationId: orgA.id,
+                ownerId: owner.id,
+                shareBps: 10000,
+                isPrimary: true,
+                createdBy: integrationActorId
+              }
+            },
+            createdBy: integrationActorId
+          }
+        });
+
+        await tx.configRule.create({
+          data: {
+            organizationId: orgA.id,
+            key: "ops.reservation_task_templates",
+            scopeType: "organization",
+            scopeId: null,
+            value: {
+              tasks: [
+                {
+                  key: "arrival",
+                  type: "ARRIVAL_PREPARATION",
+                  title: {
+                    en: "Arrival preparation",
+                    fr: "Preparation arrivee"
+                  },
+                  due: "CHECK_IN",
+                  priority: "NORMAL"
+                },
+                {
+                  key: "checkout",
+                  type: "CHECKOUT_CLEANING",
+                  title: {
+                    en: "Checkout cleaning",
+                    fr: "Menage depart"
+                  },
+                  due: "CHECK_OUT",
+                  priority: "NORMAL"
+                }
+              ]
+            },
+            effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+            version: 1,
+            createdBy: integrationActorId,
+            reason: "Integration reservation task templates"
+          }
+        });
+
+        return createdProperty;
+      }
+    );
+
+    const ctx = actorForOrganization(orgA.id);
+    const firstInput = {
+      propertyId: property.id,
+      guestName: "S3 Guest One",
+      guestEmail: "s3.guest.one@example.test",
+      source: "MANUAL" as const,
+      checkIn: "2027-03-10",
+      checkOut: "2027-03-14",
+      adultCount: 2,
+      childCount: 1,
+      notes: "Manual reservation integration flow",
+      idempotencyKey: randomUUID()
+    };
+    const first = await createManualReservation(ctx, firstInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-reservation-first",
+      ipAddress: "127.0.0.1"
+    });
+
+    expect(first.idempotent).toBe(false);
+    expect(first.reservation.reference).toBe("RES-0001");
+    expect(first.conflictCount).toBe(0);
+    expect(first.tasks.map((task) => task.title.en).sort()).toEqual([
+      "Arrival preparation",
+      "Checkout cleaning"
+    ]);
+
+    const replay = await createManualReservation(ctx, firstInput, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-reservation-replay",
+      ipAddress: "127.0.0.1"
+    });
+
+    expect(replay.idempotent).toBe(true);
+    expect(replay.reservation.id).toBe(first.reservation.id);
+    expect(replay.tasks).toHaveLength(2);
+
+    const overlapping = await createManualReservation(
+      ctx,
+      {
+        ...firstInput,
+        guestName: "S3 Guest Two",
+        guestEmail: "s3.guest.two@example.test",
+        checkIn: "2027-03-12",
+        checkOut: "2027-03-16",
+        idempotencyKey: randomUUID()
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-reservation-overlap",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(overlapping.conflictCount).toBe(1);
+
+    const tasks = await listOperationTasks(ctx, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    expect(tasks).toHaveLength(4);
+
+    const counts = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => ({
+        reservations: await tx.reservation.count({ where: { propertyId: property.id } }),
+        tasks: await tx.operationTask.count({ where: { propertyId: property.id } }),
+        conflicts: await tx.reservationConflict.count({
+          where: { reservationId: overlapping.reservation.id }
+        }),
+        audits: await tx.auditLog.findMany({
+          where: {
+            action: {
+              in: ["reservation.create", "reservation.conflict.detected", "task.create"]
+            }
+          },
+          select: { action: true },
+          orderBy: { occurredAt: "asc" }
+        })
+      })
+    );
+
+    expect(counts).toMatchObject({
+      reservations: 2,
+      tasks: 4,
+      conflicts: 1
+    });
+    expect(counts.audits.map((audit) => audit.action).sort()).toEqual([
+      "reservation.conflict.detected",
+      "reservation.create",
+      "reservation.create",
+      "task.create",
+      "task.create",
+      "task.create",
+      "task.create"
+    ]);
+
+    const reservationVisibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.reservation.findFirst({ where: { id: first.reservation.id } })
+    );
+    const taskVisibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.operationTask.findFirst({ where: { reservationId: first.reservation.id } })
+    );
+    const conflictVisibleWithoutTenant = await prisma.reservationConflict.findFirst({
+      where: { reservationId: overlapping.reservation.id }
+    });
+
+    expect(reservationVisibleToOrgB).toBeNull();
+    expect(taskVisibleToOrgB).toBeNull();
+    expect(conflictVisibleWithoutTenant).toBeNull();
+
+    await expect(
+      createManualReservation(actorForOrganization(orgB.id), firstInput, {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-reservation-cross-tenant",
+        ipAddress: "127.0.0.1"
+      })
+    ).rejects.toBeInstanceOf(ReservationNotFoundError);
   });
 
   it("allocates tenant-scoped reference numbers under RLS", async () => {
