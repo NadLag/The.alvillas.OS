@@ -194,6 +194,11 @@
     "completing": "Finalisation...",
     "saving": "Enregistrement...",
     "note": "Note de fin",
+    "offlineQueued": "Enregistre hors ligne. La synchronisation reprendra avec la connexion.",
+    "offlineSyncing": "Synchronisation de la fin de tache...",
+    "offlineSynced": "Fin de tache synchronisee.",
+    "offlineConflict": "Cette tache a change avant la synchronisation.",
+    "offlineRejected": "Cette fin de tache n'est plus assignee a vous.",
     "forms": {
       "validation": "Completez chaque element de la checklist avant de terminer.",
       "unauthorized": "Reconnectez-vous pour continuer.",

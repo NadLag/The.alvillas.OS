@@ -90,6 +90,7 @@ describe("reservation service authorization and validation", () => {
         ctx,
         {
           taskId: "018f0a0b-0000-7000-9000-000000000501",
+          idempotencyKey: "018f0a0b-0000-7000-9000-000000000602",
           checklistItemIds: ["018f0a0b-0000-7000-9000-000000000601"]
         },
         { db: deniedDb }

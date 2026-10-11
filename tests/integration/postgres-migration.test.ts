@@ -11,6 +11,7 @@ import {
   listAssignedFieldTasks,
   listOperationTasks
 } from "@/modules/reservations/application/reservation-service";
+import { pushSyncOps } from "@/modules/reservations/application/sync-service";
 import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
@@ -550,6 +551,7 @@ describe("PostgreSQL baseline", () => {
       ctx,
       {
         taskId: fieldTasks[0].id,
+        idempotencyKey: "018f0a0b-0000-7000-9000-000000000801",
         checklistItemIds: fieldTasks[0].checklistItems.map((item) => item.id),
         note: "Integration field completion"
       },
@@ -562,7 +564,45 @@ describe("PostgreSQL baseline", () => {
 
     expect(completed.state).toBe("COMPLETED");
     expect(completed.completedByUserAccountId).toBe(integrationActorId);
+    expect(completed.completionIdempotencyKey).toBe("018f0a0b-0000-7000-9000-000000000801");
     expect(completed.checklistItems.every((item) => item.completedAt)).toBe(true);
+
+    const syncTask = fieldTasks[1];
+    const syncPush = {
+      device_id: "integration-device-field-01",
+      op_schema_version: 1 as const,
+      ops: [
+        {
+          client_op_id: "018f0a0b-0000-7000-9000-000000000802",
+          type: "field_task.complete" as const,
+          payload: {
+            taskId: syncTask.id,
+            checklistItemIds: syncTask.checklistItems.map((item) => item.id),
+            note: "Integration queued completion"
+          },
+          client_created_at: "2026-10-11T12:00:00.000Z"
+        }
+      ]
+    };
+    const synced = await pushSyncOps(ctx, syncPush, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-field-sync",
+      ipAddress: "127.0.0.1"
+    });
+    const duplicate = await pushSyncOps(ctx, syncPush, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-field-sync-duplicate",
+      ipAddress: "127.0.0.1"
+    });
+
+    expect(synced.results[0]).toMatchObject({
+      client_op_id: "018f0a0b-0000-7000-9000-000000000802",
+      status: "APPLIED"
+    });
+    expect(duplicate.results[0]).toMatchObject({
+      client_op_id: "018f0a0b-0000-7000-9000-000000000802",
+      status: "DUPLICATE"
+    });
 
     const counts = await withTenant(
       prisma as unknown as TenantTransactionRunner,
@@ -571,6 +611,7 @@ describe("PostgreSQL baseline", () => {
         reservations: await tx.reservation.count({ where: { propertyId: property.id } }),
         tasks: await tx.operationTask.count({ where: { propertyId: property.id } }),
         checkItems: await tx.operationTaskChecklistItem.count({ where: { organizationId: orgA.id } }),
+        syncOps: await tx.syncOp.count({ where: { organizationId: orgA.id } }),
         conflicts: await tx.reservationConflict.count({
           where: { reservationId: overlapping.reservation.id }
         }),
@@ -590,12 +631,14 @@ describe("PostgreSQL baseline", () => {
       reservations: 2,
       tasks: 4,
       checkItems: 8,
+      syncOps: 1,
       conflicts: 1
     });
     expect(counts.audits.map((audit) => audit.action).sort()).toEqual([
       "reservation.conflict.detected",
       "reservation.create",
       "reservation.create",
+      "task.complete",
       "task.complete",
       "task.create",
       "task.create",
@@ -630,6 +673,7 @@ describe("PostgreSQL baseline", () => {
         actorForOrganization(orgB.id),
         {
           taskId: completed.id,
+          idempotencyKey: "018f0a0b-0000-7000-9000-000000000803",
           checklistItemIds: completed.checklistItems.map((item) => item.id)
         },
         {

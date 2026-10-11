@@ -194,6 +194,11 @@
     "completing": "Completing...",
     "saving": "Saving...",
     "note": "Completion note",
+    "offlineQueued": "Saved offline. It will sync when the connection returns.",
+    "offlineSyncing": "Syncing saved completion...",
+    "offlineSynced": "Completion synced.",
+    "offlineConflict": "This task changed before the saved completion synced.",
+    "offlineRejected": "This saved completion is no longer assigned to you.",
     "forms": {
       "validation": "Complete every checklist item before finishing.",
       "unauthorized": "Sign in again to continue.",
