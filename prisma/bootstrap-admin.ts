@@ -58,7 +58,7 @@ export async function bootstrapFirstAdmin(
       }
     });
 
-    await tx.userAccount.upsert({
+    const account = await tx.userAccount.upsert({
       where: { organizationId_email: { organizationId: organization.id, email } },
       update: {
         personId: person.id,
@@ -73,6 +73,57 @@ export async function bootstrapFirstAdmin(
         status: "ACTIVE"
       }
     });
+
+    const existingReservationTaskConfig = await tx.configRule.findFirst({
+      where: {
+        organizationId: organization.id,
+        key: "ops.reservation_task_templates",
+        scopeType: "organization",
+        scopeId: null,
+        archivedAt: null
+      }
+    });
+
+    if (!existingReservationTaskConfig) {
+      await tx.configRule.create({
+        data: {
+          organizationId: organization.id,
+          key: "ops.reservation_task_templates",
+          scopeType: "organization",
+          scopeId: null,
+          value: {
+            tasks: [
+              {
+                key: "arrival",
+                type: "ARRIVAL_PREPARATION",
+                title: {
+                  en: "Arrival preparation",
+                  fr: "Preparation arrivee",
+                  ar: "Arrival preparation"
+                },
+                due: "CHECK_IN",
+                priority: "NORMAL"
+              },
+              {
+                key: "checkout",
+                type: "CHECKOUT_CLEANING",
+                title: {
+                  en: "Checkout cleaning",
+                  fr: "Menage depart",
+                  ar: "Checkout cleaning"
+                },
+                due: "CHECK_OUT",
+                priority: "NORMAL"
+              }
+            ]
+          },
+          effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+          version: 1,
+          createdBy: account.id,
+          reason: "Bootstrap standard reservation task templates"
+        }
+      });
+    }
   });
 }
 

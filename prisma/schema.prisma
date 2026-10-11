@@ -8,25 +8,28 @@ datasource db {
 }
 
 model Organization {
-  id                 String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  name               String
-  baseCurrency       String                 @default("MAD") @map("base_currency") @db.Char(3)
-  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  configRules        ConfigRule[]
-  outboxEvents       OutboxEvent[]
-  auditLogs          AuditLog[]
-  referenceSequences ReferenceSequence[]
-  exchangeRates      ExchangeRate[]
-  ledgerAccounts     LedgerAccount[]
-  transactions       FinancialTransaction[]
-  postings           Posting[]
-  rateLimitBuckets   RateLimitBucket[]
-  persons            Person[]
-  userAccounts       UserAccount[]
-  owners             Owner[]
-  properties         Property[]
-  propertyOwners     PropertyOwner[]
+  id                   String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  name                 String
+  baseCurrency         String                 @default("MAD") @map("base_currency") @db.Char(3)
+  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  configRules          ConfigRule[]
+  outboxEvents         OutboxEvent[]
+  auditLogs            AuditLog[]
+  referenceSequences   ReferenceSequence[]
+  exchangeRates        ExchangeRate[]
+  ledgerAccounts       LedgerAccount[]
+  transactions         FinancialTransaction[]
+  postings             Posting[]
+  rateLimitBuckets     RateLimitBucket[]
+  persons              Person[]
+  userAccounts         UserAccount[]
+  owners               Owner[]
+  properties           Property[]
+  propertyOwners       PropertyOwner[]
+  reservations         Reservation[]
+  reservationConflicts ReservationConflict[]
+  operationTasks       OperationTask[]
 
   @@map("organization")
 }
@@ -90,32 +93,35 @@ model Owner {
 }
 
 model Property {
-  id              String          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId  String          @map("organization_id") @db.Uuid
-  name            String
-  addressLine1    String          @map("address_line_1")
-  addressLine2    String?         @map("address_line_2")
-  city            String
-  region          String?
-  countryCode     String          @default("MA") @map("country_code") @db.Char(2)
-  propertyType    String          @map("property_type")
-  bedrooms        Int
-  bathrooms       Int
-  livingSpaces    Int             @default(1) @map("living_spaces")
-  hasPool         Boolean         @default(false) @map("has_pool")
-  hasGarden       Boolean         @default(false) @map("has_garden")
-  parkingSpaces   Int             @default(0) @map("parking_spaces")
-  maxGuests       Int             @map("max_guests")
-  timezone        String          @default("Africa/Casablanca")
-  amenities       Json
-  photoUrls       Json            @map("photo_urls")
-  status          String          @default("DRAFT")
-  archivedAt      DateTime?       @map("archived_at") @db.Timestamptz(6)
-  createdBy       String?         @map("created_by") @db.Uuid
-  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  propertyOwners  PropertyOwner[]
+  id                  String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String                @map("organization_id") @db.Uuid
+  name                String
+  addressLine1        String                @map("address_line_1")
+  addressLine2        String?               @map("address_line_2")
+  city                String
+  region              String?
+  countryCode         String                @default("MA") @map("country_code") @db.Char(2)
+  propertyType        String                @map("property_type")
+  bedrooms            Int
+  bathrooms           Int
+  livingSpaces        Int                   @default(1) @map("living_spaces")
+  hasPool             Boolean               @default(false) @map("has_pool")
+  hasGarden           Boolean               @default(false) @map("has_garden")
+  parkingSpaces       Int                   @default(0) @map("parking_spaces")
+  maxGuests           Int                   @map("max_guests")
+  timezone            String                @default("Africa/Casablanca")
+  amenities           Json
+  photoUrls           Json                  @map("photo_urls")
+  status              String                @default("DRAFT")
+  archivedAt          DateTime?             @map("archived_at") @db.Timestamptz(6)
+  createdBy           String?               @map("created_by") @db.Uuid
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  propertyOwners      PropertyOwner[]
+  Reservation         Reservation[]
+  ReservationConflict ReservationConflict[]
+  OperationTask       OperationTask[]
 
   @@index([organizationId, city, name], map: "property_org_city_name_idx")
   @@index([organizationId, status], map: "property_org_status_idx")
@@ -142,6 +148,88 @@ model PropertyOwner {
   @@index([organizationId, ownerId], map: "property_owner_org_owner_idx")
   @@index([organizationId, propertyId], map: "property_owner_org_property_idx")
   @@map("property_owner")
+}
+
+model Reservation {
+  id              String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String                @map("organization_id") @db.Uuid
+  propertyId      String                @map("property_id") @db.Uuid
+  reference       String
+  source          String
+  externalId      String?               @map("external_id")
+  status          String                @default("CONFIRMED")
+  guestName       String                @map("guest_name")
+  guestEmail      String?               @map("guest_email")
+  checkIn         DateTime              @map("check_in") @db.Date
+  checkOut        DateTime              @map("check_out") @db.Date
+  nights          Int
+  adultCount      Int                   @default(1) @map("adult_count")
+  childCount      Int                   @default(0) @map("child_count")
+  notes           String?
+  idempotencyKey  String                @map("idempotency_key")
+  archivedAt      DateTime?             @map("archived_at") @db.Timestamptz(6)
+  createdBy       String?               @map("created_by") @db.Uuid
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property        Property              @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  operationTasks  OperationTask[]
+  conflicts       ReservationConflict[] @relation("ReservationConflictReservation")
+  conflictingWith ReservationConflict[] @relation("ReservationConflictOther")
+
+  @@unique([organizationId, reference], map: "reservation_org_reference_unique")
+  @@unique([organizationId, idempotencyKey], map: "reservation_org_idempotency_unique")
+  @@unique([organizationId, propertyId, source, externalId], map: "reservation_org_property_source_external_unique")
+  @@index([organizationId, propertyId, checkIn, checkOut], map: "reservation_org_property_dates_idx")
+  @@index([organizationId, source, externalId], map: "reservation_org_source_external_idx")
+  @@map("reservation")
+}
+
+model ReservationConflict {
+  id                       String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId           String       @map("organization_id") @db.Uuid
+  propertyId               String       @map("property_id") @db.Uuid
+  reservationId            String       @map("reservation_id") @db.Uuid
+  conflictingReservationId String       @map("conflicting_reservation_id") @db.Uuid
+  reason                   String
+  status                   String       @default("OPEN")
+  createdBy                String?      @map("created_by") @db.Uuid
+  createdAt                DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property                 Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation              Reservation  @relation("ReservationConflictReservation", fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  conflictingReservation   Reservation  @relation("ReservationConflictOther", fields: [conflictingReservationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, reservationId, conflictingReservationId], map: "reservation_conflict_pair_unique")
+  @@index([organizationId, propertyId, status], map: "reservation_conflict_org_property_status_idx")
+  @@map("reservation_conflict")
+}
+
+model OperationTask {
+  id                String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId    String       @map("organization_id") @db.Uuid
+  propertyId        String       @map("property_id") @db.Uuid
+  reservationId     String?      @map("reservation_id") @db.Uuid
+  type              String
+  state             String       @default("PLANNED")
+  priority          String       @default("NORMAL")
+  dueDate           DateTime     @map("due_date") @db.Date
+  titleTranslations Json         @map("title_translations")
+  idempotencyKey    String       @map("idempotency_key")
+  archivedAt        DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdBy         String?      @map("created_by") @db.Uuid
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property          Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation       Reservation? @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, idempotencyKey], map: "operation_task_org_idempotency_unique")
+  @@index([organizationId, dueDate, state], map: "operation_task_org_due_state_idx")
+  @@index([organizationId, propertyId, dueDate], map: "operation_task_org_property_due_idx")
+  @@index([organizationId, reservationId], map: "operation_task_org_reservation_idx")
+  @@map("operation_task")
 }
 
 model LedgerAccount {

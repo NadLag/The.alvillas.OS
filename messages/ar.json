@@ -38,6 +38,8 @@
     "logout": "Log out",
     "owners": "Owners",
     "properties": "Properties",
+    "reservations": "Reservations",
+    "operations": "Operations",
     "todayLabel": "Today",
     "welcome": "Welcome, {name}",
     "summary": "The security spine now carries the first core records: authenticated owners and properties, scoped by organization and audited on create.",
@@ -127,5 +129,52 @@
         "saveProperty": "Create property"
       }
     }
+  },
+  "Reservations": {
+    "eyebrow": "Reservations",
+    "title": "Manual reservations",
+    "subtitle": "Create a confirmed manual stay and let the configured workflow generate the operational tasks.",
+    "backToWorkspace": "Workspace",
+    "listLabel": "Reservation register",
+    "createLabel": "Create manual reservation",
+    "empty": "No reservations have been created for this organization yet.",
+    "count": "{count, plural, one {# reservation} other {# reservations}}",
+    "rowMeta": "{property} - {guest}",
+    "stayDates": "{checkIn, date, medium} - {checkOut, date, medium}",
+    "forms": {
+      "validation": "Check the highlighted fields and try again.",
+      "unauthorized": "Sign in again to continue.",
+      "forbidden": "You do not have access to perform this action.",
+      "notFound": "The selected property was not found in this organization.",
+      "config": "Reservation task rules are not configured for this organization.",
+      "generic": "The reservation could not be saved. Try again."
+    },
+    "form": {
+      "property": "Property",
+      "noProperties": "Create a property before adding a reservation.",
+      "guestName": "Guest name",
+      "guestEmail": "Guest email",
+      "source": "Source",
+      "checkIn": "Check-in",
+      "checkOut": "Check-out",
+      "adultCount": "Adults",
+      "childCount": "Children",
+      "notes": "Notes",
+      "saveReservation": "Create reservation",
+      "saving": "Saving..."
+    }
+  },
+  "Operations": {
+    "eyebrow": "Operations",
+    "title": "Task list",
+    "subtitle": "Authorized operational work generated from confirmed reservations.",
+    "backToWorkspace": "Workspace",
+    "newReservation": "New reservation",
+    "listLabel": "Operations queue",
+    "empty": "No operational tasks have been generated yet.",
+    "count": "{count, plural, one {# task} other {# tasks}}",
+    "rowMeta": "{property} - {reservation}",
+    "dueDate": "{dueDate, date, medium}",
+    "noReservation": "No reservation"
   }
 }

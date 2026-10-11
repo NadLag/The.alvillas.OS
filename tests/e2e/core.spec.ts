@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { e2eEmail, ensureE2EAdmin } from "./support/auth";
 
-const adminEmail = process.env.ADMIN_EMAIL ?? "admin@example.test";
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
 
@@ -15,9 +15,12 @@ test.describe("owners and properties journey", () => {
     const ownerName = `Owner ${suffix}`;
     const ownerEmail = `owner-${suffix}@example.test`;
     const propertyName = `Villa ${suffix}`;
+    const loginEmail = e2eEmail(`core-${suffix}`, testInfo.project.name);
+
+    await ensureE2EAdmin(loginEmail, adminPassword);
 
     await page.goto("/en/login");
-    await page.getByTestId("login-email").fill(adminEmail);
+    await page.getByTestId("login-email").fill(loginEmail);
     await page.getByTestId("login-password").fill(adminPassword);
     await page.getByTestId("login-submit").click();
     await expect(page).toHaveURL(/\/en\/app/u);

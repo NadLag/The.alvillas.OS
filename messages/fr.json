@@ -38,6 +38,8 @@
     "logout": "Deconnexion",
     "owners": "Proprietaires",
     "properties": "Proprietes",
+    "reservations": "Reservations",
+    "operations": "Operations",
     "todayLabel": "Aujourd'hui",
     "welcome": "Bienvenue, {name}",
     "summary": "Le socle de securite porte maintenant les premiers dossiers coeur: proprietaires et proprietes authentifies, limites par organisation et audites a la creation.",
@@ -127,5 +129,52 @@
         "saveProperty": "Creer la propriete"
       }
     }
+  },
+  "Reservations": {
+    "eyebrow": "Reservations",
+    "title": "Reservations manuelles",
+    "subtitle": "Creez un sejour manuel confirme et laissez le workflow configure generer les taches operationnelles.",
+    "backToWorkspace": "Espace de travail",
+    "listLabel": "Registre reservations",
+    "createLabel": "Creer une reservation manuelle",
+    "empty": "Aucune reservation n'a encore ete creee pour cette organisation.",
+    "count": "{count, plural, one {# reservation} other {# reservations}}",
+    "rowMeta": "{property} - {guest}",
+    "stayDates": "{checkIn, date, medium} - {checkOut, date, medium}",
+    "forms": {
+      "validation": "Verifiez les champs signales puis reessayez.",
+      "unauthorized": "Reconnectez-vous pour continuer.",
+      "forbidden": "Vous n'avez pas acces a cette action.",
+      "notFound": "La propriete selectionnee est introuvable dans cette organisation.",
+      "config": "Les regles de taches reservation ne sont pas configurees pour cette organisation.",
+      "generic": "La reservation n'a pas pu etre enregistree. Reessayez."
+    },
+    "form": {
+      "property": "Propriete",
+      "noProperties": "Creez une propriete avant d'ajouter une reservation.",
+      "guestName": "Nom du voyageur",
+      "guestEmail": "Email du voyageur",
+      "source": "Source",
+      "checkIn": "Arrivee",
+      "checkOut": "Depart",
+      "adultCount": "Adultes",
+      "childCount": "Enfants",
+      "notes": "Notes",
+      "saveReservation": "Creer la reservation",
+      "saving": "Enregistrement..."
+    }
+  },
+  "Operations": {
+    "eyebrow": "Operations",
+    "title": "Liste des taches",
+    "subtitle": "Travail operationnel autorise genere depuis les reservations confirmees.",
+    "backToWorkspace": "Espace de travail",
+    "newReservation": "Nouvelle reservation",
+    "listLabel": "File operations",
+    "empty": "Aucune tache operationnelle n'a encore ete generee.",
+    "count": "{count, plural, one {# tache} other {# taches}}",
+    "rowMeta": "{property} - {reservation}",
+    "dueDate": "{dueDate, date, medium}",
+    "noReservation": "Sans reservation"
   }
 }
