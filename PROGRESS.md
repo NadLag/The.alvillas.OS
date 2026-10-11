@@ -78,8 +78,8 @@ F-CFG-02 | TODO |
 F-CFG-03 | TODO |
 F-CFG-04 | TODO |
 F-CFG-05 | TODO |
-F-CFG-06 | TODO |
-F-CFG-07 | TODO |
+F-CFG-06 | IN-PROGRESS | S6 uses tenant-scoped `finance.commission` config rules to resolve property > owner > organization commission rules for reservation revenue posting. Evidence: PR #12 `543fee1`, CI run `38158574875` green, protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified 20% property rule on an 8000.00 MAD reservation.
+F-CFG-07 | IN-PROGRESS | S6 snapshots the selected commission rule, owner share, basis and accrual event into immutable `commission_snapshot` rows before posting. Evidence: PR #12 `543fee1`; CI `tests/integration/postgres-migration.test.ts` asserts the snapshotted property rule/version and future rule isolation.
 F-CFG-08 | TODO |
 F-ORG-01 | TODO |
 F-ORG-02 | TODO |
@@ -171,14 +171,14 @@ F-FIN-09 | TODO |
 F-FIN-10 | TODO |
 F-FIN-11 | TODO |
 F-FIN-12 | TODO |
-F-FIN-13 | TODO |
-F-FIN-14 | TODO |
+F-FIN-13 | IN-PROGRESS | S6 reservation accommodation revenue posting merged via PR #12 `543fee1`: authorized UI records 8000.00 MAD manual reservation revenue and creates balanced append-only owner revenue postings exactly once. Evidence: CI run `38158574875` green including real PostgreSQL and Playwright; protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified `STAGING_S6_REVENUE_POSTED=true`.
+F-FIN-14 | IN-PROGRESS | S6 applies the property's snapshotted commission rule to reservation accommodation revenue and posts owner net plus ALVILLAS commission without editable balances. Evidence: PR #12 `543fee1`; CI integration proves 8000.00 MAD gross -> 1600.00 MAD commission and 6400.00 MAD owner net, idempotency, reversal, tenant isolation and authorization; staging verified owner statement closing `6400.00`.
 F-FIN-15 | TODO |
 F-FIN-16 | TODO |
 F-FIN-17 | TODO |
-F-FIN-18 | IN-PROGRESS | S5 owner portal live balance merged via PR #10 `8996606`: owner ledger opening/credits/debits/closing derived from `OWNER_PAYABLE` postings only. Evidence: CI runs `38154596499` and `38154822044` green, including real PostgreSQL integration and Playwright; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified owner statement closing `5300.00` for `Owner Ledger Villa staging-s5-1791735861339`.
+F-FIN-18 | IN-PROGRESS | S5 owner portal live balance merged via PR #10 `8996606`: owner ledger opening/credits/debits/closing derived from `OWNER_PAYABLE` postings only. S6 PR #12 `543fee1` posts reservation revenue into the same derived balance. Evidence: CI run `38158574875` green; protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified owner statement closing `6400.00` after revenue posting.
 F-FIN-19 | TODO |
-F-FIN-20 | IN-PROGRESS | S5 shows remaining owner payable and posting-derived held-location breakdown without exposing internal bank account codes. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified `owner-money-held` equals PostgreSQL owner-payable closing `5300.00`. Broader collected/allocated/used/reconciliation workflows pending.
+F-FIN-20 | IN-PROGRESS | S5 shows remaining owner payable and posting-derived held-location breakdown without exposing internal bank account codes. S6 PR #12 `543fee1` adds reservation revenue/commission postings into that derived payable. Evidence: CI run `38158574875` green; protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified `owner-money-held`/closing `6400.00`. Broader collected/allocated/used/reconciliation workflows pending.
 F-FIN-21 | TODO |
 F-FIN-22 | TODO |
 F-FIN-23 | TODO |
@@ -200,7 +200,7 @@ F-FIN-38 | TODO |
 F-FIN-39 | IN-PROGRESS | Branch `f-fnd-01-foundation-skeleton`: central serializer masks financial fields by data class. Full financial endpoint adoption and negative tests incomplete.
 F-FIN-40 | TODO |
 F-FIN-41 | TODO |
-F-FIN-42 | IN-PROGRESS | S5 statement data generator added for period, opening, lines by bucket, credits/debits and closing from postings. Evidence: PR #10 `8996606`; local `npm run verify`, `npm run test:integration`, `npm run check:schema-drift`, and `npm run test:e2e -- owner-portal-statement.spec.ts` passed on 2026-10-11; CI runs `38154596499`/`38154822044` green; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified 5 ledger lines. PDF/CSV reuse pending.
+F-FIN-42 | IN-PROGRESS | S5 statement data generator added for period, opening, lines by bucket, credits/debits and closing from postings. S6 PR #12 `543fee1` feeds reservation revenue and commission lines into the statement. Evidence: CI run `38158574875` green; protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified owner revenue and commission buckets with closing `6400.00`. PDF/CSV reuse pending.
 F-DOC-01 | TODO |
 F-DOC-02 | TODO |
 F-DOC-03 | TODO |
@@ -285,12 +285,12 @@ F-SUP-02 | TODO |
 F-SUP-03 | TODO |
 F-SUP-04 | TODO |
 F-SUP-05 | TODO |
-F-OWN-01 | IN-PROGRESS | S5 owner portal entry `/app/owner-portal` lists only properties linked through tenant-scoped `owner_portal_access`. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified owner-only property list, cross-owner 404, and tenant/no-owner 404.
+F-OWN-01 | IN-PROGRESS | S5 owner portal entry `/app/owner-portal` lists only properties linked through tenant-scoped `owner_portal_access`. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; S6 protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified cross-owner direct property statement access returns 404 after reservation revenue posting.
 F-OWN-02 | TODO |
-F-OWN-03 | IN-PROGRESS | S5 owner revenue, commission, expenses, services and payouts are visible as statement bucket totals derived from ledger postings. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified 5 statement lines from ledger postings. Broader revenue/expense portal views pending.
-F-OWN-04 | IN-PROGRESS | S5 owner money held by ALVILLAS appears as remaining payable from `OWNER_PAYABLE` closing balance. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified UI `owner-money-held` equals PostgreSQL posting total `5300.00`. Full collected/allocated/used/paid drilldown pending.
+F-OWN-03 | IN-PROGRESS | S5 owner revenue, commission, expenses, services and payouts are visible as statement bucket totals derived from ledger postings. S6 PR #12 `543fee1` adds reservation-posted owner revenue and commission buckets. Evidence: CI run `38158574875` green; protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified owner revenue and commission bucket totals after posting. Broader revenue/expense portal views pending.
+F-OWN-04 | IN-PROGRESS | S5 owner money held by ALVILLAS appears as remaining payable from `OWNER_PAYABLE` closing balance. S6 PR #12 `543fee1` updates that payable from reservation revenue minus commission. Evidence: CI run `38158574875` green; protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified owner statement closing `6400.00`. Full collected/allocated/used/paid drilldown pending.
 F-OWN-05 | TODO |
-F-OWN-06 | IN-PROGRESS | S5 monthly statement screen added with EN/FR display and ledger-derived opening/closing balances. Evidence: PR #10 `8996606`, CI runs `38154596499`/`38154822044`; protected Preview staging `dpl_EmK5o5rrETHV3bvcmccYHqSEETPQ` verified owner login -> property selection -> statement. PDF and CSV generation remain pending.
+F-OWN-06 | IN-PROGRESS | S5 monthly statement screen added with EN/FR display and ledger-derived opening/closing balances. S6 PR #12 `543fee1` verified the statement updates after an authorized reservation revenue posting. Evidence: CI run `38158574875` green; protected Preview staging `dpl_GZgCD9jfoqFJXstKf9ux8dt2sm5L` verified owner login -> property selection -> statement closing `6400.00`. PDF and CSV generation remain pending.
 F-OWN-07 | TODO |
 F-OWN-08 | TODO |
 F-OWN-09 | TODO |
