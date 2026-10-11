@@ -25,6 +25,7 @@
     "check:rtl-css": "tsx tests/scripts/check-rtl-css.ts",
     "check:boundaries": "tsx tests/scripts/check-boundaries.ts",
     "check:organization-id": "tsx tests/scripts/check-organization-id.ts",
+    "check:schema-drift": "tsx tests/scripts/check-schema-drift.ts",
     "check:ledger": "tsx tests/scripts/check-ledger.ts",
     "check:audit": "tsx tests/scripts/check-audit.ts",
     "check:progress": "tsx tests/scripts/check-progress.ts",

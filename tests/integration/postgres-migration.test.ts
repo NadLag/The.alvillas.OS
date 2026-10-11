@@ -8,10 +8,15 @@ let prisma: PrismaClient;
 let adminPrisma: PrismaClient | undefined;
 let containerName: string;
 let ownsContainer = false;
-let enforcesRls = false;
 
-function bin(command: string): string {
-  return process.platform === "win32" ? `${command}.cmd` : command;
+function runNpx(args: string[], env: NodeJS.ProcessEnv): void {
+  const command = process.platform === "win32" ? "cmd.exe" : "npx";
+  const commandArgs = process.platform === "win32" ? ["/d", "/s", "/c", "npx.cmd", ...args] : args;
+
+  execFileSync(command, commandArgs, {
+    env,
+    stdio: "inherit"
+  });
 }
 
 function docker(args: string[]): string {
@@ -61,6 +66,32 @@ function appRoleUrl(databaseUrl: string): string {
   return url.toString();
 }
 
+async function configureAppRole(databaseUrl: string): Promise<string> {
+  adminPrisma = new PrismaClient({
+    datasources: { db: { url: databaseUrl } }
+  });
+
+  await adminPrisma.$executeRawUnsafe(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'alvillas_app_test') THEN
+        CREATE ROLE alvillas_app_test LOGIN;
+      END IF;
+    END
+    $$;
+  `);
+  await adminPrisma.$executeRawUnsafe(
+    "ALTER ROLE alvillas_app_test WITH LOGIN PASSWORD 'alvillas_app_test'"
+  );
+  await adminPrisma.$executeRawUnsafe("GRANT USAGE ON SCHEMA public TO alvillas_app_test");
+  await adminPrisma.$executeRawUnsafe(
+    "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO alvillas_app_test"
+  );
+  await adminPrisma.$executeRawUnsafe("REVOKE UPDATE, DELETE ON audit_log FROM alvillas_app_test");
+
+  return appRoleUrl(databaseUrl);
+}
+
 describe("PostgreSQL baseline", () => {
   beforeAll(async () => {
     let databaseUrl = process.env.TEST_DATABASE_URL;
@@ -95,36 +126,9 @@ describe("PostgreSQL baseline", () => {
       )}/alvillas_os?schema=public`;
     }
 
-    execFileSync(bin("npx"), ["prisma", "migrate", "deploy"], {
-      env: { ...process.env, DATABASE_URL: databaseUrl },
-      stdio: "inherit"
-    });
+    runNpx(["prisma", "migrate", "deploy"], { ...process.env, DATABASE_URL: databaseUrl });
 
-    if (ownsContainer) {
-      adminPrisma = new PrismaClient({
-        datasources: { db: { url: databaseUrl } }
-      });
-
-      await adminPrisma.$executeRawUnsafe(`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'alvillas_app_test') THEN
-            CREATE ROLE alvillas_app_test LOGIN PASSWORD 'alvillas_app_test';
-          END IF;
-        END
-        $$;
-      `);
-      await adminPrisma.$executeRawUnsafe("GRANT USAGE ON SCHEMA public TO alvillas_app_test");
-      await adminPrisma.$executeRawUnsafe(
-        "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO alvillas_app_test"
-      );
-      await adminPrisma.$executeRawUnsafe(
-        "REVOKE UPDATE, DELETE ON audit_log FROM alvillas_app_test"
-      );
-
-      databaseUrl = appRoleUrl(databaseUrl);
-      enforcesRls = true;
-    }
+    databaseUrl = await configureAppRole(databaseUrl);
 
     prisma = new PrismaClient({
       datasources: { db: { url: databaseUrl } }
@@ -178,10 +182,6 @@ describe("PostgreSQL baseline", () => {
   });
 
   it("enforces tenant isolation with PostgreSQL RLS", async () => {
-    if (!enforcesRls) {
-      return;
-    }
-
     const [orgA, orgB] = await Promise.all([
       prisma.organization.create({
         data: { name: "ALVILLAS RLS A", baseCurrency: "MAD" }
@@ -224,10 +224,6 @@ describe("PostgreSQL baseline", () => {
   });
 
   it("allocates tenant-scoped reference numbers under RLS", async () => {
-    if (!enforcesRls) {
-      return;
-    }
-
     const org = await prisma.organization.create({
       data: { name: "ALVILLAS References", baseCurrency: "MAD" }
     });
@@ -256,10 +252,6 @@ describe("PostgreSQL baseline", () => {
   });
 
   it("enforces balanced append-only ledger transactions", async () => {
-    if (!enforcesRls) {
-      return;
-    }
-
     const org = await prisma.organization.create({
       data: { name: "ALVILLAS Ledger", baseCurrency: "MAD" }
     });

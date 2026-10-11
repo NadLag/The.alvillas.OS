@@ -11,8 +11,8 @@ model Organization {
   id                 String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   name               String
   baseCurrency       String                 @default("MAD") @map("base_currency") @db.Char(3)
-  createdAt          DateTime               @default(now()) @map("created_at")
-  updatedAt          DateTime               @updatedAt @map("updated_at")
+  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   configRules        ConfigRule[]
   outboxEvents       OutboxEvent[]
   auditLogs          AuditLog[]
@@ -35,14 +35,14 @@ model Person {
   email           String?
   phone           String?
   preferredLocale String        @default("en") @map("preferred_locale") @db.Char(2)
-  archivedAt      DateTime?     @map("archived_at")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
-  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  archivedAt      DateTime?     @map("archived_at") @db.Timestamptz(6)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   userAccounts    UserAccount[]
 
-  @@unique([organizationId, email])
-  @@index([organizationId, displayName])
+  @@unique([organizationId, email], map: "person_org_email_unique")
+  @@index([organizationId, displayName], map: "person_org_display_name_idx")
   @@map("person")
 }
 
@@ -53,14 +53,14 @@ model UserAccount {
   email          String?
   passwordHash   String?      @map("password_hash")
   status         String       @default("ACTIVE")
-  lastLoginAt    DateTime?    @map("last_login_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  person         Person       @relation(fields: [personId], references: [id], onDelete: Restrict)
+  lastLoginAt    DateTime?    @map("last_login_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person         Person       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
-  @@unique([organizationId, email])
-  @@index([organizationId, personId])
+  @@unique([organizationId, email], map: "user_account_org_email_unique")
+  @@index([organizationId, personId], map: "user_account_org_person_idx")
   @@map("user_account")
 }
 
@@ -71,13 +71,13 @@ model LedgerAccount {
   name           String
   accountType    String       @map("account_type")
   normalSide     String       @map("normal_side")
-  archivedAt     DateTime?    @map("archived_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  archivedAt     DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   postings       Posting[]
 
-  @@unique([organizationId, code])
+  @@unique([organizationId, code], map: "ledger_account_org_code_unique")
   @@map("ledger_account")
 }
 
@@ -85,18 +85,18 @@ model FinancialTransaction {
   id                     String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId         String                 @map("organization_id") @db.Uuid
   reference              String
-  occurredAt             DateTime               @map("occurred_at")
+  occurredAt             DateTime               @map("occurred_at") @db.Timestamptz(6)
   description            String?
   reversesTransactionId  String?                @map("reverses_transaction_id") @db.Uuid
   createdBy              String?                @map("created_by") @db.Uuid
-  createdAt              DateTime               @default(now()) @map("created_at")
-  organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdAt              DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   postings               Posting[]
-  reversesTransaction    FinancialTransaction?  @relation("FinancialTransactionReversal", fields: [reversesTransactionId], references: [id], onDelete: Restrict)
+  reversesTransaction    FinancialTransaction?  @relation("FinancialTransactionReversal", fields: [reversesTransactionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   reversedByTransactions FinancialTransaction[] @relation("FinancialTransactionReversal")
 
-  @@unique([organizationId, reference])
-  @@index([organizationId, occurredAt])
+  @@unique([organizationId, reference], map: "financial_transaction_org_reference_unique")
+  @@index([organizationId, occurredAt], map: "financial_transaction_org_occurred_idx")
   @@map("financial_transaction")
 }
 
@@ -110,13 +110,14 @@ model Posting {
   currency        String               @db.Char(3)
   bucket          String?
   dimensions      Json?
-  createdAt       DateTime             @default(now()) @map("created_at")
-  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  transaction     FinancialTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
-  ledgerAccount   LedgerAccount        @relation(fields: [ledgerAccountId], references: [id], onDelete: Restrict)
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization    Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  transaction     FinancialTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  ledgerAccount   LedgerAccount        @relation(fields: [ledgerAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  currencyRef     Currency             @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
 
-  @@index([organizationId, transactionId])
-  @@index([organizationId, ledgerAccountId])
+  @@index([organizationId, transactionId], map: "posting_org_transaction_idx")
+  @@index([organizationId, ledgerAccountId], map: "posting_org_account_idx")
   @@map("posting")
 }
 
@@ -124,15 +125,15 @@ model RateLimitBucket {
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   keyHash        String       @map("key_hash")
-  windowStart    DateTime     @map("window_start")
+  windowStart    DateTime     @map("window_start") @db.Timestamptz(6)
   windowSeconds  Int          @map("window_seconds")
   count          Int          @default(0)
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
-  @@unique([organizationId, keyHash, windowStart, windowSeconds])
-  @@index([organizationId, windowStart])
+  @@unique([organizationId, keyHash, windowStart, windowSeconds], map: "rate_limit_bucket_unique_window")
+  @@index([organizationId, windowStart], map: "rate_limit_bucket_org_window_idx")
   @@map("rate_limit_bucket")
 }
 
@@ -141,35 +142,40 @@ model ReferenceSequence {
   prefix         String
   nextValue      BigInt       @default(1) @map("next_value")
   width          Int          @default(4)
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@id([organizationId, prefix])
   @@map("reference_sequence")
 }
 
 model Currency {
-  code      String   @id @db.Char(3)
-  name      String
-  minorUnit Int      @default(2) @map("minor_unit")
-  createdAt DateTime @default(now()) @map("created_at")
+  code              String         @id @db.Char(3)
+  name              String
+  minorUnit         Int            @default(2) @map("minor_unit")
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  exchangeRatesFrom ExchangeRate[] @relation("ExchangeRateFromCurrency")
+  exchangeRatesTo   ExchangeRate[] @relation("ExchangeRateToCurrency")
+  postings          Posting[]
 
   @@map("currency")
 }
 
 model ExchangeRate {
-  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  fromCurrency   String       @map("from_currency") @db.Char(3)
-  toCurrency     String       @map("to_currency") @db.Char(3)
-  rate           Decimal      @db.Decimal(18, 8)
-  source         String
-  effectiveAt    DateTime     @map("effective_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  fromCurrency    String       @map("from_currency") @db.Char(3)
+  toCurrency      String       @map("to_currency") @db.Char(3)
+  rate            Decimal      @db.Decimal(18, 8)
+  source          String
+  effectiveAt     DateTime     @map("effective_at") @db.Timestamptz(6)
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  fromCurrencyRef Currency     @relation("ExchangeRateFromCurrency", fields: [fromCurrency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  toCurrencyRef   Currency     @relation("ExchangeRateToCurrency", fields: [toCurrency], references: [code], onDelete: Restrict, onUpdate: NoAction)
 
-  @@index([organizationId, fromCurrency, toCurrency, effectiveAt])
+  @@index([organizationId, fromCurrency, toCurrency, effectiveAt], map: "exchange_rate_org_pair_effective_idx")
   @@map("exchange_rate")
 }
 
@@ -180,17 +186,17 @@ model ConfigRule {
   scopeType      String       @map("scope_type")
   scopeId        String?      @map("scope_id") @db.Uuid
   value          Json
-  effectiveFrom  DateTime     @map("effective_from")
-  effectiveTo    DateTime?    @map("effective_to")
+  effectiveFrom  DateTime     @map("effective_from") @db.Timestamptz(6)
+  effectiveTo    DateTime?    @map("effective_to") @db.Timestamptz(6)
   version        Int
   createdBy      String?      @map("created_by") @db.Uuid
   reason         String
-  archivedAt     DateTime?    @map("archived_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  archivedAt     DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
-  @@index([organizationId, key, scopeType, effectiveFrom])
+  @@index([organizationId, key, scopeType, effectiveFrom], map: "config_rule_org_key_scope_effective_idx")
   @@map("config_rule")
 }
 
@@ -201,14 +207,14 @@ model OutboxEvent {
   payload        Json
   status         String       @default("PENDING")
   idempotencyKey String       @map("idempotency_key")
-  occurredAt     DateTime     @default(now()) @map("occurred_at")
-  processedAt    DateTime?    @map("processed_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  occurredAt     DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  processedAt    DateTime?    @map("processed_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
-  @@unique([organizationId, idempotencyKey])
-  @@index([organizationId, status, occurredAt])
+  @@unique([organizationId, idempotencyKey], map: "outbox_event_org_idempotency_key")
+  @@index([organizationId, status, occurredAt], map: "outbox_event_org_status_occurred_idx")
   @@map("outbox_event")
 }
 
@@ -226,11 +232,11 @@ model AuditLog {
   after           Json?
   reason          String?
   requestId       String       @map("request_id")
-  occurredAt      DateTime     @default(now()) @map("occurred_at")
-  createdAt       DateTime     @default(now()) @map("created_at")
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  occurredAt      DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
-  @@index([organizationId, occurredAt])
-  @@index([organizationId, resourceType, resourceId])
+  @@index([organizationId, occurredAt], map: "audit_log_org_occurred_idx")
+  @@index([organizationId, resourceType, resourceId], map: "audit_log_org_resource_idx")
   @@map("audit_log")
 }
