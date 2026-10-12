@@ -11,6 +11,14 @@ Purpose: restore ALVILLAS OS from a PostgreSQL backup without rewriting financia
 
 ## Staging Rehearsal
 
+Automated local/CI rehearsal:
+
+```bash
+npm run rehearse:restore
+```
+
+This creates disposable PostgreSQL databases, applies migrations, writes rehearsal evidence, runs `pg_dump`, restores into a fresh database, re-runs migrations, and verifies the restored migration/audit evidence.
+
 1. Provision an empty staging PostgreSQL database.
 2. Restore the selected backup or point-in-time snapshot into staging.
 3. Run `npm ci`.

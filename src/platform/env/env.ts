@@ -16,10 +16,14 @@ export const envSchema = z.object({
   R2_ACCESS_KEY_ID: z.string().optional(),
   R2_SECRET_ACCESS_KEY: z.string().optional(),
   R2_BUCKET: z.string().optional(),
+  RESERVATION_ADAPTER_MODE: z.enum(["ical", "none"]).optional().or(z.literal("")),
   INNGEST_EVENT_KEY: z.string().optional(),
   INNGEST_SIGNING_KEY: z.string().optional(),
   SENTRY_DSN: optionalUrl,
+  SENTRY_ENVIRONMENT: z.string().optional(),
   SENTRY_AUTH_TOKEN: z.string().optional(),
+  NEXT_PUBLIC_SENTRY_DSN: optionalUrl,
+  NEXT_PUBLIC_SENTRY_ENVIRONMENT: z.string().optional(),
   DOCUMENSO_URL: optionalUrl,
   DOCUMENSO_API_TOKEN: z.string().optional(),
   DOCUMENSO_WEBHOOK_SECRET: z.string().optional(),
@@ -27,7 +31,12 @@ export const envSchema = z.object({
   VAPID_PRIVATE_KEY: z.string().optional(),
   NEXT_PUBLIC_WHATSAPP_NUMBER: z.string().optional(),
   PAYPAL_CLIENT_ID: z.string().optional(),
-  PAYPAL_SECRET: z.string().optional()
+  PAYPAL_SECRET: z.string().optional(),
+  PDF_RENDERER_ENDPOINT: optionalUrl,
+  PDF_RENDERER_TOKEN: z.string().optional(),
+  INNGEST_EVENT_URL: optionalUrl,
+  INNGEST_ENV: z.string().optional(),
+  ALVILLAS_STRICT_READINESS: z.enum(["0", "1"]).optional()
 });
 
 export type AppEnv = z.infer<typeof envSchema>;
