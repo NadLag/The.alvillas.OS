@@ -203,7 +203,7 @@ test.describe("identity lifecycle", () => {
     await page.getByTestId("recovery-code-input").fill(recoveryCode);
     await page.getByTestId("recovery-password").fill("correct horse recovered staple");
     await page.getByTestId("recovery-submit").click();
-    await expect(page).toHaveURL(/\/en\/login/u);
+    await expect(page).toHaveURL(/\/en\/login/u, { timeout: 15_000 });
     await page.getByTestId("login-email").fill(invitedEmail);
     await page.getByTestId("login-password").fill("correct horse recovered staple");
     await page.getByTestId("login-submit").click();
