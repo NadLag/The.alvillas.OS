@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { permissionKey, type AuthContext, type DataClass } from "@/platform/authz/authorize";
-import { maskedValue, present, type FieldPolicy, type PresentationContext } from "@/platform/authz/present";
+import {
+  catalogFieldPolicy,
+  maskedValue,
+  present,
+  type FieldPolicy,
+  type PresentationContext
+} from "@/platform/authz/present";
 
 type ReservationView = {
   id: string;
@@ -89,5 +95,31 @@ describe("present", () => {
         policy
       )
     ).toThrow("Not authorized to present resource");
+  });
+
+  it("can derive financial masking from the central field policy catalog", () => {
+    expect(
+      present(
+        context(),
+        "view",
+        {
+          type: "reservation",
+          organizationId: "org-a",
+          id: "res-1",
+          data: {
+            id: "res-1",
+            guestFirstName: "Nadia",
+            revenue: "8000.00 MAD",
+            guestEmail: "nadia@example.test"
+          }
+        },
+        catalogFieldPolicy("reservation")
+      )
+    ).toMatchObject({
+      id: "res-1",
+      guestFirstName: "Nadia",
+      revenue: maskedValue,
+      guestEmail: "nadia@example.test"
+    });
   });
 });

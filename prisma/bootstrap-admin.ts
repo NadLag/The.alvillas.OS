@@ -6,6 +6,7 @@ import { readEnv, type AppEnv } from "../src/platform/env/env";
 import { bootstrapOrganizationId } from "../src/platform/identity/bootstrap";
 import { standardRoles } from "../src/modules/identity/domain/identity";
 import { IdentityRepository } from "../src/modules/identity/infrastructure/identity-repository";
+import { fieldPolicyCatalog, permissionCatalog } from "../src/platform/authz/catalog";
 
 export { bootstrapOrganizationId };
 
@@ -107,13 +108,22 @@ export async function bootstrapFirstAdmin(
 
     const identityRepository = new IdentityRepository(tx, organization.id);
 
+    for (const permission of permissionCatalog) {
+      await identityRepository.ensurePermission(permission);
+    }
+
     for (const role of standardRoles) {
       await identityRepository.ensureRole({
         key: role.key,
         name: role.name,
+        description: role.description,
         permissions: role.permissions,
         isSystem: true
       });
+    }
+
+    for (const fieldPolicy of fieldPolicyCatalog) {
+      await identityRepository.ensureFieldPolicy(fieldPolicy);
     }
 
     const adminRole = await identityRepository.findRoleByKey("admin");
@@ -230,7 +240,7 @@ export async function bootstrapFirstAdmin(
         }
       });
     }
-  });
+  }, { timeout: 30000 });
 }
 
 async function main(): Promise<void> {

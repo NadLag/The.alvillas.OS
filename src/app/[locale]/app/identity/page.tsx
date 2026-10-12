@@ -2,7 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
-import { ensureStandardIdentitySetup, listIdentityDashboard } from "@/modules/identity/application/identity-service";
+import { listIdentityDashboard } from "@/modules/identity/application/identity-service";
 import { IdentityAdmin } from "@/modules/identity/ui/identity-admin";
 import { SecurityPanel } from "@/modules/identity/ui/security-panel";
 import { auth } from "@/platform/auth/session";
@@ -30,7 +30,6 @@ export default async function IdentityPage({
     redirect(`/${appLocale}/login`);
   }
 
-  await ensureStandardIdentitySetup(ctx.organizationId);
   const [t, dashboard] = await Promise.all([
     getTranslations("Identity"),
     listIdentityDashboard(ctx)
@@ -65,7 +64,11 @@ export default async function IdentityPage({
       />
       <IdentityAdmin
         accounts={dashboard.accounts}
+        assignments={dashboard.assignments}
         invitations={dashboard.invitations}
+        permissions={dashboard.permissions}
+        roles={dashboard.roles}
+        simulations={dashboard.simulations}
         labels={{
           createInvitation: t("createInvitation"),
           displayName: t("displayName"),
@@ -77,6 +80,36 @@ export default async function IdentityPage({
           invite: t("invite"),
           invitationCode: t("invitationCode"),
           accounts: t("accounts"),
+          roleCatalog: t("roleCatalog"),
+          createCustomRole: t("createCustomRole"),
+          editRole: t("editRole"),
+          roleKey: t("roleKey"),
+          roleName: t("roleName"),
+          description: t("description"),
+          permissions: t("permissions"),
+          saveRole: t("saveRole"),
+          createRole: t("createRole"),
+          permissionCatalog: t("permissionCatalog"),
+          assignmentWorkflow: t("assignmentWorkflow"),
+          assignRole: t("assignRole"),
+          account: t("account"),
+          scopeId: t("scopeId"),
+          conditions: t("conditions"),
+          assignedToMe: t("assignedToMe"),
+          statuses: t("statuses"),
+          maxAmount: t("maxAmount"),
+          validFrom: t("validFrom"),
+          validTo: t("validTo"),
+          compensationRef: t("compensationRef"),
+          activeAssignments: t("activeAssignments"),
+          systemRole: t("systemRole"),
+          customRole: t("customRole"),
+          permissionCount: t("permissionCount"),
+          assignmentCount: t("assignmentCount"),
+          permissionSimulator: t("permissionSimulator"),
+          canSee: t("canSee"),
+          cannotSee: t("cannotSee"),
+          noSimulatorRows: t("noSimulatorRows"),
           pendingInvitations: t("pendingInvitations"),
           noInvitations: t("noInvitations"),
           status: t("status"),
@@ -91,7 +124,38 @@ export default async function IdentityPage({
           finance: t("rolesList.finance"),
           fieldStaff: t("rolesList.fieldStaff"),
           owner: t("rolesList.owner"),
+          coHost: t("rolesList.coHost"),
+          operationsManager: t("rolesList.operationsManager"),
+          propertyManager: t("rolesList.propertyManager"),
+          housekeeper: t("rolesList.housekeeper"),
+          poolTechnician: t("rolesList.poolTechnician"),
+          gardener: t("rolesList.gardener"),
+          maintenance: t("rolesList.maintenance"),
+          chef: t("rolesList.chef"),
+          driver: t("rolesList.driver"),
+          qaInspector: t("rolesList.qaInspector"),
+          accountant: t("rolesList.accountant"),
+          procurement: t("rolesList.procurement"),
+          guestExperience: t("rolesList.guestExperience"),
+          revenueManager: t("rolesList.revenueManager"),
+          regionalManager: t("rolesList.regionalManager"),
+          contractor: t("rolesList.contractor"),
+          ownerRepresentative: t("rolesList.ownerRepresentative"),
+          temporaryWorker: t("rolesList.temporaryWorker"),
           organization: t("organization"),
+          region: t("scopes.region"),
+          city: t("scopes.city"),
+          property: t("scopes.property"),
+          ownerScope: t("scopes.owner"),
+          reservation: t("scopes.reservation"),
+          job: t("scopes.job"),
+          service: t("scopes.service"),
+          financialRecord: t("scopes.financialRecord"),
+          wallet: t("scopes.wallet"),
+          fieldTeam: t("scopes.fieldTeam"),
+          roleCreated: t("forms.roleCreated"),
+          roleUpdated: t("forms.roleUpdated"),
+          assignmentCreated: t("forms.assignmentCreated"),
           successCreated: t("forms.created"),
           successRecovery: t("forms.recoveryIssued"),
           validation: t("forms.validation"),

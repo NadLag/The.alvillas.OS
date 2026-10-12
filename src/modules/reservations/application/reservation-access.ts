@@ -1,5 +1,6 @@
 import type { Session } from "next-auth";
-import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
+import { type AuthContext } from "@/platform/authz/authorize";
+import { authContextForAccount } from "@/platform/authz/account-context";
 
 export type ReservationActorContext = {
   organizationId: string;
@@ -8,22 +9,9 @@ export type ReservationActorContext = {
   authContext: AuthContext;
 };
 
-const bootstrapReservationPermissions = new Set([
-  permissionKey("reservation", "view"),
-  permissionKey("reservation", "create"),
-  permissionKey("task", "view"),
-  permissionKey("task", "create"),
-  permissionKey("task", "edit"),
-  permissionKey("task", "validate"),
-  permissionKey("financial_transaction", "view"),
-  permissionKey("financial_transaction", "create"),
-  permissionKey("financial_transaction", "void"),
-  permissionKey("financial_transaction", "reconcile")
-]);
-
-export function reservationActorContextFromSession(
+export async function reservationActorContextFromSession(
   session: Session | null
-): ReservationActorContext | null {
+): Promise<ReservationActorContext | null> {
   const user = session?.user;
 
   if (!user?.id || !user.personId || !user.organizationId) {
@@ -35,9 +23,8 @@ export function reservationActorContextFromSession(
     actorId: user.id,
     personId: user.personId,
     authContext: {
-      organizationId: user.organizationId,
-      permissions: bootstrapReservationPermissions,
-      scopes: [{ organizationId: user.organizationId }]
+      ...(await authContextForAccount(user.organizationId, user.id)),
+      personId: user.personId
     }
   };
 }

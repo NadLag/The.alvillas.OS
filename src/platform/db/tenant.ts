@@ -2,8 +2,17 @@ import { Prisma } from "@prisma/client";
 
 export type TenantTransaction = Prisma.TransactionClient;
 
+export type TenantTransactionOptions = {
+  maxWait?: number;
+  timeout?: number;
+  isolationLevel?: Prisma.TransactionIsolationLevel;
+};
+
 export type TenantTransactionRunner = {
-  $transaction<T>(fn: (tx: TenantTransaction) => Promise<T>): Promise<T>;
+  $transaction<T>(
+    fn: (tx: TenantTransaction) => Promise<T>,
+    options?: TenantTransactionOptions
+  ): Promise<T>;
 };
 
 const uuidPattern =
@@ -18,7 +27,8 @@ export function assertOrganizationId(organizationId: string): void {
 export async function withTenant<T>(
   db: TenantTransactionRunner,
   organizationId: string,
-  work: (tx: TenantTransaction) => Promise<T>
+  work: (tx: TenantTransaction) => Promise<T>,
+  options?: TenantTransactionOptions
 ): Promise<T> {
   assertOrganizationId(organizationId);
 
@@ -28,5 +38,5 @@ export async function withTenant<T>(
     );
 
     return work(tx);
-  });
+  }, options);
 }

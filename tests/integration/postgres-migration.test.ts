@@ -5,6 +5,16 @@ import { PrismaClient } from "@prisma/client";
 import Decimal from "decimal.js";
 import type { Session } from "next-auth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  IdentityAuthorizationError,
+  authContextForAccount
+} from "@/modules/identity/application/identity-access";
+import {
+  assignRoleToAccount,
+  createCustomRole,
+  ensureStandardIdentitySetup,
+  updateCustomRole
+} from "@/modules/identity/application/identity-service";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
 import {
   getOwnerStatement,
@@ -35,7 +45,9 @@ import {
   listOperationTasks
 } from "@/modules/reservations/application/reservation-service";
 import { pushSyncOps } from "@/modules/reservations/application/sync-service";
-import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
+import { authorize, permissionKey, type AuthContext, type DataClass } from "@/platform/authz/authorize";
+import { present, maskedValue, type FieldPolicy, type PresentationContext } from "@/platform/authz/present";
+import { coHostSpecScenarios, simulateAccess } from "@/platform/authz/simulator";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
 let prisma: PrismaClient;
@@ -403,6 +415,508 @@ describe("PostgreSQL baseline", () => {
     expect(ownerVisibleToOrgB).toBeNull();
     expect(propertyVisibleToOrgB).toBeNull();
     expect(linkVisibleWithoutTenant).toBeNull();
+  });
+
+  it("enforces scoped RBAC, ABAC, simulator and field masking from PostgreSQL assignments", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Authorization A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Authorization B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+
+    await ensureStandardIdentitySetup(orgA.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+
+    const fixture = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const person = await tx.person.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Scoped Co-host",
+            email: `cohost-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const account = await tx.userAccount.create({
+          data: {
+            organizationId: orgA.id,
+            personId: person.id,
+            email: `cohost-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
+        const customPerson = await tx.person.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Custom Scoped User",
+            email: `custom-role-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const customAccount = await tx.userAccount.create({
+          data: {
+            organizationId: orgA.id,
+            personId: customPerson.id,
+            email: `custom-role-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
+        const expiredPerson = await tx.person.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Expired Scoped User",
+            email: `expired-role-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const expiredAccount = await tx.userAccount.create({
+          data: {
+            organizationId: orgA.id,
+            personId: expiredPerson.id,
+            email: `expired-role-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
+        const owner = await tx.owner.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Authorization Owner",
+            email: `auth-owner-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const assignedProperty = await tx.property.create({
+          data: {
+            organizationId: orgA.id,
+            name: "Villa Scoped Co-host",
+            addressLine1: "Route de Fes",
+            city: "Marrakech",
+            countryCode: "MA",
+            propertyType: "Villa",
+            bedrooms: 4,
+            bathrooms: 4,
+            livingSpaces: 2,
+            maxGuests: 8,
+            timezone: "Africa/Casablanca",
+            amenities: ["pool"],
+            photoUrls: [],
+            propertyOwners: {
+              create: {
+                organizationId: orgA.id,
+                ownerId: owner.id,
+                shareBps: 10000,
+                isPrimary: true,
+                createdBy: account.id
+              }
+            },
+            createdBy: account.id
+          }
+        });
+        const otherProperty = await tx.property.create({
+          data: {
+            organizationId: orgA.id,
+            name: "Villa Other Scope",
+            addressLine1: "Route de Fes",
+            city: "Marrakech",
+            countryCode: "MA",
+            propertyType: "Villa",
+            bedrooms: 3,
+            bathrooms: 3,
+            livingSpaces: 1,
+            maxGuests: 6,
+            timezone: "Africa/Casablanca",
+            amenities: [],
+            photoUrls: [],
+            propertyOwners: {
+              create: {
+                organizationId: orgA.id,
+                ownerId: owner.id,
+                shareBps: 10000,
+                isPrimary: true,
+                createdBy: account.id
+              }
+            },
+            createdBy: account.id
+          }
+        });
+        const coHostRole = await tx.role.findFirstOrThrow({
+          where: { organizationId: orgA.id, key: "co_host" }
+        });
+        await tx.roleAssignment.create({
+          data: {
+            organizationId: orgA.id,
+            personId: person.id,
+            userAccountId: account.id,
+            roleId: coHostRole.id,
+            scopeType: "property",
+            scopeId: assignedProperty.id,
+            createdBy: account.id
+          }
+        });
+
+        return { person, account, customPerson, customAccount, expiredPerson, expiredAccount, owner, assignedProperty, otherProperty };
+      }
+    );
+
+    const adminPermissions = new Set([
+      permissionKey("role", "create"),
+      permissionKey("role", "edit"),
+      permissionKey("role", "assign"),
+      permissionKey("role", "override"),
+      permissionKey("property", "view"),
+      permissionKey("reservation", "view"),
+      permissionKey("task", "view"),
+      permissionKey("task", "edit")
+    ]);
+    const adminIdentityCtx = {
+      organizationId: orgA.id,
+      actorId: fixture.account.id,
+      personId: fixture.person.id,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: fixture.account.id,
+        personId: fixture.person.id,
+        permissions: adminPermissions,
+        scopes: [{ organizationId: orgA.id, scopeType: "organization" as const }],
+        assignments: [
+          {
+            roleKey: "admin",
+            permissions: adminPermissions,
+            scope: { organizationId: orgA.id, scopeType: "organization" as const }
+          }
+        ]
+      }
+    };
+    const customRoleKey = `custom_ops_${randomUUID().replaceAll("-", "").slice(0, 8)}`;
+    const customRole = await createCustomRole(
+      adminIdentityCtx,
+      {
+        key: customRoleKey,
+        name: "Custom scoped operations",
+        description: "Property-scoped operational role",
+        permissionKeys: [
+          permissionKey("property", "view"),
+          permissionKey("reservation", "view"),
+          permissionKey("task", "view")
+        ]
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-auz-custom-role",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await updateCustomRole(
+      adminIdentityCtx,
+      {
+        roleId: customRole.id,
+        key: customRoleKey,
+        name: "Custom scoped operations edited",
+        description: "Property-scoped operational role edited",
+        permissionKeys: [
+          permissionKey("property", "view"),
+          permissionKey("reservation", "view"),
+          permissionKey("task", "view"),
+          permissionKey("task", "edit")
+        ]
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-auz-custom-role-edit",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const assignment = await assignRoleToAccount(
+      adminIdentityCtx,
+      {
+        userAccountId: fixture.customAccount.id,
+        roleId: customRole.id,
+        scopeType: "property",
+        scopeId: fixture.assignedProperty.id,
+        assignedToMe: false,
+        statuses: [],
+        validFrom: new Date("2026-01-01T00:00:00.000Z"),
+        validTo: undefined
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-auz-assignment",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await assignRoleToAccount(
+      adminIdentityCtx,
+      {
+        userAccountId: fixture.expiredAccount.id,
+        roleId: customRole.id,
+        scopeType: "property",
+        scopeId: fixture.assignedProperty.id,
+        assignedToMe: false,
+        statuses: [],
+        validFrom: new Date("2026-01-01T00:00:00.000Z"),
+        validTo: new Date("2026-01-02T00:00:00.000Z")
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-auz-expired-assignment",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await expect(
+      createCustomRole(
+        {
+          organizationId: orgA.id,
+          actorId: fixture.customAccount.id,
+          personId: fixture.customPerson.id,
+          authContext: {
+            organizationId: orgA.id,
+            userAccountId: fixture.customAccount.id,
+            personId: fixture.customPerson.id,
+            permissions: new Set([permissionKey("role", "create")]),
+            scopes: [{ organizationId: orgA.id, scopeType: "organization" as const }],
+            assignments: [
+              {
+                roleKey: "limited-role-admin",
+                permissions: new Set([permissionKey("role", "create")]),
+                scope: { organizationId: orgA.id, scopeType: "organization" as const }
+              }
+            ]
+          }
+        },
+        {
+          key: `bad_finance_${randomUUID().replaceAll("-", "").slice(0, 8)}`,
+          name: "Bad finance grant",
+          description: "Privilege escalation attempt",
+          permissionKeys: [permissionKey("financial_transaction", "view")]
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-auz-privilege-escalation",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    const adminRole = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        tx.role.findFirstOrThrow({
+          where: {
+            organizationId: orgA.id,
+            key: "admin",
+            archivedAt: null
+          },
+          select: { id: true }
+        })
+    );
+    await expect(
+      assignRoleToAccount(
+        {
+          organizationId: orgA.id,
+          actorId: fixture.customAccount.id,
+          personId: fixture.customPerson.id,
+          authContext: {
+            organizationId: orgA.id,
+            userAccountId: fixture.customAccount.id,
+            personId: fixture.customPerson.id,
+            permissions: new Set([permissionKey("role", "assign")]),
+            scopes: [{ organizationId: orgA.id, scopeType: "organization" as const }],
+            assignments: [
+              {
+                roleKey: "limited-role-assigner",
+                permissions: new Set([permissionKey("role", "assign")]),
+                scope: { organizationId: orgA.id, scopeType: "organization" as const }
+              }
+            ]
+          }
+        },
+        {
+          userAccountId: fixture.expiredAccount.id,
+          roleId: adminRole.id,
+          scopeType: "organization",
+          assignedToMe: false,
+          statuses: [],
+          validFrom: undefined,
+          validTo: undefined
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-auz-role-assignment-escalation",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(IdentityAuthorizationError);
+
+    const authContext = await authContextForAccount(orgA.id, fixture.account.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const customAuthContext = await authContextForAccount(orgA.id, fixture.customAccount.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const expiredAuthContext = await authContextForAccount(orgA.id, fixture.expiredAccount.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+
+    expect(assignment.created).toBe(true);
+    expect(customAuthContext.permissions.has(permissionKey("task", "edit"))).toBe(true);
+    expect(expiredAuthContext.permissions.size).toBe(0);
+
+    expect(
+      authorize(authContext, "view", {
+        type: "property",
+        organizationId: orgA.id,
+        id: fixture.assignedProperty.id,
+        propertyId: fixture.assignedProperty.id
+      })
+    ).toBe(true);
+    expect(
+      authorize(authContext, "view", {
+        type: "property",
+        organizationId: orgA.id,
+        id: fixture.otherProperty.id,
+        propertyId: fixture.otherProperty.id
+      })
+    ).toBe(false);
+    expect(
+      authorize(authContext, "view", {
+        type: "reservation",
+        organizationId: orgA.id,
+        id: "018f0a0b-0000-7000-9000-00000000a001",
+        propertyId: fixture.assignedProperty.id
+      })
+    ).toBe(true);
+    expect(
+      authorize(authContext, "view", {
+        type: "financial_transaction",
+        organizationId: orgA.id,
+        id: "018f0a0b-0000-7000-9000-00000000a002",
+        propertyId: fixture.assignedProperty.id,
+        amount: "8000.00",
+        dataClass: "financial"
+      })
+    ).toBe(false);
+    expect(
+      authorize(authContext, "view", {
+        type: "wallet",
+        organizationId: orgA.id,
+        id: "018f0a0b-0000-7000-9000-00000000a003",
+        walletId: "018f0a0b-0000-7000-9000-00000000a003",
+        propertyId: fixture.otherProperty.id
+      })
+    ).toBe(false);
+    expect(
+      authorize(authContext, "view", {
+        type: "property",
+        organizationId: orgB.id,
+        id: fixture.assignedProperty.id,
+        propertyId: fixture.assignedProperty.id
+      })
+    ).toBe(false);
+    expect(
+      authorize(customAuthContext, "view", {
+        type: "property",
+        organizationId: orgA.id,
+        id: fixture.assignedProperty.id,
+        propertyId: fixture.assignedProperty.id
+      })
+    ).toBe(true);
+    expect(
+      authorize(customAuthContext, "view", {
+        type: "property",
+        organizationId: orgA.id,
+        id: fixture.otherProperty.id,
+        propertyId: fixture.otherProperty.id
+      })
+    ).toBe(false);
+    expect(
+      authorize(customAuthContext, "view", {
+        type: "property",
+        organizationId: orgB.id,
+        id: fixture.assignedProperty.id,
+        propertyId: fixture.assignedProperty.id
+      })
+    ).toBe(false);
+    expect(
+      authorize(customAuthContext, "view", {
+        type: "financial_transaction",
+        organizationId: orgA.id,
+        id: "018f0a0b-0000-7000-9000-00000000a007",
+        propertyId: fixture.assignedProperty.id,
+        amount: "8000.00",
+        dataClass: "financial"
+      })
+    ).toBe(false);
+
+    const assignmentCountBefore = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => tx.roleAssignment.count({ where: { organizationId: orgA.id } })
+    );
+    const simulation = simulateAccess(
+      authContext,
+      coHostSpecScenarios({
+        organizationId: orgA.id,
+        assignedPropertyId: fixture.assignedProperty.id,
+        otherPropertyId: fixture.otherProperty.id,
+        reservationId: "018f0a0b-0000-7000-9000-00000000a004",
+        walletId: "018f0a0b-0000-7000-9000-00000000a005"
+      })
+    );
+    const assignmentCountAfter = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => tx.roleAssignment.count({ where: { organizationId: orgA.id } })
+    );
+
+    expect(simulation.filter((result) => result.allowed).map((result) => result.key).sort()).toEqual([
+      "assigned-property",
+      "assigned-reservations",
+      "assigned-tasks"
+    ]);
+    expect(assignmentCountAfter).toBe(assignmentCountBefore);
+
+    type ReservationPreview = {
+      id: string;
+      guestFirstName: string;
+      revenue: string;
+      passportUrl: string;
+    };
+    const policy: FieldPolicy<ReservationPreview> = {
+      revenue: { dataClass: "financial" },
+      passportUrl: { dataClass: "sensitive", mask: "omit" }
+    };
+    const presented = present(
+      {
+        ...authContext,
+        visibleDataClasses: new Set<DataClass>(["operational", "guest"])
+      } satisfies PresentationContext,
+      "view",
+      {
+        type: "reservation",
+        organizationId: orgA.id,
+        id: "018f0a0b-0000-7000-9000-00000000a006",
+        propertyId: fixture.assignedProperty.id,
+        data: {
+          id: "018f0a0b-0000-7000-9000-00000000a006",
+          guestFirstName: "Nadia",
+          revenue: "8000.00 MAD",
+          passportUrl: "https://signed.example/passport"
+        }
+      },
+      policy
+    );
+
+    expect(presented).toEqual({
+      id: "018f0a0b-0000-7000-9000-00000000a006",
+      guestFirstName: "Nadia",
+      revenue: maskedValue
+    });
   });
 
   it("creates manual reservations with idempotent task generation, overlap detection, and tenant isolation", async () => {

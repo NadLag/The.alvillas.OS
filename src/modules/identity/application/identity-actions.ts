@@ -13,20 +13,26 @@ import {
   IdentityConflictError,
   IdentityNotFoundError,
   activateInvitation,
+  assignRoleToAccount,
   beginPasskeyAuthentication,
   beginPasskeyRegistration,
   confirmTotpEnrollment,
+  createCustomRole,
   createInvitation,
   finishPasskeyRegistration,
   issueRecoveryCode,
   parseActivationInput,
+  parseCustomRoleInput,
   parseInvitationInput,
+  parseRoleAssignmentInput,
   parseRecoveryInput,
+  parseUpdateCustomRoleInput,
   reactivateAccount,
   recoverPassword,
   revokeSession,
   startTotpEnrollment,
   suspendAccount,
+  updateCustomRole,
   verifyPasskeyAuthentication
 } from "@/modules/identity/application/identity-service";
 import { auth } from "@/platform/auth/session";
@@ -42,6 +48,9 @@ export type IdentityFormState = {
     | "conflict"
     | "generic"
     | "created"
+    | "roleCreated"
+    | "roleUpdated"
+    | "assignmentCreated"
     | "suspended"
     | "reactivated"
     | "recoveryIssued"
@@ -66,6 +75,13 @@ function safeLocale(locale: string): AppLocale {
 
 function formValue(formData: FormData, key: string): FormDataEntryValue | undefined {
   return formData.get(key) ?? undefined;
+}
+
+function formValues(formData: FormData, key: string): string[] {
+  return formData
+    .getAll(key)
+    .map((value) => (typeof value === "string" ? value : ""))
+    .filter(Boolean);
 }
 
 function flattenZodError(error: ZodError): IdentityFormState {
@@ -104,6 +120,113 @@ async function requestMeta() {
     ipAddress: requestHeaders.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
     origin: requestHeaders.get("origin") ?? undefined
   };
+}
+
+export async function createCustomRoleAction(
+  locale: string,
+  _state: IdentityFormState,
+  formData: FormData
+): Promise<IdentityFormState> {
+  const appLocale = safeLocale(locale);
+  const ctx = await identityContext();
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parseCustomRoleInput({
+    key: formValue(formData, "key"),
+    name: formValue(formData, "name"),
+    description: formValue(formData, "description"),
+    permissionKeys: formValues(formData, "permissionKeys")
+  });
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await createCustomRole(ctx, parsed.data, await requestMeta());
+    revalidatePath(`/${appLocale}/app/identity`);
+
+    return { status: "success", messageKey: "roleCreated" };
+  } catch (error) {
+    return actionErrorState(error);
+  }
+}
+
+export async function updateCustomRoleAction(
+  locale: string,
+  roleId: string,
+  _state: IdentityFormState,
+  formData: FormData
+): Promise<IdentityFormState> {
+  const appLocale = safeLocale(locale);
+  const ctx = await identityContext();
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parseUpdateCustomRoleInput({
+    roleId,
+    key: formValue(formData, "key"),
+    name: formValue(formData, "name"),
+    description: formValue(formData, "description"),
+    permissionKeys: formValues(formData, "permissionKeys")
+  });
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await updateCustomRole(ctx, parsed.data, await requestMeta());
+    revalidatePath(`/${appLocale}/app/identity`);
+
+    return { status: "success", messageKey: "roleUpdated" };
+  } catch (error) {
+    return actionErrorState(error);
+  }
+}
+
+export async function assignRoleAction(
+  locale: string,
+  _state: IdentityFormState,
+  formData: FormData
+): Promise<IdentityFormState> {
+  const appLocale = safeLocale(locale);
+  const ctx = await identityContext();
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parseRoleAssignmentInput({
+    userAccountId: formValue(formData, "userAccountId"),
+    roleId: formValue(formData, "roleId"),
+    scopeType: formValue(formData, "scopeType") ?? "organization",
+    scopeId: formValue(formData, "scopeId"),
+    assignedToMe: formData.get("assignedToMe") === "on",
+    statuses: formValue(formData, "statuses"),
+    maxAmount: formValue(formData, "maxAmount"),
+    validFrom: formValue(formData, "validFrom"),
+    validTo: formValue(formData, "validTo"),
+    compensationRef: formValue(formData, "compensationRef")
+  });
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await assignRoleToAccount(ctx, parsed.data, await requestMeta());
+    revalidatePath(`/${appLocale}/app/identity`);
+
+    return { status: "success", messageKey: "assignmentCreated" };
+  } catch (error) {
+    return actionErrorState(error);
+  }
 }
 
 export async function createInvitationAction(

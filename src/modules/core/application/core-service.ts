@@ -9,7 +9,7 @@ import {
   type PropertySummary
 } from "@/modules/core/domain/owner-property";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
-import { authorize } from "@/platform/authz/authorize";
+import { authorize, authorizeCollection } from "@/platform/authz/authorize";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import type { CoreActorContext } from "@/modules/core/application/core-access";
@@ -40,11 +40,15 @@ type AuditMeta = {
 };
 
 function assertAllowed(ctx: CoreActorContext, action: "view" | "create", resource: "owner" | "property", id?: string): void {
-  const allowed = authorize(ctx.authContext, action, {
-    type: resource,
-    organizationId: ctx.organizationId,
-    id
-  });
+  const allowed = id
+    ? authorize(ctx.authContext, action, {
+        type: resource,
+        organizationId: ctx.organizationId,
+        id,
+        ownerId: resource === "owner" ? id : undefined,
+        propertyId: resource === "property" ? id : undefined
+      })
+    : authorizeCollection(ctx.authContext, action, resource);
 
   if (!allowed) {
     throw new CoreAuthorizationError();
@@ -116,7 +120,14 @@ export async function listOwners(
   assertAllowed(ctx, "view", "owner");
 
   return withTenant(db(deps), ctx.organizationId, async (tx) =>
-    new CoreRepository(tx, ctx.organizationId).listOwners()
+    (await new CoreRepository(tx, ctx.organizationId).listOwners()).filter((owner) =>
+      authorize(ctx.authContext, "view", {
+        type: "owner",
+        organizationId: ctx.organizationId,
+        id: owner.id,
+        ownerId: owner.id
+      })
+    )
   );
 }
 
@@ -181,7 +192,15 @@ export async function listProperties(
   assertAllowed(ctx, "view", "property");
 
   return withTenant(db(deps), ctx.organizationId, async (tx) =>
-    new CoreRepository(tx, ctx.organizationId).listProperties()
+    (await new CoreRepository(tx, ctx.organizationId).listProperties()).filter((property) =>
+      authorize(ctx.authContext, "view", {
+        type: "property",
+        organizationId: ctx.organizationId,
+        id: property.id,
+        propertyId: property.id,
+        city: property.city
+      })
+    )
   );
 }
 

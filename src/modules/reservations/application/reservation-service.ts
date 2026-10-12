@@ -11,7 +11,7 @@ import {
 } from "@/modules/reservations/domain/reservation-task";
 import { ReservationRepository } from "@/modules/reservations/infrastructure/reservation-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
-import { authorize } from "@/platform/authz/authorize";
+import { authorize, authorizeCollection } from "@/platform/authz/authorize";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { nextReferenceNumber } from "@/platform/references/reference-number";
@@ -62,11 +62,16 @@ function assertAllowed(
   resource: "reservation" | "task",
   id?: string
 ): void {
-  const allowed = authorize(ctx.authContext, action, {
-    type: resource,
-    organizationId: ctx.organizationId,
-    id
-  });
+  const allowed = id
+    ? authorize(ctx.authContext, action, {
+        type: resource,
+        organizationId: ctx.organizationId,
+        id,
+        reservationId: resource === "reservation" ? id : undefined,
+        taskId: resource === "task" ? id : undefined,
+        jobId: resource === "task" ? id : undefined
+      })
+    : authorizeCollection(ctx.authContext, action, resource);
 
   if (!allowed) {
     throw new ReservationAuthorizationError();
@@ -175,6 +180,21 @@ export async function createManualReservation(
       throw new ReservationNotFoundError("Property does not exist in this tenant");
     }
 
+    if (
+      !authorize(ctx.authContext, "create", {
+        type: "reservation",
+        organizationId: ctx.organizationId,
+        propertyId: property.id
+      }) ||
+      !authorize(ctx.authContext, "create", {
+        type: "task",
+        organizationId: ctx.organizationId,
+        propertyId: property.id
+      })
+    ) {
+      throw new ReservationAuthorizationError();
+    }
+
     if (!taskConfig) {
       throw new ReservationConfigError();
     }
@@ -236,7 +256,16 @@ export async function listReservations(
   assertAllowed(ctx, "view", "reservation");
 
   return withTenant(db(deps), ctx.organizationId, async (tx) =>
-    new ReservationRepository(tx, ctx.organizationId).listReservations()
+    (await new ReservationRepository(tx, ctx.organizationId).listReservations()).filter((reservation) =>
+      authorize(ctx.authContext, "view", {
+        type: "reservation",
+        organizationId: ctx.organizationId,
+        id: reservation.id,
+        reservationId: reservation.id,
+        propertyId: reservation.propertyId,
+        status: reservation.status
+      })
+    )
   );
 }
 
@@ -247,7 +276,14 @@ export async function listReservationPropertyOptions(
   assertAllowed(ctx, "create", "reservation");
 
   return withTenant(db(deps), ctx.organizationId, async (tx) =>
-    new ReservationRepository(tx, ctx.organizationId).listPropertyOptions()
+    (await new ReservationRepository(tx, ctx.organizationId).listPropertyOptions()).filter((property) =>
+      authorize(ctx.authContext, "create", {
+        type: "reservation",
+        organizationId: ctx.organizationId,
+        propertyId: property.id,
+        city: property.city
+      })
+    )
   );
 }
 
@@ -258,7 +294,18 @@ export async function listOperationTasks(
   assertAllowed(ctx, "view", "task");
 
   return withTenant(db(deps), ctx.organizationId, async (tx) =>
-    new ReservationRepository(tx, ctx.organizationId).listTasks()
+    (await new ReservationRepository(tx, ctx.organizationId).listTasks()).filter((task) =>
+      authorize(ctx.authContext, "view", {
+        type: "task",
+        organizationId: ctx.organizationId,
+        id: task.id,
+        taskId: task.id,
+        jobId: task.id,
+        propertyId: task.propertyId,
+        status: task.state,
+        assignedUserAccountId: task.assignedToUserAccountId
+      })
+    )
   );
 }
 

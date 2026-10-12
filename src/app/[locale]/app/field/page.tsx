@@ -23,7 +23,7 @@ export default async function FieldTasksPage({
   setRequestLocale(appLocale);
 
   const session = await auth();
-  const ctx = reservationActorContextFromSession(session);
+  const ctx = await reservationActorContextFromSession(session);
 
   if (!ctx) {
     redirect(`/${appLocale}/login`);

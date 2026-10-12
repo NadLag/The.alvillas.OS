@@ -15,18 +15,37 @@ import { Prisma } from "@prisma/client";
 import { IdentityRepository, type IdentityAccountSummary, type InvitationSummary, type SessionSummary } from "@/modules/identity/infrastructure/identity-repository";
 import {
   activationInputSchema,
+  customRoleInputSchema,
   identityActionForMutation,
   invitationInputSchema,
   recoveryInputSchema,
-  standardRoles,
+  roleAssignmentInputSchema,
+  updateCustomRoleInputSchema,
   type ActivationInput,
+  type CustomRoleInput,
   type InvitationInput,
-  type RecoveryInput
+  type RecoveryInput,
+  type RoleAssignmentInput,
+  type UpdateCustomRoleInput
 } from "@/modules/identity/domain/identity";
 import {
+  fieldPolicyCatalog,
+  permissionCatalog,
+  standardRoles
+} from "@/platform/authz/catalog";
+import {
+  coHostSpecScenarios,
+  simulateAccess,
+  splitSimulationResults,
+  type PermissionSimulationResult
+} from "@/platform/authz/simulator";
+import {
+  IdentityAuthorizationError,
   assertIdentityAllowed,
+  authContextForAccount,
   type IdentityActorContext
 } from "@/modules/identity/application/identity-access";
+import { authorize } from "@/platform/authz/authorize";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { hashCredentialSecret, hashPassword, verifyPassword } from "@/platform/auth/password";
 import { encryptSecret, decryptSecret } from "@/platform/auth/secret-encryption";
@@ -62,6 +81,18 @@ type IdentityServiceDeps = {
 export type IdentityDashboard = {
   accounts: IdentityAccountSummary[];
   invitations: InvitationSummary[];
+  roles: Awaited<ReturnType<IdentityRepository["listRoles"]>>;
+  permissions: Awaited<ReturnType<IdentityRepository["listPermissions"]>>;
+  assignments: Awaited<ReturnType<IdentityRepository["listRoleAssignments"]>>;
+  simulations: AccountPermissionSimulation[];
+};
+
+export type AccountPermissionSimulation = {
+  userAccountId: string;
+  displayName: string;
+  roleLabels: string[];
+  canSee: PermissionSimulationResult[];
+  cannotSee: PermissionSimulationResult[];
 };
 
 export type CreatedInvitation = {
@@ -119,22 +150,193 @@ export function parseRecoveryInput(input: unknown) {
   return recoveryInputSchema.safeParse(input);
 }
 
+export function parseCustomRoleInput(input: unknown) {
+  return customRoleInputSchema.safeParse(input);
+}
+
+export function parseUpdateCustomRoleInput(input: unknown) {
+  return updateCustomRoleInputSchema.safeParse(input);
+}
+
+export function parseRoleAssignmentInput(input: unknown) {
+  return roleAssignmentInputSchema.safeParse(input);
+}
+
+function assertAuthorizationAllowed(
+  ctx: IdentityActorContext,
+  action: Parameters<typeof authorize>[1],
+  resourceType: string,
+  id?: string
+): void {
+  if (
+    !authorize(ctx.authContext, action, {
+      type: resourceType,
+      organizationId: ctx.organizationId,
+      id
+    })
+  ) {
+    throw new IdentityAuthorizationError();
+  }
+}
+
+function assertPermissionGrantAllowed(
+  ctx: IdentityActorContext,
+  permissionKeys: readonly string[],
+  roleId?: string
+): void {
+  const canOverride = authorize(ctx.authContext, "override", {
+    type: "role",
+    organizationId: ctx.organizationId,
+    id: roleId
+  });
+
+  if (canOverride) {
+    return;
+  }
+
+  for (const permissionKey of permissionKeys) {
+    if (!ctx.authContext.permissions.has(permissionKey)) {
+      throw new IdentityAuthorizationError("Cannot grant a permission the actor does not hold");
+    }
+  }
+}
+
+function assignmentConditions(input: RoleAssignmentInput): Prisma.InputJsonObject | null {
+  const conditions: Record<string, Prisma.InputJsonValue> = {};
+
+  if (input.assignedToMe) {
+    conditions.assignedToMe = true;
+  }
+
+  if (input.statuses.length > 0) {
+    conditions.statuses = input.statuses;
+  }
+
+  if (input.maxAmount) {
+    conditions.maxAmount = input.maxAmount;
+  }
+
+  return Object.keys(conditions).length > 0 ? conditions : null;
+}
+
 export async function ensureStandardIdentitySetup(
   organizationId: string,
   deps: IdentityServiceDeps = {}
 ): Promise<void> {
   await withTenant(db(deps), organizationId, async (tx) => {
     const repository = new IdentityRepository(tx, organizationId);
+    const expectedRoleKeys = standardRoles.map((role) => role.key);
+    const [permissionCount, fieldPolicyCount, existingRoles] = await Promise.all([
+      tx.permission.count({
+        where: {
+          organizationId,
+          key: { in: permissionCatalog.map((permission) => permission.key) }
+        }
+      }),
+      tx.fieldPolicy.count({
+        where: {
+          organizationId,
+          OR: fieldPolicyCatalog.map((fieldPolicy) => ({
+            resource: fieldPolicy.resource,
+            field: fieldPolicy.field
+          }))
+        }
+      }),
+      tx.role.findMany({
+        where: {
+          organizationId,
+          key: { in: expectedRoleKeys },
+          archivedAt: null
+        },
+        select: {
+          key: true,
+          rolePermissions: {
+            select: {
+              permission: { select: { key: true } }
+            }
+          }
+        }
+      })
+    ]);
+    const rolePermissionCounts = new Map(
+      existingRoles.map((role) => [
+        role.key,
+        new Set(role.rolePermissions.map((rolePermission) => rolePermission.permission.key))
+      ])
+    );
+    const standardRolesReady =
+      existingRoles.length === standardRoles.length &&
+      standardRoles.every(
+        (role) =>
+          role.permissions.every((permissionKey) =>
+            rolePermissionCounts.get(role.key)?.has(permissionKey)
+          )
+      );
+
+    if (
+      permissionCount >= permissionCatalog.length &&
+      fieldPolicyCount >= fieldPolicyCatalog.length &&
+      standardRolesReady
+    ) {
+      return;
+    }
+
+    for (const permission of permissionCatalog) {
+      await repository.ensurePermission(permission);
+    }
 
     for (const role of standardRoles) {
       await repository.ensureRole({
         key: role.key,
         name: role.name,
+        description: role.description,
         permissions: role.permissions,
         isSystem: true
       });
     }
-  });
+
+    for (const fieldPolicy of fieldPolicyCatalog) {
+      await repository.ensureFieldPolicy(fieldPolicy);
+    }
+  }, { timeout: 30000 });
+}
+
+async function buildAccountSimulations(
+  organizationId: string,
+  accounts: IdentityAccountSummary[],
+  deps: IdentityServiceDeps
+): Promise<AccountPermissionSimulation[]> {
+  const simulations: AccountPermissionSimulation[] = [];
+
+  for (const account of accounts.slice(0, 12)) {
+    const ctx = await authContextForAccount(organizationId, account.id, deps);
+    const propertyScope = ctx.scopes.find((scope) => {
+      const type = scope.scopeType ?? scope.resourceType;
+      return type === "property" && (scope.scopeId || scope.resourceId);
+    });
+    const assignedPropertyId = propertyScope?.scopeId ?? propertyScope?.resourceId ?? "sim-assigned-property";
+    const results = simulateAccess(
+      ctx,
+      coHostSpecScenarios({
+        organizationId,
+        assignedPropertyId,
+        otherPropertyId: "sim-other-property",
+        reservationId: "sim-reservation",
+        walletId: "sim-wallet"
+      })
+    );
+    const split = splitSimulationResults(results);
+
+    simulations.push({
+      userAccountId: account.id,
+      displayName: account.displayName,
+      roleLabels: account.roles,
+      canSee: split.canSee,
+      cannotSee: split.cannotSee
+    });
+  }
+
+  return simulations;
 }
 
 export async function listIdentityDashboard(
@@ -145,11 +347,178 @@ export async function listIdentityDashboard(
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new IdentityRepository(tx, ctx.organizationId);
+    await ensureStandardIdentitySetup(ctx.organizationId, {
+      db: { $transaction: (callback) => callback(tx) }
+    });
+    const accounts = await repository.listAccounts();
 
     return {
-      accounts: await repository.listAccounts(),
-      invitations: await repository.listOpenInvitations(new Map())
+      accounts,
+      invitations: await repository.listOpenInvitations(new Map()),
+      roles: await repository.listRoles(),
+      permissions: await repository.listPermissions(),
+      assignments: await repository.listRoleAssignments(),
+      simulations: await buildAccountSimulations(ctx.organizationId, accounts, {
+        ...deps,
+        db: { $transaction: (callback) => callback(tx) }
+      })
     };
+  });
+}
+
+export async function createCustomRole(
+  ctx: IdentityActorContext,
+  input: CustomRoleInput,
+  deps: IdentityServiceDeps = {}
+): Promise<{ id: string }> {
+  assertAuthorizationAllowed(ctx, "create", "role");
+  assertPermissionGrantAllowed(ctx, input.permissionKeys);
+  const meta = auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new IdentityRepository(tx, ctx.organizationId);
+    await ensureStandardIdentitySetup(ctx.organizationId, { db: { $transaction: (callback) => callback(tx) } });
+
+    try {
+      const role = await repository.createCustomRole(input);
+
+      await writeAuditEvent(tx, {
+        organizationId: ctx.organizationId,
+        actorId: ctx.actorId,
+        action: "authorization.role.create",
+        resourceType: "role",
+        resourceId: role.id,
+        ipAddress: meta.ipAddress,
+        after: {
+          key: role.key,
+          name: role.name,
+          permissionKeys: role.permissionKeys
+        },
+        reason: "Custom role created",
+        requestId: meta.requestId,
+        occurredAt: new Date()
+      });
+
+      return { id: role.id };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new IdentityConflictError("Role key already exists");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function updateCustomRole(
+  ctx: IdentityActorContext,
+  input: UpdateCustomRoleInput,
+  deps: IdentityServiceDeps = {}
+): Promise<{ id: string }> {
+  assertAuthorizationAllowed(ctx, "edit", "role", input.roleId);
+  assertPermissionGrantAllowed(ctx, input.permissionKeys, input.roleId);
+  const meta = auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new IdentityRepository(tx, ctx.organizationId);
+    await ensureStandardIdentitySetup(ctx.organizationId, { db: { $transaction: (callback) => callback(tx) } });
+
+    try {
+      const role = await repository.updateCustomRole(input);
+
+      await writeAuditEvent(tx, {
+        organizationId: ctx.organizationId,
+        actorId: ctx.actorId,
+        action: "authorization.role.update",
+        resourceType: "role",
+        resourceId: role.id,
+        ipAddress: meta.ipAddress,
+        after: {
+          key: role.key,
+          name: role.name,
+          permissionKeys: role.permissionKeys
+        },
+        reason: "Custom role updated",
+        requestId: meta.requestId,
+        occurredAt: new Date()
+      });
+
+      return { id: role.id };
+    } catch (error) {
+      if (error instanceof Error && error.message === "Custom role was not found") {
+        throw new IdentityNotFoundError("Custom role was not found");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function assignRoleToAccount(
+  ctx: IdentityActorContext,
+  input: RoleAssignmentInput,
+  deps: IdentityServiceDeps = {}
+): Promise<{ id: string; created: boolean }> {
+  assertAuthorizationAllowed(ctx, "assign", "role", input.roleId);
+  const meta = auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new IdentityRepository(tx, ctx.organizationId);
+    await ensureStandardIdentitySetup(ctx.organizationId, { db: { $transaction: (callback) => callback(tx) } });
+
+    try {
+      const role = await repository.findRoleSummaryById(input.roleId);
+
+      if (!role) {
+        throw new IdentityNotFoundError("Role was not found");
+      }
+
+      assertPermissionGrantAllowed(ctx, role.permissionKeys, role.id);
+
+      const assignment = await repository.assignRoleToAccount({
+        userAccountId: input.userAccountId,
+        roleId: input.roleId,
+        scopeType: input.scopeType,
+        scopeId: input.scopeId,
+        conditions: assignmentConditions(input),
+        validFrom: input.validFrom,
+        validTo: input.validTo,
+        compensationRef: input.compensationRef,
+        actorId: ctx.actorId
+      });
+
+      if (assignment.created) {
+        await writeAuditEvent(tx, {
+          organizationId: ctx.organizationId,
+          actorId: ctx.actorId,
+          action: "authorization.role_assignment.create",
+          resourceType: "role_assignment",
+          resourceId: assignment.id,
+          ipAddress: meta.ipAddress,
+          after: {
+            userAccountId: input.userAccountId,
+            roleId: input.roleId,
+            scopeType: input.scopeType,
+            scopeId: input.scopeId ?? null,
+            conditions: assignmentConditions(input),
+            validFrom: input.validFrom ?? null,
+            validTo: input.validTo ?? null,
+            compensationRef: input.compensationRef ?? null
+          },
+          reason: "Scoped role assignment created",
+          requestId: meta.requestId,
+          occurredAt: new Date()
+        });
+      }
+
+      return assignment;
+    } catch (error) {
+      if (error instanceof Error && error.message === "Account was not found") {
+        throw new IdentityNotFoundError("Account was not found");
+      }
+
+      throw error;
+    }
   });
 }
 

@@ -1,8 +1,12 @@
 import type { Session } from "next-auth";
 import { identityResource } from "@/modules/identity/domain/identity";
-import { authorize, type AuthContext } from "@/platform/authz/authorize";
-import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import {
+  authorize,
+  type AuthContext
+} from "@/platform/authz/authorize";
+import {
+  authContextForAccount as buildAuthContextForAccount
+} from "@/platform/authz/account-context";
 
 export type IdentityActorContext = {
   organizationId: string;
@@ -11,72 +15,16 @@ export type IdentityActorContext = {
   authContext: AuthContext;
 };
 
-type RolePermissionRow = {
-  role: {
-    rolePermissions: Array<{
-      permission: {
-        key: string;
-      };
-    }>;
-  };
-  scopeType: string;
-  scopeId: string | null;
-};
-
 type IdentityAccessDeps = {
-  db?: TenantTransactionRunner;
+  db?: NonNullable<Parameters<typeof buildAuthContextForAccount>[2]>["db"];
 };
-
-function db(deps: IdentityAccessDeps): TenantTransactionRunner {
-  return deps.db ?? prisma;
-}
 
 export async function authContextForAccount(
   organizationId: string,
   userAccountId: string,
   deps: IdentityAccessDeps = {}
 ): Promise<AuthContext> {
-  return withTenant(db(deps), organizationId, async (tx) => {
-    const assignments = (await tx.roleAssignment.findMany({
-      where: {
-        organizationId,
-        userAccountId,
-        archivedAt: null,
-        validFrom: { lte: new Date() },
-        OR: [{ validTo: null }, { validTo: { gt: new Date() } }]
-      },
-      include: {
-        role: {
-          include: {
-            rolePermissions: {
-              include: {
-                permission: true
-              }
-            }
-          }
-        }
-      }
-    })) as RolePermissionRow[];
-
-    const permissions = new Set<string>();
-    const scopes = assignments.map((assignment) => {
-      for (const rolePermission of assignment.role.rolePermissions) {
-        permissions.add(rolePermission.permission.key);
-      }
-
-      return {
-        organizationId,
-        resourceType: assignment.scopeType === "organization" ? undefined : assignment.scopeType,
-        resourceId: assignment.scopeId ?? undefined
-      };
-    });
-
-    return {
-      organizationId,
-      permissions,
-      scopes: scopes.length > 0 ? scopes : [{ organizationId }]
-    };
-  });
+  return buildAuthContextForAccount(organizationId, userAccountId, deps);
 }
 
 export async function identityActorContextFromSession(
@@ -93,7 +41,10 @@ export async function identityActorContextFromSession(
     organizationId: user.organizationId,
     actorId: user.id,
     personId: user.personId,
-    authContext: await authContextForAccount(user.organizationId, user.id, deps)
+    authContext: {
+      ...(await authContextForAccount(user.organizationId, user.id, deps)),
+      personId: user.personId
+    }
   };
 }
 
