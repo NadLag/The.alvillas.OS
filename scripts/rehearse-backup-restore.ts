@@ -56,7 +56,7 @@ function waitForPostgres(containerName: string): void {
 }
 
 function ensureRehearsalDatabase(containerName: string): void {
-  runInherited("docker", [
+  const exists = run("docker", [
     "exec",
     containerName,
     "psql",
@@ -64,11 +64,13 @@ function ensureRehearsalDatabase(containerName: string): void {
     "postgres",
     "-d",
     "postgres",
-    "-v",
-    "ON_ERROR_STOP=1",
-    "-c",
-    "SELECT 'CREATE DATABASE alvillas_os' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'alvillas_os')\\gexec"
+    "-tAc",
+    "SELECT 1 FROM pg_database WHERE datname = 'alvillas_os'"
   ]);
+
+  if (exists !== "1") {
+    runInherited("docker", ["exec", containerName, "createdb", "-U", "postgres", "alvillas_os"]);
+  }
 }
 
 function publishedPort(containerName: string): string {
