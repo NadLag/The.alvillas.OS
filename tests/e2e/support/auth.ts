@@ -12,6 +12,15 @@ export function e2eEmail(label: string, projectName: string): string {
 }
 
 export async function ensureE2EAdmin(email: string, password: string): Promise<void> {
+  await ensureE2EUserWithRole(email, password, "admin", "ALVILLAS E2E Admin");
+}
+
+export async function ensureE2EUserWithRole(
+  email: string,
+  password: string,
+  roleKey: string,
+  displayName: string
+): Promise<void> {
   const prisma = new PrismaClient();
   const normalizedEmail = email.trim().toLowerCase();
   const passwordHash = await hashPassword(password);
@@ -36,12 +45,12 @@ export async function ensureE2EAdmin(email: string, password: string): Promise<v
           }
         },
         update: {
-          displayName: "ALVILLAS E2E Admin",
+          displayName,
           preferredLocale: "en"
         },
         create: {
           organizationId: bootstrapOrganizationId,
-          displayName: "ALVILLAS E2E Admin",
+          displayName,
           email: normalizedEmail,
           preferredLocale: "en"
         }
@@ -104,13 +113,13 @@ export async function ensureE2EAdmin(email: string, password: string): Promise<v
 
       const repository = new IdentityRepository(tx, bootstrapOrganizationId);
 
-      const adminRole = await repository.findRoleByKey("admin");
+      const role = await repository.findRoleByKey(roleKey);
 
-      if (adminRole) {
+      if (role) {
         await repository.assignRole({
           personId: person.id,
           userAccountId: account.id,
-          roleId: adminRole.id,
+          roleId: role.id,
           scopeType: "organization",
           actorId: account.id
         });

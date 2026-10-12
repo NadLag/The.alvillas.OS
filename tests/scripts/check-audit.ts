@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { requiredAuditCategories } from "../../src/platform/audit/audit-event";
 
 const failures: string[] = [];
 const schema = readFileSync("prisma/schema.prisma", "utf8");
@@ -46,6 +47,39 @@ for (const required of [
 ]) {
   if (!migrationSql.includes(required)) {
     failures.push(`audit migration missing ${required}`);
+  }
+}
+
+for (const category of [
+  "permission_change",
+  "role_assignment",
+  "financial_edit",
+  "payout",
+  "approval",
+  "proxy_validation",
+  "agreement_change",
+  "expense_modification",
+  "wallet_adjustment",
+  "bank_reconciliation",
+  "report_generation",
+  "account_access"
+]) {
+  if (!(requiredAuditCategories as readonly string[]).includes(category)) {
+    failures.push(`audit event catalog missing ${category}`);
+  }
+}
+
+const auditWriterSource = readFileSync("src/platform/audit/audit-writer.ts", "utf8");
+const auditServiceSource = readFileSync("src/modules/audit/application/audit-service.ts", "utf8");
+
+for (const requiredSource of [
+  "redactAuditPayload",
+  "auditActionRequiresReason",
+  "AuditAuthorizationError",
+  "exportAuditRecords"
+]) {
+  if (!auditWriterSource.includes(requiredSource) && !auditServiceSource.includes(requiredSource)) {
+    failures.push(`audit source missing ${requiredSource}`);
   }
 }
 

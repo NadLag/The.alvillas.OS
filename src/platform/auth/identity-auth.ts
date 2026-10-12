@@ -5,6 +5,7 @@ import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { decryptSecret } from "@/platform/auth/secret-encryption";
 import { verifyPassword } from "@/platform/auth/password";
 import { verifyTotpCode } from "@/platform/auth/totp";
+import { writeAuditEvent } from "@/platform/audit/audit-writer";
 
 export type AuthorizedIdentityUser = {
   id: string;
@@ -151,6 +152,7 @@ async function verifyMfa(account: NonNullable<AuthAccount>, input: {
 async function createAuthSession(
   account: NonNullable<AuthAccount>,
   input: {
+    method: "password" | "pin";
     deviceId: string;
     headers: Headers;
   }
@@ -198,6 +200,24 @@ async function createAuthSession(
       data: { lastLoginAt: new Date() }
     });
 
+    await writeAuditEvent(tx, {
+      organizationId: account.organizationId,
+      actorId: account.id,
+      action: "identity.login",
+      resourceType: "identity",
+      resourceId: account.id,
+      ipAddress: requestIp(input.headers),
+      deviceId: input.deviceId,
+      after: {
+        method: input.method,
+        sessionId: session.id,
+        userAgent: userAgent(input.headers)
+      },
+      reason: "Account access granted",
+      requestId: input.headers.get("x-request-id") ?? crypto.randomUUID(),
+      occurredAt: new Date()
+    });
+
     return session.id;
   });
 }
@@ -241,7 +261,7 @@ export async function authenticatePassword(input: {
     return null;
   }
 
-  const sessionId = await createAuthSession(account, input);
+  const sessionId = await createAuthSession(account, { ...input, method: "password" });
 
   return authorizedUser(account, sessionId);
 }
@@ -265,7 +285,7 @@ export async function authenticatePin(input: {
     return null;
   }
 
-  const sessionId = await createAuthSession(account, input);
+  const sessionId = await createAuthSession(account, { ...input, method: "pin" });
 
   return authorizedUser(account, sessionId);
 }

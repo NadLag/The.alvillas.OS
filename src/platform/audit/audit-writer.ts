@@ -1,5 +1,8 @@
 import { Prisma } from "@prisma/client";
-import type { AuditEvent } from "@/platform/audit/audit-event";
+import {
+  auditActionRequiresReason,
+  type AuditEvent
+} from "@/platform/audit/audit-event";
 
 type AuditClient = {
   auditLog: {
@@ -23,11 +26,52 @@ type AuditClient = {
   };
 };
 
-function toAuditJson(
-  value: unknown
-): Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined {
+const redactedValue = "[REDACTED]";
+
+const sensitiveKeyPatterns = [
+  /password/iu,
+  /pin/iu,
+  /secret/iu,
+  /token/iu,
+  /credential/iu,
+  /code_hash/iu,
+  /codehash/iu,
+  /recoverycode/iu,
+  /mfacode/iu,
+  /totp/iu,
+  /passkey/iu,
+  /sessionid/iu,
+  /sessiontoken/iu,
+  /authorization/iu,
+  /cookie/iu
+];
+
+function isSensitiveKey(key: string): boolean {
+  const normalized = key.replaceAll(/[-_\s]/gu, "").toLowerCase();
+
+  return key.toLowerCase() === "code" || sensitiveKeyPatterns.some((pattern) => pattern.test(normalized));
+}
+
+export function redactAuditPayload(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactAuditPayload(item));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, child]) => [
+      key,
+      isSensitiveKey(key) ? redactedValue : redactAuditPayload(child)
+    ])
+  );
+}
+
+function toAuditJson(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
   if (value === undefined) {
-    return undefined;
+    return Prisma.JsonNull;
   }
 
   if (value === null) {
@@ -46,10 +90,16 @@ function toAuditJson(
     throw new TypeError("Audit payload must be JSON serializable");
   }
 
-  return JSON.parse(serialized) as Prisma.InputJsonValue;
+  return redactAuditPayload(JSON.parse(serialized)) as Prisma.InputJsonValue;
 }
 
 export async function writeAuditEvent(client: AuditClient, event: AuditEvent): Promise<void> {
+  const reason = event.reason?.trim() ?? null;
+
+  if (auditActionRequiresReason(event.action) && !reason) {
+    throw new TypeError(`Audit event ${event.action} requires a reason`);
+  }
+
   await client.auditLog.create({
     data: {
       organizationId: event.organizationId,
@@ -62,7 +112,7 @@ export async function writeAuditEvent(client: AuditClient, event: AuditEvent): P
       propertyScopeId: event.propertyScopeId ?? null,
       before: toAuditJson(event.before),
       after: toAuditJson(event.after),
-      reason: event.reason ?? null,
+      reason,
       requestId: event.requestId,
       occurredAt: event.occurredAt
     }

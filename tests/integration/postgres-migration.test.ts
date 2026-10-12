@@ -48,6 +48,13 @@ import { pushSyncOps } from "@/modules/reservations/application/sync-service";
 import { authorize, permissionKey, type AuthContext, type DataClass } from "@/platform/authz/authorize";
 import { present, maskedValue, type FieldPolicy, type PresentationContext } from "@/platform/authz/present";
 import { coHostSpecScenarios, simulateAccess } from "@/platform/authz/simulator";
+import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { requiredAuditCategories } from "@/platform/audit/audit-event";
+import {
+  AuditAuthorizationError,
+  exportAuditRecords,
+  listAuditRecords
+} from "@/modules/audit/application/audit-service";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
 let prisma: PrismaClient;
@@ -278,6 +285,14 @@ describe("PostgreSQL baseline", () => {
         })
       )
     ).rejects.toThrow(/append-only|permission denied/u);
+
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, org.id, async (tx) =>
+        tx.auditLog.delete({
+          where: { id: audit.id }
+        })
+      )
+    ).rejects.toThrow(/append-only|permission denied/u);
   });
 
   it("enforces tenant isolation with PostgreSQL RLS", async () => {
@@ -320,6 +335,198 @@ describe("PostgreSQL baseline", () => {
     expect(visibleToOrgA?.id).toBe(audit.id);
     expect(visibleToOrgB).toBeNull();
     expect(visibleWithoutTenant).toBeNull();
+  });
+
+  it("enforces audit redaction, reasoned actions, authorized viewer/export and required event coverage", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Audit A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Audit B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const auditPermissions = new Set([
+      permissionKey("audit_log", "view"),
+      permissionKey("audit_log", "export")
+    ]);
+    const auditCtx = {
+      organizationId: orgA.id,
+      actorId: integrationActorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: integrationActorId,
+        permissions: auditPermissions,
+        scopes: [{ organizationId: orgA.id }],
+        assignments: [
+          {
+            permissions: auditPermissions,
+            scope: { organizationId: orgA.id }
+          }
+        ]
+      }
+    };
+    const deniedCtx = {
+      organizationId: orgA.id,
+      actorId: integrationActorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: integrationActorId,
+        permissions: new Set([permissionKey("reservation", "view")]),
+        scopes: [{ organizationId: orgA.id }],
+        assignments: [
+          {
+            permissions: new Set([permissionKey("reservation", "view")]),
+            scope: { organizationId: orgA.id }
+          }
+        ]
+      }
+    };
+
+    const audit = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        await expect(
+          writeAuditEvent(tx, {
+            organizationId: orgA.id,
+            actorId: integrationActorId,
+            action: "financial_transaction.void",
+            resourceType: "financial_transaction",
+            resourceId: null,
+            reason: " ",
+            requestId: "integration-audit-reason",
+            occurredAt: new Date()
+          })
+        ).rejects.toThrow(/requires a reason/u);
+
+        await writeAuditEvent(tx, {
+          organizationId: orgA.id,
+          actorId: integrationActorId,
+          action: "identity.login",
+          resourceType: "identity",
+          resourceId: integrationActorId,
+          ipAddress: "127.0.0.1",
+          deviceId: "integration-device",
+          before: {
+            password: "not-stored",
+            roleKey: "admin",
+            nested: {
+              secretHash: "hash",
+              countryCode: "MA"
+            }
+          },
+          after: {
+            sessionId: "session-secret",
+            visible: "kept"
+          },
+          reason: "Integration account access",
+          requestId: "integration-audit-redaction",
+          occurredAt: new Date("2026-10-12T10:00:00.000Z")
+        });
+
+        return tx.auditLog.findFirstOrThrow({
+          where: {
+            organizationId: orgA.id,
+            requestId: "integration-audit-redaction"
+          }
+        });
+      }
+    );
+
+    expect(audit.before).toMatchObject({
+      password: "[REDACTED]",
+      roleKey: "admin",
+      nested: {
+        secretHash: "[REDACTED]",
+        countryCode: "MA"
+      }
+    });
+    expect(audit.after).toMatchObject({
+      sessionId: "[REDACTED]",
+      visible: "kept"
+    });
+
+    await expect(
+      listAuditRecords(deniedCtx, {
+        action: "identity",
+        limit: 50
+      }, {
+        db: prisma as unknown as TenantTransactionRunner
+      })
+    ).rejects.toBeInstanceOf(AuditAuthorizationError);
+    await expect(
+      exportAuditRecords(deniedCtx, {
+        action: "identity",
+        limit: 50
+      }, {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-audit-denied-export",
+        ipAddress: "127.0.0.1"
+      })
+    ).rejects.toBeInstanceOf(AuditAuthorizationError);
+
+    const listed = await listAuditRecords(auditCtx, {
+      action: "identity.login",
+      limit: 50
+    }, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+
+    expect(listed.records.map((record) => record.id)).toContain(audit.id);
+
+    const exported = await exportAuditRecords(
+      auditCtx,
+      {
+        action: "identity.login",
+        limit: 50
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-audit-export",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(exported.csv).toContain("identity.login");
+    expect(exported.csv).toContain("[REDACTED]");
+    expect(exported.csv).not.toContain("not-stored");
+    expect(exported.rowCount).toBeGreaterThanOrEqual(1);
+
+    const exportAudit = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        tx.auditLog.findFirst({
+          where: {
+            organizationId: orgA.id,
+            action: "audit_log.export",
+            requestId: "integration-audit-export"
+          }
+        })
+    );
+    const visibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.auditLog.findFirst({ where: { id: audit.id } })
+    );
+
+    expect(exportAudit?.reason).toBe("Audit export generated");
+    expect(visibleToOrgB).toBeNull();
+    expect([...requiredAuditCategories].sort()).toEqual([
+      "account_access",
+      "agreement_change",
+      "approval",
+      "bank_reconciliation",
+      "expense_modification",
+      "financial_edit",
+      "payout",
+      "permission_change",
+      "proxy_validation",
+      "report_generation",
+      "role_assignment",
+      "wallet_adjustment"
+    ]);
   });
 
   it("enforces owner and property tenant isolation with PostgreSQL RLS", async () => {

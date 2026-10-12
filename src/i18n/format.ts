@@ -32,6 +32,19 @@ export function formatDate(
   }).format(value);
 }
 
+export function formatDateTime(
+  locale: AppLocale,
+  value: Date,
+  options: Intl.DateTimeFormatOptions = {}
+): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: defaultTimeZone,
+    ...options
+  }).format(value);
+}
+
 export function formatNumber(
   locale: AppLocale,
   value: DecimalInput,

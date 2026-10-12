@@ -890,6 +890,63 @@ a {
   line-height: 1.5;
 }
 
+.audit-filter-form {
+  gap: 12px;
+}
+
+.audit-table {
+  display: grid;
+  gap: 8px;
+}
+
+.audit-table-head,
+.audit-table-row {
+  display: grid;
+  grid-template-columns: 150px 150px minmax(150px, 1fr) minmax(150px, 1fr) minmax(120px, 0.8fr) minmax(180px, 1.4fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.audit-table-head {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.audit-table-row {
+  min-height: 70px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 12px;
+}
+
+.audit-table-row span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.audit-table-row small {
+  display: block;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.audit-table-row code {
+  display: block;
+  max-height: 92px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.78rem;
+}
+
 @media (max-width: 760px) {
   .shell {
     padding: 18px;
@@ -914,7 +971,9 @@ a {
   .detail-grid,
   .statement-summary,
   .statement-table-head,
-  .statement-table-row {
+  .statement-table-row,
+  .audit-table-head,
+  .audit-table-row {
     grid-template-columns: 1fr;
   }
 

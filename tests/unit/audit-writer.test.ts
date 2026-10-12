@@ -43,6 +43,66 @@ describe("writeAuditEvent", () => {
     });
   });
 
+  it("redacts secrets from before and after payloads", async () => {
+    const create = vi.fn().mockResolvedValue({});
+
+    await writeAuditEvent(
+      { auditLog: { create } },
+      {
+        ...baseEvent,
+        before: {
+          password: "plain-text",
+          roleKey: "admin",
+          nested: {
+            secretHash: "hash-value",
+            countryCode: "MA"
+          }
+        },
+        after: {
+          token: "bearer-token",
+          visible: "kept"
+        }
+      }
+    );
+
+    const call = create.mock.calls.at(0)?.[0] as {
+      data: {
+        before: unknown;
+        after: unknown;
+      };
+    };
+
+    expect(call.data.before).toEqual({
+      password: "[REDACTED]",
+      roleKey: "admin",
+      nested: {
+        secretHash: "[REDACTED]",
+        countryCode: "MA"
+      }
+    });
+    expect(call.data.after).toEqual({
+      token: "[REDACTED]",
+      visible: "kept"
+    });
+  });
+
+  it("requires a reason for voids, adjustments, period reopens and overrides", async () => {
+    const create = vi.fn().mockResolvedValue({});
+
+    await expect(
+      writeAuditEvent(
+        { auditLog: { create } },
+        {
+          ...baseEvent,
+          action: "financial_transaction.void",
+          reason: " "
+        }
+      )
+    ).rejects.toThrow("requires a reason");
+
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("rejects non-JSON audit payloads before writing", async () => {
     const create = vi.fn().mockResolvedValue({});
 

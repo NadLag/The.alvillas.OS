@@ -30,6 +30,7 @@ export const permissionResources = [
   "service",
   "wallet",
   "financial_transaction",
+  "audit_log",
   "owner_portal",
   "owner_portal_property",
   "owner_statement",

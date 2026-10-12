@@ -42,6 +42,7 @@
     "title": "ALVILLAS OS",
     "logout": "Deconnexion",
     "identity": "Identite",
+    "audit": "Audit",
     "owners": "Proprietaires",
     "properties": "Proprietes",
     "reservations": "Reservations",
@@ -195,6 +196,36 @@
       "validation": "Verifiez les champs de recuperation puis reessayez.",
       "conflict": "Le code de recuperation est invalide ou expire.",
       "generic": "Recuperation impossible. Reessayez."
+    }
+  },
+  "Audit": {
+    "eyebrow": "Audit",
+    "title": "Journal d'audit",
+    "subtitle": "Consultez les evenements append-only de securite, d'acces et de finance dans l'organisation.",
+    "backToWorkspace": "Espace",
+    "export": "Exporter CSV",
+    "records": "Lignes d'audit",
+    "count": "{count, plural, one {# ligne} other {# lignes}}",
+    "empty": "Aucune ligne d'audit ne correspond a ces filtres.",
+    "systemActor": "Systeme",
+    "deniedTitle": "Acces audit refuse",
+    "deniedSubtitle": "Vos affectations actuelles ne permettent pas de consulter ou exporter le journal d'audit.",
+    "filters": {
+      "action": "Action",
+      "resourceType": "Type de ressource",
+      "actorId": "ID acteur",
+      "requestId": "ID requete",
+      "from": "Depuis",
+      "to": "Jusqu'a",
+      "apply": "Appliquer les filtres"
+    },
+    "columns": {
+      "when": "Quand",
+      "actor": "Acteur",
+      "action": "Action",
+      "resource": "Ressource",
+      "reason": "Raison",
+      "change": "Avant / apres"
     }
   },
   "Core": {

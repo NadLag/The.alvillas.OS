@@ -42,6 +42,7 @@
     "title": "ALVILLAS OS",
     "logout": "Log out",
     "identity": "Identity",
+    "audit": "Audit",
     "owners": "Owners",
     "properties": "Properties",
     "reservations": "Reservations",
@@ -195,6 +196,36 @@
       "validation": "Check the recovery fields and try again.",
       "conflict": "The recovery code is invalid or expired.",
       "generic": "Recovery failed. Try again."
+    }
+  },
+  "Audit": {
+    "eyebrow": "Audit",
+    "title": "Audit trail",
+    "subtitle": "Review append-only security, access and financial events across the organization.",
+    "backToWorkspace": "Workspace",
+    "export": "Export CSV",
+    "records": "Audit records",
+    "count": "{count, plural, one {# record} other {# records}}",
+    "empty": "No audit records match these filters.",
+    "systemActor": "System",
+    "deniedTitle": "Audit access denied",
+    "deniedSubtitle": "Your current assignments do not allow audit trail viewing or export.",
+    "filters": {
+      "action": "Action",
+      "resourceType": "Resource type",
+      "actorId": "Actor ID",
+      "requestId": "Request ID",
+      "from": "From",
+      "to": "To",
+      "apply": "Apply filters"
+    },
+    "columns": {
+      "when": "When",
+      "actor": "Actor",
+      "action": "Action",
+      "resource": "Resource",
+      "reason": "Reason",
+      "change": "Before / after"
     }
   },
   "Core": {
