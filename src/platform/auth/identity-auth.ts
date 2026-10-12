@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
@@ -25,6 +26,10 @@ function requestIp(headers: Headers): string | null {
 
 function userAgent(headers: Headers): string | null {
   return headers.get("user-agent");
+}
+
+function requestId(headers: Headers): string {
+  return headers.get("x-request-id") ?? crypto.randomUUID();
 }
 
 async function findAccountByEmail(email: string) {
@@ -151,11 +156,14 @@ async function verifyMfa(account: NonNullable<AuthAccount>, input: {
 async function createAuthSession(
   account: NonNullable<AuthAccount>,
   input: {
+    method: "password" | "pin";
     deviceId: string;
     headers: Headers;
   }
 ): Promise<string> {
   const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const ipAddress = requestIp(input.headers);
+  const userAgentValue = userAgent(input.headers);
 
   return withTenant(prisma as unknown as TenantTransactionRunner, account.organizationId, async (tx) => {
     const session = await tx.authSession.create({
@@ -164,8 +172,8 @@ async function createAuthSession(
         userAccountId: account.id,
         deviceId: input.deviceId,
         sessionVersion: account.sessionVersion,
-        userAgent: userAgent(input.headers),
-        ipAddress: requestIp(input.headers),
+        userAgent: userAgentValue,
+        ipAddress,
         expiresAt
       },
       select: { id: true }
@@ -188,7 +196,7 @@ async function createAuthSession(
         userAccountId: account.id,
         deviceId: input.deviceId,
         label: "Browser",
-        platform: userAgent(input.headers),
+        platform: userAgentValue,
         lastSeenAt: new Date()
       }
     });
@@ -196,6 +204,25 @@ async function createAuthSession(
     await tx.userAccount.update({
       where: { id: account.id },
       data: { lastLoginAt: new Date() }
+    });
+
+    await writeAuditEvent(tx, {
+      organizationId: account.organizationId,
+      actorId: account.id,
+      action: "identity.account.login",
+      resourceType: "identity",
+      resourceId: account.id,
+      ipAddress,
+      deviceId: input.deviceId,
+      after: {
+        method: input.method,
+        sessionId: session.id,
+        userAgent: userAgentValue,
+        expiresAt: expiresAt.toISOString()
+      },
+      reason: "Account access",
+      requestId: requestId(input.headers),
+      occurredAt: new Date()
     });
 
     return session.id;
@@ -241,7 +268,7 @@ export async function authenticatePassword(input: {
     return null;
   }
 
-  const sessionId = await createAuthSession(account, input);
+  const sessionId = await createAuthSession(account, { ...input, method: "password" });
 
   return authorizedUser(account, sessionId);
 }
@@ -265,7 +292,7 @@ export async function authenticatePin(input: {
     return null;
   }
 
-  const sessionId = await createAuthSession(account, input);
+  const sessionId = await createAuthSession(account, { ...input, method: "pin" });
 
   return authorizedUser(account, sessionId);
 }

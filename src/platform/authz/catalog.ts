@@ -34,6 +34,7 @@ export const permissionResources = [
   "owner_portal_property",
   "owner_statement",
   "report",
+  "audit_log",
   "config_rule"
 ] as const;
 

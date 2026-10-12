@@ -42,6 +42,7 @@
     "title": "ALVILLAS OS",
     "logout": "Deconnexion",
     "identity": "Identite",
+    "audit": "Audit",
     "owners": "Proprietaires",
     "properties": "Proprietes",
     "reservations": "Reservations",
@@ -195,6 +196,50 @@
       "validation": "Verifiez les champs de recuperation puis reessayez.",
       "conflict": "Le code de recuperation est invalide ou expire.",
       "generic": "Recuperation impossible. Reessayez."
+    }
+  },
+  "Audit": {
+    "eyebrow": "Journal d'audit",
+    "title": "Historique d'audit",
+    "subtitle": "Consultez les actions sensibles avec filtres par organisation, donnees masquees et export de preuve.",
+    "backToWorkspace": "Espace",
+    "export": "Exporter CSV",
+    "listLabel": "Historique des evenements",
+    "empty": "Aucun evenement d'audit ne correspond a ces filtres.",
+    "count": "{count, plural, one {# affiche} other {# affiches}} sur {total}",
+    "systemActor": "Systeme",
+    "noReason": "Aucune raison enregistree",
+    "notRecorded": "Non enregistre",
+    "organizationScope": "Organisation",
+    "filters": {
+      "action": "Action",
+      "actionPlaceholder": "reservation.revenue",
+      "resourceType": "Ressource",
+      "resourceTypePlaceholder": "financial_transaction",
+      "actor": "ID acteur",
+      "resourceId": "ID ressource",
+      "from": "Depuis",
+      "to": "Jusqu'a",
+      "apply": "Appliquer"
+    },
+    "columns": {
+      "when": "Date",
+      "actor": "Acteur",
+      "action": "Action",
+      "resource": "Ressource",
+      "reason": "Raison"
+    },
+    "details": {
+      "request": "Requete",
+      "where": "Ou",
+      "device": "Appareil",
+      "scope": "Portee",
+      "before": "Avant",
+      "after": "Apres"
+    },
+    "denied": {
+      "title": "Acces audit refuse",
+      "subtitle": "Ce compte n'a pas la permission de consulter l'historique d'audit."
     }
   },
   "Core": {

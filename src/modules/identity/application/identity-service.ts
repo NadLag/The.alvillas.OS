@@ -726,6 +726,20 @@ export async function suspendAccount(
   const meta = auditMeta(deps);
 
   await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const before = await tx.userAccount.findFirst({
+      where: { id: userAccountId, organizationId: ctx.organizationId },
+      select: {
+        status: true,
+        suspendedAt: true,
+        deactivatedAt: true,
+        sessionVersion: true
+      }
+    });
+
+    if (!before) {
+      throw new IdentityNotFoundError();
+    }
+
     const account = await tx.userAccount.update({
       where: { id: userAccountId },
       data: {
@@ -748,7 +762,13 @@ export async function suspendAccount(
       resourceType: "identity",
       resourceId: userAccountId,
       ipAddress: meta.ipAddress,
-      after: { status: account.status },
+      before,
+      after: {
+        status: account.status,
+        suspendedAt: account.suspendedAt,
+        deactivatedAt: account.deactivatedAt,
+        sessionVersion: account.sessionVersion
+      },
       reason: "Account suspended",
       requestId: meta.requestId,
       occurredAt: new Date()
@@ -762,9 +782,24 @@ export async function reactivateAccount(
   deps: IdentityServiceDeps = {}
 ): Promise<void> {
   assertIdentityAllowed(ctx, identityActionForMutation("recover"), userAccountId);
+  const meta = auditMeta(deps);
 
   await withTenant(db(deps), ctx.organizationId, async (tx) => {
-    await tx.userAccount.update({
+    const before = await tx.userAccount.findFirst({
+      where: { id: userAccountId, organizationId: ctx.organizationId },
+      select: {
+        status: true,
+        suspendedAt: true,
+        deactivatedAt: true,
+        sessionVersion: true
+      }
+    });
+
+    if (!before) {
+      throw new IdentityNotFoundError();
+    }
+
+    const account = await tx.userAccount.update({
       where: { id: userAccountId },
       data: {
         status: "ACTIVE",
@@ -772,6 +807,25 @@ export async function reactivateAccount(
         deactivatedAt: null,
         sessionVersion: { increment: 1 }
       }
+    });
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.account.reactivate",
+      resourceType: "identity",
+      resourceId: userAccountId,
+      ipAddress: meta.ipAddress,
+      before,
+      after: {
+        status: account.status,
+        suspendedAt: account.suspendedAt,
+        deactivatedAt: account.deactivatedAt,
+        sessionVersion: account.sessionVersion
+      },
+      reason: "Account reactivated",
+      requestId: meta.requestId,
+      occurredAt: new Date()
     });
   });
 }
@@ -782,6 +836,7 @@ export async function issueRecoveryCode(
   deps: IdentityServiceDeps = {}
 ): Promise<string> {
   assertIdentityAllowed(ctx, identityActionForMutation("recover"), userAccountId);
+  const meta = auditMeta(deps);
   const code = newRecoveryCode();
 
   await withTenant(db(deps), ctx.organizationId, async (tx) => {
@@ -793,7 +848,7 @@ export async function issueRecoveryCode(
       throw new IdentityNotFoundError();
     }
 
-    await tx.authCredential.create({
+    const credential = await tx.authCredential.create({
       data: {
         organizationId: ctx.organizationId,
         userAccountId,
@@ -801,7 +856,25 @@ export async function issueRecoveryCode(
         label: "Recovery code",
         secretHash: await hashCredentialSecret(code),
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
-      }
+      },
+      select: { id: true, expiresAt: true }
+    });
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.recovery_code.issue",
+      resourceType: "identity",
+      resourceId: userAccountId,
+      ipAddress: meta.ipAddress,
+      after: {
+        userAccountId,
+        authCredentialRecordId: credential.id,
+        expiresAt: credential.expiresAt?.toISOString() ?? null
+      },
+      reason: "Recovery code issued",
+      requestId: meta.requestId,
+      occurredAt: new Date()
     });
   });
 
@@ -810,6 +883,7 @@ export async function issueRecoveryCode(
 
 export async function recoverPassword(input: RecoveryInput, deps: IdentityServiceDeps = {}): Promise<void> {
   const parsed = recoveryInputSchema.parse(input);
+  const meta = auditMeta(deps);
 
   await withTenant(db(deps), bootstrapOrganizationId, async (tx) => {
     const account = await tx.userAccount.findFirst({
@@ -877,6 +951,24 @@ export async function recoverPassword(input: RecoveryInput, deps: IdentityServic
         suspendedAt: null
       }
     });
+
+    await writeAuditEvent(tx, {
+      organizationId: bootstrapOrganizationId,
+      actorId: account.id,
+      action: "identity.account.recover",
+      resourceType: "identity",
+      resourceId: account.id,
+      ipAddress: meta.ipAddress,
+      after: {
+        userAccountId: account.id,
+        recoveryCredentialRecordId: matchedCredentialId,
+        passwordRotated: true,
+        sessionVersionIncremented: true
+      },
+      reason: "Password recovered",
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
   });
 }
 
@@ -898,8 +990,28 @@ export async function revokeSession(
   deps: IdentityServiceDeps = {}
 ): Promise<void> {
   assertIdentityAllowed(ctx, identityActionForMutation("revoke"));
+  const meta = auditMeta(deps);
 
   await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const session = await tx.authSession.findFirst({
+      where: {
+        id: sessionId,
+        organizationId: ctx.organizationId,
+        revokedAt: null
+      },
+      select: {
+        id: true,
+        userAccountId: true,
+        deviceId: true,
+        lastSeenAt: true,
+        expiresAt: true
+      }
+    });
+
+    if (!session) {
+      throw new IdentityNotFoundError();
+    }
+
     const result = await tx.authSession.updateMany({
       where: {
         id: sessionId,
@@ -914,6 +1026,30 @@ export async function revokeSession(
     if (result.count !== 1) {
       throw new IdentityNotFoundError();
     }
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.session.revoke",
+      resourceType: "identity",
+      resourceId: session.userAccountId,
+      ipAddress: meta.ipAddress,
+      deviceId: session.deviceId,
+      before: {
+        sessionId: session.id,
+        userAccountId: session.userAccountId,
+        deviceId: session.deviceId,
+        lastSeenAt: session.lastSeenAt.toISOString(),
+        expiresAt: session.expiresAt.toISOString()
+      },
+      after: {
+        sessionId: session.id,
+        revokedAt: new Date().toISOString()
+      },
+      reason: "Session revoked",
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
   });
 }
 
@@ -922,21 +1058,41 @@ export async function startTotpEnrollment(
   deps: IdentityServiceDeps = {}
 ): Promise<TotpEnrollment> {
   assertIdentityAllowed(ctx, identityActionForMutation("mfa"), ctx.actorId);
+  const meta = auditMeta(deps);
   const secret = generateTotpSecret();
 
-  const credential = await withTenant(db(deps), ctx.organizationId, async (tx) =>
-    tx.authCredential.create({
+  const credential = await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const created = await tx.authCredential.create({
       data: {
         organizationId: ctx.organizationId,
         userAccountId: ctx.actorId,
         type: "TOTP",
         label: "Authenticator app",
         secretEncrypted: encryptSecret(secret),
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+        expiresAt
       },
       select: { id: true }
-    })
-  );
+    });
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.mfa.totp.enrollment_started",
+      resourceType: "identity",
+      resourceId: ctx.actorId,
+      ipAddress: meta.ipAddress,
+      after: {
+        authCredentialRecordId: created.id,
+        expiresAt: expiresAt.toISOString()
+      },
+      reason: "TOTP enrollment started",
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
+
+    return created;
+  });
 
   return {
     credentialId: credential.id,
@@ -956,6 +1112,7 @@ export async function confirmTotpEnrollment(
   deps: IdentityServiceDeps = {}
 ): Promise<string[]> {
   assertIdentityAllowed(ctx, identityActionForMutation("mfa"), ctx.actorId);
+  const meta = auditMeta(deps);
   const recoveryCodes = Array.from({ length: 8 }, () => newRecoveryCode());
 
   await withTenant(db(deps), ctx.organizationId, async (tx) => {
@@ -993,6 +1150,27 @@ export async function confirmTotpEnrollment(
         }
       });
     }
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.mfa.totp.confirmed",
+      resourceType: "identity",
+      resourceId: ctx.actorId,
+      ipAddress: meta.ipAddress,
+      before: {
+        authCredentialRecordId: credential.id,
+        expiresAt: credential.expiresAt?.toISOString() ?? null
+      },
+      after: {
+        authCredentialRecordId: credential.id,
+        mfaRequired: true,
+        recoveryCodeCount: recoveryCodes.length
+      },
+      reason: "TOTP enrollment confirmed",
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
   });
 
   return recoveryCodes;
@@ -1062,6 +1240,7 @@ export async function finishPasskeyRegistration(
 ): Promise<void> {
   assertIdentityAllowed(ctx, identityActionForMutation("mfa"), ctx.actorId);
   const origin = webAuthnOrigin(deps);
+  const meta = auditMeta(deps);
 
   await withTenant(db(deps), ctx.organizationId, async (tx) => {
     const challenge = await tx.authChallenge.findFirst({
@@ -1091,7 +1270,7 @@ export async function finishPasskeyRegistration(
       throw new IdentityConflictError("Passkey registration failed");
     }
 
-    await tx.authCredential.create({
+    const credential = await tx.authCredential.create({
       data: {
         organizationId: ctx.organizationId,
         userAccountId: ctx.actorId,
@@ -1103,11 +1282,35 @@ export async function finishPasskeyRegistration(
         transports: response.response.transports ?? Prisma.JsonNull,
         backupEligible: verification.registrationInfo.credentialDeviceType === "multiDevice",
         backedUp: verification.registrationInfo.credentialBackedUp
+      },
+      select: {
+        id: true,
+        transports: true,
+        backupEligible: true,
+        backedUp: true
       }
     });
     await tx.authChallenge.update({
       where: { id: challenge.id },
       data: { consumedAt: new Date() }
+    });
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.passkey.registered",
+      resourceType: "identity",
+      resourceId: ctx.actorId,
+      ipAddress: meta.ipAddress,
+      after: {
+        authCredentialRecordId: credential.id,
+        transports: credential.transports,
+        backupEligible: credential.backupEligible,
+        backedUp: credential.backedUp
+      },
+      reason: "Passkey registered",
+      requestId: meta.requestId,
+      occurredAt: new Date()
     });
   });
 }
@@ -1176,6 +1379,7 @@ export async function verifyPasskeyAuthentication(
   deps: IdentityServiceDeps = {}
 ): Promise<{ userAccountId: string }> {
   const origin = webAuthnOrigin(deps);
+  const meta = auditMeta(deps);
 
   return withTenant(db(deps), bootstrapOrganizationId, async (tx) => {
     const account = await tx.userAccount.findFirst({
@@ -1246,6 +1450,22 @@ export async function verifyPasskeyAuthentication(
     await tx.authChallenge.update({
       where: { id: challenge.id },
       data: { consumedAt: new Date() }
+    });
+
+    await writeAuditEvent(tx, {
+      organizationId: bootstrapOrganizationId,
+      actorId: account.id,
+      action: "identity.passkey.authentication_verified",
+      resourceType: "identity",
+      resourceId: account.id,
+      ipAddress: meta.ipAddress,
+      after: {
+        authCredentialRecordId: credential.id,
+        challengeRecordId: challenge.id
+      },
+      reason: "Passkey authentication verified",
+      requestId: meta.requestId,
+      occurredAt: new Date()
     });
 
     return { userAccountId: account.id };

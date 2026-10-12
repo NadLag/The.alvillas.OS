@@ -890,6 +890,108 @@ a {
   line-height: 1.5;
 }
 
+.audit-header-actions,
+.audit-filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.audit-filter-form {
+  align-items: end;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 14px;
+}
+
+.audit-filter-form .field {
+  flex: 1 1 170px;
+}
+
+.audit-filter-form .primary-button {
+  flex: 0 0 auto;
+}
+
+.audit-history-panel {
+  background: var(--surface);
+}
+
+.audit-table {
+  display: grid;
+  gap: 8px;
+}
+
+.audit-table-head,
+.audit-row summary {
+  display: grid;
+  grid-template-columns: 150px 180px minmax(150px, 1fr) minmax(170px, 1fr) minmax(120px, 0.8fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.audit-table-head {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.audit-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+
+.audit-row summary {
+  min-height: 62px;
+  cursor: pointer;
+  padding: 12px;
+}
+
+.audit-row summary span,
+.audit-row summary strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.audit-row-details {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  border-top: 1px solid var(--border);
+  padding: 12px;
+}
+
+.audit-row-details .wide {
+  grid-column: span 2;
+}
+
+.audit-row-details dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.audit-row-details dd {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.audit-row-details pre {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  margin: 0;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 @media (max-width: 760px) {
   .shell {
     padding: 18px;
@@ -910,6 +1012,9 @@ a {
     .permission-checklist,
     .permission-catalog-list,
     .role-assignment-form .conditions-fieldset,
+  .audit-table-head,
+  .audit-row summary,
+  .audit-row-details,
   .segmented-control,
   .detail-grid,
   .statement-summary,
@@ -960,6 +1065,10 @@ a {
   }
 
   .detail-grid .wide {
+    grid-column: span 1;
+  }
+
+  .audit-row-details .wide {
     grid-column: span 1;
   }
 }
