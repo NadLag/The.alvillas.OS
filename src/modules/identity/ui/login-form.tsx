@@ -8,7 +8,12 @@ type LoginFormProps = {
   locale: string;
   labels: {
     email: string;
+    phone: string;
     password: string;
+    pin: string;
+    authMethod: string;
+    mfaCode: string;
+    recoveryCode: string;
     submit: string;
     invalid: string;
     rateLimited: string;
@@ -40,8 +45,16 @@ export function LoginForm({ locale, labels }: LoginFormProps) {
           autoComplete="email"
           data-testid="login-email"
           name="email"
-          required
           type="email"
+        />
+      </label>
+      <label className="field">
+        <span>{labels.phone}</span>
+        <input
+          autoComplete="tel"
+          data-testid="login-phone"
+          name="phone"
+          type="tel"
         />
       </label>
       <label className="field">
@@ -50,10 +63,50 @@ export function LoginForm({ locale, labels }: LoginFormProps) {
           autoComplete="current-password"
           data-testid="login-password"
           name="password"
-          required
           type="password"
         />
       </label>
+      <label className="field">
+        <span>{labels.pin}</span>
+        <input
+          autoComplete="one-time-code"
+          data-testid="login-pin"
+          inputMode="numeric"
+          name="pin"
+          pattern="[0-9]*"
+          type="password"
+        />
+      </label>
+      <label className="field">
+        <span>{labels.mfaCode}</span>
+        <input
+          autoComplete="one-time-code"
+          data-testid="login-mfa-code"
+          inputMode="numeric"
+          name="mfaCode"
+          pattern="[0-9]*"
+          type="text"
+        />
+      </label>
+      <label className="field">
+        <span>{labels.recoveryCode}</span>
+        <input
+          autoComplete="one-time-code"
+          data-testid="login-recovery-code"
+          name="recoveryCode"
+          type="text"
+        />
+      </label>
+      <div className="segmented-control" aria-label={labels.authMethod}>
+        <label>
+          <input name="method" type="radio" value="password" defaultChecked />
+          <span>{labels.password}</span>
+        </label>
+        <label>
+          <input name="method" type="radio" value="pin" />
+          <span>{labels.pin}</span>
+        </label>
+      </div>
       {message ? (
         <p className="form-error" data-testid="login-error" role="alert">
           {message}

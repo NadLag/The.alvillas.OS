@@ -24,7 +24,7 @@ export default async function AppPage({
 
   const session = await auth();
 
-  if (!session) {
+  if (!session?.user?.id) {
     redirect(`/${appLocale}/login`);
   }
 
@@ -41,6 +41,9 @@ export default async function AppPage({
         <nav className="app-actions" aria-label={t("actions")}>
           <Link className="secondary-button" href={`/${appLocale}/app/owners`}>
             {t("owners")}
+          </Link>
+          <Link className="secondary-button" href={`/${appLocale}/app/identity`}>
+            {t("identity")}
           </Link>
           <Link className="secondary-button" href={`/${appLocale}/app/properties`}>
             {t("properties")}

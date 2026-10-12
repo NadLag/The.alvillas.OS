@@ -6,7 +6,11 @@ export async function hashPassword(password: string, salt = randomBytes(16)): Pr
     throw new Error("Bootstrap password must be at least 12 characters");
   }
 
-  return argon2.hash(password, {
+  return hashCredentialSecret(password, salt);
+}
+
+export async function hashCredentialSecret(secret: string, salt = randomBytes(16)): Promise<string> {
+  return argon2.hash(secret, {
     type: argon2.argon2id,
     salt,
     memoryCost: 65536,

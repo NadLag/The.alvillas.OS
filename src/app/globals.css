@@ -187,6 +187,25 @@ a {
   padding: 0 12px;
 }
 
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.segmented-control label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 0 12px;
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
 .field input:focus-visible,
 .field select:focus-visible,
 .field textarea:focus-visible,
@@ -213,6 +232,33 @@ a {
   background: rgb(232 246 242);
   color: var(--accent);
   padding: 10px 12px;
+}
+
+.copy-code {
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  padding: 10px 12px;
+  color: var(--foreground);
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.86rem;
+}
+
+.inline-form {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-message {
+  color: var(--muted);
+  font-size: 0.86rem;
 }
 
 .primary-button {
@@ -694,6 +740,48 @@ a {
   gap: 10px;
 }
 
+.identity-layout,
+.identity-account-list,
+.identity-security-panel,
+.identity-security-actions,
+.identity-mfa-setup,
+.identity-recovery-codes {
+  display: grid;
+  gap: 14px;
+}
+
+.identity-account-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) repeat(4, minmax(80px, 0.7fr)) minmax(180px, 1fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 14px;
+}
+
+.identity-account-row span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.identity-account-row small {
+  color: var(--muted);
+}
+
+.identity-account-row strong {
+  overflow-wrap: anywhere;
+}
+
+.identity-row-actions,
+.identity-security-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 @media (max-width: 760px) {
   .shell {
     padding: 18px;
@@ -708,8 +796,10 @@ a {
   .form-grid.five,
   .reservation-row-main,
   .reservation-revenue-form,
-    .settlement-import-form,
-    .settlement-chain,
+  .settlement-import-form,
+  .settlement-chain,
+  .identity-account-row,
+  .segmented-control,
   .detail-grid,
   .statement-summary,
   .statement-table-head,

@@ -20,6 +20,24 @@ type ConfigRuleCreateArgs = {
   };
 };
 
+type AuthCredentialCreateArgs = {
+  data: {
+    organizationId: string;
+    userAccountId: string;
+    type: string;
+  };
+};
+
+type RoleAssignmentCreateArgs = {
+  data: {
+    organizationId: string;
+    personId: string;
+    userAccountId: string;
+    roleId: string;
+    scopeType: string;
+  };
+};
+
 describe("first-admin bootstrap", () => {
   it("requires explicit admin credentials", async () => {
     await expect(
@@ -37,6 +55,39 @@ describe("first-admin bootstrap", () => {
     const userAccount = {
       upsert: vi.fn(() => Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000003" }))
     };
+    const authCredential = {
+      findFirst: vi.fn(() => Promise.resolve(null)),
+      create: vi.fn((args: AuthCredentialCreateArgs) => {
+        void args;
+        return Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000006" });
+      }),
+      update: vi.fn(() => Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000006" }))
+    };
+    const permission = {
+      upsert: vi.fn((args: { where: { organizationId_key: { key: string } } }) =>
+        Promise.resolve({
+          id: `permission-${args.where.organizationId_key.key}`
+        })
+      )
+    };
+    const role = {
+      upsert: vi.fn((args: { where: { organizationId_key: { key: string } } }) =>
+        Promise.resolve({
+          id: `role-${args.where.organizationId_key.key}`
+        })
+      ),
+      findFirst: vi.fn(() => Promise.resolve({ id: "role-admin", key: "admin" }))
+    };
+    const rolePermission = {
+      upsert: vi.fn(() => Promise.resolve({}))
+    };
+    const roleAssignment = {
+      findFirst: vi.fn(() => Promise.resolve(null)),
+      create: vi.fn((args: RoleAssignmentCreateArgs) => {
+        void args;
+        return Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000007" });
+      })
+    };
     const configRule = {
       findFirst: vi.fn((args: ConfigRuleFindFirstArgs) => {
         void args;
@@ -51,6 +102,11 @@ describe("first-admin bootstrap", () => {
       $executeRaw: vi.fn(() => Promise.resolve(1)),
       person,
       userAccount,
+      authCredential,
+      permission,
+      role,
+      rolePermission,
+      roleAssignment,
       configRule
     };
     const client: TenantTransactionRunner & { organization: typeof organization } = {
@@ -79,6 +135,20 @@ describe("first-admin bootstrap", () => {
       })
     );
     expect(userAccount.upsert).toHaveBeenCalledOnce();
+    const authCredentialCreateArgs = authCredential.create.mock.calls[0]?.[0];
+    expect(authCredentialCreateArgs?.data).toMatchObject({
+      organizationId: bootstrapOrganizationId,
+      userAccountId: "018f0a0b-0000-7000-9000-000000000003",
+      type: "PASSWORD"
+    });
+    const roleAssignmentCreateArgs = roleAssignment.create.mock.calls[0]?.[0];
+    expect(roleAssignmentCreateArgs?.data).toMatchObject({
+      organizationId: bootstrapOrganizationId,
+      personId: "018f0a0b-0000-7000-9000-000000000002",
+      userAccountId: "018f0a0b-0000-7000-9000-000000000003",
+      roleId: "role-admin",
+      scopeType: "organization"
+    });
     expect(configRule.findFirst).toHaveBeenCalledWith({
       where: {
         organizationId: bootstrapOrganizationId,

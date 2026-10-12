@@ -4,6 +4,8 @@ import { hashPassword } from "../src/platform/auth/password";
 import { withTenant, type TenantTransactionRunner } from "../src/platform/db/tenant";
 import { readEnv, type AppEnv } from "../src/platform/env/env";
 import { bootstrapOrganizationId } from "../src/platform/identity/bootstrap";
+import { standardRoles } from "../src/modules/identity/domain/identity";
+import { IdentityRepository } from "../src/modules/identity/infrastructure/identity-repository";
 
 export { bootstrapOrganizationId };
 
@@ -73,6 +75,58 @@ export async function bootstrapFirstAdmin(
         status: "ACTIVE"
       }
     });
+
+    const existingPasswordCredential = await tx.authCredential.findFirst({
+      where: {
+        organizationId: organization.id,
+        userAccountId: account.id,
+        type: "PASSWORD",
+        revokedAt: null
+      }
+    });
+
+    if (existingPasswordCredential) {
+      await tx.authCredential.update({
+        where: { id: existingPasswordCredential.id },
+        data: {
+          secretHash: passwordHash,
+          label: "Password"
+        }
+      });
+    } else {
+      await tx.authCredential.create({
+        data: {
+          organizationId: organization.id,
+          userAccountId: account.id,
+          type: "PASSWORD",
+          label: "Password",
+          secretHash: passwordHash
+        }
+      });
+    }
+
+    const identityRepository = new IdentityRepository(tx, organization.id);
+
+    for (const role of standardRoles) {
+      await identityRepository.ensureRole({
+        key: role.key,
+        name: role.name,
+        permissions: role.permissions,
+        isSystem: true
+      });
+    }
+
+    const adminRole = await identityRepository.findRoleByKey("admin");
+
+    if (adminRole) {
+      await identityRepository.assignRole({
+        personId: person.id,
+        userAccountId: account.id,
+        roleId: adminRole.id,
+        scopeType: "organization",
+        actorId: account.id
+      });
+    }
 
     const existingReservationTaskConfig = await tx.configRule.findFirst({
       where: {
