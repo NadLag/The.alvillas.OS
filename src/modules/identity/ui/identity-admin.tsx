@@ -8,12 +8,16 @@ import {
   suspendAccountAction,
   type IdentityFormState
 } from "@/modules/identity/application/identity-actions";
+import type { AccountPermissionSimulation } from "@/modules/identity/application/identity-service";
 import type { IdentityAccountSummary, InvitationSummary } from "@/modules/identity/infrastructure/identity-repository";
+import type { RoleCatalogSummary } from "@/modules/identity/infrastructure/identity-repository";
 
 type IdentityAdminProps = {
   locale: string;
   accounts: IdentityAccountSummary[];
   invitations: InvitationSummary[];
+  roles: RoleCatalogSummary[];
+  simulations: AccountPermissionSimulation[];
   labels: {
     createInvitation: string;
     displayName: string;
@@ -25,6 +29,13 @@ type IdentityAdminProps = {
     invite: string;
     invitationCode: string;
     accounts: string;
+    roleCatalog: string;
+    permissionCount: string;
+    assignmentCount: string;
+    permissionSimulator: string;
+    canSee: string;
+    cannotSee: string;
+    noSimulatorRows: string;
     pendingInvitations: string;
     noInvitations: string;
     status: string;
@@ -39,6 +50,23 @@ type IdentityAdminProps = {
     finance: string;
     fieldStaff: string;
     owner: string;
+    coHost: string;
+    operationsManager: string;
+    propertyManager: string;
+    housekeeper: string;
+    poolTechnician: string;
+    gardener: string;
+    maintenance: string;
+    chef: string;
+    driver: string;
+    qaInspector: string;
+    accountant: string;
+    procurement: string;
+    guestExperience: string;
+    revenueManager: string;
+    regionalManager: string;
+    contractor: string;
+    ownerRepresentative: string;
     organization: string;
     successCreated: string;
     successRecovery: string;
@@ -100,7 +128,44 @@ function RecoveryForm({
   );
 }
 
-export function IdentityAdmin({ locale, accounts, invitations, labels }: IdentityAdminProps) {
+const roleLabelKey: Record<string, keyof IdentityAdminProps["labels"]> = {
+  admin: "admin",
+  finance: "finance",
+  field_staff: "fieldStaff",
+  owner: "owner",
+  co_host: "coHost",
+  operations_manager: "operationsManager",
+  property_manager: "propertyManager",
+  housekeeper: "housekeeper",
+  pool_technician: "poolTechnician",
+  gardener: "gardener",
+  maintenance: "maintenance",
+  chef: "chef",
+  driver: "driver",
+  qa_inspector: "qaInspector",
+  accountant: "accountant",
+  procurement: "procurement",
+  guest_experience: "guestExperience",
+  revenue_manager: "revenueManager",
+  regional_manager: "regionalManager",
+  contractor: "contractor",
+  owner_representative: "ownerRepresentative"
+};
+
+function roleLabel(roleKey: string, labels: IdentityAdminProps["labels"]): string {
+  const key = roleLabelKey[roleKey];
+
+  return key ? labels[key] : roleKey;
+}
+
+export function IdentityAdmin({
+  locale,
+  accounts,
+  invitations,
+  roles,
+  simulations,
+  labels
+}: IdentityAdminProps) {
   const [state, formAction, pending] = useActionState(
     createInvitationAction.bind(null, locale),
     initialState
@@ -132,10 +197,11 @@ export function IdentityAdmin({ locale, accounts, invitations, labels }: Identit
             <label className="field">
               <span>{labels.role}</span>
               <select data-testid="invite-role" name="roleKey" required>
-                <option value="admin">{labels.admin}</option>
-                <option value="finance">{labels.finance}</option>
-                <option value="field_staff">{labels.fieldStaff}</option>
-                <option value="owner">{labels.owner}</option>
+                {roles.map((role) => (
+                  <option key={role.id} value={role.key}>
+                    {roleLabel(role.key, labels)}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="field">
@@ -182,7 +248,7 @@ export function IdentityAdmin({ locale, accounts, invitations, labels }: Identit
               </span>
               <span>
                 <small>{labels.roles}</small>
-                <strong>{account.roles.join(", ")}</strong>
+                <strong>{account.roles.map((role) => roleLabel(role, labels)).join(", ")}</strong>
               </span>
               <span>
                 <small>{labels.sessions}</small>
@@ -233,6 +299,62 @@ export function IdentityAdmin({ locale, accounts, invitations, labels }: Identit
             </article>
           ))}
         </div>
+      </section>
+
+      <section className="detail-panel">
+        <div className="section-heading">
+          <h2>{labels.roleCatalog}</h2>
+        </div>
+        <div className="identity-account-list">
+          {roles.map((role) => (
+            <article className="identity-account-row role-catalog-row" data-testid="role-catalog-row" key={role.id}>
+              <span>
+                <strong>{roleLabel(role.key, labels)}</strong>
+                <small>{role.description ?? role.key}</small>
+              </span>
+              <span>
+                <small>{labels.permissionCount}</small>
+                <strong>{role.permissionCount}</strong>
+              </span>
+              <span>
+                <small>{labels.assignmentCount}</small>
+                <strong>{role.assignmentCount}</strong>
+              </span>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="detail-panel">
+        <div className="section-heading">
+          <h2>{labels.permissionSimulator}</h2>
+        </div>
+        {simulations.length === 0 ? (
+          <p className="empty-state">{labels.noSimulatorRows}</p>
+        ) : (
+          <div className="identity-account-list">
+            {simulations.map((simulation) => (
+              <article
+                className="identity-account-row simulator-row"
+                data-testid="permission-simulator-row"
+                key={simulation.userAccountId}
+              >
+                <span>
+                  <strong>{simulation.displayName}</strong>
+                  <small>{simulation.roleLabels.map((role) => roleLabel(role, labels)).join(", ")}</small>
+                </span>
+                <span>
+                  <small>{labels.canSee}</small>
+                  <strong>{simulation.canSee.map((result) => result.label).join(", ") || "-"}</strong>
+                </span>
+                <span>
+                  <small>{labels.cannotSee}</small>
+                  <strong>{simulation.cannotSee.map((result) => result.label).join(", ") || "-"}</strong>
+                </span>
+              </article>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="detail-panel">

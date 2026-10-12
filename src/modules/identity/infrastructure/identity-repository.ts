@@ -38,6 +38,16 @@ export type SessionSummary = {
   lastSeenAt: Date;
 };
 
+export type RoleCatalogSummary = {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  isSystem: boolean;
+  permissionCount: number;
+  assignmentCount: number;
+};
+
 type AccountRow = Prisma.UserAccountGetPayload<{
   include: {
     person: true;
@@ -85,8 +95,17 @@ export class IdentityRepository {
     private readonly organizationId: string
   ) {}
 
-  async ensurePermission(key: string): Promise<{ id: string }> {
-    const [resource, action] = key.split(":");
+  async ensurePermission(input: string | {
+    key: string;
+    resource?: string;
+    action?: string;
+    description?: string;
+  }): Promise<{ id: string }> {
+    const key = typeof input === "string" ? input : input.key;
+    const [parsedResource, parsedAction] = key.split(":");
+    const resource = typeof input === "string" ? parsedResource : input.resource ?? parsedResource;
+    const action = typeof input === "string" ? parsedAction : input.action ?? parsedAction;
+    const description = typeof input === "string" ? undefined : input.description;
 
     return this.tx.permission.upsert({
       where: {
@@ -97,13 +116,15 @@ export class IdentityRepository {
       },
       update: {
         resource: resource ?? key,
-        action: action ?? "view"
+        action: action ?? "view",
+        description
       },
       create: {
         organizationId: this.organizationId,
         key,
         resource: resource ?? key,
-        action: action ?? "view"
+        action: action ?? "view",
+        description
       },
       select: { id: true }
     });
@@ -112,6 +133,7 @@ export class IdentityRepository {
   async ensureRole(input: {
     key: string;
     name: string;
+    description?: string | null;
     permissions: readonly string[];
     isSystem?: boolean;
   }): Promise<{ id: string }> {
@@ -124,6 +146,7 @@ export class IdentityRepository {
       },
       update: {
         name: input.name,
+        description: input.description ?? null,
         isSystem: input.isSystem ?? true,
         archivedAt: null
       },
@@ -131,6 +154,7 @@ export class IdentityRepository {
         organizationId: this.organizationId,
         key: input.key,
         name: input.name,
+        description: input.description ?? null,
         isSystem: input.isSystem ?? true
       },
       select: { id: true }
@@ -158,6 +182,64 @@ export class IdentityRepository {
     return role;
   }
 
+  async listRoles(): Promise<RoleCatalogSummary[]> {
+    const roles = await this.tx.role.findMany({
+      where: {
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      orderBy: [{ isSystem: "desc" }, { name: "asc" }],
+      include: {
+        rolePermissions: true,
+        roleAssignments: {
+          where: { archivedAt: null },
+          select: { id: true }
+        }
+      }
+    });
+
+    return roles.map((role) => ({
+      id: role.id,
+      key: role.key,
+      name: role.name,
+      description: role.description,
+      isSystem: role.isSystem,
+      permissionCount: role.rolePermissions.length,
+      assignmentCount: role.roleAssignments.length
+    }));
+  }
+
+  async ensureFieldPolicy(input: {
+    resource: string;
+    field: string;
+    dataClass: string;
+    requiredPermission: string;
+    mask: string;
+  }): Promise<void> {
+    await this.tx.fieldPolicy.upsert({
+      where: {
+        organizationId_resource_field: {
+          organizationId: this.organizationId,
+          resource: input.resource,
+          field: input.field
+        }
+      },
+      update: {
+        dataClass: input.dataClass,
+        requiredPermission: input.requiredPermission,
+        mask: input.mask
+      },
+      create: {
+        organizationId: this.organizationId,
+        resource: input.resource,
+        field: input.field,
+        dataClass: input.dataClass,
+        requiredPermission: input.requiredPermission,
+        mask: input.mask
+      }
+    });
+  }
+
   findRoleByKey(key: string): Promise<{ id: string; key: string } | null> {
     return this.tx.role.findFirst({
       where: {
@@ -175,6 +257,10 @@ export class IdentityRepository {
     roleId: string;
     scopeType: string;
     scopeId?: string | null;
+    conditions?: Prisma.InputJsonValue | null;
+    validFrom?: Date;
+    validTo?: Date | null;
+    compensationRef?: string | null;
     actorId?: string | null;
   }): Promise<void> {
     const existing = await this.tx.roleAssignment.findFirst({
@@ -185,6 +271,7 @@ export class IdentityRepository {
         roleId: input.roleId,
         scopeType: input.scopeType,
         scopeId: input.scopeId ?? null,
+        validTo: input.validTo ?? null,
         archivedAt: null
       },
       select: { id: true }
@@ -202,6 +289,10 @@ export class IdentityRepository {
         roleId: input.roleId,
         scopeType: input.scopeType,
         scopeId: input.scopeId ?? null,
+        conditions: input.conditions ?? undefined,
+        validFrom: input.validFrom ?? undefined,
+        validTo: input.validTo ?? null,
+        compensationRef: input.compensationRef ?? null,
         createdBy: input.actorId ?? null
       }
     });

@@ -1,6 +1,11 @@
 import type { Session } from "next-auth";
 import { identityResource } from "@/modules/identity/domain/identity";
-import { authorize, type AuthContext } from "@/platform/authz/authorize";
+import {
+  authorize,
+  parseAuthorizationConditions,
+  type AuthContext,
+  type ScopeType
+} from "@/platform/authz/authorize";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
@@ -13,6 +18,7 @@ export type IdentityActorContext = {
 
 type RolePermissionRow = {
   role: {
+    key: string;
     rolePermissions: Array<{
       permission: {
         key: string;
@@ -21,6 +27,9 @@ type RolePermissionRow = {
   };
   scopeType: string;
   scopeId: string | null;
+  conditions: unknown;
+  validFrom: Date;
+  validTo: Date | null;
 };
 
 type IdentityAccessDeps = {
@@ -59,22 +68,39 @@ export async function authContextForAccount(
     })) as RolePermissionRow[];
 
     const permissions = new Set<string>();
-    const scopes = assignments.map((assignment) => {
+    const authAssignments = assignments.map((assignment) => {
+      const assignmentPermissions = new Set<string>();
+
       for (const rolePermission of assignment.role.rolePermissions) {
         permissions.add(rolePermission.permission.key);
+        assignmentPermissions.add(rolePermission.permission.key);
       }
 
-      return {
+      const scope = {
         organizationId,
+        scopeType: assignment.scopeType as ScopeType,
+        scopeId: assignment.scopeId ?? undefined,
         resourceType: assignment.scopeType === "organization" ? undefined : assignment.scopeType,
         resourceId: assignment.scopeId ?? undefined
       };
+
+      return {
+        roleKey: assignment.role.key,
+        permissions: assignmentPermissions,
+        scope,
+        conditions: parseAuthorizationConditions(assignment.conditions),
+        validFrom: assignment.validFrom,
+        validTo: assignment.validTo
+      };
     });
+    const scopes = authAssignments.map((assignment) => assignment.scope);
 
     return {
       organizationId,
+      userAccountId,
       permissions,
-      scopes: scopes.length > 0 ? scopes : [{ organizationId }]
+      scopes: scopes.length > 0 ? scopes : [{ organizationId }],
+      assignments: authAssignments
     };
   });
 }
@@ -93,7 +119,10 @@ export async function identityActorContextFromSession(
     organizationId: user.organizationId,
     actorId: user.id,
     personId: user.personId,
-    authContext: await authContextForAccount(user.organizationId, user.id, deps)
+    authContext: {
+      ...(await authContextForAccount(user.organizationId, user.id, deps)),
+      personId: user.personId
+    }
   };
 }
 

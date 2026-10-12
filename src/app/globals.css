@@ -775,6 +775,11 @@ a {
   overflow-wrap: anywhere;
 }
 
+.role-catalog-row,
+.simulator-row {
+  grid-template-columns: minmax(160px, 1.2fr) repeat(2, minmax(120px, 0.9fr));
+}
+
 .identity-row-actions,
 .identity-security-actions {
   display: flex;

@@ -1,5 +1,11 @@
 import { z } from "zod";
 import { permissionKey, type Action } from "@/platform/authz/authorize";
+import {
+  standardRoleKeys,
+  standardRoleTemplates,
+  standardPermissions as catalogStandardPermissions,
+  type StandardRoleKey
+} from "@/platform/authz/catalog";
 
 export const identityResource = "identity";
 
@@ -12,71 +18,9 @@ export const identityPermissions = [
   permissionKey(identityResource, "override")
 ] as const;
 
-export const standardPermissions = [
-  ...identityPermissions,
-  permissionKey("owner", "view"),
-  permissionKey("owner", "create"),
-  permissionKey("property", "view"),
-  permissionKey("property", "create"),
-  permissionKey("reservation", "view"),
-  permissionKey("reservation", "create"),
-  permissionKey("task", "view"),
-  permissionKey("task", "create"),
-  permissionKey("task", "edit"),
-  permissionKey("task", "validate"),
-  permissionKey("financial_transaction", "view"),
-  permissionKey("financial_transaction", "create"),
-  permissionKey("financial_transaction", "void"),
-  permissionKey("financial_transaction", "reconcile"),
-  permissionKey("owner_portal", "view"),
-  permissionKey("owner_portal_property", "view"),
-  permissionKey("owner_statement", "view")
-] as const;
-
-export type StandardRoleKey = "admin" | "finance" | "field_staff" | "owner";
-
-export const standardRoles: Array<{
-  key: StandardRoleKey;
-  name: string;
-  permissions: readonly string[];
-  mfaRequired: boolean;
-}> = [
-  {
-    key: "admin",
-    name: "Administrator",
-    permissions: standardPermissions,
-    mfaRequired: true
-  },
-  {
-    key: "finance",
-    name: "Finance",
-    permissions: [
-      permissionKey(identityResource, "view"),
-      permissionKey("reservation", "view"),
-      permissionKey("financial_transaction", "view"),
-      permissionKey("financial_transaction", "create"),
-      permissionKey("financial_transaction", "void"),
-      permissionKey("financial_transaction", "reconcile")
-    ],
-    mfaRequired: true
-  },
-  {
-    key: "field_staff",
-    name: "Field staff",
-    permissions: [permissionKey("task", "view"), permissionKey("task", "edit")],
-    mfaRequired: false
-  },
-  {
-    key: "owner",
-    name: "Owner",
-    permissions: [
-      permissionKey("owner_portal", "view"),
-      permissionKey("owner_portal_property", "view"),
-      permissionKey("owner_statement", "view")
-    ],
-    mfaRequired: false
-  }
-];
+export const standardPermissions = catalogStandardPermissions;
+export const standardRoles = standardRoleTemplates;
+export type { StandardRoleKey };
 
 export const invitationInputSchema = z.object({
   displayName: z.string().trim().min(2).max(120),
@@ -95,8 +39,22 @@ export const invitationInputSchema = z.object({
     .transform((value) => value.toLowerCase())
     .optional()
     .or(z.literal("").transform(() => undefined)),
-  roleKey: z.enum(["admin", "finance", "field_staff", "owner"]),
-  scopeType: z.enum(["organization", "property", "owner", "field_team"]).default("organization"),
+  roleKey: z.enum(standardRoleKeys),
+  scopeType: z
+    .enum([
+      "organization",
+      "region",
+      "city",
+      "property",
+      "owner",
+      "reservation",
+      "job",
+      "service",
+      "financial_record",
+      "wallet",
+      "field_team"
+    ])
+    .default("organization"),
   scopeId: z
     .string()
     .uuid()

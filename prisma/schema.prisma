@@ -32,6 +32,7 @@ model Organization {
   invitations          Invitation[]
   roles                Role[]
   permissions          Permission[]
+  fieldPolicies        FieldPolicy[]
   roleAssignments      RoleAssignment[]
   rolePermissions      RolePermission[]
   owners               Owner[]
@@ -258,6 +259,23 @@ model Permission {
   @@unique([organizationId, key], map: "permission_org_key_unique")
   @@index([organizationId, resource, action], map: "permission_org_resource_action_idx")
   @@map("permission")
+}
+
+model FieldPolicy {
+  id                 String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String       @map("organization_id") @db.Uuid
+  resource           String
+  field              String
+  dataClass          String       @map("data_class")
+  requiredPermission String       @map("required_permission")
+  mask               String       @default("placeholder")
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, resource, field], map: "field_policy_org_resource_field_unique")
+  @@index([organizationId, resource], map: "field_policy_org_resource_idx")
+  @@map("field_policy")
 }
 
 model RolePermission {

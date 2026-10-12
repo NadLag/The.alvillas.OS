@@ -81,6 +81,9 @@ describe("first-admin bootstrap", () => {
     const rolePermission = {
       upsert: vi.fn(() => Promise.resolve({}))
     };
+    const fieldPolicy = {
+      upsert: vi.fn(() => Promise.resolve({}))
+    };
     const roleAssignment = {
       findFirst: vi.fn(() => Promise.resolve(null)),
       create: vi.fn((args: RoleAssignmentCreateArgs) => {
@@ -106,6 +109,7 @@ describe("first-admin bootstrap", () => {
       permission,
       role,
       rolePermission,
+      fieldPolicy,
       roleAssignment,
       configRule
     };
