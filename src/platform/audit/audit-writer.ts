@@ -23,6 +23,94 @@ type AuditClient = {
   };
 };
 
+export const REDACTED_AUDIT_VALUE = "[REDACTED]";
+
+const SENSITIVE_AUDIT_KEYS = new Set([
+  "accesstoken",
+  "address",
+  "apikey",
+  "bankaccount",
+  "code",
+  "codehash",
+  "credentialid",
+  "displayname",
+  "documentnumber",
+  "email",
+  "iban",
+  "idnumber",
+  "legalname",
+  "nationalid",
+  "passkey",
+  "passport",
+  "password",
+  "passwordhash",
+  "phone",
+  "pin",
+  "privatekey",
+  "publickey",
+  "recoverycode",
+  "refreshtoken",
+  "secret",
+  "secretencrypted",
+  "secrethash",
+  "session",
+  "swift",
+  "token",
+  "totp"
+]);
+
+const REASON_REQUIRED_ACTION_TOKENS = new Set([
+  "adjust",
+  "adjustment",
+  "override",
+  "reopen",
+  "reopened",
+  "reverse",
+  "reversed",
+  "void",
+  "voided"
+]);
+
+function normalizeAuditKey(key: string): string {
+  return key.replace(/[^a-z0-9]/giu, "").toLowerCase();
+}
+
+function actionTokens(action: string): string[] {
+  return action
+    .replace(/([a-z])([A-Z])/gu, "$1.$2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter(Boolean);
+}
+
+export function isReasonRequiredAuditAction(action: string): boolean {
+  return actionTokens(action).some((token) => REASON_REQUIRED_ACTION_TOKENS.has(token));
+}
+
+function normalizeAuditReason(reason: string | null | undefined): string | null {
+  const trimmed = reason?.trim();
+  return trimmed ? trimmed : null;
+}
+
+export function redactAuditPayload(value: Prisma.JsonValue): Prisma.JsonValue {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactAuditPayload(item));
+  }
+
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      (Object.entries(value) as [string, Prisma.JsonValue][]).map(([key, item]) => [
+        key,
+        SENSITIVE_AUDIT_KEYS.has(normalizeAuditKey(key))
+          ? REDACTED_AUDIT_VALUE
+          : redactAuditPayload(item)
+      ])
+    );
+  }
+
+  return value;
+}
+
 function toAuditJson(
   value: unknown
 ): Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined {
@@ -46,10 +134,16 @@ function toAuditJson(
     throw new TypeError("Audit payload must be JSON serializable");
   }
 
-  return JSON.parse(serialized) as Prisma.InputJsonValue;
+  return redactAuditPayload(JSON.parse(serialized) as Prisma.JsonValue) as Prisma.InputJsonValue;
 }
 
 export async function writeAuditEvent(client: AuditClient, event: AuditEvent): Promise<void> {
+  const reason = normalizeAuditReason(event.reason);
+
+  if (isReasonRequiredAuditAction(event.action) && reason === null) {
+    throw new TypeError("Audit reason is required for reason-required actions");
+  }
+
   await client.auditLog.create({
     data: {
       organizationId: event.organizationId,
@@ -62,7 +156,7 @@ export async function writeAuditEvent(client: AuditClient, event: AuditEvent): P
       propertyScopeId: event.propertyScopeId ?? null,
       before: toAuditJson(event.before),
       after: toAuditJson(event.after),
-      reason: event.reason ?? null,
+      reason,
       requestId: event.requestId,
       occurredAt: event.occurredAt
     }
