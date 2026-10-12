@@ -44,8 +44,34 @@ export type RoleCatalogSummary = {
   name: string;
   description: string | null;
   isSystem: boolean;
+  permissionKeys: string[];
   permissionCount: number;
   assignmentCount: number;
+};
+
+export type PermissionCatalogSummary = {
+  id: string;
+  key: string;
+  resource: string;
+  action: string;
+  description: string | null;
+};
+
+export type RoleAssignmentSummary = {
+  id: string;
+  personId: string;
+  userAccountId: string | null;
+  displayName: string;
+  email: string | null;
+  roleId: string;
+  roleKey: string;
+  roleName: string;
+  scopeType: string;
+  scopeId: string | null;
+  conditions: Prisma.JsonValue | null;
+  validFrom: Date;
+  validTo: Date | null;
+  compensationRef: string | null;
 };
 
 type AccountRow = Prisma.UserAccountGetPayload<{
@@ -190,7 +216,11 @@ export class IdentityRepository {
       },
       orderBy: [{ isSystem: "desc" }, { name: "asc" }],
       include: {
-        rolePermissions: true,
+        rolePermissions: {
+          include: {
+            permission: true
+          }
+        },
         roleAssignments: {
           where: { archivedAt: null },
           select: { id: true }
@@ -204,9 +234,167 @@ export class IdentityRepository {
       name: role.name,
       description: role.description,
       isSystem: role.isSystem,
+      permissionKeys: role.rolePermissions.map((rolePermission) => rolePermission.permission.key).sort(),
       permissionCount: role.rolePermissions.length,
       assignmentCount: role.roleAssignments.length
     }));
+  }
+
+  listPermissions(): Promise<PermissionCatalogSummary[]> {
+    return this.tx.permission.findMany({
+      where: {
+        organizationId: this.organizationId
+      },
+      orderBy: [{ resource: "asc" }, { action: "asc" }],
+      select: {
+        id: true,
+        key: true,
+        resource: true,
+        action: true,
+        description: true
+      }
+    });
+  }
+
+  async createCustomRole(input: {
+    key: string;
+    name: string;
+    description?: string | null;
+    permissionKeys: readonly string[];
+  }): Promise<RoleCatalogSummary> {
+    const role = await this.tx.role.create({
+      data: {
+        organizationId: this.organizationId,
+        key: input.key,
+        name: input.name,
+        description: input.description ?? null,
+        isSystem: false
+      },
+      select: { id: true }
+    });
+
+    await this.replaceRolePermissions(role.id, input.permissionKeys);
+
+    const created = await this.findRoleSummaryById(role.id);
+
+    if (!created) {
+      throw new Error("Created role was not found");
+    }
+
+    return created;
+  }
+
+  async updateCustomRole(input: {
+    roleId: string;
+    name: string;
+    description?: string | null;
+    permissionKeys: readonly string[];
+  }): Promise<RoleCatalogSummary> {
+    const role = await this.tx.role.findFirst({
+      where: {
+        id: input.roleId,
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      select: { id: true, isSystem: true }
+    });
+
+    if (!role || role.isSystem) {
+      throw new Error("Custom role was not found");
+    }
+
+    await this.tx.role.update({
+      where: { id: input.roleId },
+      data: {
+        name: input.name,
+        description: input.description ?? null
+      }
+    });
+    await this.replaceRolePermissions(input.roleId, input.permissionKeys);
+
+    const updated = await this.findRoleSummaryById(input.roleId);
+
+    if (!updated) {
+      throw new Error("Updated role was not found");
+    }
+
+    return updated;
+  }
+
+  private async replaceRolePermissions(roleId: string, permissionKeys: readonly string[]): Promise<void> {
+    const permissions = await this.tx.permission.findMany({
+      where: {
+        organizationId: this.organizationId,
+        key: { in: [...new Set(permissionKeys)] }
+      },
+      select: { id: true, key: true }
+    });
+
+    if (permissions.length !== new Set(permissionKeys).size) {
+      throw new Error("Unknown permission");
+    }
+
+    await this.tx.rolePermission.deleteMany({
+      where: {
+        organizationId: this.organizationId,
+        roleId,
+        permissionId: { notIn: permissions.map((permission) => permission.id) }
+      }
+    });
+
+    for (const permission of permissions) {
+      await this.tx.rolePermission.upsert({
+        where: {
+          organizationId_roleId_permissionId: {
+            organizationId: this.organizationId,
+            roleId,
+            permissionId: permission.id
+          }
+        },
+        update: {},
+        create: {
+          organizationId: this.organizationId,
+          roleId,
+          permissionId: permission.id
+        }
+      });
+    }
+  }
+
+  async findRoleSummaryById(roleId: string): Promise<RoleCatalogSummary | null> {
+    const role = await this.tx.role.findFirst({
+      where: {
+        id: roleId,
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      include: {
+        rolePermissions: {
+          include: {
+            permission: true
+          }
+        },
+        roleAssignments: {
+          where: { archivedAt: null },
+          select: { id: true }
+        }
+      }
+    });
+
+    return role
+      ? {
+          id: role.id,
+          key: role.key,
+          name: role.name,
+          description: role.description,
+          isSystem: role.isSystem,
+          permissionKeys: role.rolePermissions
+            .map((rolePermission) => rolePermission.permission.key)
+            .sort(),
+          permissionCount: role.rolePermissions.length,
+          assignmentCount: role.roleAssignments.length
+        }
+      : null;
   }
 
   async ensureFieldPolicy(input: {
@@ -262,7 +450,7 @@ export class IdentityRepository {
     validTo?: Date | null;
     compensationRef?: string | null;
     actorId?: string | null;
-  }): Promise<void> {
+  }): Promise<{ id: string; created: boolean }> {
     const existing = await this.tx.roleAssignment.findFirst({
       where: {
         organizationId: this.organizationId,
@@ -278,10 +466,10 @@ export class IdentityRepository {
     });
 
     if (existing) {
-      return;
+      return { id: existing.id, created: false };
     }
 
-    await this.tx.roleAssignment.create({
+    const created = await this.tx.roleAssignment.create({
       data: {
         organizationId: this.organizationId,
         personId: input.personId,
@@ -294,8 +482,84 @@ export class IdentityRepository {
         validTo: input.validTo ?? null,
         compensationRef: input.compensationRef ?? null,
         createdBy: input.actorId ?? null
+      },
+      select: { id: true }
+    });
+
+    return { id: created.id, created: true };
+  }
+
+  async assignRoleToAccount(input: {
+    userAccountId: string;
+    roleId: string;
+    scopeType: string;
+    scopeId?: string | null;
+    conditions?: Prisma.InputJsonValue | null;
+    validFrom?: Date;
+    validTo?: Date | null;
+    compensationRef?: string | null;
+    actorId?: string | null;
+  }): Promise<{ id: string; created: boolean }> {
+    const account = await this.tx.userAccount.findFirst({
+      where: {
+        id: input.userAccountId,
+        organizationId: this.organizationId
+      },
+      select: {
+        id: true,
+        personId: true
       }
     });
+
+    if (!account) {
+      throw new Error("Account was not found");
+    }
+
+    return this.assignRole({
+      personId: account.personId,
+      userAccountId: account.id,
+      roleId: input.roleId,
+      scopeType: input.scopeType,
+      scopeId: input.scopeId,
+      conditions: input.conditions,
+      validFrom: input.validFrom,
+      validTo: input.validTo,
+      compensationRef: input.compensationRef,
+      actorId: input.actorId
+    });
+  }
+
+  async listRoleAssignments(): Promise<RoleAssignmentSummary[]> {
+    const assignments = await this.tx.roleAssignment.findMany({
+      where: {
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      orderBy: [{ createdAt: "desc" }],
+      take: 100,
+      include: {
+        person: true,
+        userAccount: true,
+        role: true
+      }
+    });
+
+    return assignments.map((assignment) => ({
+      id: assignment.id,
+      personId: assignment.personId,
+      userAccountId: assignment.userAccountId,
+      displayName: assignment.person.displayName,
+      email: assignment.userAccount?.email ?? assignment.person.email,
+      roleId: assignment.roleId,
+      roleKey: assignment.role.key,
+      roleName: assignment.role.name,
+      scopeType: assignment.scopeType,
+      scopeId: assignment.scopeId,
+      conditions: assignment.conditions,
+      validFrom: assignment.validFrom,
+      validTo: assignment.validTo,
+      compensationRef: assignment.compensationRef
+    }));
   }
 
   listAccounts(): Promise<IdentityAccountSummary[]> {

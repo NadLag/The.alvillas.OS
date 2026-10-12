@@ -780,11 +780,114 @@ a {
   grid-template-columns: minmax(160px, 1.2fr) repeat(2, minmax(120px, 0.9fr));
 }
 
+.role-catalog-row {
+  align-items: start;
+  grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(96px, 0.35fr)) minmax(240px, 1fr);
+}
+
+.role-assignment-row {
+  grid-template-columns: minmax(160px, 1.1fr) minmax(120px, 0.8fr) minmax(180px, 1.2fr) minmax(100px, 0.5fr);
+}
+
 .identity-row-actions,
 .identity-security-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.subsection-block {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.role-management-form {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 14px;
+}
+
+.role-edit-details {
+  min-width: 0;
+}
+
+.role-edit-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 700;
+  min-height: 44px;
+  padding-block: 10px;
+}
+
+.permission-checklist {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.permission-group,
+.conditions-fieldset {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 0;
+  padding: 12px;
+}
+
+.permission-group legend,
+.conditions-fieldset legend {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.permission-group div,
+.conditions-fieldset {
+  display: grid;
+  gap: 8px;
+}
+
+.permission-group label,
+.conditions-fieldset > label:first-of-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.role-assignment-form .conditions-fieldset {
+  grid-template-columns: minmax(160px, 0.7fr) repeat(3, minmax(0, 1fr));
+  align-items: end;
+}
+
+.permission-catalog-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.permission-catalog-group {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfcfb;
+  padding: 12px;
+}
+
+.permission-catalog-group span {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
 }
 
 @media (max-width: 760px) {
@@ -804,6 +907,9 @@ a {
   .settlement-import-form,
   .settlement-chain,
   .identity-account-row,
+    .permission-checklist,
+    .permission-catalog-list,
+    .role-assignment-form .conditions-fieldset,
   .segmented-control,
   .detail-grid,
   .statement-summary,

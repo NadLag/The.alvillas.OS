@@ -72,7 +72,7 @@ export async function createManualReservationAction(
 ): Promise<ReservationFormState> {
   const appLocale = safeLocale(locale);
   const session = await auth();
-  const ctx = reservationActorContextFromSession(session);
+  const ctx = await reservationActorContextFromSession(session);
 
   if (!ctx) {
     return { status: "error", messageKey: "unauthorized" };
@@ -114,7 +114,7 @@ export async function completeFieldTaskAction(
 ): Promise<FieldTaskFormState> {
   const appLocale = safeLocale(locale);
   const session = await auth();
-  const ctx = reservationActorContextFromSession(session);
+  const ctx = await reservationActorContextFromSession(session);
 
   if (!ctx) {
     return { status: "error", messageKey: "unauthorized" };

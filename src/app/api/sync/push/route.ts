@@ -5,7 +5,7 @@ import { auth } from "@/platform/auth/session";
 
 export async function POST(request: NextRequest) {
   const session = await auth();
-  const ctx = reservationActorContextFromSession(session);
+  const ctx = await reservationActorContextFromSession(session);
 
   if (!ctx) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

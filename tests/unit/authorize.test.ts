@@ -124,4 +124,30 @@ describe("authorize", () => {
     expect(authorizeCollection(ctx, "view", "reservation")).toBe(true);
     expect(authorizeCollection(ctx, "create", "reservation")).toBe(false);
   });
+
+  it("denies expired assignments", () => {
+    const expired: AuthContext = {
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("property", "view")]),
+      scopes: [{ organizationId: "org-a", scopeType: "property", scopeId: "property-1" }],
+      assignments: [
+        {
+          roleKey: "co_host",
+          permissions: new Set([permissionKey("property", "view")]),
+          scope: { organizationId: "org-a", scopeType: "property", scopeId: "property-1" },
+          validFrom: new Date("2026-01-01T00:00:00.000Z"),
+          validTo: new Date("2026-01-02T00:00:00.000Z")
+        }
+      ]
+    };
+
+    expect(
+      authorize(expired, "view", {
+        type: "property",
+        organizationId: "org-a",
+        id: "property-1",
+        propertyId: "property-1"
+      })
+    ).toBe(false);
+  });
 });

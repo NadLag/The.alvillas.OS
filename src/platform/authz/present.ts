@@ -5,6 +5,7 @@ import {
   type DataClass,
   type Resource
 } from "@/platform/authz/authorize";
+import { fieldPolicyCatalog } from "@/platform/authz/catalog";
 
 export const maskedValue = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
@@ -86,4 +87,24 @@ export function present<TResource extends Record<string, unknown>>(
   }
 
   return output as Partial<TResource>;
+}
+
+export function catalogFieldPolicy<TResource extends Record<string, unknown>>(
+  resourceType: string
+): FieldPolicy<TResource> {
+  const policy: FieldPolicy<TResource> = {};
+
+  for (const rule of fieldPolicyCatalog) {
+    if (rule.resource !== resourceType) {
+      continue;
+    }
+
+    policy[rule.field as keyof TResource & string] = {
+      dataClass: rule.dataClass,
+      requiredPermission: rule.requiredPermission,
+      mask: rule.mask
+    };
+  }
+
+  return policy;
 }

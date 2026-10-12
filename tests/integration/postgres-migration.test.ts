@@ -5,8 +5,16 @@ import { PrismaClient } from "@prisma/client";
 import Decimal from "decimal.js";
 import type { Session } from "next-auth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { authContextForAccount } from "@/modules/identity/application/identity-access";
-import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
+import {
+  IdentityAuthorizationError,
+  authContextForAccount
+} from "@/modules/identity/application/identity-access";
+import {
+  assignRoleToAccount,
+  createCustomRole,
+  ensureStandardIdentitySetup,
+  updateCustomRole
+} from "@/modules/identity/application/identity-service";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
 import {
   getOwnerStatement,
@@ -443,6 +451,38 @@ describe("PostgreSQL baseline", () => {
             status: "ACTIVE"
           }
         });
+        const customPerson = await tx.person.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Custom Scoped User",
+            email: `custom-role-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const customAccount = await tx.userAccount.create({
+          data: {
+            organizationId: orgA.id,
+            personId: customPerson.id,
+            email: `custom-role-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
+        const expiredPerson = await tx.person.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Expired Scoped User",
+            email: `expired-role-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const expiredAccount = await tx.userAccount.create({
+          data: {
+            organizationId: orgA.id,
+            personId: expiredPerson.id,
+            email: `expired-role-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
         const owner = await tx.owner.create({
           data: {
             organizationId: orgA.id,
@@ -520,13 +560,212 @@ describe("PostgreSQL baseline", () => {
           }
         });
 
-        return { person, account, owner, assignedProperty, otherProperty };
+        return { person, account, customPerson, customAccount, expiredPerson, expiredAccount, owner, assignedProperty, otherProperty };
       }
     );
+
+    const adminPermissions = new Set([
+      permissionKey("role", "create"),
+      permissionKey("role", "edit"),
+      permissionKey("role", "assign"),
+      permissionKey("role", "override"),
+      permissionKey("property", "view"),
+      permissionKey("reservation", "view"),
+      permissionKey("task", "view"),
+      permissionKey("task", "edit")
+    ]);
+    const adminIdentityCtx = {
+      organizationId: orgA.id,
+      actorId: fixture.account.id,
+      personId: fixture.person.id,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: fixture.account.id,
+        personId: fixture.person.id,
+        permissions: adminPermissions,
+        scopes: [{ organizationId: orgA.id, scopeType: "organization" as const }],
+        assignments: [
+          {
+            roleKey: "admin",
+            permissions: adminPermissions,
+            scope: { organizationId: orgA.id, scopeType: "organization" as const }
+          }
+        ]
+      }
+    };
+    const customRoleKey = `custom_ops_${randomUUID().replaceAll("-", "").slice(0, 8)}`;
+    const customRole = await createCustomRole(
+      adminIdentityCtx,
+      {
+        key: customRoleKey,
+        name: "Custom scoped operations",
+        description: "Property-scoped operational role",
+        permissionKeys: [
+          permissionKey("property", "view"),
+          permissionKey("reservation", "view"),
+          permissionKey("task", "view")
+        ]
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-auz-custom-role",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await updateCustomRole(
+      adminIdentityCtx,
+      {
+        roleId: customRole.id,
+        key: customRoleKey,
+        name: "Custom scoped operations edited",
+        description: "Property-scoped operational role edited",
+        permissionKeys: [
+          permissionKey("property", "view"),
+          permissionKey("reservation", "view"),
+          permissionKey("task", "view"),
+          permissionKey("task", "edit")
+        ]
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-auz-custom-role-edit",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const assignment = await assignRoleToAccount(
+      adminIdentityCtx,
+      {
+        userAccountId: fixture.customAccount.id,
+        roleId: customRole.id,
+        scopeType: "property",
+        scopeId: fixture.assignedProperty.id,
+        assignedToMe: false,
+        statuses: [],
+        validFrom: new Date("2026-01-01T00:00:00.000Z"),
+        validTo: undefined
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-auz-assignment",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await assignRoleToAccount(
+      adminIdentityCtx,
+      {
+        userAccountId: fixture.expiredAccount.id,
+        roleId: customRole.id,
+        scopeType: "property",
+        scopeId: fixture.assignedProperty.id,
+        assignedToMe: false,
+        statuses: [],
+        validFrom: new Date("2026-01-01T00:00:00.000Z"),
+        validTo: new Date("2026-01-02T00:00:00.000Z")
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-auz-expired-assignment",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await expect(
+      createCustomRole(
+        {
+          organizationId: orgA.id,
+          actorId: fixture.customAccount.id,
+          personId: fixture.customPerson.id,
+          authContext: {
+            organizationId: orgA.id,
+            userAccountId: fixture.customAccount.id,
+            personId: fixture.customPerson.id,
+            permissions: new Set([permissionKey("role", "create")]),
+            scopes: [{ organizationId: orgA.id, scopeType: "organization" as const }],
+            assignments: [
+              {
+                roleKey: "limited-role-admin",
+                permissions: new Set([permissionKey("role", "create")]),
+                scope: { organizationId: orgA.id, scopeType: "organization" as const }
+              }
+            ]
+          }
+        },
+        {
+          key: `bad_finance_${randomUUID().replaceAll("-", "").slice(0, 8)}`,
+          name: "Bad finance grant",
+          description: "Privilege escalation attempt",
+          permissionKeys: [permissionKey("financial_transaction", "view")]
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-auz-privilege-escalation",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    const adminRole = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        tx.role.findFirstOrThrow({
+          where: {
+            organizationId: orgA.id,
+            key: "admin",
+            archivedAt: null
+          },
+          select: { id: true }
+        })
+    );
+    await expect(
+      assignRoleToAccount(
+        {
+          organizationId: orgA.id,
+          actorId: fixture.customAccount.id,
+          personId: fixture.customPerson.id,
+          authContext: {
+            organizationId: orgA.id,
+            userAccountId: fixture.customAccount.id,
+            personId: fixture.customPerson.id,
+            permissions: new Set([permissionKey("role", "assign")]),
+            scopes: [{ organizationId: orgA.id, scopeType: "organization" as const }],
+            assignments: [
+              {
+                roleKey: "limited-role-assigner",
+                permissions: new Set([permissionKey("role", "assign")]),
+                scope: { organizationId: orgA.id, scopeType: "organization" as const }
+              }
+            ]
+          }
+        },
+        {
+          userAccountId: fixture.expiredAccount.id,
+          roleId: adminRole.id,
+          scopeType: "organization",
+          assignedToMe: false,
+          statuses: [],
+          validFrom: undefined,
+          validTo: undefined
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-auz-role-assignment-escalation",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(IdentityAuthorizationError);
 
     const authContext = await authContextForAccount(orgA.id, fixture.account.id, {
       db: prisma as unknown as TenantTransactionRunner
     });
+    const customAuthContext = await authContextForAccount(orgA.id, fixture.customAccount.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const expiredAuthContext = await authContextForAccount(orgA.id, fixture.expiredAccount.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+
+    expect(assignment.created).toBe(true);
+    expect(customAuthContext.permissions.has(permissionKey("task", "edit"))).toBe(true);
+    expect(expiredAuthContext.permissions.size).toBe(0);
 
     expect(
       authorize(authContext, "view", {
@@ -577,6 +816,40 @@ describe("PostgreSQL baseline", () => {
         organizationId: orgB.id,
         id: fixture.assignedProperty.id,
         propertyId: fixture.assignedProperty.id
+      })
+    ).toBe(false);
+    expect(
+      authorize(customAuthContext, "view", {
+        type: "property",
+        organizationId: orgA.id,
+        id: fixture.assignedProperty.id,
+        propertyId: fixture.assignedProperty.id
+      })
+    ).toBe(true);
+    expect(
+      authorize(customAuthContext, "view", {
+        type: "property",
+        organizationId: orgA.id,
+        id: fixture.otherProperty.id,
+        propertyId: fixture.otherProperty.id
+      })
+    ).toBe(false);
+    expect(
+      authorize(customAuthContext, "view", {
+        type: "property",
+        organizationId: orgB.id,
+        id: fixture.assignedProperty.id,
+        propertyId: fixture.assignedProperty.id
+      })
+    ).toBe(false);
+    expect(
+      authorize(customAuthContext, "view", {
+        type: "financial_transaction",
+        organizationId: orgA.id,
+        id: "018f0a0b-0000-7000-9000-00000000a007",
+        propertyId: fixture.assignedProperty.id,
+        amount: "8000.00",
+        dataClass: "financial"
       })
     ).toBe(false);
 

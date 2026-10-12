@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   authContextForMatrixCase,
-  permissionMatrixCases
+  permissionMatrixCases,
+  permissionMatrixFixtures
 } from "@/platform/authz/permission-matrix";
 import { authorize } from "@/platform/authz/authorize";
 import { simulateAccess, splitSimulationResults } from "@/platform/authz/simulator";
 
 describe("generated permission matrix", () => {
+  it("generates assigned and out-of-scope cases for every standard role permission entry", () => {
+    expect(permissionMatrixFixtures.catalogCaseCount).toBe(
+      permissionMatrixFixtures.standardRoleCount * permissionMatrixFixtures.permissionCount * 2
+    );
+  });
+
   it.each(permissionMatrixCases)(
     "$roleKey $scenarioKey is $expected",
     ({ roleKey, scenario, expected }) => {
@@ -17,7 +24,9 @@ describe("generated permission matrix", () => {
   );
 
   it("proves the co-host example from the specification", () => {
-    const coHostCases = permissionMatrixCases.filter((testCase) => testCase.roleKey === "co_host");
+    const coHostCases = permissionMatrixCases.filter(
+      (testCase) => testCase.roleKey === "co_host" && testCase.scenarioKey.startsWith("spec:")
+    );
     const results = splitSimulationResults(
       simulateAccess(
         authContextForMatrixCase("co_host"),

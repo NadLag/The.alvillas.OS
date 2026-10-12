@@ -103,6 +103,7 @@ export type StandardRoleKey =
   | "revenue_manager"
   | "regional_manager"
   | "contractor"
+  | "temporary_worker"
   | "owner"
   | "owner_representative";
 
@@ -289,6 +290,13 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     mfaRequired: false
   },
   {
+    key: "temporary_worker",
+    name: "Temporary Worker",
+    description: "Time-boxed explicit job access only.",
+    permissions: [permissionKey("task", "view"), permissionKey("task", "edit")],
+    mfaRequired: false
+  },
+  {
     key: "owner",
     name: "Owner",
     description: "Own-property owner portal, statements and approvals only.",
@@ -322,6 +330,41 @@ export type FieldPolicyCatalogEntry = {
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
   {
+    resource: "reservation",
+    field: "totalAmount",
+    dataClass: "financial",
+    requiredPermission: permissionKey("financial_transaction", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "reservation",
+    field: "revenue",
+    dataClass: "financial",
+    requiredPermission: permissionKey("financial_transaction", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "reservation",
+    field: "ownerPayout",
+    dataClass: "financial",
+    requiredPermission: permissionKey("owner_statement", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "reservation",
+    field: "guestEmail",
+    dataClass: "guest",
+    requiredPermission: permissionKey("guest", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "reservation",
+    field: "guestPhone",
+    dataClass: "guest",
+    requiredPermission: permissionKey("guest", "view"),
+    mask: "placeholder"
+  },
+  {
     resource: "financial_transaction",
     field: "amount",
     dataClass: "financial",
@@ -331,6 +374,20 @@ export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
   {
     resource: "financial_transaction",
     field: "ledgerAccountCode",
+    dataClass: "financial",
+    requiredPermission: permissionKey("financial_transaction", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "financial_transaction",
+    field: "ownerProfitability",
+    dataClass: "financial",
+    requiredPermission: permissionKey("financial_transaction", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "financial_transaction",
+    field: "alvillasProfit",
     dataClass: "financial",
     requiredPermission: permissionKey("financial_transaction", "view"),
     mask: "placeholder"
@@ -357,10 +414,52 @@ export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
     mask: "omit"
   },
   {
+    resource: "owner_statement",
+    field: "ownerBankDetails",
+    dataClass: "sensitive",
+    requiredPermission: permissionKey("owner_statement", "view"),
+    mask: "omit"
+  },
+  {
     resource: "wallet",
     field: "balance",
     dataClass: "financial",
     requiredPermission: permissionKey("wallet", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "wallet",
+    field: "movements",
+    dataClass: "financial",
+    requiredPermission: permissionKey("wallet", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "property",
+    field: "ownerProfitability",
+    dataClass: "financial",
+    requiredPermission: permissionKey("financial_transaction", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "property",
+    field: "bankAccount",
+    dataClass: "sensitive",
+    requiredPermission: permissionKey("financial_transaction", "view"),
+    mask: "omit"
+  },
+  {
+    resource: "task",
+    field: "staffCompensation",
+    dataClass: "personal",
+    requiredPermission: permissionKey("wallet", "view"),
+    mask: "placeholder"
+  },
+  {
+    resource: "service",
+    field: "supplierCost",
+    dataClass: "financial",
+    requiredPermission: permissionKey("financial_transaction", "view"),
     mask: "placeholder"
   },
   {

@@ -22,22 +22,113 @@ function invitationHash(code: string): string {
   return createHash("sha256").update(code).digest("hex");
 }
 
+async function createAuthorizationFixture(label: string): Promise<{ propertyId: string; reservationReference: string }> {
+  const prisma = new PrismaClient();
+  const unique = `${label}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9-]+/gu, "-");
+
+  try {
+    return await withTenant(prisma as unknown as TenantTransactionRunner, bootstrapOrganizationId, async (tx) => {
+      const owner = await tx.owner.create({
+        data: {
+          organizationId: bootstrapOrganizationId,
+          displayName: `AUZ Owner ${unique}`,
+          email: `auz-owner-${unique}@example.test`,
+          preferredLocale: "en"
+        }
+      });
+      const property = await tx.property.create({
+        data: {
+          organizationId: bootstrapOrganizationId,
+          name: `AUZ Villa ${unique}`,
+          addressLine1: "Route de Fes",
+          city: "Marrakech",
+          countryCode: "MA",
+          propertyType: "Villa",
+          bedrooms: 4,
+          bathrooms: 4,
+          livingSpaces: 2,
+          maxGuests: 8,
+          timezone: "Africa/Casablanca",
+          amenities: ["pool"],
+          photoUrls: [],
+          propertyOwners: {
+            create: {
+              organizationId: bootstrapOrganizationId,
+              ownerId: owner.id,
+              shareBps: 10000,
+              isPrimary: true
+            }
+          }
+        }
+      });
+      const reservationReference = `AUZ-${unique}`;
+      await tx.reservation.create({
+        data: {
+          organizationId: bootstrapOrganizationId,
+          propertyId: property.id,
+          reference: reservationReference,
+          source: "DIRECT",
+          externalId: `AUZ-${unique}`,
+          status: "CONFIRMED",
+          guestName: "AUZ Guest",
+          guestEmail: `auz-guest-${unique}@example.test`,
+          checkIn: new Date("2028-06-01T00:00:00.000Z"),
+          checkOut: new Date("2028-06-04T00:00:00.000Z"),
+          nights: 3,
+          adultCount: 2,
+          childCount: 0,
+          idempotencyKey: `auz-${unique}`
+        }
+      });
+
+      return { propertyId: property.id, reservationReference };
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 test.describe("identity lifecycle", () => {
   test.skip(!hasDatabase, "DATABASE_URL is required for identity E2E");
   test.describe.configure({ mode: "serial" });
 
-  test("invites, activates, denies invitation reuse, and suspends a field user", async ({ page }, testInfo) => {
+  test("creates roles, assigns scoped access, simulates permissions, and denies co-host revenue", async ({ page }, testInfo) => {
     const adminEmail = e2eEmail("identity-admin", testInfo.project.name);
     const invitedEmail = e2eEmail(`identity-field-${Date.now()}`, testInfo.project.name);
     const invitedPhone = `+212600${Date.now().toString().slice(-6)}`.toLowerCase();
+    const invitedDisplayName = `Identity Field User ${Date.now()}`;
+    const customRoleName = `E2E Scoped Role ${Date.now()}`;
+    const editedCustomRoleName = `${customRoleName} Edited`;
+    const customRoleKey = `e2e_scoped_${Date.now()}`;
     await ensureE2EAdmin(adminEmail, adminPassword);
+    const fixture = await createAuthorizationFixture(testInfo.project.name);
     await loginAdmin(page, adminEmail);
 
     await page.goto("/en/app/identity");
-    await page.getByTestId("invite-display-name").fill("Identity Field User");
+    const createRoleForm = page.getByTestId("custom-role-create-form");
+    await createRoleForm.getByTestId("custom-role-name").fill(customRoleName);
+    await createRoleForm.getByTestId("custom-role-key").fill(customRoleKey);
+    await createRoleForm.getByTestId("custom-role-description").fill("E2E property scoped role");
+    await createRoleForm.locator('input[name="permissionKeys"][value="property:view"]').check();
+    await createRoleForm.locator('input[name="permissionKeys"][value="task:view"]').check();
+    await createRoleForm.getByTestId("custom-role-submit").click();
+    await expect(page.getByTestId("role-catalog-row").filter({ hasText: customRoleName })).toContainText("Custom role");
+    const roleRow = page.getByTestId("role-catalog-row").filter({ hasText: customRoleName });
+    await roleRow.getByText("Edit role").click();
+    const editRoleForm = roleRow.getByTestId("custom-role-edit-form");
+    await editRoleForm.getByTestId("edit-custom-role-name").fill(editedCustomRoleName);
+    await editRoleForm.locator('input[name="permissionKeys"][value="task:edit"]').check();
+    await editRoleForm.getByTestId("edit-custom-role-submit").click();
+    await expect(page.getByTestId("role-catalog-row").filter({ hasText: editedCustomRoleName })).toContainText(
+      "Custom role"
+    );
+
+    await page.getByTestId("invite-display-name").fill(invitedDisplayName);
     await page.getByTestId("invite-email").fill(invitedEmail);
     await page.getByTestId("invite-phone").fill(invitedPhone);
-    await page.getByTestId("invite-role").selectOption("field_staff");
+    await page.getByTestId("invite-role").selectOption("co_host");
+    await page.getByTestId("invite-scope-type").selectOption("property");
+    await page.getByTestId("invite-scope-id").fill(fixture.propertyId);
     await page.getByTestId("invite-submit").click();
 
     const codeText = await page.getByTestId("invitation-code").innerText();
@@ -58,6 +149,9 @@ test.describe("identity lifecycle", () => {
     await page.getByRole("radio", { name: "PIN" }).check();
     await page.getByTestId("login-submit").click();
     await expect(page).toHaveURL(/\/en\/app/u);
+    await page.goto("/en/app/reservations");
+    await expect(page.getByTestId("reservation-row").filter({ hasText: fixture.reservationReference })).toBeVisible();
+    await expect(page.getByTestId("reservation-revenue-form")).toHaveCount(0);
 
     await page.goto(`/en/activate/${code}`);
     await page.getByTestId("activation-phone").fill(invitedPhone);
@@ -68,6 +162,17 @@ test.describe("identity lifecycle", () => {
     await page.context().clearCookies();
     await loginAdmin(page, adminEmail);
     await page.goto("/en/app/identity");
+    await expect(page.getByTestId("permission-simulator-row").filter({ hasText: invitedDisplayName })).toContainText(
+      "Portfolio revenue"
+    );
+    await page.getByTestId("assignment-account").selectOption({ label: `${invitedDisplayName} - ${invitedEmail}` });
+    await page.getByTestId("assignment-role").selectOption({ label: editedCustomRoleName });
+    await page.getByTestId("assignment-scope-type").selectOption("property");
+    await page.getByTestId("assignment-scope-id").fill(fixture.propertyId);
+    await page.getByTestId("assignment-submit").click();
+    await expect(page.getByTestId("role-assignment-row").filter({ hasText: editedCustomRoleName })).toContainText(
+      fixture.propertyId
+    );
     await page
       .getByTestId("identity-account-row")
       .filter({ hasText: invitedEmail })
