@@ -25,6 +25,15 @@ model Organization {
   rateLimitBuckets     RateLimitBucket[]
   persons              Person[]
   userAccounts         UserAccount[]
+  authCredentials      AuthCredential[]
+  authSessions         AuthSession[]
+  authDevices          AuthDevice[]
+  authChallenges       AuthChallenge[]
+  invitations          Invitation[]
+  roles                Role[]
+  permissions          Permission[]
+  roleAssignments      RoleAssignment[]
+  rolePermissions      RolePermission[]
   owners               Owner[]
   ownerPortalAccesses  OwnerPortalAccess[]
   properties           Property[]
@@ -56,8 +65,11 @@ model Person {
   completedTasks  OperationTask[]              @relation("OperationTaskCompletedPerson")
   completedChecks OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedPerson")
   syncOps         SyncOp[]                     @relation("SyncOpActorPerson")
+  invitations     Invitation[]
+  roleAssignments RoleAssignment[]
 
   @@unique([organizationId, email], map: "person_org_email_unique")
+  @@index([organizationId, phone], map: "person_org_phone_idx")
   @@index([organizationId, displayName], map: "person_org_display_name_idx")
   @@map("person")
 }
@@ -67,13 +79,24 @@ model UserAccount {
   organizationId      String                       @map("organization_id") @db.Uuid
   personId            String                       @map("person_id") @db.Uuid
   email               String?
+  phone               String?
   passwordHash        String?                      @map("password_hash")
   status              String                       @default("ACTIVE")
+  sessionVersion      Int                          @default(1) @map("session_version")
+  mfaRequired         Boolean                      @default(false) @map("mfa_required")
   lastLoginAt         DateTime?                    @map("last_login_at") @db.Timestamptz(6)
+  suspendedAt         DateTime?                    @map("suspended_at") @db.Timestamptz(6)
+  deactivatedAt       DateTime?                    @map("deactivated_at") @db.Timestamptz(6)
   createdAt           DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt           DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization        Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   person              Person                       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  authCredentials     AuthCredential[]
+  authSessions        AuthSession[]
+  authDevices         AuthDevice[]
+  authChallenges      AuthChallenge[]
+  invitations         Invitation[]
+  roleAssignments     RoleAssignment[]
   assignedTasks       OperationTask[]              @relation("OperationTaskAssignedAccount")
   completedTasks      OperationTask[]              @relation("OperationTaskCompletedAccount")
   completedChecks     OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
@@ -81,8 +104,201 @@ model UserAccount {
   ownerPortalAccesses OwnerPortalAccess[]
 
   @@unique([organizationId, email], map: "user_account_org_email_unique")
+  @@unique([organizationId, phone], map: "user_account_org_phone_unique")
   @@index([organizationId, personId], map: "user_account_org_person_idx")
+  @@index([organizationId, status], map: "user_account_org_status_idx")
   @@map("user_account")
+}
+
+model AuthCredential {
+  id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  userAccountId   String       @map("user_account_id") @db.Uuid
+  type            String
+  label           String?
+  secretHash      String?      @map("secret_hash")
+  secretEncrypted String?      @map("secret_encrypted")
+  credentialId    String?      @map("credential_id")
+  publicKey       Bytes?       @map("public_key")
+  counter         Int          @default(0)
+  transports      Json?
+  backupEligible  Boolean      @default(false) @map("backup_eligible")
+  backedUp        Boolean      @default(false) @map("backed_up")
+  lastUsedAt      DateTime?    @map("last_used_at") @db.Timestamptz(6)
+  expiresAt       DateTime?    @map("expires_at") @db.Timestamptz(6)
+  revokedAt       DateTime?    @map("revoked_at") @db.Timestamptz(6)
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount     UserAccount  @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, type, credentialId], map: "auth_credential_org_type_credential_unique")
+  @@index([organizationId, userAccountId, type, revokedAt], map: "auth_credential_org_user_type_idx")
+  @@map("auth_credential")
+}
+
+model AuthSession {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  userAccountId  String       @map("user_account_id") @db.Uuid
+  deviceId       String       @map("device_id")
+  sessionVersion Int          @map("session_version")
+  userAgent      String?      @map("user_agent")
+  ipAddress      String?      @map("ip_address")
+  expiresAt      DateTime     @map("expires_at") @db.Timestamptz(6)
+  revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz(6)
+  lastSeenAt     DateTime     @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount    UserAccount  @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organizationId, userAccountId, revokedAt, expiresAt], map: "auth_session_org_user_active_idx")
+  @@index([organizationId, deviceId], map: "auth_session_org_device_idx")
+  @@map("auth_session")
+}
+
+model AuthDevice {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  userAccountId  String       @map("user_account_id") @db.Uuid
+  deviceId       String       @map("device_id")
+  label          String?
+  platform       String?
+  trusted        Boolean      @default(false)
+  registeredAt   DateTime     @default(now()) @map("registered_at") @db.Timestamptz(6)
+  lastSeenAt     DateTime?    @map("last_seen_at") @db.Timestamptz(6)
+  revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount    UserAccount  @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, userAccountId, deviceId], map: "auth_device_org_user_device_unique")
+  @@index([organizationId, userAccountId, revokedAt], map: "auth_device_org_user_idx")
+  @@map("auth_device")
+}
+
+model AuthChallenge {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  userAccountId  String?      @map("user_account_id") @db.Uuid
+  type           String
+  challenge      String
+  expiresAt      DateTime     @map("expires_at") @db.Timestamptz(6)
+  consumedAt     DateTime?    @map("consumed_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount    UserAccount? @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organizationId, type, expiresAt], map: "auth_challenge_org_type_expires_idx")
+  @@map("auth_challenge")
+}
+
+model Invitation {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  personId       String       @map("person_id") @db.Uuid
+  userAccountId  String?      @map("user_account_id") @db.Uuid
+  roleId         String       @map("role_id") @db.Uuid
+  scopeType      String       @map("scope_type")
+  scopeId        String?      @map("scope_id") @db.Uuid
+  email          String?
+  phone          String?
+  codeHash       String       @map("code_hash")
+  expiresAt      DateTime     @map("expires_at") @db.Timestamptz(6)
+  acceptedAt     DateTime?    @map("accepted_at") @db.Timestamptz(6)
+  revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz(6)
+  createdBy      String       @map("created_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person         Person       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount    UserAccount? @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  role           Role         @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, codeHash], map: "invitation_org_code_hash_unique")
+  @@index([organizationId, personId, acceptedAt, revokedAt], map: "invitation_org_person_state_idx")
+  @@index([organizationId, expiresAt], map: "invitation_org_expires_idx")
+  @@map("invitation")
+}
+
+model Role {
+  id              String           @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String           @map("organization_id") @db.Uuid
+  key             String
+  name            String
+  description     String?
+  isSystem        Boolean          @default(false) @map("is_system")
+  archivedAt      DateTime?        @map("archived_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invitations     Invitation[]
+  rolePermissions RolePermission[]
+  roleAssignments RoleAssignment[]
+
+  @@unique([organizationId, key], map: "role_org_key_unique")
+  @@index([organizationId, archivedAt], map: "role_org_archived_idx")
+  @@map("role")
+}
+
+model Permission {
+  id              String           @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String           @map("organization_id") @db.Uuid
+  key             String
+  resource        String
+  action          String
+  description     String?
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rolePermissions RolePermission[]
+
+  @@unique([organizationId, key], map: "permission_org_key_unique")
+  @@index([organizationId, resource, action], map: "permission_org_resource_action_idx")
+  @@map("permission")
+}
+
+model RolePermission {
+  organizationId String       @map("organization_id") @db.Uuid
+  roleId         String       @map("role_id") @db.Uuid
+  permissionId   String       @map("permission_id") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  role           Role         @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  permission     Permission   @relation(fields: [permissionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([organizationId, roleId, permissionId])
+  @@index([organizationId, permissionId], map: "role_permission_org_permission_idx")
+  @@map("role_permission")
+}
+
+model RoleAssignment {
+  id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  personId        String       @map("person_id") @db.Uuid
+  userAccountId   String?      @map("user_account_id") @db.Uuid
+  roleId          String       @map("role_id") @db.Uuid
+  scopeType       String       @map("scope_type")
+  scopeId         String?      @map("scope_id") @db.Uuid
+  conditions      Json?
+  validFrom       DateTime     @default(now()) @map("valid_from") @db.Timestamptz(6)
+  validTo         DateTime?    @map("valid_to") @db.Timestamptz(6)
+  compensationRef String?      @map("compensation_ref")
+  archivedAt      DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdBy       String?      @map("created_by") @db.Uuid
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person          Person       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount     UserAccount? @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  role            Role         @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organizationId, personId, archivedAt], map: "role_assignment_org_person_idx")
+  @@index([organizationId, userAccountId, archivedAt], map: "role_assignment_org_account_idx")
+  @@index([organizationId, roleId, scopeType, scopeId], map: "role_assignment_org_role_scope_idx")
+  @@map("role_assignment")
 }
 
 model Owner {

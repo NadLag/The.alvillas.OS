@@ -7,6 +7,8 @@ declare module "next-auth" {
       personId: string;
       organizationId: string;
       preferredLocale: string;
+      sessionId: string;
+      sessionRevoked: boolean;
     } & DefaultSession["user"];
   }
 
@@ -14,6 +16,8 @@ declare module "next-auth" {
     personId?: string;
     organizationId?: string;
     preferredLocale?: string;
+    sessionId?: string;
+    sessionRevoked?: boolean;
   }
 }
 
@@ -23,5 +27,8 @@ declare module "next-auth/jwt" {
     personId?: string;
     organizationId?: string;
     preferredLocale?: string;
+    authSessionId?: string;
+    sessionVersion?: number;
+    sessionRevoked?: boolean;
   }
 }

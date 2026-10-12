@@ -24,7 +24,7 @@ export default async function LoginPage({
 
   const session = await auth();
 
-  if (session) {
+  if (session?.user?.id) {
     redirect(`/${appLocale}/app`);
   }
 
@@ -44,7 +44,12 @@ export default async function LoginPage({
           locale={appLocale}
           labels={{
             email: t("email"),
+            phone: t("phone"),
             password: t("password"),
+            pin: t("pin"),
+            authMethod: t("authMethod"),
+            mfaCode: t("mfaCode"),
+            recoveryCode: t("recoveryCode"),
             submit: t("submit"),
             invalid: t("invalid"),
             rateLimited: t("rateLimited"),

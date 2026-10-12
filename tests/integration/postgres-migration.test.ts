@@ -139,6 +139,8 @@ function sessionForOwnerPortal(input: {
       personId: input.personId,
       organizationId: input.organizationId,
       preferredLocale: "en",
+      sessionId: "integration-session",
+      sessionRevoked: false,
       email: input.email,
       name: input.email
     },
