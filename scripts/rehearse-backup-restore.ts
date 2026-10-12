@@ -67,14 +67,6 @@ function publishedPort(containerName: string): string {
   return port;
 }
 
-function postgresClientUrl(databaseUrl: string): string {
-  const url = new URL(databaseUrl);
-
-  url.searchParams.delete("schema");
-
-  return url.toString();
-}
-
 function startDatabase(label: string): RehearsalDatabase {
   const containerName = `alvillas-os-restore-${label}-${Date.now()}-${randomUUID().slice(0, 8)}`;
 
@@ -177,14 +169,22 @@ async function main(): Promise<void> {
     runNpx(["prisma", "migrate", "deploy"], { ...process.env, DATABASE_URL: source.databaseUrl });
     const organizationId = await writeRehearsalEvidence(source.databaseUrl);
 
-    runInherited("pg_dump", [
+    const containerDumpPath = "/tmp/alvillas-os.dump";
+    runInherited("docker", [
+      "exec",
+      source.containerName,
+      "pg_dump",
+      "-U",
+      "postgres",
+      "-d",
+      "alvillas_os",
       "--format=custom",
       "--no-owner",
       "--no-privileges",
       "--file",
-      dumpPath,
-      postgresClientUrl(source.databaseUrl)
+      containerDumpPath
     ]);
+    runInherited("docker", ["cp", `${source.containerName}:${containerDumpPath}`, dumpPath]);
 
     if (!existsSync(dumpPath)) {
       throw new Error("pg_dump did not create a backup artifact");
@@ -192,12 +192,18 @@ async function main(): Promise<void> {
 
     const target = startDatabase("target");
     containers.push(target.containerName);
-    runInherited("pg_restore", [
+    runInherited("docker", ["cp", dumpPath, `${target.containerName}:${containerDumpPath}`]);
+    runInherited("docker", [
+      "exec",
+      target.containerName,
+      "pg_restore",
+      "-U",
+      "postgres",
+      "-d",
+      "alvillas_os",
       "--no-owner",
       "--no-privileges",
-      "--dbname",
-      postgresClientUrl(target.databaseUrl),
-      dumpPath
+      containerDumpPath
     ]);
     runNpx(["prisma", "migrate", "deploy"], { ...process.env, DATABASE_URL: target.databaseUrl });
 
