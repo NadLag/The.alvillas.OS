@@ -42,17 +42,30 @@ function waitForPostgres(containerName: string): void {
   const deadline = Date.now() + 90000;
 
   while (Date.now() < deadline) {
-    try {
-      execFileSync("docker", ["exec", containerName, "pg_isready", "-U", "postgres", "-d", "alvillas_os"], {
-        stdio: "ignore"
-      });
-      return;
-    } catch {
+    if (canRunSql(containerName)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+      if (canRunSql(containerName)) {
+        return;
+      }
+    } else {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
     }
   }
 
   throw new Error(`PostgreSQL container ${containerName} did not become ready`);
+}
+
+function canRunSql(containerName: string): boolean {
+  try {
+    execFileSync(
+      "docker",
+      ["exec", containerName, "psql", "-U", "postgres", "-d", "postgres", "-tAc", "SELECT 1"],
+      { stdio: "ignore" }
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function ensureRehearsalDatabase(containerName: string): void {
