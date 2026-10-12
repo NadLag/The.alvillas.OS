@@ -55,6 +55,22 @@ function waitForPostgres(containerName: string): void {
   throw new Error(`PostgreSQL container ${containerName} did not become ready`);
 }
 
+function ensureRehearsalDatabase(containerName: string): void {
+  runInherited("docker", [
+    "exec",
+    containerName,
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "postgres",
+    "-v",
+    "ON_ERROR_STOP=1",
+    "-c",
+    "SELECT 'CREATE DATABASE alvillas_os' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'alvillas_os')\\gexec"
+  ]);
+}
+
 function publishedPort(containerName: string): string {
   const output = docker(["port", containerName, "5432/tcp"]);
   const firstLine = output.split(/\r?\n/u)[0];
@@ -87,6 +103,7 @@ function startDatabase(label: string): RehearsalDatabase {
     "postgres:17-alpine"
   ]);
   waitForPostgres(containerName);
+  ensureRehearsalDatabase(containerName);
 
   return {
     containerName,
