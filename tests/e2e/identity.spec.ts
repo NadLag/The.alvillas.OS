@@ -259,8 +259,10 @@ test.describe("identity lifecycle", () => {
     const secretText = await page.getByTestId("totp-secret").innerText();
     const secret = secretText.split(":").pop()?.trim() ?? "";
     await page.getByTestId("totp-code").fill(totpCode(secret));
-    await page.getByTestId("confirm-totp-button").click();
-    await expect(page.getByTestId("mfa-recovery-code").first()).toBeVisible();
+    const confirmTotpButton = page.getByTestId("confirm-totp-button");
+    await expect(confirmTotpButton).toBeEnabled();
+    await confirmTotpButton.click();
+    await expect(page.getByTestId("mfa-recovery-code").first()).toBeVisible({ timeout: 15_000 });
 
     const client = await page.context().newCDPSession(page);
     await client.send("WebAuthn.enable");

@@ -1,9 +1,11 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AdminShell, EmptyState, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
 import { listOwners } from "@/modules/core/application/core-service";
 import { OwnerCreateForm } from "@/modules/core/ui/core-forms";
+import { OwnerRegisterTable } from "@/modules/core/ui/core-tables";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -29,20 +31,31 @@ export default async function OwnersPage({
     redirect(`/${appLocale}/login`);
   }
 
-  const [t, owners] = await Promise.all([getTranslations("Core"), listOwners(ctx)]);
+  const [t, dsnT, owners] = await Promise.all([
+    getTranslations("Core"),
+    getTranslations("DesignSystem"),
+    listOwners(ctx)
+  ]);
+  const ownerRows = owners.map((owner) => ({
+    id: owner.id,
+    contact: owner.email ?? owner.phone ?? t("common.noContact"),
+    displayName: owner.displayName,
+    href: `/${appLocale}/app/owners/${owner.id}`,
+    propertyCountLabel: t("owners.propertyCount", { count: owner.propertyCount })
+  }));
 
   return (
-    <section className="resource-page" data-testid="owners-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("owners.eyebrow")}</p>
-          <h1>{t("owners.title")}</h1>
-          <p>{t("owners.subtitle")}</p>
-        </div>
+    <AdminShell className="resource-page" testId="owners-page">
+      <ShellHeader
+        actions={
         <Link className="secondary-button" href={`/${appLocale}/app`}>
           {t("common.backToWorkspace")}
         </Link>
-      </header>
+        }
+        eyebrow={t("owners.eyebrow")}
+        subtitle={t("owners.subtitle")}
+        title={t("owners.title")}
+      />
 
       <div className="resource-layout">
         <section className="workspace-main">
@@ -50,28 +63,21 @@ export default async function OwnersPage({
             <p className="panel-label">{t("owners.listLabel")}</p>
             <span data-testid="owner-count">{t("owners.count", { count: owners.length })}</span>
           </div>
-          {owners.length === 0 ? (
-            <p className="empty-state" data-testid="owners-empty">
-              {t("owners.empty")}
-            </p>
-          ) : (
-            <div className="resource-list">
-              {owners.map((owner) => (
-                <Link
-                  className="resource-row"
-                  data-testid="owner-row"
-                  href={`/${appLocale}/app/owners/${owner.id}`}
-                  key={owner.id}
-                >
-                  <span>
-                    <strong>{owner.displayName}</strong>
-                    <small>{owner.email ?? owner.phone ?? t("common.noContact")}</small>
-                  </span>
-                  <span>{t("owners.propertyCount", { count: owner.propertyCount })}</span>
-                </Link>
-              ))}
-            </div>
-          )}
+          {owners.length === 0 ? <EmptyState testId="owners-empty" tone="motif">{t("owners.empty")}</EmptyState> : null}
+          <OwnerRegisterTable
+            labels={{
+              contact: dsnT("dataTable.contact"),
+              empty: dsnT("dataTable.empty"),
+              exportCsv: dsnT("dataTable.exportCsv"),
+              name: dsnT("dataTable.name"),
+              properties: dsnT("dataTable.properties"),
+              rows: dsnT("dataTable.rows"),
+              saveView: dsnT("dataTable.saveView"),
+              search: dsnT("dataTable.search"),
+              viewName: dsnT("dataTable.viewName")
+            }}
+            rows={ownerRows}
+          />
         </section>
 
         <aside className="workspace-side" aria-label={t("owners.createLabel")}>
@@ -96,6 +102,6 @@ export default async function OwnersPage({
           />
         </aside>
       </div>
-    </section>
+    </AdminShell>
   );
 }

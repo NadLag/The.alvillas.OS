@@ -2,6 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
+import { FieldShell, ShellHeader } from "@/design-system/shells";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationNotFoundError,
@@ -48,22 +49,21 @@ export default async function FieldTaskPage({
   }
 
   return (
-    <section className="field-page field-detail" data-testid="field-task-page">
-      <header className="field-header">
-        <div>
-          <p className="eyebrow">{task.propertyName}</p>
-          <h1 data-testid="field-task-title">{localizedTaskTitle(task.title, appLocale)}</h1>
-          <p>
-            {t("detailMeta", {
-              reservation: task.reservationReference ?? t("noReservation"),
-              guest: task.guestName ?? t("noGuest")
-            })}
-          </p>
-        </div>
+    <FieldShell className="field-page field-detail" testId="field-task-page">
+      <ShellHeader
+        actions={
         <Link className="secondary-button" href={`/${appLocale}/app/field`}>
           {t("backToJobs")}
         </Link>
-      </header>
+        }
+        eyebrow={task.propertyName}
+        subtitle={t("detailMeta", {
+          reservation: task.reservationReference ?? t("noReservation"),
+          guest: task.guestName ?? t("noGuest")
+        })}
+        title={localizedTaskTitle(task.title, appLocale)}
+        titleTestId="field-task-title"
+      />
 
       <FieldTaskCompletionForm
         checklistItems={task.checklistItems.map((item) => ({
@@ -94,6 +94,6 @@ export default async function FieldTaskPage({
         userId={ctx.actorId}
         taskId={task.id}
       />
-    </section>
+    </FieldShell>
   );
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { useActionState, useEffect, useState, type FormEvent } from "react";
+import { useActionState, useEffect, useMemo, useState, type FormEvent } from "react";
+import { z } from "zod";
+import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import type {
   FieldTaskFormState,
   ReservationFormState
@@ -407,6 +409,12 @@ function ErrorText({ children, testId }: { children: string | null; testId: stri
   );
 }
 
+function firstClientError(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "message" in error
+    ? String(error.message)
+    : null;
+}
+
 export function ManualReservationForm({
   locale,
   labels,
@@ -418,44 +426,91 @@ export function ManualReservationForm({
   properties: PropertyOption[];
   idempotencyKey: string;
 }) {
+  const schema = useMemo(
+    () =>
+      z.object({
+        adultCount: z.coerce.number().min(0, labels.validation),
+        checkIn: z.string().trim().min(1, labels.validation),
+        checkOut: z.string().trim().min(1, labels.validation),
+        childCount: z.coerce.number().min(0, labels.validation),
+        externalId: z.string().optional(),
+        guestEmail: z.string().trim().email(labels.validation).or(z.literal("")),
+        guestName: z.string().trim().min(1, labels.validation),
+        notes: z.string().optional(),
+        propertyId: z.string().trim().min(1, labels.validation),
+        source: z.enum(["MANUAL", "DIRECT", "AGENCY", "AIRBNB", "BOOKING", "VRBO"])
+      }),
+    [labels.validation]
+  );
+  const form = useZodForm(schema, {
+    defaultValues: {
+      adultCount: 2,
+      checkIn: "",
+      checkOut: "",
+      childCount: 0,
+      externalId: "",
+      guestEmail: "",
+      guestName: "",
+      notes: "",
+      source: "MANUAL"
+    }
+  });
   const [state, formAction, pending] = useActionState(
     createManualReservationAction.bind(null, locale),
     initialReservationFormState
   );
+  const validateSubmit = useServerActionValidation(form, formAction);
   const message = messageForState(state, labels);
   const hasProperties = properties.length > 0;
 
   return (
-    <form className="resource-form" action={formAction} data-testid="reservation-create-form">
+    <form
+      className="resource-form"
+      action={formAction}
+      data-testid="reservation-create-form"
+      onSubmit={validateSubmit}
+    >
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
       <label className="field">
         <span>{labels.property}</span>
-        <select data-testid="reservation-property" name="propertyId" required disabled={!hasProperties}>
+        <select
+          data-testid="reservation-property"
+          defaultValue={properties[0]?.id ?? ""}
+          required
+          disabled={!hasProperties}
+          {...form.register("propertyId")}
+        >
           {properties.map((property) => (
-            <option key={property.id} value={property.id}>
+            <option key={property.id} label={`${property.name} - ${property.city}`} value={property.id}>
               {property.name} - {property.city}
             </option>
           ))}
         </select>
         {!hasProperties ? <p className="field-hint">{labels.noProperties}</p> : null}
-        <ErrorText testId="reservation-property-error">{fieldError(state, "propertyId")}</ErrorText>
+        <ErrorText testId="reservation-property-error">
+          {firstClientError(form.formState.errors.propertyId) ?? fieldError(state, "propertyId")}
+        </ErrorText>
       </label>
       <label className="field">
         <span>{labels.guestName}</span>
-        <input data-testid="reservation-guest-name" name="guestName" required />
-        <ErrorText testId="reservation-guest-name-error">{fieldError(state, "guestName")}</ErrorText>
+        <input data-testid="reservation-guest-name" required {...form.register("guestName")} />
+        <ErrorText testId="reservation-guest-name-error">
+          {firstClientError(form.formState.errors.guestName) ?? fieldError(state, "guestName")}
+        </ErrorText>
       </label>
       <label className="field">
         <span>{labels.guestEmail}</span>
-        <input autoComplete="email" data-testid="reservation-guest-email" name="guestEmail" type="email" />
-        <ErrorText testId="reservation-guest-email-error">{fieldError(state, "guestEmail")}</ErrorText>
+        <input autoComplete="email" data-testid="reservation-guest-email" type="email" {...form.register("guestEmail")} />
+        <ErrorText testId="reservation-guest-email-error">
+          {firstClientError(form.formState.errors.guestEmail) ?? fieldError(state, "guestEmail")}
+        </ErrorText>
       </label>
       <div className="form-grid two">
         <label className="field">
           <span>{labels.source}</span>
-          <select data-testid="reservation-source" name="source" required defaultValue="MANUAL">
+          <select data-testid="reservation-source" required {...form.register("source")}>
             {Object.entries(labels.sources).map(([value, label]) => (
-              <option key={value} value={value}>
+              <option key={value} label={label} value={value}>
                 {label}
               </option>
             ))}
@@ -463,35 +518,39 @@ export function ManualReservationForm({
         </label>
         <label className="field">
           <span>{labels.externalId}</span>
-          <input data-testid="reservation-external-id" name="externalId" />
+          <input data-testid="reservation-external-id" {...form.register("externalId")} />
           <ErrorText testId="reservation-external-id-error">{fieldError(state, "externalId")}</ErrorText>
         </label>
       </div>
       <div className="form-grid two">
         <label className="field">
           <span>{labels.checkIn}</span>
-          <input data-testid="reservation-check-in" name="checkIn" required type="date" />
-          <ErrorText testId="reservation-check-in-error">{fieldError(state, "checkIn")}</ErrorText>
+          <input data-testid="reservation-check-in" required type="date" {...form.register("checkIn")} />
+          <ErrorText testId="reservation-check-in-error">
+            {firstClientError(form.formState.errors.checkIn) ?? fieldError(state, "checkIn")}
+          </ErrorText>
         </label>
         <label className="field">
           <span>{labels.checkOut}</span>
-          <input data-testid="reservation-check-out" name="checkOut" required type="date" />
-          <ErrorText testId="reservation-check-out-error">{fieldError(state, "checkOut")}</ErrorText>
+          <input data-testid="reservation-check-out" required type="date" {...form.register("checkOut")} />
+          <ErrorText testId="reservation-check-out-error">
+            {firstClientError(form.formState.errors.checkOut) ?? fieldError(state, "checkOut")}
+          </ErrorText>
         </label>
       </div>
       <div className="form-grid two">
         <label className="field">
           <span>{labels.adultCount}</span>
-          <input data-testid="reservation-adults" name="adultCount" type="number" min={0} defaultValue={2} />
+          <input data-testid="reservation-adults" type="number" min={0} {...form.register("adultCount")} />
         </label>
         <label className="field">
           <span>{labels.childCount}</span>
-          <input data-testid="reservation-children" name="childCount" type="number" min={0} defaultValue={0} />
+          <input data-testid="reservation-children" type="number" min={0} {...form.register("childCount")} />
         </label>
       </div>
       <label className="field">
         <span>{labels.notes}</span>
-        <textarea name="notes" rows={3} />
+        <textarea rows={3} {...form.register("notes")} />
       </label>
       {message ? (
         <p className="form-error" data-testid="reservation-form-error" role="alert">

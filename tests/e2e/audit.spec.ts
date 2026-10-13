@@ -147,6 +147,7 @@ async function ensureE2EUserWithRole(input: {
 async function seedAuditEvents(actorId: string, label: string): Promise<string> {
   const prisma = new PrismaClient();
   const resourceId = randomUUID();
+  const occurredAt = new Date();
 
   try {
     await withTenant(prisma as unknown as TenantTransactionRunner, bootstrapOrganizationId, async (tx) => {
@@ -169,7 +170,7 @@ async function seedAuditEvents(actorId: string, label: string): Promise<string> 
         },
         reason: "E2E audit fixture",
         requestId: `audit-e2e-${label}`,
-        occurredAt: new Date("2026-10-12T12:00:00.000Z")
+        occurredAt
       });
       await writeAuditEvent(tx, {
         organizationId: bootstrapOrganizationId,
@@ -183,7 +184,7 @@ async function seedAuditEvents(actorId: string, label: string): Promise<string> 
         },
         reason: "E2E login fixture",
         requestId: `audit-e2e-login-${label}`,
-        occurredAt: new Date("2026-10-12T12:05:00.000Z")
+        occurredAt
       });
     });
 

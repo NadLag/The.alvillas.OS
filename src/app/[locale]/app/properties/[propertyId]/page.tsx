@@ -2,6 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
+import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
 import { CoreNotFoundError, getProperty } from "@/modules/core/application/core-service";
 import { auth } from "@/platform/auth/session";
@@ -51,17 +52,17 @@ export default async function PropertyDetailPage({
   }
 
   return (
-    <section className="resource-page" data-testid="property-detail-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("properties.detailEyebrow")}</p>
-          <h1>{property.name}</h1>
-          <p>{t("properties.rowMeta", { city: property.city, type: property.propertyType })}</p>
-        </div>
+    <AdminShell className="resource-page" testId="property-detail-page">
+      <ShellHeader
+        actions={
         <Link className="secondary-button" href={`/${appLocale}/app/properties`}>
           {t("properties.backToProperties")}
         </Link>
-      </header>
+        }
+        eyebrow={t("properties.detailEyebrow")}
+        subtitle={t("properties.rowMeta", { city: property.city, type: property.propertyType })}
+        title={property.name}
+      />
 
       <section className="detail-panel">
         <dl className="detail-grid">
@@ -109,6 +110,6 @@ export default async function PropertyDetailPage({
           </div>
         </dl>
       </section>
-    </section>
+    </AdminShell>
   );
 }

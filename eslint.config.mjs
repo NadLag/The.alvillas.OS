@@ -9,7 +9,7 @@ const typeCheckedConfigs = tseslint.configs.recommendedTypeChecked.map((config) 
 
 export default tseslint.config(
   {
-    ignores: [".next/**", ".vercel/**", "node_modules/**", "coverage/**", "playwright-report/**"]
+    ignores: [".next/**", ".vercel/**", "node_modules/**", "coverage/**", "playwright-report/**", "test-results/**"]
   },
   js.configs.recommended,
   ...typeCheckedConfigs,

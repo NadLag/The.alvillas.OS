@@ -69,6 +69,10 @@ test.describe("admin authentication", () => {
     await prisma?.$executeRawUnsafe("DELETE FROM rate_limit_bucket");
   });
 
+  test.afterEach(async () => {
+    await prisma?.$executeRawUnsafe("DELETE FROM rate_limit_bucket");
+  });
+
   test.afterAll(async () => {
     await prisma?.$disconnect();
   });

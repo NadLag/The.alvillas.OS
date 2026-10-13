@@ -1,6 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useMemo } from "react";
+import { z } from "zod";
+import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { safeLocale } from "@/i18n/routing";
 import type { AirbnbSettlementFormState } from "@/modules/finance/application/airbnb-settlement-actions";
@@ -110,6 +112,12 @@ function ErrorText({ children, testId }: { children: string | null; testId: stri
   );
 }
 
+function firstClientError(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "message" in error
+    ? String(error.message)
+    : null;
+}
+
 export function AirbnbSettlementPanel({
   locale,
   idempotencyKey,
@@ -127,6 +135,20 @@ export function AirbnbSettlementPanel({
     importAirbnbSettlementAction.bind(null, locale),
     initialAirbnbSettlementFormState
   );
+  const schema = useMemo(
+    () =>
+      z.object({
+        csv: z.string().trim().min(1, labels.validation),
+        receivedAccountId: z.string().trim().min(1, labels.validation)
+      }),
+    [labels.validation]
+  );
+  const form = useZodForm(schema, {
+    defaultValues: {
+      csv: ""
+    }
+  });
+  const validateSubmit = useServerActionValidation(form, formAction);
   const message = messageForState(state, labels);
   const hasAccounts = accounts.length > 0;
   const appLocale = safeLocale(locale);
@@ -141,37 +163,45 @@ export function AirbnbSettlementPanel({
         <span data-testid="airbnb-settlement-variance-count">{variances.length}</span>
       </div>
 
-      <form className="settlement-import-form" action={formAction} data-testid="airbnb-settlement-form">
+      <form
+        className="settlement-import-form"
+        action={formAction}
+        data-testid="airbnb-settlement-form"
+        onSubmit={validateSubmit}
+      >
         <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
         <label className="field">
           <span>{labels.account}</span>
           <select
             data-testid="airbnb-settlement-account"
+            defaultValue={accounts[0]?.id ?? ""}
             disabled={!hasAccounts}
-            name="receivedAccountId"
             required
+            {...form.register("receivedAccountId")}
           >
             {accounts.map((account) => (
-              <option key={account.id} value={account.id}>
+              <option key={account.id} label={account.name} value={account.id}>
                 {account.name}
               </option>
             ))}
           </select>
           {!hasAccounts ? <p className="field-hint">{labels.noAccounts}</p> : null}
           <ErrorText testId="airbnb-settlement-account-error">
-            {fieldError(state, "receivedAccountId")}
+            {firstClientError(form.formState.errors.receivedAccountId) ?? fieldError(state, "receivedAccountId")}
           </ErrorText>
         </label>
         <label className="field settlement-csv-field">
           <span>{labels.csv}</span>
           <textarea
             data-testid="airbnb-settlement-csv"
-            name="csv"
             placeholder={labels.csvHint}
             required
             rows={6}
+            {...form.register("csv")}
           />
-          <ErrorText testId="airbnb-settlement-csv-error">{fieldError(state, "csv")}</ErrorText>
+          <ErrorText testId="airbnb-settlement-csv-error">
+            {firstClientError(form.formState.errors.csv) ?? fieldError(state, "csv")}
+          </ErrorText>
         </label>
         {message ? (
           <p className="form-error" data-testid="airbnb-settlement-form-error" role="alert">

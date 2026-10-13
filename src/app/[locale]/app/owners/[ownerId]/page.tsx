@@ -2,6 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
+import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
 import { CoreNotFoundError, getOwner } from "@/modules/core/application/core-service";
 import { auth } from "@/platform/auth/session";
@@ -51,17 +52,17 @@ export default async function OwnerDetailPage({
   }
 
   return (
-    <section className="resource-page" data-testid="owner-detail-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("owners.detailEyebrow")}</p>
-          <h1>{owner.displayName}</h1>
-          <p>{owner.legalName ?? t("owners.noLegalName")}</p>
-        </div>
+    <AdminShell className="resource-page" testId="owner-detail-page">
+      <ShellHeader
+        actions={
         <Link className="secondary-button" href={`/${appLocale}/app/owners`}>
           {t("owners.backToOwners")}
         </Link>
-      </header>
+        }
+        eyebrow={t("owners.detailEyebrow")}
+        subtitle={owner.legalName ?? t("owners.noLegalName")}
+        title={owner.displayName}
+      />
 
       <section className="detail-panel">
         <dl className="detail-grid">
@@ -87,6 +88,6 @@ export default async function OwnerDetailPage({
           </div>
         </dl>
       </section>
-    </section>
+    </AdminShell>
   );
 }

@@ -1,6 +1,7 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { EmptyState, ManagerShell, ShellHeader } from "@/design-system/shells";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import { listOperationTasks } from "@/modules/reservations/application/reservation-service";
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
@@ -32,22 +33,22 @@ export default async function OperationsPage({
   const [t, tasks] = await Promise.all([getTranslations("Operations"), listOperationTasks(ctx)]);
 
   return (
-    <section className="resource-page" data-testid="operations-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("eyebrow")}</p>
-          <h1>{t("title")}</h1>
-          <p>{t("subtitle")}</p>
-        </div>
-        <div className="app-actions">
+    <ManagerShell className="resource-page" testId="operations-page">
+      <ShellHeader
+        actions={
+          <>
           <Link className="secondary-button" href={`/${appLocale}/app/reservations`}>
             {t("newReservation")}
           </Link>
           <Link className="secondary-button" href={`/${appLocale}/app`}>
             {t("backToWorkspace")}
           </Link>
-        </div>
-      </header>
+          </>
+        }
+        eyebrow={t("eyebrow")}
+        subtitle={t("subtitle")}
+        title={t("title")}
+      />
 
       <section className="workspace-main">
         <div className="section-heading">
@@ -55,9 +56,7 @@ export default async function OperationsPage({
           <span data-testid="operation-task-count">{t("count", { count: tasks.length })}</span>
         </div>
         {tasks.length === 0 ? (
-          <p className="empty-state" data-testid="operation-tasks-empty">
-            {t("empty")}
-          </p>
+          <EmptyState testId="operation-tasks-empty" tone="motif">{t("empty")}</EmptyState>
         ) : (
           <div className="resource-list">
             {tasks.map((task) => (
@@ -83,6 +82,6 @@ export default async function OperationsPage({
           </div>
         )}
       </section>
-    </section>
+    </ManagerShell>
   );
 }
