@@ -42,6 +42,7 @@
     "title": "ALVILLAS OS",
     "logout": "Log out",
     "identity": "Identity",
+    "audit": "Audit",
     "owners": "Owners",
     "properties": "Properties",
     "reservations": "Reservations",
@@ -195,6 +196,50 @@
       "validation": "Check the recovery fields and try again.",
       "conflict": "The recovery code is invalid or expired.",
       "generic": "Recovery failed. Try again."
+    }
+  },
+  "Audit": {
+    "eyebrow": "Audit trail",
+    "title": "Audit history",
+    "subtitle": "Review sensitive activity with tenant-scoped filters, redacted payloads, and exportable evidence.",
+    "backToWorkspace": "Workspace",
+    "export": "Export CSV",
+    "listLabel": "Event history",
+    "empty": "No audit events match these filters.",
+    "count": "{count, plural, one {# shown} other {# shown}} of {total}",
+    "systemActor": "System",
+    "noReason": "No reason recorded",
+    "notRecorded": "Not recorded",
+    "organizationScope": "Organization",
+    "filters": {
+      "action": "Action",
+      "actionPlaceholder": "reservation.revenue",
+      "resourceType": "Resource",
+      "resourceTypePlaceholder": "financial_transaction",
+      "actor": "Actor ID",
+      "resourceId": "Resource ID",
+      "from": "From",
+      "to": "To",
+      "apply": "Apply filters"
+    },
+    "columns": {
+      "when": "When",
+      "actor": "Actor",
+      "action": "Action",
+      "resource": "Resource",
+      "reason": "Reason"
+    },
+    "details": {
+      "request": "Request",
+      "where": "Where",
+      "device": "Device",
+      "scope": "Scope",
+      "before": "Before",
+      "after": "After"
+    },
+    "denied": {
+      "title": "Audit access denied",
+      "subtitle": "This account does not have permission to view audit history."
     }
   },
   "Core": {

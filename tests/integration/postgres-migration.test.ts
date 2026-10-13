@@ -45,6 +45,8 @@ import {
   listOperationTasks
 } from "@/modules/reservations/application/reservation-service";
 import { pushSyncOps } from "@/modules/reservations/application/sync-service";
+import { requiredAuditEventCoverage } from "@/platform/audit/audit-event-catalog";
+import { REDACTED_AUDIT_VALUE, writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, permissionKey, type AuthContext, type DataClass } from "@/platform/authz/authorize";
 import { present, maskedValue, type FieldPolicy, type PresentationContext } from "@/platform/authz/present";
 import { coHostSpecScenarios, simulateAccess } from "@/platform/authz/simulator";
@@ -278,6 +280,14 @@ describe("PostgreSQL baseline", () => {
         })
       )
     ).rejects.toThrow(/append-only|permission denied/u);
+
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, org.id, async (tx) =>
+        tx.auditLog.delete({
+          where: { id: audit.id }
+        })
+      )
+    ).rejects.toThrow(/append-only|permission denied/u);
   });
 
   it("enforces tenant isolation with PostgreSQL RLS", async () => {
@@ -320,6 +330,107 @@ describe("PostgreSQL baseline", () => {
     expect(visibleToOrgA?.id).toBe(audit.id);
     expect(visibleToOrgB).toBeNull();
     expect(visibleWithoutTenant).toBeNull();
+  });
+
+  it("redacts sensitive audit payloads through the real PostgreSQL writer", async () => {
+    const org = await prisma.organization.create({
+      data: { name: "ALVILLAS Audit Redaction", baseCurrency: "MAD" }
+    });
+
+    await withTenant(prisma as unknown as TenantTransactionRunner, org.id, async (tx) =>
+      writeAuditEvent(tx, {
+        organizationId: org.id,
+        actorId: null,
+        action: "identity.account.recover",
+        resourceType: "identity",
+        resourceId: org.id,
+        ipAddress: "127.0.0.1",
+        before: {
+          email: "owner@example.test",
+          nested: {
+            passwordHash: "hash",
+            safeValue: "kept"
+          }
+        },
+        after: {
+          token: "secret-token",
+          publicStatus: "ACTIVE"
+        },
+        reason: "Redaction integration test",
+        requestId: "audit-redaction-test",
+        occurredAt: new Date("2026-10-12T10:00:00.000Z")
+      })
+    );
+
+    const row = await withTenant(prisma as unknown as TenantTransactionRunner, org.id, async (tx) =>
+      tx.auditLog.findFirstOrThrow({
+        where: {
+          organizationId: org.id,
+          action: "identity.account.recover"
+        }
+      })
+    );
+
+    expect(row.before).toEqual({
+      email: REDACTED_AUDIT_VALUE,
+      nested: {
+        passwordHash: REDACTED_AUDIT_VALUE,
+        safeValue: "kept"
+      }
+    });
+    expect(row.after).toEqual({
+      token: REDACTED_AUDIT_VALUE,
+      publicStatus: "ACTIVE"
+    });
+  });
+
+  it("covers every required audit event family with complete PostgreSQL rows", async () => {
+    const org = await prisma.organization.create({
+      data: { name: "ALVILLAS Audit Coverage", baseCurrency: "MAD" }
+    });
+
+    await withTenant(prisma as unknown as TenantTransactionRunner, org.id, async (tx) => {
+      for (const eventFamily of requiredAuditEventCoverage) {
+        await writeAuditEvent(tx, {
+          organizationId: org.id,
+          actorId: integrationActorId,
+          action: eventFamily.canonicalActions[0],
+          resourceType: "audit_coverage",
+          resourceId: org.id,
+          ipAddress: "127.0.0.1",
+          deviceId: "coverage-device",
+          before: { category: eventFamily.category, previousState: "before" },
+          after: { category: eventFamily.category, nextState: "after" },
+          reason: `Coverage for ${eventFamily.label}`,
+          requestId: `audit-coverage-${eventFamily.category}`,
+          occurredAt: new Date("2026-10-12T11:00:00.000Z")
+        });
+      }
+    });
+
+    const rows = await withTenant(prisma as unknown as TenantTransactionRunner, org.id, async (tx) =>
+      tx.auditLog.findMany({
+        where: {
+          organizationId: org.id,
+          resourceType: "audit_coverage"
+        },
+        orderBy: { requestId: "asc" }
+      })
+    );
+
+    expect(rows).toHaveLength(requiredAuditEventCoverage.length);
+    expect(rows.map((row) => row.action).sort()).toEqual(
+      requiredAuditEventCoverage.map((entry) => entry.canonicalActions[0]).sort()
+    );
+    for (const row of rows) {
+      expect(row.actorId).toBe(integrationActorId);
+      expect(row.ipAddress).toBe("127.0.0.1");
+      expect(row.deviceId).toBe("coverage-device");
+      expect(row.reason).toMatch(/^Coverage for /u);
+      expect(row.before).toBeTruthy();
+      expect(row.after).toBeTruthy();
+      expect(row.occurredAt).toBeInstanceOf(Date);
+    }
   });
 
   it("enforces owner and property tenant isolation with PostgreSQL RLS", async () => {
