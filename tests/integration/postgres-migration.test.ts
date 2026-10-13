@@ -56,6 +56,13 @@ import {
   evaluateExpensePolicy,
   planOwnerPayout
 } from "@/modules/finance/application/finance-config-service";
+import type { OrganizationActorContext } from "@/modules/organization/application/organization-access";
+import { OrganizationAuthorizationError } from "@/modules/organization/application/organization-access";
+import {
+  OrganizationCurrencyLockedError,
+  getOrganizationSettings,
+  updateOrganizationSettings
+} from "@/modules/organization/application/organization-service";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationNotFoundError,
@@ -548,6 +555,154 @@ describe("PostgreSQL baseline", () => {
     expect(ownerVisibleToOrgB).toBeNull();
     expect(propertyVisibleToOrgB).toBeNull();
     expect(linkVisibleWithoutTenant).toBeNull();
+  });
+
+  it("manages organization settings with RBAC, RLS, audit and locked base currency", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Organization A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Organization B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const personId = randomUUID();
+    const ctx: OrganizationActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      personId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        personId,
+        permissions: new Set([
+          permissionKey("organization", "view"),
+          permissionKey("organization", "edit"),
+          permissionKey("organization", "configure")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+
+    const initial = await getOrganizationSettings(ctx, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const updated = await updateOrganizationSettings(
+      ctx,
+      {
+        name: "ALVILLAS Operating Company",
+        legalName: "ALVILLAS SARL",
+        brandName: "ALVILLAS",
+        baseCurrency: "EUR",
+        logoUrl: "https://assets.example.test/alvillas-logo.png",
+        primaryColor: "#0B6B5F",
+        accentColor: "#9F3F1B",
+        websiteUrl: "https://www.alvillas.com",
+        supportEmail: "support@alvillas.com",
+        supportPhone: "+212600000000",
+        defaultLocale: "fr",
+        timezone: "Africa/Casablanca",
+        countryCode: "MA",
+        fiscalYearStartMonth: 1
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-organization-settings-update",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(initial.brandName).toBe(orgA.name);
+    expect(updated).toMatchObject({
+      name: "ALVILLAS Operating Company",
+      brandName: "ALVILLAS",
+      baseCurrency: "EUR",
+      supportEmail: "support@alvillas.com",
+      baseCurrencyLocked: false
+    });
+
+    const stored = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => ({
+      organization: await tx.organization.findFirstOrThrow({ where: { id: orgA.id } }),
+      profile: await tx.organizationProfile.findFirstOrThrow({ where: { organizationId: orgA.id } }),
+      audit: await tx.auditLog.findFirstOrThrow({
+        where: {
+          organizationId: orgA.id,
+          requestId: "integration-organization-settings-update"
+        }
+      })
+    }));
+    const profileVisibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.organizationProfile.findFirst({ where: { organizationId: orgA.id } })
+    );
+    const profileVisibleWithoutTenant = await prisma.organizationProfile.findFirst({
+      where: { organizationId: orgA.id }
+    });
+
+    expect(stored.organization.baseCurrency).toBe("EUR");
+    expect(stored.profile).toMatchObject({
+      brandName: "ALVILLAS",
+      defaultLocale: "fr",
+      countryCode: "MA",
+      createdBy: actorId
+    });
+    expect(stored.audit).toMatchObject({
+      action: "organization.settings.update",
+      resourceType: "organization",
+      resourceId: orgA.id,
+      actorId,
+      reason: "Organization settings updated"
+    });
+    expect(stored.audit.before).toMatchObject({ baseCurrency: "MAD" });
+    expect(stored.audit.after).toMatchObject({ baseCurrency: "EUR", brandName: "ALVILLAS" });
+    expect(profileVisibleToOrgB).toBeNull();
+    expect(profileVisibleWithoutTenant).toBeNull();
+
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.organizationProfile.delete({ where: { organizationId: orgA.id } })
+      )
+    ).rejects.toThrow(/archived, not deleted|business rows/u);
+
+    const editOnlyCtx: OrganizationActorContext = {
+      ...ctx,
+      authContext: {
+        ...ctx.authContext,
+        permissions: new Set([permissionKey("organization", "view"), permissionKey("organization", "edit")])
+      }
+    };
+
+    await expect(
+      updateOrganizationSettings(editOnlyCtx, { ...updated, baseCurrency: "USD" }, {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-organization-currency-denied"
+      })
+    ).rejects.toBeInstanceOf(OrganizationAuthorizationError);
+
+    await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+      tx.ledgerAccount.create({
+        data: {
+          organizationId: orgA.id,
+          code: `BANK_${randomUUID().replace(/-/gu, "").slice(0, 8).toUpperCase()}`,
+          name: "Currency lock bank",
+          accountType: "ASSET_LOCATION",
+          normalSide: "DEBIT"
+        }
+      })
+    );
+    const locked = await getOrganizationSettings(ctx, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+
+    expect(locked.baseCurrencyLocked).toBe(true);
+    await expect(
+      updateOrganizationSettings(ctx, { ...updated, baseCurrency: "USD" }, {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-organization-currency-locked"
+      })
+    ).rejects.toBeInstanceOf(OrganizationCurrencyLockedError);
   });
 
   it("creates owner representatives, encrypted payout methods and property onboarding profiles", async () => {

@@ -54,6 +54,7 @@
     "identity": "Identite",
     "audit": "Audit",
     "configuration": "Configuration",
+    "organization": "Organisation",
     "owners": "Proprietaires",
     "properties": "Proprietes",
     "reservations": "Reservations",
@@ -358,6 +359,49 @@
     "denied": {
       "title": "Acces configuration refuse",
       "subtitle": "Ce compte n'a pas la permission de consulter l'historique de configuration."
+    }
+  },
+  "Organization": {
+    "eyebrow": "Organisation",
+    "title": "Parametres organisation",
+    "subtitle": "Gerez l'identite, la marque, la langue, le pays et la devise de base de cette organisation ALVILLAS OS independante.",
+    "backToWorkspace": "Espace",
+    "profileLabel": "Profil",
+    "settingsLabel": "Parametres",
+    "notProvided": "Non renseigne",
+    "baseCurrencyLocked": "La devise de base est verrouillee car des dossiers financiers existent deja.",
+    "fields": {
+      "name": "Nom de l'organisation",
+      "legalName": "Nom legal",
+      "brandName": "Nom de marque",
+      "baseCurrency": "Devise de base",
+      "logoUrl": "URL du logo",
+      "primaryColor": "Couleur principale",
+      "accentColor": "Couleur accent",
+      "websiteUrl": "URL du site",
+      "supportEmail": "Email support",
+      "supportPhone": "Telephone support",
+      "defaultLocale": "Langue par defaut",
+      "timezone": "Fuseau horaire",
+      "countryCode": "Pays",
+      "fiscalYearStartMonth": "Mois de debut d'exercice"
+    },
+    "form": {
+      "save": "Enregistrer l'organisation",
+      "saving": "Enregistrement..."
+    },
+    "messages": {
+      "saved": "Parametres organisation enregistres.",
+      "validation": "Verifiez les champs indiques puis reessayez.",
+      "unauthorized": "Reconnectez-vous pour continuer.",
+      "forbidden": "Vous n'avez pas acces aux parametres organisation.",
+      "notFound": "L'organisation est introuvable.",
+      "currencyLocked": "La devise de base ne peut pas etre modifiee apres la configuration financiere.",
+      "generic": "Les parametres organisation n'ont pas pu etre enregistres. Reessayez."
+    },
+    "denied": {
+      "title": "Acces organisation refuse",
+      "subtitle": "Ce compte n'a pas la permission de consulter les parametres organisation."
     }
   },
   "Core": {

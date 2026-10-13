@@ -17,6 +17,7 @@ export const permissionActions = [
 ] as const satisfies readonly Action[];
 
 export const permissionResources = [
+  "organization",
   "identity",
   "role",
   "permission",

@@ -54,6 +54,7 @@
     "identity": "Identity",
     "audit": "Audit",
     "configuration": "Configuration",
+    "organization": "Organization",
     "owners": "Owners",
     "properties": "Properties",
     "reservations": "Reservations",
@@ -358,6 +359,49 @@
     "denied": {
       "title": "Configuration access denied",
       "subtitle": "This account does not have permission to view configuration history."
+    }
+  },
+  "Organization": {
+    "eyebrow": "Organization",
+    "title": "Organization settings",
+    "subtitle": "Manage identity, branding, locale, country and base-currency policy for this independent ALVILLAS OS organization.",
+    "backToWorkspace": "Workspace",
+    "profileLabel": "Profile",
+    "settingsLabel": "Settings",
+    "notProvided": "Not provided",
+    "baseCurrencyLocked": "Base currency is locked because financial records already exist.",
+    "fields": {
+      "name": "Organization name",
+      "legalName": "Legal name",
+      "brandName": "Brand name",
+      "baseCurrency": "Base currency",
+      "logoUrl": "Logo URL",
+      "primaryColor": "Primary color",
+      "accentColor": "Accent color",
+      "websiteUrl": "Website URL",
+      "supportEmail": "Support email",
+      "supportPhone": "Support phone",
+      "defaultLocale": "Default language",
+      "timezone": "Timezone",
+      "countryCode": "Country",
+      "fiscalYearStartMonth": "Fiscal year start month"
+    },
+    "form": {
+      "save": "Save organization",
+      "saving": "Saving..."
+    },
+    "messages": {
+      "saved": "Organization settings saved.",
+      "validation": "Check the highlighted fields and try again.",
+      "unauthorized": "Sign in again to continue.",
+      "forbidden": "You do not have access to organization settings.",
+      "notFound": "The organization was not found.",
+      "currencyLocked": "Base currency cannot be changed after financial setup.",
+      "generic": "Organization settings could not be saved. Try again."
+    },
+    "denied": {
+      "title": "Organization access denied",
+      "subtitle": "This account does not have permission to view organization settings."
     }
   },
   "Core": {
