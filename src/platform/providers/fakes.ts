@@ -1,5 +1,5 @@
 import type {
-  EmailProvider,
+  EmailProvider as EmailProviderContract,
   NotificationChannel,
   PaymentProvider,
   PdfRenderer,
@@ -8,6 +8,7 @@ import type {
   SignatureProvider,
   StorageProvider
 } from "@/platform/providers";
+import type { AppLocale } from "@/i18n/routing";
 
 export function assertFakeProviderAllowed(nodeEnv: string | undefined = process.env.NODE_ENV): void {
   if (nodeEnv === "production") {
@@ -15,14 +16,14 @@ export function assertFakeProviderAllowed(nodeEnv: string | undefined = process.
   }
 }
 
-export class FakeEmailProvider implements EmailProvider {
-  readonly sent: Array<{ to: string; subject: string; html: string; text?: string }> = [];
+export class FakeEmailProvider implements EmailProviderContract {
+  readonly sent: Array<Parameters<EmailProviderContract["send"]>[0]> = [];
 
   constructor(nodeEnv?: string) {
     assertFakeProviderAllowed(nodeEnv);
   }
 
-  send(input: { to: string; subject: string; html: string; text?: string }): Promise<{ id: string }> {
+  send(input: Parameters<EmailProviderContract["send"]>[0]): Promise<{ id: string }> {
     this.sent.push(input);
     return Promise.resolve({ id: `fake-email-${this.sent.length}` });
   }
@@ -88,7 +89,7 @@ export class FakePdfRenderer implements PdfRenderer {
   render(input: {
     template: string;
     data: Record<string, unknown>;
-    locale: string;
+    locale: AppLocale;
   }): Promise<Uint8Array> {
     return Promise.resolve(
       new TextEncoder().encode(

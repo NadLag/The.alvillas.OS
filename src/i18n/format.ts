@@ -32,6 +32,19 @@ export function formatDate(
   }).format(value);
 }
 
+export function formatDateTime(
+  locale: AppLocale,
+  value: Date,
+  options: Intl.DateTimeFormatOptions = {}
+): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: defaultTimeZone,
+    ...options
+  }).format(value);
+}
+
 export function formatNumber(
   locale: AppLocale,
   value: DecimalInput,
@@ -48,6 +61,20 @@ export function formatCurrency(locale: AppLocale, money: Money): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   }).format(decimalToSafeNumber(money.amount));
+}
+
+export function formatCurrencyAmount(
+  locale: AppLocale,
+  amount: DecimalInput,
+  currency: string
+): string {
+  return new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency,
+    currencyDisplay: "code",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(decimalToSafeNumber(amount));
 }
 
 export function pluralCategory(locale: AppLocale, count: number): Intl.LDMLPluralRule {

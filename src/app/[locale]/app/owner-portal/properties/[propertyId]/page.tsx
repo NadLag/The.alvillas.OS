@@ -2,6 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { formatCurrency, formatDate } from "@/i18n/format";
+import { LocaleSwitch } from "@/i18n/locale-switch";
 import { routing, type AppLocale } from "@/i18n/routing";
 import {
   addUtcDays,
@@ -102,12 +103,12 @@ export default async function OwnerStatementPage({
           <Link className="secondary-button" href={`/${appLocale}/app/owner-portal`}>
             {t("backToProperties")}
           </Link>
-          <Link
-            className="secondary-button"
-            href={`/${appLocale === "fr" ? "en" : "fr"}/app/owner-portal/properties/${propertyId}?from=${period.from}&to=${period.to}`}
-          >
-            {t(`switch.${appLocale === "fr" ? "en" : "fr"}`)}
-          </Link>
+          <LocaleSwitch
+            compact
+            currentLocale={appLocale}
+            label={t("language")}
+            path={`/app/owner-portal/properties/${propertyId}?from=${period.from}&to=${period.to}`}
+          />
         </div>
       </header>
 

@@ -79,6 +79,20 @@ jobs:
           test -n "${VERCEL_ORG_ID:?GitHub staging variable VERCEL_ORG_ID is required}"
           test -n "${VERCEL_PROJECT_ID:?GitHub staging variable VERCEL_PROJECT_ID is required}"
           test -n "${VERCEL_TOKEN:?GitHub staging secret VERCEL_TOKEN is required}"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const project = JSON.parse(readFileSync(".vercel/project.json", "utf8"));
+            const pairs = [
+              ["VERCEL_ORG_ID", project.orgId],
+              ["VERCEL_PROJECT_ID", project.projectId]
+            ];
+            for (const [name, expected] of pairs) {
+              if (!expected || process.env[name] !== expected) {
+                throw new Error(`${name} does not match .vercel/project.json`);
+              }
+            }
+            console.log("staging credential presence and Vercel project parity ok");
+          '
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       - name: Install Vercel CLI
@@ -115,16 +129,20 @@ jobs:
         run: |
           curl --fail --show-error --silent "${DEPLOYMENT_URL}/api/health" > /tmp/health.json
           curl --fail --show-error --silent "${DEPLOYMENT_URL}/api/readiness" > /tmp/readiness.json
+          curl --fail --show-error --silent "${DEPLOYMENT_URL}/api/version" > /tmp/version.json
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const health = JSON.parse(readFileSync("/tmp/health.json", "utf8"));
             const readiness = JSON.parse(readFileSync("/tmp/readiness.json", "utf8"));
-            if (health.service?.service !== "alvillas-os") throw new Error("Unexpected health payload");
+            const version = JSON.parse(readFileSync("/tmp/version.json", "utf8"));
+            if (health.service !== "alvillas-os") throw new Error("Unexpected health payload");
             if (!["ready", "not_ready"].includes(readiness.status)) throw new Error("Unexpected readiness status");
+            if (version.service !== "alvillas-os" || !version.version) throw new Error("Unexpected version payload");
             console.log(JSON.stringify({
               deployment: process.env.DEPLOYMENT_URL,
               health: health.status,
               readiness: readiness.status,
+              version: version.version,
               checks: readiness.checks?.map((check) => `${check.name}:${check.status}`).join(",")
             }));
           '

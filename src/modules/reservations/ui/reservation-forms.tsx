@@ -9,6 +9,7 @@ import {
   completeFieldTaskAction,
   createManualReservationAction
 } from "@/modules/reservations/application/reservation-actions";
+import { localizedChecklistLabel } from "@/modules/reservations/domain/reservation-task";
 
 type FormLabels = {
   saving: string;
@@ -109,10 +110,6 @@ type SyncResult = {
 
 const fieldQueueKey = "alvillas.fieldTaskQueue.v1";
 const fieldDeviceKey = "alvillas.fieldDeviceId.v1";
-
-function localizedLabel(label: Record<string, string>, locale: string): string {
-  return label[locale] ?? label.en ?? Object.values(label)[0] ?? "";
-}
 
 function readFieldQueue(): QueuedFieldTaskCompletion[] {
   try {
@@ -360,7 +357,7 @@ export function FieldTaskCompletionForm({
               type="checkbox"
               value={item.id}
             />
-            <span>{localizedLabel(item.label, locale)}</span>
+            <span>{localizedChecklistLabel(item.label, locale)}</span>
           </label>
         ))}
       </div>

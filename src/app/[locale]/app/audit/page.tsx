@@ -9,7 +9,8 @@ import {
   type AuditHistoryResult
 } from "@/modules/audit/application/audit-service";
 import { auth } from "@/platform/auth/session";
-import { routing, type AppLocale } from "@/i18n/routing";
+import { formatDateTime } from "@/i18n/format";
+import { safeLocale } from "@/i18n/routing";
 
 export const dynamic = "force-dynamic";
 
@@ -32,10 +33,6 @@ const filterKeys = [
   "from",
   "to"
 ] as const;
-
-function safeLocale(locale: string): AppLocale {
-  return routing.locales.includes(locale as AppLocale) ? (locale as AppLocale) : routing.defaultLocale;
-}
 
 function firstParam(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
@@ -87,10 +84,6 @@ export default async function AuditPage({
   const filterInput = auditFilterInput(rawSearchParams);
   const parsedFilters = auditFilterSchema.safeParse(filterInput);
   const filters = parsedFilters.success ? parsedFilters.data : {};
-  const dateTime = new Intl.DateTimeFormat(appLocale, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  });
 
   let history: AuditHistoryResult;
 
@@ -201,7 +194,7 @@ export default async function AuditPage({
             {history.rows.map((row) => (
               <details className="audit-row" data-testid="audit-row" key={row.id}>
                 <summary>
-                  <span>{dateTime.format(row.occurredAt)}</span>
+                  <span>{formatDateTime(appLocale, row.occurredAt)}</span>
                   <span>{row.actorId ?? t("systemActor")}</span>
                   <strong>{row.action}</strong>
                   <span>

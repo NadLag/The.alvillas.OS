@@ -125,6 +125,12 @@ a {
   padding: 0 14px;
 }
 
+.locale-switch a[aria-current="page"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
 .auth-panel {
   width: min(440px, 100%);
   border: 1px solid var(--border);
@@ -357,6 +363,18 @@ a {
 .workspace-side dd {
   margin: 4px 0 0;
   overflow-wrap: anywhere;
+}
+
+.preference-form {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 18px;
+}
+
+.preference-form .secondary-button {
+  width: 100%;
 }
 
 .section-heading {

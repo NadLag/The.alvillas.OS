@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
+import { formatCurrencyAmount } from "@/i18n/format";
+import { safeLocale } from "@/i18n/routing";
 import type { AirbnbSettlementFormState } from "@/modules/finance/application/airbnb-settlement-actions";
 import { importAirbnbSettlementAction } from "@/modules/finance/application/airbnb-settlement-actions";
 
@@ -88,8 +90,8 @@ function fieldError(state: AirbnbSettlementFormState, field: string): string | n
   return state.fieldErrors?.[field]?.[0] ?? null;
 }
 
-function moneyText(value: { amount: string; currency: string }): string {
-  return `${value.amount} ${value.currency}`;
+function moneyText(locale: string, value: { amount: string; currency: string }): string {
+  return formatCurrencyAmount(safeLocale(locale), value.amount, value.currency);
 }
 
 function moneyAmount(value: { amount: string; currency: string }): string {
@@ -127,6 +129,7 @@ export function AirbnbSettlementPanel({
   );
   const message = messageForState(state, labels);
   const hasAccounts = accounts.length > 0;
+  const appLocale = safeLocale(locale);
 
   return (
     <section className="settlement-panel" data-testid="airbnb-settlement-panel">
@@ -209,19 +212,19 @@ export function AirbnbSettlementPanel({
                 <span>
                   <small>{labels.expected}</small>
                   <strong data-testid="airbnb-settlement-expected">
-                    {moneyText(variance.expectedAmount)}
+                    {moneyText(appLocale, variance.expectedAmount)}
                   </strong>
                 </span>
                 <span>
                   <small>{labels.actual}</small>
                   <strong data-testid="airbnb-settlement-actual">
-                    {moneyText(variance.actualAmount)}
+                    {moneyText(appLocale, variance.actualAmount)}
                   </strong>
                 </span>
                 <span>
                   <small>{labels.variance}</small>
                   <strong data-testid="airbnb-settlement-variance-amount">
-                    {moneyText(variance.varianceAmount)}
+                    {moneyText(appLocale, variance.varianceAmount)}
                   </strong>
                 </span>
                 <span>

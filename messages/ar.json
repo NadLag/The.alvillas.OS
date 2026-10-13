@@ -15,7 +15,8 @@
     "language": "Language",
     "switch": {
       "en": "English",
-      "fr": "Francais"
+      "fr": "Francais",
+      "ar": "AR"
     },
     "eyebrow": "Secure access",
     "title": "Sign in to ALVILLAS OS",
@@ -36,7 +37,16 @@
     "actions": "Workspace actions",
     "switch": {
       "en": "EN",
-      "fr": "FR"
+      "fr": "FR",
+      "ar": "AR"
+    },
+    "language": "Language",
+    "languagePreference": "Workspace language",
+    "saveLanguagePreference": "Save language",
+    "languageNames": {
+      "en": "English",
+      "fr": "Francais",
+      "ar": "Arabic"
     },
     "eyebrow": "Admin workspace",
     "title": "ALVILLAS OS",
@@ -51,6 +61,7 @@
     "ownerPortal": "Owner portal",
     "todayLabel": "Today",
     "welcome": "Welcome, {name}",
+    "fallbackName": "Admin",
     "summary": "The security spine now carries the first core records: authenticated owners and properties, scoped by organization and audited on create.",
     "sessionLabel": "Session",
     "signedInAs": "Signed in as",
@@ -446,8 +457,10 @@
   "OwnerPortal": {
     "switch": {
       "en": "EN",
-      "fr": "FR"
+      "fr": "FR",
+      "ar": "AR"
     },
+    "language": "Language",
     "eyebrow": "Owner portal",
     "title": "Owner portal",
     "subtitle": "Select an authorized property to review ledger-derived balances and statement lines.",

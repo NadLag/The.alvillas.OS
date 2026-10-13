@@ -2,8 +2,12 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "../../../../auth";
-import { routing, type AppLocale } from "@/i18n/routing";
-import { logoutAction } from "@/modules/identity/application/session-actions";
+import { LocaleSwitch } from "@/i18n/locale-switch";
+import { routing, safeLocale } from "@/i18n/routing";
+import {
+  logoutAction,
+  updatePreferredLocaleAction
+} from "@/modules/identity/application/session-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -17,9 +21,7 @@ export default async function AppPage({
   params: Promise<{ locale: string }>;
 }>) {
   const { locale } = await params;
-  const appLocale = routing.locales.includes(locale as AppLocale)
-    ? (locale as AppLocale)
-    : routing.defaultLocale;
+  const appLocale = safeLocale(locale);
   setRequestLocale(appLocale);
 
   const session = await auth();
@@ -29,7 +31,6 @@ export default async function AppPage({
   }
 
   const t = await getTranslations("AppShell");
-  const switchLocale = appLocale === "fr" ? "en" : "fr";
 
   return (
     <section className="app-shell" data-testid="app-shell">
@@ -63,9 +64,7 @@ export default async function AppPage({
           <Link className="secondary-button" href={`/${appLocale}/app/owner-portal`}>
             {t("ownerPortal")}
           </Link>
-          <Link className="secondary-button" href={`/${switchLocale}/app`}>
-            {t(`switch.${switchLocale}`)}
-          </Link>
+          <LocaleSwitch compact currentLocale={appLocale} label={t("language")} path="/app" />
           <form action={logoutAction.bind(null, appLocale)}>
             <button className="secondary-button" data-testid="logout-button" type="submit">
               {t("logout")}
@@ -76,10 +75,31 @@ export default async function AppPage({
       <div className="workspace-grid">
         <section className="workspace-main">
           <p className="panel-label">{t("todayLabel")}</p>
-          <h2>{t("welcome", { name: session.user?.name ?? session.user?.email ?? "Admin" })}</h2>
+          <h2>{t("welcome", { name: session.user?.name ?? session.user?.email ?? t("fallbackName") })}</h2>
           <p>{t("summary")}</p>
         </section>
         <aside className="workspace-side" aria-label={t("sessionLabel")}>
+          <form
+            action={updatePreferredLocaleAction.bind(null, appLocale)}
+            className="preference-form"
+            data-testid="preferred-locale-form"
+          >
+            <label className="field">
+              <span>{t("languagePreference")}</span>
+              <select
+                data-testid="preferred-locale-select"
+                defaultValue={safeLocale(session.user.preferredLocale)}
+                name="preferredLocale"
+              >
+                <option value="en">{t("languageNames.en")}</option>
+                <option value="fr">{t("languageNames.fr")}</option>
+                <option value="ar">{t("languageNames.ar")}</option>
+              </select>
+            </label>
+            <button className="secondary-button" data-testid="preferred-locale-submit" type="submit">
+              {t("saveLanguagePreference")}
+            </button>
+          </form>
           <dl>
             <div>
               <dt>{t("signedInAs")}</dt>

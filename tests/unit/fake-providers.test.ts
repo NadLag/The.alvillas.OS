@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   FakeEmailProvider,
+  FakePdfRenderer,
   FakePaymentProvider,
   FakeRateLimiter,
   assertFakeProviderAllowed
@@ -17,9 +18,29 @@ describe("fake providers", () => {
     const provider = new FakeEmailProvider("test");
 
     await expect(
-      provider.send({ to: "owner@example.com", subject: "Hello", html: "<p>Hello</p>" })
+      provider.send({
+        to: "owner@example.com",
+        subject: "Hello",
+        html: "<p>Hello</p>",
+        locale: "en",
+        template: "test.email"
+      })
     ).resolves.toEqual({ id: "fake-email-1" });
     expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0]).toMatchObject({ locale: "en", template: "test.email" });
+  });
+
+  it("includes locale in fake PDF payloads", async () => {
+    const payload = await new FakePdfRenderer("test").render({
+      template: "test.pdf",
+      data: { name: "Villa A" },
+      locale: "fr"
+    });
+
+    expect(JSON.parse(new TextDecoder().decode(payload))).toMatchObject({
+      template: "test.pdf",
+      locale: "fr"
+    });
   });
 
   it("returns deterministic fake payment ids", async () => {

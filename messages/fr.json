@@ -15,7 +15,8 @@
     "language": "Langue",
     "switch": {
       "en": "English",
-      "fr": "Francais"
+      "fr": "Francais",
+      "ar": "AR"
     },
     "eyebrow": "Acces securise",
     "title": "Connexion a ALVILLAS OS",
@@ -36,7 +37,16 @@
     "actions": "Actions de l'espace",
     "switch": {
       "en": "EN",
-      "fr": "FR"
+      "fr": "FR",
+      "ar": "AR"
+    },
+    "language": "Langue",
+    "languagePreference": "Langue de l'espace",
+    "saveLanguagePreference": "Enregistrer la langue",
+    "languageNames": {
+      "en": "Anglais",
+      "fr": "Francais",
+      "ar": "Arabe"
     },
     "eyebrow": "Espace admin",
     "title": "ALVILLAS OS",
@@ -51,6 +61,7 @@
     "ownerPortal": "Portail proprietaire",
     "todayLabel": "Aujourd'hui",
     "welcome": "Bienvenue, {name}",
+    "fallbackName": "Admin",
     "summary": "Le socle de securite porte maintenant les premiers dossiers coeur: proprietaires et proprietes authentifies, limites par organisation et audites a la creation.",
     "sessionLabel": "Session",
     "signedInAs": "Connecte en tant que",
@@ -446,8 +457,10 @@
   "OwnerPortal": {
     "switch": {
       "en": "EN",
-      "fr": "FR"
+      "fr": "FR",
+      "ar": "AR"
     },
+    "language": "Langue",
     "eyebrow": "Portail proprietaire",
     "title": "Portail proprietaire",
     "subtitle": "Selectionnez une propriete autorisee pour consulter les soldes et lignes issus du grand livre.",

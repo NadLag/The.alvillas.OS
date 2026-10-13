@@ -56,6 +56,7 @@ import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import {
   consumeRateLimit
 } from "@/platform/rate-limit/postgres-rate-limiter";
+import type { AppLocale } from "@/i18n/routing";
 
 export class IdentityNotFoundError extends Error {
   constructor(message = "Identity resource was not found") {
@@ -363,6 +364,43 @@ export async function listIdentityDashboard(
         db: { $transaction: (callback) => callback(tx) }
       })
     };
+  });
+}
+
+export async function updateOwnPreferredLocale(
+  ctx: IdentityActorContext,
+  preferredLocale: AppLocale,
+  deps: IdentityServiceDeps = {}
+): Promise<void> {
+  const meta = auditMeta(deps);
+
+  await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new IdentityRepository(tx, ctx.organizationId);
+    const update = await repository.updatePersonPreferredLocale(ctx.personId, preferredLocale);
+
+    if (update.before === update.after) {
+      return;
+    }
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.preference.update",
+      resourceType: "identity",
+      resourceId: ctx.actorId,
+      ipAddress: meta.ipAddress,
+      before: {
+        personId: update.id,
+        preferredLocale: update.before
+      },
+      after: {
+        personId: update.id,
+        preferredLocale: update.after
+      },
+      reason: "User language preference updated",
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
   });
 }
 
