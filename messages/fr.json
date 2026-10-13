@@ -53,6 +53,7 @@
     "logout": "Deconnexion",
     "identity": "Identite",
     "audit": "Audit",
+    "configuration": "Configuration",
     "owners": "Proprietaires",
     "properties": "Proprietes",
     "reservations": "Reservations",
@@ -291,6 +292,72 @@
     "denied": {
       "title": "Acces audit refuse",
       "subtitle": "Ce compte n'a pas la permission de consulter l'historique d'audit."
+    }
+  },
+  "Configuration": {
+    "eyebrow": "Configuration",
+    "title": "Regles metier",
+    "subtitle": "Creez, activez, retirez et previsualisez les regles metier effectives par organisation et propriete.",
+    "backToWorkspace": "Espace",
+    "createTitle": "Creer une version",
+    "historyTitle": "Historique des regles",
+    "previewTitle": "Previsualisation a date",
+    "empty": "Aucune regle de configuration n'a encore ete creee pour cette organisation.",
+    "form": {
+      "key": "Cle de regle",
+      "customFeatureFlagKey": "Suffixe feature flag",
+      "scopeType": "Portee",
+      "scopeOrganization": "Organisation",
+      "scopeProperty": "Propriete",
+      "scopeId": "Propriete",
+      "noProperties": "Creez une propriete avant d'ajouter des regles par propriete.",
+      "lifecycle": "Cycle",
+      "value": "JSON de regle",
+      "valuePlaceholder": "Collez une valeur JSON valide pour la cle selectionnee.",
+      "effectiveFrom": "Effectif depuis",
+      "effectiveTo": "Effectif jusqu'a",
+      "reason": "Raison",
+      "createVersion": "Creer la version",
+      "saving": "Enregistrement...",
+      "activate": "Activer",
+      "retire": "Retirer",
+      "asOf": "A la date",
+      "preview": "Previsualiser"
+    },
+    "lifecycle": {
+      "DRAFT": "Brouillon",
+      "ACTIVE": "Active",
+      "RETIRED": "Retiree"
+    },
+    "columns": {
+      "version": "Version",
+      "scope": "Portee",
+      "status": "Statut",
+      "dates": "Dates",
+      "diff": "Diff",
+      "value": "Valeur"
+    },
+    "diff": {
+      "none": "Aucune version precedente",
+      "changed": "Modifie"
+    },
+    "preview": {
+      "resolved": "Regle resolue",
+      "none": "Aucune regle ne correspond a cette date et cette portee"
+    },
+    "messages": {
+      "created": "Version de configuration creee.",
+      "activated": "Version de configuration activee.",
+      "retired": "Regle de configuration retiree.",
+      "validation": "Verifiez les champs et le JSON valide, puis reessayez.",
+      "unauthorized": "Reconnectez-vous pour continuer.",
+      "forbidden": "Vous n'avez pas acces a la configuration des regles metier.",
+      "notFound": "La regle de configuration est introuvable.",
+      "generic": "L'action de configuration a echoue. Reessayez."
+    },
+    "denied": {
+      "title": "Acces configuration refuse",
+      "subtitle": "Ce compte n'a pas la permission de consulter l'historique de configuration."
     }
   },
   "Core": {

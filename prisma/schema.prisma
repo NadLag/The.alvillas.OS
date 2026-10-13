@@ -14,6 +14,7 @@ model Organization {
   createdAt            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   configRules          ConfigRule[]
+  reservationSnapshots ReservationConfigSnapshot[]
   outboxEvents         OutboxEvent[]
   auditLogs            AuditLog[]
   referenceSequences   ReferenceSequence[]
@@ -393,6 +394,7 @@ model Property {
   ReservationConflict ReservationConflict[]
   OperationTask       OperationTask[]
   commissionSnapshots CommissionSnapshot[]
+  configSnapshots     ReservationConfigSnapshot[]
   airbnbSettlements   AirbnbSettlement[]
   variances           Variance[]
 
@@ -450,6 +452,7 @@ model Reservation {
   conflicts           ReservationConflict[] @relation("ReservationConflictReservation")
   conflictingWith     ReservationConflict[] @relation("ReservationConflictOther")
   commissionSnapshots CommissionSnapshot[]
+  configSnapshots     ReservationConfigSnapshot[]
   airbnbSettlements   AirbnbSettlement[]
   variances           Variance[]
 
@@ -699,6 +702,7 @@ model ConfigRule {
   effectiveFrom       DateTime             @map("effective_from") @db.Timestamptz(6)
   effectiveTo         DateTime?            @map("effective_to") @db.Timestamptz(6)
   version             Int
+  lifecycle           String               @default("ACTIVE")
   createdBy           String?              @map("created_by") @db.Uuid
   reason              String
   archivedAt          DateTime?            @map("archived_at") @db.Timestamptz(6)
@@ -706,9 +710,36 @@ model ConfigRule {
   updatedAt           DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   commissionSnapshots CommissionSnapshot[]
+  reservationSnapshots ReservationConfigSnapshot[]
 
   @@index([organizationId, key, scopeType, effectiveFrom], map: "config_rule_org_key_scope_effective_idx")
+  @@index([organizationId, key, scopeType, lifecycle, effectiveFrom], map: "config_rule_org_key_lifecycle_effective_idx")
   @@map("config_rule")
+}
+
+model ReservationConfigSnapshot {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  reservationId  String       @map("reservation_id") @db.Uuid
+  propertyId     String       @map("property_id") @db.Uuid
+  configRuleId   String?      @map("config_rule_id") @db.Uuid
+  key            String
+  scopeType      String       @map("scope_type")
+  scopeId        String?      @map("scope_id") @db.Uuid
+  version        Int
+  snapshotValue  Json         @map("snapshot_value")
+  resolvedAt     DateTime     @map("resolved_at") @db.Timestamptz(6)
+  createdBy      String?      @map("created_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservation    Reservation  @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property       Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  configRule     ConfigRule?  @relation(fields: [configRuleId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, reservationId, key], map: "reservation_config_snapshot_org_reservation_key_unique")
+  @@index([organizationId, reservationId], map: "reservation_config_snapshot_org_reservation_idx")
+  @@index([organizationId, propertyId, key], map: "reservation_config_snapshot_org_property_key_idx")
+  @@map("reservation_config_snapshot")
 }
 
 model CommissionSnapshot {

@@ -4,6 +4,7 @@ import type {
   PropertyOwnerShare
 } from "@/modules/finance/domain/reservation-revenue";
 import { commissionConfigKey } from "@/modules/finance/domain/reservation-revenue";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
 type ReservationWithFinanceContext = Prisma.ReservationGetPayload<{
@@ -31,12 +32,14 @@ export type FinanceLedgerAccount = {
 
 export type CommissionRuleRow = {
   id: string;
+  key: string;
   scopeType: string;
   scopeId: string | null;
   value: Prisma.JsonValue;
   effectiveFrom: Date;
   effectiveTo: Date | null;
   version: number;
+  lifecycle: "DRAFT" | "ACTIVE" | "RETIRED";
 };
 
 export type PostingTransaction = Prisma.FinancialTransactionGetPayload<{
@@ -80,19 +83,6 @@ function ownerSharesFromReservation(reservation: ReservationWithFinanceContext):
     ownerName: propertyOwner.owner.displayName,
     shareBps: propertyOwner.shareBps
   }));
-}
-
-function specificity(scopeType: string): number {
-  switch (scopeType) {
-    case "property":
-      return 3;
-    case "owner":
-      return 2;
-    case "organization":
-      return 1;
-    default:
-      return 0;
-  }
 }
 
 function inputJsonObject(value: Record<string, unknown>): Prisma.InputJsonObject {
@@ -285,69 +275,29 @@ export class FinanceRepository {
     ownerId: string;
     asOf: Date;
   }): Promise<CommissionRuleRow | null> {
-    const rules = await this.tx.configRule.findMany({
-      where: {
-        organizationId: this.organizationId,
-        key: commissionConfigKey,
-        archivedAt: null,
-        effectiveFrom: {
-          lte: input.asOf
-        },
-        OR: [
-          {
-            effectiveTo: null
-          },
-          {
-            effectiveTo: {
-              gt: input.asOf
-            }
-          }
-        ],
-        AND: [
-          {
-            OR: [
-              {
-                scopeType: "property",
-                scopeId: input.propertyId
-              },
-              {
-                scopeType: "owner",
-                scopeId: input.ownerId
-              },
-              {
-                scopeType: "organization",
-                scopeId: null
-              }
-            ]
-          }
-        ]
-      },
-      select: {
-        id: true,
-        scopeType: true,
-        scopeId: true,
-        value: true,
-        effectiveFrom: true,
-        effectiveTo: true,
-        version: true
-      }
+    const rule = await new ConfigRuleRepository(this.tx, this.organizationId).resolve({
+      key: commissionConfigKey,
+      asOf: input.asOf,
+      scopes: [
+        { scopeType: "property", scopeId: input.propertyId },
+        { scopeType: "owner", scopeId: input.ownerId },
+        { scopeType: "organization", scopeId: null }
+      ]
     });
 
-    return (
-      rules.sort((left, right) => {
-        const scopeOrder = specificity(right.scopeType) - specificity(left.scopeType);
-        if (scopeOrder !== 0) {
-          return scopeOrder;
+    return rule
+      ? {
+          id: rule.id,
+          key: rule.key,
+          scopeType: rule.scopeType,
+          scopeId: rule.scopeId,
+          value: rule.value,
+          effectiveFrom: rule.effectiveFrom,
+          effectiveTo: rule.effectiveTo,
+          version: rule.version,
+          lifecycle: rule.lifecycle
         }
-
-        const effectiveOrder = right.effectiveFrom.getTime() - left.effectiveFrom.getTime();
-        if (effectiveOrder !== 0) {
-          return effectiveOrder;
-        }
-
-        return right.version - left.version;
-      })[0] ?? null
-    );
+      : null;
   }
 
   async findCommissionSnapshot(input: {

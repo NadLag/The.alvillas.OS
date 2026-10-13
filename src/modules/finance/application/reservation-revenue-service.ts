@@ -4,7 +4,6 @@ import {
   allocateGrossRevenueByOwnerShare,
   assertFinancePostingsBalanced,
   parseCommissionRuleValue,
-  commissionConfigKey,
   parseRecordReservationRevenueInput,
   parseReverseReservationRevenueInput,
   withCommissionAllocations,
@@ -20,6 +19,7 @@ import {
 } from "@/modules/finance/infrastructure/finance-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type AuthContext } from "@/platform/authz/authorize";
+import { configRuleSnapshotMetadata } from "@/platform/config/config-rule-repository";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
@@ -307,13 +307,7 @@ function snapshotValue(
   }
 ): Prisma.InputJsonObject {
   return {
-    key: commissionConfigKey,
-    config_rule_id: rule.id,
-    config_rule_version: rule.version,
-    config_rule_scope_type: rule.scopeType,
-    config_rule_scope_id: rule.scopeId,
-    config_rule_effective_from: rule.effectiveFrom.toISOString(),
-    config_rule_effective_to: rule.effectiveTo?.toISOString() ?? null,
+    ...configRuleSnapshotMetadata(rule),
     owner_id: input.ownerId,
     owner_name: input.ownerName,
     owner_share_bps: input.shareBps,

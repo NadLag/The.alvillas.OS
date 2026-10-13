@@ -38,5 +38,9 @@ export async function withTenant<T>(
     );
 
     return work(tx);
-  }, options);
+  }, {
+    maxWait: options?.maxWait ?? 10000,
+    timeout: options?.timeout ?? 30000,
+    isolationLevel: options?.isolationLevel
+  });
 }

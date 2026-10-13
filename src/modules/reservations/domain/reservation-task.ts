@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { localizedTextSchema, localizedText } from "@/i18n/content";
+import {
+  reservationTaskConfigSchema,
+  reservationTaskTemplateSchema,
+  taskChecklistTemplateSchema,
+  taskDueAnchorSchema,
+  taskTypeSchema
+} from "@/platform/config/rule-registry";
+import { localizedText } from "@/i18n/content";
 import { safeLocale } from "@/i18n/routing";
 
 const requiredText = (max: number) => z.string().trim().min(1).max(max);
@@ -28,36 +35,13 @@ export const reservationSourceSchema = z.enum([
   "VRBO"
 ]);
 
-export const taskTypeSchema = z.enum([
-  "ARRIVAL_PREPARATION",
-  "CHECKOUT_CLEANING",
-  "CLEANING_MIDSTAY",
-  "INSPECTION",
-  "POOL",
-  "GARDEN",
-  "MAINTENANCE",
-  "CUSTOM"
-]);
-
-export const taskDueAnchorSchema = z.enum(["CHECK_IN", "CHECK_OUT"]);
-
-export const taskChecklistTemplateSchema = z.object({
-  key: z.string().trim().min(1).max(80).regex(/^[a-z0-9_.-]+$/u),
-  label: localizedTextSchema
-});
-
-export const reservationTaskTemplateSchema = z.object({
-  key: z.string().trim().min(1).max(80).regex(/^[a-z0-9_.-]+$/u),
-  type: taskTypeSchema,
-  title: localizedTextSchema,
-  due: taskDueAnchorSchema,
-  priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
-  checklist: z.array(taskChecklistTemplateSchema).max(24).default([])
-});
-
-export const reservationTaskConfigSchema = z.object({
-  tasks: z.array(reservationTaskTemplateSchema).min(1).max(12)
-});
+export {
+  reservationTaskConfigSchema,
+  reservationTaskTemplateSchema,
+  taskChecklistTemplateSchema,
+  taskDueAnchorSchema,
+  taskTypeSchema
+};
 
 export type ReservationTaskTemplate = z.infer<typeof reservationTaskTemplateSchema>;
 export type ReservationTaskConfig = z.infer<typeof reservationTaskConfigSchema>;

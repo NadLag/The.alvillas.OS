@@ -7,6 +7,7 @@ import { bootstrapOrganizationId } from "../src/platform/identity/bootstrap";
 import { standardRoles } from "../src/modules/identity/domain/identity";
 import { IdentityRepository } from "../src/modules/identity/infrastructure/identity-repository";
 import { fieldPolicyCatalog, permissionCatalog } from "../src/platform/authz/catalog";
+import { reservationTaskTemplatesConfigKey } from "../src/platform/config/rule-registry";
 
 export { bootstrapOrganizationId };
 
@@ -22,13 +23,18 @@ type BootstrapClient = TenantTransactionRunner & {
 
 type BootstrapEnv = Pick<AppEnv, "ADMIN_EMAIL" | "ADMIN_PASSWORD">;
 
+type BootstrapOptions = {
+  timeoutMs?: number;
+};
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
 export async function bootstrapFirstAdmin(
   client: BootstrapClient,
-  env: BootstrapEnv
+  env: BootstrapEnv,
+  options: BootstrapOptions = {}
 ): Promise<void> {
   if (!env.ADMIN_EMAIL) {
     throw new Error("ADMIN_EMAIL is required for first-admin bootstrap");
@@ -141,7 +147,7 @@ export async function bootstrapFirstAdmin(
     const existingReservationTaskConfig = await tx.configRule.findFirst({
       where: {
         organizationId: organization.id,
-        key: "ops.reservation_task_templates",
+        key: reservationTaskTemplatesConfigKey,
         scopeType: "organization",
         scopeId: null,
         archivedAt: null
@@ -152,7 +158,7 @@ export async function bootstrapFirstAdmin(
       await tx.configRule.create({
         data: {
           organizationId: organization.id,
-          key: "ops.reservation_task_templates",
+          key: reservationTaskTemplatesConfigKey,
           scopeType: "organization",
           scopeId: null,
           value: {
@@ -240,7 +246,7 @@ export async function bootstrapFirstAdmin(
         }
       });
     }
-  }, { timeout: 30000 });
+  }, { timeout: options.timeoutMs ?? 120000 });
 }
 
 async function main(): Promise<void> {

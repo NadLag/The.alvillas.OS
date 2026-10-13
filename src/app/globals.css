@@ -1237,6 +1237,100 @@ textarea:disabled {
   background: var(--surface);
 }
 
+.config-admin-grid {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: var(--space-7);
+}
+
+.config-rule-list {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.config-rule-row,
+.config-preview {
+  display: grid;
+  gap: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  padding: var(--space-6);
+}
+
+.config-preview {
+  margin-block-end: var(--space-6);
+}
+
+.config-rule-summary,
+.config-rule-meta,
+.config-lifecycle-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.config-rule-summary {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.config-rule-summary span:first-child {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.config-rule-summary strong,
+.config-rule-summary small,
+.config-rule-meta dd {
+  overflow-wrap: anywhere;
+}
+
+.config-rule-summary small {
+  color: var(--muted);
+}
+
+.config-rule-meta {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.config-rule-meta dt {
+  color: var(--muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+}
+
+.config-rule-meta dd {
+  margin: var(--space-1) 0 0;
+}
+
+.config-value-details summary {
+  min-height: var(--target-min);
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: var(--font-weight-bold);
+  padding-block: var(--space-3);
+}
+
+.config-value-details pre {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  margin: 0;
+  padding: var(--space-4);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.config-lifecycle-form {
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  align-items: end;
+}
+
 .audit-table {
   display: grid;
   gap: var(--space-3);
@@ -1600,6 +1694,10 @@ textarea:disabled {
     .permission-checklist,
     .permission-catalog-list,
     .role-assignment-form .conditions-fieldset,
+  .config-admin-grid,
+  .config-rule-summary,
+  .config-rule-meta,
+  .config-lifecycle-form,
   .audit-table-head,
   .audit-row summary,
   .audit-row-details,
