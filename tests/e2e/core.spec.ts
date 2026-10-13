@@ -14,6 +14,7 @@ test.describe("owners and properties journey", () => {
     const suffix = `${testInfo.project.name}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/gu, "-");
     const ownerName = `Owner ${suffix}`;
     const ownerEmail = `owner-${suffix}@example.test`;
+    const representativeName = `Representative ${suffix}`;
     const propertyName = `Villa ${suffix}`;
     const loginEmail = e2eEmail(`core-${suffix}`, testInfo.project.name);
 
@@ -30,12 +31,18 @@ test.describe("owners and properties journey", () => {
     await page.getByTestId("owner-display-name").fill(ownerName);
     await page.getByTestId("owner-email").fill(ownerEmail);
     await page.getByTestId("owner-preferred-locale").selectOption("en");
+    await page.getByTestId("owner-representative-display-name").fill(representativeName);
+    await page.getByTestId("owner-payout-label").fill("Main MAD bank");
+    await page.getByTestId("owner-payout-account-holder").fill(ownerName);
+    await page.getByTestId("owner-payout-details").fill("IBAN MA64011519000001205000534921 RIB 1234567890");
     await page.getByTestId("owner-submit").click();
 
     await expect(page).toHaveURL(/\/en\/app\/owners\/[0-9a-f-]+/u);
     await expect(page.getByTestId("owner-detail-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: ownerName })).toBeVisible();
     await expect(page.getByTestId("owner-detail-email")).toContainText(ownerEmail);
+    await expect(page.getByTestId("owner-representatives")).toContainText(representativeName);
+    await expect(page.getByTestId("owner-payout-methods")).toContainText("**** 7890");
 
     await page.goto("/en/app/properties");
     await expect(page.getByTestId("properties-page")).toBeVisible();
@@ -49,11 +56,20 @@ test.describe("owners and properties journey", () => {
     await page.getByTestId("property-max-guests").fill("8");
     await page.getByTestId("property-has-pool").check();
     await page.getByTestId("property-amenities").fill("Pool, Garden, Fiber");
+    await page.getByTestId("property-photo-urls").fill("https://assets.example.test/e2e-villa.jpg");
+    await page.getByTestId("property-headline").fill("Calm family villa near the Palmeraie");
+    await page.getByTestId("property-public-directions").fill("Meet the host at the main gate.");
+    await page.getByTestId("property-internal-access-notes").fill("Key safe behind the service entrance.");
+    await page.getByTestId("property-house-rules").fill("No parties, Quiet after 22:00");
+    await page.getByTestId("property-onboarding-notes").fill("Wi-Fi and linen inventory need final confirmation.");
     await page.getByTestId("property-submit").click();
 
     await expect(page).toHaveURL(/\/en\/app\/properties\/[0-9a-f-]+/u);
     await expect(page.getByTestId("property-detail-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: propertyName })).toBeVisible();
     await expect(page.getByTestId("property-detail-owner")).toContainText(ownerName);
+    await expect(page.getByTestId("property-onboarding-profile")).toContainText("Calm family villa near the Palmeraie");
+    await expect(page.getByTestId("property-onboarding-profile")).toContainText("No parties");
+    await expect(page.getByTestId("property-onboarding-profile")).toContainText("1");
   });
 });

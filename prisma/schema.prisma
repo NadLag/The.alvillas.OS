@@ -37,8 +37,11 @@ model Organization {
   roleAssignments      RoleAssignment[]
   rolePermissions      RolePermission[]
   owners               Owner[]
+  ownerRepresentatives OwnerRepresentative[]
+  ownerPayoutMethods   OwnerPayoutMethod[]
   ownerPortalAccesses  OwnerPortalAccess[]
   properties           Property[]
+  propertyProfiles     PropertyOnboardingProfile[]
   propertyOwners       PropertyOwner[]
   reservations         Reservation[]
   reservationConflicts ReservationConflict[]
@@ -321,27 +324,81 @@ model RoleAssignment {
 }
 
 model Owner {
-  id                  String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId      String               @map("organization_id") @db.Uuid
-  displayName         String               @map("display_name")
-  legalName           String?              @map("legal_name")
+  id                  String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String                @map("organization_id") @db.Uuid
+  displayName         String                @map("display_name")
+  legalName           String?               @map("legal_name")
   email               String?
   phone               String?
-  preferredLocale     String               @default("fr") @map("preferred_locale") @db.Char(2)
+  preferredLocale     String                @default("fr") @map("preferred_locale") @db.Char(2)
   notes               String?
-  archivedAt          DateTime?            @map("archived_at") @db.Timestamptz(6)
-  createdBy           String?              @map("created_by") @db.Uuid
-  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  archivedAt          DateTime?             @map("archived_at") @db.Timestamptz(6)
+  createdBy           String?               @map("created_by") @db.Uuid
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   propertyOwners      PropertyOwner[]
   ownerPortalAccesses OwnerPortalAccess[]
   commissionSnapshots CommissionSnapshot[]
+  representatives     OwnerRepresentative[]
+  payoutMethods       OwnerPayoutMethod[]
 
   @@unique([organizationId, email], map: "owner_org_email_unique")
   @@index([organizationId, displayName], map: "owner_org_display_name_idx")
   @@index([organizationId, archivedAt], map: "owner_org_archived_idx")
   @@map("owner")
+}
+
+model OwnerRepresentative {
+  id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  ownerId         String       @map("owner_id") @db.Uuid
+  displayName     String       @map("display_name")
+  email           String?
+  phone           String?
+  preferredLocale String       @default("fr") @map("preferred_locale") @db.Char(2)
+  relationship    String?
+  accessNotes     String?      @map("access_notes")
+  validFrom       DateTime?    @map("valid_from") @db.Timestamptz(6)
+  validTo         DateTime?    @map("valid_to") @db.Timestamptz(6)
+  status          String       @default("ACTIVE")
+  archivedAt      DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdBy       String?      @map("created_by") @db.Uuid
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  owner           Owner        @relation(fields: [ownerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, ownerId, email], map: "owner_representative_org_owner_email_unique")
+  @@index([organizationId, ownerId, archivedAt], map: "owner_representative_org_owner_archived_idx")
+  @@index([organizationId, status, validTo], map: "owner_representative_org_status_valid_idx")
+  @@map("owner_representative")
+}
+
+model OwnerPayoutMethod {
+  id                String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId    String       @map("organization_id") @db.Uuid
+  ownerId           String       @map("owner_id") @db.Uuid
+  label             String
+  methodType        String       @map("method_type")
+  accountHolderName String       @map("account_holder_name")
+  currency          String       @db.Char(3)
+  countryCode       String       @map("country_code") @db.Char(2)
+  detailsEncrypted  String       @map("details_encrypted")
+  maskedAccount     String       @map("masked_account")
+  isDefault         Boolean      @default(false) @map("is_default")
+  status            String       @default("ACTIVE")
+  archivedAt        DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdBy         String?      @map("created_by") @db.Uuid
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  owner             Owner        @relation(fields: [ownerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  currencyRef       Currency     @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organizationId, ownerId, archivedAt], map: "owner_payout_method_org_owner_archived_idx")
+  @@index([organizationId, ownerId, isDefault], map: "owner_payout_method_org_owner_default_idx")
+  @@map("owner_payout_method")
 }
 
 model OwnerPortalAccess {
@@ -364,31 +421,31 @@ model OwnerPortalAccess {
 }
 
 model Property {
-  id                  String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId      String                @map("organization_id") @db.Uuid
+  id                  String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String                      @map("organization_id") @db.Uuid
   name                String
-  addressLine1        String                @map("address_line_1")
-  addressLine2        String?               @map("address_line_2")
+  addressLine1        String                      @map("address_line_1")
+  addressLine2        String?                     @map("address_line_2")
   city                String
   region              String?
-  countryCode         String                @default("MA") @map("country_code") @db.Char(2)
-  propertyType        String                @map("property_type")
+  countryCode         String                      @default("MA") @map("country_code") @db.Char(2)
+  propertyType        String                      @map("property_type")
   bedrooms            Int
   bathrooms           Int
-  livingSpaces        Int                   @default(1) @map("living_spaces")
-  hasPool             Boolean               @default(false) @map("has_pool")
-  hasGarden           Boolean               @default(false) @map("has_garden")
-  parkingSpaces       Int                   @default(0) @map("parking_spaces")
-  maxGuests           Int                   @map("max_guests")
-  timezone            String                @default("Africa/Casablanca")
+  livingSpaces        Int                         @default(1) @map("living_spaces")
+  hasPool             Boolean                     @default(false) @map("has_pool")
+  hasGarden           Boolean                     @default(false) @map("has_garden")
+  parkingSpaces       Int                         @default(0) @map("parking_spaces")
+  maxGuests           Int                         @map("max_guests")
+  timezone            String                      @default("Africa/Casablanca")
   amenities           Json
-  photoUrls           Json                  @map("photo_urls")
-  status              String                @default("DRAFT")
-  archivedAt          DateTime?             @map("archived_at") @db.Timestamptz(6)
-  createdBy           String?               @map("created_by") @db.Uuid
-  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  photoUrls           Json                        @map("photo_urls")
+  status              String                      @default("DRAFT")
+  archivedAt          DateTime?                   @map("archived_at") @db.Timestamptz(6)
+  createdBy           String?                     @map("created_by") @db.Uuid
+  createdAt           DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   propertyOwners      PropertyOwner[]
   Reservation         Reservation[]
   ReservationConflict ReservationConflict[]
@@ -397,11 +454,34 @@ model Property {
   configSnapshots     ReservationConfigSnapshot[]
   airbnbSettlements   AirbnbSettlement[]
   variances           Variance[]
+  onboardingProfile   PropertyOnboardingProfile?
 
   @@index([organizationId, city, name], map: "property_org_city_name_idx")
   @@index([organizationId, status], map: "property_org_status_idx")
   @@index([organizationId, archivedAt], map: "property_org_archived_idx")
   @@map("property")
+}
+
+model PropertyOnboardingProfile {
+  id                  String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String       @map("organization_id") @db.Uuid
+  propertyId          String       @unique(map: "property_onboarding_profile_property_unique") @map("property_id") @db.Uuid
+  headline            String?
+  description         String?
+  publicDirections    String?      @map("public_directions")
+  internalAccessNotes String?      @map("internal_access_notes")
+  houseRules          Json         @default("[]") @map("house_rules")
+  photoGallery        Json         @default("[]") @map("photo_gallery")
+  onboardingChecklist Json         @default("{}") @map("onboarding_checklist")
+  onboardingNotes     String?      @map("onboarding_notes")
+  createdBy           String?      @map("created_by") @db.Uuid
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property            Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organizationId, propertyId], map: "property_onboarding_profile_org_property_idx")
+  @@map("property_onboarding_profile")
 }
 
 model PropertyOwner {
@@ -426,31 +506,31 @@ model PropertyOwner {
 }
 
 model Reservation {
-  id                  String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId      String                @map("organization_id") @db.Uuid
-  propertyId          String                @map("property_id") @db.Uuid
+  id                  String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String                      @map("organization_id") @db.Uuid
+  propertyId          String                      @map("property_id") @db.Uuid
   reference           String
   source              String
-  externalId          String?               @map("external_id")
-  status              String                @default("CONFIRMED")
-  guestName           String                @map("guest_name")
-  guestEmail          String?               @map("guest_email")
-  checkIn             DateTime              @map("check_in") @db.Date
-  checkOut            DateTime              @map("check_out") @db.Date
+  externalId          String?                     @map("external_id")
+  status              String                      @default("CONFIRMED")
+  guestName           String                      @map("guest_name")
+  guestEmail          String?                     @map("guest_email")
+  checkIn             DateTime                    @map("check_in") @db.Date
+  checkOut            DateTime                    @map("check_out") @db.Date
   nights              Int
-  adultCount          Int                   @default(1) @map("adult_count")
-  childCount          Int                   @default(0) @map("child_count")
+  adultCount          Int                         @default(1) @map("adult_count")
+  childCount          Int                         @default(0) @map("child_count")
   notes               String?
-  idempotencyKey      String                @map("idempotency_key")
-  archivedAt          DateTime?             @map("archived_at") @db.Timestamptz(6)
-  createdBy           String?               @map("created_by") @db.Uuid
-  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  property            Property              @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  idempotencyKey      String                      @map("idempotency_key")
+  archivedAt          DateTime?                   @map("archived_at") @db.Timestamptz(6)
+  createdBy           String?                     @map("created_by") @db.Uuid
+  createdAt           DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property            Property                    @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   operationTasks      OperationTask[]
-  conflicts           ReservationConflict[] @relation("ReservationConflictReservation")
-  conflictingWith     ReservationConflict[] @relation("ReservationConflictOther")
+  conflicts           ReservationConflict[]       @relation("ReservationConflictReservation")
+  conflictingWith     ReservationConflict[]       @relation("ReservationConflictOther")
   commissionSnapshots CommissionSnapshot[]
   configSnapshots     ReservationConfigSnapshot[]
   airbnbSettlements   AirbnbSettlement[]
@@ -662,15 +742,16 @@ model ReferenceSequence {
 }
 
 model Currency {
-  code              String             @id @db.Char(3)
-  name              String
-  minorUnit         Int                @default(2) @map("minor_unit")
-  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  exchangeRatesFrom ExchangeRate[]     @relation("ExchangeRateFromCurrency")
-  exchangeRatesTo   ExchangeRate[]     @relation("ExchangeRateToCurrency")
-  postings          Posting[]
-  airbnbSettlements AirbnbSettlement[]
-  variances         Variance[]
+  code               String              @id @db.Char(3)
+  name               String
+  minorUnit          Int                 @default(2) @map("minor_unit")
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  exchangeRatesFrom  ExchangeRate[]      @relation("ExchangeRateFromCurrency")
+  exchangeRatesTo    ExchangeRate[]      @relation("ExchangeRateToCurrency")
+  postings           Posting[]
+  airbnbSettlements  AirbnbSettlement[]
+  variances          Variance[]
+  ownerPayoutMethods OwnerPayoutMethod[]
 
   @@map("currency")
 }
@@ -693,23 +774,23 @@ model ExchangeRate {
 }
 
 model ConfigRule {
-  id                  String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId      String               @map("organization_id") @db.Uuid
-  key                 String
-  scopeType           String               @map("scope_type")
-  scopeId             String?              @map("scope_id") @db.Uuid
-  value               Json
-  effectiveFrom       DateTime             @map("effective_from") @db.Timestamptz(6)
-  effectiveTo         DateTime?            @map("effective_to") @db.Timestamptz(6)
-  version             Int
-  lifecycle           String               @default("ACTIVE")
-  createdBy           String?              @map("created_by") @db.Uuid
-  reason              String
-  archivedAt          DateTime?            @map("archived_at") @db.Timestamptz(6)
-  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime             @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  commissionSnapshots CommissionSnapshot[]
+  id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId       String                      @map("organization_id") @db.Uuid
+  key                  String
+  scopeType            String                      @map("scope_type")
+  scopeId              String?                     @map("scope_id") @db.Uuid
+  value                Json
+  effectiveFrom        DateTime                    @map("effective_from") @db.Timestamptz(6)
+  effectiveTo          DateTime?                   @map("effective_to") @db.Timestamptz(6)
+  version              Int
+  lifecycle            String                      @default("ACTIVE")
+  createdBy            String?                     @map("created_by") @db.Uuid
+  reason               String
+  archivedAt           DateTime?                   @map("archived_at") @db.Timestamptz(6)
+  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization         Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  commissionSnapshots  CommissionSnapshot[]
   reservationSnapshots ReservationConfigSnapshot[]
 
   @@index([organizationId, key, scopeType, effectiveFrom], map: "config_rule_org_key_scope_effective_idx")

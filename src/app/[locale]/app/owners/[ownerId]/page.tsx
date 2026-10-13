@@ -88,6 +88,56 @@ export default async function OwnerDetailPage({
           </div>
         </dl>
       </section>
+
+      <section className="detail-panel">
+        <div className="subsection-block">
+          <p className="panel-label">{t("owners.representatives")}</p>
+          {owner.representatives.length > 0 ? (
+            <dl className="detail-grid" data-testid="owner-representatives">
+              {owner.representatives.map((representative) => (
+                <div key={representative.id} className="wide">
+                  <dt>
+                    {representative.displayName}
+                    {representative.relationship ? ` - ${representative.relationship}` : ""}
+                  </dt>
+                  <dd>
+                    {[representative.email, representative.phone, representative.status]
+                      .filter(Boolean)
+                      .join(" | ")}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="field-hint">{t("owners.noRepresentatives")}</p>
+          )}
+        </div>
+
+        <div className="subsection-block">
+          <p className="panel-label">{t("owners.payoutMethods")}</p>
+          {owner.payoutMethods.length > 0 ? (
+            <dl className="detail-grid" data-testid="owner-payout-methods">
+              {owner.payoutMethods.map((method) => (
+                <div key={method.id} className="wide">
+                  <dt>
+                    {method.label}
+                    {method.isDefault ? ` - ${t("owners.defaultPayout")}` : ""}
+                  </dt>
+                  <dd>
+                    {t("owners.maskedPayout", {
+                      method: method.methodType,
+                      account: method.maskedAccount,
+                      currency: method.currency
+                    })}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="field-hint">{t("owners.noPayoutMethods")}</p>
+          )}
+        </div>
+      </section>
     </AdminShell>
   );
 }

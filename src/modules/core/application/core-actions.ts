@@ -12,7 +12,11 @@ import {
   parseOwnerInput,
   parsePropertyInput
 } from "@/modules/core/application/core-service";
-import { normalizeAmenities, normalizePhotoUrls } from "@/modules/core/domain/owner-property";
+import {
+  normalizeAmenities,
+  normalizeHouseRules,
+  normalizePhotoUrls
+} from "@/modules/core/domain/owner-property";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -37,6 +41,48 @@ function stringValue(formData: FormData, key: string): string {
 
 function checkboxValue(formData: FormData, key: string): boolean {
   return formData.get(key) === "on";
+}
+
+function optionalOwnerRepresentatives(formData: FormData) {
+  const displayName = stringValue(formData, "representativeDisplayName").trim();
+
+  if (!displayName) {
+    return [];
+  }
+
+  return [
+    {
+      displayName,
+      email: formValue(formData, "representativeEmail"),
+      phone: formValue(formData, "representativePhone"),
+      preferredLocale: formValue(formData, "representativePreferredLocale") ?? "fr",
+      relationship: formValue(formData, "representativeRelationship"),
+      accessNotes: formValue(formData, "representativeAccessNotes"),
+      validFrom: formValue(formData, "representativeValidFrom"),
+      validTo: formValue(formData, "representativeValidTo")
+    }
+  ];
+}
+
+function optionalPayoutMethods(formData: FormData) {
+  const label = stringValue(formData, "payoutLabel").trim();
+  const detailsPlaintext = stringValue(formData, "payoutDetails").trim();
+
+  if (!label && !detailsPlaintext) {
+    return [];
+  }
+
+  return [
+    {
+      label,
+      methodType: formValue(formData, "payoutMethodType") ?? "BANK_TRANSFER",
+      accountHolderName: formValue(formData, "payoutAccountHolderName"),
+      currency: formValue(formData, "payoutCurrency") ?? "MAD",
+      countryCode: formValue(formData, "payoutCountryCode") ?? "MA",
+      detailsPlaintext,
+      isDefault: checkboxValue(formData, "payoutIsDefault")
+    }
+  ];
 }
 
 function flattenZodError(error: ZodError): CoreFormState {
@@ -78,7 +124,9 @@ export async function createOwnerAction(
     email: formValue(formData, "email"),
     phone: formValue(formData, "phone"),
     preferredLocale: formValue(formData, "preferredLocale"),
-    notes: formValue(formData, "notes")
+    notes: formValue(formData, "notes"),
+    representatives: optionalOwnerRepresentatives(formData),
+    payoutMethods: optionalPayoutMethods(formData)
   });
 
   if (!parsed.success) {
@@ -130,7 +178,15 @@ export async function createPropertyAction(
     timezone: formValue(formData, "timezone") ?? "Africa/Casablanca",
     amenities: normalizeAmenities(stringValue(formData, "amenities")),
     photoUrls: normalizePhotoUrls(stringValue(formData, "photoUrls")),
-    status: "DRAFT"
+    status: "DRAFT",
+    onboardingProfile: {
+      headline: formValue(formData, "headline"),
+      description: formValue(formData, "description"),
+      publicDirections: formValue(formData, "publicDirections"),
+      internalAccessNotes: formValue(formData, "internalAccessNotes"),
+      houseRules: normalizeHouseRules(stringValue(formData, "houseRules")),
+      onboardingNotes: formValue(formData, "onboardingNotes")
+    }
   });
 
   if (!parsed.success) {

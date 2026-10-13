@@ -9,6 +9,13 @@ import {
   IdentityAuthorizationError,
   authContextForAccount
 } from "@/modules/identity/application/identity-access";
+import type { CoreActorContext } from "@/modules/core/application/core-access";
+import {
+  createOwner,
+  createProperty,
+  getOwner,
+  getProperty
+} from "@/modules/core/application/core-service";
 import {
   assignRoleToAccount,
   createCustomRole,
@@ -541,6 +548,175 @@ describe("PostgreSQL baseline", () => {
     expect(ownerVisibleToOrgB).toBeNull();
     expect(propertyVisibleToOrgB).toBeNull();
     expect(linkVisibleWithoutTenant).toBeNull();
+  });
+
+  it("creates owner representatives, encrypted payout methods and property onboarding profiles", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS ORG Core A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS ORG Core B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const personId = randomUUID();
+    const ctx: CoreActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        personId,
+        permissions: new Set([
+          permissionKey("owner", "view"),
+          permissionKey("owner", "create"),
+          permissionKey("property", "view"),
+          permissionKey("property", "create")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const payoutDetails = "IBAN MA64011519000001205000534921 RIB 1234567890";
+
+    const owner = await createOwner(
+      ctx,
+      {
+        displayName: "Owner With Delegate",
+        legalName: "Owner With Delegate SARL",
+        email: `owner-delegate-${randomUUID()}@example.test`,
+        phone: "+212600000000",
+        preferredLocale: "en",
+        notes: "Owner with representative and encrypted payout method",
+        representatives: [
+          {
+            displayName: "Owner Delegate",
+            email: `delegate-${randomUUID()}@example.test`,
+            phone: "+212611111111",
+            preferredLocale: "fr",
+            relationship: "Family office",
+            accessNotes: "Can approve owner-facing operating questions",
+            validFrom: new Date("2026-01-01T00:00:00.000Z"),
+            validTo: new Date("2027-01-01T00:00:00.000Z")
+          }
+        ],
+        payoutMethods: [
+          {
+            label: "Main MAD bank",
+            methodType: "BANK_TRANSFER",
+            accountHolderName: "Owner With Delegate SARL",
+            currency: "MAD",
+            countryCode: "MA",
+            detailsPlaintext: payoutDetails,
+            isDefault: true
+          }
+        ]
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-owner-create",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const property = await createProperty(
+      ctx,
+      {
+        ownerId: owner.id,
+        name: "Villa ORG Profile",
+        addressLine1: "Route de Fes",
+        city: "Marrakech",
+        countryCode: "MA",
+        propertyType: "Villa",
+        bedrooms: 5,
+        bathrooms: 5,
+        livingSpaces: 2,
+        hasPool: true,
+        hasGarden: true,
+        parkingSpaces: 2,
+        maxGuests: 10,
+        timezone: "Africa/Casablanca",
+        amenities: ["pool", "garden", "fiber"],
+        photoUrls: ["https://assets.example.test/villa-org-profile.jpg"],
+        status: "DRAFT",
+        onboardingProfile: {
+          headline: "Calm family villa near the Palmeraie",
+          description: "Owner-approved onboarding description.",
+          publicDirections: "Meet the host at the main gate.",
+          internalAccessNotes: "Key safe behind the service entrance.",
+          houseRules: ["No parties", "Quiet after 22:00"],
+          onboardingNotes: "Wi-Fi and linen inventory still need final confirmation."
+        }
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-property-create",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const [ownerDetail, propertyDetail, stored, orgBRepresentative, orgBPayout, orgBProfile] =
+      await Promise.all([
+        getOwner(ctx, owner.id, { db: prisma as unknown as TenantTransactionRunner }),
+        getProperty(ctx, property.id, { db: prisma as unknown as TenantTransactionRunner }),
+        withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => ({
+          payout: await tx.ownerPayoutMethod.findFirstOrThrow({
+            where: { organizationId: orgA.id, ownerId: owner.id }
+          }),
+          auditRows: await tx.auditLog.findMany({
+            where: {
+              organizationId: orgA.id,
+              requestId: {
+                in: ["integration-org-owner-create", "integration-org-property-create"]
+              }
+            }
+          })
+        })),
+        withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, async (tx) =>
+          tx.ownerRepresentative.findFirst({ where: { ownerId: owner.id } })
+        ),
+        withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, async (tx) =>
+          tx.ownerPayoutMethod.findFirst({ where: { ownerId: owner.id } })
+        ),
+        withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, async (tx) =>
+          tx.propertyOnboardingProfile.findFirst({ where: { propertyId: property.id } })
+        )
+      ]);
+
+    expect(ownerDetail.representatives).toHaveLength(1);
+    expect(ownerDetail.representatives[0]).toMatchObject({
+      displayName: "Owner Delegate",
+      preferredLocale: "fr",
+      relationship: "Family office"
+    });
+    expect(ownerDetail.payoutMethods).toHaveLength(1);
+    expect(ownerDetail.payoutMethods[0]).toMatchObject({
+      label: "Main MAD bank",
+      maskedAccount: "**** 7890",
+      isDefault: true
+    });
+    expect(stored.payout.detailsEncrypted).not.toContain("1234567890");
+    expect(stored.payout.detailsEncrypted).not.toContain("IBAN");
+    expect(JSON.stringify(stored.auditRows)).not.toContain("1234567890");
+    expect(propertyDetail.onboardingProfile).toMatchObject({
+      headline: "Calm family villa near the Palmeraie",
+      houseRules: ["No parties", "Quiet after 22:00"],
+      photoGallery: [
+        {
+          url: "https://assets.example.test/villa-org-profile.jpg",
+          label: "Photo 1",
+          sortOrder: 1
+        }
+      ]
+    });
+    expect(orgBRepresentative).toBeNull();
+    expect(orgBPayout).toBeNull();
+    expect(orgBProfile).toBeNull();
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.ownerPayoutMethod.delete({
+          where: { id: stored.payout.id }
+        })
+      )
+    ).rejects.toThrow(/archived, not deleted|business rows/u);
   });
 
   it("enforces scoped RBAC, ABAC, simulator and field masking from PostgreSQL assignments", async () => {
