@@ -110,6 +110,48 @@ export default async function PropertyDetailPage({
           </div>
         </dl>
       </section>
+
+      <section className="detail-panel">
+        <p className="panel-label">{t("properties.onboardingProfile")}</p>
+        {property.onboardingProfile ? (
+          <dl className="detail-grid" data-testid="property-onboarding-profile">
+            <div>
+              <dt>{t("properties.form.headline")}</dt>
+              <dd>{property.onboardingProfile.headline ?? t("common.notProvided")}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.photoCount")}</dt>
+              <dd>{property.onboardingProfile.photoGallery.length}</dd>
+            </div>
+            <div className="wide">
+              <dt>{t("properties.form.description")}</dt>
+              <dd>{property.onboardingProfile.description ?? t("common.notProvided")}</dd>
+            </div>
+            <div className="wide">
+              <dt>{t("properties.form.publicDirections")}</dt>
+              <dd>{property.onboardingProfile.publicDirections ?? t("common.notProvided")}</dd>
+            </div>
+            <div className="wide">
+              <dt>{t("properties.form.internalAccessNotes")}</dt>
+              <dd>{property.onboardingProfile.internalAccessNotes ?? t("common.notProvided")}</dd>
+            </div>
+            <div className="wide">
+              <dt>{t("properties.form.houseRules")}</dt>
+              <dd>
+                {property.onboardingProfile.houseRules.length > 0
+                  ? property.onboardingProfile.houseRules.join(", ")
+                  : t("common.notProvided")}
+              </dd>
+            </div>
+            <div className="wide">
+              <dt>{t("properties.form.onboardingNotes")}</dt>
+              <dd>{property.onboardingProfile.onboardingNotes ?? t("common.notProvided")}</dd>
+            </div>
+          </dl>
+        ) : (
+          <p className="field-hint">{t("properties.noOnboardingProfile")}</p>
+        )}
+      </section>
     </AdminShell>
   );
 }

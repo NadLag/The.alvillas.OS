@@ -1,10 +1,46 @@
 import type { Prisma } from "@prisma/client";
-import type { OwnerInput, OwnerSummary, PropertyInput, PropertySummary } from "@/modules/core/domain/owner-property";
+import type {
+  OwnerInput,
+  OwnerPayoutMethodSummary,
+  OwnerRepresentativeSummary,
+  OwnerSummary,
+  PropertyInput,
+  PropertyOnboardingProfileSummary,
+  PropertySummary
+} from "@/modules/core/domain/owner-property";
+import { encryptSecret } from "@/platform/auth/secret-encryption";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
-type OwnerRow = Awaited<ReturnType<TenantTransaction["owner"]["create"]>>;
+const ownerInclude = {
+  _count: {
+    select: {
+      propertyOwners: {
+        where: {
+          archivedAt: null
+        }
+      }
+    }
+  },
+  representatives: {
+    where: {
+      archivedAt: null
+    },
+    orderBy: [{ status: "asc" }, { displayName: "asc" }]
+  },
+  payoutMethods: {
+    where: {
+      archivedAt: null
+    },
+    orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }]
+  }
+} satisfies Prisma.OwnerInclude;
+
+type OwnerWithDetails = Prisma.OwnerGetPayload<{
+  include: typeof ownerInclude;
+}>;
 type PropertyWithOwners = Prisma.PropertyGetPayload<{
   include: {
+    onboardingProfile: true;
     propertyOwners: {
       include: {
         owner: true;
@@ -13,7 +49,47 @@ type PropertyWithOwners = Prisma.PropertyGetPayload<{
   };
 }>;
 
-function ownerToSummary(owner: OwnerRow & { _count?: { propertyOwners: number } }): OwnerSummary {
+function maskedPayoutAccount(details: string): string {
+  const compact = details.replace(/[^a-z0-9]/giu, "");
+  const tail = compact.slice(-4).toUpperCase();
+
+  return tail ? `**** ${tail}` : "**** stored";
+}
+
+function representativeToSummary(
+  representative: OwnerWithDetails["representatives"][number]
+): OwnerRepresentativeSummary {
+  return {
+    id: representative.id,
+    displayName: representative.displayName,
+    email: representative.email,
+    phone: representative.phone,
+    preferredLocale: representative.preferredLocale as OwnerRepresentativeSummary["preferredLocale"],
+    relationship: representative.relationship,
+    accessNotes: representative.accessNotes,
+    validFrom: representative.validFrom,
+    validTo: representative.validTo,
+    status: representative.status as OwnerRepresentativeSummary["status"]
+  };
+}
+
+function payoutMethodToSummary(
+  method: OwnerWithDetails["payoutMethods"][number]
+): OwnerPayoutMethodSummary {
+  return {
+    id: method.id,
+    label: method.label,
+    methodType: method.methodType as OwnerPayoutMethodSummary["methodType"],
+    accountHolderName: method.accountHolderName,
+    currency: method.currency,
+    countryCode: method.countryCode,
+    maskedAccount: method.maskedAccount,
+    isDefault: method.isDefault,
+    status: method.status as OwnerPayoutMethodSummary["status"]
+  };
+}
+
+function ownerToSummary(owner: OwnerWithDetails): OwnerSummary {
   return {
     id: owner.id,
     displayName: owner.displayName,
@@ -23,7 +99,69 @@ function ownerToSummary(owner: OwnerRow & { _count?: { propertyOwners: number } 
     preferredLocale: owner.preferredLocale as OwnerSummary["preferredLocale"],
     notes: owner.notes,
     propertyCount: owner._count?.propertyOwners ?? 0,
+    representatives: owner.representatives.map(representativeToSummary),
+    payoutMethods: owner.payoutMethods.map(payoutMethodToSummary),
     createdAt: owner.createdAt
+  };
+}
+
+function onboardingChecklist(input: PropertyInput): Record<string, boolean | number | string> {
+  return {
+    ownerLinked: true,
+    capacityComplete: input.maxGuests > 0,
+    photos: input.photoUrls.length,
+    publicDirections: Boolean(input.onboardingProfile.publicDirections),
+    internalAccessNotes: Boolean(input.onboardingProfile.internalAccessNotes),
+    houseRules: input.onboardingProfile.houseRules.length
+  };
+}
+
+function onboardingProfileToSummary(
+  profile: PropertyWithOwners["onboardingProfile"]
+): PropertyOnboardingProfileSummary | null {
+  if (!profile) {
+    return null;
+  }
+
+  const houseRules = Array.isArray(profile.houseRules)
+    ? profile.houseRules.filter((item): item is string => typeof item === "string")
+    : [];
+  const photoGallery = Array.isArray(profile.photoGallery)
+    ? profile.photoGallery
+        .filter(
+          (item): item is { url: string; label?: string; sortOrder?: number } =>
+            typeof item === "object" &&
+            item !== null &&
+            "url" in item &&
+            typeof item.url === "string"
+        )
+        .map((item, index) => ({
+          url: item.url,
+          label: typeof item.label === "string" ? item.label : `Photo ${index + 1}`,
+          sortOrder: typeof item.sortOrder === "number" ? item.sortOrder : index + 1
+        }))
+    : [];
+  const onboardingChecklistValue =
+    profile.onboardingChecklist &&
+    typeof profile.onboardingChecklist === "object" &&
+    !Array.isArray(profile.onboardingChecklist)
+      ? Object.fromEntries(
+          Object.entries(profile.onboardingChecklist).filter(
+            (entry): entry is [string, boolean | number | string] =>
+              ["boolean", "number", "string"].includes(typeof entry[1])
+          )
+        )
+      : {};
+
+  return {
+    headline: profile.headline,
+    description: profile.description,
+    publicDirections: profile.publicDirections,
+    internalAccessNotes: profile.internalAccessNotes,
+    houseRules,
+    photoGallery,
+    onboardingChecklist: onboardingChecklistValue,
+    onboardingNotes: profile.onboardingNotes
   };
 }
 
@@ -46,6 +184,7 @@ function propertyToSummary(property: PropertyWithOwners): PropertySummary {
     photoUrls: Array.isArray(property.photoUrls)
       ? property.photoUrls.filter((item): item is string => typeof item === "string")
       : [],
+    onboardingProfile: onboardingProfileToSummary(property.onboardingProfile),
     owners: property.propertyOwners
       .filter((link) => !link.archivedAt)
       .map((link) => ({
@@ -74,8 +213,43 @@ export class CoreRepository {
         phone: input.phone,
         preferredLocale: input.preferredLocale,
         notes: input.notes,
-        createdBy: actorId
-      }
+        createdBy: actorId,
+        representatives:
+          input.representatives.length > 0
+            ? {
+                create: input.representatives.map((representative) => ({
+                  organizationId: this.organizationId,
+                  displayName: representative.displayName,
+                  email: representative.email,
+                  phone: representative.phone,
+                  preferredLocale: representative.preferredLocale,
+                  relationship: representative.relationship,
+                  accessNotes: representative.accessNotes,
+                  validFrom: representative.validFrom,
+                  validTo: representative.validTo,
+                  createdBy: actorId
+                }))
+              }
+            : undefined,
+        payoutMethods:
+          input.payoutMethods.length > 0
+            ? {
+                create: input.payoutMethods.map((method) => ({
+                  organizationId: this.organizationId,
+                  label: method.label,
+                  methodType: method.methodType,
+                  accountHolderName: method.accountHolderName,
+                  currency: method.currency,
+                  countryCode: method.countryCode,
+                  detailsEncrypted: encryptSecret(method.detailsPlaintext),
+                  maskedAccount: maskedPayoutAccount(method.detailsPlaintext),
+                  isDefault: method.isDefault,
+                  createdBy: actorId
+                }))
+              }
+            : undefined
+      },
+      include: ownerInclude
     });
 
     return ownerToSummary(owner);
@@ -89,17 +263,7 @@ export class CoreRepository {
       },
       orderBy: [{ displayName: "asc" }, { createdAt: "desc" }],
       take: 1000,
-      include: {
-        _count: {
-          select: {
-            propertyOwners: {
-              where: {
-                archivedAt: null
-              }
-            }
-          }
-        }
-      }
+      include: ownerInclude
     });
 
     return owners.map(ownerToSummary);
@@ -112,17 +276,7 @@ export class CoreRepository {
         organizationId: this.organizationId,
         archivedAt: null
       },
-      include: {
-        _count: {
-          select: {
-            propertyOwners: {
-              where: {
-                archivedAt: null
-              }
-            }
-          }
-        }
-      }
+      include: ownerInclude
     });
 
     return owner ? ownerToSummary(owner) : null;
@@ -159,9 +313,28 @@ export class CoreRepository {
             isPrimary: true,
             createdBy: actorId
           }
+        },
+        onboardingProfile: {
+          create: {
+            organizationId: this.organizationId,
+            headline: input.onboardingProfile.headline,
+            description: input.onboardingProfile.description,
+            publicDirections: input.onboardingProfile.publicDirections,
+            internalAccessNotes: input.onboardingProfile.internalAccessNotes,
+            houseRules: input.onboardingProfile.houseRules,
+            photoGallery: input.photoUrls.map((url, index) => ({
+              url,
+              label: `Photo ${index + 1}`,
+              sortOrder: index + 1
+            })),
+            onboardingChecklist: onboardingChecklist(input),
+            onboardingNotes: input.onboardingProfile.onboardingNotes,
+            createdBy: actorId
+          }
         }
       },
       include: {
+        onboardingProfile: true,
         propertyOwners: {
           include: {
             owner: true
@@ -182,6 +355,7 @@ export class CoreRepository {
       orderBy: [{ city: "asc" }, { name: "asc" }],
       take: 1000,
       include: {
+        onboardingProfile: true,
         propertyOwners: {
           where: {
             archivedAt: null
@@ -205,6 +379,7 @@ export class CoreRepository {
         archivedAt: null
       },
       include: {
+        onboardingProfile: true,
         propertyOwners: {
           where: {
             archivedAt: null

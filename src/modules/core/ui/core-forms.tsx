@@ -26,6 +26,22 @@ type OwnerLabels = FormLabels & {
   phone: string;
   preferredLocale: string;
   notes: string;
+  representativeSection: string;
+  representativeDisplayName: string;
+  representativeEmail: string;
+  representativePhone: string;
+  representativeRelationship: string;
+  representativeAccessNotes: string;
+  representativeValidFrom: string;
+  representativeValidTo: string;
+  payoutSection: string;
+  payoutLabel: string;
+  payoutMethodType: string;
+  payoutAccountHolderName: string;
+  payoutCurrency: string;
+  payoutCountryCode: string;
+  payoutDetails: string;
+  payoutIsDefault: string;
   saveOwner: string;
 };
 
@@ -49,6 +65,13 @@ type PropertyLabels = FormLabels & {
   hasGarden: string;
   amenities: string;
   photoUrls: string;
+  onboardingSection: string;
+  headline: string;
+  description: string;
+  publicDirections: string;
+  internalAccessNotes: string;
+  houseRules: string;
+  onboardingNotes: string;
   saveProperty: string;
 };
 
@@ -111,8 +134,24 @@ export function OwnerCreateForm({ locale, labels }: LocalizedFormProps<OwnerLabe
         email: z.string().trim().email(labels.validation).or(z.literal("")),
         legalName: z.string().optional(),
         notes: z.string().optional(),
+        payoutAccountHolderName: z.string().optional(),
+        payoutCountryCode: z.string().optional(),
+        payoutCurrency: z.string().optional(),
+        payoutDetails: z.string().optional(),
+        payoutIsDefault: z.boolean().optional(),
+        payoutLabel: z.string().optional(),
+        payoutMethodType: z.enum(["BANK_TRANSFER", "WISE", "CASH", "CHEQUE", "OTHER"]),
         phone: z.string().optional(),
         preferredLocale: z.enum(appLocales)
+          .or(z.literal("")),
+        representativeAccessNotes: z.string().optional(),
+        representativeDisplayName: z.string().optional(),
+        representativeEmail: z.string().trim().email(labels.validation).or(z.literal("")),
+        representativePhone: z.string().optional(),
+        representativePreferredLocale: z.enum(appLocales),
+        representativeRelationship: z.string().optional(),
+        representativeValidFrom: z.string().optional(),
+        representativeValidTo: z.string().optional()
       }),
     [labels.validation]
   );
@@ -122,8 +161,23 @@ export function OwnerCreateForm({ locale, labels }: LocalizedFormProps<OwnerLabe
       email: "",
       legalName: "",
       notes: "",
+      payoutAccountHolderName: "",
+      payoutCountryCode: "MA",
+      payoutCurrency: "MAD",
+      payoutDetails: "",
+      payoutIsDefault: true,
+      payoutLabel: "",
+      payoutMethodType: "BANK_TRANSFER",
       phone: "",
-      preferredLocale: "fr"
+      preferredLocale: "fr",
+      representativeAccessNotes: "",
+      representativeDisplayName: "",
+      representativeEmail: "",
+      representativePhone: "",
+      representativePreferredLocale: "fr",
+      representativeRelationship: "",
+      representativeValidFrom: "",
+      representativeValidTo: ""
     }
   });
   const [state, formAction, pending] = useActionState(
@@ -173,6 +227,96 @@ export function OwnerCreateForm({ locale, labels }: LocalizedFormProps<OwnerLabe
         <span>{labels.notes}</span>
         <textarea rows={4} {...form.register("notes")} />
       </label>
+      <div className="subsection-block">
+        <p className="panel-label">{labels.representativeSection}</p>
+        <label className="field">
+          <span>{labels.representativeDisplayName}</span>
+          <input data-testid="owner-representative-display-name" {...form.register("representativeDisplayName")} />
+        </label>
+        <div className="form-grid two">
+          <label className="field">
+            <span>{labels.representativeEmail}</span>
+            <input autoComplete="email" type="email" {...form.register("representativeEmail")} />
+          </label>
+          <label className="field">
+            <span>{labels.representativePhone}</span>
+            <input autoComplete="tel" {...form.register("representativePhone")} />
+          </label>
+        </div>
+        <div className="form-grid two">
+          <label className="field">
+            <span>{labels.representativeRelationship}</span>
+            <input {...form.register("representativeRelationship")} />
+          </label>
+          <label className="field">
+            <span>{labels.preferredLocale}</span>
+            <select {...form.register("representativePreferredLocale")}>
+              {appLocales.map((appLocale) => (
+                <option key={appLocale} value={appLocale}>
+                  {compactLocaleLabels[appLocale]}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="form-grid two">
+          <label className="field">
+            <span>{labels.representativeValidFrom}</span>
+            <input type="date" {...form.register("representativeValidFrom")} />
+          </label>
+          <label className="field">
+            <span>{labels.representativeValidTo}</span>
+            <input type="date" {...form.register("representativeValidTo")} />
+          </label>
+        </div>
+        <label className="field">
+          <span>{labels.representativeAccessNotes}</span>
+          <textarea rows={3} {...form.register("representativeAccessNotes")} />
+        </label>
+      </div>
+      <div className="subsection-block">
+        <p className="panel-label">{labels.payoutSection}</p>
+        <div className="form-grid two">
+          <label className="field">
+            <span>{labels.payoutLabel}</span>
+            <input data-testid="owner-payout-label" {...form.register("payoutLabel")} />
+          </label>
+          <label className="field">
+            <span>{labels.payoutMethodType}</span>
+            <select {...form.register("payoutMethodType")}>
+              {["BANK_TRANSFER", "WISE", "CASH", "CHEQUE", "OTHER"].map((method) => (
+                <option key={method} value={method}>
+                  {method}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <label className="field">
+          <span>{labels.payoutAccountHolderName}</span>
+          <input data-testid="owner-payout-account-holder" {...form.register("payoutAccountHolderName")} />
+        </label>
+        <div className="form-grid two">
+          <label className="field">
+            <span>{labels.payoutCurrency}</span>
+            <input maxLength={3} {...form.register("payoutCurrency")} />
+          </label>
+          <label className="field">
+            <span>{labels.payoutCountryCode}</span>
+            <input maxLength={2} {...form.register("payoutCountryCode")} />
+          </label>
+        </div>
+        <label className="field">
+          <span>{labels.payoutDetails}</span>
+          <textarea data-testid="owner-payout-details" rows={4} {...form.register("payoutDetails")} />
+        </label>
+        <div className="check-row">
+          <label>
+            <input type="checkbox" {...form.register("payoutIsDefault")} />
+            <span>{labels.payoutIsDefault}</span>
+          </label>
+        </div>
+      </div>
       {message ? (
         <p className="form-error" data-testid="owner-form-error" role="alert">
           {message}
@@ -200,15 +344,21 @@ export function PropertyCreateForm({
         bedrooms: z.coerce.number().min(0, labels.validation),
         city: z.string().trim().min(1, labels.validation),
         countryCode: z.string().trim().length(2, labels.validation),
+        description: z.string().optional(),
         hasGarden: z.boolean().optional(),
         hasPool: z.boolean().optional(),
+        headline: z.string().optional(),
+        houseRules: z.string().optional(),
+        internalAccessNotes: z.string().optional(),
         livingSpaces: z.coerce.number().min(0, labels.validation),
         maxGuests: z.coerce.number().min(1, labels.validation),
         name: z.string().trim().min(1, labels.validation),
+        onboardingNotes: z.string().optional(),
         ownerId: z.string().trim().min(1, labels.validation),
         parkingSpaces: z.coerce.number().min(0, labels.validation),
         photoUrls: z.string().optional(),
         propertyType: z.string().trim().min(1, labels.validation),
+        publicDirections: z.string().optional(),
         region: z.string().optional(),
         timezone: z.string().trim().min(1, labels.validation)
       }),
@@ -223,14 +373,20 @@ export function PropertyCreateForm({
       bedrooms: 0,
       city: "",
       countryCode: "MA",
+      description: "",
       hasGarden: false,
       hasPool: false,
+      headline: "",
+      houseRules: "",
+      internalAccessNotes: "",
       livingSpaces: 1,
       maxGuests: 1,
       name: "",
+      onboardingNotes: "",
       parkingSpaces: 0,
       photoUrls: "",
       propertyType: "",
+      publicDirections: "",
       region: "",
       timezone: "Africa/Casablanca"
     }
@@ -342,9 +498,36 @@ export function PropertyCreateForm({
       </label>
       <label className="field">
         <span>{labels.photoUrls}</span>
-        <textarea rows={3} {...form.register("photoUrls")} />
+        <textarea data-testid="property-photo-urls" rows={3} {...form.register("photoUrls")} />
         <ErrorText testId="property-photo-urls-error">{fieldError(state, "photoUrls")}</ErrorText>
       </label>
+      <div className="subsection-block">
+        <p className="panel-label">{labels.onboardingSection}</p>
+        <label className="field">
+          <span>{labels.headline}</span>
+          <input data-testid="property-headline" {...form.register("headline")} />
+        </label>
+        <label className="field">
+          <span>{labels.description}</span>
+          <textarea rows={4} {...form.register("description")} />
+        </label>
+        <label className="field">
+          <span>{labels.publicDirections}</span>
+          <textarea data-testid="property-public-directions" rows={3} {...form.register("publicDirections")} />
+        </label>
+        <label className="field">
+          <span>{labels.internalAccessNotes}</span>
+          <textarea data-testid="property-internal-access-notes" rows={3} {...form.register("internalAccessNotes")} />
+        </label>
+        <label className="field">
+          <span>{labels.houseRules}</span>
+          <textarea data-testid="property-house-rules" rows={3} {...form.register("houseRules")} />
+        </label>
+        <label className="field">
+          <span>{labels.onboardingNotes}</span>
+          <textarea data-testid="property-onboarding-notes" rows={3} {...form.register("onboardingNotes")} />
+        </label>
+      </div>
       {message ? (
         <p className="form-error" data-testid="property-form-error" role="alert">
           {message}

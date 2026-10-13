@@ -46,7 +46,9 @@ describe("core service authorization", () => {
         ctx,
         {
           displayName: "Denied Owner",
-          preferredLocale: "en"
+          preferredLocale: "en",
+          representatives: [],
+          payoutMethods: []
         },
         { db: deniedDb }
       )
