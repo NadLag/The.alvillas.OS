@@ -1,6 +1,7 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { EmptyState, OwnerShell, ShellHeader } from "@/design-system/shells";
 import { routing, type AppLocale } from "@/i18n/routing";
 import { defaultStatementPeriod } from "@/modules/owner-portal/domain/owner-statement";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
@@ -42,17 +43,17 @@ export default async function OwnerPortalPage({
   const periodQuery = `from=${period.from}&to=${period.to}`;
 
   return (
-    <section className="resource-page" data-testid="owner-portal-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("eyebrow")}</p>
-          <h1>{t("title")}</h1>
-          <p>{t("subtitle")}</p>
-        </div>
+    <OwnerShell className="resource-page" testId="owner-portal-page">
+      <ShellHeader
+        actions={
         <Link className="secondary-button" href={`/${appLocale}/app`}>
           {t("backToWorkspace")}
         </Link>
-      </header>
+        }
+        eyebrow={t("eyebrow")}
+        subtitle={t("subtitle")}
+        title={t("title")}
+      />
 
       <section className="workspace-main">
         <div className="section-heading">
@@ -62,9 +63,7 @@ export default async function OwnerPortalPage({
           </span>
         </div>
         {properties.length === 0 ? (
-          <p className="empty-state" data-testid="owner-properties-empty">
-            {t("empty")}
-          </p>
+          <EmptyState testId="owner-properties-empty" tone="motif">{t("empty")}</EmptyState>
         ) : (
           <div className="resource-list">
             {properties.map((property) => (
@@ -84,6 +83,6 @@ export default async function OwnerPortalPage({
           </div>
         )}
       </section>
-    </section>
+    </OwnerShell>
   );
 }

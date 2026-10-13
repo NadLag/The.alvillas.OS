@@ -1,9 +1,11 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AdminShell, EmptyState, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
 import { listOwners, listProperties } from "@/modules/core/application/core-service";
 import { PropertyCreateForm } from "@/modules/core/ui/core-forms";
+import { PropertyRegisterTable } from "@/modules/core/ui/core-tables";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -34,19 +36,27 @@ export default async function PropertiesPage({
     listOwners(ctx),
     listProperties(ctx)
   ]);
+  const dsnT = await getTranslations("DesignSystem");
+  const propertyRows = properties.map((property) => ({
+    id: property.id,
+    href: `/${appLocale}/app/properties/${property.id}`,
+    meta: t("properties.rowMeta", { city: property.city, type: property.propertyType }),
+    name: property.name,
+    status: t(`properties.status.${property.status}`)
+  }));
 
   return (
-    <section className="resource-page" data-testid="properties-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("properties.eyebrow")}</p>
-          <h1>{t("properties.title")}</h1>
-          <p>{t("properties.subtitle")}</p>
-        </div>
+    <AdminShell className="resource-page" testId="properties-page">
+      <ShellHeader
+        actions={
         <Link className="secondary-button" href={`/${appLocale}/app`}>
           {t("common.backToWorkspace")}
         </Link>
-      </header>
+        }
+        eyebrow={t("properties.eyebrow")}
+        subtitle={t("properties.subtitle")}
+        title={t("properties.title")}
+      />
 
       <div className="resource-layout">
         <section className="workspace-main">
@@ -55,27 +65,22 @@ export default async function PropertiesPage({
             <span data-testid="property-count">{t("properties.count", { count: properties.length })}</span>
           </div>
           {properties.length === 0 ? (
-            <p className="empty-state" data-testid="properties-empty">
-              {t("properties.empty")}
-            </p>
-          ) : (
-            <div className="resource-list">
-              {properties.map((property) => (
-                <Link
-                  className="resource-row"
-                  data-testid="property-row"
-                  href={`/${appLocale}/app/properties/${property.id}`}
-                  key={property.id}
-                >
-                  <span>
-                    <strong>{property.name}</strong>
-                    <small>{t("properties.rowMeta", { city: property.city, type: property.propertyType })}</small>
-                  </span>
-                  <span>{t(`properties.status.${property.status}`)}</span>
-                </Link>
-              ))}
-            </div>
-          )}
+            <EmptyState testId="properties-empty" tone="motif">{t("properties.empty")}</EmptyState>
+          ) : null}
+          <PropertyRegisterTable
+            labels={{
+              empty: dsnT("dataTable.empty"),
+              exportCsv: dsnT("dataTable.exportCsv"),
+              location: dsnT("dataTable.location"),
+              property: dsnT("dataTable.property"),
+              rows: dsnT("dataTable.rows"),
+              saveView: dsnT("dataTable.saveView"),
+              search: dsnT("dataTable.search"),
+              status: dsnT("dataTable.status"),
+              viewName: dsnT("dataTable.viewName")
+            }}
+            rows={propertyRows}
+          />
         </section>
 
         <aside className="workspace-side" aria-label={t("properties.createLabel")}>
@@ -114,6 +119,6 @@ export default async function PropertiesPage({
           />
         </aside>
       </div>
-    </section>
+    </AdminShell>
   );
 }

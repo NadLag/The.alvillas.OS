@@ -1,6 +1,7 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { EmptyState, ManagerShell, ShellHeader } from "@/design-system/shells";
 import { listAirbnbSettlementVariances } from "@/modules/finance/application/airbnb-settlement-service";
 import {
   listReservationsWithActiveRevenue,
@@ -76,17 +77,17 @@ export default async function ReservationsPage({
   }));
 
   return (
-    <section className="resource-page" data-testid="reservations-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("eyebrow")}</p>
-          <h1>{t("title")}</h1>
-          <p>{t("subtitle")}</p>
-        </div>
+    <ManagerShell className="resource-page" testId="reservations-page">
+      <ShellHeader
+        actions={
         <Link className="secondary-button" href={`/${appLocale}/app`}>
           {t("backToWorkspace")}
         </Link>
-      </header>
+        }
+        eyebrow={t("eyebrow")}
+        subtitle={t("subtitle")}
+        title={t("title")}
+      />
 
       <div className="resource-layout">
         <section className="workspace-main">
@@ -95,9 +96,7 @@ export default async function ReservationsPage({
             <span data-testid="reservation-count">{t("count", { count: reservations.length })}</span>
           </div>
           {reservations.length === 0 ? (
-            <p className="empty-state" data-testid="reservations-empty">
-              {t("empty")}
-            </p>
+            <EmptyState testId="reservations-empty" tone="motif">{t("empty")}</EmptyState>
           ) : (
             <div className="resource-list">
               {reservations.map((reservation) => (
@@ -221,6 +220,6 @@ export default async function ReservationsPage({
           />
         </aside>
       </div>
-    </section>
+    </ManagerShell>
   );
 }

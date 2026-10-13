@@ -1,6 +1,7 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
 import { listIdentityDashboard } from "@/modules/identity/application/identity-service";
 import { IdentityAdmin } from "@/modules/identity/ui/identity-admin";
@@ -37,17 +38,17 @@ export default async function IdentityPage({
   ]);
 
   return (
-    <section className="resource-page" data-testid="identity-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("eyebrow")}</p>
-          <h1>{t("title")}</h1>
-          <p>{t("subtitle")}</p>
-        </div>
+    <AdminShell className="resource-page" testId="identity-page">
+      <ShellHeader
+        actions={
         <Link className="secondary-button" href={`/${appLocale}/app`}>
           {t("backToWorkspace")}
         </Link>
-      </header>
+        }
+        eyebrow={t("eyebrow")}
+        subtitle={t("subtitle")}
+        title={t("title")}
+      />
       <SecurityPanel
         labels={{
           title: t("security.title"),
@@ -169,6 +170,6 @@ export default async function IdentityPage({
         }}
         locale={appLocale}
       />
-    </section>
+    </AdminShell>
   );
 }

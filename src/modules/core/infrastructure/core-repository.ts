@@ -88,7 +88,7 @@ export class CoreRepository {
         archivedAt: null
       },
       orderBy: [{ displayName: "asc" }, { createdAt: "desc" }],
-      take: 100,
+      take: 1000,
       include: {
         _count: {
           select: {
@@ -180,7 +180,7 @@ export class CoreRepository {
         archivedAt: null
       },
       orderBy: [{ city: "asc" }, { name: "asc" }],
-      take: 100,
+      take: 1000,
       include: {
         propertyOwners: {
           where: {

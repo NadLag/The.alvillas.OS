@@ -1,6 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useMemo } from "react";
+import { z } from "zod";
+import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import type { ReservationRevenueFormState } from "@/modules/finance/application/reservation-revenue-actions";
 import { recordReservationRevenueAction } from "@/modules/finance/application/reservation-revenue-actions";
 
@@ -70,6 +72,12 @@ function ErrorText({ children, testId }: { children: string | null; testId: stri
   );
 }
 
+function firstClientError(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "message" in error
+    ? String(error.message)
+    : null;
+}
+
 export function ReservationRevenueForm({
   locale,
   reservationId,
@@ -89,6 +97,22 @@ export function ReservationRevenueForm({
     recordReservationRevenueAction.bind(null, locale),
     initialReservationRevenueFormState
   );
+  const schema = useMemo(
+    () =>
+      z.object({
+        amount: z.string().trim().min(1, labels.validation),
+        currency: z.string().trim().length(3, labels.validation),
+        receivedAccountId: z.string().trim().min(1, labels.validation)
+      }),
+    [labels.validation]
+  );
+  const form = useZodForm(schema, {
+    defaultValues: {
+      amount: "",
+      currency: "MAD"
+    }
+  });
+  const validateSubmit = useServerActionValidation(form, formAction);
   const message = messageForState(state, labels);
   const hasAccounts = accounts.length > 0;
 
@@ -101,36 +125,46 @@ export function ReservationRevenueForm({
   }
 
   return (
-    <form className="reservation-revenue-form" action={formAction} data-testid="reservation-revenue-form">
+    <form
+      className="reservation-revenue-form"
+      action={formAction}
+      data-testid="reservation-revenue-form"
+      onSubmit={validateSubmit}
+    >
       <input name="reservationId" type="hidden" value={reservationId} />
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
       <label className="field">
         <span>{labels.amount}</span>
-        <input data-testid="reservation-revenue-amount" inputMode="decimal" name="amount" required />
-        <ErrorText testId="reservation-revenue-amount-error">{fieldError(state, "amount")}</ErrorText>
+        <input data-testid="reservation-revenue-amount" inputMode="decimal" required {...form.register("amount")} />
+        <ErrorText testId="reservation-revenue-amount-error">
+          {firstClientError(form.formState.errors.amount) ?? fieldError(state, "amount")}
+        </ErrorText>
       </label>
       <label className="field">
         <span>{labels.currency}</span>
-        <input data-testid="reservation-revenue-currency" maxLength={3} name="currency" required defaultValue="MAD" />
-        <ErrorText testId="reservation-revenue-currency-error">{fieldError(state, "currency")}</ErrorText>
+        <input data-testid="reservation-revenue-currency" maxLength={3} required {...form.register("currency")} />
+        <ErrorText testId="reservation-revenue-currency-error">
+          {firstClientError(form.formState.errors.currency) ?? fieldError(state, "currency")}
+        </ErrorText>
       </label>
       <label className="field">
         <span>{labels.account}</span>
         <select
           data-testid="reservation-revenue-account"
+          defaultValue={accounts[0]?.id ?? ""}
           disabled={!hasAccounts}
-          name="receivedAccountId"
           required
+          {...form.register("receivedAccountId")}
         >
           {accounts.map((account) => (
-            <option key={account.id} value={account.id}>
+            <option key={account.id} label={account.name} value={account.id}>
               {account.name}
             </option>
           ))}
         </select>
         {!hasAccounts ? <p className="field-hint">{labels.noAccounts}</p> : null}
         <ErrorText testId="reservation-revenue-account-error">
-          {fieldError(state, "receivedAccountId")}
+          {firstClientError(form.formState.errors.receivedAccountId) ?? fieldError(state, "receivedAccountId")}
         </ErrorText>
       </label>
       {message ? (

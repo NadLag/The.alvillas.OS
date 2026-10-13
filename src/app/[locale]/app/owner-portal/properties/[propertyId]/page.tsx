@@ -1,6 +1,7 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { EmptyState, OwnerShell, ShellHeader } from "@/design-system/shells";
 import { formatCurrency, formatDate } from "@/i18n/format";
 import { LocaleSwitch } from "@/i18n/locale-switch";
 import { routing, type AppLocale } from "@/i18n/routing";
@@ -87,19 +88,10 @@ export default async function OwnerStatementPage({
   ) as Array<[OwnerStatementBucket, (typeof statement.bucketTotals)[OwnerStatementBucket]]>;
 
   return (
-    <section className="resource-page" data-testid="owner-statement-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("statementEyebrow")}</p>
-          <h1>{statement.propertyName}</h1>
-          <p>
-            {t("statementPeriod", {
-              from: formatDate(appLocale, statement.periodStart),
-              to: formatDate(appLocale, periodEndInclusive)
-            })}
-          </p>
-        </div>
-        <div className="app-actions">
+    <OwnerShell className="resource-page" testId="owner-statement-page">
+      <ShellHeader
+        actions={
+          <>
           <Link className="secondary-button" href={`/${appLocale}/app/owner-portal`}>
             {t("backToProperties")}
           </Link>
@@ -109,8 +101,15 @@ export default async function OwnerStatementPage({
             label={t("language")}
             path={`/app/owner-portal/properties/${propertyId}?from=${period.from}&to=${period.to}`}
           />
-        </div>
-      </header>
+          </>
+        }
+        eyebrow={t("statementEyebrow")}
+        subtitle={t("statementPeriod", {
+          from: formatDate(appLocale, statement.periodStart),
+          to: formatDate(appLocale, periodEndInclusive)
+        })}
+        title={statement.propertyName}
+      />
 
       <section className="statement-summary" aria-label={t("balanceSummary")}>
         <div>
@@ -158,9 +157,7 @@ export default async function OwnerStatementPage({
             <span>{t("lineCount", { count: statement.lines.length })}</span>
           </div>
           {statement.lines.length === 0 ? (
-            <p className="empty-state" data-testid="owner-statement-empty">
-              {t("emptyStatement")}
-            </p>
+            <EmptyState testId="owner-statement-empty" tone="motif">{t("emptyStatement")}</EmptyState>
           ) : (
             <div className="statement-table" role="table" aria-label={t("statementLines")}>
               <div role="row" className="statement-table-head">
@@ -222,6 +219,6 @@ export default async function OwnerStatementPage({
           </div>
         </aside>
       </div>
-    </section>
+    </OwnerShell>
   );
 }

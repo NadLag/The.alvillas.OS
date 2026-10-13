@@ -1,6 +1,7 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { EmptyState, FieldShell, ShellHeader } from "@/design-system/shells";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import { listAssignedFieldTasks } from "@/modules/reservations/application/reservation-service";
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
@@ -32,22 +33,20 @@ export default async function FieldTasksPage({
   const [t, tasks] = await Promise.all([getTranslations("Field"), listAssignedFieldTasks(ctx)]);
 
   return (
-    <section className="field-page" data-testid="field-page">
-      <header className="field-header">
-        <div>
-          <p className="eyebrow">{t("eyebrow")}</p>
-          <h1>{t("title")}</h1>
-          <p>{t("subtitle")}</p>
-        </div>
+    <FieldShell className="field-page" testId="field-page">
+      <ShellHeader
+        actions={
         <Link className="secondary-button" href={`/${appLocale}/app`}>
           {t("backToWorkspace")}
         </Link>
-      </header>
+        }
+        eyebrow={t("eyebrow")}
+        subtitle={t("subtitle")}
+        title={t("title")}
+      />
 
       {tasks.length === 0 ? (
-        <p className="empty-state" data-testid="field-tasks-empty">
-          {t("empty")}
-        </p>
+        <EmptyState testId="field-tasks-empty" tone="motif">{t("empty")}</EmptyState>
       ) : (
         <div className="field-task-list">
           {tasks.map((task) => (
@@ -71,6 +70,6 @@ export default async function FieldTasksPage({
           ))}
         </div>
       )}
-    </section>
+    </FieldShell>
   );
 }

@@ -1,6 +1,7 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AdminShell, EmptyState, ShellHeader } from "@/design-system/shells";
 import { auditActorContextFromSession } from "@/modules/audit/application/audit-access";
 import {
   AuditAuthorizationError,
@@ -92,18 +93,18 @@ export default async function AuditPage({
   } catch (error) {
     if (error instanceof AuditAuthorizationError) {
       return (
-        <section className="resource-page" data-testid="audit-denied">
-          <header className="resource-header">
-            <div>
-              <p className="eyebrow">{t("eyebrow")}</p>
-              <h1>{t("denied.title")}</h1>
-              <p>{t("denied.subtitle")}</p>
-            </div>
+        <AdminShell className="resource-page" testId="audit-denied">
+          <ShellHeader
+            actions={
             <Link className="secondary-button" href={`/${appLocale}/app`}>
               {t("backToWorkspace")}
             </Link>
-          </header>
-        </section>
+            }
+            eyebrow={t("eyebrow")}
+            subtitle={t("denied.subtitle")}
+            title={t("denied.title")}
+          />
+        </AdminShell>
       );
     }
 
@@ -111,22 +112,22 @@ export default async function AuditPage({
   }
 
   return (
-    <section className="resource-page" data-testid="audit-page">
-      <header className="resource-header">
-        <div>
-          <p className="eyebrow">{t("eyebrow")}</p>
-          <h1>{t("title")}</h1>
-          <p>{t("subtitle")}</p>
-        </div>
-        <div className="audit-header-actions">
+    <AdminShell className="resource-page" testId="audit-page">
+      <ShellHeader
+        actions={
+          <>
           <a className="secondary-button" data-testid="audit-export-link" href={exportHref(filterInput)}>
             {t("export")}
           </a>
           <Link className="secondary-button" href={`/${appLocale}/app`}>
             {t("backToWorkspace")}
           </Link>
-        </div>
-      </header>
+          </>
+        }
+        eyebrow={t("eyebrow")}
+        subtitle={t("subtitle")}
+        title={t("title")}
+      />
 
       <form action={`/${appLocale}/app/audit`} className="audit-filter-form" method="get">
         <label className="field">
@@ -179,9 +180,7 @@ export default async function AuditPage({
           </span>
         </div>
         {history.rows.length === 0 ? (
-          <p className="empty-state" data-testid="audit-empty">
-            {t("empty")}
-          </p>
+          <EmptyState testId="audit-empty" tone="motif">{t("empty")}</EmptyState>
         ) : (
           <div className="audit-table" data-testid="audit-table">
             <div className="audit-table-head" role="row">
@@ -238,6 +237,6 @@ export default async function AuditPage({
           </div>
         )}
       </section>
-    </section>
+    </AdminShell>
   );
 }

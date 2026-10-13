@@ -158,13 +158,13 @@ export class ReservationRepository {
         organizationId: this.organizationId,
         archivedAt: null
       },
-      orderBy: [{ city: "asc" }, { name: "asc" }],
+      orderBy: [{ createdAt: "desc" }, { city: "asc" }, { name: "asc" }],
       select: {
         id: true,
         name: true,
         city: true
       },
-      take: 200
+      take: 1000
     });
   }
 

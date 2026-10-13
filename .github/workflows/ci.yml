@@ -38,6 +38,7 @@ jobs:
       - run: npm run typecheck
       - run: npm run check:i18n
       - run: npm run check:rtl-css
+      - run: npm run check:design-system
       - run: npm run check:boundaries
       - run: npm run check:organization-id
       - name: Prepare schema drift database

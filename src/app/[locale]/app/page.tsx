@@ -2,6 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "../../../../auth";
+import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { LocaleSwitch } from "@/i18n/locale-switch";
 import { routing, safeLocale } from "@/i18n/routing";
 import {
@@ -30,16 +31,16 @@ export default async function AppPage({
     redirect(`/${appLocale}/login`);
   }
 
-  const t = await getTranslations("AppShell");
+  const [t, dsnT] = await Promise.all([
+    getTranslations("AppShell"),
+    getTranslations("DesignSystem")
+  ]);
 
   return (
-    <section className="app-shell" data-testid="app-shell">
-      <header className="app-header">
-        <div>
-          <p className="eyebrow">{t("eyebrow")}</p>
-          <h1>{t("title")}</h1>
-        </div>
-        <nav className="app-actions" aria-label={t("actions")}>
+    <AdminShell className="app-shell" testId="app-shell">
+      <ShellHeader
+        actions={
+          <nav className="app-actions" aria-label={t("actions")}>
           <Link className="secondary-button" href={`/${appLocale}/app/owners`}>
             {t("owners")}
           </Link>
@@ -64,6 +65,9 @@ export default async function AppPage({
           <Link className="secondary-button" href={`/${appLocale}/app/owner-portal`}>
             {t("ownerPortal")}
           </Link>
+          <Link className="secondary-button" href={`/${appLocale}/app/design-system`}>
+            {dsnT("nav")}
+          </Link>
           <LocaleSwitch compact currentLocale={appLocale} label={t("language")} path="/app" />
           <form action={logoutAction.bind(null, appLocale)}>
             <button className="secondary-button" data-testid="logout-button" type="submit">
@@ -71,7 +75,10 @@ export default async function AppPage({
             </button>
           </form>
         </nav>
-      </header>
+        }
+        eyebrow={t("eyebrow")}
+        title={t("title")}
+      />
       <div className="workspace-grid">
         <section className="workspace-main">
           <p className="panel-label">{t("todayLabel")}</p>
@@ -112,6 +119,6 @@ export default async function AppPage({
           </dl>
         </aside>
       </div>
-    </section>
+    </AdminShell>
   );
 }
