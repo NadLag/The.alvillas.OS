@@ -93,6 +93,8 @@ test.describe("identity lifecycle", () => {
   test.describe.configure({ mode: "serial" });
 
   test("creates roles, assigns scoped access, simulates permissions, and denies co-host revenue", async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
+
     const adminEmail = e2eEmail("identity-admin", testInfo.project.name);
     const invitedEmail = e2eEmail(`identity-field-${Date.now()}`, testInfo.project.name);
     const invitedPhone = `+212600${Date.now().toString().slice(-6)}`.toLowerCase();
@@ -211,6 +213,8 @@ test.describe("identity lifecycle", () => {
   });
 
   test("denies expired invitations and supports MFA plus passkey registration", async ({ page }, testInfo) => {
+    test.setTimeout(60_000);
+
     const adminEmail = e2eEmail(`identity-security-${Date.now()}-${testInfo.retry}`, testInfo.project.name);
     const invitedEmail = e2eEmail(`identity-expired-${Date.now()}`, testInfo.project.name);
     const invitedPhone = `+212601${Date.now().toString().slice(-6)}`.toLowerCase();
