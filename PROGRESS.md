@@ -83,8 +83,8 @@ F-CFG-07 | DONE | Finance config consumers accepted for approval thresholds, exp
 F-CFG-08 | DONE | Feature-flag config accepted: feature_flag.* resolves through org fallback and property overrides and drives app-shell owner portal visibility. Evidence: PR #22 merge 8603cbf; CI 38443831593/38444678237 green; npm run verify; npm run test:integration; staging dpl_FTJV6JKyMrdEF7Dg3HZ3iyhVzcDY verifier passed org fallback plus property override.
 F-ORG-01 | TODO |
 F-ORG-02 | TODO |
-F-ORG-03 | IN-PROGRESS | Authenticated owner create/list/detail slice with scoped service/repository, validation, audit event and EN/FR UI added on `f-org-03-04-owners-properties`; representatives and encrypted payout details still pending.
-F-ORG-04 | IN-PROGRESS | Authenticated property create/list/detail slice with owner link, capacity, amenities, photos-as-URLs, timezone, scoped service/repository, validation, audit event and EN/FR UI added; richer photo storage/onboarding profile still pending.
+F-ORG-03 | DONE | Owner contacts/language/representatives/encrypted payout shipped in PR #24; CI run 38477123370 green, merged 66a1c23. Local: npm run verify, npm run test:integration, core Playwright chromium+field-mobile. Staging dpl_2DEkcEsBdCpfb6iknbALAvky7CmG verified auth owners route, masked payout/encrypted at rest, tenant isolation via non-bypass app role, audit/no plaintext, immutable payout/audit.
+F-ORG-04 | DONE | Property profile/photos/capacity/timezone/onboarding profile shipped in PR #24; CI run 38477123370 green, merged 66a1c23. Local: npm run verify, npm run test:integration, core Playwright chromium+field-mobile. Staging dpl_2DEkcEsBdCpfb6iknbALAvky7CmG verified authenticated property create/detail, photo gallery, house rules, onboarding notes, tenant isolation, audit and immutable history.
 F-ORG-05 | TODO |
 F-ORG-06 | TODO |
 F-ORG-07 | TODO |
