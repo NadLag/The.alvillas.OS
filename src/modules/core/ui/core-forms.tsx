@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { appLocales, compactLocaleLabels } from "@/i18n/routing";
 import type { CoreFormState } from "@/modules/core/application/core-actions";
 import {
   createOwnerAction,
@@ -126,9 +127,11 @@ export function OwnerCreateForm({ locale, labels }: LocalizedFormProps<OwnerLabe
       <label className="field">
         <span>{labels.preferredLocale}</span>
         <select data-testid="owner-preferred-locale" name="preferredLocale" defaultValue="fr">
-          <option value="fr">FR</option>
-          <option value="en">EN</option>
-          <option value="ar">AR</option>
+          {appLocales.map((appLocale) => (
+            <option key={appLocale} value={appLocale}>
+              {compactLocaleLabels[appLocale]}
+            </option>
+          ))}
         </select>
       </label>
       <label className="field">

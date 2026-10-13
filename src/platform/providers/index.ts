@@ -1,5 +1,14 @@
+import type { AppLocale } from "@/i18n/routing";
+
 export interface EmailProvider {
-  send(input: { to: string; subject: string; html: string; text?: string }): Promise<{ id: string }>;
+  send(input: {
+    to: string;
+    subject: string;
+    html: string;
+    text?: string;
+    locale: AppLocale;
+    template: string;
+  }): Promise<{ id: string }>;
 }
 
 export interface SignatureProvider {
@@ -23,7 +32,7 @@ export interface NotificationChannel {
 }
 
 export interface PdfRenderer {
-  render(input: { template: string; data: Record<string, unknown>; locale: string }): Promise<Uint8Array>;
+  render(input: { template: string; data: Record<string, unknown>; locale: AppLocale }): Promise<Uint8Array>;
 }
 
 export interface RateLimiter {

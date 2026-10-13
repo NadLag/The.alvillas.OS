@@ -152,12 +152,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         typeof token.authSessionId === "string" &&
         typeof token.sessionVersion === "number"
       ) {
-        token.sessionRevoked = !(await validateAuthSession({
+        const validation = await validateAuthSession({
           organizationId: token.organizationId,
           userAccountId: token.userId,
           sessionId: token.authSessionId,
           sessionVersion: token.sessionVersion
-        }));
+        });
+
+        token.sessionRevoked = !validation.valid;
+
+        if (validation.valid && validation.preferredLocale) {
+          token.preferredLocale = validation.preferredLocale;
+        }
       }
 
       return token;

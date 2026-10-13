@@ -4,9 +4,12 @@ import { AuthError } from "next-auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { signIn, signOut } from "../../../../auth";
-import { routing, type AppLocale } from "@/i18n/routing";
+import { auth, signIn, signOut } from "../../../../auth";
+import { appLocales, safeLocale } from "@/i18n/routing";
+import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
+import { updateOwnPreferredLocale } from "@/modules/identity/application/identity-service";
 import { ensureDeviceId } from "@/platform/auth/device";
+import { preferredLocaleForLogin } from "@/platform/auth/identity-auth";
 import { consumeLoginRateLimit, loginRateLimitIp } from "@/platform/auth/login-rate-limit";
 
 export type LoginFormState = {
@@ -37,9 +40,9 @@ const loginSchema = z
     }
   });
 
-function safeLocale(locale: string): AppLocale {
-  return routing.locales.includes(locale as AppLocale) ? (locale as AppLocale) : routing.defaultLocale;
-}
+const preferredLocaleSchema = z.object({
+  preferredLocale: z.enum(appLocales)
+});
 
 function authErrorCode(error: AuthError): string | undefined {
   const cause = error.cause as { err?: { code?: string } } | undefined;
@@ -112,11 +115,42 @@ export async function loginAction(
     throw error;
   }
 
-  redirect(`/${appLocale}/app`);
+  redirect(
+    `/${await preferredLocaleForLogin({
+      email: parsed.data.email,
+      phone: parsed.data.phone
+    }, appLocale)}/app`
+  );
 }
 
 export async function logoutAction(locale: string): Promise<void> {
   const appLocale = safeLocale(locale);
 
   await signOut({ redirectTo: `/${appLocale}/login` });
+}
+
+export async function updatePreferredLocaleAction(locale: string, formData: FormData): Promise<void> {
+  const appLocale = safeLocale(locale);
+  const parsed = preferredLocaleSchema.safeParse({
+    preferredLocale: formData.get("preferredLocale")
+  });
+
+  if (!parsed.success) {
+    redirect(`/${appLocale}/app`);
+  }
+
+  const session = await auth();
+  const ctx = await identityActorContextFromSession(session);
+
+  if (!ctx) {
+    redirect(`/${appLocale}/login`);
+  }
+
+  const requestHeaders = await headers();
+  await updateOwnPreferredLocale(ctx, parsed.data.preferredLocale, {
+    ipAddress: loginRateLimitIp(requestHeaders),
+    requestId: requestHeaders.get("x-request-id") ?? undefined
+  });
+
+  redirect(`/${parsed.data.preferredLocale}/app`);
 }

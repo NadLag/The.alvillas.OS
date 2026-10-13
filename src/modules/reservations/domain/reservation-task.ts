@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { localizedTextSchema, localizedText } from "@/i18n/content";
+import { safeLocale } from "@/i18n/routing";
 
 const requiredText = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) =>
@@ -41,21 +43,13 @@ export const taskDueAnchorSchema = z.enum(["CHECK_IN", "CHECK_OUT"]);
 
 export const taskChecklistTemplateSchema = z.object({
   key: z.string().trim().min(1).max(80).regex(/^[a-z0-9_.-]+$/u),
-  label: z.object({
-    en: requiredText(120),
-    fr: requiredText(120),
-    ar: optionalText(120)
-  })
+  label: localizedTextSchema
 });
 
 export const reservationTaskTemplateSchema = z.object({
   key: z.string().trim().min(1).max(80).regex(/^[a-z0-9_.-]+$/u),
   type: taskTypeSchema,
-  title: z.object({
-    en: requiredText(120),
-    fr: requiredText(120),
-    ar: optionalText(120)
-  }),
+  title: localizedTextSchema,
   due: taskDueAnchorSchema,
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
   checklist: z.array(taskChecklistTemplateSchema).max(24).default([])
@@ -162,14 +156,14 @@ export function localizedTaskTitle(
   title: Record<string, string>,
   locale: string
 ): string {
-  return title[locale] ?? title.en ?? Object.values(title)[0] ?? "";
+  return localizedText(title, safeLocale(locale));
 }
 
 export function localizedChecklistLabel(
   label: Record<string, string>,
   locale: string
 ): string {
-  return label[locale] ?? label.en ?? Object.values(label)[0] ?? "";
+  return localizedText(label, safeLocale(locale));
 }
 
 export const completeTaskInputSchema = z.object({

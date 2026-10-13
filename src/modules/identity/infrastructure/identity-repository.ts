@@ -634,6 +634,49 @@ export class IdentityRepository {
     });
   }
 
+  async updatePersonPreferredLocale(
+    personId: string,
+    preferredLocale: string
+  ): Promise<{ id: string; before: string; after: string }> {
+    const person = await this.tx.person.findFirst({
+      where: {
+        id: personId,
+        organizationId: this.organizationId
+      },
+      select: {
+        id: true,
+        preferredLocale: true
+      }
+    });
+
+    if (!person) {
+      throw new Error("Person was not found");
+    }
+
+    if (person.preferredLocale === preferredLocale) {
+      return {
+        id: person.id,
+        before: person.preferredLocale,
+        after: person.preferredLocale
+      };
+    }
+
+    const updated = await this.tx.person.update({
+      where: { id: person.id },
+      data: { preferredLocale },
+      select: {
+        id: true,
+        preferredLocale: true
+      }
+    });
+
+    return {
+      id: updated.id,
+      before: person.preferredLocale,
+      after: updated.preferredLocale
+    };
+  }
+
   createInvitation(input: {
     personId: string;
     roleId: string;

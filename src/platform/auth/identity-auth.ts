@@ -6,6 +6,7 @@ import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { decryptSecret } from "@/platform/auth/secret-encryption";
 import { verifyPassword } from "@/platform/auth/password";
 import { verifyTotpCode } from "@/platform/auth/totp";
+import { safeLocale, type AppLocale } from "@/i18n/routing";
 
 export type AuthorizedIdentityUser = {
   id: string;
@@ -13,9 +14,14 @@ export type AuthorizedIdentityUser = {
   email: string;
   name: string;
   organizationId: string;
-  preferredLocale: string;
+  preferredLocale: AppLocale;
   sessionId: string;
   sessionVersion: number;
+};
+
+export type AuthSessionValidation = {
+  valid: boolean;
+  preferredLocale?: AppLocale;
 };
 
 type AuthAccount = Awaited<ReturnType<typeof findAccountByEmail>>;
@@ -236,10 +242,23 @@ function authorizedUser(account: NonNullable<AuthAccount>, sessionId: string): A
     email: account.email ?? "",
     name: account.person.displayName,
     organizationId: account.organizationId,
-    preferredLocale: account.person.preferredLocale,
+    preferredLocale: safeLocale(account.person.preferredLocale),
     sessionId,
     sessionVersion: account.sessionVersion
   };
+}
+
+export async function preferredLocaleForLogin(input: {
+  email?: string;
+  phone?: string;
+}, fallback?: AppLocale): Promise<AppLocale> {
+  const account = input.email
+    ? await findAccountByEmail(input.email.trim().toLowerCase())
+    : input.phone
+      ? await findAccountByPhone(input.phone.trim().toLowerCase())
+      : null;
+
+  return safeLocale(account?.person.preferredLocale ?? fallback);
 }
 
 export async function authenticatePassword(input: {
@@ -302,7 +321,7 @@ export async function validateAuthSession(input: {
   userAccountId: string;
   sessionId: string;
   sessionVersion: number;
-}): Promise<boolean> {
+}): Promise<AuthSessionValidation> {
   return withTenant(prisma as unknown as TenantTransactionRunner, input.organizationId, async (tx) => {
     const account = await tx.userAccount.findFirst({
       where: {
@@ -311,12 +330,17 @@ export async function validateAuthSession(input: {
         status: "ACTIVE"
       },
       select: {
-        sessionVersion: true
+        sessionVersion: true,
+        person: {
+          select: {
+            preferredLocale: true
+          }
+        }
       }
     });
 
     if (!account || account.sessionVersion !== input.sessionVersion) {
-      return false;
+      return { valid: false };
     }
 
     const updated = await tx.authSession.updateMany({
@@ -333,10 +357,12 @@ export async function validateAuthSession(input: {
       }
     });
 
-    return updated.count === 1;
+    return updated.count === 1
+      ? { valid: true, preferredLocale: safeLocale(account.person.preferredLocale) }
+      : { valid: false };
   }).catch((error: unknown) => {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
-      return false;
+      return { valid: false };
     }
 
     throw error;

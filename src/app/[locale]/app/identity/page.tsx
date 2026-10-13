@@ -6,6 +6,7 @@ import { listIdentityDashboard } from "@/modules/identity/application/identity-s
 import { IdentityAdmin } from "@/modules/identity/ui/identity-admin";
 import { SecurityPanel } from "@/modules/identity/ui/security-panel";
 import { auth } from "@/platform/auth/session";
+import { formatDateTime } from "@/i18n/format";
 import { routing, type AppLocale } from "@/i18n/routing";
 
 export const dynamic = "force-dynamic";
@@ -65,7 +66,10 @@ export default async function IdentityPage({
       <IdentityAdmin
         accounts={dashboard.accounts}
         assignments={dashboard.assignments}
-        invitations={dashboard.invitations}
+        invitations={dashboard.invitations.map((invitation) => ({
+          ...invitation,
+          expiresAtLabel: formatDateTime(appLocale, invitation.expiresAt)
+        }))}
         permissions={dashboard.permissions}
         roles={dashboard.roles}
         simulations={dashboard.simulations}

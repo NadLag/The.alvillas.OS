@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
+import { formatDate } from "@/i18n/format";
+import { safeLocale, type AppLocale } from "@/i18n/routing";
 import {
   assignRoleAction,
   createCustomRoleAction,
@@ -23,7 +25,7 @@ import type {
 type IdentityAdminProps = {
   locale: string;
   accounts: IdentityAccountSummary[];
-  invitations: InvitationSummary[];
+  invitations: Array<InvitationSummary & { expiresAtLabel: string }>;
   roles: RoleCatalogSummary[];
   permissions: PermissionCatalogSummary[];
   assignments: RoleAssignmentSummary[];
@@ -479,9 +481,11 @@ function RoleAssignmentForm({
 
 function RoleAssignmentList({
   assignments,
+  locale,
   labels
 }: {
   assignments: RoleAssignmentSummary[];
+  locale: AppLocale;
   labels: IdentityAdminProps["labels"];
 }) {
   return (
@@ -505,7 +509,7 @@ function RoleAssignmentList({
           </span>
           <span>
             <small>{labels.validTo}</small>
-            <strong>{assignment.validTo?.toLocaleDateString() ?? "-"}</strong>
+            <strong>{assignment.validTo ? formatDate(locale, assignment.validTo) : "-"}</strong>
           </span>
         </article>
       ))}
@@ -547,6 +551,7 @@ export function IdentityAdmin({
   const [busyAccount, setBusyAccount] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const message = stateMessage(state, labels);
+  const appLocale = safeLocale(locale);
 
   return (
     <div className="identity-layout">
@@ -731,7 +736,7 @@ export function IdentityAdmin({
         <RoleAssignmentForm accounts={accounts} labels={labels} locale={locale} roles={roles} />
         <div className="subsection-block">
           <p className="panel-label">{labels.activeAssignments}</p>
-          <RoleAssignmentList assignments={assignments} labels={labels} />
+          <RoleAssignmentList assignments={assignments} labels={labels} locale={appLocale} />
         </div>
       </section>
 
@@ -794,7 +799,7 @@ export function IdentityAdmin({
                 </span>
                 <span>
                   <small>{labels.expires}</small>
-                  <strong>{invitation.expiresAt.toLocaleString()}</strong>
+                  <strong>{invitation.expiresAtLabel}</strong>
                 </span>
               </article>
             ))}
