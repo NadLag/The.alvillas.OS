@@ -13,6 +13,7 @@ model Organization {
   baseCurrency         String                       @default("MAD") @map("base_currency") @db.Char(3)
   createdAt            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  profile              OrganizationProfile?
   configRules          ConfigRule[]
   reservationSnapshots ReservationConfigSnapshot[]
   outboxEvents         OutboxEvent[]
@@ -52,6 +53,30 @@ model Organization {
   variances            Variance[]
 
   @@map("organization")
+}
+
+model OrganizationProfile {
+  organizationId       String       @id @map("organization_id") @db.Uuid
+  legalName            String?      @map("legal_name")
+  brandName            String       @map("brand_name")
+  logoUrl              String?      @map("logo_url")
+  primaryColor         String       @default("#0B6B5F") @map("primary_color")
+  accentColor          String       @default("#9F3F1B") @map("accent_color")
+  websiteUrl           String?      @map("website_url")
+  supportEmail         String?      @map("support_email")
+  supportPhone         String?      @map("support_phone")
+  defaultLocale        String       @default("fr") @map("default_locale") @db.Char(2)
+  timezone             String       @default("Africa/Casablanca")
+  countryCode          String       @default("MA") @map("country_code") @db.Char(2)
+  fiscalYearStartMonth Int          @default(1) @map("fiscal_year_start_month")
+  settings             Json         @default("{}")
+  createdBy            String?      @map("created_by") @db.Uuid
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([countryCode, defaultLocale], map: "organization_profile_country_locale_idx")
+  @@map("organization_profile")
 }
 
 model Person {

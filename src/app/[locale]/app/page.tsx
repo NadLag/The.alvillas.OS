@@ -47,6 +47,9 @@ export default async function AppPage({
       <ShellHeader
         actions={
           <nav className="app-actions" aria-label={t("actions")}>
+          <Link className="secondary-button" href={`/${appLocale}/app/organization`}>
+            {t("organization")}
+          </Link>
           <Link className="secondary-button" href={`/${appLocale}/app/owners`}>
             {t("owners")}
           </Link>
