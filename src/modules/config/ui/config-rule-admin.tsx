@@ -204,6 +204,8 @@ export function ConfigRuleAdmin({
     createConfigRuleAction.bind(null, locale),
     initialState
   );
+  const defaultKey = model.catalogKeys[0] ?? "finance.commission";
+  const [selectedKey, setSelectedKey] = useState(defaultKey);
   const [scopeType, setScopeType] = useState("organization");
   const schema = useMemo(
     () =>
@@ -217,13 +219,14 @@ export function ConfigRuleAdmin({
   );
   const form = useZodForm(schema, {
     defaultValues: {
-      key: model.catalogKeys[0] ?? "finance.commission",
+      key: defaultKey,
       valueJson: "",
       effectiveFrom: localDateTime(),
       reason: ""
     }
   });
   const validateSubmit = useServerActionValidation(form, formAction);
+  const keyField = form.register("key");
   const message = messageForState(state, labels);
   const hasProperties = model.properties.length > 0;
 
@@ -241,7 +244,16 @@ export function ConfigRuleAdmin({
         >
           <label className="field">
             <span>{labels.key}</span>
-            <select data-testid="config-rule-key" required {...form.register("key")}>
+            <select
+              data-testid="config-rule-key"
+              required
+              {...keyField}
+              value={selectedKey}
+              onChange={(event) => {
+                setSelectedKey(event.target.value);
+                void keyField.onChange(event);
+              }}
+            >
               {model.catalogKeys.map((key) => (
                 <option key={key} value={key}>
                   {key}

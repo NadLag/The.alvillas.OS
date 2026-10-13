@@ -41,8 +41,14 @@ import {
   ConfigAuthorizationError,
   ConfigValidationError,
   createConfigRuleVersion,
+  getConfigAdminModel,
   retireConfigRuleVersion
 } from "@/modules/config/application/config-service";
+import {
+  FinanceConfigAuthorizationError,
+  evaluateExpensePolicy,
+  planOwnerPayout
+} from "@/modules/finance/application/finance-config-service";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationNotFoundError,
@@ -58,6 +64,7 @@ import { authorize, permissionKey, type AuthContext, type DataClass } from "@/pl
 import { present, maskedValue, type FieldPolicy, type PresentationContext } from "@/platform/authz/present";
 import { coHostSpecScenarios, simulateAccess } from "@/platform/authz/simulator";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { resolveFeatureFlag } from "@/platform/config/feature-flags";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
 let prisma: PrismaClient;
@@ -1711,6 +1718,396 @@ describe("PostgreSQL baseline", () => {
     expect(afterRetire?.id).toBe(orgRuleV2.id);
     expect(orgBRule).toBeNull();
     expect(orgBSnapshot).toBeNull();
+  });
+
+  it("applies finance and feature-flag configuration through real consumers", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS CFG Consumers A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS CFG Consumers B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const personId = randomUUID();
+    const fixture = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const person = await tx.person.create({
+          data: {
+            id: personId,
+            organizationId: orgA.id,
+            displayName: "CFG Consumer Admin",
+            email: `cfg-consumer-admin-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const account = await tx.userAccount.create({
+          data: {
+            id: actorId,
+            organizationId: orgA.id,
+            personId: person.id,
+            email: `cfg-consumer-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
+        const owner = await tx.owner.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "CFG Consumer Owner",
+            email: `cfg-consumer-owner-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const property = await tx.property.create({
+          data: {
+            organizationId: orgA.id,
+            name: "Villa CFG Consumers",
+            addressLine1: "Route de Fes",
+            city: "Marrakech",
+            countryCode: "MA",
+            propertyType: "Villa",
+            bedrooms: 4,
+            bathrooms: 4,
+            livingSpaces: 2,
+            maxGuests: 8,
+            timezone: "Africa/Casablanca",
+            amenities: ["pool"],
+            photoUrls: [],
+            propertyOwners: {
+              create: {
+                organizationId: orgA.id,
+                ownerId: owner.id,
+                shareBps: 10000,
+                isPrimary: true,
+                createdBy: actorId
+              }
+            },
+            createdBy: actorId
+          }
+        });
+
+        return { account, owner, property };
+      }
+    );
+    const configCtx: ConfigActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      personId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        personId,
+        permissions: new Set([
+          permissionKey("config_rule", "view"),
+          permissionKey("config_rule", "create"),
+          permissionKey("config_rule", "configure")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const financeCtx = {
+      organizationId: orgA.id,
+      actorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        personId,
+        permissions: new Set([permissionKey("financial_transaction", "view")]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const asOf = new Date("2026-03-15T00:00:00.000Z");
+    const expenseRule = await createConfigRuleVersion(
+      configCtx,
+      {
+        key: "finance.expense_allocation",
+        scopeType: "property",
+        scopeId: fixture.property.id,
+        lifecycle: "ACTIVE",
+        valueJson: JSON.stringify({
+          default_treatment: "ALVILLAS_PAID",
+          categories: {
+            maintenance: {
+              treatment: "SHARED",
+              owner_share_bps: 3000,
+              alvillas_share_bps: 7000,
+              approval_rule_key: "maintenance-high"
+            }
+          }
+        }),
+        effectiveFrom: new Date("2026-02-01T00:00:00.000Z"),
+        reason: "CFG consumer expense allocation"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-consumer-expense-v1",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const expenseRuleV2 = await createConfigRuleVersion(
+      configCtx,
+      {
+        key: "finance.expense_allocation",
+        scopeType: "property",
+        scopeId: fixture.property.id,
+        lifecycle: "ACTIVE",
+        valueJson: JSON.stringify({
+          default_treatment: "ALVILLAS_PAID",
+          categories: {
+            maintenance: {
+              treatment: "SHARED",
+              owner_share_bps: 4000,
+              alvillas_share_bps: 6000,
+              approval_rule_key: "maintenance-high"
+            }
+          }
+        }),
+        effectiveFrom: new Date("2026-04-01T00:00:00.000Z"),
+        reason: "CFG consumer expense allocation v2"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-consumer-expense-v2",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await createConfigRuleVersion(
+      configCtx,
+      {
+        key: "finance.approval_thresholds",
+        scopeType: "property",
+        scopeId: fixture.property.id,
+        lifecycle: "ACTIVE",
+        valueJson: JSON.stringify({
+          thresholds: [
+            {
+              key: "maintenance-high",
+              category: "maintenance",
+              amount: "1000.00",
+              currency: "MAD",
+              emergency_bypass_owner: true,
+              requires_approval_from: ["manager_owner"]
+            }
+          ]
+        }),
+        effectiveFrom: new Date("2026-02-01T00:00:00.000Z"),
+        reason: "CFG consumer approval thresholds"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-consumer-approval",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await createConfigRuleVersion(
+      configCtx,
+      {
+        key: "finance.payout_schedule",
+        scopeType: "property",
+        scopeId: fixture.property.id,
+        lifecycle: "ACTIVE",
+        valueJson: JSON.stringify({
+          cadence: "AFTER_CHECKOUT",
+          hold_days: 3,
+          holdback_amount: "100.00",
+          holdback_currency: "MAD",
+          holdback_bps: 1000
+        }),
+        effectiveFrom: new Date("2026-02-01T00:00:00.000Z"),
+        reason: "CFG consumer payout schedule"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-consumer-payout",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const orgFlag = await createConfigRuleVersion(
+      configCtx,
+      {
+        key: "feature_flag",
+        customFeatureFlagKey: "owner_portal",
+        scopeType: "organization",
+        lifecycle: "ACTIVE",
+        valueJson: JSON.stringify({ enabled: false, variant: "dark" }),
+        effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+        reason: "CFG consumer owner portal dark"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-consumer-flag-org",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const propertyFlag = await createConfigRuleVersion(
+      configCtx,
+      {
+        key: "feature_flag",
+        customFeatureFlagKey: "owner_portal",
+        scopeType: "property",
+        scopeId: fixture.property.id,
+        lifecycle: "ACTIVE",
+        valueJson: JSON.stringify({ enabled: true, variant: "pilot", payload: { surface: "owner" } }),
+        effectiveFrom: new Date("2026-02-01T00:00:00.000Z"),
+        reason: "CFG consumer owner portal pilot"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-consumer-flag-property",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    const expenseDecision = await evaluateExpensePolicy(
+      financeCtx,
+      {
+        propertyId: fixture.property.id,
+        ownerId: fixture.owner.id,
+        category: "maintenance",
+        amount: "1500.00",
+        currency: "MAD",
+        emergency: true,
+        asOf
+      },
+      { db: prisma as unknown as TenantTransactionRunner }
+    );
+    const payoutPlan = await planOwnerPayout(
+      financeCtx,
+      {
+        propertyId: fixture.property.id,
+        ownerId: fixture.owner.id,
+        availableBalance: "10000.00",
+        currency: "MAD",
+        checkoutDate: new Date("2028-04-14T00:00:00.000Z"),
+        triggeredAt: new Date("2028-04-15T00:00:00.000Z"),
+        asOf
+      },
+      { db: prisma as unknown as TenantTransactionRunner }
+    );
+    const disabledFlag = await resolveFeatureFlag(
+      {
+        organizationId: orgA.id,
+        key: "owner_portal",
+        propertyId: fixture.property.id,
+        asOf: new Date("2026-01-15T00:00:00.000Z"),
+        defaultEnabled: false
+      },
+      { db: prisma as unknown as TenantTransactionRunner }
+    );
+    const enabledFlag = await resolveFeatureFlag(
+      {
+        organizationId: orgA.id,
+        key: "owner_portal",
+        propertyId: fixture.property.id,
+        asOf,
+        defaultEnabled: false
+      },
+      { db: prisma as unknown as TenantTransactionRunner }
+    );
+    const orgBFlag = await resolveFeatureFlag(
+      {
+        organizationId: orgB.id,
+        key: "owner_portal",
+        propertyId: fixture.property.id,
+        asOf,
+        defaultEnabled: false
+      },
+      { db: prisma as unknown as TenantTransactionRunner }
+    );
+
+    expect(expenseDecision.allocationRule.configRuleId).toBe(expenseRule.id);
+    expect(expenseDecision.allocation.ownerAmount.toJSON().amount).toBe("450.00");
+    expect(expenseDecision.allocation.alvillasAmount.toJSON().amount).toBe("1050.00");
+    expect(expenseDecision.approval).toMatchObject({
+      matchedThresholdKey: "maintenance-high",
+      requiredSteps: ["manager"],
+      postHocOwnerNotificationRequired: true
+    });
+    expect(payoutPlan.payoutRule.key).toBe("finance.payout_schedule");
+    expect(payoutPlan.payout.eligibleOn.toISOString()).toBe("2028-04-17T00:00:00.000Z");
+    expect(payoutPlan.payout.holdbackAmount.toJSON().amount).toBe("1100.00");
+    expect(payoutPlan.payout.payableAmount.toJSON().amount).toBe("8900.00");
+    expect(disabledFlag.configRuleId).toBe(orgFlag.id);
+    expect(disabledFlag.enabled).toBe(false);
+    expect(enabledFlag.configRuleId).toBe(propertyFlag.id);
+    expect(enabledFlag.enabled).toBe(true);
+    expect(enabledFlag.variant).toBe("pilot");
+    expect(orgBFlag.configRuleId).toBeNull();
+    expect(orgBFlag.enabled).toBe(false);
+
+    await expect(
+      evaluateExpensePolicy(
+        {
+          ...financeCtx,
+          authContext: {
+            ...financeCtx.authContext,
+            permissions: new Set([])
+          }
+        },
+        {
+          propertyId: fixture.property.id,
+          category: "maintenance",
+          amount: "1500.00",
+          currency: "MAD",
+          asOf
+        },
+        { db: prisma as unknown as TenantTransactionRunner }
+      )
+    ).rejects.toBeInstanceOf(FinanceConfigAuthorizationError);
+
+    const model = await getConfigAdminModel(configCtx, {}, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const expenseV2History = model.rules.find((rule) => rule.id === expenseRuleV2.id);
+    expect(expenseV2History?.changedPaths).toContain("categories");
+
+    const auditRows = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        tx.auditLog.findMany({
+          where: {
+            organizationId: orgA.id,
+            action: "config_rule.version.created",
+            requestId: {
+              in: [
+                "integration-cfg-consumer-expense-v1",
+                "integration-cfg-consumer-expense-v2",
+                "integration-cfg-consumer-approval",
+                "integration-cfg-consumer-payout",
+                "integration-cfg-consumer-flag-org",
+                "integration-cfg-consumer-flag-property"
+              ]
+            }
+          }
+        })
+    );
+    const orgBRule = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.configRule.findFirst({ where: { id: expenseRule.id } })
+    );
+
+    expect(auditRows).toHaveLength(6);
+    expect(orgBRule).toBeNull();
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.configRule.update({
+          where: { id: expenseRule.id },
+          data: { reason: "CFG consumer forbidden mutation" }
+        })
+      )
+    ).rejects.toThrow(/append-only|permission denied/u);
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.configRule.delete({
+          where: { id: expenseRule.id }
+        })
+      )
+    ).rejects.toThrow(/append-only|permission denied/u);
   });
 
   it("derives owner portal statements from PostgreSQL ledger postings and owner scopes", async () => {
