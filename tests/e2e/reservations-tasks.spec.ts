@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { e2eEmail, ensureE2EAdmin } from "./support/auth";
 import { ensureReservationRevenuePostingSetup } from "./support/reservation-revenue";
+import { formatCurrencyAmount } from "@/i18n/format";
 
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
@@ -245,7 +246,9 @@ test.describe("manual reservation to operations tasks journey", () => {
     await expect(variance).toHaveAttribute("data-expected", "5200.00");
     await expect(variance).toHaveAttribute("data-actual", "5150.00");
     await expect(variance).toHaveAttribute("data-variance", "50.00");
-    await expect(variance.getByTestId("airbnb-settlement-variance-amount")).toContainText("50.00 MAD");
+    await expect(variance.getByTestId("airbnb-settlement-variance-amount")).toHaveText(
+      formatCurrencyAmount("en", "50.00", "MAD")
+    );
     await expect(variance).toContainText("Bank fee");
     await expect(variance).toContainText("Review payout");
   });

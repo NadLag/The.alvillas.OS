@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import { formatDate, formatDateTime } from "@/i18n/format";
+import { formatDate } from "@/i18n/format";
 import { safeLocale, type AppLocale } from "@/i18n/routing";
 import {
   assignRoleAction,
@@ -25,7 +25,7 @@ import type {
 type IdentityAdminProps = {
   locale: string;
   accounts: IdentityAccountSummary[];
-  invitations: InvitationSummary[];
+  invitations: Array<InvitationSummary & { expiresAtLabel: string }>;
   roles: RoleCatalogSummary[];
   permissions: PermissionCatalogSummary[];
   assignments: RoleAssignmentSummary[];
@@ -799,7 +799,7 @@ export function IdentityAdmin({
                 </span>
                 <span>
                   <small>{labels.expires}</small>
-                  <strong>{formatDateTime(appLocale, invitation.expiresAt)}</strong>
+                  <strong>{invitation.expiresAtLabel}</strong>
                 </span>
               </article>
             ))}

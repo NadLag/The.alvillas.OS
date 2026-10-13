@@ -1,7 +1,7 @@
 "use server";
 
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/types";
-import { revalidatePath } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ZodError } from "zod";
@@ -148,6 +148,7 @@ export async function createCustomRoleAction(
   try {
     await createCustomRole(ctx, parsed.data, await requestMeta());
     revalidatePath(`/${appLocale}/app/identity`);
+    refresh();
 
     return { status: "success", messageKey: "roleCreated" };
   } catch (error) {
@@ -183,6 +184,7 @@ export async function updateCustomRoleAction(
   try {
     await updateCustomRole(ctx, parsed.data, await requestMeta());
     revalidatePath(`/${appLocale}/app/identity`);
+    refresh();
 
     return { status: "success", messageKey: "roleUpdated" };
   } catch (error) {
@@ -222,6 +224,7 @@ export async function assignRoleAction(
   try {
     await assignRoleToAccount(ctx, parsed.data, await requestMeta());
     revalidatePath(`/${appLocale}/app/identity`);
+    refresh();
 
     return { status: "success", messageKey: "assignmentCreated" };
   } catch (error) {
@@ -309,6 +312,7 @@ export async function suspendAccountAction(
 
   await suspendAccount(ctx, userAccountId, await requestMeta());
   revalidatePath(`/${appLocale}/app/identity`);
+  refresh();
 }
 
 export async function reactivateAccountAction(
@@ -324,6 +328,7 @@ export async function reactivateAccountAction(
 
   await reactivateAccount(ctx, userAccountId, await requestMeta());
   revalidatePath(`/${appLocale}/app/identity`);
+  refresh();
 }
 
 export async function issueRecoveryCodeAction(
@@ -386,6 +391,7 @@ export async function revokeSessionAction(locale: string, sessionId: string): Pr
 
   await revokeSession(ctx, sessionId, await requestMeta());
   revalidatePath(`/${appLocale}/app/identity`);
+  refresh();
 }
 
 export async function startTotpEnrollmentAction(): Promise<IdentityFormState> {
