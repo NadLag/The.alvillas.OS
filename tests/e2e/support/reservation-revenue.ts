@@ -11,6 +11,7 @@ export async function ensureReservationRevenuePostingSetup(input: {
   ownerEmail: string;
   propertyName: string;
   password: string;
+  commissionRateBps?: number | null;
 }): Promise<{
   ownerEmail: string;
   propertyId: string;
@@ -20,6 +21,7 @@ export async function ensureReservationRevenuePostingSetup(input: {
   const passwordHash = await hashPassword(input.password);
   const ownerEmail = input.ownerEmail.trim().toLowerCase();
   const bankName = `S6 revenue bank ${randomUUID().slice(0, 8)}`;
+  const commissionRateBps = input.commissionRateBps === undefined ? 2000 : input.commissionRateBps;
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -109,23 +111,25 @@ export async function ensureReservationRevenuePostingSetup(input: {
           normalSide: "DEBIT"
         }
       });
-      await tx.configRule.create({
-        data: {
-          organizationId: bootstrapOrganizationId,
-          key: "finance.commission",
-          scopeType: "property",
-          scopeId: property.id,
-          value: {
-            rate_bps: 2000,
-            basis: "GROSS_ACCOMMODATION",
-            accrual_event: "ON_RECEIPT"
-          },
-          effectiveFrom: new Date("2000-01-01T00:00:00.000Z"),
-          version: 1,
-          createdBy: userAccount.id,
-          reason: "S6 E2E commission rule"
-        }
-      });
+      if (commissionRateBps !== null) {
+        await tx.configRule.create({
+          data: {
+            organizationId: bootstrapOrganizationId,
+            key: "finance.commission",
+            scopeType: "property",
+            scopeId: property.id,
+            value: {
+              rate_bps: commissionRateBps,
+              basis: "GROSS_ACCOMMODATION",
+              accrual_event: "ON_RECEIPT"
+            },
+            effectiveFrom: new Date("2000-01-01T00:00:00.000Z"),
+            version: 1,
+            createdBy: userAccount.id,
+            reason: "S6 E2E commission rule"
+          }
+        });
+      }
 
       return {
         ownerEmail,

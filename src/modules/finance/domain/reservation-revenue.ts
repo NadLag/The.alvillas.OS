@@ -1,35 +1,22 @@
 import Decimal from "decimal.js";
 import { z } from "zod";
+import {
+  commissionAccrualEventSchema,
+  commissionBasisSchema,
+  commissionConfigKey,
+  commissionRuleValueSchema,
+  type CommissionRuleValue
+} from "@/platform/config/rule-registry";
 import type { LedgerSide } from "@/platform/ledger/ledger";
 import { assertBalancedPostings } from "@/platform/ledger/ledger";
 import { Money } from "@/platform/money/money";
 
-export const commissionConfigKey = "finance.commission";
-
-export const commissionBasisSchema = z.enum([
-  "GROSS_ACCOMMODATION",
-  "NET_OF_OTA_FEES",
-  "TOTAL_INCLUDING_SERVICES",
-  "CUSTOM_FORMULA"
-]);
-
-export const commissionAccrualEventSchema = z.enum([
-  "ON_CONFIRMATION",
-  "ON_CHECKIN",
-  "ON_CHECKOUT",
-  "ON_RECEIPT"
-]);
-
-export const commissionRuleValueSchema = z
-  .object({
-    rate_bps: z.number().int().min(0).max(10000),
-    basis: commissionBasisSchema,
-    accrual_event: commissionAccrualEventSchema,
-    expense_treatments: z.unknown().optional(),
-    approval_thresholds: z.unknown().optional(),
-    payout_rule: z.unknown().optional()
-  })
-  .passthrough();
+export {
+  commissionAccrualEventSchema,
+  commissionBasisSchema,
+  commissionConfigKey,
+  commissionRuleValueSchema
+};
 
 const positiveMoneyAmountSchema = z
   .string()
@@ -53,7 +40,7 @@ export const reverseReservationRevenueInputSchema = z.object({
   idempotencyKey: z.string().uuid()
 });
 
-export type CommissionRuleValue = z.infer<typeof commissionRuleValueSchema>;
+export type { CommissionRuleValue };
 export type RecordReservationRevenueInput = z.infer<typeof recordReservationRevenueInputSchema>;
 export type ReverseReservationRevenueInput = z.infer<typeof reverseReservationRevenueInputSchema>;
 

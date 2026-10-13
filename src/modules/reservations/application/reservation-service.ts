@@ -171,10 +171,7 @@ export async function createManualReservation(
       };
     }
 
-    const [property, taskConfig] = await Promise.all([
-      repository.findProperty(input.propertyId),
-      repository.resolveTaskConfig()
-    ]);
+    const property = await repository.findProperty(input.propertyId);
 
     if (!property) {
       throw new ReservationNotFoundError("Property does not exist in this tenant");
@@ -195,12 +192,24 @@ export async function createManualReservation(
       throw new ReservationAuthorizationError();
     }
 
+    const reference = await nextReferenceNumber(tx, ctx.organizationId, "RES", 4);
+    const reservation = await repository.createReservation(input, reference, ctx.actorId);
+    const taskConfig = await repository.resolveTaskConfig({
+      propertyId: reservation.propertyId,
+      asOf: reservation.createdAt
+    });
+
     if (!taskConfig) {
       throw new ReservationConfigError();
     }
 
-    const reference = await nextReferenceNumber(tx, ctx.organizationId, "RES", 4);
-    const reservation = await repository.createReservation(input, reference, ctx.actorId);
+    await repository.snapshotTaskConfigRule({
+      reservationId: reservation.id,
+      propertyId: reservation.propertyId,
+      rule: taskConfig.rule,
+      resolvedAt: reservation.createdAt,
+      createdBy: ctx.actorId
+    });
     await auditReservationCreate(tx, ctx, meta, reservation);
 
     const overlaps = await repository.listOverlaps(input, reservation.id);
@@ -226,7 +235,7 @@ export async function createManualReservation(
     }
 
     const tasks: OperationTaskSummary[] = [];
-    for (const template of taskConfig.tasks) {
+    for (const template of taskConfig.config.tasks) {
       const result = await repository.ensureTask(reservation, template, {
         userAccountId: ctx.actorId,
         personId: ctx.personId

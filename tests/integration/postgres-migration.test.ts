@@ -36,6 +36,13 @@ import {
   listAirbnbSettlementVariances,
   reverseAirbnbSettlement
 } from "@/modules/finance/application/airbnb-settlement-service";
+import type { ConfigActorContext } from "@/modules/config/application/config-access";
+import {
+  ConfigAuthorizationError,
+  ConfigValidationError,
+  createConfigRuleVersion,
+  retireConfigRuleVersion
+} from "@/modules/config/application/config-service";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
   ReservationNotFoundError,
@@ -50,6 +57,7 @@ import { REDACTED_AUDIT_VALUE, writeAuditEvent } from "@/platform/audit/audit-wr
 import { authorize, permissionKey, type AuthContext, type DataClass } from "@/platform/authz/authorize";
 import { present, maskedValue, type FieldPolicy, type PresentationContext } from "@/platform/authz/present";
 import { coHostSpecScenarios, simulateAccess } from "@/platform/authz/simulator";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
 let prisma: PrismaClient;
@@ -1365,6 +1373,344 @@ describe("PostgreSQL baseline", () => {
         ipAddress: "127.0.0.1"
       })
     ).rejects.toBeInstanceOf(ReservationNotFoundError);
+  });
+
+  it("resolves configurable rules by precedence, effective dates, snapshots and tenant boundaries", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS CFG A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS CFG B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const personId = randomUUID();
+    const fixture = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const person = await tx.person.create({
+          data: {
+            id: personId,
+            organizationId: orgA.id,
+            displayName: "CFG Integration Admin",
+            email: `cfg-admin-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const account = await tx.userAccount.create({
+          data: {
+            id: actorId,
+            organizationId: orgA.id,
+            personId: person.id,
+            email: `cfg-admin-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
+        const owner = await tx.owner.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "CFG Owner",
+            email: `cfg-owner-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const property = await tx.property.create({
+          data: {
+            organizationId: orgA.id,
+            name: "Villa CFG",
+            addressLine1: "Route de Fes",
+            city: "Marrakech",
+            countryCode: "MA",
+            propertyType: "Villa",
+            bedrooms: 5,
+            bathrooms: 5,
+            livingSpaces: 2,
+            maxGuests: 10,
+            timezone: "Africa/Casablanca",
+            amenities: ["pool"],
+            photoUrls: [],
+            propertyOwners: {
+              create: {
+                organizationId: orgA.id,
+                ownerId: owner.id,
+                shareBps: 10000,
+                isPrimary: true,
+                createdBy: actorId
+              }
+            },
+            createdBy: actorId
+          }
+        });
+
+        return { account, property };
+      }
+    );
+    const configCtx: ConfigActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      personId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        personId,
+        permissions: new Set([
+          permissionKey("config_rule", "view"),
+          permissionKey("config_rule", "create"),
+          permissionKey("config_rule", "configure")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const reservationCtx: ReservationActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      personId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        personId,
+        permissions: new Set([
+          permissionKey("reservation", "view"),
+          permissionKey("reservation", "create"),
+          permissionKey("task", "view"),
+          permissionKey("task", "create")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const taskValue = (key: string, title: string) => ({
+      tasks: [
+        {
+          key,
+          type: "ARRIVAL_PREPARATION",
+          title: { en: title, fr: title },
+          due: "CHECK_IN",
+          priority: "NORMAL",
+          checklist: []
+        }
+      ]
+    });
+
+    const orgRuleV1 = await createConfigRuleVersion(
+      configCtx,
+      {
+        key: "ops.reservation_task_templates",
+        scopeType: "organization",
+        lifecycle: "ACTIVE",
+        valueJson: JSON.stringify(taskValue("arrival", "Organization arrival")),
+        effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+        reason: "CFG integration organization v1"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-org-v1",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const orgRuleV2 = await createConfigRuleVersion(
+      configCtx,
+      {
+        key: "ops.reservation_task_templates",
+        scopeType: "organization",
+        lifecycle: "ACTIVE",
+        valueJson: JSON.stringify(taskValue("checkout", "Organization checkout")),
+        effectiveFrom: new Date("2026-03-01T00:00:00.000Z"),
+        reason: "CFG integration organization v2"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-org-v2",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const propertyRule = await createConfigRuleVersion(
+      configCtx,
+      {
+        key: "ops.reservation_task_templates",
+        scopeType: "property",
+        scopeId: fixture.property.id,
+        lifecycle: "ACTIVE",
+        valueJson: JSON.stringify(taskValue("inspection", "Property inspection")),
+        effectiveFrom: new Date("2026-02-01T00:00:00.000Z"),
+        reason: "CFG integration property override"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-property",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    await expect(
+      createConfigRuleVersion(
+        configCtx,
+        {
+          key: "finance.payout_schedule",
+          scopeType: "organization",
+          lifecycle: "ACTIVE",
+          valueJson: JSON.stringify({ cadence: "EVERY_WHENEVER" }),
+          effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+          reason: "CFG invalid payout"
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-cfg-invalid",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(ConfigValidationError);
+    await expect(
+      createConfigRuleVersion(
+        {
+          ...configCtx,
+          authContext: {
+            ...configCtx.authContext,
+            permissions: new Set([permissionKey("config_rule", "view"), permissionKey("config_rule", "create")])
+          }
+        },
+        {
+          key: "finance.approval_thresholds",
+          scopeType: "organization",
+          lifecycle: "ACTIVE",
+          valueJson: JSON.stringify({
+            thresholds: [
+              {
+                key: "maintenance",
+                amount: "1000.00",
+                currency: "MAD",
+                requires_approval_from: ["manager"]
+              }
+            ]
+          }),
+          effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+          reason: "CFG denied create"
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-cfg-denied",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(ConfigAuthorizationError);
+
+    const resolved = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const repository = new ConfigRuleRepository(tx, orgA.id);
+        const january = await repository.resolve({
+          key: "ops.reservation_task_templates",
+          asOf: new Date("2026-01-15T00:00:00.000Z"),
+          scopes: [
+            { scopeType: "property", scopeId: fixture.property.id },
+            { scopeType: "organization", scopeId: null }
+          ]
+        });
+        const april = await repository.resolve({
+          key: "ops.reservation_task_templates",
+          asOf: new Date("2026-04-01T00:00:00.000Z"),
+          scopes: [
+            { scopeType: "property", scopeId: fixture.property.id },
+            { scopeType: "organization", scopeId: null }
+          ]
+        });
+
+        return { january, april };
+      }
+    );
+
+    expect(resolved.january?.id).toBe(orgRuleV1.id);
+    expect(resolved.april?.id).toBe(propertyRule.id);
+
+    const reservation = await createManualReservation(
+      reservationCtx,
+      {
+        propertyId: fixture.property.id,
+        guestName: "CFG Guest",
+        guestEmail: "cfg.guest@example.test",
+        source: "MANUAL",
+        checkIn: "2027-06-10",
+        checkOut: "2027-06-13",
+        adultCount: 2,
+        childCount: 0,
+        notes: "CFG snapshot reservation",
+        idempotencyKey: randomUUID()
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-reservation",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(reservation.tasks.map((task) => task.title.en)).toEqual(["Property inspection"]);
+
+    const snapshot = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        tx.reservationConfigSnapshot.findUnique({
+          where: {
+            organizationId_reservationId_key: {
+              organizationId: orgA.id,
+              reservationId: reservation.reservation.id,
+              key: "ops.reservation_task_templates"
+            }
+          }
+        })
+    );
+
+    expect(snapshot?.configRuleId).toBe(propertyRule.id);
+    expect(snapshot?.version).toBe(propertyRule.version);
+    expect(snapshot?.snapshotValue).toMatchObject({
+      config_rule_id: propertyRule.id,
+      config_rule_scope_type: "property"
+    });
+
+    await retireConfigRuleVersion(
+      configCtx,
+      {
+        ruleId: propertyRule.id,
+        effectiveFrom: new Date("2026-05-01T00:00:00.000Z"),
+        reason: "CFG integration retire property override"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-cfg-retire",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    const afterRetire = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        new ConfigRuleRepository(tx, orgA.id).resolve({
+          key: "ops.reservation_task_templates",
+          asOf: new Date("2026-06-01T00:00:00.000Z"),
+          scopes: [
+            { scopeType: "property", scopeId: fixture.property.id },
+            { scopeType: "organization", scopeId: null }
+          ]
+        })
+    );
+    const orgBRule = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.configRule.findFirst({ where: { id: propertyRule.id } })
+    );
+    const orgBSnapshot = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.reservationConfigSnapshot.findFirst({ where: { id: snapshot?.id } })
+    );
+
+    expect(orgRuleV2.version).toBe(2);
+    expect(afterRetire?.id).toBe(orgRuleV2.id);
+    expect(orgBRule).toBeNull();
+    expect(orgBSnapshot).toBeNull();
   });
 
   it("derives owner portal statements from PostgreSQL ledger postings and owner scopes", async () => {

@@ -53,6 +53,7 @@
     "logout": "Log out",
     "identity": "Identity",
     "audit": "Audit",
+    "configuration": "Configuration",
     "owners": "Owners",
     "properties": "Properties",
     "reservations": "Reservations",
@@ -291,6 +292,72 @@
     "denied": {
       "title": "Audit access denied",
       "subtitle": "This account does not have permission to view audit history."
+    }
+  },
+  "Configuration": {
+    "eyebrow": "Configuration",
+    "title": "Business rules",
+    "subtitle": "Create, activate, retire and preview effective business rules for organization and property scopes.",
+    "backToWorkspace": "Workspace",
+    "createTitle": "Create version",
+    "historyTitle": "Rule history",
+    "previewTitle": "As-of preview",
+    "empty": "No configuration rules have been created for this organization yet.",
+    "form": {
+      "key": "Rule key",
+      "customFeatureFlagKey": "Feature flag suffix",
+      "scopeType": "Scope",
+      "scopeOrganization": "Organization",
+      "scopeProperty": "Property",
+      "scopeId": "Property",
+      "noProperties": "Create a property before adding property-scoped rules.",
+      "lifecycle": "Lifecycle",
+      "value": "Rule JSON",
+      "valuePlaceholder": "Paste a valid JSON value for the selected rule key.",
+      "effectiveFrom": "Effective from",
+      "effectiveTo": "Effective until",
+      "reason": "Reason",
+      "createVersion": "Create version",
+      "saving": "Saving...",
+      "activate": "Activate",
+      "retire": "Retire",
+      "asOf": "As of",
+      "preview": "Preview"
+    },
+    "lifecycle": {
+      "DRAFT": "Draft",
+      "ACTIVE": "Active",
+      "RETIRED": "Retired"
+    },
+    "columns": {
+      "version": "Version",
+      "scope": "Scope",
+      "status": "Status",
+      "dates": "Dates",
+      "diff": "Diff",
+      "value": "Value"
+    },
+    "diff": {
+      "none": "No previous version",
+      "changed": "Changed"
+    },
+    "preview": {
+      "resolved": "Resolved rule",
+      "none": "No rule resolves for this date and scope"
+    },
+    "messages": {
+      "created": "Configuration version created.",
+      "activated": "Configuration version activated.",
+      "retired": "Configuration rule retired.",
+      "validation": "Check the highlighted fields and valid JSON, then try again.",
+      "unauthorized": "Sign in again to continue.",
+      "forbidden": "You do not have access to configure business rules.",
+      "notFound": "The configuration rule was not found.",
+      "generic": "Configuration action failed. Try again."
+    },
+    "denied": {
+      "title": "Configuration access denied",
+      "subtitle": "This account does not have permission to view configuration history."
     }
   },
   "Core": {

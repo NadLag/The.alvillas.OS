@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import type {
   ManualReservationInput,
   OperationTaskChecklistItemSummary,
@@ -13,6 +13,9 @@ import {
   nightsBetween,
   reservationTaskConfigSchema
 } from "@/modules/reservations/domain/reservation-task";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import type { ResolvedConfigRule } from "@/platform/config/config-rule-repository";
+import { reservationTaskTemplatesConfigKey } from "@/platform/config/rule-registry";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
 type ReservationWithProperty = Prisma.ReservationGetPayload<{
@@ -45,8 +48,9 @@ type FieldTaskWithRelations = Prisma.OperationTaskGetPayload<{
   };
 }>;
 
-type ConfigRuleRow = {
-  value: Prisma.JsonValue;
+export type ResolvedReservationTaskConfig = {
+  config: ReservationTaskConfig;
+  rule: ResolvedConfigRule;
 };
 
 function toStringRecord(value: Prisma.JsonValue): Record<string, string> {
@@ -168,28 +172,43 @@ export class ReservationRepository {
     });
   }
 
-  async resolveTaskConfig(): Promise<ReservationTaskConfig | null> {
-    const rows = await this.tx.$queryRaw<ConfigRuleRow[]>(
-      Prisma.sql`
-        SELECT value
-        FROM config_rule
-        WHERE organization_id = ${this.organizationId}::uuid
-          AND key = 'ops.reservation_task_templates'
-          AND scope_type = 'organization'
-          AND archived_at IS NULL
-          AND effective_from <= now()
-          AND (effective_to IS NULL OR effective_to > now())
-        ORDER BY effective_from DESC, version DESC
-        LIMIT 1
-      `
-    );
-    const value = rows[0]?.value;
+  async resolveTaskConfig(input: {
+    propertyId: string;
+    asOf: Date;
+  }): Promise<ResolvedReservationTaskConfig | null> {
+    const rule = await new ConfigRuleRepository(this.tx, this.organizationId).resolve({
+      key: reservationTaskTemplatesConfigKey,
+      asOf: input.asOf,
+      scopes: [
+        { scopeType: "property", scopeId: input.propertyId },
+        { scopeType: "organization", scopeId: null }
+      ]
+    });
 
-    if (!value) {
+    if (!rule) {
       return null;
     }
 
-    return reservationTaskConfigSchema.parse(value);
+    return {
+      config: reservationTaskConfigSchema.parse(rule.value),
+      rule
+    };
+  }
+
+  async snapshotTaskConfigRule(input: {
+    reservationId: string;
+    propertyId: string;
+    rule: ResolvedConfigRule;
+    resolvedAt: Date;
+    createdBy: string;
+  }): Promise<void> {
+    await new ConfigRuleRepository(this.tx, this.organizationId).snapshotReservationRule({
+      reservationId: input.reservationId,
+      propertyId: input.propertyId,
+      rule: input.rule,
+      resolvedAt: input.resolvedAt,
+      createdBy: input.createdBy
+    });
   }
 
   async findReservationByIdempotency(idempotencyKey: string): Promise<ReservationSummary | null> {
