@@ -5,7 +5,7 @@ export default defineConfig({
   globalSetup: "tests/e2e/global-setup.ts",
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
-  workers: 2,
+  workers: process.env.CI ? 1 : 2,
   retries: process.env.CI ? 2 : 0,
   reporter: "list",
   use: {
