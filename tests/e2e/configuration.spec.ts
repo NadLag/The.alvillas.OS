@@ -1,9 +1,36 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { e2eEmail, ensureE2EAdmin } from "./support/auth";
 import { ensureReservationRevenuePostingSetup } from "./support/reservation-revenue";
 
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
+
+async function expectConfigRuleCreated(page: Page): Promise<void> {
+  await expect(page.getByTestId("config-rule-form-message")).toContainText("created");
+  await expect(page.getByTestId("config-rule-submit")).toBeEnabled();
+}
+
+async function expectCreateFormData(
+  page: Page,
+  expected: Record<string, string>
+): Promise<void> {
+  const formData = await page.getByTestId("config-rule-create-form").evaluate((form) =>
+    Object.fromEntries(new FormData(form as HTMLFormElement).entries())
+  );
+
+  expect(formData).toMatchObject(expected);
+}
+
+async function selectPropertyScopedRule(
+  page: Page,
+  key: string,
+  propertyLabel: string
+): Promise<void> {
+  await page.locator('input[name="scopeType"][value="property"]').check();
+  await page.getByTestId("config-rule-scope-id").selectOption({ label: propertyLabel });
+  await page.getByTestId("config-rule-key").selectOption(key);
+  await expect(page.getByTestId("config-rule-key")).toHaveValue(key);
+}
 
 test.describe("configuration engine journey", () => {
   test.skip(!hasDatabase, "DATABASE_URL is required for configuration E2E");
@@ -11,6 +38,7 @@ test.describe("configuration engine journey", () => {
   test("creates, activates and applies property rules to tasks and commission", async ({
     page
   }, testInfo) => {
+    test.setTimeout(90000);
     const suffix = `cfg-${testInfo.project.name}-${Date.now()}`
       .toLowerCase()
       .replace(/[^a-z0-9]+/gu, "-");
@@ -57,9 +85,11 @@ test.describe("configuration engine journey", () => {
 
     await page.goto("/en/app/configuration");
     await expect(page.getByTestId("configuration-page")).toBeVisible();
-    await page.getByTestId("config-rule-key").selectOption("ops.reservation_task_templates");
-    await page.locator('input[name="scopeType"][value="property"]').check();
-    await page.getByTestId("config-rule-scope-id").selectOption({ label: `${propertyName} - Marrakech` });
+    await selectPropertyScopedRule(
+      page,
+      "ops.reservation_task_templates",
+      `${propertyName} - Marrakech`
+    );
     await page.getByTestId("config-rule-lifecycle").selectOption("DRAFT");
     await page.getByTestId("config-rule-value").fill(
       JSON.stringify({
@@ -77,8 +107,14 @@ test.describe("configuration engine journey", () => {
     );
     await page.getByTestId("config-rule-effective-from").fill("2000-01-01T00:00");
     await page.getByTestId("config-rule-reason").fill("CFG E2E draft task rule");
+    await expectCreateFormData(page, {
+      key: "ops.reservation_task_templates",
+      scopeType: "property",
+      lifecycle: "DRAFT",
+      reason: "CFG E2E draft task rule"
+    });
     await page.getByTestId("config-rule-submit").click();
-    await expect(page.getByTestId("config-rule-form-message")).toContainText("created");
+    await expectConfigRuleCreated(page);
 
     const draftRule = page
       .getByTestId("config-rule-row")
@@ -94,9 +130,7 @@ test.describe("configuration engine journey", () => {
         .filter({ hasText: "Active" })
     ).toBeVisible();
 
-    await page.getByTestId("config-rule-key").selectOption("finance.commission");
-    await page.locator('input[name="scopeType"][value="property"]').check();
-    await page.getByTestId("config-rule-scope-id").selectOption({ label: `${propertyName} - Marrakech` });
+    await selectPropertyScopedRule(page, "finance.commission", `${propertyName} - Marrakech`);
     await page.getByTestId("config-rule-lifecycle").selectOption("ACTIVE");
     await page.getByTestId("config-rule-value").fill(
       JSON.stringify({
@@ -108,7 +142,28 @@ test.describe("configuration engine journey", () => {
     await page.getByTestId("config-rule-effective-from").fill("2000-01-01T00:00");
     await page.getByTestId("config-rule-reason").fill("CFG E2E commission rule");
     await page.getByTestId("config-rule-submit").click();
-    await expect(page.getByTestId("config-rule-form-message")).toContainText("created");
+    await expectConfigRuleCreated(page);
+
+    await selectPropertyScopedRule(page, "finance.commission", `${propertyName} - Marrakech`);
+    await page.getByTestId("config-rule-lifecycle").selectOption("ACTIVE");
+    await page.getByTestId("config-rule-value").fill(
+      JSON.stringify({
+        rate_bps: 2600,
+        basis: "GROSS_ACCOMMODATION",
+        accrual_event: "ON_RECEIPT"
+      })
+    );
+    await page.getByTestId("config-rule-effective-from").fill("2099-01-01T00:00");
+    await page.getByTestId("config-rule-reason").fill("CFG E2E future commission rule");
+    await page.getByTestId("config-rule-submit").click();
+    await expectConfigRuleCreated(page);
+    await expect(
+      page
+        .getByTestId("config-rule-row")
+        .filter({ hasText: "finance.commission" })
+        .filter({ hasText: propertyName })
+        .filter({ hasText: "Changed" })
+    ).toBeVisible();
 
     await page.goto("/en/app/reservations");
     await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - Marrakech` });
@@ -130,6 +185,23 @@ test.describe("configuration engine journey", () => {
     });
     await reservationRow.getByTestId("reservation-revenue-submit").click();
     await expect(reservationRow.getByTestId("reservation-revenue-posted")).toContainText("Revenue posted");
+
+    await page.goto("/en/app/configuration");
+    const activeTaskRule = page
+      .getByTestId("config-rule-row")
+      .filter({ hasText: "ops.reservation_task_templates" })
+      .filter({ hasText: propertyName })
+      .filter({ hasText: "Active" });
+    await activeTaskRule.locator('input[name="reason"]').fill("CFG E2E retire task rule");
+    await activeTaskRule.getByTestId("config-rule-retire").click();
+    await expect(
+      page
+        .getByTestId("config-rule-row")
+        .filter({ hasText: "ops.reservation_task_templates" })
+        .filter({ hasText: propertyName })
+        .filter({ hasText: "CFG E2E retire task rule" })
+        .filter({ hasText: "Retired" })
+    ).toBeVisible();
 
     await page.context().clearCookies();
     await page.goto("/en/login");

@@ -78,7 +78,7 @@ const feeRuleSchema = z
   })
   .passthrough();
 
-const expenseTreatmentSchema = z
+export const expenseTreatmentConfigSchema = z
   .object({
     default_treatment: z.enum([
       "OWNER_PAID",
@@ -115,7 +115,7 @@ const expenseTreatmentSchema = z
 
 const approvalStepSchema = z.enum(["manager", "owner", "manager_owner", "finance", "none"]);
 
-const approvalThresholdsSchema = z
+export const approvalThresholdsConfigSchema = z
   .object({
     thresholds: z.array(
       z
@@ -133,7 +133,7 @@ const approvalThresholdsSchema = z
   })
   .passthrough();
 
-const payoutScheduleSchema = z
+export const payoutScheduleConfigSchema = z
   .object({
     cadence: z.enum([
       "AFTER_CHECKOUT",
@@ -270,7 +270,7 @@ const midStayThresholdSchema = z
   })
   .passthrough();
 
-const featureFlagSchema = z
+export const featureFlagConfigSchema = z
   .object({
     enabled: z.boolean(),
     variant: configSlugSchema.optional(),
@@ -281,10 +281,10 @@ const featureFlagSchema = z
 export const configRuleSchemas = {
   [commissionConfigKey]: commissionRuleValueSchema,
   "finance.ota_fee": feeRuleSchema,
-  "finance.expense_treatment": expenseTreatmentSchema,
-  "finance.expense_allocation": expenseTreatmentSchema,
-  "finance.approval_thresholds": approvalThresholdsSchema,
-  "finance.payout_schedule": payoutScheduleSchema,
+  "finance.expense_treatment": expenseTreatmentConfigSchema,
+  "finance.expense_allocation": expenseTreatmentConfigSchema,
+  "finance.approval_thresholds": approvalThresholdsConfigSchema,
+  "finance.payout_schedule": payoutScheduleConfigSchema,
   "staff.compensation": staffCompensationSchema,
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
@@ -294,15 +294,19 @@ export const configRuleSchemas = {
   "ops.operating_rules": operatingRulesSchema,
   "ops.mid_stay_threshold": midStayThresholdSchema,
   [reservationTaskTemplatesConfigKey]: reservationTaskConfigSchema,
-  "feature_flag": featureFlagSchema
+  "feature_flag": featureFlagConfigSchema
 } as const satisfies Record<string, z.ZodType>;
 
 export type ConfigRuleKey = keyof typeof configRuleSchemas | `feature_flag.${string}`;
 export type CommissionRuleValue = z.infer<typeof commissionRuleValueSchema>;
+export type ApprovalThresholdsConfig = z.infer<typeof approvalThresholdsConfigSchema>;
+export type ExpenseTreatmentConfig = z.infer<typeof expenseTreatmentConfigSchema>;
+export type FeatureFlagConfig = z.infer<typeof featureFlagConfigSchema>;
+export type PayoutScheduleConfig = z.infer<typeof payoutScheduleConfigSchema>;
 
 export function schemaForConfigKey(key: string): z.ZodType | null {
   if (key.startsWith("feature_flag.")) {
-    return featureFlagSchema;
+    return featureFlagConfigSchema;
   }
 
   return configRuleSchemas[key as keyof typeof configRuleSchemas] ?? null;

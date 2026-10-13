@@ -9,6 +9,7 @@ import {
   logoutAction,
   updatePreferredLocaleAction
 } from "@/modules/identity/application/session-actions";
+import { resolveFeatureFlag } from "@/platform/config/feature-flags";
 
 export const dynamic = "force-dynamic";
 
@@ -27,13 +28,18 @@ export default async function AppPage({
 
   const session = await auth();
 
-  if (!session?.user?.id) {
+  if (!session?.user?.id || !session.user.organizationId) {
     redirect(`/${appLocale}/login`);
   }
 
-  const [t, dsnT] = await Promise.all([
+  const [t, dsnT, ownerPortalFlag] = await Promise.all([
     getTranslations("AppShell"),
-    getTranslations("DesignSystem")
+    getTranslations("DesignSystem"),
+    resolveFeatureFlag({
+      organizationId: session.user.organizationId,
+      key: "owner_portal",
+      defaultEnabled: true
+    })
   ]);
 
   return (
@@ -65,9 +71,11 @@ export default async function AppPage({
           <Link className="secondary-button" href={`/${appLocale}/app/field`}>
             {t("field")}
           </Link>
-          <Link className="secondary-button" href={`/${appLocale}/app/owner-portal`}>
-            {t("ownerPortal")}
-          </Link>
+          {ownerPortalFlag.enabled ? (
+            <Link className="secondary-button" href={`/${appLocale}/app/owner-portal`}>
+              {t("ownerPortal")}
+            </Link>
+          ) : null}
           <Link className="secondary-button" href={`/${appLocale}/app/design-system`}>
             {dsnT("nav")}
           </Link>
