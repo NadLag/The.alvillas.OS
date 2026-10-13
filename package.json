@@ -23,6 +23,7 @@
     "prisma:migrate:deploy": "prisma migrate deploy",
     "check:i18n": "tsx tests/scripts/check-i18n.ts",
     "check:rtl-css": "tsx tests/scripts/check-rtl-css.ts",
+    "check:design-system": "tsx tests/scripts/check-design-system.ts",
     "check:boundaries": "tsx tests/scripts/check-boundaries.ts",
     "check:organization-id": "tsx tests/scripts/check-organization-id.ts",
     "check:schema-drift": "tsx tests/scripts/check-schema-drift.ts",
@@ -32,7 +33,7 @@
     "progress:report": "tsx tests/scripts/progress-report.ts",
     "progress:set": "tsx tests/scripts/set-progress-note.ts",
     "rehearse:restore": "tsx scripts/rehearse-backup-restore.ts",
-    "verify": "npm run lint && npm run typecheck && npm run check:i18n && npm run check:rtl-css && npm run check:boundaries && npm run check:organization-id && npm run check:ledger && npm run check:audit && npm run check:progress && npm run test:unit && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm run check:i18n && npm run check:rtl-css && npm run check:design-system && npm run check:boundaries && npm run check:organization-id && npm run check:ledger && npm run check:audit && npm run check:progress && npm run test:unit && npm run build"
   },
   "dependencies": {
     "@prisma/client": "^6.12.0",
