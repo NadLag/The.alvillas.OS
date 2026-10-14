@@ -225,6 +225,8 @@ export async function assignRoleAction(
     assignedToMe: formData.get("assignedToMe") === "on",
     statuses: formValue(formData, "statuses"),
     maxAmount: formValue(formData, "maxAmount"),
+    conditionStartsAt: formValue(formData, "conditionStartsAt"),
+    conditionEndsAt: formValue(formData, "conditionEndsAt"),
     validFrom: formValue(formData, "validFrom"),
     validTo: formValue(formData, "validTo"),
     compensationRef: formValue(formData, "compensationRef")

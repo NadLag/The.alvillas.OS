@@ -78,6 +78,8 @@ type IdentityAdminProps = {
     assignedToMe: string;
     statuses: string;
     maxAmount: string;
+    conditionStartsAt: string;
+    conditionEndsAt: string;
     validFrom: string;
     validTo: string;
     compensationRef: string;
@@ -712,6 +714,14 @@ function RoleAssignmentForm({
         <label className="field">
           <span>{labels.maxAmount}</span>
           <input inputMode="decimal" name="maxAmount" />
+        </label>
+        <label className="field">
+          <span>{labels.conditionStartsAt}</span>
+          <input data-testid="assignment-condition-starts-at" name="conditionStartsAt" type="datetime-local" />
+        </label>
+        <label className="field">
+          <span>{labels.conditionEndsAt}</span>
+          <input data-testid="assignment-condition-ends-at" name="conditionEndsAt" type="datetime-local" />
         </label>
         <label className="field">
           <span>{labels.compensationRef}</span>

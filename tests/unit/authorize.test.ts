@@ -161,6 +161,46 @@ describe("authorize", () => {
     ).toBe(false);
   });
 
+  it("enforces assignment time windows against the resource occurrence date", () => {
+    const timed: AuthContext = {
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("task", "edit")]),
+      scopes: [{ organizationId: "org-a", scopeType: "property", scopeId: "property-1" }],
+      assignments: [
+        {
+          roleKey: "field-lead",
+          permissions: new Set([permissionKey("task", "edit")]),
+          scope: { organizationId: "org-a", scopeType: "property", scopeId: "property-1" },
+          conditions: {
+            timeWindow: {
+              startsAt: "2026-06-01T00:00:00.000Z",
+              endsAt: "2026-06-30T23:59:59.000Z"
+            }
+          }
+        }
+      ]
+    };
+
+    expect(
+      authorize(timed, "edit", {
+        type: "task",
+        organizationId: "org-a",
+        id: "task-1",
+        propertyId: "property-1",
+        occurredAt: "2026-06-15T12:00:00.000Z"
+      })
+    ).toBe(true);
+    expect(
+      authorize(timed, "edit", {
+        type: "task",
+        organizationId: "org-a",
+        id: "task-1",
+        propertyId: "property-1",
+        occurredAt: "2026-07-01T00:00:00.000Z"
+      })
+    ).toBe(false);
+  });
+
   it("allows collection entry only when a role assignment carries the permission", () => {
     expect(authorizeCollection(ctx, "view", "reservation")).toBe(true);
     expect(authorizeCollection(ctx, "create", "reservation")).toBe(false);

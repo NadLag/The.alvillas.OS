@@ -151,6 +151,17 @@ const optionalDecimalSchema = z
     message: "Use a positive amount with up to two decimals"
   });
 
+function assignmentConditionWindowIsOrdered(value: {
+  conditionStartsAt?: Date;
+  conditionEndsAt?: Date;
+}): boolean {
+  return (
+    !value.conditionStartsAt ||
+    !value.conditionEndsAt ||
+    value.conditionEndsAt.getTime() > value.conditionStartsAt.getTime()
+  );
+}
+
 export const roleAssignmentInputSchema = z
   .object({
     userAccountId: z.string().uuid(),
@@ -172,6 +183,8 @@ export const roleAssignmentInputSchema = z
           : []
       ),
     maxAmount: optionalDecimalSchema,
+    conditionStartsAt: optionalDateSchema,
+    conditionEndsAt: optionalDateSchema,
     validFrom: optionalDateSchema,
     validTo: optionalDateSchema,
     compensationRef: z.string().trim().max(120).optional().or(z.literal("").transform(() => undefined))
@@ -183,6 +196,10 @@ export const roleAssignmentInputSchema = z
   .refine((value) => !value.validFrom || !value.validTo || value.validTo.getTime() > value.validFrom.getTime(), {
     path: ["validTo"],
     message: "Valid to must be after valid from"
+  })
+  .refine(assignmentConditionWindowIsOrdered, {
+    path: ["conditionEndsAt"],
+    message: "Condition end must be after condition start"
   });
 
 export type RoleAssignmentInput = z.infer<typeof roleAssignmentInputSchema>;
