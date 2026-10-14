@@ -551,6 +551,9 @@
       "agreement": {
         "title": "Management agreement",
         "formTitle": "Create management agreement",
+        "amendmentFormTitle": "Amend agreement terms",
+        "historyTitle": "Amendment history",
+        "versionLabel": "Version {version}",
         "empty": "No management agreement has been recorded for this property.",
         "reference": "Agreement reference",
         "status": "Status",
@@ -573,7 +576,9 @@
         "specialConditions": "Special conditions",
         "reason": "Reason",
         "save": "Save agreement",
+        "saveAmendment": "Save amendment",
         "saved": "Management agreement saved.",
+        "amendmentSaved": "Agreement amendment saved.",
         "statusOptions": {
           "DRAFT": "Draft",
           "ACTIVE": "Active",

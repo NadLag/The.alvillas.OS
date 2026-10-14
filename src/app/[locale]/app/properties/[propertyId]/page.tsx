@@ -42,6 +42,60 @@ function ruleValue(agreement: ManagementAgreementSummary, key: string): Record<s
   return rule?.value ?? {};
 }
 
+function latestRuleVersion(agreement: ManagementAgreementSummary): number {
+  return agreement.rules.reduce((version, rule) => Math.max(version, rule.version), 0);
+}
+
+function dateTimeInputValue(value: Date | null | undefined): string | undefined {
+  return value ? value.toISOString().slice(0, 16) : undefined;
+}
+
+function arrayInputValue(value: unknown): string | undefined {
+  return Array.isArray(value)
+    ? value.filter((item): item is string | number => typeof item === "string" || typeof item === "number").join(", ")
+    : undefined;
+}
+
+function stringInputValue(value: unknown): string | undefined {
+  return typeof value === "string" || typeof value === "number" ? String(value) : undefined;
+}
+
+function agreementFormDefaults(agreement: ManagementAgreementSummary) {
+  const commission = ruleValue(agreement, "finance.commission");
+  const expense = ruleValue(agreement, "finance.expense_treatment");
+  const payout = ruleValue(agreement, "finance.payout_schedule");
+  const approval = ruleValue(agreement, "finance.approval_thresholds");
+  const responsibilities = ruleValue(agreement, "agreement.responsibilities");
+  const notice = ruleValue(agreement, "agreement.notice");
+  const conditions = ruleValue(agreement, "agreement.special_conditions");
+  const threshold = Array.isArray(approval.thresholds) && approval.thresholds[0] && typeof approval.thresholds[0] === "object"
+    ? approval.thresholds[0] as Record<string, unknown>
+    : {};
+
+  return {
+    approvalRequires: Array.isArray(threshold.requires_approval_from)
+      ? threshold.requires_approval_from.filter((item): item is string => typeof item === "string")[0]
+      : undefined,
+    approvalThresholdAmount: stringInputValue(threshold.amount),
+    approvalThresholdCurrency: stringInputValue(threshold.currency) ?? "MAD",
+    approvalThresholdKey: stringInputValue(threshold.key),
+    alvillasResponsibilities: arrayInputValue(responsibilities.alvillas),
+    commissionAccrualEvent: stringInputValue(commission.accrual_event),
+    commissionBasis: stringInputValue(commission.basis),
+    commissionRateBps: typeof commission.rate_bps === "number" ? commission.rate_bps : undefined,
+    effectiveFrom: dateTimeInputValue(new Date()),
+    expenseDefaultTreatment: stringInputValue(expense.default_treatment),
+    noticePeriodDays: typeof notice.notice_period_days === "number" ? notice.notice_period_days : undefined,
+    ownerResponsibilities: arrayInputValue(responsibilities.owner),
+    payoutCadence: stringInputValue(payout.cadence),
+    payoutHoldDays: stringInputValue(payout.hold_days),
+    payoutHoldbackBps: stringInputValue(payout.holdback_bps),
+    reference: agreement.reference,
+    specialConditions: arrayInputValue(conditions.conditions),
+    status: agreement.status
+  };
+}
+
 function bpsLabel(value: unknown): string {
   return typeof value === "number" ? `${(value / 100).toFixed(2).replace(/\.00$/u, "")}%` : "";
 }
@@ -156,6 +210,86 @@ export default async function PropertyDetailPage({
   const managementAgreements = canViewAgreements && agreementCtx
     ? await listPropertyManagementAgreements(agreementCtx, property.id)
     : [];
+  const agreementLabels = {
+    alvillasResponsibilities: t("properties.agreement.alvillasResponsibilities"),
+    amendmentFormTitle: t("properties.agreement.amendmentFormTitle"),
+    amendmentSaved: t("properties.agreement.amendmentSaved"),
+    approvalRequires: t("properties.agreement.approvalRequires"),
+    approvalStepOptions: {
+      manager: t("properties.agreement.approvalStepOptions.manager"),
+      owner: t("properties.agreement.approvalStepOptions.owner"),
+      manager_owner: t("properties.agreement.approvalStepOptions.manager_owner"),
+      finance: t("properties.agreement.approvalStepOptions.finance"),
+      none: t("properties.agreement.approvalStepOptions.none")
+    },
+    approvalThresholdAmount: t("properties.agreement.approvalThresholdAmount"),
+    approvalThresholdCurrency: t("properties.agreement.approvalThresholdCurrency"),
+    approvalThresholdKey: t("properties.agreement.approvalThresholdKey"),
+    commissionAccrualEvent: t("properties.agreement.commissionAccrualEvent"),
+    commissionAccrualOptions: {
+      ON_CONFIRMATION: t("properties.agreement.commissionAccrualOptions.ON_CONFIRMATION"),
+      ON_CHECKIN: t("properties.agreement.commissionAccrualOptions.ON_CHECKIN"),
+      ON_CHECKOUT: t("properties.agreement.commissionAccrualOptions.ON_CHECKOUT"),
+      ON_RECEIPT: t("properties.agreement.commissionAccrualOptions.ON_RECEIPT")
+    },
+    commissionBasis: t("properties.agreement.commissionBasis"),
+    commissionBasisOptions: {
+      GROSS_ACCOMMODATION: t("properties.agreement.commissionBasisOptions.GROSS_ACCOMMODATION"),
+      NET_OF_OTA_FEES: t("properties.agreement.commissionBasisOptions.NET_OF_OTA_FEES"),
+      TOTAL_INCLUDING_SERVICES: t("properties.agreement.commissionBasisOptions.TOTAL_INCLUDING_SERVICES"),
+      CUSTOM_FORMULA: t("properties.agreement.commissionBasisOptions.CUSTOM_FORMULA")
+    },
+    commissionRateBps: t("properties.agreement.commissionRateBps"),
+    effectiveFrom: t("properties.agreement.effectiveFrom"),
+    effectiveTo: t("properties.agreement.effectiveTo"),
+    empty: t("properties.agreement.empty"),
+    expenseDefaultTreatment: t("properties.agreement.expenseDefaultTreatment"),
+    expenseTreatmentOptions: {
+      OWNER_PAID: t("properties.agreement.expenseTreatmentOptions.OWNER_PAID"),
+      ALVILLAS_PAID: t("properties.agreement.expenseTreatmentOptions.ALVILLAS_PAID"),
+      INCLUDED_IN_COMMISSION: t("properties.agreement.expenseTreatmentOptions.INCLUDED_IN_COMMISSION"),
+      GUEST_PAID: t("properties.agreement.expenseTreatmentOptions.GUEST_PAID"),
+      SHARED: t("properties.agreement.expenseTreatmentOptions.SHARED"),
+      REIMBURSABLE: t("properties.agreement.expenseTreatmentOptions.REIMBURSABLE"),
+      DEDUCT_FROM_PAYOUT: t("properties.agreement.expenseTreatmentOptions.DEDUCT_FROM_PAYOUT"),
+      CUSTOM: t("properties.agreement.expenseTreatmentOptions.CUSTOM")
+    },
+    forbidden: t("forms.forbidden"),
+    formTitle: t("properties.agreement.formTitle"),
+    generic: t("forms.generic"),
+    historyTitle: t("properties.agreement.historyTitle"),
+    notFound: t("forms.notFound"),
+    noticePeriodDays: t("properties.agreement.noticePeriodDays"),
+    ownerResponsibilities: t("properties.agreement.ownerResponsibilities"),
+    payoutCadence: t("properties.agreement.payoutCadence"),
+    payoutCadenceOptions: {
+      AFTER_CHECKOUT: t("properties.agreement.payoutCadenceOptions.AFTER_CHECKOUT"),
+      PER_BOOKING: t("properties.agreement.payoutCadenceOptions.PER_BOOKING"),
+      WEEKLY: t("properties.agreement.payoutCadenceOptions.WEEKLY"),
+      FIFTEEN_DAY: t("properties.agreement.payoutCadenceOptions.FIFTEEN_DAY"),
+      MONTHLY: t("properties.agreement.payoutCadenceOptions.MONTHLY"),
+      CUSTOM_CRON: t("properties.agreement.payoutCadenceOptions.CUSTOM_CRON"),
+      OTA_SPLIT_EXPECTED_SETTLEMENT: t("properties.agreement.payoutCadenceOptions.OTA_SPLIT_EXPECTED_SETTLEMENT")
+    },
+    payoutHoldDays: t("properties.agreement.payoutHoldDays"),
+    payoutHoldbackBps: t("properties.agreement.payoutHoldbackBps"),
+    reason: t("properties.agreement.reason"),
+    reference: t("properties.agreement.reference"),
+    save: t("properties.agreement.save"),
+    saveAmendment: t("properties.agreement.saveAmendment"),
+    saved: t("properties.agreement.saved"),
+    saving: t("common.saving"),
+    specialConditions: t("properties.agreement.specialConditions"),
+    status: t("properties.agreement.status"),
+    statusOptions: {
+      DRAFT: t("properties.agreement.statusOptions.DRAFT"),
+      ACTIVE: t("properties.agreement.statusOptions.ACTIVE"),
+      ENDED: t("properties.agreement.statusOptions.ENDED")
+    },
+    title: t("properties.agreement.title"),
+    unauthorized: t("forms.unauthorized"),
+    validation: t("forms.validation")
+  };
 
   return (
     <AdminShell className="resource-page" testId="property-detail-page">
@@ -283,6 +417,28 @@ export default async function PropertyDetailPage({
                       <dd>{listLabel(conditions.conditions, t("common.notProvided"))}</dd>
                     </div>
                   </dl>
+                  <div className="config-rule-history" data-testid="management-agreement-history">
+                    <p className="field-hint">
+                      {agreementLabels.historyTitle} {t("properties.agreement.versionLabel", { version: latestRuleVersion(agreement) })}
+                    </p>
+                    <ul>
+                      {agreement.rules.map((rule) => (
+                        <li key={rule.id}>
+                          {rule.key} {t("properties.agreement.versionLabel", { version: rule.version })} -{" "}
+                          {rule.effectiveFrom.toLocaleString()} - {rule.reason}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                  {canManageAgreements ? (
+                    <ManagementAgreementForm
+                      agreementId={agreement.id}
+                      defaults={agreementFormDefaults(agreement)}
+                      labels={agreementLabels}
+                      locale={appLocale}
+                      propertyId={property.id}
+                    />
+                  ) : null}
                 </article>
               );
             })}
@@ -294,6 +450,8 @@ export default async function PropertyDetailPage({
           <ManagementAgreementForm
             labels={{
               alvillasResponsibilities: t("properties.agreement.alvillasResponsibilities"),
+              amendmentFormTitle: t("properties.agreement.amendmentFormTitle"),
+              amendmentSaved: t("properties.agreement.amendmentSaved"),
               approvalRequires: t("properties.agreement.approvalRequires"),
               approvalStepOptions: {
                 manager: t("properties.agreement.approvalStepOptions.manager"),
@@ -337,6 +495,7 @@ export default async function PropertyDetailPage({
               forbidden: t("forms.forbidden"),
               formTitle: t("properties.agreement.formTitle"),
               generic: t("forms.generic"),
+              historyTitle: t("properties.agreement.historyTitle"),
               notFound: t("forms.notFound"),
               noticePeriodDays: t("properties.agreement.noticePeriodDays"),
               ownerResponsibilities: t("properties.agreement.ownerResponsibilities"),
@@ -355,6 +514,7 @@ export default async function PropertyDetailPage({
               reason: t("properties.agreement.reason"),
               reference: t("properties.agreement.reference"),
               save: t("properties.agreement.save"),
+              saveAmendment: t("properties.agreement.saveAmendment"),
               saved: t("properties.agreement.saved"),
               saving: t("common.saving"),
               specialConditions: t("properties.agreement.specialConditions"),
