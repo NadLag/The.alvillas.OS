@@ -151,6 +151,8 @@
     "assignedToMe": "Assigned to me",
     "statuses": "Statuses",
     "maxAmount": "Maximum amount",
+    "conditionStartsAt": "Condition starts",
+    "conditionEndsAt": "Condition ends",
     "validFrom": "Valid from",
     "validTo": "Valid to",
     "compensationRef": "Compensation reference",

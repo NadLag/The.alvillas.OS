@@ -51,7 +51,7 @@ import {
   authContextForAccount,
   type IdentityActorContext
 } from "@/modules/identity/application/identity-access";
-import { authorize } from "@/platform/authz/authorize";
+import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { hashCredentialSecret, hashPassword, verifyPassword } from "@/platform/auth/password";
 import { encryptSecret, decryptSecret } from "@/platform/auth/secret-encryption";
@@ -226,28 +226,102 @@ export function parseRoleAssignmentInput(input: unknown) {
 function assertAuthorizationAllowed(
   ctx: IdentityActorContext,
   action: Parameters<typeof authorize>[1],
-  resourceType: string,
+  resourceOrType: string | Resource,
   id?: string
 ): void {
+  const resource =
+    typeof resourceOrType === "string"
+      ? {
+          type: resourceOrType,
+          organizationId: ctx.organizationId,
+          id
+        }
+      : resourceOrType;
+
   if (
-    !authorize(ctx.authContext, action, {
-      type: resourceType,
-      organizationId: ctx.organizationId,
-      id
-    })
+    !authorize(ctx.authContext, action, resource)
   ) {
     throw new IdentityAuthorizationError();
   }
 }
 
+function scopedRoleAssignmentResource(
+  organizationId: string,
+  input: Pick<RoleAssignmentInput, "roleId" | "scopeType" | "scopeId">
+): Resource {
+  const resource: Resource = {
+    type: "role",
+    organizationId,
+    id: input.roleId
+  };
+
+  switch (input.scopeType) {
+    case "region":
+      resource.region = input.scopeId;
+      break;
+    case "city":
+      resource.city = input.scopeId;
+      break;
+    case "property":
+      resource.propertyId = input.scopeId;
+      break;
+    case "owner":
+      resource.ownerId = input.scopeId;
+      break;
+    case "reservation":
+      resource.reservationId = input.scopeId;
+      break;
+    case "job":
+      resource.jobId = input.scopeId;
+      resource.taskId = input.scopeId;
+      break;
+    case "service":
+      resource.serviceId = input.scopeId;
+      break;
+    case "financial_record":
+      resource.financialRecordId = input.scopeId;
+      break;
+    case "wallet":
+      resource.walletId = input.scopeId;
+      break;
+    case "field_team":
+      resource.fieldTeamId = input.scopeId;
+      break;
+    case "organization":
+      break;
+  }
+
+  return resource;
+}
+
+function permissionParts(permission: string): { resourceType: string; action: Action } {
+  const separator = permission.lastIndexOf(":");
+
+  if (separator <= 0 || separator === permission.length - 1) {
+    throw new IdentityAuthorizationError("Cannot grant an invalid permission");
+  }
+
+  return {
+    resourceType: permission.slice(0, separator),
+    action: permission.slice(separator + 1) as Action
+  };
+}
+
 function assertPermissionGrantAllowed(
   ctx: IdentityActorContext,
   permissionKeys: readonly string[],
-  roleId?: string
+  roleId?: string,
+  grantResource?: Resource
 ): void {
+  const overrideResource =
+    grantResource ?? {
+      type: "role",
+      organizationId: ctx.organizationId,
+      id: roleId
+    };
   const canOverride = authorize(ctx.authContext, "override", {
+    ...overrideResource,
     type: "role",
-    organizationId: ctx.organizationId,
     id: roleId
   });
 
@@ -256,6 +330,21 @@ function assertPermissionGrantAllowed(
   }
 
   for (const permissionKey of permissionKeys) {
+    if (grantResource) {
+      const { resourceType, action } = permissionParts(permissionKey);
+
+      if (
+        !authorize(ctx.authContext, action, {
+          ...grantResource,
+          type: resourceType
+        })
+      ) {
+        throw new IdentityAuthorizationError("Cannot grant a permission the actor does not hold at this scope");
+      }
+
+      continue;
+    }
+
     if (!ctx.authContext.permissions.has(permissionKey)) {
       throw new IdentityAuthorizationError("Cannot grant a permission the actor does not hold");
     }
@@ -275,6 +364,13 @@ function assignmentConditions(input: RoleAssignmentInput): Prisma.InputJsonObjec
 
   if (input.maxAmount) {
     conditions.maxAmount = input.maxAmount;
+  }
+
+  if (input.conditionStartsAt || input.conditionEndsAt) {
+    conditions.timeWindow = {
+      ...(input.conditionStartsAt ? { startsAt: input.conditionStartsAt.toISOString() } : {}),
+      ...(input.conditionEndsAt ? { endsAt: input.conditionEndsAt.toISOString() } : {})
+    };
   }
 
   return Object.keys(conditions).length > 0 ? conditions : null;
@@ -771,7 +867,9 @@ export async function assignRoleToAccount(
   input: RoleAssignmentInput,
   deps: IdentityServiceDeps = {}
 ): Promise<{ id: string; created: boolean }> {
-  assertAuthorizationAllowed(ctx, "assign", "role", input.roleId);
+  const assignmentResource = scopedRoleAssignmentResource(ctx.organizationId, input);
+
+  assertAuthorizationAllowed(ctx, "assign", assignmentResource);
   const meta = auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
@@ -785,7 +883,7 @@ export async function assignRoleToAccount(
         throw new IdentityNotFoundError("Role was not found");
       }
 
-      assertPermissionGrantAllowed(ctx, role.permissionKeys, role.id);
+      assertPermissionGrantAllowed(ctx, role.permissionKeys, role.id, assignmentResource);
 
       const assignment = await repository.assignRoleToAccount({
         userAccountId: input.userAccountId,

@@ -113,6 +113,8 @@ export default async function IdentityPage({
           assignedToMe: t("assignedToMe"),
           statuses: t("statuses"),
           maxAmount: t("maxAmount"),
+          conditionStartsAt: t("conditionStartsAt"),
+          conditionEndsAt: t("conditionEndsAt"),
           validFrom: t("validFrom"),
           validTo: t("validTo"),
           compensationRef: t("compensationRef"),

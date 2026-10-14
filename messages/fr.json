@@ -151,6 +151,8 @@
     "assignedToMe": "Assigne a moi",
     "statuses": "Statuts",
     "maxAmount": "Montant maximum",
+    "conditionStartsAt": "Debut de condition",
+    "conditionEndsAt": "Fin de condition",
     "validFrom": "Valide depuis",
     "validTo": "Valide jusqu'a",
     "compensationRef": "Reference remuneration",

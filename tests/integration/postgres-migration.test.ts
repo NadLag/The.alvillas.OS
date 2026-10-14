@@ -3087,6 +3087,22 @@ describe("PostgreSQL baseline", () => {
             status: "ACTIVE"
           }
         });
+        const delegatedPerson = await tx.person.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Delegated Scoped User",
+            email: `delegated-role-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const delegatedAccount = await tx.userAccount.create({
+          data: {
+            organizationId: orgA.id,
+            personId: delegatedPerson.id,
+            email: `delegated-role-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
         const owner = await tx.owner.create({
           data: {
             organizationId: orgA.id,
@@ -3164,7 +3180,19 @@ describe("PostgreSQL baseline", () => {
           }
         });
 
-        return { person, account, customPerson, customAccount, expiredPerson, expiredAccount, owner, assignedProperty, otherProperty };
+        return {
+          person,
+          account,
+          customPerson,
+          customAccount,
+          expiredPerson,
+          expiredAccount,
+          delegatedPerson,
+          delegatedAccount,
+          owner,
+          assignedProperty,
+          otherProperty
+        };
       }
     );
 
@@ -3245,6 +3273,8 @@ describe("PostgreSQL baseline", () => {
         scopeId: fixture.assignedProperty.id,
         assignedToMe: false,
         statuses: [],
+        conditionStartsAt: new Date("2020-01-01T00:00:00.000Z"),
+        conditionEndsAt: new Date("2099-12-31T23:59:59.000Z"),
         validFrom: new Date("2026-01-01T00:00:00.000Z"),
         validTo: undefined
       },
@@ -3263,6 +3293,8 @@ describe("PostgreSQL baseline", () => {
         scopeId: fixture.assignedProperty.id,
         assignedToMe: false,
         statuses: [],
+        conditionStartsAt: undefined,
+        conditionEndsAt: undefined,
         validFrom: new Date("2026-01-01T00:00:00.000Z"),
         validTo: new Date("2026-01-02T00:00:00.000Z")
       },
@@ -3346,12 +3378,81 @@ describe("PostgreSQL baseline", () => {
           scopeType: "organization",
           assignedToMe: false,
           statuses: [],
+          conditionStartsAt: undefined,
+          conditionEndsAt: undefined,
           validFrom: undefined,
           validTo: undefined
         },
         {
           db: prisma as unknown as TenantTransactionRunner,
           requestId: "integration-auz-role-assignment-escalation",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    const propertyScopedAssignerPermissions = new Set([
+      permissionKey("role", "assign"),
+      permissionKey("property", "view"),
+      permissionKey("reservation", "view"),
+      permissionKey("task", "view"),
+      permissionKey("task", "edit")
+    ]);
+    const propertyScopedAssigner = {
+      organizationId: orgA.id,
+      actorId: fixture.customAccount.id,
+      personId: fixture.customPerson.id,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: fixture.customAccount.id,
+        personId: fixture.customPerson.id,
+        permissions: propertyScopedAssignerPermissions,
+        scopes: [{ organizationId: orgA.id, scopeType: "property" as const, scopeId: fixture.assignedProperty.id }],
+        assignments: [
+          {
+            roleKey: "property-role-assigner",
+            permissions: propertyScopedAssignerPermissions,
+            scope: { organizationId: orgA.id, scopeType: "property" as const, scopeId: fixture.assignedProperty.id }
+          }
+        ]
+      }
+    };
+    const delegatedAssignment = await assignRoleToAccount(
+      propertyScopedAssigner,
+      {
+        userAccountId: fixture.delegatedAccount.id,
+        roleId: customRole.id,
+        scopeType: "property",
+        scopeId: fixture.assignedProperty.id,
+        assignedToMe: false,
+        statuses: [],
+        conditionStartsAt: undefined,
+        conditionEndsAt: undefined,
+        validFrom: undefined,
+        validTo: undefined
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-auz-property-scoped-assignment",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await expect(
+      assignRoleToAccount(
+        propertyScopedAssigner,
+        {
+          userAccountId: fixture.delegatedAccount.id,
+          roleId: customRole.id,
+          scopeType: "organization",
+          assignedToMe: false,
+          statuses: [],
+          conditionStartsAt: undefined,
+          conditionEndsAt: undefined,
+          validFrom: undefined,
+          validTo: undefined
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-auz-scope-escalation",
           ipAddress: "127.0.0.1"
         }
       )
@@ -3368,6 +3469,7 @@ describe("PostgreSQL baseline", () => {
     });
 
     expect(assignment.created).toBe(true);
+    expect(delegatedAssignment.created).toBe(true);
     expect(customAuthContext.permissions.has(permissionKey("task", "edit"))).toBe(true);
     expect(expiredAuthContext.permissions.size).toBe(0);
 
@@ -3454,6 +3556,24 @@ describe("PostgreSQL baseline", () => {
         propertyId: fixture.assignedProperty.id,
         amount: "8000.00",
         dataClass: "financial"
+      })
+    ).toBe(false);
+    expect(
+      authorize(customAuthContext, "edit", {
+        type: "task",
+        organizationId: orgA.id,
+        id: "018f0a0b-0000-7000-9000-00000000a008",
+        propertyId: fixture.assignedProperty.id,
+        occurredAt: "2026-06-15T12:00:00.000Z"
+      })
+    ).toBe(true);
+    expect(
+      authorize(customAuthContext, "edit", {
+        type: "task",
+        organizationId: orgA.id,
+        id: "018f0a0b-0000-7000-9000-00000000a009",
+        propertyId: fixture.assignedProperty.id,
+        occurredAt: "2100-01-01T00:00:00.000Z"
       })
     ).toBe(false);
 
