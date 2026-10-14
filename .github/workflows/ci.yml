@@ -141,7 +141,8 @@ jobs:
         if: steps.staging_credentials.outputs.ready == 'true'
         id: deploy
         run: |
-          deployment_output="$(vercel deploy --prebuilt --target=preview --meta githubCommitSha="$GITHUB_SHA" --meta githubCommitRef=main)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          deployment_output="$(vercel deploy --prebuilt --target=preview --meta githubCommitSha="$GITHUB_SHA" --meta githubCommitRef=main --env "VERCEL_GIT_COMMIT_SHA=$GITHUB_SHA" --env VERCEL_GIT_COMMIT_REF=main)"
           deployment_url="$(DEPLOYMENT_OUTPUT="$deployment_output" node --input-type=module -e '
             const output = process.env.DEPLOYMENT_OUTPUT ?? "";
             const urls = [...output.matchAll(/https:\/\/[a-z0-9.-]+\.vercel\.app/g)].map((match) => match[0]);
