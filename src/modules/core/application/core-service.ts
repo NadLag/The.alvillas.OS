@@ -198,7 +198,8 @@ export async function listProperties(
         organizationId: ctx.organizationId,
         id: property.id,
         propertyId: property.id,
-        city: property.city
+        city: property.cityId,
+        region: property.regionId
       })
     )
   );

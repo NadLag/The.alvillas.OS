@@ -366,6 +366,7 @@
     "title": "Parametres organisation",
     "subtitle": "Gerez l'identite, la marque, la langue, le pays et la devise de base de cette organisation ALVILLAS OS independante.",
     "backToWorkspace": "Espace",
+    "geographyLink": "Regions et villes",
     "profileLabel": "Profil",
     "settingsLabel": "Parametres",
     "notProvided": "Non renseigne",
@@ -402,6 +403,60 @@
     "denied": {
       "title": "Acces organisation refuse",
       "subtitle": "Ce compte n'a pas la permission de consulter les parametres organisation."
+    },
+    "geography": {
+      "eyebrow": "Organisation",
+      "title": "Regions et villes",
+      "subtitle": "Gerez la hierarchie geographique qui cadre les portefeuilles, les proprietes et les operations regionales.",
+      "backToOrganization": "Organisation",
+      "fields": {
+        "regionName": "Nom de region",
+        "regionCode": "Code region",
+        "regionDescription": "Description",
+        "cityName": "Nom de ville",
+        "cityRegion": "Region",
+        "cityCountry": "Pays",
+        "cityTimezone": "Fuseau horaire",
+        "sortOrder": "Ordre",
+        "noRegion": "Sans region"
+      },
+      "form": {
+        "archive": "Archiver",
+        "saveRegion": "Creer region",
+        "saveCity": "Creer ville",
+        "saving": "Enregistrement..."
+      },
+      "forms": {
+        "label": "Formulaires geographie",
+        "region": "Creer region",
+        "city": "Creer ville"
+      },
+      "regions": {
+        "title": "Regions",
+        "empty": "Aucune region n'a encore ete creee.",
+        "noCode": "Sans code",
+        "cityCount": "{count, plural, one {# ville} other {# villes}}",
+        "propertyCount": "{count, plural, one {# propriete} other {# proprietes}}"
+      },
+      "cities": {
+        "title": "Villes",
+        "empty": "Aucune ville n'a encore ete creee.",
+        "propertyCount": "{count, plural, one {# propriete} other {# proprietes}}"
+      },
+      "messages": {
+        "saved": "Geographie enregistree.",
+        "archived": "Geographie archivee.",
+        "validation": "Verifiez les champs indiques puis reessayez.",
+        "unauthorized": "Reconnectez-vous pour continuer.",
+        "forbidden": "Vous n'avez pas acces aux parametres geographiques.",
+        "notFound": "L'enregistrement geographique est introuvable.",
+        "conflict": "Deplacez ou archivez les enregistrements dependants d'abord.",
+        "generic": "La geographie n'a pas pu etre enregistree. Reessayez."
+      },
+      "denied": {
+        "title": "Acces geographie refuse",
+        "subtitle": "Ce compte n'a pas la permission de consulter les regions et villes."
+      }
     }
   },
   "Core": {
@@ -490,6 +545,7 @@
       "form": {
         "owner": "Proprietaire principal",
         "noOwners": "Creez un proprietaire avant d'ajouter une propriete.",
+        "noCities": "Les villes viennent de Organisation > Regions et villes.",
         "name": "Nom de la propriete",
         "addressLine1": "Adresse ligne 1",
         "addressLine2": "Adresse ligne 2",

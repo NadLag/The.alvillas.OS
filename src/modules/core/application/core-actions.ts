@@ -161,6 +161,7 @@ export async function createPropertyAction(
 
   const parsed = parsePropertyInput({
     ownerId: formValue(formData, "ownerId"),
+    cityId: formValue(formData, "cityId"),
     name: formValue(formData, "name"),
     addressLine1: formValue(formData, "addressLine1"),
     addressLine2: formValue(formData, "addressLine2"),

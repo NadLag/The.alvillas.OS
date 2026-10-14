@@ -137,33 +137,42 @@ export const propertyOnboardingProfileInputSchema = z.object({
 
 export type PropertyOnboardingProfileInput = z.infer<typeof propertyOnboardingProfileInputSchema>;
 
-export const propertyInputSchema = z.object({
-  ownerId: z.string().uuid(),
-  name: requiredText(160),
-  addressLine1: requiredText(240),
-  addressLine2: optionalText(240),
-  city: requiredText(120),
-  region: optionalText(120),
-  countryCode: z
-    .string()
-    .trim()
-    .length(2)
-    .transform((value) => value.toUpperCase())
-    .default("MA"),
-  propertyType: requiredText(80),
-  bedrooms: nonNegativeInteger,
-  bathrooms: nonNegativeInteger,
-  livingSpaces: nonNegativeInteger.default(1),
-  hasPool: z.coerce.boolean().default(false),
-  hasGarden: z.coerce.boolean().default(false),
-  parkingSpaces: nonNegativeInteger.default(0),
-  maxGuests: positiveInteger,
-  timezone: requiredText(80).default("Africa/Casablanca"),
-  amenities: z.array(z.string().trim().min(1).max(80)).max(40).default([]),
-  photoUrls: z.array(z.string().url()).max(30).default([]),
-  status: propertyStatusSchema.default("DRAFT"),
-  onboardingProfile: propertyOnboardingProfileInputSchema.default({ houseRules: [] })
-});
+export const propertyInputSchema = z
+  .object({
+    ownerId: z.string().uuid(),
+    cityId: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      z.string().uuid().optional()
+    ),
+    name: requiredText(160),
+    addressLine1: requiredText(240),
+    addressLine2: optionalText(240),
+    city: optionalText(120),
+    region: optionalText(120),
+    countryCode: z
+      .string()
+      .trim()
+      .length(2)
+      .transform((value) => value.toUpperCase())
+      .default("MA"),
+    propertyType: requiredText(80),
+    bedrooms: nonNegativeInteger,
+    bathrooms: nonNegativeInteger,
+    livingSpaces: nonNegativeInteger.default(1),
+    hasPool: z.coerce.boolean().default(false),
+    hasGarden: z.coerce.boolean().default(false),
+    parkingSpaces: nonNegativeInteger.default(0),
+    maxGuests: positiveInteger,
+    timezone: requiredText(80).default("Africa/Casablanca"),
+    amenities: z.array(z.string().trim().min(1).max(80)).max(40).default([]),
+    photoUrls: z.array(z.string().url()).max(30).default([]),
+    status: propertyStatusSchema.default("DRAFT"),
+    onboardingProfile: propertyOnboardingProfileInputSchema.default({ houseRules: [] })
+  })
+  .refine((value) => Boolean(value.cityId || value.city), {
+    message: "City is required",
+    path: ["city"]
+  });
 
 export type PropertyInput = z.infer<typeof propertyInputSchema>;
 
@@ -224,6 +233,9 @@ export type PropertyOnboardingProfileSummary = {
 export type PropertySummary = {
   id: string;
   name: string;
+  cityId: string;
+  regionId: string | null;
+  region: string | null;
   city: string;
   propertyType: string;
   bedrooms: number;

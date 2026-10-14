@@ -47,9 +47,14 @@ export default async function OrganizationPage({
     <AdminShell className="resource-page" testId="organization-page">
       <ShellHeader
         actions={
-          <Link className="secondary-button" href={`/${appLocale}/app`}>
-            {t("backToWorkspace")}
-          </Link>
+          <div className="button-row">
+            <Link className="secondary-button" href={`/${appLocale}/app/organization/geography`}>
+              {t("geographyLink")}
+            </Link>
+            <Link className="secondary-button" href={`/${appLocale}/app`}>
+              {t("backToWorkspace")}
+            </Link>
+          </div>
         }
         eyebrow={t("eyebrow")}
         subtitle={t("subtitle")}

@@ -40,6 +40,11 @@ type OwnerWithDetails = Prisma.OwnerGetPayload<{
 }>;
 type PropertyWithOwners = Prisma.PropertyGetPayload<{
   include: {
+    cityRef: {
+      include: {
+        region: true;
+      };
+    };
     onboardingProfile: true;
     propertyOwners: {
       include: {
@@ -169,7 +174,10 @@ function propertyToSummary(property: PropertyWithOwners): PropertySummary {
   return {
     id: property.id,
     name: property.name,
-    city: property.city,
+    cityId: property.cityId ?? property.cityRef?.id ?? "",
+    regionId: property.regionId,
+    region: property.cityRef?.region?.name ?? property.region,
+    city: property.cityRef?.name ?? property.city,
     propertyType: property.propertyType,
     bedrooms: property.bedrooms,
     bathrooms: property.bathrooms,
@@ -283,14 +291,17 @@ export class CoreRepository {
   }
 
   async createProperty(input: PropertyInput, actorId: string): Promise<PropertySummary> {
+    const geography = await this.resolvePropertyGeography(input, actorId);
     const property = await this.tx.property.create({
       data: {
         organizationId: this.organizationId,
         name: input.name,
         addressLine1: input.addressLine1,
         addressLine2: input.addressLine2,
-        city: input.city,
-        region: input.region,
+        cityId: geography.city.id,
+        regionId: geography.city.regionId,
+        city: geography.city.name,
+        region: geography.city.region?.name,
         countryCode: input.countryCode,
         propertyType: input.propertyType,
         bedrooms: input.bedrooms,
@@ -334,6 +345,11 @@ export class CoreRepository {
         }
       },
       include: {
+        cityRef: {
+          include: {
+            region: true
+          }
+        },
         onboardingProfile: true,
         propertyOwners: {
           include: {
@@ -355,6 +371,11 @@ export class CoreRepository {
       orderBy: [{ city: "asc" }, { name: "asc" }],
       take: 1000,
       include: {
+        cityRef: {
+          include: {
+            region: true
+          }
+        },
         onboardingProfile: true,
         propertyOwners: {
           where: {
@@ -379,6 +400,11 @@ export class CoreRepository {
         archivedAt: null
       },
       include: {
+        cityRef: {
+          include: {
+            region: true
+          }
+        },
         onboardingProfile: true,
         propertyOwners: {
           where: {
@@ -393,5 +419,77 @@ export class CoreRepository {
     });
 
     return property ? propertyToSummary(property) : null;
+  }
+
+  private async resolvePropertyGeography(
+    input: PropertyInput,
+    actorId: string
+  ): Promise<{
+    city: Prisma.CityGetPayload<{ include: { region: true } }>;
+  }> {
+    if (input.cityId) {
+      const city = await this.tx.city.findFirst({
+        where: {
+          id: input.cityId,
+          organizationId: this.organizationId,
+          archivedAt: null
+        },
+        include: { region: true }
+      });
+
+      if (!city) {
+        throw new Error("City does not exist in this tenant");
+      }
+
+      return { city };
+    }
+
+    const regionName = input.region?.trim();
+    const region = regionName
+      ? (await this.tx.region.findFirst({
+          where: {
+            organizationId: this.organizationId,
+            archivedAt: null,
+            name: { equals: regionName, mode: "insensitive" }
+          }
+        })) ??
+        (await this.tx.region.create({
+          data: {
+            organizationId: this.organizationId,
+            name: regionName,
+            createdBy: actorId
+          }
+        }))
+      : null;
+    const cityName = input.city?.trim();
+
+    if (!cityName) {
+      throw new Error("City is required");
+    }
+
+    const city =
+      (await this.tx.city.findFirst({
+        where: {
+          organizationId: this.organizationId,
+          archivedAt: null,
+          name: { equals: cityName, mode: "insensitive" },
+          countryCode: input.countryCode,
+          regionId: region?.id ?? null
+        },
+        include: { region: true }
+      })) ??
+      (await this.tx.city.create({
+        data: {
+          organizationId: this.organizationId,
+          regionId: region?.id,
+          name: cityName,
+          countryCode: input.countryCode,
+          timezone: input.timezone,
+          createdBy: actorId
+        },
+        include: { region: true }
+      }));
+
+    return { city };
   }
 }

@@ -6,6 +6,8 @@ import { coreActorContextFromSession } from "@/modules/core/application/core-acc
 import { listOwners, listProperties } from "@/modules/core/application/core-service";
 import { PropertyCreateForm } from "@/modules/core/ui/core-forms";
 import { PropertyRegisterTable } from "@/modules/core/ui/core-tables";
+import { listGeography } from "@/modules/organization/application/geography-service";
+import { organizationActorContextFromSession } from "@/modules/organization/application/organization-access";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -26,15 +28,17 @@ export default async function PropertiesPage({
 
   const session = await auth();
   const ctx = coreActorContextFromSession(session);
+  const organizationCtx = await organizationActorContextFromSession(session);
 
   if (!ctx) {
     redirect(`/${appLocale}/login`);
   }
 
-  const [t, owners, properties] = await Promise.all([
+  const [t, owners, properties, geography] = await Promise.all([
     getTranslations("Core"),
     listOwners(ctx),
-    listProperties(ctx)
+    listProperties(ctx),
+    organizationCtx ? listGeography(organizationCtx).catch(() => ({ cities: [], regions: [] })) : { cities: [], regions: [] }
   ]);
   const dsnT = await getTranslations("DesignSystem");
   const propertyRows = properties.map((property) => ({
@@ -86,11 +90,13 @@ export default async function PropertiesPage({
         <aside className="workspace-side" aria-label={t("properties.createLabel")}>
           <p className="panel-label">{t("properties.createLabel")}</p>
           <PropertyCreateForm
+            cities={geography.cities.map((city) => ({ id: city.id, name: city.name, regionName: city.regionName }))}
             locale={appLocale}
             owners={owners.map((owner) => ({ id: owner.id, displayName: owner.displayName }))}
             labels={{
               owner: t("properties.form.owner"),
               noOwners: t("properties.form.noOwners"),
+              noCities: t("properties.form.noCities"),
               name: t("properties.form.name"),
               addressLine1: t("properties.form.addressLine1"),
               addressLine2: t("properties.form.addressLine2"),

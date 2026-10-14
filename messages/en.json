@@ -366,6 +366,7 @@
     "title": "Organization settings",
     "subtitle": "Manage identity, branding, locale, country and base-currency policy for this independent ALVILLAS OS organization.",
     "backToWorkspace": "Workspace",
+    "geographyLink": "Regions and cities",
     "profileLabel": "Profile",
     "settingsLabel": "Settings",
     "notProvided": "Not provided",
@@ -402,6 +403,60 @@
     "denied": {
       "title": "Organization access denied",
       "subtitle": "This account does not have permission to view organization settings."
+    },
+    "geography": {
+      "eyebrow": "Organization",
+      "title": "Regions and cities",
+      "subtitle": "Manage the geography hierarchy that scopes portfolios, properties and regional operations.",
+      "backToOrganization": "Organization",
+      "fields": {
+        "regionName": "Region name",
+        "regionCode": "Region code",
+        "regionDescription": "Description",
+        "cityName": "City name",
+        "cityRegion": "Region",
+        "cityCountry": "Country",
+        "cityTimezone": "Timezone",
+        "sortOrder": "Sort order",
+        "noRegion": "No region"
+      },
+      "form": {
+        "archive": "Archive",
+        "saveRegion": "Create region",
+        "saveCity": "Create city",
+        "saving": "Saving..."
+      },
+      "forms": {
+        "label": "Geography forms",
+        "region": "Create region",
+        "city": "Create city"
+      },
+      "regions": {
+        "title": "Regions",
+        "empty": "No regions have been created yet.",
+        "noCode": "No code",
+        "cityCount": "{count, plural, one {# city} other {# cities}}",
+        "propertyCount": "{count, plural, one {# property} other {# properties}}"
+      },
+      "cities": {
+        "title": "Cities",
+        "empty": "No cities have been created yet.",
+        "propertyCount": "{count, plural, one {# property} other {# properties}}"
+      },
+      "messages": {
+        "saved": "Geography saved.",
+        "archived": "Geography archived.",
+        "validation": "Check the highlighted fields and try again.",
+        "unauthorized": "Sign in again to continue.",
+        "forbidden": "You do not have access to geography settings.",
+        "notFound": "The geography record was not found.",
+        "conflict": "Move or archive dependent records first.",
+        "generic": "Geography could not be saved. Try again."
+      },
+      "denied": {
+        "title": "Geography access denied",
+        "subtitle": "This account does not have permission to view regions and cities."
+      }
     }
   },
   "Core": {
@@ -490,6 +545,7 @@
       "form": {
         "owner": "Primary owner",
         "noOwners": "Create an owner before adding a property.",
+        "noCities": "Cities come from Organization > Regions and cities.",
         "name": "Property name",
         "addressLine1": "Address line 1",
         "addressLine2": "Address line 2",
