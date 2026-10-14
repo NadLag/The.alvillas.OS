@@ -137,12 +137,13 @@ test.describe("identity lifecycle", () => {
     const code = codeText.split(":").pop()?.trim();
     expect(code).toBeTruthy();
 
+    await page.context().clearCookies();
     await page.goto(`/en/activate/${code}`);
     await page.getByTestId("activation-phone").fill(invitedPhone);
     await page.getByTestId("activation-pin").fill("123456");
     await page.getByTestId("activation-password").fill("correct horse field staple");
     await page.getByTestId("activation-submit").click();
-    await expect(page).toHaveURL(/\/en\/app/u);
+    await expect(page).toHaveURL(/\/en\/login/u);
 
     await page.context().clearCookies();
     await page.goto("/en/login");
@@ -289,5 +290,16 @@ test.describe("identity lifecycle", () => {
 
     await page.getByTestId("register-passkey-button").click();
     await expect(page.getByText("Passkey registered.")).toBeVisible();
+    await page.context().clearCookies();
+    await page.goto(`${passkeyOrigin}/en/login`);
+    await page.getByTestId("login-email").fill(adminEmail);
+    await page.getByTestId("login-passkey").click();
+    await expect(page.getByTestId("login-mfa-step")).toBeVisible();
+    await expect(page.getByTestId("login-password")).toHaveCount(0);
+    await page.getByTestId("login-mfa-code").fill(totpCode(secret));
+    await page.getByTestId("login-submit").click();
+    await expect(page).toHaveURL(/\/en\/app/u);
+    const session = await (await page.request.get(`${passkeyOrigin}/api/auth/session`)).json() as { user?: { id?: string } };
+    expect(session.user?.id).toBeTruthy();
   });
 });

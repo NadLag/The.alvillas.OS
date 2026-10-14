@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { authenticateMfaChallenge, beginPasswordMfaChallenge } from "@/platform/auth/identity-auth";
+import { authenticateMfaChallenge, beginPasswordMfaChallenge, beginVerifiedPasskeyLogin } from "@/platform/auth/identity-auth";
 import { decryptSecret, encryptSecret } from "@/platform/auth/secret-encryption";
 import { generateTotpSecret, totpCode } from "@/platform/auth/totp";
 import { loginRateLimitWasChecked, withCheckedLoginRateLimit } from "@/platform/auth/login-rate-limit";
@@ -16,6 +16,7 @@ vi.mock("@/platform/db/tenant", () => ({
     userAccount: { findFirst: mocks.findAccount, update: mocks.updateAccount },
     authCredential: { update: mocks.updateCredential, updateMany: mocks.updateCredential },
     authChallenge: { create: mocks.createChallenge, updateMany: mocks.consumeChallenge },
+    $queryRaw: () => Promise.resolve([{ id: "active-account" }]),
     authSession: { create: mocks.createSession }, authDevice: { upsert: mocks.upsertDevice }
   })
 }));
@@ -96,6 +97,34 @@ describe("password MFA challenges", () => {
     mocks.consumeChallenge.mockResolvedValue({ count: 0 });
     await expect(authenticateMfaChallenge({ email: user.email, challengeToken: token, deviceId: "device-a", mfaCode: totpCode(user.secret), headers: new Headers() })).resolves.toBeNull();
     expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+});
+
+describe("verified passkey session handoff", () => {
+  it.each([true, false])("preserves MFA policy when required=%s", async (mfaRequired) => {
+    const user = { ...account(), mfaRequired, roleAssignments: [] };
+    mocks.findAccount.mockResolvedValue(user);
+    const result = await beginVerifiedPasskeyLogin({ email: user.email, userAccountId: user.id, sessionVersion: user.sessionVersion, deviceId: "passkey-device" });
+    expect(result.mfaRequired).toBe(mfaRequired);
+    const input = { email: user.email, challengeToken: result.challengeToken, deviceId: "passkey-device", headers: new Headers() };
+    if (mfaRequired) {
+      await expect(authenticateMfaChallenge(input)).resolves.toBeNull();
+      expect(mocks.createSession).not.toHaveBeenCalled();
+    }
+    await expect(authenticateMfaChallenge({ ...input, mfaCode: mfaRequired ? totpCode(user.secret) : undefined })).resolves.toMatchObject({ id: user.id, sessionId: "session-id" });
+    expect(mocks.audit).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ after: expect.objectContaining({ method: "passkey" }) as unknown }));
+  });
+
+  it("refuses a proof for a different account", async () => {
+    mocks.findAccount.mockResolvedValue(account());
+    await expect(beginVerifiedPasskeyLogin({ email: "other@example.test", userAccountId: randomUUID(), sessionVersion: 1, deviceId: "device" })).rejects.toThrow();
+    expect(mocks.createChallenge).not.toHaveBeenCalled();
+  });
+  it("refuses a proof captured before credential or session revocation", async () => {
+    const user = { ...account(), sessionVersion: 2 };
+    mocks.findAccount.mockResolvedValue(user);
+    await expect(beginVerifiedPasskeyLogin({ email: user.email, userAccountId: user.id, sessionVersion: 1, deviceId: "device" })).rejects.toThrow();
+    expect(mocks.createChallenge).not.toHaveBeenCalled();
   });
 });
 

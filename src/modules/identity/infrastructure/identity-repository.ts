@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
 export type IdentityAccountSummary = {
@@ -251,6 +251,47 @@ export class IdentityRepository {
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
   ) {}
+
+  findAccountIdByEmail(email: string) {
+    return this.tx.userAccount.findUnique({
+      where: { organizationId_email: { organizationId: this.organizationId, email } }, select: { id: true }
+    });
+  }
+
+  async lockIdentityOperation(key: string): Promise<void> {
+    await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${this.organizationId}:${key}`}, 0))`);
+  }
+
+  findActivePinAccount(phone: string, now: Date) {
+    return this.tx.userAccount.findFirst({
+      where: { organizationId: this.organizationId, phone, status: "ACTIVE" },
+      include: {
+        person: true,
+        authCredentials: { where: { revokedAt: null, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] } },
+        roleAssignments: { include: { role: true }, where: {
+          archivedAt: null, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }]
+        } }
+      }
+    });
+  }
+
+  async lockActiveAccount(userAccountId: string, sessionVersion: number): Promise<boolean> {
+    const rows = await this.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM user_account
+      WHERE organization_id = ${this.organizationId}::uuid AND id = ${userAccountId}::uuid
+        AND status = 'ACTIVE' AND session_version = ${sessionVersion}
+      FOR UPDATE
+    `);
+    return rows.length === 1;
+  }
+
+  async lockRecoverableAccount(email: string): Promise<boolean> {
+    const rows = await this.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM user_account WHERE organization_id = ${this.organizationId}::uuid
+        AND email = ${email} AND status <> 'DEACTIVATED' FOR UPDATE
+    `);
+    return rows.length === 1;
+  }
 
   async ensurePermission(input: string | {
     key: string;

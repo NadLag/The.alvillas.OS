@@ -28,6 +28,7 @@ import {
 } from "@/modules/core/application/core-service";
 import {
   assignRoleToAccount,
+  activateInvitation,
   createCustomRole,
   createInvitation,
   createPersonProfile,
@@ -37,6 +38,7 @@ import {
   issueRecoveryCode,
   listIdentityDashboard,
   resetAccountPin,
+  recoverPassword,
   revokeCredential,
   revokeDevice,
   updatePersonProfile,
@@ -110,6 +112,9 @@ import { coHostSpecScenarios, simulateAccess } from "@/platform/authz/simulator"
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { resolveFeatureFlag } from "@/platform/config/feature-flags";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { bootstrapFirstAdmin, bootstrapOrganizationId } from "../../prisma/bootstrap-admin";
+import { PinSecurityRepository } from "@/modules/identity/infrastructure/pin-security-repository";
+import { pinLockoutConfigKey, pinLockoutState } from "@/modules/identity/domain/pin-lockout";
 
 let prisma: PrismaClient;
 let adminPrisma: PrismaClient | undefined;
@@ -310,6 +315,101 @@ describe("PostgreSQL baseline", () => {
     `;
 
     expect(rows.map((row) => row.migration_name)).toEqual(migrationNames());
+  });
+
+  it("persists configurable PIN backoff across concurrent transactions and isolates tenant state", async () => {
+    const orgA = await prisma.organization.create({ data: { name: "PIN security tenant", baseCurrency: "MAD" } });
+    const orgB = await prisma.organization.create({ data: { name: "Other PIN security tenant", baseCurrency: "MAD" } });
+    const runner = prisma as unknown as TenantTransactionRunner;
+    const phone = "+212699000001";
+    const now = new Date();
+    await withTenant(runner, orgA.id, async (tx) => {
+      await new ConfigRuleRepository(tx, orgA.id).createVersion({ key: pinLockoutConfigKey, scopeType: "organization",
+        value: { attempts: 3, initialDelaySeconds: 10, maximumDelaySeconds: 40, resetAfterSeconds: 3600 },
+        effectiveFrom: new Date(now.getTime() - 1000), reason: "Integration PIN security policy" });
+    });
+    await Promise.all(Array.from({ length: 4 }, () => withTenant(runner, orgA.id, async (tx) => {
+      const repo = new PinSecurityRepository(tx, orgA.id);
+      await repo.lock(phone);
+      const state = await repo.state(phone);
+      await repo.save(phone, (state?.count ?? 0) + 1, now);
+    })));
+    await withTenant(runner, orgA.id, async (tx) => {
+      const repo = new PinSecurityRepository(tx, orgA.id);
+      const state = await repo.state(phone);
+      const policy = await repo.policy(now);
+      expect(state?.count).toBe(4);
+      expect(pinLockoutState(state, policy, now).lockedUntil.getTime() - now.getTime()).toBe(20_000);
+      const stored = await tx.rateLimitBucket.findMany();
+      expect(stored).toHaveLength(1);
+      expect(stored[0].keyHash).not.toContain(phone);
+      await repo.save(phone, 0, now);
+      expect(pinLockoutState(await repo.state(phone), policy, now).locked).toBe(false);
+    });
+    await withTenant(runner, orgB.id, async (tx) => {
+      expect(await new PinSecurityRepository(tx, orgB.id).state(phone)).toBeNull();
+      const wrongTenantRepo = new PinSecurityRepository(tx, orgA.id);
+      expect(await wrongTenantRepo.state(phone)).toBeNull();
+      await expect(wrongTenantRepo.save(phone, 1, now)).rejects.toThrow(/row-level security/u);
+    });
+  });
+
+  it("consumes invitation and recovery codes once under concurrency and prevents offboard recovery", async () => {
+    if (!adminPrisma) throw new Error("Expected local administrator connection");
+    const email = `idn-bootstrap-${randomUUID()}@example.test`;
+    await bootstrapFirstAdmin(adminPrisma, { ADMIN_EMAIL: email, ADMIN_PASSWORD: "local integration bootstrap password" });
+    const runner = prisma as unknown as TenantTransactionRunner;
+    const admin = await withTenant(runner, bootstrapOrganizationId, (tx) => tx.userAccount.findFirstOrThrow({ where: { email } }));
+    const credentialBefore = await withTenant(runner, bootstrapOrganizationId, async (tx) => {
+      await tx.person.update({ where: { id: admin.personId }, data: { displayName: "Owner-managed profile" } });
+      await tx.userAccount.update({ where: { id: admin.id }, data: { mfaRequired: true } });
+      return tx.authCredential.findFirstOrThrow({ where: { userAccountId: admin.id, type: "PASSWORD" } });
+    });
+    await bootstrapFirstAdmin(adminPrisma, { ADMIN_EMAIL: email, ADMIN_PASSWORD: "must not replace enrolled credentials" });
+    await withTenant(runner, bootstrapOrganizationId, async (tx) => {
+      const preserved = await tx.userAccount.findFirstOrThrow({ where: { id: admin.id }, include: { person: true } });
+      expect(preserved.passwordHash).toBe(admin.passwordHash);
+      expect(preserved.mfaRequired).toBe(true);
+      expect(preserved.person.displayName).toBe("Owner-managed profile");
+      expect((await tx.authCredential.findFirstOrThrow({ where: { id: credentialBefore.id } })).secretHash).toBe(credentialBefore.secretHash);
+    });
+    const ctx = { organizationId: bootstrapOrganizationId, actorId: admin.id, personId: admin.personId,
+      authContext: await authContextForAccount(bootstrapOrganizationId, admin.id, { db: runner }) };
+    const invitedEmail = `idn-invitation-${randomUUID()}@example.test`;
+    const invitation = await createInvitation(ctx, { displayName: "Identity integration invite", email: invitedEmail,
+      phone: "+212699000002", roleKey: "field_staff", scopeType: "organization", expiresInHours: 1 }, { db: runner });
+    // A wrong phone is rejected but the limiter transaction still commits.
+    await expect(activateInvitation({ code: invitation.code, phone: "+212699000099", pin: "654321" }, { db: runner })).rejects.toThrow(/phone verification/u);
+    const results = await Promise.allSettled([1, 2].map(() => activateInvitation({ code: invitation.code,
+      phone: "+212699000002", pin: "654321", password: "local invitation password" }, { db: runner })));
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const account = await withTenant(runner, bootstrapOrganizationId, (tx) => tx.userAccount.findFirstOrThrow({ where: { email: invitedEmail } }));
+    const recoveryCode = await issueRecoveryCode(ctx, account.id, { db: runner });
+    const recovered = await Promise.allSettled([1, 2].map(() => recoverPassword({ email: invitedEmail,
+      recoveryCode, newPassword: "local recovered identity password" }, { db: runner })));
+    expect(recovered.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const credential = await withTenant(runner, bootstrapOrganizationId, (tx) => tx.authCredential.findFirstOrThrow({ where: { userAccountId: account.id, type: "PASSWORD", revokedAt: null } }));
+    await revokeCredential(ctx, credential.id, { db: runner });
+    await withTenant(runner, bootstrapOrganizationId, async (tx) => {
+      expect((await tx.userAccount.findFirstOrThrow({ where: { id: account.id } })).passwordHash).toBeNull();
+      expect(await tx.authCredential.count({ where: { userAccountId: account.id, type: "PASSWORD", revokedAt: null } })).toBe(0);
+      expect(await tx.authCredential.count({ where: { userAccountId: account.id, type: "PIN" } })).toBe(1);
+      const invitationBucket = await tx.rateLimitBucket.findMany({ where: { windowSeconds: 900 } });
+      expect(invitationBucket.some((bucket) => bucket.count === 3)).toBe(true);
+    });
+    const offboardCode = await issueRecoveryCode(ctx, account.id, { db: runner });
+    const offboardRace = await Promise.allSettled([
+      deactivateAccount(ctx, account.id, { db: runner }),
+      recoverPassword({ email: invitedEmail, recoveryCode: offboardCode,
+        newPassword: "concurrent recovery must remain offboarded" }, { db: runner })
+    ]);
+    expect(offboardRace[0].status).toBe("fulfilled");
+    await withTenant(runner, bootstrapOrganizationId, async (tx) => {
+      expect((await tx.userAccount.findFirstOrThrow({ where: { id: account.id } })).status).toBe("DEACTIVATED");
+    });
+    await expect(recoverPassword({ email: invitedEmail, recoveryCode: offboardCode,
+      newPassword: "must not reactivate offboarded account" }, { db: runner })).rejects.toThrow();
   });
 
   it("supports password MFA challenges with atomic consumption and tenant isolation", async () => {

@@ -44,6 +44,11 @@ export async function bootstrapFirstAdmin(
   }
 
   const email = normalizeEmail(env.ADMIN_EMAIL);
+  const existing = await withTenant(client, bootstrapOrganizationId, (tx) =>
+    new IdentityRepository(tx, bootstrapOrganizationId).findAccountIdByEmail(email));
+  // Deployment bootstrap creates the first account; recovery and account lifecycle
+  // own all subsequent changes. Repeated deployments must preserve enrolled factors.
+  if (existing) return;
   const organization = await client.organization.upsert({
     where: { id: bootstrapOrganizationId },
     update: { name: "ALVILLAS SARL", baseCurrency: "MAD" },
@@ -52,6 +57,9 @@ export async function bootstrapFirstAdmin(
   const passwordHash = await hashPassword(env.ADMIN_PASSWORD);
 
   await withTenant(client, organization.id, async (tx) => {
+    const bootstrapRepository = new IdentityRepository(tx, organization.id);
+    await bootstrapRepository.lockIdentityOperation(`first-admin:${email}`);
+    if (await bootstrapRepository.findAccountIdByEmail(email)) return;
     const person = await tx.person.upsert({
       where: { organizationId_email: { organizationId: organization.id, email } },
       update: {

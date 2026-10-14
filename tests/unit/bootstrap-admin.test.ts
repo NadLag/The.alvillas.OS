@@ -108,6 +108,7 @@ describe("first-admin bootstrap", () => {
       upsert: vi.fn(() => Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000002" }))
     };
     const userAccount = {
+      findUnique: vi.fn(() => Promise.resolve(null)),
       upsert: vi.fn((args: UserAccountUpsertArgs) => {
         void args;
         return Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000003" });
@@ -208,7 +209,7 @@ describe("first-admin bootstrap", () => {
     });
   });
 
-  it("updates an existing administrator without duplicating credentials, roles, or config", async () => {
+  it("preserves an existing administrator's credentials, lifecycle, roles, profile and config", async () => {
     const existingPasswordCredentialId = "018f0a0b-0000-7000-9000-000000000006";
     const existingRoleAssignmentId = "018f0a0b-0000-7000-9000-000000000007";
     const existingConfigRuleId = "018f0a0b-0000-7000-9000-000000000004";
@@ -219,6 +220,7 @@ describe("first-admin bootstrap", () => {
       upsert: vi.fn(() => Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000002" }))
     };
     const userAccount = {
+      findUnique: vi.fn(() => Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000003" })),
       upsert: vi.fn((args: UserAccountUpsertArgs) => {
         void args;
         return Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000003" });
@@ -272,30 +274,12 @@ describe("first-admin bootstrap", () => {
       ADMIN_PASSWORD: "owner-entered replacement password"
     });
 
-    const userAccountUpsertArgs = userAccount.upsert.mock.calls[0]?.[0];
-    expect(userAccountUpsertArgs?.update).toMatchObject({
-      personId: "018f0a0b-0000-7000-9000-000000000002",
-      status: "ACTIVE"
-    });
-    expect(authCredential.update).toHaveBeenCalledOnce();
-    expect(authCredential.update.mock.calls[0]?.[0]).toMatchObject({
-      where: { id: existingPasswordCredentialId },
-      data: { label: "Password" }
-    });
+    expect(organization.upsert).not.toHaveBeenCalled();
+    expect(person.upsert).not.toHaveBeenCalled();
+    expect(userAccount.upsert).not.toHaveBeenCalled();
+    expect(authCredential.update).not.toHaveBeenCalled();
     expect(authCredential.create).not.toHaveBeenCalled();
-    expect(roleAssignment.findFirst).toHaveBeenCalledWith({
-      where: {
-        organizationId: bootstrapOrganizationId,
-        personId: "018f0a0b-0000-7000-9000-000000000002",
-        userAccountId: "018f0a0b-0000-7000-9000-000000000003",
-        roleId: "role-admin",
-        scopeType: "organization",
-        scopeId: null,
-        validTo: null,
-        archivedAt: null
-      },
-      select: { id: true }
-    });
+    expect(roleAssignment.findFirst).not.toHaveBeenCalled();
     expect(roleAssignment.create).not.toHaveBeenCalled();
     expect(configRule.create).not.toHaveBeenCalled();
   });

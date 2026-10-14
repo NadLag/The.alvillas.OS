@@ -8,6 +8,9 @@ import { decryptSecret, encryptSecret } from "@/platform/auth/secret-encryption"
 import { verifyPassword } from "@/platform/auth/password";
 import { verifyTotpCode } from "@/platform/auth/totp";
 import { safeLocale, type AppLocale } from "@/i18n/routing";
+import { PinSecurityRepository } from "@/modules/identity/infrastructure/pin-security-repository";
+import { pinLockoutState } from "@/modules/identity/domain/pin-lockout";
+import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
 
 export type AuthorizedIdentityUser = {
   id: string;
@@ -35,7 +38,7 @@ export type PasswordMfaChallengeResult =
 const mfaChallengeTtlMs = 5 * 60 * 1000;
 
 const mfaChallengeSchema = z.object({
-  purpose: z.literal("password-mfa"),
+  purpose: z.enum(["password-mfa", "passkey-login"]),
   organizationId: z.string().uuid(),
   userAccountId: z.string().uuid(),
   email: z.string().email(),
@@ -231,13 +234,13 @@ async function passwordMatchesAccount(
 
 async function issueMfaChallenge(
   account: NonNullable<AuthAccount>,
-  input: { email: string; deviceId: string }
+  input: { email: string; deviceId: string; purpose?: MfaChallengePayload["purpose"] }
 ): Promise<string> {
   const nonce = crypto.randomUUID();
   const expiresAt = Date.now() + mfaChallengeTtlMs;
   const token = encryptSecret(
     JSON.stringify({
-      purpose: "password-mfa",
+      purpose: input.purpose ?? "password-mfa",
       organizationId: account.organizationId,
       userAccountId: account.id,
       email: input.email,
@@ -275,7 +278,7 @@ function parseMfaChallenge(token: string): MfaChallengePayload | null {
 async function createAuthSession(
   account: NonNullable<AuthAccount>,
   input: {
-    method: "password" | "pin";
+    method: "password" | "pin" | "passkey";
     deviceId: string;
     headers: Headers;
   }
@@ -285,6 +288,9 @@ async function createAuthSession(
   const userAgentValue = userAgent(input.headers);
 
   return withTenant(prisma as unknown as TenantTransactionRunner, account.organizationId, async (tx) => {
+    if (!await new IdentityRepository(tx, account.organizationId).lockActiveAccount(account.id, account.sessionVersion)) {
+      throw new Error("Account changed during authentication");
+    }
     const session = await tx.authSession.create({
       data: {
         organizationId: account.organizationId,
@@ -418,7 +424,7 @@ export async function authenticateMfaChallenge(input: {
     !account ||
     account.email !== email ||
     account.sessionVersion !== challenge.sessionVersion ||
-    !accountRequiresMfa(account) ||
+    (challenge.purpose === "password-mfa" && !accountRequiresMfa(account)) ||
     !(await verifyMfa(account, input))
   ) {
     return null;
@@ -436,7 +442,7 @@ export async function authenticateMfaChallenge(input: {
   );
   if (consumed.count !== 1) return null;
 
-  const sessionId = await createAuthSession(account, { ...input, method: "password" });
+  const sessionId = await createAuthSession(account, { ...input, method: challenge.purpose === "passkey-login" ? "passkey" : "password" });
 
   return authorizedUser(account, sessionId);
 }
@@ -470,22 +476,52 @@ export async function authenticatePin(input: {
   deviceId: string;
   headers: Headers;
 }): Promise<AuthorizedIdentityUser | null> {
-  const account = await findAccountByPhone(input.phone);
-  const pinCredential = account?.authCredentials.find(
-    (credential) => credential.type === "PIN" && credential.secretHash
-  );
-
-  if (!account || !pinCredential?.secretHash) {
-    return null;
-  }
-
-  if (!(await verifyPassword(input.pin, pinCredential.secretHash))) {
-    return null;
-  }
+  const phone = input.phone.trim().toLowerCase();
+  const account = await withTenant(prisma as unknown as TenantTransactionRunner, bootstrapOrganizationId, async (tx) => {
+    const repository = new PinSecurityRepository(tx, bootstrapOrganizationId);
+    await repository.lock(phone);
+    const now = new Date();
+    const policy = await repository.policy(now, async (rule) => {
+      await writeAuditEvent(tx, {
+        organizationId: bootstrapOrganizationId, actorId: null, action: "config_rule.version.created",
+        resourceType: "config_rule", resourceId: rule.id, requestId: requestId(input.headers), occurredAt: now,
+        after: { key: rule.key, version: rule.version, value: rule.value },
+        reason: "Initialize identity PIN security policy"
+      });
+    });
+    const state = pinLockoutState(await repository.state(phone), policy, now);
+    if (state.locked) return null;
+    const account = await new IdentityRepository(tx, bootstrapOrganizationId).findActivePinAccount(phone, now);
+    const pinCredential = account?.authCredentials.find((credential) => credential.type === "PIN" && credential.secretHash);
+    const valid = Boolean(account && !accountRequiresMfa(account) && pinCredential?.secretHash &&
+      await verifyPassword(input.pin, pinCredential.secretHash));
+    await repository.save(phone, valid ? 0 : state.failures + 1, now);
+    if (!valid && account) await writeAuditEvent(tx, {
+      organizationId: account.organizationId, actorId: account.id, action: "identity.pin.login_failed",
+      resourceType: "identity", resourceId: account.id, ipAddress: requestIp(input.headers),
+      deviceId: input.deviceId, after: { failures: state.failures + 1 },
+      reason: "PIN authentication rejected", requestId: requestId(input.headers), occurredAt: now
+    });
+    return valid ? account : null;
+  });
+  if (!account) return null;
 
   const sessionId = await createAuthSession(account, { ...input, method: "pin" });
 
   return authorizedUser(account, sessionId);
+}
+
+export async function beginVerifiedPasskeyLogin(input: {
+  email: string; userAccountId: string; sessionVersion: number; deviceId: string;
+}): Promise<{ challengeToken: string; mfaRequired: boolean }> {
+  const account = await findAccountById(bootstrapOrganizationId, input.userAccountId);
+  if (!account || account.email !== input.email.trim().toLowerCase() || account.sessionVersion !== input.sessionVersion) {
+    throw new Error("Passkey account is unavailable");
+  }
+  return {
+    challengeToken: await issueMfaChallenge(account, { email: account.email, deviceId: input.deviceId, purpose: "passkey-login" }),
+    mfaRequired: accountRequiresMfa(account)
+  };
 }
 
 export async function validateAuthSession(input: {

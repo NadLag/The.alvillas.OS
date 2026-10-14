@@ -1,8 +1,6 @@
 "use client";
 
 import { useActionState, useState, useTransition } from "react";
-import { formatDate } from "@/i18n/format";
-import { safeLocale, type AppLocale } from "@/i18n/routing";
 import {
   assignRoleAction,
   createCustomRoleAction,
@@ -33,6 +31,7 @@ import type {
 
 type IdentityAdminProps = {
   locale: string;
+  dateLabels: Record<string, string>;
   people: PersonProfileSummary[];
   duplicateContacts: DuplicateContactSummary[];
   accounts: IdentityAccountSummary[];
@@ -742,11 +741,11 @@ function RoleAssignmentForm({
 
 function RoleAssignmentList({
   assignments,
-  locale,
+  dateLabels,
   labels
 }: {
   assignments: RoleAssignmentSummary[];
-  locale: AppLocale;
+  dateLabels: Record<string, string>;
   labels: IdentityAdminProps["labels"];
 }) {
   return (
@@ -770,7 +769,7 @@ function RoleAssignmentList({
           </span>
           <span>
             <small>{labels.validTo}</small>
-            <strong>{assignment.validTo ? formatDate(locale, assignment.validTo) : "-"}</strong>
+            <strong>{assignment.validTo ? dateLabels[assignment.validTo.toISOString()] : "-"}</strong>
           </span>
         </article>
       ))}
@@ -797,6 +796,7 @@ function PermissionCatalog({
 
 export function IdentityAdmin({
   locale,
+  dateLabels,
   people,
   duplicateContacts,
   accounts,
@@ -814,7 +814,6 @@ export function IdentityAdmin({
   const [busyAccount, setBusyAccount] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const message = stateMessage(state, labels);
-  const appLocale = safeLocale(locale);
 
   return (
     <div className="identity-layout">
@@ -997,11 +996,11 @@ export function IdentityAdmin({
                       <div className="identity-security-row" data-testid="identity-session-row" key={session.id}>
                         <span>
                           <small>{labels.lastSeen}</small>
-                          <strong>{formatDate(appLocale, session.lastSeenAt)}</strong>
+                          <strong>{dateLabels[session.lastSeenAt.toISOString()]}</strong>
                         </span>
                         <span>
                           <small>{labels.expires}</small>
-                          <strong>{formatDate(appLocale, session.expiresAt)}</strong>
+                          <strong>{dateLabels[session.expiresAt.toISOString()]}</strong>
                         </span>
                         <span>
                           <small>{labels.status}</small>
@@ -1040,7 +1039,7 @@ export function IdentityAdmin({
                         </span>
                         <span>
                           <small>{labels.lastSeen}</small>
-                          <strong>{device.lastSeenAt ? formatDate(appLocale, device.lastSeenAt) : "-"}</strong>
+                          <strong>{device.lastSeenAt ? dateLabels[device.lastSeenAt.toISOString()] : "-"}</strong>
                         </span>
                         <span>
                           <small>{labels.status}</small>
@@ -1083,7 +1082,7 @@ export function IdentityAdmin({
                         </span>
                         <span>
                           <small>{labels.expires}</small>
-                          <strong>{credential.expiresAt ? formatDate(appLocale, credential.expiresAt) : "-"}</strong>
+                          <strong>{credential.expiresAt ? dateLabels[credential.expiresAt.toISOString()] : "-"}</strong>
                         </span>
                         <button
                           className="secondary-button"
@@ -1159,7 +1158,7 @@ export function IdentityAdmin({
         <RoleAssignmentForm accounts={accounts} labels={labels} locale={locale} roles={roles} />
         <div className="subsection-block">
           <p className="panel-label">{labels.activeAssignments}</p>
-          <RoleAssignmentList assignments={assignments} labels={labels} locale={appLocale} />
+          <RoleAssignmentList assignments={assignments} labels={labels} dateLabels={dateLabels} />
         </div>
       </section>
 

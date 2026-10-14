@@ -68,7 +68,8 @@ export default async function LoginPage({
             invalid: t("invalid"),
             mfaInvalid: t("mfaInvalid"),
             rateLimited: t("rateLimited"),
-            generic: t("generic")
+            generic: t("generic"),
+            passkey: t("passkey")
           }}
         />
       </div>

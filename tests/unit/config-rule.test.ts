@@ -51,6 +51,7 @@ describe("config rule registry", () => {
       "finance.ota_fee",
       "finance.payout_schedule",
       "finance.tax",
+      "identity.pin_lockout",
       "inventory.minimums",
       "operations.laundry_pricing",
       "ops.mid_stay_threshold",

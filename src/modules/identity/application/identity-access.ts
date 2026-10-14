@@ -37,13 +37,21 @@ export async function identityActorContextFromSession(
     return null;
   }
 
+  const accountContext = await authContextForAccount(user.organizationId, user.id, deps);
+  // An authenticated person may configure their own factors. This grant cannot reach
+  // the identity collection, another person, roles, or business records.
+  const ownSecurityScope = { organizationId: user.organizationId, resourceType: identityResource, resourceId: user.id };
+  const ownSecurityPermissions = new Set(["identity:configure"]);
   return {
     organizationId: user.organizationId,
     actorId: user.id,
     personId: user.personId,
     authContext: {
-      ...(await authContextForAccount(user.organizationId, user.id, deps)),
-      personId: user.personId
+      ...accountContext,
+      personId: user.personId,
+      permissions: new Set([...accountContext.permissions, ...ownSecurityPermissions]),
+      scopes: [...accountContext.scopes, ownSecurityScope],
+      assignments: [...(accountContext.assignments ?? []), { scope: ownSecurityScope, permissions: ownSecurityPermissions }]
     }
   };
 }

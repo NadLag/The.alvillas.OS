@@ -45,7 +45,8 @@
     "invalid": "The credentials could not be verified.",
     "mfaInvalid": "The second factor could not be verified.",
     "rateLimited": "Too many attempts. Wait a minute and try again.",
-    "generic": "Sign in failed. Try again."
+    "generic": "Sign in failed. Try again.",
+    "passkey": "تسجيل الدخول بمفتاح مرور"
   },
   "AppShell": {
     "actions": "Workspace actions",
@@ -66,6 +67,7 @@
     "title": "ALVILLAS OS",
     "logout": "Log out",
     "identity": "Identity",
+    "security": "أمان الحساب",
     "audit": "Audit",
     "configuration": "Configuration",
     "organization": "Organization",
