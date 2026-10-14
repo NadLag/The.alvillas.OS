@@ -23,7 +23,8 @@ import {
   listProperties,
   transitionPropertyLifecycle,
   updatePropertyOperatingProfile,
-  updatePropertyOwnership
+  updatePropertyOwnership,
+  upsertPropertyBookingChannel
 } from "@/modules/core/application/core-service";
 import {
   assignRoleToAccount,
@@ -1611,6 +1612,215 @@ describe("PostgreSQL baseline", () => {
     await expect(
       withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
         tx.propertyOperatingProfile.delete({ where: { propertyId: property.id } })
+      )
+    ).rejects.toThrow(/archived, not deleted|business rows/u);
+  });
+
+  it("configures property booking channels with masked endpoints, audit, and tenant isolation", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Booking Channel A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Booking Channel B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const ctx: CoreActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        permissions: new Set([
+          permissionKey("owner", "view"),
+          permissionKey("owner", "create"),
+          permissionKey("property", "view"),
+          permissionKey("property", "create"),
+          permissionKey("property", "edit")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const owner = await createOwner(
+      ctx,
+      {
+        displayName: "Booking Channel Owner",
+        email: `booking-channel-${randomUUID()}@example.test`,
+        preferredLocale: "en",
+        representatives: [],
+        payoutMethods: []
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-booking-channel-owner",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const property = await createProperty(
+      ctx,
+      {
+        ownerId: owner.id,
+        name: "Villa Booking Channels",
+        addressLine1: "Route de Fes",
+        city: "Marrakech",
+        countryCode: "MA",
+        propertyType: "Villa",
+        bedrooms: 5,
+        bathrooms: 5,
+        livingSpaces: 2,
+        hasPool: true,
+        hasGarden: true,
+        parkingSpaces: 2,
+        maxGuests: 10,
+        timezone: "Africa/Casablanca",
+        amenities: ["pool", "garden"],
+        photoUrls: ["https://assets.example.test/booking-channel-villa.jpg"],
+        status: "DRAFT",
+        onboardingProfile: {
+          headline: "Booking channel villa",
+          houseRules: []
+        }
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-booking-channel-property",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const privateEndpoint = "https://calendar.airbnb.com/ical/private-token.ics";
+
+    await expect(
+      upsertPropertyBookingChannel(
+        {
+          ...ctx,
+          authContext: {
+            ...ctx.authContext,
+            permissions: new Set([permissionKey("property", "view")])
+          }
+        },
+        {
+          propertyId: property.id,
+          sourceKey: "AIRBNB",
+          displayName: "Airbnb Palmeraie",
+          externalListingId: "airbnb-denied",
+          listingUrl: "https://www.airbnb.com/rooms/123456",
+          syncMode: "ICAL",
+          importEnabled: true,
+          exportEnabled: false,
+          syncEndpointUrl: privateEndpoint,
+          status: "ACTIVE"
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-org-booking-channel-denied",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(CoreAuthorizationError);
+
+    const created = await upsertPropertyBookingChannel(
+      ctx,
+      {
+        propertyId: property.id,
+        sourceKey: "AIRBNB",
+        displayName: "Airbnb Palmeraie",
+        externalListingId: "airbnb-123",
+        listingUrl: "https://www.airbnb.com/rooms/123456",
+        syncMode: "ICAL",
+        importEnabled: true,
+        exportEnabled: false,
+        syncEndpointUrl: privateEndpoint,
+        status: "ACTIVE"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-booking-channel-create",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const updated = await upsertPropertyBookingChannel(
+      ctx,
+      {
+        propertyId: property.id,
+        sourceKey: "AIRBNB",
+        displayName: "Airbnb Palmeraie Direct",
+        externalListingId: "airbnb-456",
+        listingUrl: "https://www.airbnb.com/rooms/456789",
+        syncMode: "ICAL",
+        importEnabled: true,
+        exportEnabled: true,
+        status: "PAUSED"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-booking-channel-update",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const propertyWithChannel = await getProperty(ctx, property.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const stored = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => ({
+      channel: await tx.bookingChannel.findUniqueOrThrow({
+        where: { id: created.id }
+      }),
+      audits: await tx.auditLog.findMany({
+        where: {
+          organizationId: orgA.id,
+          action: "property.booking_channel.upsert",
+          resourceId: created.id
+        },
+        orderBy: [{ occurredAt: "asc" }]
+      })
+    }));
+    const visibleToOrgB = await withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, async (tx) => ({
+      audits: await tx.auditLog.findMany({ where: { resourceId: created.id } }),
+      channels: await tx.bookingChannel.findMany({ where: { propertyId: property.id } })
+    }));
+    const auditJson = JSON.stringify(stored.audits);
+
+    expect(created).toMatchObject({
+      sourceKey: "AIRBNB",
+      displayName: "Airbnb Palmeraie",
+      maskedSyncEndpoint: "https://calendar.airbnb.com/***",
+      status: "ACTIVE"
+    });
+    expect(updated).toMatchObject({
+      id: created.id,
+      displayName: "Airbnb Palmeraie Direct",
+      externalListingId: "airbnb-456",
+      exportEnabled: true,
+      maskedSyncEndpoint: "https://calendar.airbnb.com/***",
+      status: "PAUSED"
+    });
+    expect(propertyWithChannel.bookingChannels).toHaveLength(1);
+    expect(propertyWithChannel.bookingChannels[0]).toMatchObject({
+      id: created.id,
+      displayName: "Airbnb Palmeraie Direct",
+      maskedSyncEndpoint: "https://calendar.airbnb.com/***"
+    });
+    expect(stored.channel).toMatchObject({
+      organizationId: orgA.id,
+      propertyId: property.id,
+      sourceKey: "AIRBNB",
+      status: "PAUSED",
+      maskedSyncEndpoint: "https://calendar.airbnb.com/***"
+    });
+    expect(stored.channel.syncEndpointEncrypted ?? "").not.toContain("private-token");
+    expect(stored.channel.syncEndpointEncrypted ?? "").not.toContain("calendar.airbnb.com");
+    expect(stored.audits).toHaveLength(2);
+    expect(auditJson).toContain("https://calendar.airbnb.com/***");
+    expect(auditJson).not.toContain("private-token");
+    expect(auditJson).not.toContain("/ical/");
+    expect(visibleToOrgB).toEqual({
+      audits: [],
+      channels: []
+    });
+
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.bookingChannel.delete({ where: { id: created.id } })
       )
     ).rejects.toThrow(/archived, not deleted|business rows/u);
   });

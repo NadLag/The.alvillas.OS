@@ -17,6 +17,12 @@ const optionalText = (max: number) =>
 
 const requiredText = (max: number) => z.string().trim().min(1).max(max);
 
+const optionalUrl = (max: number) =>
+  z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().trim().url().max(max).optional()
+  );
+
 const optionalEmail = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z
@@ -493,6 +499,31 @@ export const propertyLifecycleTransitionInputSchema = z.object({
 
 export type PropertyLifecycleTransitionInput = z.infer<typeof propertyLifecycleTransitionInputSchema>;
 
+export const bookingChannelStatusSchema = z.enum(["ACTIVE", "PAUSED", "DISCONNECTED"]);
+export const bookingChannelSyncModeSchema = z.enum(["MANUAL", "ICAL", "API", "CSV", "CHANNEL_MANAGER"]);
+export const bookingChannelSourceKeySchema = z
+  .string()
+  .trim()
+  .min(2)
+  .max(40)
+  .transform((value) => value.toUpperCase().replace(/[^A-Z0-9]+/gu, "_").replace(/^_+|_+$/gu, ""))
+  .refine((value) => /^[A-Z0-9_]{2,40}$/u.test(value), "Use a stable booking source key");
+
+export const bookingChannelInputSchema = z.object({
+  propertyId: z.string().uuid(),
+  sourceKey: bookingChannelSourceKeySchema,
+  displayName: requiredText(120),
+  externalListingId: optionalText(160),
+  listingUrl: optionalUrl(1000),
+  syncMode: bookingChannelSyncModeSchema.default("MANUAL"),
+  importEnabled: z.coerce.boolean().default(false),
+  exportEnabled: z.coerce.boolean().default(false),
+  syncEndpointUrl: optionalUrl(2000),
+  status: bookingChannelStatusSchema.default("ACTIVE")
+});
+
+export type BookingChannelInput = z.infer<typeof bookingChannelInputSchema>;
+
 export type OwnerRepresentativeSummary = {
   id: string;
   displayName: string;
@@ -582,6 +613,24 @@ export type PropertyLifecycleEventSummary = {
   occurredAt: Date;
 };
 
+export type BookingChannelSummary = {
+  id: string;
+  propertyId: string;
+  sourceKey: string;
+  displayName: string;
+  externalListingId: string | null;
+  listingUrl: string | null;
+  syncMode: z.infer<typeof bookingChannelSyncModeSchema>;
+  importEnabled: boolean;
+  exportEnabled: boolean;
+  maskedSyncEndpoint: string | null;
+  status: z.infer<typeof bookingChannelStatusSchema>;
+  lastSyncAt: Date | null;
+  lastSyncStatus: string | null;
+  lastSyncMessage: string | null;
+  createdAt: Date;
+};
+
 export type PropertySummary = {
   id: string;
   name: string;
@@ -608,5 +657,6 @@ export type PropertySummary = {
     isPrimary: boolean;
   }>;
   lifecycleEvents: PropertyLifecycleEventSummary[];
+  bookingChannels: BookingChannelSummary[];
   createdAt: Date;
 };

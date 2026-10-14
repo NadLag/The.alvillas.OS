@@ -12,6 +12,7 @@ import {
   createManagementAgreement,
   createOwner,
   createProperty,
+  parseBookingChannelInput,
   parseManagementAgreementAmendmentInput,
   parseManagementAgreementInput,
   parseOwnerInput,
@@ -21,7 +22,8 @@ import {
   parsePropertyOwnershipInput,
   transitionPropertyLifecycle,
   updatePropertyOperatingProfile,
-  updatePropertyOwnership
+  updatePropertyOwnership,
+  upsertPropertyBookingChannel
 } from "@/modules/core/application/core-service";
 import {
   normalizeAmenities,
@@ -226,6 +228,21 @@ function managementAgreementAmendmentInput(propertyId: string, agreementId: stri
   };
 }
 
+function bookingChannelInput(propertyId: string, formData: FormData) {
+  return {
+    propertyId,
+    sourceKey: formValue(formData, "sourceKey"),
+    displayName: formValue(formData, "displayName"),
+    externalListingId: formValue(formData, "externalListingId"),
+    listingUrl: formValue(formData, "listingUrl"),
+    syncMode: formValue(formData, "syncMode") ?? "MANUAL",
+    importEnabled: checkboxValue(formData, "importEnabled"),
+    exportEnabled: checkboxValue(formData, "exportEnabled"),
+    syncEndpointUrl: formValue(formData, "syncEndpointUrl"),
+    status: formValue(formData, "status") ?? "ACTIVE"
+  };
+}
+
 export async function createOwnerAction(
   locale: string,
   _state: CoreFormState,
@@ -422,6 +439,38 @@ export async function transitionPropertyLifecycleAction(
 
   try {
     await transitionPropertyLifecycle(ctx, parsed.data);
+  } catch (error) {
+    return actionErrorState(error);
+  }
+
+  revalidatePath(`/${appLocale}/app/properties/${propertyId}`);
+  revalidatePath(`/${appLocale}/app/properties`);
+
+  return { status: "success" };
+}
+
+export async function upsertPropertyBookingChannelAction(
+  locale: string,
+  propertyId: string,
+  _state: CoreFormState,
+  formData: FormData
+): Promise<CoreFormState> {
+  const appLocale = safeLocale(locale);
+  const session = await auth();
+  const ctx = coreActorContextFromSession(session);
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parseBookingChannelInput(bookingChannelInput(propertyId, formData));
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await upsertPropertyBookingChannel(ctx, parsed.data);
   } catch (error) {
     return actionErrorState(error);
   }

@@ -46,6 +46,7 @@ model Organization {
   properties                Property[]
   propertyProfiles          PropertyOnboardingProfile[]
   propertyOperatingProfiles PropertyOperatingProfile[]
+  bookingChannels           BookingChannel[]
   managementAgreements      ManagementAgreement[]
   propertyOwners            PropertyOwner[]
   reservations              Reservation[]
@@ -529,6 +530,7 @@ model Property {
   variances            Variance[]
   onboardingProfile    PropertyOnboardingProfile?
   operatingProfile     PropertyOperatingProfile?
+  bookingChannels      BookingChannel[]
   managementAgreements ManagementAgreement[]
 
   @@index([organizationId, city, name], map: "property_org_city_name_idx")
@@ -637,6 +639,37 @@ model PropertyOwner {
   @@index([organizationId, propertyId], map: "property_owner_org_property_idx")
   @@index([organizationId, propertyId, archivedAt, isPrimary], map: "property_owner_org_property_archived_share_idx")
   @@map("property_owner")
+}
+
+model BookingChannel {
+  id                    String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId        String       @map("organization_id") @db.Uuid
+  propertyId            String       @map("property_id") @db.Uuid
+  sourceKey             String       @map("source_key")
+  displayName           String       @map("display_name")
+  externalListingId     String?      @map("external_listing_id")
+  listingUrl            String?      @map("listing_url")
+  syncMode              String       @default("MANUAL") @map("sync_mode")
+  importEnabled         Boolean      @default(false) @map("import_enabled")
+  exportEnabled         Boolean      @default(false) @map("export_enabled")
+  syncEndpointEncrypted String?      @map("sync_endpoint_encrypted")
+  maskedSyncEndpoint    String?      @map("masked_sync_endpoint")
+  status                String       @default("ACTIVE")
+  settings              Json         @default("{}")
+  lastSyncAt            DateTime?    @map("last_sync_at") @db.Timestamptz(6)
+  lastSyncStatus        String?      @map("last_sync_status")
+  lastSyncMessage       String?      @map("last_sync_message")
+  archivedAt            DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdBy             String?      @map("created_by") @db.Uuid
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property              Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, propertyId, sourceKey], map: "booking_channel_org_property_source_unique")
+  @@index([organizationId, propertyId, archivedAt, sourceKey], map: "booking_channel_org_property_archived_idx")
+  @@index([organizationId, status, syncMode], map: "booking_channel_org_status_sync_idx")
+  @@map("booking_channel")
 }
 
 model Reservation {

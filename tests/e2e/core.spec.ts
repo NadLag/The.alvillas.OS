@@ -88,6 +88,18 @@ test.describe("owners and properties journey", () => {
     await expect(page.getByTestId("property-operating-profile")).toContainText("Pool service");
     await expect(page.getByTestId("property-operating-profile")).toContainText("Daily");
     await expect(page.getByTestId("property-operating-profile")).toContainText("Hammam");
+    await expect(page.getByTestId("property-booking-channels-panel")).toBeVisible();
+    await page.getByTestId("booking-channel-source-key").fill("AIRBNB");
+    await page.getByTestId("booking-channel-display-name").fill("Airbnb Palmeraie");
+    await page.getByTestId("booking-channel-external-listing-id").fill(`airbnb-${suffix}`);
+    await page.getByTestId("booking-channel-listing-url").fill("https://www.airbnb.com/rooms/123456");
+    await page.getByTestId("booking-channel-sync-mode").selectOption("ICAL");
+    await page.getByTestId("booking-channel-import-enabled").check();
+    await page.getByTestId("booking-channel-sync-endpoint").fill("https://calendar.airbnb.com/ical/private-token.ics");
+    await page.getByTestId("booking-channel-submit").click();
+    await expect(page.getByTestId("booking-channel-form-success")).toContainText("Booking channel saved");
+    await expect(page.getByTestId("booking-channel-summary")).toContainText("Airbnb Palmeraie");
+    await expect(page.getByTestId("booking-channel-summary")).toContainText("https://calendar.airbnb.com/***");
     await page.getByTestId("property-operating-groceries").check();
     await page.getByTestId("property-operating-maintenance-frequency").selectOption("MONTHLY");
     await page.getByTestId("property-operating-profile-submit").click();

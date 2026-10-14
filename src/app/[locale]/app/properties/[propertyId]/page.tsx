@@ -14,6 +14,7 @@ import {
 } from "@/modules/core/application/core-service";
 import {
   ManagementAgreementForm,
+  PropertyBookingChannelForm,
   PropertyLifecycleForm,
   PropertyOperatingProfileForm,
   PropertyOwnershipForm
@@ -330,6 +331,39 @@ export default async function PropertyDetailPage({
     unauthorized: t("forms.unauthorized"),
     validation: t("forms.validation")
   };
+  const bookingChannelLabels = {
+    displayName: t("properties.bookingChannels.displayName"),
+    externalListingId: t("properties.bookingChannels.externalListingId"),
+    exportEnabled: t("properties.bookingChannels.exportEnabled"),
+    forbidden: t("forms.forbidden"),
+    generic: t("forms.generic"),
+    importEnabled: t("properties.bookingChannels.importEnabled"),
+    listingUrl: t("properties.bookingChannels.listingUrl"),
+    maskedSyncEndpoint: t("properties.bookingChannels.maskedSyncEndpoint"),
+    notFound: t("forms.notFound"),
+    save: t("properties.bookingChannels.save"),
+    saved: t("properties.bookingChannels.saved"),
+    saving: t("common.saving"),
+    sourceKey: t("properties.bookingChannels.sourceKey"),
+    status: t("properties.bookingChannels.status"),
+    statusOptions: {
+      ACTIVE: t("properties.bookingChannels.statusOptions.ACTIVE"),
+      PAUSED: t("properties.bookingChannels.statusOptions.PAUSED"),
+      DISCONNECTED: t("properties.bookingChannels.statusOptions.DISCONNECTED")
+    },
+    syncEndpointUrl: t("properties.bookingChannels.syncEndpointUrl"),
+    syncMode: t("properties.bookingChannels.syncMode"),
+    syncModeOptions: {
+      MANUAL: t("properties.bookingChannels.syncModeOptions.MANUAL"),
+      ICAL: t("properties.bookingChannels.syncModeOptions.ICAL"),
+      API: t("properties.bookingChannels.syncModeOptions.API"),
+      CSV: t("properties.bookingChannels.syncModeOptions.CSV"),
+      CHANNEL_MANAGER: t("properties.bookingChannels.syncModeOptions.CHANNEL_MANAGER")
+    },
+    title: t("properties.bookingChannels.title"),
+    unauthorized: t("forms.unauthorized"),
+    validation: t("forms.validation")
+  };
 
   return (
     <AdminShell className="resource-page" testId="property-detail-page">
@@ -437,6 +471,71 @@ export default async function PropertyDetailPage({
             propertyId={property.id}
             transitions={lifecycleTransitions}
           />
+        ) : null}
+      </section>
+
+      <section className="detail-panel" data-testid="property-booking-channels-panel">
+        <div className="section-heading">
+          <p className="panel-label">{t("properties.bookingChannels.title")}</p>
+          <span>{t("properties.bookingChannels.count", { count: property.bookingChannels.length })}</span>
+        </div>
+        {property.bookingChannels.length > 0 ? (
+          <div className="config-rule-list" data-testid="booking-channel-summary">
+            {property.bookingChannels.map((channel) => (
+              <article className="config-rule-row" data-testid="booking-channel-row" key={channel.id}>
+                <div>
+                  <strong>{channel.displayName}</strong>
+                  <span>
+                    {channel.sourceKey} - {t(`properties.bookingChannels.statusOptions.${channel.status}`)} -{" "}
+                    {t(`properties.bookingChannels.syncModeOptions.${channel.syncMode}`)}
+                  </span>
+                </div>
+                <dl className="detail-grid">
+                  <div>
+                    <dt>{t("properties.bookingChannels.externalListingId")}</dt>
+                    <dd>{channel.externalListingId ?? t("common.notProvided")}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("properties.bookingChannels.importEnabled")}</dt>
+                    <dd>{channel.importEnabled ? t("common.yes") : t("common.no")}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("properties.bookingChannels.exportEnabled")}</dt>
+                    <dd>{channel.exportEnabled ? t("common.yes") : t("common.no")}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("properties.bookingChannels.maskedSyncEndpoint")}</dt>
+                    <dd>{channel.maskedSyncEndpoint ?? t("common.notProvided")}</dd>
+                  </div>
+                  <div>
+                    <dt>{t("properties.bookingChannels.lastSync")}</dt>
+                    <dd>
+                      {channel.lastSyncAt
+                        ? `${channel.lastSyncAt.toLocaleString()} - ${channel.lastSyncStatus ?? t("common.notProvided")}`
+                        : t("common.notProvided")}
+                    </dd>
+                  </div>
+                  <div className="wide">
+                    <dt>{t("properties.bookingChannels.listingUrl")}</dt>
+                    <dd>
+                      {channel.listingUrl ? (
+                        <a href={channel.listingUrl} rel="noreferrer" target="_blank">
+                          {channel.listingUrl}
+                        </a>
+                      ) : (
+                        t("common.notProvided")
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="field-hint">{t("properties.bookingChannels.empty")}</p>
+        )}
+        {canEditOwnership ? (
+          <PropertyBookingChannelForm labels={bookingChannelLabels} locale={appLocale} propertyId={property.id} />
         ) : null}
       </section>
 
