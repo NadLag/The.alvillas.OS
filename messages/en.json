@@ -535,6 +535,27 @@
       "onboardingProfile": "Onboarding profile",
       "noOnboardingProfile": "No onboarding profile recorded.",
       "photoCount": "Photos",
+      "lifecycle": {
+        "title": "Property lifecycle",
+        "current": "Current status",
+        "requirements": "Activation checklist",
+        "history": "Lifecycle history",
+        "noHistory": "No lifecycle transitions recorded yet.",
+        "noTransitions": "No further lifecycle transitions are available.",
+        "nextStatus": "Next status",
+        "reason": "Reason",
+        "save": "Save lifecycle transition",
+        "saved": "Property lifecycle updated.",
+        "passed": "Ready",
+        "blocked": "Needs work",
+        "requirementLabels": {
+          "ownership": "Ownership shares total 100% with one primary owner",
+          "operating_profile": "Operating profile configured",
+          "onboarding_profile": "Onboarding profile headline recorded",
+          "photos": "At least one property photo recorded",
+          "management_agreement": "Active management agreement with configured rules"
+        }
+      },
       "ownership": {
         "title": "Ownership shares",
         "formTitle": "Manage owner shares",

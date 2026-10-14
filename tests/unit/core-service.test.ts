@@ -3,14 +3,17 @@ import type { CoreActorContext } from "@/modules/core/application/core-access";
 import {
   amendManagementAgreement,
   CoreAuthorizationError,
+  allowedPropertyLifecycleTransitions,
   createManagementAgreement,
   createOwner,
   getProperty,
   listOwners,
   parseManagementAgreementAmendmentInput,
   parseManagementAgreementInput,
+  parsePropertyLifecycleTransitionInput,
   parsePropertyOperatingProfileInput,
   parsePropertyOwnershipInput,
+  transitionPropertyLifecycle,
   updatePropertyOperatingProfile,
   updatePropertyOwnership
 } from "@/modules/core/application/core-service";
@@ -269,6 +272,45 @@ describe("core service authorization", () => {
           groceriesAvailable: false,
           wellnessAvailable: false,
           otherServices: []
+        },
+        { db: deniedDb }
+      )
+    ).rejects.toBeInstanceOf(CoreAuthorizationError);
+  });
+
+  it("validates property lifecycle transitions and reasons", () => {
+    const valid = parsePropertyLifecycleTransitionInput({
+      propertyId: "00000000-0000-7000-8000-000000000100",
+      status: "ONBOARDING",
+      reason: "Owner onboarding dossier opened"
+    });
+    const invalidReason = parsePropertyLifecycleTransitionInput({
+      propertyId: "00000000-0000-7000-8000-000000000100",
+      status: "ACTIVE",
+      reason: "short"
+    });
+
+    expect(valid.success).toBe(true);
+    expect(invalidReason.success).toBe(false);
+    expect(allowedPropertyLifecycleTransitions("DRAFT")).toEqual(["ONBOARDING"]);
+    expect(allowedPropertyLifecycleTransitions("PAUSED")).toEqual(["ACTIVE", "OFFBOARDED"]);
+    expect(allowedPropertyLifecycleTransitions("OFFBOARDED")).toEqual([]);
+  });
+
+  it("denies property lifecycle changes without property edit permission", async () => {
+    const ctx = actor({
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("property", "view")]),
+      scopes: [{ organizationId: "org-a" }]
+    });
+
+    await expect(
+      transitionPropertyLifecycle(
+        ctx,
+        {
+          propertyId: "00000000-0000-7000-8000-000000000100",
+          status: "ONBOARDING",
+          reason: "Owner onboarding dossier opened"
         },
         { db: deniedDb }
       )

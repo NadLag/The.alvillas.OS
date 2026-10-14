@@ -121,6 +121,8 @@ export const propertyStatusSchema = z.enum([
   "PAUSED",
   "OFFBOARDED"
 ]);
+export const propertyLifecycleStatuses = propertyStatusSchema.options;
+export type PropertyLifecycleStatus = z.infer<typeof propertyStatusSchema>;
 
 export function normalizeAmenities(value: string | readonly string[] | undefined): string[] {
   const rawItems: string[] = typeof value === "string" ? value.split(",") : [...(value ?? [])];
@@ -483,6 +485,14 @@ export const propertyOwnershipInputSchema = z
 
 export type PropertyOwnershipInput = z.infer<typeof propertyOwnershipInputSchema>;
 
+export const propertyLifecycleTransitionInputSchema = z.object({
+  propertyId: z.string().uuid(),
+  status: propertyStatusSchema,
+  reason: z.string().trim().min(6).max(500)
+});
+
+export type PropertyLifecycleTransitionInput = z.infer<typeof propertyLifecycleTransitionInputSchema>;
+
 export type OwnerRepresentativeSummary = {
   id: string;
   displayName: string;
@@ -563,6 +573,15 @@ export type PropertyOperatingProfileSummary = {
   automationNotes: string | null;
 };
 
+export type PropertyLifecycleEventSummary = {
+  id: string;
+  fromStatus: PropertyLifecycleStatus | null;
+  toStatus: PropertyLifecycleStatus;
+  reason: string | null;
+  actorId: string | null;
+  occurredAt: Date;
+};
+
 export type PropertySummary = {
   id: string;
   name: string;
@@ -588,5 +607,6 @@ export type PropertySummary = {
     shareBps: number;
     isPrimary: boolean;
   }>;
+  lifecycleEvents: PropertyLifecycleEventSummary[];
   createdAt: Date;
 };

@@ -8,6 +8,8 @@ import type {
   ManagementAgreementRuleSummary,
   ManagementAgreementSummary,
   PropertyInput,
+  PropertyLifecycleEventSummary,
+  PropertyLifecycleStatus,
   PropertyOperatingProfileInput,
   PropertyOperatingProfileSummary,
   PropertyOwnershipInput,
@@ -232,6 +234,42 @@ function jsonRecord(value: Prisma.JsonValue): Record<string, unknown> {
     : {};
 }
 
+function lifecycleStatus(value: unknown): PropertyLifecycleStatus | null {
+  return value === "DRAFT" ||
+    value === "ONBOARDING" ||
+    value === "ACTIVE" ||
+    value === "PAUSED" ||
+    value === "OFFBOARDED"
+    ? value
+    : null;
+}
+
+function lifecycleEventToSummary(event: {
+  id: string;
+  actorId: string | null;
+  before: Prisma.JsonValue | null;
+  after: Prisma.JsonValue | null;
+  reason: string | null;
+  occurredAt: Date;
+}): PropertyLifecycleEventSummary | null {
+  const before = event.before ? jsonRecord(event.before) : {};
+  const after = event.after ? jsonRecord(event.after) : {};
+  const toStatus = lifecycleStatus(after.status);
+
+  if (!toStatus) {
+    return null;
+  }
+
+  return {
+    id: event.id,
+    fromStatus: lifecycleStatus(before.status),
+    toStatus,
+    reason: event.reason,
+    actorId: event.actorId,
+    occurredAt: event.occurredAt
+  };
+}
+
 function managementAgreementToSummary(
   agreement: ManagementAgreementRecord,
   rules: readonly ManagementAgreementRuleSummary[]
@@ -288,6 +326,7 @@ function propertyToSummary(property: PropertyWithOwners): PropertySummary {
         shareBps: link.shareBps,
         isPrimary: link.isPrimary
       })),
+    lifecycleEvents: [],
     createdAt: property.createdAt
   };
 }
@@ -536,7 +575,71 @@ export class CoreRepository {
       }
     });
 
-    return property ? propertyToSummary(property) : null;
+    if (!property) {
+      return null;
+    }
+
+    return {
+      ...propertyToSummary(property),
+      lifecycleEvents: await this.listPropertyLifecycleEvents(propertyId)
+    };
+  }
+
+  async listPropertyLifecycleEvents(propertyId: string): Promise<PropertyLifecycleEventSummary[]> {
+    const events = await this.tx.auditLog.findMany({
+      where: {
+        organizationId: this.organizationId,
+        action: "property.lifecycle.transition",
+        resourceType: "property",
+        resourceId: propertyId
+      },
+      orderBy: [{ occurredAt: "desc" }, { createdAt: "desc" }],
+      take: 50,
+      select: {
+        id: true,
+        actorId: true,
+        before: true,
+        after: true,
+        reason: true,
+        occurredAt: true
+      }
+    });
+
+    return events.flatMap((event) => {
+      const summary = lifecycleEventToSummary(event);
+      return summary ? [summary] : [];
+    });
+  }
+
+  async updatePropertyStatus(
+    propertyId: string,
+    status: PropertyLifecycleStatus
+  ): Promise<PropertySummary | null> {
+    const property = await this.tx.property.findFirst({
+      where: {
+        id: propertyId,
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!property) {
+      return null;
+    }
+
+    await this.tx.property.update({
+      where: {
+        id: propertyId
+      },
+      data: {
+        status
+      }
+    });
+
+    return this.findProperty(propertyId);
   }
 
   async createManagementAgreement(
