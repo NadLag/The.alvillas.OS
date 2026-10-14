@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { e2eEmail, ensureE2EAdmin } from "./support/auth";
+import { setPropertyCity } from "./support/property-form";
 
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
@@ -50,7 +51,7 @@ test.describe("owners and properties journey", () => {
     await page.getByTestId("property-name").fill(propertyName);
     await page.getByTestId("property-type").fill("Villa");
     await page.getByTestId("property-address").fill("Route de Fes");
-    await page.getByTestId("property-city").fill("Marrakech");
+    await setPropertyCity(page, "Marrakech");
     await page.getByTestId("property-bedrooms").fill("4");
     await page.getByTestId("property-bathrooms").fill("4");
     await page.getByTestId("property-max-guests").fill("8");

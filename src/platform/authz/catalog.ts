@@ -22,6 +22,8 @@ export const permissionResources = [
   "role",
   "permission",
   "field_policy",
+  "region",
+  "city",
   "owner",
   "property",
   "reservation",
@@ -72,6 +74,8 @@ const operationalFull = permissionsFor(
   ["property", "reservation", "guest", "task", "issue", "service"],
   ["view", "create", "edit", "assign", "validate"]
 );
+
+const geographyView = permissionsFor(["region", "city"], ["view"]);
 
 const financeFull = permissionsFor(
   ["financial_transaction", "wallet", "owner_statement", "report"],
@@ -129,7 +133,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     key: "operations_manager",
     name: "Operations Manager",
     description: "Full scoped operational control without default financial visibility.",
-    permissions: [...operationalFull, permissionKey("owner", "view")],
+    permissions: [...geographyView, ...operationalFull, permissionKey("owner", "view")],
     mfaRequired: false
   },
   {
@@ -281,7 +285,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     key: "regional_manager",
     name: "Regional Manager",
     description: "Scoped regional operations with optional scope-level finance grants.",
-    permissions: [...operationalFull, permissionKey("owner", "view"), permissionKey("report", "view")],
+    permissions: [...geographyView, ...operationalFull, permissionKey("owner", "view"), permissionKey("report", "view")],
     mfaRequired: false
   },
   {

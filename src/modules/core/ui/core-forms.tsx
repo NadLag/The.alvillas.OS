@@ -48,6 +48,7 @@ type OwnerLabels = FormLabels & {
 type PropertyLabels = FormLabels & {
   owner: string;
   noOwners: string;
+  noCities: string;
   name: string;
   addressLine1: string;
   addressLine2: string;
@@ -78,6 +79,12 @@ type PropertyLabels = FormLabels & {
 type OwnerOption = {
   id: string;
   displayName: string;
+};
+
+type CityOption = {
+  id: string;
+  name: string;
+  regionName: string | null;
 };
 
 const initialCoreFormState: CoreFormState = { status: "idle" };
@@ -330,10 +337,12 @@ export function OwnerCreateForm({ locale, labels }: LocalizedFormProps<OwnerLabe
 }
 
 export function PropertyCreateForm({
+  cities = [],
   locale,
   labels,
   owners
-}: LocalizedFormProps<PropertyLabels> & { owners: OwnerOption[] }) {
+}: LocalizedFormProps<PropertyLabels> & { cities?: CityOption[]; owners: OwnerOption[] }) {
+  const hasCities = cities.length > 0;
   const schema = useMemo(
     () =>
       z.object({
@@ -342,7 +351,8 @@ export function PropertyCreateForm({
         amenities: z.string().optional(),
         bathrooms: z.coerce.number().min(0, labels.validation),
         bedrooms: z.coerce.number().min(0, labels.validation),
-        city: z.string().trim().min(1, labels.validation),
+        city: hasCities ? z.string().optional() : z.string().trim().min(1, labels.validation),
+        cityId: hasCities ? z.string().trim().min(1, labels.validation) : z.string().optional(),
         countryCode: z.string().trim().length(2, labels.validation),
         description: z.string().optional(),
         hasGarden: z.boolean().optional(),
@@ -362,7 +372,7 @@ export function PropertyCreateForm({
         region: z.string().optional(),
         timezone: z.string().trim().min(1, labels.validation)
       }),
-    [labels.validation]
+    [hasCities, labels.validation]
   );
   const form = useZodForm(schema, {
     defaultValues: {
@@ -372,6 +382,7 @@ export function PropertyCreateForm({
       bathrooms: 0,
       bedrooms: 0,
       city: "",
+      cityId: cities[0]?.id ?? "",
       countryCode: "MA",
       description: "",
       hasGarden: false,
@@ -443,14 +454,30 @@ export function PropertyCreateForm({
         <input {...form.register("addressLine2")} />
       </label>
       <div className="form-grid three">
-        <label className="field">
-          <span>{labels.city}</span>
-          <input data-testid="property-city" required {...form.register("city")} />
-        </label>
-        <label className="field">
-          <span>{labels.region}</span>
-          <input {...form.register("region")} />
-        </label>
+        {hasCities ? (
+          <label className="field">
+            <span>{labels.city}</span>
+            <select data-testid="property-city-id" required {...form.register("cityId")}>
+              {cities.map((city) => (
+                <option key={city.id} value={city.id}>
+                  {city.regionName ? `${city.name} / ${city.regionName}` : city.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <>
+            <label className="field">
+              <span>{labels.city}</span>
+              <input data-testid="property-city" required {...form.register("city")} />
+              <p className="field-hint">{labels.noCities}</p>
+            </label>
+            <label className="field">
+              <span>{labels.region}</span>
+              <input {...form.register("region")} />
+            </label>
+          </>
+        )}
         <label className="field">
           <span>{labels.countryCode}</span>
           <input required maxLength={2} {...form.register("countryCode")} />

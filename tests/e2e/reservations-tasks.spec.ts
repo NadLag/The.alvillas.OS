@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { e2eEmail, ensureE2EAdmin } from "./support/auth";
+import { setPropertyCity } from "./support/property-form";
 import { ensureReservationRevenuePostingSetup } from "./support/reservation-revenue";
 import { formatCurrencyAmount } from "@/i18n/format";
 
@@ -42,7 +43,7 @@ test.describe("manual reservation to operations tasks journey", () => {
     await page.getByTestId("property-name").fill(propertyName);
     await page.getByTestId("property-type").fill("Villa");
     await page.getByTestId("property-address").fill("Route de Fes");
-    await page.getByTestId("property-city").fill("Marrakech");
+    const propertyCity = await setPropertyCity(page, "Marrakech");
     await page.getByTestId("property-bedrooms").fill("4");
     await page.getByTestId("property-bathrooms").fill("4");
     await page.getByTestId("property-max-guests").fill("8");
@@ -51,7 +52,7 @@ test.describe("manual reservation to operations tasks journey", () => {
 
     await page.goto("/en/app/reservations");
     await expect(page.getByTestId("reservations-page")).toBeVisible();
-    await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - Marrakech` });
+    await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - ${propertyCity}` });
     await page.getByTestId("reservation-guest-name").fill(guestName);
     await page.getByTestId("reservation-guest-email").fill(`guest-${suffix}@example.test`);
     await page.getByTestId("reservation-check-in").fill("2027-04-10");
@@ -118,7 +119,7 @@ test.describe("manual reservation to operations tasks journey", () => {
     await page.getByTestId("property-name").fill(propertyName);
     await page.getByTestId("property-type").fill("Villa");
     await page.getByTestId("property-address").fill("Route de Fes");
-    await page.getByTestId("property-city").fill("Marrakech");
+    const propertyCity = await setPropertyCity(page, "Marrakech");
     await page.getByTestId("property-bedrooms").fill("4");
     await page.getByTestId("property-bathrooms").fill("4");
     await page.getByTestId("property-max-guests").fill("8");
@@ -133,7 +134,7 @@ test.describe("manual reservation to operations tasks journey", () => {
 
     await page.goto("/en/app/reservations");
     await expect(page.getByTestId("reservations-page")).toBeVisible();
-    await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - Marrakech` });
+    await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - ${propertyCity}` });
     await page.getByTestId("reservation-guest-name").fill(guestName);
     await page.getByTestId("reservation-guest-email").fill(`guest-${suffix}@example.test`);
     await page.getByTestId("reservation-check-in").fill("2028-04-10");
@@ -200,7 +201,7 @@ test.describe("manual reservation to operations tasks journey", () => {
     await page.getByTestId("property-name").fill(propertyName);
     await page.getByTestId("property-type").fill("Villa");
     await page.getByTestId("property-address").fill("Route de Fes");
-    await page.getByTestId("property-city").fill("Marrakech");
+    const propertyCity = await setPropertyCity(page, "Marrakech");
     await page.getByTestId("property-bedrooms").fill("4");
     await page.getByTestId("property-bathrooms").fill("4");
     await page.getByTestId("property-max-guests").fill("8");
@@ -215,7 +216,7 @@ test.describe("manual reservation to operations tasks journey", () => {
 
     await page.goto("/en/app/reservations");
     await expect(page.getByTestId("reservations-page")).toBeVisible();
-    await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - Marrakech` });
+    await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - ${propertyCity}` });
     await page.getByTestId("reservation-guest-name").fill(guestName);
     await page.getByTestId("reservation-guest-email").fill(`guest-${suffix}@example.test`);
     await page.getByTestId("reservation-source").selectOption("AIRBNB");

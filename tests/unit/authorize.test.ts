@@ -62,6 +62,47 @@ describe("authorize", () => {
     ).toBe(false);
   });
 
+  it("allows region and city scoped access to child properties", () => {
+    const regionScoped: AuthContext = {
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("property", "view")]),
+      scopes: [{ organizationId: "org-a", scopeType: "region", scopeId: "region-1" }]
+    };
+    const cityScoped: AuthContext = {
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("property", "view")]),
+      scopes: [{ organizationId: "org-a", scopeType: "city", scopeId: "city-1" }]
+    };
+
+    expect(
+      authorize(regionScoped, "view", {
+        type: "property",
+        organizationId: "org-a",
+        id: "property-1",
+        region: "region-1",
+        city: "city-1"
+      })
+    ).toBe(true);
+    expect(
+      authorize(cityScoped, "view", {
+        type: "property",
+        organizationId: "org-a",
+        id: "property-1",
+        region: "region-1",
+        city: "city-1"
+      })
+    ).toBe(true);
+    expect(
+      authorize(cityScoped, "view", {
+        type: "property",
+        organizationId: "org-a",
+        id: "property-2",
+        region: "region-1",
+        city: "city-2"
+      })
+    ).toBe(false);
+  });
+
   it("enforces assigned-to-me, status and amount ABAC conditions", () => {
     const conditional: AuthContext = {
       organizationId: "org-a",

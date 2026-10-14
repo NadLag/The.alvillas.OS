@@ -14,7 +14,8 @@ import {
   createOwner,
   createProperty,
   getOwner,
-  getProperty
+  getProperty,
+  listProperties
 } from "@/modules/core/application/core-service";
 import {
   assignRoleToAccount,
@@ -58,6 +59,15 @@ import {
 } from "@/modules/finance/application/finance-config-service";
 import type { OrganizationActorContext } from "@/modules/organization/application/organization-access";
 import { OrganizationAuthorizationError } from "@/modules/organization/application/organization-access";
+import {
+  GeographyAuthorizationError,
+  GeographyConflictError,
+  archiveCity,
+  archiveRegion,
+  createCity,
+  createRegion,
+  listGeography
+} from "@/modules/organization/application/geography-service";
 import {
   OrganizationCurrencyLockedError,
   getOrganizationSettings,
@@ -703,6 +713,330 @@ describe("PostgreSQL baseline", () => {
         requestId: "integration-organization-currency-locked"
       })
     ).rejects.toBeInstanceOf(OrganizationCurrencyLockedError);
+  });
+
+  it("manages regions and cities with RBAC, RLS, audit, immutable rows and property scopes", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Geography A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Geography B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const personId = randomUUID();
+    const geographyCtx: OrganizationActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      personId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        personId,
+        permissions: new Set([
+          permissionKey("region", "view"),
+          permissionKey("region", "create"),
+          permissionKey("region", "edit"),
+          permissionKey("city", "view"),
+          permissionKey("city", "create"),
+          permissionKey("city", "edit")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+
+    const deniedGeographyCtx: OrganizationActorContext = {
+      ...geographyCtx,
+      authContext: {
+        ...geographyCtx.authContext,
+        permissions: new Set([permissionKey("region", "view"), permissionKey("city", "view")])
+      }
+    };
+
+    await expect(
+      createRegion(
+        deniedGeographyCtx,
+        { name: "Denied Region", code: undefined, sortOrder: 0 },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-geography-denied"
+        }
+      )
+    ).rejects.toBeInstanceOf(GeographyAuthorizationError);
+
+    const region = await createRegion(
+      geographyCtx,
+      {
+        name: "Marrakech-Safi",
+        code: "MS",
+        description: "Marrakech operating region",
+        sortOrder: 10
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-region-create",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const city = await createCity(
+      geographyCtx,
+      {
+        name: "Marrakech",
+        regionId: region.id,
+        countryCode: "MA",
+        timezone: "Africa/Casablanca",
+        sortOrder: 10
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-city-create",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const otherCity = await createCity(
+      geographyCtx,
+      {
+        name: "Essaouira",
+        regionId: region.id,
+        countryCode: "MA",
+        timezone: "Africa/Casablanca",
+        sortOrder: 20
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-city-create-other"
+      }
+    );
+    const archiveRegionCandidate = await createRegion(
+      geographyCtx,
+      { name: "Archive Candidate", code: undefined, sortOrder: 99 },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-region-archive-candidate"
+      }
+    );
+    const archiveCityCandidate = await createCity(
+      geographyCtx,
+      {
+        name: "Archive Candidate City",
+        regionId: archiveRegionCandidate.id,
+        countryCode: "MA",
+        timezone: "Africa/Casablanca",
+        sortOrder: 99
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-city-archive-candidate"
+      }
+    );
+    const coreCtx: CoreActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        personId,
+        permissions: new Set([
+          permissionKey("owner", "view"),
+          permissionKey("owner", "create"),
+          permissionKey("property", "view"),
+          permissionKey("property", "create")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const owner = await createOwner(
+      coreCtx,
+      {
+        displayName: "Geography Owner",
+        preferredLocale: "en",
+        representatives: [],
+        payoutMethods: []
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-geography-owner-create"
+      }
+    );
+    const property = await createProperty(
+      coreCtx,
+      {
+        ownerId: owner.id,
+        cityId: city.id,
+        name: "Villa Geography Marrakech",
+        addressLine1: "Route de Fes",
+        countryCode: "MA",
+        propertyType: "Villa",
+        bedrooms: 5,
+        bathrooms: 5,
+        livingSpaces: 2,
+        hasPool: true,
+        hasGarden: true,
+        parkingSpaces: 2,
+        maxGuests: 10,
+        timezone: "Africa/Casablanca",
+        amenities: ["pool", "garden"],
+        photoUrls: [],
+        status: "DRAFT",
+        onboardingProfile: {
+          houseRules: []
+        }
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-geography-property-create"
+      }
+    );
+    const otherProperty = await createProperty(
+      coreCtx,
+      {
+        ownerId: owner.id,
+        cityId: otherCity.id,
+        name: "Villa Geography Essaouira",
+        addressLine1: "Medina",
+        countryCode: "MA",
+        propertyType: "Riad",
+        bedrooms: 3,
+        bathrooms: 3,
+        livingSpaces: 1,
+        hasPool: false,
+        hasGarden: false,
+        parkingSpaces: 0,
+        maxGuests: 6,
+        timezone: "Africa/Casablanca",
+        amenities: ["terrace"],
+        photoUrls: [],
+        status: "DRAFT",
+        onboardingProfile: {
+          houseRules: []
+        }
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-geography-other-property-create"
+      }
+    );
+
+    expect(property).toMatchObject({
+      cityId: city.id,
+      regionId: region.id,
+      city: "Marrakech",
+      region: "Marrakech-Safi"
+    });
+    expect(otherProperty.cityId).toBe(otherCity.id);
+
+    const cityScopedProperties = await listProperties(
+      {
+        ...coreCtx,
+        authContext: {
+          ...coreCtx.authContext,
+          scopes: [{ organizationId: orgA.id, scopeType: "city", scopeId: city.id }]
+        }
+      },
+      { db: prisma as unknown as TenantTransactionRunner }
+    );
+
+    expect(cityScopedProperties.map((entry) => entry.id)).toEqual([property.id]);
+
+    const geography = await listGeography(geographyCtx, { db: prisma as unknown as TenantTransactionRunner });
+    const stored = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => ({
+      region: await tx.region.findFirstOrThrow({ where: { id: region.id } }),
+      city: await tx.city.findFirstOrThrow({ where: { id: city.id } }),
+      property: await tx.property.findFirstOrThrow({ where: { id: property.id } }),
+      auditActions: await tx.auditLog.findMany({
+        where: {
+          organizationId: orgA.id,
+          action: { in: ["region.create", "city.create"] },
+          resourceId: { in: [region.id, city.id] }
+        },
+        orderBy: { action: "asc" }
+      })
+    }));
+    const cityVisibleToOrgB = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => tx.city.findFirst({ where: { id: city.id } })
+    );
+    const cityVisibleWithoutTenant = await prisma.city.findFirst({ where: { id: city.id } });
+
+    expect(geography.regions.some((entry) => entry.id === region.id)).toBe(true);
+    expect(geography.cities.some((entry) => entry.id === city.id)).toBe(true);
+    expect(stored.region.organizationId).toBe(orgA.id);
+    expect(stored.city.organizationId).toBe(orgA.id);
+    expect(stored.property).toMatchObject({
+      cityId: city.id,
+      regionId: region.id,
+      city: "Marrakech",
+      region: "Marrakech-Safi"
+    });
+    expect(stored.auditActions.map((entry) => entry.action).sort()).toEqual(["city.create", "region.create"]);
+    expect(cityVisibleToOrgB).toBeNull();
+    expect(cityVisibleWithoutTenant).toBeNull();
+
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.city.delete({ where: { id: archiveCityCandidate.id } })
+      )
+    ).rejects.toThrow(/archived, not deleted|business rows/u);
+    await expect(
+      archiveCity(geographyCtx, city.id, {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-city-archive-conflict"
+      })
+    ).rejects.toBeInstanceOf(GeographyConflictError);
+    await expect(
+      archiveRegion(geographyCtx, region.id, {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-region-archive-conflict"
+      })
+    ).rejects.toBeInstanceOf(GeographyConflictError);
+
+    const archivedCity = await archiveCity(geographyCtx, archiveCityCandidate.id, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-city-archive"
+    });
+    const archivedRegion = await archiveRegion(geographyCtx, archiveRegionCandidate.id, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-region-archive"
+    });
+
+    expect(archivedCity.archivedAt).toBeInstanceOf(Date);
+    expect(archivedRegion.archivedAt).toBeInstanceOf(Date);
+
+    const directProperty = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+      tx.property.create({
+        data: {
+          organizationId: orgA.id,
+          name: "Villa Legacy Geography Resolver",
+          addressLine1: "Legacy Address",
+          city: "Legacy City",
+          region: "Legacy Region",
+          countryCode: "MA",
+          propertyType: "Villa",
+          bedrooms: 2,
+          bathrooms: 2,
+          livingSpaces: 1,
+          maxGuests: 4,
+          timezone: "Africa/Casablanca",
+          amenities: [],
+          photoUrls: [],
+          propertyOwners: {
+            create: {
+              organizationId: orgA.id,
+              ownerId: owner.id,
+              shareBps: 10000,
+              isPrimary: true,
+              createdBy: actorId
+            }
+          },
+          createdBy: actorId
+        }
+      })
+    );
+
+    expect(directProperty.cityId).toEqual(expect.any(String));
+    expect(directProperty.regionId).toEqual(expect.any(String));
   });
 
   it("creates owner representatives, encrypted payout methods and property onboarding profiles", async () => {

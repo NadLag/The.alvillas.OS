@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { e2eEmail, ensureE2EAdmin } from "./support/auth";
+import { setPropertyCity } from "./support/property-form";
 import { ensureReservationRevenuePostingSetup } from "./support/reservation-revenue";
 
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
@@ -69,7 +70,7 @@ test.describe("configuration engine journey", () => {
     await page.getByTestId("property-name").fill(propertyName);
     await page.getByTestId("property-type").fill("Villa");
     await page.getByTestId("property-address").fill("Route de Fes");
-    await page.getByTestId("property-city").fill("Marrakech");
+    const propertyCity = await setPropertyCity(page, "Marrakech");
     await page.getByTestId("property-bedrooms").fill("4");
     await page.getByTestId("property-bathrooms").fill("4");
     await page.getByTestId("property-max-guests").fill("8");
@@ -88,7 +89,7 @@ test.describe("configuration engine journey", () => {
     await selectPropertyScopedRule(
       page,
       "ops.reservation_task_templates",
-      `${propertyName} - Marrakech`
+      `${propertyName} - ${propertyCity}`
     );
     await page.getByTestId("config-rule-lifecycle").selectOption("DRAFT");
     await page.getByTestId("config-rule-value").fill(
@@ -130,7 +131,7 @@ test.describe("configuration engine journey", () => {
         .filter({ hasText: "Active" })
     ).toBeVisible();
 
-    await selectPropertyScopedRule(page, "finance.commission", `${propertyName} - Marrakech`);
+    await selectPropertyScopedRule(page, "finance.commission", `${propertyName} - ${propertyCity}`);
     await page.getByTestId("config-rule-lifecycle").selectOption("ACTIVE");
     await page.getByTestId("config-rule-value").fill(
       JSON.stringify({
@@ -144,7 +145,7 @@ test.describe("configuration engine journey", () => {
     await page.getByTestId("config-rule-submit").click();
     await expectConfigRuleCreated(page);
 
-    await selectPropertyScopedRule(page, "finance.commission", `${propertyName} - Marrakech`);
+    await selectPropertyScopedRule(page, "finance.commission", `${propertyName} - ${propertyCity}`);
     await page.getByTestId("config-rule-lifecycle").selectOption("ACTIVE");
     await page.getByTestId("config-rule-value").fill(
       JSON.stringify({
@@ -166,7 +167,7 @@ test.describe("configuration engine journey", () => {
     ).toBeVisible();
 
     await page.goto("/en/app/reservations");
-    await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - Marrakech` });
+    await page.getByTestId("reservation-property").selectOption({ label: `${propertyName} - ${propertyCity}` });
     await page.getByTestId("reservation-guest-name").fill(guestName);
     await page.getByTestId("reservation-guest-email").fill(`guest-${suffix}@example.test`);
     await page.getByTestId("reservation-check-in").fill("2028-07-10");
