@@ -15,6 +15,8 @@ test.describe("owners and properties journey", () => {
     const suffix = `${testInfo.project.name}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/gu, "-");
     const ownerName = `Owner ${suffix}`;
     const ownerEmail = `owner-${suffix}@example.test`;
+    const coOwnerName = `Co Owner ${suffix}`;
+    const coOwnerEmail = `co-owner-${suffix}@example.test`;
     const representativeName = `Representative ${suffix}`;
     const propertyName = `Villa ${suffix}`;
     const loginEmail = e2eEmail(`core-${suffix}`, testInfo.project.name);
@@ -45,6 +47,13 @@ test.describe("owners and properties journey", () => {
     await expect(page.getByTestId("owner-representatives")).toContainText(representativeName);
     await expect(page.getByTestId("owner-payout-methods")).toContainText("**** 7890");
 
+    await page.goto("/en/app/owners");
+    await page.getByTestId("owner-display-name").fill(coOwnerName);
+    await page.getByTestId("owner-email").fill(coOwnerEmail);
+    await page.getByTestId("owner-preferred-locale").selectOption("en");
+    await page.getByTestId("owner-submit").click();
+    await expect(page.getByRole("heading", { name: coOwnerName })).toBeVisible();
+
     await page.goto("/en/app/properties");
     await expect(page.getByTestId("properties-page")).toBeVisible();
     await page.getByTestId("property-owner").selectOption({ label: ownerName });
@@ -69,6 +78,16 @@ test.describe("owners and properties journey", () => {
     await expect(page.getByTestId("property-detail-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: propertyName })).toBeVisible();
     await expect(page.getByTestId("property-detail-owner")).toContainText(ownerName);
+    await page.getByTestId("property-owner-share-percent").first().fill("60");
+    await page.getByTestId("property-owner-share-add").click();
+    await page.getByTestId("property-owner-share-owner").nth(1).selectOption({ label: coOwnerName });
+    await page.getByTestId("property-owner-share-percent").nth(1).fill("40");
+    await page.getByTestId("property-owner-share-submit").click();
+    await expect(page.getByTestId("property-ownership-form-success")).toContainText("Ownership saved");
+    await expect(page.getByTestId("property-ownership-summary")).toContainText(ownerName);
+    await expect(page.getByTestId("property-ownership-summary")).toContainText(coOwnerName);
+    await expect(page.getByTestId("property-ownership-summary")).toContainText("60%");
+    await expect(page.getByTestId("property-ownership-summary")).toContainText("40%");
     await expect(page.getByTestId("property-onboarding-profile")).toContainText("Calm family villa near the Palmeraie");
     await expect(page.getByTestId("property-onboarding-profile")).toContainText("No parties");
     await expect(page.getByTestId("property-onboarding-profile")).toContainText("1");

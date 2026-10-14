@@ -14,7 +14,8 @@ const bootstrapCorePermissions = new Set([
   permissionKey("owner", "view"),
   permissionKey("owner", "create"),
   permissionKey("property", "view"),
-  permissionKey("property", "create")
+  permissionKey("property", "create"),
+  permissionKey("property", "edit")
 ]);
 
 export function coreActorContextFromSession(session: Session | null): CoreActorContext | null {

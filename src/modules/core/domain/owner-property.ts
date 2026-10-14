@@ -28,6 +28,7 @@ const optionalDate = z.preprocess(
 
 const nonNegativeInteger = z.coerce.number().int().min(0);
 const positiveInteger = z.coerce.number().int().min(1);
+const positiveShareBps = z.coerce.number().int().min(1).max(10000);
 
 export const payoutMethodTypeSchema = z.enum([
   "BANK_TRANSFER",
@@ -175,6 +176,54 @@ export const propertyInputSchema = z
   });
 
 export type PropertyInput = z.infer<typeof propertyInputSchema>;
+
+export const propertyOwnershipShareInputSchema = z.object({
+  ownerId: z.string().uuid(),
+  shareBps: positiveShareBps,
+  isPrimary: z.coerce.boolean().default(false)
+});
+
+export const propertyOwnershipInputSchema = z
+  .object({
+    propertyId: z.string().uuid(),
+    shares: z.array(propertyOwnershipShareInputSchema).min(1).max(20)
+  })
+  .superRefine((value, ctx) => {
+    const ownerIds = new Set<string>();
+    let primaryCount = 0;
+    let totalShareBps = 0;
+
+    value.shares.forEach((share, index) => {
+      if (ownerIds.has(share.ownerId)) {
+        ctx.addIssue({
+          code: "custom",
+          message: "Each owner can only appear once",
+          path: ["shares", index, "ownerId"]
+        });
+      }
+      ownerIds.add(share.ownerId);
+      totalShareBps += share.shareBps;
+      primaryCount += share.isPrimary ? 1 : 0;
+    });
+
+    if (totalShareBps !== 10000) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Ownership shares must total 100%",
+        path: ["shares"]
+      });
+    }
+
+    if (primaryCount !== 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Select exactly one primary owner",
+        path: ["shares"]
+      });
+    }
+  });
+
+export type PropertyOwnershipInput = z.infer<typeof propertyOwnershipInputSchema>;
 
 export type OwnerRepresentativeSummary = {
   id: string;

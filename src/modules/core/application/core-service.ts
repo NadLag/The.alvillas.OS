@@ -3,9 +3,11 @@ import { CoreRepository } from "@/modules/core/infrastructure/core-repository";
 import {
   ownerInputSchema,
   propertyInputSchema,
+  propertyOwnershipInputSchema,
   type OwnerInput,
   type OwnerSummary,
   type PropertyInput,
+  type PropertyOwnershipInput,
   type PropertySummary
 } from "@/modules/core/domain/owner-property";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
@@ -39,7 +41,12 @@ type AuditMeta = {
   ipAddress: string | null;
 };
 
-function assertAllowed(ctx: CoreActorContext, action: "view" | "create", resource: "owner" | "property", id?: string): void {
+function assertAllowed(
+  ctx: CoreActorContext,
+  action: "view" | "create" | "edit",
+  resource: "owner" | "property",
+  id?: string
+): void {
   const allowed = id
     ? authorize(ctx.authContext, action, {
         type: resource,
@@ -81,6 +88,10 @@ export function parseOwnerInput(input: unknown) {
 
 export function parsePropertyInput(input: unknown) {
   return propertyInputSchema.safeParse(input);
+}
+
+export function parsePropertyOwnershipInput(input: unknown) {
+  return propertyOwnershipInputSchema.safeParse(input);
 }
 
 export async function createOwner(
@@ -221,4 +232,49 @@ export async function getProperty(
   }
 
   return property;
+}
+
+export async function updatePropertyOwnership(
+  ctx: CoreActorContext,
+  input: PropertyOwnershipInput,
+  deps: CoreServiceDeps = {}
+): Promise<PropertySummary> {
+  assertAllowed(ctx, "edit", "property", input.propertyId);
+  const meta = await auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new CoreRepository(tx, ctx.organizationId);
+    const before = await repository.findProperty(input.propertyId);
+
+    if (!before) {
+      throw new CoreNotFoundError();
+    }
+
+    const property = await repository.replacePropertyOwnership(input, ctx.actorId);
+
+    if (!property) {
+      throw new CoreNotFoundError();
+    }
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "property.ownership.update",
+      resourceType: "property",
+      resourceId: property.id,
+      ipAddress: meta.ipAddress,
+      propertyScopeId: property.id,
+      before: {
+        owners: before.owners
+      },
+      after: {
+        owners: property.owners
+      },
+      reason: "F-ORG-05 property ownership update",
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
+
+    return property;
+  });
 }

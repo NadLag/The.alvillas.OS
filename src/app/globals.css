@@ -735,6 +735,17 @@ textarea:disabled {
   margin: 0;
 }
 
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.form-success {
+  color: var(--accent-active);
+  font-weight: var(--font-weight-bold);
+}
+
 .quiet-button {
   display: inline-flex;
   align-items: center;
@@ -1054,6 +1065,48 @@ textarea:disabled {
 .detail-grid dd {
   margin: 6px 0 0;
   overflow-wrap: anywhere;
+}
+
+.ownership-form {
+  margin-block-start: var(--space-7);
+}
+
+.ownership-row {
+  align-items: end;
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(12rem, 1.5fr) minmax(7rem, 0.75fr) minmax(7rem, auto) auto;
+}
+
+.choice-row {
+  align-items: center;
+  display: inline-flex;
+  gap: var(--space-3);
+  min-block-size: var(--target-field);
+  color: var(--ink-soft);
+  font-weight: var(--font-weight-semibold);
+}
+
+.ownership-summary {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.ownership-summary-row {
+  align-items: center;
+  border-block-end: 1px solid var(--border);
+  display: grid;
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-block-size: var(--target-field);
+}
+
+.ownership-summary-row:last-child {
+  border-block-end: 0;
+}
+
+.ownership-summary-row small {
+  color: var(--muted);
 }
 
 .statement-summary {
@@ -1760,6 +1813,7 @@ textarea:disabled {
   .form-grid.two,
   .form-grid.three,
   .form-grid.five,
+  .ownership-row,
   .reservation-row-main,
   .reservation-revenue-form,
   .settlement-import-form,
@@ -1780,6 +1834,7 @@ textarea:disabled {
   .dsn-board-grid,
   .segmented-control,
   .detail-grid,
+  .ownership-summary-row,
   .statement-summary,
   .statement-table-head,
   .statement-table-row {

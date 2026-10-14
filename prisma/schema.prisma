@@ -575,6 +575,7 @@ model PropertyOwner {
   @@unique([organizationId, propertyId, ownerId], map: "property_owner_org_property_owner_unique")
   @@index([organizationId, ownerId], map: "property_owner_org_owner_idx")
   @@index([organizationId, propertyId], map: "property_owner_org_property_idx")
+  @@index([organizationId, propertyId, archivedAt, isPrimary], map: "property_owner_org_property_archived_share_idx")
   @@map("property_owner")
 }
 

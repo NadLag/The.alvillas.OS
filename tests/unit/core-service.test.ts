@@ -4,7 +4,9 @@ import {
   CoreAuthorizationError,
   createOwner,
   getProperty,
-  listOwners
+  listOwners,
+  parsePropertyOwnershipInput,
+  updatePropertyOwnership
 } from "@/modules/core/application/core-service";
 import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
 import type { TenantTransactionRunner } from "@/platform/db/tenant";
@@ -70,6 +72,67 @@ describe("core service authorization", () => {
 
     await expect(
       getProperty(ctx, "00000000-0000-7000-8000-000000000011", { db: deniedDb })
+    ).rejects.toBeInstanceOf(CoreAuthorizationError);
+  });
+
+  it("validates multi-owner share sets before they reach the repository", () => {
+    const valid = parsePropertyOwnershipInput({
+      propertyId: "00000000-0000-7000-8000-000000000100",
+      shares: [
+        {
+          ownerId: "00000000-0000-7000-8000-000000000101",
+          shareBps: 6000,
+          isPrimary: true
+        },
+        {
+          ownerId: "00000000-0000-7000-8000-000000000102",
+          shareBps: 4000,
+          isPrimary: false
+        }
+      ]
+    });
+    const invalid = parsePropertyOwnershipInput({
+      propertyId: "00000000-0000-7000-8000-000000000100",
+      shares: [
+        {
+          ownerId: "00000000-0000-7000-8000-000000000101",
+          shareBps: 6000,
+          isPrimary: true
+        },
+        {
+          ownerId: "00000000-0000-7000-8000-000000000101",
+          shareBps: 3000,
+          isPrimary: false
+        }
+      ]
+    });
+
+    expect(valid.success).toBe(true);
+    expect(invalid.success).toBe(false);
+  });
+
+  it("denies ownership updates without property edit permission", async () => {
+    const ctx = actor({
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("property", "view")]),
+      scopes: [{ organizationId: "org-a" }]
+    });
+
+    await expect(
+      updatePropertyOwnership(
+        ctx,
+        {
+          propertyId: "00000000-0000-7000-8000-000000000100",
+          shares: [
+            {
+              ownerId: "00000000-0000-7000-8000-000000000101",
+              shareBps: 10000,
+              isPrimary: true
+            }
+          ]
+        },
+        { db: deniedDb }
+      )
     ).rejects.toBeInstanceOf(CoreAuthorizationError);
   });
 });

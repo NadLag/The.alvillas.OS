@@ -15,7 +15,8 @@ import {
   createProperty,
   getOwner,
   getProperty,
-  listProperties
+  listProperties,
+  updatePropertyOwnership
 } from "@/modules/core/application/core-service";
 import {
   assignRoleToAccount,
@@ -1205,6 +1206,221 @@ describe("PostgreSQL baseline", () => {
           where: { id: stored.payout.id }
         })
       )
+    ).rejects.toThrow(/archived, not deleted|business rows/u);
+  });
+
+  it("manages multiple property owners with audited shares and immutable links", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Owner Shares A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Owner Shares B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const personId = randomUUID();
+    const ctx: CoreActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        personId,
+        permissions: new Set([
+          permissionKey("owner", "view"),
+          permissionKey("owner", "create"),
+          permissionKey("property", "view"),
+          permissionKey("property", "create"),
+          permissionKey("property", "edit")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const [primaryOwner, coOwner, archivedOwner] = await Promise.all([
+      createOwner(
+        ctx,
+        {
+          displayName: "Share Primary Owner",
+          email: `share-primary-${randomUUID()}@example.test`,
+          preferredLocale: "en",
+          representatives: [],
+          payoutMethods: []
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-org-owner-shares-primary",
+          ipAddress: "127.0.0.1"
+        }
+      ),
+      createOwner(
+        ctx,
+        {
+          displayName: "Share Co Owner",
+          email: `share-co-${randomUUID()}@example.test`,
+          preferredLocale: "fr",
+          representatives: [],
+          payoutMethods: []
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-org-owner-shares-co",
+          ipAddress: "127.0.0.1"
+        }
+      ),
+      createOwner(
+        ctx,
+        {
+          displayName: "Share Archived Owner",
+          email: `share-archived-${randomUUID()}@example.test`,
+          preferredLocale: "fr",
+          representatives: [],
+          payoutMethods: []
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-org-owner-shares-archived",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ]);
+    const property = await createProperty(
+      ctx,
+      {
+        ownerId: archivedOwner.id,
+        name: "Villa Shared Ownership",
+        addressLine1: "Route de Fes",
+        city: "Marrakech",
+        countryCode: "MA",
+        propertyType: "Villa",
+        bedrooms: 5,
+        bathrooms: 5,
+        livingSpaces: 2,
+        hasPool: true,
+        hasGarden: true,
+        parkingSpaces: 2,
+        maxGuests: 10,
+        timezone: "Africa/Casablanca",
+        amenities: ["pool", "garden"],
+        photoUrls: [],
+        status: "DRAFT",
+        onboardingProfile: {
+          headline: "Shared owner villa",
+          houseRules: []
+        }
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-owner-shares-property",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    const updated = await updatePropertyOwnership(
+      ctx,
+      {
+        propertyId: property.id,
+        shares: [
+          {
+            ownerId: primaryOwner.id,
+            shareBps: 6000,
+            isPrimary: true
+          },
+          {
+            ownerId: coOwner.id,
+            shareBps: 4000,
+            isPrimary: false
+          }
+        ]
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-owner-shares",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const stored = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => ({
+      links: await tx.propertyOwner.findMany({
+        where: { organizationId: orgA.id, propertyId: property.id },
+        orderBy: [{ archivedAt: "asc" }, { shareBps: "desc" }]
+      }),
+      audit: await tx.auditLog.findFirstOrThrow({
+        where: {
+          organizationId: orgA.id,
+          action: "property.ownership.update",
+          resourceId: property.id,
+          requestId: "integration-org-owner-shares"
+        }
+      })
+    }));
+    const visibleToOrgB = await withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, async (tx) =>
+      tx.propertyOwner.findMany({ where: { propertyId: property.id } })
+    );
+
+    expect(updated.owners).toEqual([
+      expect.objectContaining({
+        id: primaryOwner.id,
+        shareBps: 6000,
+        isPrimary: true
+      }),
+      expect.objectContaining({
+        id: coOwner.id,
+        shareBps: 4000,
+        isPrimary: false
+      })
+    ]);
+    expect(stored.links.find((link) => link.ownerId === archivedOwner.id)?.archivedAt).toBeInstanceOf(Date);
+    expect(visibleToOrgB).toHaveLength(0);
+    expect(stored.audit.before).toEqual({
+      owners: [
+        expect.objectContaining({
+          id: archivedOwner.id,
+          shareBps: 10000,
+          isPrimary: true
+        })
+      ]
+    });
+    expect(stored.audit.after).toEqual({
+      owners: [
+        expect.objectContaining({
+          id: primaryOwner.id,
+          shareBps: 6000,
+          isPrimary: true
+        }),
+        expect.objectContaining({
+          id: coOwner.id,
+          shareBps: 4000,
+          isPrimary: false
+        })
+      ]
+    });
+
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => {
+        const primaryLink = stored.links.find((link) => link.ownerId === primaryOwner.id);
+
+        if (!primaryLink) {
+          throw new Error("Expected primary owner link");
+        }
+
+        await tx.propertyOwner.update({
+          where: { id: primaryLink.id },
+          data: { shareBps: 5000 }
+        });
+      })
+    ).rejects.toThrow(/shares must total 10000|property owner shares/u);
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => {
+        const coOwnerLink = stored.links.find((link) => link.ownerId === coOwner.id);
+
+        if (!coOwnerLink) {
+          throw new Error("Expected co-owner link");
+        }
+
+        await tx.propertyOwner.delete({
+          where: { id: coOwnerLink.id }
+        });
+      })
     ).rejects.toThrow(/archived, not deleted|business rows/u);
   });
 

@@ -535,6 +535,19 @@
       "onboardingProfile": "Onboarding profile",
       "noOnboardingProfile": "No onboarding profile recorded.",
       "photoCount": "Photos",
+      "ownership": {
+        "title": "Ownership shares",
+        "formTitle": "Manage owner shares",
+        "owner": "Owner",
+        "sharePercent": "Share %",
+        "primary": "Primary",
+        "shareTotal": "Total",
+        "shareTotalInvalid": "Shares must total 100%, use each owner once, and select one primary owner.",
+        "addOwner": "Add owner",
+        "removeOwner": "Remove",
+        "save": "Save ownership",
+        "saved": "Ownership saved."
+      },
       "status": {
         "DRAFT": "Draft",
         "ONBOARDING": "Onboarding",
