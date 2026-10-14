@@ -66,6 +66,7 @@ jobs:
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
       VERCEL_CLI_VERSION: "63.1.2"
+      STAGING_ALIAS: "the-alvillas-os-staging.vercel.app"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -133,11 +134,21 @@ jobs:
       - name: Build staging
         if: steps.staging_credentials.outputs.ready == 'true'
         run: vercel build
+        env:
+          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
+          VERCEL_GIT_COMMIT_REF: main
       - name: Deploy staging
         if: steps.staging_credentials.outputs.ready == 'true'
         id: deploy
         run: |
-          deployment_url="$(vercel deploy --prebuilt --target=preview)"
+          deployment_output="$(vercel deploy --prebuilt --target=preview --meta githubCommitSha="$GITHUB_SHA" --meta githubCommitRef=main)"
+          deployment_url="$(DEPLOYMENT_OUTPUT="$deployment_output" node --input-type=module -e '
+            const output = process.env.DEPLOYMENT_OUTPUT ?? "";
+            const urls = [...output.matchAll(/https:\/\/[a-z0-9.-]+\.vercel\.app/g)].map((match) => match[0]);
+            const deployment = urls.at(-1);
+            if (!deployment) throw new Error("Vercel deploy did not print a deployment URL");
+            console.log(deployment);
+          ')"
           DEPLOYMENT_URL="$deployment_url" node --input-type=module -e '
             const value = process.env.DEPLOYMENT_URL;
             const url = new URL(value);
@@ -151,9 +162,9 @@ jobs:
       - name: Smoke staging deployment
         if: steps.staging_credentials.outputs.ready == 'true'
         run: |
-          curl --fail --show-error --silent "${DEPLOYMENT_URL}/api/health" > /tmp/health.json
-          curl --fail --show-error --silent "${DEPLOYMENT_URL}/api/readiness" > /tmp/readiness.json
-          curl --fail --show-error --silent "${DEPLOYMENT_URL}/api/version" > /tmp/version.json
+          vercel curl /api/health --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/health.json
+          vercel curl /api/readiness --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/readiness.json
+          vercel curl /api/version --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/version.json
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const health = JSON.parse(readFileSync("/tmp/health.json", "utf8"));
@@ -162,6 +173,8 @@ jobs:
             if (health.service !== "alvillas-os") throw new Error("Unexpected health payload");
             if (!["ready", "not_ready"].includes(readiness.status)) throw new Error("Unexpected readiness status");
             if (version.service !== "alvillas-os" || !version.version) throw new Error("Unexpected version payload");
+            if (version.version !== process.env.GITHUB_SHA) throw new Error(`Unexpected version SHA ${version.version}`);
+            if (version.commitRef !== "main") throw new Error(`Unexpected commit ref ${version.commitRef}`);
             console.log(JSON.stringify({
               deployment: process.env.DEPLOYMENT_URL,
               health: health.status,
@@ -172,3 +185,24 @@ jobs:
           '
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      - name: Assign stable staging alias
+        if: steps.staging_credentials.outputs.ready == 'true'
+        run: |
+          test -n "${STAGING_ALIAS:?STAGING_ALIAS is required}"
+          vercel alias set "$DEPLOYMENT_URL" "$STAGING_ALIAS"
+          vercel curl /api/version --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-version.json
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const version = JSON.parse(readFileSync("/tmp/staging-version.json", "utf8"));
+            if (version.service !== "alvillas-os") throw new Error("Unexpected stable staging service");
+            if (version.version !== process.env.GITHUB_SHA) throw new Error(`Stable staging alias points at ${version.version}`);
+            console.log(JSON.stringify({
+              stagingUrl: `https://${process.env.STAGING_ALIAS}`,
+              version: version.version,
+              commitRef: version.commitRef
+            }));
+          '
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}

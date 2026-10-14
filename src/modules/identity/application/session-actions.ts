@@ -9,25 +9,38 @@ import { appLocales, safeLocale } from "@/i18n/routing";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
 import { updateOwnPreferredLocale } from "@/modules/identity/application/identity-service";
 import { ensureDeviceId } from "@/platform/auth/device";
-import { preferredLocaleForLogin } from "@/platform/auth/identity-auth";
-import { consumeLoginRateLimit, loginRateLimitIp } from "@/platform/auth/login-rate-limit";
+import { beginPasswordMfaChallenge, preferredLocaleForLogin } from "@/platform/auth/identity-auth";
+import { consumeLoginRateLimit, loginRateLimitIp, withCheckedLoginRateLimit } from "@/platform/auth/login-rate-limit";
 
 export type LoginFormState = {
-  status: "idle" | "error";
-  messageKey?: "invalid" | "rateLimited" | "generic";
+  status: "idle" | "error" | "mfaRequired";
+  messageKey?: "invalid" | "mfaInvalid" | "rateLimited" | "generic";
+  email?: string;
+  mfaChallenge?: string;
 };
+
+const emptyFormValue = z.union([z.literal(""), z.null()]).transform(() => undefined);
+const optionalFormString = z.string().optional().or(emptyFormValue);
 
 const loginSchema = z
   .object({
-    method: z.enum(["password", "pin"]).default("password"),
-    email: z.string().email().optional().or(z.literal("").transform(() => undefined)),
-    phone: z.string().optional().or(z.literal("").transform(() => undefined)),
-    password: z.string().optional().or(z.literal("").transform(() => undefined)),
-    pin: z.string().optional().or(z.literal("").transform(() => undefined)),
-    mfaCode: z.string().optional().or(z.literal("").transform(() => undefined)),
-    recoveryCode: z.string().optional().or(z.literal("").transform(() => undefined))
+    method: z.enum(["password", "pin", "mfa"]).default("password"),
+    email: z.string().email().optional().or(emptyFormValue),
+    phone: optionalFormString,
+    password: optionalFormString,
+    pin: optionalFormString,
+    mfaCode: optionalFormString,
+    recoveryCode: optionalFormString,
+    mfaChallenge: optionalFormString
   })
   .superRefine((value, ctx) => {
+    if (value.method === "mfa") {
+      if (!value.email || !value.mfaChallenge || (!value.mfaCode && !value.recoveryCode)) {
+        ctx.addIssue({ code: "custom", message: "MFA challenge and code are required" });
+      }
+      return;
+    }
+
     if (value.method === "pin") {
       if (!value.phone || !value.pin) {
         ctx.addIssue({ code: "custom", message: "Phone and PIN are required" });
@@ -56,17 +69,34 @@ export async function loginAction(
   formData: FormData
 ): Promise<LoginFormState> {
   const appLocale = safeLocale(locale);
+  const requestedMethod = formData.get("method");
+  const method =
+    requestedMethod === "mfa" || formData.get("mfaChallenge")
+      ? "mfa"
+      : requestedMethod === "pin"
+        ? "pin"
+        : "password";
   const parsed = loginSchema.safeParse({
-    method: formData.get("method") === "pin" ? "pin" : "password",
+    method,
     email: formData.get("email"),
     phone: formData.get("phone"),
     password: formData.get("password"),
     pin: formData.get("pin"),
     mfaCode: formData.get("mfaCode"),
-    recoveryCode: formData.get("recoveryCode")
+    recoveryCode: formData.get("recoveryCode"),
+    mfaChallenge: formData.get("mfaChallenge")
   });
 
   if (!parsed.success) {
+    const rawEmail = formData.get("email");
+    const rawMfaChallenge = formData.get("mfaChallenge");
+    const email = typeof rawEmail === "string" ? rawEmail : undefined;
+    const mfaChallenge = typeof rawMfaChallenge === "string" ? rawMfaChallenge : undefined;
+
+    if (method === "mfa" && email && mfaChallenge) {
+      return { status: "mfaRequired", messageKey: "mfaInvalid", email, mfaChallenge };
+    }
+
     return { status: "error", messageKey: "invalid" };
   }
 
@@ -87,11 +117,18 @@ export async function loginAction(
   const deviceId = await ensureDeviceId();
   const credentials: Record<string, string> = {
     method: parsed.data.method,
-    deviceId,
-    rateLimitChecked: "1"
+    deviceId
   };
 
-  for (const key of ["email", "phone", "password", "pin", "mfaCode", "recoveryCode"] as const) {
+  for (const key of [
+    "email",
+    "phone",
+    "password",
+    "pin",
+    "mfaCode",
+    "recoveryCode",
+    "mfaChallenge"
+  ] as const) {
     const value = parsed.data[key];
 
     if (value) {
@@ -100,12 +137,36 @@ export async function loginAction(
   }
 
   try {
-    await signIn("credentials", {
-      ...credentials,
-      redirect: false
-    });
+    await withCheckedLoginRateLimit(rateLimitKey, loginRateLimitIp(requestHeaders), () =>
+      signIn("credentials", { ...credentials, redirect: false })
+    );
   } catch (error) {
     if (error instanceof AuthError) {
+      if (parsed.data.method === "mfa" && parsed.data.email && parsed.data.mfaChallenge) {
+        return {
+          status: "mfaRequired",
+          messageKey: authErrorCode(error) === "rate_limited" ? "rateLimited" : "mfaInvalid",
+          email: parsed.data.email,
+          mfaChallenge: parsed.data.mfaChallenge
+        };
+      }
+
+      if (parsed.data.method === "password" && parsed.data.email && parsed.data.password) {
+        const mfaChallenge = await beginPasswordMfaChallenge({
+          email: parsed.data.email,
+          password: parsed.data.password,
+          deviceId
+        });
+
+        if (mfaChallenge.status === "mfa_required") {
+          return {
+            status: "mfaRequired",
+            email: mfaChallenge.email,
+            mfaChallenge: mfaChallenge.challengeToken
+          };
+        }
+      }
+
       return {
         status: "error",
         messageKey: authErrorCode(error) === "rate_limited" ? "rateLimited" : "invalid"

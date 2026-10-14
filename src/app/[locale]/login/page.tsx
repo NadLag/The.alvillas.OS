@@ -1,4 +1,5 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth } from "../../../../auth";
 import { LocaleSwitch } from "@/i18n/locale-switch";
@@ -30,11 +31,18 @@ export default async function LoginPage({
 
   return (
     <section className="auth-page">
-      <LocaleSwitch currentLocale={appLocale} label={t("language")} path="/login" />
+      <div className="auth-topbar">
+        <Link className="secondary-button" href={`/${appLocale}`}>
+          {t("publicSite")}
+        </Link>
+        <LocaleSwitch currentLocale={appLocale} label={t("language")} path="/login" />
+      </div>
       <div className="auth-panel">
-        <p className="eyebrow">{t("eyebrow")}</p>
-        <h1>{t("title")}</h1>
-        <p>{t("subtitle")}</p>
+        <div className="auth-panel-header">
+          <p className="eyebrow">{t("eyebrow")}</p>
+          <h1>{t("title")}</h1>
+          <p>{t("subtitle")}</p>
+        </div>
         <LoginForm
           locale={appLocale}
           labels={{
@@ -43,10 +51,22 @@ export default async function LoginPage({
             password: t("password"),
             pin: t("pin"),
             authMethod: t("authMethod"),
+            emailPassword: t("emailPassword"),
+            phonePin: t("phonePin"),
+            fieldWorker: t("fieldWorker"),
+            mfaTitle: t("mfaTitle"),
+            mfaSubtitle: t("mfaSubtitle"),
             mfaCode: t("mfaCode"),
             recoveryCode: t("recoveryCode"),
+            useRecoveryCode: t("useRecoveryCode"),
+            useAuthenticatorCode: t("useAuthenticatorCode"),
+            recoverAccount: t("recoverAccount"),
+            continue: t("continue"),
+            verify: t("verify"),
             submit: t("submit"),
+            submitting: t("submitting"),
             invalid: t("invalid"),
+            mfaInvalid: t("mfaInvalid"),
             rateLimited: t("rateLimited"),
             generic: t("generic")
           }}
