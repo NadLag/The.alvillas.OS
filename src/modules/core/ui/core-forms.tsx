@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useMemo, useState, type FormEvent } from "react";
+import { useActionState, useMemo, useState, type FormEvent, type SelectHTMLAttributes } from "react";
 import { z } from "zod";
 import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import { appLocales, compactLocaleLabels } from "@/i18n/routing";
@@ -8,8 +8,10 @@ import type { CoreFormState } from "@/modules/core/application/core-actions";
 import {
   createOwnerAction,
   createPropertyAction,
+  updatePropertyOperatingProfileAction,
   updatePropertyOwnershipAction
 } from "@/modules/core/application/core-actions";
+import type { PropertyOperatingCadence, PropertyOperatingProfileSummary } from "@/modules/core/domain/owner-property";
 
 type FormLabels = {
   saving: string;
@@ -74,7 +76,52 @@ type PropertyLabels = FormLabels & {
   internalAccessNotes: string;
   houseRules: string;
   onboardingNotes: string;
+  operatingSection: string;
+  cleaning: string;
+  inspection: string;
+  poolService: string;
+  gardenService: string;
+  laundry: string;
+  linen: string;
+  maintenance: string;
+  preventiveMaintenance: string;
+  midStayCleaning: string;
+  midStayRuleKey: string;
+  breakfast: string;
+  chef: string;
+  transfers: string;
+  groceries: string;
+  wellness: string;
+  otherServices: string;
+  automationNotes: string;
+  cadence: string;
+  cadenceOptions: Record<PropertyOperatingCadence, string>;
   saveProperty: string;
+};
+
+type PropertyOperatingProfileLabels = FormLabels & {
+  automationNotes: string;
+  breakfast: string;
+  cadence: string;
+  cadenceOptions: Record<PropertyOperatingCadence, string>;
+  chef: string;
+  cleaning: string;
+  formTitle: string;
+  gardenService: string;
+  groceries: string;
+  inspection: string;
+  laundry: string;
+  linen: string;
+  maintenance: string;
+  midStayCleaning: string;
+  midStayRuleKey: string;
+  otherServices: string;
+  poolService: string;
+  preventiveMaintenance: string;
+  save: string;
+  saved: string;
+  transfers: string;
+  wellness: string;
 };
 
 type PropertyOwnershipLabels = FormLabels & {
@@ -114,6 +161,18 @@ type OwnershipFormRow = {
   sharePercent: string;
   isPrimary: boolean;
 };
+
+const operatingCadences: PropertyOperatingCadence[] = [
+  "NONE",
+  "ON_DEMAND",
+  "BETWEEN_STAYS",
+  "DAILY",
+  "WEEKLY",
+  "MONTHLY",
+  "CHECKIN",
+  "CHECKOUT",
+  "CUSTOM_RULE"
+];
 
 const initialCoreFormState: CoreFormState = { status: "idle" };
 
@@ -174,6 +233,33 @@ function percentToClientBps(value: string): number {
 
   return Number.parseInt(match.groups.whole, 10) * 100 +
     Number.parseInt((match.groups.fraction ?? "").padEnd(2, "0"), 10);
+}
+
+function CadenceSelect({
+  labels,
+  selectProps,
+  testId
+}: {
+  labels: Pick<PropertyLabels, "cadence" | "cadenceOptions"> | Pick<PropertyOperatingProfileLabels, "cadence" | "cadenceOptions">;
+  selectProps: SelectHTMLAttributes<HTMLSelectElement> & { name: string };
+  testId?: string;
+}) {
+  return (
+    <label className="field">
+      <span>{labels.cadence}</span>
+      <select data-testid={testId} {...selectProps}>
+        {operatingCadences.map((cadence) => (
+          <option key={cadence} value={cadence}>
+            {labels.cadenceOptions[cadence]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function otherServicesText(profile: PropertyOperatingProfileSummary): string {
+  return profile.otherServices.join(", ");
 }
 
 export function OwnerCreateForm({ locale, labels }: LocalizedFormProps<OwnerLabels>) {
@@ -397,22 +483,43 @@ export function PropertyCreateForm({
         city: hasCities ? z.string().optional() : z.string().trim().min(1, labels.validation),
         cityId: hasCities ? z.string().trim().min(1, labels.validation) : z.string().optional(),
         countryCode: z.string().trim().length(2, labels.validation),
+        automationNotes: z.string().optional(),
+        breakfastAvailable: z.boolean().optional(),
+        chefAvailable: z.boolean().optional(),
+        cleaningEnabled: z.boolean().optional(),
+        cleaningFrequency: z.string().trim().min(1, labels.validation),
         description: z.string().optional(),
+        gardenServiceEnabled: z.boolean().optional(),
+        gardenServiceFrequency: z.string().trim().min(1, labels.validation),
+        groceriesAvailable: z.boolean().optional(),
         hasGarden: z.boolean().optional(),
         hasPool: z.boolean().optional(),
         headline: z.string().optional(),
         houseRules: z.string().optional(),
+        inspectionEnabled: z.boolean().optional(),
+        inspectionFrequency: z.string().trim().min(1, labels.validation),
         internalAccessNotes: z.string().optional(),
+        laundryManaged: z.boolean().optional(),
+        linenManaged: z.boolean().optional(),
         livingSpaces: z.coerce.number().min(0, labels.validation),
+        maintenanceTrackingEnabled: z.boolean().optional(),
         maxGuests: z.coerce.number().min(1, labels.validation),
+        midStayCleaningEnabled: z.boolean().optional(),
+        midStayCleaningRuleKey: z.string().optional(),
         name: z.string().trim().min(1, labels.validation),
         onboardingNotes: z.string().optional(),
+        otherServices: z.string().optional(),
         ownerId: z.string().trim().min(1, labels.validation),
         parkingSpaces: z.coerce.number().min(0, labels.validation),
         photoUrls: z.string().optional(),
+        poolServiceEnabled: z.boolean().optional(),
+        poolServiceFrequency: z.string().trim().min(1, labels.validation),
+        preventiveMaintenanceFrequency: z.string().trim().min(1, labels.validation),
         propertyType: z.string().trim().min(1, labels.validation),
         publicDirections: z.string().optional(),
         region: z.string().optional(),
+        transfersAvailable: z.boolean().optional(),
+        wellnessAvailable: z.boolean().optional(),
         timezone: z.string().trim().min(1, labels.validation)
       }),
     [hasCities, labels.validation]
@@ -427,21 +534,42 @@ export function PropertyCreateForm({
       city: "",
       cityId: cities[0]?.id ?? "",
       countryCode: "MA",
+      automationNotes: "",
+      breakfastAvailable: false,
+      chefAvailable: false,
+      cleaningEnabled: true,
+      cleaningFrequency: "BETWEEN_STAYS",
       description: "",
+      gardenServiceEnabled: false,
+      gardenServiceFrequency: "NONE",
+      groceriesAvailable: false,
       hasGarden: false,
       hasPool: false,
       headline: "",
       houseRules: "",
+      inspectionEnabled: true,
+      inspectionFrequency: "CHECKOUT",
       internalAccessNotes: "",
+      laundryManaged: true,
+      linenManaged: true,
       livingSpaces: 1,
+      maintenanceTrackingEnabled: true,
       maxGuests: 1,
+      midStayCleaningEnabled: false,
+      midStayCleaningRuleKey: "ops.mid_stay_threshold",
       name: "",
       onboardingNotes: "",
+      otherServices: "",
       parkingSpaces: 0,
       photoUrls: "",
+      poolServiceEnabled: false,
+      poolServiceFrequency: "NONE",
+      preventiveMaintenanceFrequency: "ON_DEMAND",
       propertyType: "",
       publicDirections: "",
       region: "",
+      transfersAvailable: false,
+      wellnessAvailable: false,
       timezone: "Africa/Casablanca"
     }
   });
@@ -560,6 +688,118 @@ export function PropertyCreateForm({
         <label>
           <input type="checkbox" {...form.register("hasGarden")} />
           <span>{labels.hasGarden}</span>
+        </label>
+      </div>
+      <div className="subsection-block">
+        <p className="panel-label">{labels.operatingSection}</p>
+        <div className="operating-grid">
+          <div className="operating-service-row">
+            <label className="choice-row">
+              <input data-testid="property-operating-cleaning" type="checkbox" {...form.register("cleaningEnabled")} />
+              <span>{labels.cleaning}</span>
+            </label>
+            <CadenceSelect
+              labels={labels}
+              selectProps={{ ...form.register("cleaningFrequency"), name: "cleaningFrequency" }}
+              testId="property-operating-cleaning-frequency"
+            />
+          </div>
+          <div className="operating-service-row">
+            <label className="choice-row">
+              <input data-testid="property-operating-inspection" type="checkbox" {...form.register("inspectionEnabled")} />
+              <span>{labels.inspection}</span>
+            </label>
+            <CadenceSelect
+              labels={labels}
+              selectProps={{ ...form.register("inspectionFrequency"), name: "inspectionFrequency" }}
+              testId="property-operating-inspection-frequency"
+            />
+          </div>
+          <div className="operating-service-row">
+            <label className="choice-row">
+              <input data-testid="property-operating-pool" type="checkbox" {...form.register("poolServiceEnabled")} />
+              <span>{labels.poolService}</span>
+            </label>
+            <CadenceSelect
+              labels={labels}
+              selectProps={{ ...form.register("poolServiceFrequency"), name: "poolServiceFrequency" }}
+              testId="property-operating-pool-frequency"
+            />
+          </div>
+          <div className="operating-service-row">
+            <label className="choice-row">
+              <input data-testid="property-operating-garden" type="checkbox" {...form.register("gardenServiceEnabled")} />
+              <span>{labels.gardenService}</span>
+            </label>
+            <CadenceSelect
+              labels={labels}
+              selectProps={{ ...form.register("gardenServiceFrequency"), name: "gardenServiceFrequency" }}
+              testId="property-operating-garden-frequency"
+            />
+          </div>
+          <div className="operating-service-row">
+            <label className="choice-row">
+              <input
+                data-testid="property-operating-maintenance"
+                type="checkbox"
+                {...form.register("maintenanceTrackingEnabled")}
+              />
+              <span>{labels.maintenance}</span>
+            </label>
+            <CadenceSelect
+              labels={labels}
+              selectProps={{ ...form.register("preventiveMaintenanceFrequency"), name: "preventiveMaintenanceFrequency" }}
+              testId="property-operating-maintenance-frequency"
+            />
+          </div>
+        </div>
+        <div className="check-row">
+          <label>
+            <input data-testid="property-operating-laundry" type="checkbox" {...form.register("laundryManaged")} />
+            <span>{labels.laundry}</span>
+          </label>
+          <label>
+            <input data-testid="property-operating-linen" type="checkbox" {...form.register("linenManaged")} />
+            <span>{labels.linen}</span>
+          </label>
+          <label>
+            <input data-testid="property-operating-midstay" type="checkbox" {...form.register("midStayCleaningEnabled")} />
+            <span>{labels.midStayCleaning}</span>
+          </label>
+        </div>
+        <label className="field">
+          <span>{labels.midStayRuleKey}</span>
+          <input data-testid="property-operating-midstay-rule" {...form.register("midStayCleaningRuleKey")} />
+        </label>
+        <div className="check-row">
+          <label>
+            <input data-testid="property-operating-breakfast" type="checkbox" {...form.register("breakfastAvailable")} />
+            <span>{labels.breakfast}</span>
+          </label>
+          <label>
+            <input data-testid="property-operating-chef" type="checkbox" {...form.register("chefAvailable")} />
+            <span>{labels.chef}</span>
+          </label>
+          <label>
+            <input data-testid="property-operating-transfers" type="checkbox" {...form.register("transfersAvailable")} />
+            <span>{labels.transfers}</span>
+          </label>
+          <label>
+            <input data-testid="property-operating-groceries" type="checkbox" {...form.register("groceriesAvailable")} />
+            <span>{labels.groceries}</span>
+          </label>
+          <label>
+            <input data-testid="property-operating-wellness" type="checkbox" {...form.register("wellnessAvailable")} />
+            <span>{labels.wellness}</span>
+          </label>
+        </div>
+        <label className="field">
+          <span>{labels.otherServices}</span>
+          <textarea data-testid="property-operating-other-services" rows={2} {...form.register("otherServices")} />
+        </label>
+        <label className="field">
+          <span>{labels.automationNotes}</span>
+          <textarea data-testid="property-operating-notes" rows={3} {...form.register("automationNotes")} />
         </label>
       </div>
       <label className="field">
@@ -823,6 +1063,239 @@ export function PropertyOwnershipForm({
           {pending ? labels.saving : labels.saveOwnership}
         </button>
       </div>
+    </form>
+  );
+}
+
+export function PropertyOperatingProfileForm({
+  labels,
+  locale,
+  profile,
+  propertyId
+}: LocalizedFormProps<PropertyOperatingProfileLabels> & {
+  profile: PropertyOperatingProfileSummary;
+  propertyId: string;
+}) {
+  const [state, formAction, pending] = useActionState(
+    updatePropertyOperatingProfileAction.bind(null, locale, propertyId),
+    initialCoreFormState
+  );
+  const message = messageForState(state, labels);
+
+  return (
+    <form
+      className="resource-form operating-profile-form"
+      action={formAction}
+      data-testid="property-operating-profile-form"
+    >
+      <p className="panel-label">{labels.formTitle}</p>
+      <div className="operating-grid">
+        <div className="operating-service-row">
+          <label className="choice-row">
+            <input
+              data-testid="property-operating-cleaning"
+              defaultChecked={profile.cleaningEnabled}
+              name="cleaningEnabled"
+              type="checkbox"
+            />
+            <span>{labels.cleaning}</span>
+          </label>
+          <CadenceSelect
+            labels={labels}
+            selectProps={{
+              defaultValue: profile.cleaningFrequency,
+              name: "cleaningFrequency"
+            }}
+            testId="property-operating-cleaning-frequency"
+          />
+        </div>
+        <div className="operating-service-row">
+          <label className="choice-row">
+            <input
+              data-testid="property-operating-inspection"
+              defaultChecked={profile.inspectionEnabled}
+              name="inspectionEnabled"
+              type="checkbox"
+            />
+            <span>{labels.inspection}</span>
+          </label>
+          <CadenceSelect
+            labels={labels}
+            selectProps={{
+              defaultValue: profile.inspectionFrequency,
+              name: "inspectionFrequency"
+            }}
+            testId="property-operating-inspection-frequency"
+          />
+        </div>
+        <div className="operating-service-row">
+          <label className="choice-row">
+            <input
+              data-testid="property-operating-pool"
+              defaultChecked={profile.poolServiceEnabled}
+              name="poolServiceEnabled"
+              type="checkbox"
+            />
+            <span>{labels.poolService}</span>
+          </label>
+          <CadenceSelect
+            labels={labels}
+            selectProps={{
+              defaultValue: profile.poolServiceFrequency,
+              name: "poolServiceFrequency"
+            }}
+            testId="property-operating-pool-frequency"
+          />
+        </div>
+        <div className="operating-service-row">
+          <label className="choice-row">
+            <input
+              data-testid="property-operating-garden"
+              defaultChecked={profile.gardenServiceEnabled}
+              name="gardenServiceEnabled"
+              type="checkbox"
+            />
+            <span>{labels.gardenService}</span>
+          </label>
+          <CadenceSelect
+            labels={labels}
+            selectProps={{
+              defaultValue: profile.gardenServiceFrequency,
+              name: "gardenServiceFrequency"
+            }}
+            testId="property-operating-garden-frequency"
+          />
+        </div>
+        <div className="operating-service-row">
+          <label className="choice-row">
+            <input
+              data-testid="property-operating-maintenance"
+              defaultChecked={profile.maintenanceTrackingEnabled}
+              name="maintenanceTrackingEnabled"
+              type="checkbox"
+            />
+            <span>{labels.maintenance}</span>
+          </label>
+          <CadenceSelect
+            labels={labels}
+            selectProps={{
+              defaultValue: profile.preventiveMaintenanceFrequency,
+              name: "preventiveMaintenanceFrequency"
+            }}
+            testId="property-operating-maintenance-frequency"
+          />
+        </div>
+      </div>
+      <div className="check-row">
+        <label>
+          <input
+            data-testid="property-operating-laundry"
+            defaultChecked={profile.laundryManaged}
+            name="laundryManaged"
+            type="checkbox"
+          />
+          <span>{labels.laundry}</span>
+        </label>
+        <label>
+          <input
+            data-testid="property-operating-linen"
+            defaultChecked={profile.linenManaged}
+            name="linenManaged"
+            type="checkbox"
+          />
+          <span>{labels.linen}</span>
+        </label>
+        <label>
+          <input
+            data-testid="property-operating-midstay"
+            defaultChecked={profile.midStayCleaningEnabled}
+            name="midStayCleaningEnabled"
+            type="checkbox"
+          />
+          <span>{labels.midStayCleaning}</span>
+        </label>
+      </div>
+      <label className="field">
+        <span>{labels.midStayRuleKey}</span>
+        <input
+          data-testid="property-operating-midstay-rule"
+          defaultValue={profile.midStayCleaningRuleKey ?? "ops.mid_stay_threshold"}
+          name="midStayCleaningRuleKey"
+        />
+      </label>
+      <div className="check-row">
+        <label>
+          <input
+            data-testid="property-operating-breakfast"
+            defaultChecked={profile.breakfastAvailable}
+            name="breakfastAvailable"
+            type="checkbox"
+          />
+          <span>{labels.breakfast}</span>
+        </label>
+        <label>
+          <input
+            data-testid="property-operating-chef"
+            defaultChecked={profile.chefAvailable}
+            name="chefAvailable"
+            type="checkbox"
+          />
+          <span>{labels.chef}</span>
+        </label>
+        <label>
+          <input
+            data-testid="property-operating-transfers"
+            defaultChecked={profile.transfersAvailable}
+            name="transfersAvailable"
+            type="checkbox"
+          />
+          <span>{labels.transfers}</span>
+        </label>
+        <label>
+          <input
+            data-testid="property-operating-groceries"
+            defaultChecked={profile.groceriesAvailable}
+            name="groceriesAvailable"
+            type="checkbox"
+          />
+          <span>{labels.groceries}</span>
+        </label>
+        <label>
+          <input
+            data-testid="property-operating-wellness"
+            defaultChecked={profile.wellnessAvailable}
+            name="wellnessAvailable"
+            type="checkbox"
+          />
+          <span>{labels.wellness}</span>
+        </label>
+      </div>
+      <label className="field">
+        <span>{labels.otherServices}</span>
+        <textarea data-testid="property-operating-other-services" defaultValue={otherServicesText(profile)} name="otherServices" rows={2} />
+      </label>
+      <label className="field">
+        <span>{labels.automationNotes}</span>
+        <textarea data-testid="property-operating-notes" defaultValue={profile.automationNotes ?? ""} name="automationNotes" rows={3} />
+      </label>
+      {message ? (
+        <p className="form-error" data-testid="property-operating-profile-form-error" role="alert">
+          {message}
+        </p>
+      ) : null}
+      {state.status === "success" ? (
+        <p className="form-success" data-testid="property-operating-profile-form-success" role="status">
+          {labels.saved}
+        </p>
+      ) : null}
+      <button
+        className="primary-button"
+        data-testid="property-operating-profile-submit"
+        disabled={pending}
+        type="submit"
+      >
+        {pending ? labels.saving : labels.save}
+      </button>
     </form>
   );
 }

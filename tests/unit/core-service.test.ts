@@ -5,7 +5,9 @@ import {
   createOwner,
   getProperty,
   listOwners,
+  parsePropertyOperatingProfileInput,
   parsePropertyOwnershipInput,
+  updatePropertyOperatingProfile,
   updatePropertyOwnership
 } from "@/modules/core/application/core-service";
 import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
@@ -130,6 +132,93 @@ describe("core service authorization", () => {
               isPrimary: true
             }
           ]
+        },
+        { db: deniedDb }
+      )
+    ).rejects.toBeInstanceOf(CoreAuthorizationError);
+  });
+
+  it("validates operating profile rules without embedding mid-stay night thresholds", () => {
+    const valid = parsePropertyOperatingProfileInput({
+      cleaningEnabled: true,
+      cleaningFrequency: "BETWEEN_STAYS",
+      inspectionEnabled: true,
+      inspectionFrequency: "CHECKOUT",
+      poolServiceEnabled: true,
+      poolServiceFrequency: "DAILY",
+      gardenServiceEnabled: false,
+      gardenServiceFrequency: "NONE",
+      laundryManaged: true,
+      linenManaged: true,
+      maintenanceTrackingEnabled: true,
+      preventiveMaintenanceFrequency: "ON_DEMAND",
+      midStayCleaningEnabled: true,
+      midStayCleaningRuleKey: "ops.mid_stay_threshold",
+      breakfastAvailable: true,
+      chefAvailable: true,
+      transfersAvailable: true,
+      groceriesAvailable: false,
+      wellnessAvailable: false,
+      otherServices: ["hammam"]
+    });
+    const invalidMidStay = parsePropertyOperatingProfileInput({
+      cleaningEnabled: true,
+      cleaningFrequency: "BETWEEN_STAYS",
+      inspectionEnabled: true,
+      inspectionFrequency: "CHECKOUT",
+      poolServiceEnabled: false,
+      poolServiceFrequency: "NONE",
+      gardenServiceEnabled: false,
+      gardenServiceFrequency: "NONE",
+      laundryManaged: true,
+      linenManaged: true,
+      maintenanceTrackingEnabled: true,
+      preventiveMaintenanceFrequency: "ON_DEMAND",
+      midStayCleaningEnabled: true,
+      breakfastAvailable: false,
+      chefAvailable: false,
+      transfersAvailable: false,
+      groceriesAvailable: false,
+      wellnessAvailable: false,
+      otherServices: []
+    });
+
+    expect(valid.success).toBe(true);
+    expect(valid.success && valid.data.midStayCleaningRuleKey).toBe("ops.mid_stay_threshold");
+    expect(invalidMidStay.success).toBe(false);
+  });
+
+  it("denies operating profile updates without property edit permission", async () => {
+    const ctx = actor({
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("property", "view")]),
+      scopes: [{ organizationId: "org-a" }]
+    });
+
+    await expect(
+      updatePropertyOperatingProfile(
+        ctx,
+        "00000000-0000-7000-8000-000000000100",
+        {
+          cleaningEnabled: true,
+          cleaningFrequency: "BETWEEN_STAYS",
+          inspectionEnabled: true,
+          inspectionFrequency: "CHECKOUT",
+          poolServiceEnabled: false,
+          poolServiceFrequency: "NONE",
+          gardenServiceEnabled: false,
+          gardenServiceFrequency: "NONE",
+          laundryManaged: true,
+          linenManaged: true,
+          maintenanceTrackingEnabled: true,
+          preventiveMaintenanceFrequency: "ON_DEMAND",
+          midStayCleaningEnabled: false,
+          breakfastAvailable: false,
+          chefAvailable: false,
+          transfersAvailable: false,
+          groceriesAvailable: false,
+          wellnessAvailable: false,
+          otherServices: []
         },
         { db: deniedDb }
       )

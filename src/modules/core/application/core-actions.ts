@@ -10,13 +10,16 @@ import {
   createOwner,
   createProperty,
   parseOwnerInput,
+  parsePropertyOperatingProfileInput,
   parsePropertyInput,
   parsePropertyOwnershipInput,
+  updatePropertyOperatingProfile,
   updatePropertyOwnership
 } from "@/modules/core/application/core-service";
 import {
   normalizeAmenities,
   normalizeHouseRules,
+  normalizeOtherServices,
   normalizePhotoUrls
 } from "@/modules/core/domain/owner-property";
 import { auth } from "@/platform/auth/session";
@@ -146,6 +149,32 @@ function propertyOwnershipShares(formData: FormData) {
   });
 }
 
+function operatingProfileInput(formData: FormData) {
+  return {
+    cleaningEnabled: checkboxValue(formData, "cleaningEnabled"),
+    cleaningFrequency: formValue(formData, "cleaningFrequency") ?? "NONE",
+    inspectionEnabled: checkboxValue(formData, "inspectionEnabled"),
+    inspectionFrequency: formValue(formData, "inspectionFrequency") ?? "NONE",
+    poolServiceEnabled: checkboxValue(formData, "poolServiceEnabled"),
+    poolServiceFrequency: formValue(formData, "poolServiceFrequency") ?? "NONE",
+    gardenServiceEnabled: checkboxValue(formData, "gardenServiceEnabled"),
+    gardenServiceFrequency: formValue(formData, "gardenServiceFrequency") ?? "NONE",
+    laundryManaged: checkboxValue(formData, "laundryManaged"),
+    linenManaged: checkboxValue(formData, "linenManaged"),
+    maintenanceTrackingEnabled: checkboxValue(formData, "maintenanceTrackingEnabled"),
+    preventiveMaintenanceFrequency: formValue(formData, "preventiveMaintenanceFrequency") ?? "NONE",
+    midStayCleaningEnabled: checkboxValue(formData, "midStayCleaningEnabled"),
+    midStayCleaningRuleKey: formValue(formData, "midStayCleaningRuleKey"),
+    breakfastAvailable: checkboxValue(formData, "breakfastAvailable"),
+    chefAvailable: checkboxValue(formData, "chefAvailable"),
+    transfersAvailable: checkboxValue(formData, "transfersAvailable"),
+    groceriesAvailable: checkboxValue(formData, "groceriesAvailable"),
+    wellnessAvailable: checkboxValue(formData, "wellnessAvailable"),
+    otherServices: normalizeOtherServices(stringValue(formData, "otherServices")),
+    automationNotes: formValue(formData, "automationNotes")
+  };
+}
+
 export async function createOwnerAction(
   locale: string,
   _state: CoreFormState,
@@ -221,6 +250,7 @@ export async function createPropertyAction(
     amenities: normalizeAmenities(stringValue(formData, "amenities")),
     photoUrls: normalizePhotoUrls(stringValue(formData, "photoUrls")),
     status: "DRAFT",
+    operatingProfile: operatingProfileInput(formData),
     onboardingProfile: {
       headline: formValue(formData, "headline"),
       description: formValue(formData, "description"),
@@ -246,6 +276,38 @@ export async function createPropertyAction(
 
   revalidatePath(`/${appLocale}/app/properties`);
   redirect(`/${appLocale}/app/properties/${propertyId}`);
+}
+
+export async function updatePropertyOperatingProfileAction(
+  locale: string,
+  propertyId: string,
+  _state: CoreFormState,
+  formData: FormData
+): Promise<CoreFormState> {
+  const appLocale = safeLocale(locale);
+  const session = await auth();
+  const ctx = coreActorContextFromSession(session);
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parsePropertyOperatingProfileInput(operatingProfileInput(formData));
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await updatePropertyOperatingProfile(ctx, propertyId, parsed.data);
+  } catch (error) {
+    return actionErrorState(error);
+  }
+
+  revalidatePath(`/${appLocale}/app/properties/${propertyId}`);
+  revalidatePath(`/${appLocale}/app/properties`);
+
+  return { status: "success" };
 }
 
 export async function updatePropertyOwnershipAction(

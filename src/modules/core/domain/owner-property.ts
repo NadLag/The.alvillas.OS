@@ -29,6 +29,7 @@ const optionalDate = z.preprocess(
 const nonNegativeInteger = z.coerce.number().int().min(0);
 const positiveInteger = z.coerce.number().int().min(1);
 const positiveShareBps = z.coerce.number().int().min(1).max(10000);
+const configRuleKey = z.string().trim().min(1).max(120).regex(/^[a-z0-9_.-]+$/u);
 
 export const payoutMethodTypeSchema = z.enum([
   "BANK_TRANSFER",
@@ -127,6 +128,16 @@ export function normalizeHouseRules(value: string | readonly string[] | undefine
   return normalized.slice(0, 30);
 }
 
+export function normalizeOtherServices(value: string | readonly string[] | undefined): string[] {
+  const rawItems: string[] =
+    typeof value === "string" ? value.split(/\r?\n|,/u) : [...(value ?? [])];
+  const normalized = rawItems
+    .map((item) => item.trim())
+    .filter((item, index, items) => item.length > 0 && items.indexOf(item) === index);
+
+  return normalized.slice(0, 24);
+}
+
 export const propertyOnboardingProfileInputSchema = z.object({
   headline: optionalText(180),
   description: optionalText(2000),
@@ -137,6 +148,109 @@ export const propertyOnboardingProfileInputSchema = z.object({
 });
 
 export type PropertyOnboardingProfileInput = z.infer<typeof propertyOnboardingProfileInputSchema>;
+
+export const operatingCadenceSchema = z.enum([
+  "NONE",
+  "ON_DEMAND",
+  "BETWEEN_STAYS",
+  "DAILY",
+  "WEEKLY",
+  "MONTHLY",
+  "CHECKIN",
+  "CHECKOUT",
+  "CUSTOM_RULE"
+]);
+
+function cadenceFor(enabledKey: string, cadenceKey: string) {
+  return (value: Record<string, unknown>, ctx: z.RefinementCtx) => {
+    if (value[enabledKey] === true && value[cadenceKey] === "NONE") {
+      ctx.addIssue({
+        code: "custom",
+        message: "Select an operating cadence when the service is enabled",
+        path: [cadenceKey]
+      });
+    }
+  };
+}
+
+export const propertyOperatingProfileInputSchema = z
+  .object({
+    cleaningEnabled: z.coerce.boolean().default(true),
+    cleaningFrequency: operatingCadenceSchema.default("BETWEEN_STAYS"),
+    inspectionEnabled: z.coerce.boolean().default(true),
+    inspectionFrequency: operatingCadenceSchema.default("CHECKOUT"),
+    poolServiceEnabled: z.coerce.boolean().default(false),
+    poolServiceFrequency: operatingCadenceSchema.default("NONE"),
+    gardenServiceEnabled: z.coerce.boolean().default(false),
+    gardenServiceFrequency: operatingCadenceSchema.default("NONE"),
+    laundryManaged: z.coerce.boolean().default(true),
+    linenManaged: z.coerce.boolean().default(true),
+    maintenanceTrackingEnabled: z.coerce.boolean().default(true),
+    preventiveMaintenanceFrequency: operatingCadenceSchema.default("ON_DEMAND"),
+    midStayCleaningEnabled: z.coerce.boolean().default(false),
+    midStayCleaningRuleKey: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      configRuleKey.optional()
+    ),
+    breakfastAvailable: z.coerce.boolean().default(false),
+    chefAvailable: z.coerce.boolean().default(false),
+    transfersAvailable: z.coerce.boolean().default(false),
+    groceriesAvailable: z.coerce.boolean().default(false),
+    wellnessAvailable: z.coerce.boolean().default(false),
+    otherServices: z.array(z.string().trim().min(1).max(120)).max(24).default([]),
+    automationNotes: optionalText(2000)
+  })
+  .superRefine((value, ctx) => {
+    cadenceFor("cleaningEnabled", "cleaningFrequency")(value, ctx);
+    cadenceFor("inspectionEnabled", "inspectionFrequency")(value, ctx);
+    cadenceFor("poolServiceEnabled", "poolServiceFrequency")(value, ctx);
+    cadenceFor("gardenServiceEnabled", "gardenServiceFrequency")(value, ctx);
+
+    if (value.maintenanceTrackingEnabled && value.preventiveMaintenanceFrequency === "NONE") {
+      ctx.addIssue({
+        code: "custom",
+        message: "Select a preventive maintenance cadence when maintenance tracking is enabled",
+        path: ["preventiveMaintenanceFrequency"]
+      });
+    }
+
+    if (value.midStayCleaningEnabled && !value.midStayCleaningRuleKey) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Select the config rule that controls mid-stay cleaning nights",
+        path: ["midStayCleaningRuleKey"]
+      });
+    }
+  });
+
+export type PropertyOperatingProfileInput = z.infer<typeof propertyOperatingProfileInputSchema>;
+
+export function defaultPropertyOperatingProfile(input: {
+  hasPool?: boolean;
+  hasGarden?: boolean;
+} = {}): PropertyOperatingProfileInput {
+  return {
+    cleaningEnabled: true,
+    cleaningFrequency: "BETWEEN_STAYS",
+    inspectionEnabled: true,
+    inspectionFrequency: "CHECKOUT",
+    poolServiceEnabled: Boolean(input.hasPool),
+    poolServiceFrequency: input.hasPool ? "ON_DEMAND" : "NONE",
+    gardenServiceEnabled: Boolean(input.hasGarden),
+    gardenServiceFrequency: input.hasGarden ? "ON_DEMAND" : "NONE",
+    laundryManaged: true,
+    linenManaged: true,
+    maintenanceTrackingEnabled: true,
+    preventiveMaintenanceFrequency: "ON_DEMAND",
+    midStayCleaningEnabled: false,
+    breakfastAvailable: false,
+    chefAvailable: false,
+    transfersAvailable: false,
+    groceriesAvailable: false,
+    wellnessAvailable: false,
+    otherServices: []
+  };
+}
 
 export const propertyInputSchema = z
   .object({
@@ -168,6 +282,27 @@ export const propertyInputSchema = z
     amenities: z.array(z.string().trim().min(1).max(80)).max(40).default([]),
     photoUrls: z.array(z.string().url()).max(30).default([]),
     status: propertyStatusSchema.default("DRAFT"),
+    operatingProfile: propertyOperatingProfileInputSchema.default({
+      cleaningEnabled: true,
+      cleaningFrequency: "BETWEEN_STAYS",
+      inspectionEnabled: true,
+      inspectionFrequency: "CHECKOUT",
+      poolServiceEnabled: false,
+      poolServiceFrequency: "NONE",
+      gardenServiceEnabled: false,
+      gardenServiceFrequency: "NONE",
+      laundryManaged: true,
+      linenManaged: true,
+      maintenanceTrackingEnabled: true,
+      preventiveMaintenanceFrequency: "ON_DEMAND",
+      midStayCleaningEnabled: false,
+      breakfastAvailable: false,
+      chefAvailable: false,
+      transfersAvailable: false,
+      groceriesAvailable: false,
+      wellnessAvailable: false,
+      otherServices: []
+    }),
     onboardingProfile: propertyOnboardingProfileInputSchema.default({ houseRules: [] })
   })
   .refine((value) => Boolean(value.cityId || value.city), {
@@ -175,7 +310,9 @@ export const propertyInputSchema = z
     path: ["city"]
   });
 
-export type PropertyInput = z.infer<typeof propertyInputSchema>;
+export type PropertyInput = Omit<z.infer<typeof propertyInputSchema>, "operatingProfile"> & {
+  operatingProfile?: PropertyOperatingProfileInput;
+};
 
 export const propertyOwnershipShareInputSchema = z.object({
   ownerId: z.string().uuid(),
@@ -279,6 +416,32 @@ export type PropertyOnboardingProfileSummary = {
   onboardingNotes: string | null;
 };
 
+export type PropertyOperatingCadence = z.infer<typeof operatingCadenceSchema>;
+
+export type PropertyOperatingProfileSummary = {
+  cleaningEnabled: boolean;
+  cleaningFrequency: PropertyOperatingCadence;
+  inspectionEnabled: boolean;
+  inspectionFrequency: PropertyOperatingCadence;
+  poolServiceEnabled: boolean;
+  poolServiceFrequency: PropertyOperatingCadence;
+  gardenServiceEnabled: boolean;
+  gardenServiceFrequency: PropertyOperatingCadence;
+  laundryManaged: boolean;
+  linenManaged: boolean;
+  maintenanceTrackingEnabled: boolean;
+  preventiveMaintenanceFrequency: PropertyOperatingCadence;
+  midStayCleaningEnabled: boolean;
+  midStayCleaningRuleKey: string | null;
+  breakfastAvailable: boolean;
+  chefAvailable: boolean;
+  transfersAvailable: boolean;
+  groceriesAvailable: boolean;
+  wellnessAvailable: boolean;
+  otherServices: string[];
+  automationNotes: string | null;
+};
+
 export type PropertySummary = {
   id: string;
   name: string;
@@ -297,6 +460,7 @@ export type PropertySummary = {
   amenities: string[];
   photoUrls: string[];
   onboardingProfile: PropertyOnboardingProfileSummary | null;
+  operatingProfile: PropertyOperatingProfileSummary | null;
   owners: Array<{
     id: string;
     displayName: string;

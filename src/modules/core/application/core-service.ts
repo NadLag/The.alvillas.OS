@@ -2,11 +2,13 @@ import { headers } from "next/headers";
 import { CoreRepository } from "@/modules/core/infrastructure/core-repository";
 import {
   ownerInputSchema,
+  propertyOperatingProfileInputSchema,
   propertyInputSchema,
   propertyOwnershipInputSchema,
   type OwnerInput,
   type OwnerSummary,
   type PropertyInput,
+  type PropertyOperatingProfileInput,
   type PropertyOwnershipInput,
   type PropertySummary
 } from "@/modules/core/domain/owner-property";
@@ -88,6 +90,10 @@ export function parseOwnerInput(input: unknown) {
 
 export function parsePropertyInput(input: unknown) {
   return propertyInputSchema.safeParse(input);
+}
+
+export function parsePropertyOperatingProfileInput(input: unknown) {
+  return propertyOperatingProfileInputSchema.safeParse(input);
 }
 
 export function parsePropertyOwnershipInput(input: unknown) {
@@ -271,6 +277,52 @@ export async function updatePropertyOwnership(
         owners: property.owners
       },
       reason: "F-ORG-05 property ownership update",
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
+
+    return property;
+  });
+}
+
+export async function updatePropertyOperatingProfile(
+  ctx: CoreActorContext,
+  propertyId: string,
+  input: PropertyOperatingProfileInput,
+  deps: CoreServiceDeps = {}
+): Promise<PropertySummary> {
+  assertAllowed(ctx, "edit", "property", propertyId);
+  const meta = await auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new CoreRepository(tx, ctx.organizationId);
+    const before = await repository.findProperty(propertyId);
+
+    if (!before) {
+      throw new CoreNotFoundError();
+    }
+
+    const property = await repository.replacePropertyOperatingProfile(propertyId, input, ctx.actorId);
+
+    if (!property) {
+      throw new CoreNotFoundError();
+    }
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "property.operating_profile.update",
+      resourceType: "property",
+      resourceId: property.id,
+      ipAddress: meta.ipAddress,
+      propertyScopeId: property.id,
+      before: {
+        operatingProfile: before.operatingProfile
+      },
+      after: {
+        operatingProfile: property.operatingProfile
+      },
+      reason: "F-ORG-06 property operating profile update",
       requestId: meta.requestId,
       occurredAt: new Date()
     });
