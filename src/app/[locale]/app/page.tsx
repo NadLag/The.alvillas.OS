@@ -56,6 +56,9 @@ export default async function AppPage({
           <Link className="secondary-button" href={`/${appLocale}/app/identity`}>
             {t("identity")}
           </Link>
+          <Link className="secondary-button" href={`/${appLocale}/app/security`}>
+            {t("security")}
+          </Link>
           <Link className="secondary-button" href={`/${appLocale}/app/audit`}>
             {t("audit")}
           </Link>

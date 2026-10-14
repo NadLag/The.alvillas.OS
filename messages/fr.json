@@ -45,7 +45,8 @@
     "invalid": "Les identifiants n'ont pas pu etre verifies.",
     "mfaInvalid": "Le deuxieme facteur n'a pas pu etre verifie.",
     "rateLimited": "Trop de tentatives. Attendez une minute puis reessayez.",
-    "generic": "Connexion impossible. Reessayez."
+    "generic": "Connexion impossible. Reessayez.",
+    "passkey": "Se connecter avec une clé d’accès"
   },
   "AppShell": {
     "actions": "Actions de l'espace",
@@ -66,6 +67,7 @@
     "title": "ALVILLAS OS",
     "logout": "Deconnexion",
     "identity": "Identite",
+    "security": "Sécurité du compte",
     "audit": "Audit",
     "configuration": "Configuration",
     "organization": "Organisation",

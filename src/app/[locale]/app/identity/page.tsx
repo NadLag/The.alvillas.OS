@@ -7,7 +7,7 @@ import { listIdentityDashboard } from "@/modules/identity/application/identity-s
 import { IdentityAdmin } from "@/modules/identity/ui/identity-admin";
 import { SecurityPanel } from "@/modules/identity/ui/security-panel";
 import { auth } from "@/platform/auth/session";
-import { formatDateTime } from "@/i18n/format";
+import { formatDate, formatDateTime } from "@/i18n/format";
 import { routing, type AppLocale } from "@/i18n/routing";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +36,15 @@ export default async function IdentityPage({
     getTranslations("Identity"),
     listIdentityDashboard(ctx)
   ]);
+  const dates = [
+    ...dashboard.assignments.map((assignment) => assignment.validTo),
+    ...dashboard.accounts.flatMap((account) => [
+      ...account.recentSessions.flatMap((session) => [session.lastSeenAt, session.expiresAt]),
+      ...account.devices.map((device) => device.lastSeenAt),
+      ...account.credentials.map((credential) => credential.expiresAt)
+    ])
+  ].filter((value): value is Date => value !== null);
+  const dateLabels = Object.fromEntries(dates.map((date) => [date.toISOString(), formatDate(appLocale, date)]));
 
   return (
     <AdminShell className="resource-page" testId="identity-page">
@@ -68,6 +77,7 @@ export default async function IdentityPage({
         }}
       />
       <IdentityAdmin
+        dateLabels={dateLabels}
         accounts={dashboard.accounts}
         assignments={dashboard.assignments}
         duplicateContacts={dashboard.duplicateContacts}

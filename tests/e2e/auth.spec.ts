@@ -277,6 +277,10 @@ test.describe("admin authentication", () => {
 
     await page.goto("/en/login");
 
+    // All six attempts must belong to one real fixed window. Near the minute
+    // boundary, the limiter correctly starts a new bucket rather than blocking it.
+    const remainingInWindow = 60_000 - Date.now() % 60_000;
+    if (remainingInWindow < 15_000) await page.waitForTimeout(remainingInWindow + 50);
     for (let attempt = 0; attempt < 6; attempt += 1) {
       await page.getByTestId("login-email").fill(rejectedEmail);
       await page.getByTestId("login-password").fill(`wrong-password-${attempt}`);

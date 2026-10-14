@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
 import { localizedTextSchema } from "@/i18n/content";
 
 const moneyAmountSchema = z
@@ -298,6 +299,7 @@ export const featureFlagConfigSchema = z
   .passthrough();
 
 export const configRuleSchemas = {
+  [pinLockoutConfigKey]: pinLockoutPolicySchema,
   [commissionConfigKey]: commissionRuleValueSchema,
   "finance.ota_fee": feeRuleSchema,
   "finance.expense_treatment": expenseTreatmentConfigSchema,

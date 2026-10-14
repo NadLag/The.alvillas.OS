@@ -55,15 +55,14 @@ export function SecurityPanel({ labels }: SecurityPanelProps) {
   }
 
   function registerPasskey() {
-    startTransition(() => {
-      void beginPasskeyRegistrationAction()
-        .then(async ({ challengeId, options }) => {
-          const response = await startRegistration(options);
-
-          return finishPasskeyRegistrationAction(challengeId, response);
-        })
-        .then(setState)
-        .catch(() => setState({ status: "error", messageKey: "generic" }));
+    startTransition(async () => {
+      try {
+        const { challengeId, options } = await beginPasskeyRegistrationAction();
+        const response = await startRegistration(options);
+        setState(await finishPasskeyRegistrationAction(challengeId, response));
+      } catch {
+        setState({ status: "error", messageKey: "generic" });
+      }
     });
   }
 

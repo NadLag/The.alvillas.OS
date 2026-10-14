@@ -63,6 +63,7 @@ import {
   consumeRateLimit
 } from "@/platform/rate-limit/postgres-rate-limiter";
 import type { AppLocale } from "@/i18n/routing";
+import { PinSecurityRepository } from "@/modules/identity/infrastructure/pin-security-repository";
 
 export class IdentityNotFoundError extends Error {
   constructor(message = "Identity resource was not found") {
@@ -1023,18 +1024,15 @@ export async function activateInvitation(
 ): Promise<{ userAccountId: string }> {
   const parsed = activationInputSchema.parse(input);
   const organizationId = bootstrapOrganizationId;
-
-  return withTenant(db(deps), organizationId, async (tx) => {
-    const rateLimit = await consumeRateLimit(tx, organizationId, {
+  const rateLimit = await withTenant(db(deps), organizationId, (tx) => consumeRateLimit(tx, organizationId, {
       key: `invitation:${hashCode(parsed.code)}`,
       limit: 6,
       windowSeconds: 15 * 60
-    });
+  }));
+  if (!rateLimit.allowed) throw new IdentityConflictError("Too many invitation attempts");
 
-    if (!rateLimit.allowed) {
-      throw new IdentityConflictError("Too many invitation attempts");
-    }
-
+  return withTenant(db(deps), organizationId, async (tx) => {
+    await new IdentityRepository(tx, organizationId).lockIdentityOperation(`invitation:${hashCode(parsed.code)}`);
     const invitation = await tx.invitation.findFirst({
       where: {
         organizationId,
@@ -1379,6 +1377,11 @@ export async function resetAccountPin(
     }
 
     const now = new Date();
+    if (account.phone) {
+      const pinSecurity = new PinSecurityRepository(tx, ctx.organizationId);
+      await pinSecurity.lock(account.phone);
+      await pinSecurity.save(account.phone, 0, now);
+    }
     const existingPins = await tx.authCredential.updateMany({
       where: {
         organizationId: ctx.organizationId,
@@ -1513,8 +1516,15 @@ export async function issueRecoveryCode(
 export async function recoverPassword(input: RecoveryInput, deps: IdentityServiceDeps = {}): Promise<void> {
   const parsed = recoveryInputSchema.parse(input);
   const meta = auditMeta(deps);
+  const limit = await withTenant(db(deps), bootstrapOrganizationId, (tx) => consumeRateLimit(tx, bootstrapOrganizationId, {
+    key: `recovery:${parsed.email}:${deps.ipAddress ?? "local"}`, limit: 5, windowSeconds: 60
+  }));
+  if (!limit.allowed) throw new IdentityConflictError("Too many recovery attempts");
 
   await withTenant(db(deps), bootstrapOrganizationId, async (tx) => {
+    if (!await new IdentityRepository(tx, bootstrapOrganizationId).lockRecoverableAccount(parsed.email)) {
+      throw new IdentityNotFoundError();
+    }
     const account = await tx.userAccount.findFirst({
       where: {
         organizationId: bootstrapOrganizationId,
@@ -1531,7 +1541,7 @@ export async function recoverPassword(input: RecoveryInput, deps: IdentityServic
       }
     });
 
-    if (!account) {
+    if (!account || account.status === "DEACTIVATED") {
       throw new IdentityNotFoundError();
     }
 
@@ -1549,10 +1559,12 @@ export async function recoverPassword(input: RecoveryInput, deps: IdentityServic
     }
 
     const passwordHash = await hashPassword(parsed.newPassword);
-    await tx.authCredential.update({
-      where: { id: matchedCredentialId },
+    const consumed = await tx.authCredential.updateMany({
+      where: { id: matchedCredentialId, organizationId: bootstrapOrganizationId, revokedAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
       data: { revokedAt: new Date(), lastUsedAt: new Date() }
     });
+    if (consumed.count !== 1) throw new IdentityConflictError("Recovery code is invalid");
     await tx.authCredential.updateMany({
       where: {
         organizationId: bootstrapOrganizationId,
@@ -1819,7 +1831,8 @@ export async function revokeCredential(
       tx.userAccount.update({
         where: { id: credential.userAccountId },
         data: {
-          sessionVersion: { increment: 1 }
+          sessionVersion: { increment: 1 },
+          ...(credential.type === "PASSWORD" ? { passwordHash: null } : {})
         },
         select: {
           sessionVersion: true
@@ -2014,7 +2027,7 @@ export async function beginPasskeyRegistration(
       attestationType: "none",
       authenticatorSelection: {
         residentKey: "preferred",
-        userVerification: "preferred"
+        userVerification: "required"
       },
       excludeCredentials: account.authCredentials
         .filter((credential) => credential.credentialId)
@@ -2054,6 +2067,7 @@ export async function finishPasskeyRegistration(
   const meta = auditMeta(deps);
 
   await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    await new IdentityRepository(tx, ctx.organizationId).lockIdentityOperation(`passkey-registration:${challengeId}`);
     const challenge = await tx.authChallenge.findFirst({
       where: {
         id: challengeId,
@@ -2074,7 +2088,7 @@ export async function finishPasskeyRegistration(
       expectedChallenge: challenge.challenge,
       expectedOrigin: origin,
       expectedRPID: rpIdFromOrigin(origin),
-      requireUserVerification: false
+      requireUserVerification: true
     });
 
     if (!verification.verified || !verification.registrationInfo) {
@@ -2155,7 +2169,7 @@ export async function beginPasskeyAuthentication(
 
     const options = await generateAuthenticationOptions({
       rpID: rpIdFromOrigin(origin),
-      userVerification: "preferred",
+      userVerification: "required",
       allowCredentials: account.authCredentials
         .filter((credential) => credential.credentialId)
         .map((credential) => ({
@@ -2188,11 +2202,12 @@ export async function verifyPasskeyAuthentication(
   challengeId: string,
   response: AuthenticationResponseJSON,
   deps: IdentityServiceDeps = {}
-): Promise<{ userAccountId: string }> {
+): Promise<{ userAccountId: string; sessionVersion: number }> {
   const origin = webAuthnOrigin(deps);
   const meta = auditMeta(deps);
 
   return withTenant(db(deps), bootstrapOrganizationId, async (tx) => {
+    await new IdentityRepository(tx, bootstrapOrganizationId).lockIdentityOperation(`passkey:${response.id}`);
     const account = await tx.userAccount.findFirst({
       where: {
         organizationId: bootstrapOrganizationId,
@@ -2234,7 +2249,7 @@ export async function verifyPasskeyAuthentication(
       expectedChallenge: challenge.challenge,
       expectedOrigin: origin,
       expectedRPID: rpIdFromOrigin(origin),
-      requireUserVerification: false,
+      requireUserVerification: true,
       authenticator: {
         credentialID: Buffer.from(credential.credentialId, "base64url"),
         credentialPublicKey: Buffer.from(credential.publicKey),
@@ -2279,6 +2294,6 @@ export async function verifyPasskeyAuthentication(
       occurredAt: new Date()
     });
 
-    return { userAccountId: account.id };
+    return { userAccountId: account.id, sessionVersion: account.sessionVersion };
   });
 }
