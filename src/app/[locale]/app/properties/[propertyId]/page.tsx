@@ -5,7 +5,7 @@ import { z } from "zod";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
 import { CoreNotFoundError, getProperty, listOwners } from "@/modules/core/application/core-service";
-import { PropertyOwnershipForm } from "@/modules/core/ui/core-forms";
+import { PropertyOperatingProfileForm, PropertyOwnershipForm } from "@/modules/core/ui/core-forms";
 import { authorize } from "@/platform/authz/authorize";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
@@ -20,6 +20,10 @@ function safeLocale(locale: string): AppLocale {
 
 function shareLabel(shareBps: number): string {
   return `${(shareBps / 100).toFixed(2).replace(/\.00$/u, "")}%`;
+}
+
+function enabledLabel(value: boolean, yes: string, no: string): string {
+  return value ? yes : no;
 }
 
 export default async function PropertyDetailPage({
@@ -126,6 +130,149 @@ export default async function PropertyDetailPage({
             <dd>{property.photoUrls.length > 0 ? property.photoUrls.join(", ") : t("common.notProvided")}</dd>
           </div>
         </dl>
+      </section>
+
+      <section className="detail-panel">
+        <p className="panel-label">{t("properties.operating.title")}</p>
+        {property.operatingProfile ? (
+          <>
+            <dl className="detail-grid" data-testid="property-operating-profile">
+              <div>
+                <dt>{t("properties.operating.cleaning")}</dt>
+                <dd>
+                  {enabledLabel(property.operatingProfile.cleaningEnabled, t("common.yes"), t("common.no"))} ·{" "}
+                  {t(`properties.operating.cadenceOptions.${property.operatingProfile.cleaningFrequency}`)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.inspection")}</dt>
+                <dd>
+                  {enabledLabel(property.operatingProfile.inspectionEnabled, t("common.yes"), t("common.no"))} ·{" "}
+                  {t(`properties.operating.cadenceOptions.${property.operatingProfile.inspectionFrequency}`)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.poolService")}</dt>
+                <dd>
+                  {enabledLabel(property.operatingProfile.poolServiceEnabled, t("common.yes"), t("common.no"))} ·{" "}
+                  {t(`properties.operating.cadenceOptions.${property.operatingProfile.poolServiceFrequency}`)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.gardenService")}</dt>
+                <dd>
+                  {enabledLabel(property.operatingProfile.gardenServiceEnabled, t("common.yes"), t("common.no"))} ·{" "}
+                  {t(`properties.operating.cadenceOptions.${property.operatingProfile.gardenServiceFrequency}`)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.laundry")}</dt>
+                <dd>{enabledLabel(property.operatingProfile.laundryManaged, t("common.yes"), t("common.no"))}</dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.linen")}</dt>
+                <dd>{enabledLabel(property.operatingProfile.linenManaged, t("common.yes"), t("common.no"))}</dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.maintenance")}</dt>
+                <dd>
+                  {enabledLabel(property.operatingProfile.maintenanceTrackingEnabled, t("common.yes"), t("common.no"))} ·{" "}
+                  {t(`properties.operating.cadenceOptions.${property.operatingProfile.preventiveMaintenanceFrequency}`)}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.midStayCleaning")}</dt>
+                <dd>
+                  {enabledLabel(property.operatingProfile.midStayCleaningEnabled, t("common.yes"), t("common.no"))}
+                  {property.operatingProfile.midStayCleaningRuleKey
+                    ? ` · ${property.operatingProfile.midStayCleaningRuleKey}`
+                    : ""}
+                </dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.breakfast")}</dt>
+                <dd>{enabledLabel(property.operatingProfile.breakfastAvailable, t("common.yes"), t("common.no"))}</dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.chef")}</dt>
+                <dd>{enabledLabel(property.operatingProfile.chefAvailable, t("common.yes"), t("common.no"))}</dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.transfers")}</dt>
+                <dd>{enabledLabel(property.operatingProfile.transfersAvailable, t("common.yes"), t("common.no"))}</dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.groceries")}</dt>
+                <dd>{enabledLabel(property.operatingProfile.groceriesAvailable, t("common.yes"), t("common.no"))}</dd>
+              </div>
+              <div>
+                <dt>{t("properties.operating.wellness")}</dt>
+                <dd>{enabledLabel(property.operatingProfile.wellnessAvailable, t("common.yes"), t("common.no"))}</dd>
+              </div>
+              <div className="wide">
+                <dt>{t("properties.operating.otherServices")}</dt>
+                <dd>
+                  {property.operatingProfile.otherServices.length > 0
+                    ? property.operatingProfile.otherServices.join(", ")
+                    : t("common.notProvided")}
+                </dd>
+              </div>
+              <div className="wide">
+                <dt>{t("properties.operating.automationNotes")}</dt>
+                <dd>{property.operatingProfile.automationNotes ?? t("common.notProvided")}</dd>
+              </div>
+            </dl>
+            {canEditOwnership ? (
+              <PropertyOperatingProfileForm
+                labels={{
+                  automationNotes: t("properties.operating.automationNotes"),
+                  breakfast: t("properties.operating.breakfast"),
+                  cadence: t("properties.operating.cadence"),
+                  cadenceOptions: {
+                    NONE: t("properties.operating.cadenceOptions.NONE"),
+                    ON_DEMAND: t("properties.operating.cadenceOptions.ON_DEMAND"),
+                    BETWEEN_STAYS: t("properties.operating.cadenceOptions.BETWEEN_STAYS"),
+                    DAILY: t("properties.operating.cadenceOptions.DAILY"),
+                    WEEKLY: t("properties.operating.cadenceOptions.WEEKLY"),
+                    MONTHLY: t("properties.operating.cadenceOptions.MONTHLY"),
+                    CHECKIN: t("properties.operating.cadenceOptions.CHECKIN"),
+                    CHECKOUT: t("properties.operating.cadenceOptions.CHECKOUT"),
+                    CUSTOM_RULE: t("properties.operating.cadenceOptions.CUSTOM_RULE")
+                  },
+                  chef: t("properties.operating.chef"),
+                  cleaning: t("properties.operating.cleaning"),
+                  formTitle: t("properties.operating.formTitle"),
+                  gardenService: t("properties.operating.gardenService"),
+                  groceries: t("properties.operating.groceries"),
+                  inspection: t("properties.operating.inspection"),
+                  laundry: t("properties.operating.laundry"),
+                  linen: t("properties.operating.linen"),
+                  maintenance: t("properties.operating.maintenance"),
+                  midStayCleaning: t("properties.operating.midStayCleaning"),
+                  midStayRuleKey: t("properties.operating.midStayRuleKey"),
+                  otherServices: t("properties.operating.otherServices"),
+                  poolService: t("properties.operating.poolService"),
+                  preventiveMaintenance: t("properties.operating.preventiveMaintenance"),
+                  save: t("properties.operating.save"),
+                  saved: t("properties.operating.saved"),
+                  saving: t("common.saving"),
+                  transfers: t("properties.operating.transfers"),
+                  validation: t("forms.validation"),
+                  unauthorized: t("forms.unauthorized"),
+                  forbidden: t("forms.forbidden"),
+                  notFound: t("forms.notFound"),
+                  generic: t("forms.generic"),
+                  wellness: t("properties.operating.wellness")
+                }}
+                locale={appLocale}
+                profile={property.operatingProfile}
+                propertyId={property.id}
+              />
+            ) : null}
+          </>
+        ) : (
+          <p className="field-hint">{t("properties.operating.empty")}</p>
+        )}
       </section>
 
       <section className="detail-panel">

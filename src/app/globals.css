@@ -1071,6 +1071,22 @@ textarea:disabled {
   margin-block-start: var(--space-7);
 }
 
+.operating-profile-form {
+  margin-block-start: var(--space-7);
+}
+
+.operating-grid {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.operating-service-row {
+  align-items: end;
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(12rem, 1fr) minmax(10rem, 0.75fr);
+}
+
 .ownership-row {
   align-items: end;
   display: grid;
@@ -1813,6 +1829,7 @@ textarea:disabled {
   .form-grid.two,
   .form-grid.three,
   .form-grid.five,
+  .operating-service-row,
   .ownership-row,
   .reservation-row-main,
   .reservation-revenue-form,

@@ -16,6 +16,7 @@ import {
   getOwner,
   getProperty,
   listProperties,
+  updatePropertyOperatingProfile,
   updatePropertyOwnership
 } from "@/modules/core/application/core-service";
 import {
@@ -1421,6 +1422,190 @@ describe("PostgreSQL baseline", () => {
           where: { id: coOwnerLink.id }
         });
       })
+    ).rejects.toThrow(/archived, not deleted|business rows/u);
+  });
+
+  it("manages property operating profiles with audited service automation settings", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Operating Profile A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Operating Profile B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const ctx: CoreActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        permissions: new Set([
+          permissionKey("owner", "view"),
+          permissionKey("owner", "create"),
+          permissionKey("property", "view"),
+          permissionKey("property", "create"),
+          permissionKey("property", "edit")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const owner = await createOwner(
+      ctx,
+      {
+        displayName: "Operating Profile Owner",
+        email: `operating-profile-${randomUUID()}@example.test`,
+        preferredLocale: "en",
+        representatives: [],
+        payoutMethods: []
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-operating-profile-owner",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const property = await createProperty(
+      ctx,
+      {
+        ownerId: owner.id,
+        name: "Villa Operating Profile",
+        addressLine1: "Route de Fes",
+        city: "Marrakech",
+        countryCode: "MA",
+        propertyType: "Villa",
+        bedrooms: 4,
+        bathrooms: 4,
+        livingSpaces: 2,
+        hasPool: true,
+        hasGarden: true,
+        parkingSpaces: 2,
+        maxGuests: 8,
+        timezone: "Africa/Casablanca",
+        amenities: ["pool", "garden"],
+        photoUrls: [],
+        status: "DRAFT",
+        operatingProfile: {
+          cleaningEnabled: true,
+          cleaningFrequency: "BETWEEN_STAYS",
+          inspectionEnabled: true,
+          inspectionFrequency: "CHECKOUT",
+          poolServiceEnabled: true,
+          poolServiceFrequency: "DAILY",
+          gardenServiceEnabled: true,
+          gardenServiceFrequency: "WEEKLY",
+          laundryManaged: true,
+          linenManaged: true,
+          maintenanceTrackingEnabled: true,
+          preventiveMaintenanceFrequency: "ON_DEMAND",
+          midStayCleaningEnabled: true,
+          midStayCleaningRuleKey: "ops.mid_stay_threshold",
+          breakfastAvailable: true,
+          chefAvailable: false,
+          transfersAvailable: true,
+          groceriesAvailable: false,
+          wellnessAvailable: false,
+          otherServices: ["hammam"],
+          automationNotes: "Initial operating profile"
+        },
+        onboardingProfile: {
+          headline: "Operating profile villa",
+          houseRules: []
+        }
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-operating-profile-property",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(property.operatingProfile).toEqual(expect.objectContaining({
+      poolServiceEnabled: true,
+      poolServiceFrequency: "DAILY",
+      midStayCleaningRuleKey: "ops.mid_stay_threshold"
+    }));
+
+    const updated = await updatePropertyOperatingProfile(
+      ctx,
+      property.id,
+      {
+        cleaningEnabled: true,
+        cleaningFrequency: "BETWEEN_STAYS",
+        inspectionEnabled: true,
+        inspectionFrequency: "CHECKOUT",
+        poolServiceEnabled: true,
+        poolServiceFrequency: "DAILY",
+        gardenServiceEnabled: true,
+        gardenServiceFrequency: "WEEKLY",
+        laundryManaged: true,
+        linenManaged: true,
+        maintenanceTrackingEnabled: true,
+        preventiveMaintenanceFrequency: "MONTHLY",
+        midStayCleaningEnabled: true,
+        midStayCleaningRuleKey: "ops.mid_stay_threshold",
+        breakfastAvailable: true,
+        chefAvailable: true,
+        transfersAvailable: true,
+        groceriesAvailable: true,
+        wellnessAvailable: true,
+        otherServices: ["hammam", "yoga"],
+        automationNotes: "Updated automation profile"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-operating-profile-update",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const stored = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => ({
+      profile: await tx.propertyOperatingProfile.findUniqueOrThrow({
+        where: { propertyId: property.id }
+      }),
+      audit: await tx.auditLog.findFirstOrThrow({
+        where: {
+          organizationId: orgA.id,
+          action: "property.operating_profile.update",
+          resourceId: property.id,
+          requestId: "integration-org-operating-profile-update"
+        }
+      })
+    }));
+    const visibleToOrgB = await withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, async (tx) =>
+      tx.propertyOperatingProfile.findMany({ where: { propertyId: property.id } })
+    );
+
+    expect(updated.operatingProfile).toEqual(expect.objectContaining({
+      chefAvailable: true,
+      groceriesAvailable: true,
+      wellnessAvailable: true,
+      preventiveMaintenanceFrequency: "MONTHLY",
+      otherServices: ["hammam", "yoga"]
+    }));
+    expect(stored.profile.otherServices).toEqual(["hammam", "yoga"]);
+    expect(visibleToOrgB).toHaveLength(0);
+    const auditBefore = stored.audit.before as {
+      operatingProfile?: { chefAvailable?: boolean; midStayCleaningRuleKey?: string | null };
+    };
+    const auditAfter = stored.audit.after as {
+      operatingProfile?: { chefAvailable?: boolean; groceriesAvailable?: boolean; wellnessAvailable?: boolean };
+    };
+
+    expect(auditBefore.operatingProfile).toMatchObject({
+      chefAvailable: false,
+      midStayCleaningRuleKey: "ops.mid_stay_threshold"
+    });
+    expect(auditAfter.operatingProfile).toMatchObject({
+      chefAvailable: true,
+      groceriesAvailable: true,
+      wellnessAvailable: true
+    });
+
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.propertyOperatingProfile.delete({ where: { propertyId: property.id } })
+      )
     ).rejects.toThrow(/archived, not deleted|business rows/u);
   });
 

@@ -45,6 +45,7 @@ model Organization {
   ownerPortalAccesses  OwnerPortalAccess[]
   properties           Property[]
   propertyProfiles     PropertyOnboardingProfile[]
+  propertyOperatingProfiles PropertyOperatingProfile[]
   propertyOwners       PropertyOwner[]
   reservations         Reservation[]
   reservationConflicts ReservationConflict[]
@@ -526,6 +527,7 @@ model Property {
   airbnbSettlements   AirbnbSettlement[]
   variances           Variance[]
   onboardingProfile   PropertyOnboardingProfile?
+  operatingProfile    PropertyOperatingProfile?
 
   @@index([organizationId, city, name], map: "property_org_city_name_idx")
   @@index([organizationId, regionId, name], map: "property_org_region_name_idx")
@@ -533,6 +535,42 @@ model Property {
   @@index([organizationId, status], map: "property_org_status_idx")
   @@index([organizationId, archivedAt], map: "property_org_archived_idx")
   @@map("property")
+}
+
+model PropertyOperatingProfile {
+  id                             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId                 String       @map("organization_id") @db.Uuid
+  propertyId                     String       @unique(map: "property_operating_profile_property_unique") @map("property_id") @db.Uuid
+  cleaningEnabled                Boolean      @default(true) @map("cleaning_enabled")
+  cleaningFrequency              String       @default("BETWEEN_STAYS") @map("cleaning_frequency")
+  inspectionEnabled              Boolean      @default(true) @map("inspection_enabled")
+  inspectionFrequency            String       @default("CHECKOUT") @map("inspection_frequency")
+  poolServiceEnabled             Boolean      @default(false) @map("pool_service_enabled")
+  poolServiceFrequency           String       @default("NONE") @map("pool_service_frequency")
+  gardenServiceEnabled           Boolean      @default(false) @map("garden_service_enabled")
+  gardenServiceFrequency         String       @default("NONE") @map("garden_service_frequency")
+  laundryManaged                 Boolean      @default(true) @map("laundry_managed")
+  linenManaged                   Boolean      @default(true) @map("linen_managed")
+  maintenanceTrackingEnabled     Boolean      @default(true) @map("maintenance_tracking_enabled")
+  preventiveMaintenanceFrequency String       @default("ON_DEMAND") @map("preventive_maintenance_frequency")
+  midStayCleaningEnabled         Boolean      @default(false) @map("mid_stay_cleaning_enabled")
+  midStayCleaningRuleKey         String?      @map("mid_stay_cleaning_rule_key")
+  breakfastAvailable             Boolean      @default(false) @map("breakfast_available")
+  chefAvailable                  Boolean      @default(false) @map("chef_available")
+  transfersAvailable             Boolean      @default(false) @map("transfers_available")
+  groceriesAvailable             Boolean      @default(false) @map("groceries_available")
+  wellnessAvailable              Boolean      @default(false) @map("wellness_available")
+  otherServices                  Json         @default("[]") @map("other_services")
+  automationNotes                String?      @map("automation_notes")
+  createdBy                      String?      @map("created_by") @db.Uuid
+  createdAt                      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization                   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property                       Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organizationId, propertyId], map: "property_operating_profile_org_property_idx")
+  @@index([organizationId, cleaningEnabled, inspectionEnabled, poolServiceEnabled, gardenServiceEnabled, midStayCleaningEnabled], map: "property_operating_profile_org_services_idx")
+  @@map("property_operating_profile")
 }
 
 model PropertyOnboardingProfile {

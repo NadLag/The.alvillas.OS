@@ -5,10 +5,13 @@ import type {
   OwnerRepresentativeSummary,
   OwnerSummary,
   PropertyInput,
+  PropertyOperatingProfileInput,
+  PropertyOperatingProfileSummary,
   PropertyOwnershipInput,
   PropertyOnboardingProfileSummary,
   PropertySummary
 } from "@/modules/core/domain/owner-property";
+import { defaultPropertyOperatingProfile as operatingProfileDefaults } from "@/modules/core/domain/owner-property";
 import { encryptSecret } from "@/platform/auth/secret-encryption";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
@@ -47,6 +50,7 @@ type PropertyWithOwners = Prisma.PropertyGetPayload<{
       };
     };
     onboardingProfile: true;
+    operatingProfile: true;
     propertyOwners: {
       include: {
         owner: true;
@@ -171,6 +175,43 @@ function onboardingProfileToSummary(
   };
 }
 
+function operatingProfileToSummary(
+  profile: PropertyWithOwners["operatingProfile"]
+): PropertyOperatingProfileSummary | null {
+  if (!profile) {
+    return null;
+  }
+
+  const otherServices = Array.isArray(profile.otherServices)
+    ? profile.otherServices.filter((item): item is string => typeof item === "string")
+    : [];
+
+  return {
+    cleaningEnabled: profile.cleaningEnabled,
+    cleaningFrequency: profile.cleaningFrequency as PropertyOperatingProfileSummary["cleaningFrequency"],
+    inspectionEnabled: profile.inspectionEnabled,
+    inspectionFrequency: profile.inspectionFrequency as PropertyOperatingProfileSummary["inspectionFrequency"],
+    poolServiceEnabled: profile.poolServiceEnabled,
+    poolServiceFrequency: profile.poolServiceFrequency as PropertyOperatingProfileSummary["poolServiceFrequency"],
+    gardenServiceEnabled: profile.gardenServiceEnabled,
+    gardenServiceFrequency: profile.gardenServiceFrequency as PropertyOperatingProfileSummary["gardenServiceFrequency"],
+    laundryManaged: profile.laundryManaged,
+    linenManaged: profile.linenManaged,
+    maintenanceTrackingEnabled: profile.maintenanceTrackingEnabled,
+    preventiveMaintenanceFrequency:
+      profile.preventiveMaintenanceFrequency as PropertyOperatingProfileSummary["preventiveMaintenanceFrequency"],
+    midStayCleaningEnabled: profile.midStayCleaningEnabled,
+    midStayCleaningRuleKey: profile.midStayCleaningRuleKey,
+    breakfastAvailable: profile.breakfastAvailable,
+    chefAvailable: profile.chefAvailable,
+    transfersAvailable: profile.transfersAvailable,
+    groceriesAvailable: profile.groceriesAvailable,
+    wellnessAvailable: profile.wellnessAvailable,
+    otherServices,
+    automationNotes: profile.automationNotes
+  };
+}
+
 function propertyToSummary(property: PropertyWithOwners): PropertySummary {
   return {
     id: property.id,
@@ -194,6 +235,7 @@ function propertyToSummary(property: PropertyWithOwners): PropertySummary {
       ? property.photoUrls.filter((item): item is string => typeof item === "string")
       : [],
     onboardingProfile: onboardingProfileToSummary(property.onboardingProfile),
+    operatingProfile: operatingProfileToSummary(property.operatingProfile),
     owners: property.propertyOwners
       .filter((link) => !link.archivedAt)
       .map((link) => ({
@@ -293,6 +335,7 @@ export class CoreRepository {
 
   async createProperty(input: PropertyInput, actorId: string): Promise<PropertySummary> {
     const geography = await this.resolvePropertyGeography(input, actorId);
+    const operatingProfile = input.operatingProfile ?? operatingProfileDefaults(input);
     const property = await this.tx.property.create({
       data: {
         organizationId: this.organizationId,
@@ -326,6 +369,33 @@ export class CoreRepository {
             createdBy: actorId
           }
         },
+        operatingProfile: {
+          create: {
+            organizationId: this.organizationId,
+            cleaningEnabled: operatingProfile.cleaningEnabled,
+            cleaningFrequency: operatingProfile.cleaningFrequency,
+            inspectionEnabled: operatingProfile.inspectionEnabled,
+            inspectionFrequency: operatingProfile.inspectionFrequency,
+            poolServiceEnabled: operatingProfile.poolServiceEnabled,
+            poolServiceFrequency: operatingProfile.poolServiceFrequency,
+            gardenServiceEnabled: operatingProfile.gardenServiceEnabled,
+            gardenServiceFrequency: operatingProfile.gardenServiceFrequency,
+            laundryManaged: operatingProfile.laundryManaged,
+            linenManaged: operatingProfile.linenManaged,
+            maintenanceTrackingEnabled: operatingProfile.maintenanceTrackingEnabled,
+            preventiveMaintenanceFrequency: operatingProfile.preventiveMaintenanceFrequency,
+            midStayCleaningEnabled: operatingProfile.midStayCleaningEnabled,
+            midStayCleaningRuleKey: operatingProfile.midStayCleaningRuleKey,
+            breakfastAvailable: operatingProfile.breakfastAvailable,
+            chefAvailable: operatingProfile.chefAvailable,
+            transfersAvailable: operatingProfile.transfersAvailable,
+            groceriesAvailable: operatingProfile.groceriesAvailable,
+            wellnessAvailable: operatingProfile.wellnessAvailable,
+            otherServices: operatingProfile.otherServices,
+            automationNotes: operatingProfile.automationNotes,
+            createdBy: actorId
+          }
+        },
         onboardingProfile: {
           create: {
             organizationId: this.organizationId,
@@ -352,6 +422,7 @@ export class CoreRepository {
           }
         },
         onboardingProfile: true,
+        operatingProfile: true,
         propertyOwners: {
           include: {
             owner: true
@@ -378,6 +449,7 @@ export class CoreRepository {
           }
         },
         onboardingProfile: true,
+        operatingProfile: true,
         propertyOwners: {
           where: {
             archivedAt: null
@@ -407,6 +479,7 @@ export class CoreRepository {
           }
         },
         onboardingProfile: true,
+        operatingProfile: true,
         propertyOwners: {
           where: {
             archivedAt: null
@@ -420,6 +493,84 @@ export class CoreRepository {
     });
 
     return property ? propertyToSummary(property) : null;
+  }
+
+  async replacePropertyOperatingProfile(
+    propertyId: string,
+    input: PropertyOperatingProfileInput,
+    actorId: string
+  ): Promise<PropertySummary | null> {
+    const property = await this.tx.property.findFirst({
+      where: {
+        id: propertyId,
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!property) {
+      return null;
+    }
+
+    await this.tx.propertyOperatingProfile.upsert({
+      where: {
+        propertyId
+      },
+      update: {
+        cleaningEnabled: input.cleaningEnabled,
+        cleaningFrequency: input.cleaningFrequency,
+        inspectionEnabled: input.inspectionEnabled,
+        inspectionFrequency: input.inspectionFrequency,
+        poolServiceEnabled: input.poolServiceEnabled,
+        poolServiceFrequency: input.poolServiceFrequency,
+        gardenServiceEnabled: input.gardenServiceEnabled,
+        gardenServiceFrequency: input.gardenServiceFrequency,
+        laundryManaged: input.laundryManaged,
+        linenManaged: input.linenManaged,
+        maintenanceTrackingEnabled: input.maintenanceTrackingEnabled,
+        preventiveMaintenanceFrequency: input.preventiveMaintenanceFrequency,
+        midStayCleaningEnabled: input.midStayCleaningEnabled,
+        midStayCleaningRuleKey: input.midStayCleaningRuleKey,
+        breakfastAvailable: input.breakfastAvailable,
+        chefAvailable: input.chefAvailable,
+        transfersAvailable: input.transfersAvailable,
+        groceriesAvailable: input.groceriesAvailable,
+        wellnessAvailable: input.wellnessAvailable,
+        otherServices: input.otherServices,
+        automationNotes: input.automationNotes
+      },
+      create: {
+        organizationId: this.organizationId,
+        propertyId,
+        cleaningEnabled: input.cleaningEnabled,
+        cleaningFrequency: input.cleaningFrequency,
+        inspectionEnabled: input.inspectionEnabled,
+        inspectionFrequency: input.inspectionFrequency,
+        poolServiceEnabled: input.poolServiceEnabled,
+        poolServiceFrequency: input.poolServiceFrequency,
+        gardenServiceEnabled: input.gardenServiceEnabled,
+        gardenServiceFrequency: input.gardenServiceFrequency,
+        laundryManaged: input.laundryManaged,
+        linenManaged: input.linenManaged,
+        maintenanceTrackingEnabled: input.maintenanceTrackingEnabled,
+        preventiveMaintenanceFrequency: input.preventiveMaintenanceFrequency,
+        midStayCleaningEnabled: input.midStayCleaningEnabled,
+        midStayCleaningRuleKey: input.midStayCleaningRuleKey,
+        breakfastAvailable: input.breakfastAvailable,
+        chefAvailable: input.chefAvailable,
+        transfersAvailable: input.transfersAvailable,
+        groceriesAvailable: input.groceriesAvailable,
+        wellnessAvailable: input.wellnessAvailable,
+        otherServices: input.otherServices,
+        automationNotes: input.automationNotes,
+        createdBy: actorId
+      }
+    });
+
+    return this.findProperty(propertyId);
   }
 
   async replacePropertyOwnership(input: PropertyOwnershipInput, actorId: string): Promise<PropertySummary | null> {
