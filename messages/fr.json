@@ -259,6 +259,7 @@
       "confirmTotp": "Confirmer MFA",
       "totpCode": "Code d'authentification",
       "totpSecret": "Secret de configuration",
+      "totpInvalid": "Le code n'a pas été accepté. Utilisez un code actuel correspondant à cette clé, ou recommencez la configuration si elle a expiré.",
       "recoveryCodes": "Codes de recuperation",
       "registerPasskey": "Enregistrer passkey",
       "passkeyReady": "Passkey enregistre."

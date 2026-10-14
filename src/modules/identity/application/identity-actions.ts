@@ -71,6 +71,7 @@ export type IdentityFormState = {
     | "revoked"
     | "totpStarted"
     | "totpConfirmed"
+    | "totpInvalid"
     | "passkeyRegistered"
     | "passkeyVerified";
   fieldErrors?: Record<string, string[]>;

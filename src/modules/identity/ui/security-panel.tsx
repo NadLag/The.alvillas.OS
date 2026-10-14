@@ -18,11 +18,14 @@ type SecurityPanelProps = {
     confirmTotp: string;
     totpCode: string;
     totpSecret: string;
+    totpInvalid: string;
     recoveryCodes: string;
     registerPasskey: string;
     passkeyReady: string;
     validation: string;
     generic: string;
+    unauthorized: string;
+    forbidden: string;
   };
 };
 
@@ -32,8 +35,8 @@ export function SecurityPanel({ labels }: SecurityPanelProps) {
   const [isPending, startTransition] = useTransition();
 
   function startTotp() {
-    startTransition(() => {
-      void startTotpEnrollmentAction().then(setState);
+    startTransition(async () => {
+      setState(await startTotpEnrollmentAction());
     });
   }
 
@@ -43,8 +46,11 @@ export function SecurityPanel({ labels }: SecurityPanelProps) {
       return;
     }
 
-    startTransition(() => {
-      void confirmTotpEnrollmentAction(state.totpCredentialId ?? "", totpCode).then(setState);
+    startTransition(async () => {
+      const result = await confirmTotpEnrollmentAction(state.totpCredentialId ?? "", totpCode);
+      setState((current) => result.status === "error" && result.messageKey === "conflict"
+        ? { ...current, status: result.status, messageKey: "totpInvalid" }
+        : result);
     });
   }
 
@@ -61,14 +67,15 @@ export function SecurityPanel({ labels }: SecurityPanelProps) {
     });
   }
 
-  const message =
-    state.messageKey === "passkeyRegistered"
-      ? labels.passkeyReady
-      : state.messageKey === "validation"
-        ? labels.validation
-        : state.messageKey === "generic"
-          ? labels.generic
-          : null;
+  const statusMessages: Partial<Record<NonNullable<IdentityFormState["messageKey"]>, string>> = {
+    passkeyRegistered: labels.passkeyReady,
+    totpInvalid: labels.totpInvalid,
+    validation: labels.validation,
+    unauthorized: labels.unauthorized,
+    forbidden: labels.forbidden,
+    generic: labels.generic
+  };
+  const message = state.messageKey ? statusMessages[state.messageKey] ?? null : null;
 
   return (
     <section className="detail-panel identity-security-panel">
