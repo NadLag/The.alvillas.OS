@@ -2,7 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
-import { AdminShell, ShellHeader } from "@/design-system/shells";
+import { AdminShell, EmptyState, ShellHeader } from "@/design-system/shells";
 import { agreementActorContextFromSession, coreActorContextFromSession } from "@/modules/core/application/core-access";
 import {
   CoreNotFoundError,
@@ -20,6 +20,12 @@ import {
   PropertyOwnershipForm
 } from "@/modules/core/ui/core-forms";
 import type { ManagementAgreementSummary } from "@/modules/core/domain/owner-property";
+import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
+import {
+  listOperationTasks,
+  listReservations
+} from "@/modules/reservations/application/reservation-service";
+import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
 import { authorize } from "@/platform/authz/authorize";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
@@ -129,6 +135,10 @@ function approvalThresholdLabel(value: unknown, fallback: string): string {
   return label || fallback;
 }
 
+function dateRangeLabel(checkIn: Date, checkOut: Date): string {
+  return `${checkIn.toLocaleDateString()} - ${checkOut.toLocaleDateString()}`;
+}
+
 export default async function PropertyDetailPage({
   params
 }: Readonly<{
@@ -147,6 +157,7 @@ export default async function PropertyDetailPage({
   const session = await auth();
   const ctx = coreActorContextFromSession(session);
   const agreementCtx = await agreementActorContextFromSession(session);
+  const reservationCtx = await reservationActorContextFromSession(session);
 
   if (!ctx) {
     redirect(`/${appLocale}/login`);
@@ -171,6 +182,38 @@ export default async function PropertyDetailPage({
     propertyId: property.id,
     city: property.cityId,
     region: property.regionId
+  });
+  const propertyScopedResource = {
+    organizationId: ctx.organizationId,
+    propertyId: property.id,
+    city: property.cityId,
+    region: property.regionId
+  };
+  const canViewReservations = reservationCtx
+    ? authorize(reservationCtx.authContext, "view", {
+        ...propertyScopedResource,
+        organizationId: reservationCtx.organizationId,
+        type: "reservation"
+      })
+    : false;
+  const canViewOperations = reservationCtx
+    ? authorize(reservationCtx.authContext, "view", {
+        ...propertyScopedResource,
+        organizationId: reservationCtx.organizationId,
+        type: "task"
+      })
+    : false;
+  const canViewFinance = authorize(ctx.authContext, "view", {
+    ...propertyScopedResource,
+    type: "financial_transaction"
+  });
+  const canViewServices = authorize(ctx.authContext, "view", {
+    ...propertyScopedResource,
+    type: "service"
+  });
+  const canViewIssues = authorize(ctx.authContext, "view", {
+    ...propertyScopedResource,
+    type: "issue"
   });
   const ownerOptions = canEditOwnership ? await listOwners(ctx) : [];
   const canViewAgreements = agreementCtx
@@ -214,6 +257,17 @@ export default async function PropertyDetailPage({
   const managementAgreements = canViewAgreements && agreementCtx
     ? await listPropertyManagementAgreements(agreementCtx, property.id)
     : [];
+  const [propertyReservations, propertyTasks] = await Promise.all([
+    canViewReservations && reservationCtx
+      ? listReservations(reservationCtx).then((reservations) =>
+          reservations.filter((reservation) => reservation.propertyId === property.id)
+        )
+      : Promise.resolve([]),
+    canViewOperations && reservationCtx
+      ? listOperationTasks(reservationCtx).then((tasks) => tasks.filter((task) => task.propertyId === property.id))
+      : Promise.resolve([])
+  ]);
+  const openTaskCount = propertyTasks.filter((task) => !task.completedAt).length;
   const lifecycleTransitions = allowedPropertyLifecycleTransitions(property.status);
   const lifecycleRequirements = propertyLifecycleReadiness(property, managementAgreements);
   const lifecycleStatusLabels = {
@@ -364,6 +418,42 @@ export default async function PropertyDetailPage({
     unauthorized: t("forms.unauthorized"),
     validation: t("forms.validation")
   };
+  const workspaceTabs = [
+    { key: "overview", label: t("properties.workspace.tabs.overview") },
+    ...(canViewReservations
+      ? [
+          {
+            key: "calendar",
+            label: t("properties.workspace.tabs.calendar"),
+            count: propertyReservations.length
+          },
+          {
+            key: "reservations",
+            label: t("properties.workspace.tabs.reservations"),
+            count: propertyReservations.length
+          }
+        ]
+      : []),
+    ...(canViewOperations
+      ? [
+          {
+            key: "operations",
+            label: t("properties.workspace.tabs.operations"),
+            count: openTaskCount
+          }
+        ]
+      : []),
+    ...(canViewFinance ? [{ key: "finance", label: t("properties.workspace.tabs.finance") }] : []),
+    ...(canViewServices ? [{ key: "inventory", label: t("properties.workspace.tabs.inventory") }] : []),
+    ...(canViewOperations ? [{ key: "laundry", label: t("properties.workspace.tabs.laundry") }] : []),
+    ...(canViewIssues || canViewOperations
+      ? [{ key: "maintenance", label: t("properties.workspace.tabs.maintenance") }]
+      : []),
+    { key: "assets", label: t("properties.workspace.tabs.assets") },
+    { key: "documents", label: t("properties.workspace.tabs.documents") },
+    { key: "team", label: t("properties.workspace.tabs.team"), count: property.owners.length },
+    ...(canViewAgreements ? [{ key: "rules", label: t("properties.workspace.tabs.rules") }] : [])
+  ];
 
   return (
     <AdminShell className="resource-page" testId="property-detail-page">
@@ -378,7 +468,51 @@ export default async function PropertyDetailPage({
         title={property.name}
       />
 
-      <section className="detail-panel">
+      <nav
+        aria-label={t("properties.workspace.tabsLabel")}
+        className="property-workspace-tabs"
+        data-testid="property-workspace-tabs"
+      >
+        {workspaceTabs.map((tab) => (
+          <a className="property-workspace-tab" href={`#property-workspace-${tab.key}`} key={tab.key}>
+            <span>{tab.label}</span>
+            {"count" in tab && typeof tab.count === "number" ? <strong>{tab.count}</strong> : null}
+          </a>
+        ))}
+      </nav>
+
+      <section className="detail-panel property-workspace-overview" data-testid="property-workspace-summary">
+        <div className="property-workspace-metrics">
+          <div>
+            <span>{t("properties.workspace.metrics.owners")}</span>
+            <strong>{property.owners.length}</strong>
+          </div>
+          <div>
+            <span>{t("properties.workspace.metrics.channels")}</span>
+            <strong>{property.bookingChannels.length}</strong>
+          </div>
+          {canViewReservations ? (
+            <div>
+              <span>{t("properties.workspace.metrics.reservations")}</span>
+              <strong>{propertyReservations.length}</strong>
+            </div>
+          ) : null}
+          {canViewOperations ? (
+            <div>
+              <span>{t("properties.workspace.metrics.openTasks")}</span>
+              <strong>{openTaskCount}</strong>
+            </div>
+          ) : null}
+          {canViewAgreements ? (
+            <div>
+              <span>{t("properties.workspace.metrics.agreements")}</span>
+              <strong>{managementAgreements.length}</strong>
+            </div>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="detail-panel" id="property-workspace-overview">
         <dl className="detail-grid">
           <div>
             <dt>{t("properties.form.owner")}</dt>
@@ -425,6 +559,303 @@ export default async function PropertyDetailPage({
             <dd>{property.photoUrls.length > 0 ? property.photoUrls.join(", ") : t("common.notProvided")}</dd>
           </div>
         </dl>
+      </section>
+
+      {canViewReservations ? (
+        <section className="detail-panel" data-testid="property-workspace-calendar" id="property-workspace-calendar">
+          <div className="section-heading">
+            <p className="panel-label">{t("properties.workspace.calendar.title")}</p>
+            <span>{t("properties.workspace.calendar.count", { count: propertyReservations.length })}</span>
+          </div>
+          {propertyReservations.length > 0 ? (
+            <div className="resource-list">
+              {propertyReservations.map((reservation) => (
+                <div className="resource-row" data-testid="property-calendar-row" key={reservation.id}>
+                  <span>
+                    <strong>{reservation.reference}</strong>
+                    <small>{reservation.guestName}</small>
+                  </span>
+                  <span>{dateRangeLabel(reservation.checkIn, reservation.checkOut)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState testId="property-calendar-empty" tone="motif">
+              {t("properties.workspace.calendar.empty")}
+            </EmptyState>
+          )}
+        </section>
+      ) : null}
+
+      {canViewReservations ? (
+        <section
+          className="detail-panel"
+          data-testid="property-workspace-reservations"
+          id="property-workspace-reservations"
+        >
+          <div className="section-heading">
+            <p className="panel-label">{t("properties.workspace.reservations.title")}</p>
+            <span>{t("properties.workspace.reservations.count", { count: propertyReservations.length })}</span>
+          </div>
+          {propertyReservations.length > 0 ? (
+            <div className="resource-list">
+              {propertyReservations.map((reservation) => (
+                <div className="resource-row" data-testid="property-reservation-row" key={reservation.id}>
+                  <span>
+                    <strong>{reservation.reference}</strong>
+                    <small>
+                      {t("properties.workspace.reservations.rowMeta", {
+                        source: reservation.source,
+                        status: reservation.status
+                      })}
+                    </small>
+                  </span>
+                  <span>
+                    {t("properties.workspace.reservations.nights", {
+                      nights: reservation.nights
+                    })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState testId="property-reservations-empty" tone="motif">
+              {t("properties.workspace.reservations.empty")}
+            </EmptyState>
+          )}
+        </section>
+      ) : null}
+
+      {canViewOperations ? (
+        <section className="detail-panel" data-testid="property-workspace-operations" id="property-workspace-operations">
+          <div className="section-heading">
+            <p className="panel-label">{t("properties.workspace.operations.title")}</p>
+            <span>{t("properties.workspace.operations.count", { count: propertyTasks.length })}</span>
+          </div>
+          {propertyTasks.length > 0 ? (
+            <div className="resource-list">
+              {propertyTasks.map((task) => (
+                <div className="resource-row" data-testid="property-operation-task-row" key={task.id}>
+                  <span>
+                    <strong>{localizedTaskTitle(task.title, appLocale)}</strong>
+                    <small>
+                      {task.reservationReference ?? t("properties.workspace.operations.noReservation")} - {task.state}
+                    </small>
+                  </span>
+                  <span>{task.dueDate.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState testId="property-operations-empty" tone="motif">
+              {t("properties.workspace.operations.empty")}
+            </EmptyState>
+          )}
+        </section>
+      ) : null}
+
+      {canViewFinance ? (
+        <section className="detail-panel" data-testid="property-workspace-finance" id="property-workspace-finance">
+          <div className="section-heading">
+            <p className="panel-label">{t("properties.workspace.finance.title")}</p>
+            <span>{t("properties.workspace.finance.currency", { currency: "MAD" })}</span>
+          </div>
+          <dl className="detail-grid">
+            <div>
+              <dt>{t("properties.workspace.finance.agreements")}</dt>
+              <dd>{managementAgreements.length}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.workspace.finance.bookingChannels")}</dt>
+              <dd>{property.bookingChannels.length}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.workspace.finance.activeOwners")}</dt>
+              <dd>{property.owners.length}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.workspace.finance.lifecycle")}</dt>
+              <dd>{lifecycleStatusLabels[property.status]}</dd>
+            </div>
+          </dl>
+        </section>
+      ) : null}
+
+      {canViewServices ? (
+        <section className="detail-panel" data-testid="property-workspace-inventory" id="property-workspace-inventory">
+          <div className="section-heading">
+            <p className="panel-label">{t("properties.workspace.inventory.title")}</p>
+            <span>{t("properties.workspace.inventory.amenityCount", { count: property.amenities.length })}</span>
+          </div>
+          <dl className="detail-grid">
+            <div className="wide">
+              <dt>{t("properties.form.amenities")}</dt>
+              <dd>{property.amenities.length > 0 ? property.amenities.join(", ") : t("common.notProvided")}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.breakfast")}</dt>
+              <dd>
+                {property.operatingProfile?.breakfastAvailable ? t("common.yes") : t("common.no")}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.chef")}</dt>
+              <dd>{property.operatingProfile?.chefAvailable ? t("common.yes") : t("common.no")}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.groceries")}</dt>
+              <dd>{property.operatingProfile?.groceriesAvailable ? t("common.yes") : t("common.no")}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.otherServices")}</dt>
+              <dd>
+                {property.operatingProfile?.otherServices.length
+                  ? property.operatingProfile.otherServices.join(", ")
+                  : t("common.notProvided")}
+              </dd>
+            </div>
+          </dl>
+        </section>
+      ) : null}
+
+      {canViewOperations ? (
+        <section className="detail-panel" data-testid="property-workspace-laundry" id="property-workspace-laundry">
+          <p className="panel-label">{t("properties.workspace.laundry.title")}</p>
+          <dl className="detail-grid">
+            <div>
+              <dt>{t("properties.operating.laundry")}</dt>
+              <dd>{property.operatingProfile?.laundryManaged ? t("common.yes") : t("common.no")}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.linen")}</dt>
+              <dd>{property.operatingProfile?.linenManaged ? t("common.yes") : t("common.no")}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.midStayCleaning")}</dt>
+              <dd>{property.operatingProfile?.midStayCleaningEnabled ? t("common.yes") : t("common.no")}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.midStayRuleKey")}</dt>
+              <dd>{property.operatingProfile?.midStayCleaningRuleKey ?? t("common.notProvided")}</dd>
+            </div>
+          </dl>
+        </section>
+      ) : null}
+
+      {canViewIssues || canViewOperations ? (
+        <section className="detail-panel" data-testid="property-workspace-maintenance" id="property-workspace-maintenance">
+          <p className="panel-label">{t("properties.workspace.maintenance.title")}</p>
+          <dl className="detail-grid">
+            <div>
+              <dt>{t("properties.operating.maintenance")}</dt>
+              <dd>{property.operatingProfile?.maintenanceTrackingEnabled ? t("common.yes") : t("common.no")}</dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.preventiveMaintenance")}</dt>
+              <dd>
+                {property.operatingProfile
+                  ? t(`properties.operating.cadenceOptions.${property.operatingProfile.preventiveMaintenanceFrequency}`)
+                  : t("common.notProvided")}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.poolService")}</dt>
+              <dd>
+                {property.operatingProfile
+                  ? `${enabledLabel(property.operatingProfile.poolServiceEnabled, t("common.yes"), t("common.no"))} - ${t(
+                      `properties.operating.cadenceOptions.${property.operatingProfile.poolServiceFrequency}`
+                    )}`
+                  : t("common.notProvided")}
+              </dd>
+            </div>
+            <div>
+              <dt>{t("properties.operating.gardenService")}</dt>
+              <dd>
+                {property.operatingProfile
+                  ? `${enabledLabel(property.operatingProfile.gardenServiceEnabled, t("common.yes"), t("common.no"))} - ${t(
+                      `properties.operating.cadenceOptions.${property.operatingProfile.gardenServiceFrequency}`
+                    )}`
+                  : t("common.notProvided")}
+              </dd>
+            </div>
+          </dl>
+        </section>
+      ) : null}
+
+      <section className="detail-panel" data-testid="property-workspace-assets" id="property-workspace-assets">
+        <p className="panel-label">{t("properties.workspace.assets.title")}</p>
+        <dl className="detail-grid">
+          <div>
+            <dt>{t("properties.form.propertyType")}</dt>
+            <dd>{property.propertyType}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.form.bedrooms")}</dt>
+            <dd>{property.bedrooms}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.form.bathrooms")}</dt>
+            <dd>{property.bathrooms}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.form.livingSpaces")}</dt>
+            <dd>{property.livingSpaces}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.form.parkingSpaces")}</dt>
+            <dd>{property.parkingSpaces}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.form.hasPool")}</dt>
+            <dd>{property.hasPool ? t("common.yes") : t("common.no")}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.form.hasGarden")}</dt>
+            <dd>{property.hasGarden ? t("common.yes") : t("common.no")}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.photoCount")}</dt>
+            <dd>{property.photoUrls.length}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="detail-panel" data-testid="property-workspace-documents" id="property-workspace-documents">
+        <p className="panel-label">{t("properties.workspace.documents.title")}</p>
+        <dl className="detail-grid">
+          <div>
+            <dt>{t("properties.workspace.documents.agreements")}</dt>
+            <dd>{managementAgreements.length}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.photoCount")}</dt>
+            <dd>{property.onboardingProfile?.photoGallery.length ?? property.photoUrls.length}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.form.houseRules")}</dt>
+            <dd>{property.onboardingProfile?.houseRules.length ?? 0}</dd>
+          </div>
+          <div>
+            <dt>{t("properties.onboardingProfile")}</dt>
+            <dd>{property.onboardingProfile?.headline ?? t("common.notProvided")}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section className="detail-panel" data-testid="property-workspace-team" id="property-workspace-team">
+        <div className="section-heading">
+          <p className="panel-label">{t("properties.workspace.team.title")}</p>
+          <span>{t("properties.workspace.team.count", { count: property.owners.length })}</span>
+        </div>
+        <div className="ownership-summary">
+          {property.owners.map((owner) => (
+            <div className="ownership-summary-row" key={owner.id}>
+              <span>{owner.displayName}</span>
+              <strong>{shareLabel(owner.shareBps)}</strong>
+              {owner.isPrimary ? <small>{t("properties.ownership.primary")}</small> : null}
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="detail-panel" data-testid="property-lifecycle-panel">
@@ -539,7 +970,7 @@ export default async function PropertyDetailPage({
         ) : null}
       </section>
 
-      <section className="detail-panel">
+      <section className="detail-panel" data-testid="property-workspace-rules" id="property-workspace-rules">
         <p className="panel-label">{t("properties.agreement.title")}</p>
         {managementAgreements.length > 0 ? (
           <div className="config-rule-list" data-testid="management-agreement-summary">

@@ -641,6 +641,8 @@ export type PropertySummary = {
   propertyType: string;
   bedrooms: number;
   bathrooms: number;
+  livingSpaces: number;
+  parkingSpaces: number;
   maxGuests: number;
   timezone: string;
   status: z.infer<typeof propertyStatusSchema>;
