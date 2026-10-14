@@ -1,10 +1,24 @@
 import { headers } from "next/headers";
 import { CoreRepository } from "@/modules/core/infrastructure/core-repository";
 import {
+  agreementNoticeConfigKey,
+  agreementResponsibilitiesConfigKey,
+  agreementSpecialConditionsConfigKey,
+  approvalThresholdsConfigSchema,
+  commissionConfigKey,
+  expenseTreatmentConfigSchema,
+  payoutScheduleConfigSchema
+} from "@/platform/config/rule-registry";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import {
+  managementAgreementInputSchema,
   ownerInputSchema,
   propertyOperatingProfileInputSchema,
   propertyInputSchema,
   propertyOwnershipInputSchema,
+  type ManagementAgreementInput,
+  type ManagementAgreementRuleSummary,
+  type ManagementAgreementSummary,
   type OwnerInput,
   type OwnerSummary,
   type PropertyInput,
@@ -64,6 +78,33 @@ function assertAllowed(
   }
 }
 
+const agreementConfigKeys = [
+  commissionConfigKey,
+  "finance.expense_treatment",
+  "finance.approval_thresholds",
+  "finance.payout_schedule",
+  agreementResponsibilitiesConfigKey,
+  agreementNoticeConfigKey,
+  agreementSpecialConditionsConfigKey
+] as const;
+
+function assertConfigAllowed(
+  ctx: CoreActorContext,
+  action: "view" | "create" | "configure",
+  propertyId: string
+): void {
+  const allowed = authorize(ctx.authContext, action, {
+    type: "config_rule",
+    organizationId: ctx.organizationId,
+    id: `agreement:${propertyId}`,
+    propertyId
+  });
+
+  if (!allowed) {
+    throw new CoreAuthorizationError();
+  }
+}
+
 async function auditMeta(deps: CoreServiceDeps): Promise<AuditMeta> {
   if (deps.requestId) {
     return {
@@ -98,6 +139,111 @@ export function parsePropertyOperatingProfileInput(input: unknown) {
 
 export function parsePropertyOwnershipInput(input: unknown) {
   return propertyOwnershipInputSchema.safeParse(input);
+}
+
+export function parseManagementAgreementInput(input: unknown) {
+  return managementAgreementInputSchema.safeParse(input);
+}
+
+function latestRule(
+  agreement: ManagementAgreementSummary,
+  key: string
+): ManagementAgreementRuleSummary | null {
+  return (
+    agreement.rules
+      .filter((rule) => rule.key === key)
+      .sort((left, right) => right.version - left.version)[0] ?? null
+  );
+}
+
+function compactAgreementSummary(agreement: ManagementAgreementSummary): Record<string, unknown> {
+  const commission = latestRule(agreement, commissionConfigKey);
+  const payout = latestRule(agreement, "finance.payout_schedule");
+  const notice = latestRule(agreement, agreementNoticeConfigKey);
+
+  return {
+    id: agreement.id,
+    propertyId: agreement.propertyId,
+    reference: agreement.reference,
+    status: agreement.status,
+    effectiveFrom: agreement.effectiveFrom,
+    effectiveTo: agreement.effectiveTo,
+    commission: commission?.value ?? null,
+    payout: payout?.value ?? null,
+    notice: notice?.value ?? null,
+    ruleIds: agreement.rules.map((rule) => ({
+      id: rule.id,
+      key: rule.key,
+      version: rule.version
+    }))
+  };
+}
+
+function agreementRuleValues(input: ManagementAgreementInput): Array<{ key: string; value: unknown }> {
+  const approvalThresholds = input.approvalThresholdAmount
+    ? {
+        thresholds: [
+          {
+            key: input.approvalThresholdKey ?? "owner_approval",
+            amount: input.approvalThresholdAmount,
+            currency: input.approvalThresholdCurrency,
+            requires_approval_from: input.approvalRequires
+          }
+        ]
+      }
+    : {
+        thresholds: []
+      };
+  const payoutSchedule = {
+    cadence: input.payoutCadence,
+    ...(input.payoutHoldDays === undefined ? {} : { hold_days: input.payoutHoldDays }),
+    ...(input.payoutHoldbackBps === undefined ? {} : { holdback_bps: input.payoutHoldbackBps })
+  };
+
+  return [
+    {
+      key: commissionConfigKey,
+      value: {
+        rate_bps: input.commissionRateBps,
+        basis: input.commissionBasis,
+        accrual_event: input.commissionAccrualEvent
+      }
+    },
+    {
+      key: "finance.expense_treatment",
+      value: {
+        default_treatment: input.expenseDefaultTreatment,
+        categories: {}
+      }
+    },
+    {
+      key: "finance.approval_thresholds",
+      value: approvalThresholds
+    },
+    {
+      key: "finance.payout_schedule",
+      value: payoutSchedule
+    },
+    {
+      key: agreementResponsibilitiesConfigKey,
+      value: {
+        owner: input.ownerResponsibilities,
+        alvillas: input.alvillasResponsibilities
+      }
+    },
+    {
+      key: agreementNoticeConfigKey,
+      value: {
+        notice_period_days: input.noticePeriodDays
+      }
+    },
+    {
+      key: agreementSpecialConditionsConfigKey,
+      value: {
+        conditions: input.specialConditions
+      }
+    }
+  ];
 }
 
 export async function createOwner(
@@ -238,6 +384,95 @@ export async function getProperty(
   }
 
   return property;
+}
+
+export async function listPropertyManagementAgreements(
+  ctx: CoreActorContext,
+  propertyId: string,
+  deps: CoreServiceDeps = {}
+): Promise<ManagementAgreementSummary[]> {
+  assertAllowed(ctx, "view", "property", propertyId);
+  assertConfigAllowed(ctx, "view", propertyId);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new CoreRepository(tx, ctx.organizationId);
+    const property = await repository.findProperty(propertyId);
+
+    if (!property) {
+      throw new CoreNotFoundError();
+    }
+
+    return repository.listManagementAgreementsForProperty(propertyId, agreementConfigKeys);
+  });
+}
+
+export async function createManagementAgreement(
+  ctx: CoreActorContext,
+  input: ManagementAgreementInput,
+  deps: CoreServiceDeps = {}
+): Promise<ManagementAgreementSummary> {
+  assertAllowed(ctx, "edit", "property", input.propertyId);
+  assertConfigAllowed(ctx, "create", input.propertyId);
+  assertConfigAllowed(ctx, "configure", input.propertyId);
+  const meta = await auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new CoreRepository(tx, ctx.organizationId);
+    const property = await repository.findProperty(input.propertyId);
+
+    if (!property) {
+      throw new CoreNotFoundError();
+    }
+
+    const agreement = await repository.createManagementAgreement(input, ctx.actorId);
+    const configRepository = new ConfigRuleRepository(tx, ctx.organizationId);
+
+    for (const rule of agreementRuleValues(input)) {
+      if (rule.key === "finance.approval_thresholds") {
+        approvalThresholdsConfigSchema.parse(rule.value);
+      } else if (rule.key === "finance.expense_treatment") {
+        expenseTreatmentConfigSchema.parse(rule.value);
+      } else if (rule.key === "finance.payout_schedule") {
+        payoutScheduleConfigSchema.parse(rule.value);
+      }
+
+      await configRepository.createVersion({
+        key: rule.key,
+        scopeType: "agreement",
+        scopeId: agreement.id,
+        value: rule.value,
+        effectiveFrom: input.effectiveFrom,
+        effectiveTo: input.effectiveTo,
+        lifecycle: input.status === "DRAFT" ? "DRAFT" : input.status === "ENDED" ? "RETIRED" : "ACTIVE",
+        createdBy: ctx.actorId,
+        reason: input.reason
+      });
+    }
+
+    const created = (await repository.listManagementAgreementsForProperty(input.propertyId, agreementConfigKeys)).find(
+      (candidate) => candidate.id === agreement.id
+    );
+
+    if (!created) {
+      throw new CoreNotFoundError("Management agreement was not created");
+    }
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "owner_agreement.changed",
+      resourceType: "property",
+      resourceId: property.id,
+      ipAddress: meta.ipAddress,
+      propertyScopeId: property.id,
+      after: compactAgreementSummary(created),
+      reason: input.reason,
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
+
+    return created;
+  });
 }
 
 export async function updatePropertyOwnership(

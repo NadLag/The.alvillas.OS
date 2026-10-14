@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  approvalStepSchema,
+  commissionAccrualEventSchema,
+  commissionBasisSchema,
+  expenseTreatmentSchema,
+  payoutCadenceSchema
+} from "@/platform/config/rule-registry";
 
 const localeSchema = z.enum(["en", "fr", "ar"]);
 
@@ -29,7 +36,23 @@ const optionalDate = z.preprocess(
 const nonNegativeInteger = z.coerce.number().int().min(0);
 const positiveInteger = z.coerce.number().int().min(1);
 const positiveShareBps = z.coerce.number().int().min(1).max(10000);
+const optionalNonNegativeInteger = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.coerce.number().int().min(0).optional()
+);
+const optionalBps = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.coerce.number().int().min(0).max(10000).optional()
+);
 const configRuleKey = z.string().trim().min(1).max(120).regex(/^[a-z0-9_.-]+$/u);
+const moneyAmountText = z
+  .string()
+  .trim()
+  .regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u, "Use a money amount with up to 2 decimals");
+const optionalMoneyAmountText = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  moneyAmountText.optional()
+);
 
 export const payoutMethodTypeSchema = z.enum([
   "BANK_TRANSFER",
@@ -138,6 +161,16 @@ export function normalizeOtherServices(value: string | readonly string[] | undef
   return normalized.slice(0, 24);
 }
 
+export function normalizeAgreementTextList(value: string | readonly string[] | undefined): string[] {
+  const rawItems: string[] =
+    typeof value === "string" ? value.split(/\r?\n|,/u) : [...(value ?? [])];
+  const normalized = rawItems
+    .map((item) => item.trim())
+    .filter((item, index, items) => item.length > 0 && items.indexOf(item) === index);
+
+  return normalized.slice(0, 80);
+}
+
 export const propertyOnboardingProfileInputSchema = z.object({
   headline: optionalText(180),
   description: optionalText(2000),
@@ -224,6 +257,72 @@ export const propertyOperatingProfileInputSchema = z
   });
 
 export type PropertyOperatingProfileInput = z.infer<typeof propertyOperatingProfileInputSchema>;
+
+export const managementAgreementStatusSchema = z.enum(["DRAFT", "ACTIVE", "ENDED"]);
+
+export const managementAgreementInputSchema = z
+  .object({
+    propertyId: z.string().uuid(),
+    reference: requiredText(160),
+    status: managementAgreementStatusSchema.default("ACTIVE"),
+    effectiveFrom: z.coerce.date(),
+    effectiveTo: optionalDate,
+    commissionRateBps: z.coerce.number().int().min(0).max(10000),
+    commissionBasis: commissionBasisSchema,
+    commissionAccrualEvent: commissionAccrualEventSchema,
+    expenseDefaultTreatment: expenseTreatmentSchema,
+    approvalThresholdKey: z.preprocess(
+      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+      configRuleKey.optional()
+    ),
+    approvalThresholdAmount: optionalMoneyAmountText,
+    approvalThresholdCurrency: z
+      .string()
+      .trim()
+      .length(3)
+      .transform((value) => value.toUpperCase())
+      .default("MAD"),
+    approvalRequires: z.array(approvalStepSchema).min(1).default(["owner"]),
+    payoutCadence: payoutCadenceSchema,
+    payoutHoldDays: optionalNonNegativeInteger,
+    payoutHoldbackBps: optionalBps,
+    noticePeriodDays: z.coerce.number().int().min(0).max(1095),
+    ownerResponsibilities: z.array(z.string().trim().min(1).max(240)).max(40).default([]),
+    alvillasResponsibilities: z.array(z.string().trim().min(1).max(240)).max(40).default([]),
+    specialConditions: z.array(z.string().trim().min(1).max(240)).max(80).default([]),
+    reason: requiredText(500)
+  })
+  .refine(
+    (value) =>
+      !value.effectiveTo || value.effectiveTo.getTime() > value.effectiveFrom.getTime(),
+    {
+      message: "Agreement end date must be after the effective date",
+      path: ["effectiveTo"]
+    }
+  );
+
+export type ManagementAgreementInput = z.infer<typeof managementAgreementInputSchema>;
+
+export type ManagementAgreementRuleSummary = {
+  id: string;
+  key: string;
+  version: number;
+  lifecycle: "DRAFT" | "ACTIVE" | "RETIRED";
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+  value: Record<string, unknown>;
+};
+
+export type ManagementAgreementSummary = {
+  id: string;
+  propertyId: string;
+  reference: string;
+  status: "DRAFT" | "ACTIVE" | "ENDED";
+  effectiveFrom: Date;
+  effectiveTo: Date | null;
+  createdAt: Date;
+  rules: ManagementAgreementRuleSummary[];
+};
 
 export function defaultPropertyOperatingProfile(input: {
   hasPool?: boolean;

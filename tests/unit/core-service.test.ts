@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { CoreActorContext } from "@/modules/core/application/core-access";
 import {
   CoreAuthorizationError,
+  createManagementAgreement,
   createOwner,
   getProperty,
   listOwners,
+  parseManagementAgreementInput,
   parsePropertyOperatingProfileInput,
   parsePropertyOwnershipInput,
   updatePropertyOperatingProfile,
@@ -26,6 +28,30 @@ function actor(authContext: AuthContext): CoreActorContext {
     authContext
   };
 }
+
+const validManagementAgreementInput = {
+  propertyId: "00000000-0000-7000-8000-000000000100",
+  reference: "MA-2026-001",
+  status: "ACTIVE",
+  effectiveFrom: "2026-02-01T00:00:00.000Z",
+  effectiveTo: "2027-02-01T00:00:00.000Z",
+  commissionRateBps: "1800",
+  commissionBasis: "GROSS_ACCOMMODATION",
+  commissionAccrualEvent: "ON_CHECKOUT",
+  expenseDefaultTreatment: "DEDUCT_FROM_PAYOUT",
+  approvalThresholdKey: "maintenance",
+  approvalThresholdAmount: "2500.00",
+  approvalThresholdCurrency: "mad",
+  approvalRequires: ["manager", "owner"],
+  payoutCadence: "MONTHLY",
+  payoutHoldDays: "7",
+  payoutHoldbackBps: "500",
+  noticePeriodDays: "60",
+  ownerResponsibilities: ["insurance", "major repairs"],
+  alvillasResponsibilities: ["guest operations", "owner reporting"],
+  specialConditions: ["ramadan staffing plan"],
+  reason: "Signed owner management agreement"
+};
 
 describe("core service authorization", () => {
   it("denies owner reads when the actor has no owner permission", async () => {
@@ -223,5 +249,40 @@ describe("core service authorization", () => {
         { db: deniedDb }
       )
     ).rejects.toBeInstanceOf(CoreAuthorizationError);
+  });
+
+  it("validates management agreements as config-backed rule bundles", () => {
+    const valid = parseManagementAgreementInput(validManagementAgreementInput);
+    const invalidRange = parseManagementAgreementInput({
+      ...validManagementAgreementInput,
+      effectiveTo: "2026-01-01T00:00:00.000Z"
+    });
+    const invalidCommission = parseManagementAgreementInput({
+      ...validManagementAgreementInput,
+      commissionRateBps: "10001"
+    });
+
+    expect(valid.success).toBe(true);
+    expect(valid.success && valid.data.approvalThresholdCurrency).toBe("MAD");
+    expect(valid.success && valid.data.approvalRequires).toEqual(["manager", "owner"]);
+    expect(invalidRange.success).toBe(false);
+    expect(invalidCommission.success).toBe(false);
+  });
+
+  it("denies management agreement creation without config permissions before reaching the database", async () => {
+    const parsed = parseManagementAgreementInput(validManagementAgreementInput);
+    const ctx = actor({
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("property", "edit")]),
+      scopes: [{ organizationId: "org-a" }]
+    });
+
+    if (!parsed.success) {
+      throw new Error("management agreement fixture should parse");
+    }
+
+    await expect(createManagementAgreement(ctx, parsed.data, { db: deniedDb })).rejects.toBeInstanceOf(
+      CoreAuthorizationError
+    );
   });
 });

@@ -40,6 +40,9 @@ function rule(input: Omit<Partial<ConfigRuleRecord>, "effectiveFrom"> & {
 describe("config rule registry", () => {
   it("validates the full configurable business-rule catalog without embedding business values", () => {
     expect(Object.keys(configRuleSchemas).sort()).toEqual([
+      "agreement.notice",
+      "agreement.responsibilities",
+      "agreement.special_conditions",
       "feature_flag",
       "finance.approval_thresholds",
       "finance.commission",
@@ -80,6 +83,16 @@ describe("config rule registry", () => {
         }
       ]
     })).toMatchObject({ tasks: [{ key: "arrival" }] });
+    expect(parseConfigRuleValue("agreement.responsibilities", {
+      owner: ["insurance"],
+      alvillas: ["guest operations"]
+    })).toMatchObject({ owner: ["insurance"] });
+    expect(parseConfigRuleValue("agreement.notice", {
+      notice_period_days: 60
+    })).toMatchObject({ notice_period_days: 60 });
+    expect(parseConfigRuleValue("agreement.special_conditions", {
+      conditions: ["seasonal staffing"]
+    })).toMatchObject({ conditions: ["seasonal staffing"] });
 
     expect(() => parseConfigRuleValue("finance.unregistered", {})).toThrow("Unknown config rule key");
   });

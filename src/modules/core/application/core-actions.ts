@@ -3,12 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ZodError } from "zod";
-import { coreActorContextFromSession } from "@/modules/core/application/core-access";
+import { agreementActorContextFromSession, coreActorContextFromSession } from "@/modules/core/application/core-access";
 import {
   CoreAuthorizationError,
   CoreNotFoundError,
+  createManagementAgreement,
   createOwner,
   createProperty,
+  parseManagementAgreementInput,
   parseOwnerInput,
   parsePropertyOperatingProfileInput,
   parsePropertyInput,
@@ -18,6 +20,7 @@ import {
 } from "@/modules/core/application/core-service";
 import {
   normalizeAmenities,
+  normalizeAgreementTextList,
   normalizeHouseRules,
   normalizeOtherServices,
   normalizePhotoUrls
@@ -172,6 +175,38 @@ function operatingProfileInput(formData: FormData) {
     wellnessAvailable: checkboxValue(formData, "wellnessAvailable"),
     otherServices: normalizeOtherServices(stringValue(formData, "otherServices")),
     automationNotes: formValue(formData, "automationNotes")
+  };
+}
+
+function approvalRequires(formData: FormData) {
+  return formData
+    .getAll("approvalRequires")
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
+function managementAgreementInput(propertyId: string, formData: FormData) {
+  return {
+    propertyId,
+    reference: formValue(formData, "reference"),
+    status: formValue(formData, "status") ?? "ACTIVE",
+    effectiveFrom: formValue(formData, "effectiveFrom"),
+    effectiveTo: formValue(formData, "effectiveTo"),
+    commissionRateBps: formValue(formData, "commissionRateBps"),
+    commissionBasis: formValue(formData, "commissionBasis"),
+    commissionAccrualEvent: formValue(formData, "commissionAccrualEvent"),
+    expenseDefaultTreatment: formValue(formData, "expenseDefaultTreatment"),
+    approvalThresholdKey: formValue(formData, "approvalThresholdKey"),
+    approvalThresholdAmount: formValue(formData, "approvalThresholdAmount"),
+    approvalThresholdCurrency: formValue(formData, "approvalThresholdCurrency") ?? "MAD",
+    approvalRequires: approvalRequires(formData),
+    payoutCadence: formValue(formData, "payoutCadence"),
+    payoutHoldDays: formValue(formData, "payoutHoldDays"),
+    payoutHoldbackBps: formValue(formData, "payoutHoldbackBps"),
+    noticePeriodDays: formValue(formData, "noticePeriodDays"),
+    ownerResponsibilities: normalizeAgreementTextList(stringValue(formData, "ownerResponsibilities")),
+    alvillasResponsibilities: normalizeAgreementTextList(stringValue(formData, "alvillasResponsibilities")),
+    specialConditions: normalizeAgreementTextList(stringValue(formData, "specialConditions")),
+    reason: formValue(formData, "reason")
   };
 }
 
@@ -335,6 +370,38 @@ export async function updatePropertyOwnershipAction(
 
   try {
     await updatePropertyOwnership(ctx, parsed.data);
+  } catch (error) {
+    return actionErrorState(error);
+  }
+
+  revalidatePath(`/${appLocale}/app/properties/${propertyId}`);
+  revalidatePath(`/${appLocale}/app/properties`);
+
+  return { status: "success" };
+}
+
+export async function createManagementAgreementAction(
+  locale: string,
+  propertyId: string,
+  _state: CoreFormState,
+  formData: FormData
+): Promise<CoreFormState> {
+  const appLocale = safeLocale(locale);
+  const session = await auth();
+  const ctx = await agreementActorContextFromSession(session);
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parseManagementAgreementInput(managementAgreementInput(propertyId, formData));
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await createManagementAgreement(ctx, parsed.data);
   } catch (error) {
     return actionErrorState(error);
   }
