@@ -548,6 +548,76 @@
         "save": "Enregistrer les parts",
         "saved": "Parts enregistrees."
       },
+      "agreement": {
+        "title": "Contrat de gestion",
+        "formTitle": "Creer un contrat de gestion",
+        "empty": "Aucun contrat de gestion n'a ete renseigne pour cette propriete.",
+        "reference": "Reference du contrat",
+        "status": "Statut",
+        "effectiveFrom": "Effectif a partir de",
+        "effectiveTo": "Effectif jusqu'a",
+        "commissionRateBps": "Commission (bps)",
+        "commissionBasis": "Base de commission",
+        "commissionAccrualEvent": "Constatation du revenu",
+        "expenseDefaultTreatment": "Traitement des depenses",
+        "approvalThresholdKey": "Cle de regle d'approbation",
+        "approvalThresholdAmount": "Seuil d'approbation",
+        "approvalThresholdCurrency": "Devise du seuil",
+        "approvalRequires": "Approbation requise par",
+        "payoutCadence": "Cadence de paiement",
+        "payoutHoldDays": "Jours de retenue",
+        "payoutHoldbackBps": "Retenue (bps)",
+        "noticePeriodDays": "Preavis en jours",
+        "ownerResponsibilities": "Responsabilites proprietaire",
+        "alvillasResponsibilities": "Responsabilites ALVILLAS",
+        "specialConditions": "Conditions particulieres",
+        "reason": "Motif",
+        "save": "Enregistrer le contrat",
+        "saved": "Contrat de gestion enregistre.",
+        "statusOptions": {
+          "DRAFT": "Brouillon",
+          "ACTIVE": "Actif",
+          "ENDED": "Termine"
+        },
+        "commissionBasisOptions": {
+          "GROSS_ACCOMMODATION": "Hebergement brut",
+          "NET_OF_OTA_FEES": "Net des frais OTA",
+          "TOTAL_INCLUDING_SERVICES": "Total services inclus",
+          "CUSTOM_FORMULA": "Formule personnalisee"
+        },
+        "commissionAccrualOptions": {
+          "ON_CONFIRMATION": "A la confirmation",
+          "ON_CHECKIN": "A l'arrivee",
+          "ON_CHECKOUT": "Au depart",
+          "ON_RECEIPT": "A l'encaissement"
+        },
+        "expenseTreatmentOptions": {
+          "OWNER_PAID": "Payee par le proprietaire",
+          "ALVILLAS_PAID": "Payee par ALVILLAS",
+          "INCLUDED_IN_COMMISSION": "Incluse dans la commission",
+          "GUEST_PAID": "Payee par le client",
+          "SHARED": "Partagee",
+          "REIMBURSABLE": "Remboursable",
+          "DEDUCT_FROM_PAYOUT": "Deduite du paiement",
+          "CUSTOM": "Personnalise"
+        },
+        "approvalStepOptions": {
+          "manager": "Manager",
+          "owner": "Proprietaire",
+          "manager_owner": "Manager et proprietaire",
+          "finance": "Finance",
+          "none": "Aucune"
+        },
+        "payoutCadenceOptions": {
+          "AFTER_CHECKOUT": "Apres depart",
+          "PER_BOOKING": "Par reservation",
+          "WEEKLY": "Hebdomadaire",
+          "FIFTEEN_DAY": "Tous les 15 jours",
+          "MONTHLY": "Mensuel",
+          "CUSTOM_CRON": "Cron personnalise",
+          "OTA_SPLIT_EXPECTED_SETTLEMENT": "Reglement OTA attendu"
+        }
+      },
       "operating": {
         "title": "Profil operationnel",
         "formTitle": "Profil operationnel",

@@ -548,6 +548,76 @@
         "save": "Save ownership",
         "saved": "Ownership saved."
       },
+      "agreement": {
+        "title": "Management agreement",
+        "formTitle": "Create management agreement",
+        "empty": "No management agreement has been recorded for this property.",
+        "reference": "Agreement reference",
+        "status": "Status",
+        "effectiveFrom": "Effective from",
+        "effectiveTo": "Effective to",
+        "commissionRateBps": "Commission (bps)",
+        "commissionBasis": "Commission basis",
+        "commissionAccrualEvent": "Revenue accrual",
+        "expenseDefaultTreatment": "Expense treatment",
+        "approvalThresholdKey": "Approval rule key",
+        "approvalThresholdAmount": "Approval threshold",
+        "approvalThresholdCurrency": "Threshold currency",
+        "approvalRequires": "Approval required from",
+        "payoutCadence": "Payout cadence",
+        "payoutHoldDays": "Payout hold days",
+        "payoutHoldbackBps": "Holdback (bps)",
+        "noticePeriodDays": "Notice period days",
+        "ownerResponsibilities": "Owner responsibilities",
+        "alvillasResponsibilities": "ALVILLAS responsibilities",
+        "specialConditions": "Special conditions",
+        "reason": "Reason",
+        "save": "Save agreement",
+        "saved": "Management agreement saved.",
+        "statusOptions": {
+          "DRAFT": "Draft",
+          "ACTIVE": "Active",
+          "ENDED": "Ended"
+        },
+        "commissionBasisOptions": {
+          "GROSS_ACCOMMODATION": "Gross accommodation",
+          "NET_OF_OTA_FEES": "Net of OTA fees",
+          "TOTAL_INCLUDING_SERVICES": "Total including services",
+          "CUSTOM_FORMULA": "Custom formula"
+        },
+        "commissionAccrualOptions": {
+          "ON_CONFIRMATION": "On confirmation",
+          "ON_CHECKIN": "On check-in",
+          "ON_CHECKOUT": "On checkout",
+          "ON_RECEIPT": "On receipt"
+        },
+        "expenseTreatmentOptions": {
+          "OWNER_PAID": "Owner paid",
+          "ALVILLAS_PAID": "ALVILLAS paid",
+          "INCLUDED_IN_COMMISSION": "Included in commission",
+          "GUEST_PAID": "Guest paid",
+          "SHARED": "Shared",
+          "REIMBURSABLE": "Reimbursable",
+          "DEDUCT_FROM_PAYOUT": "Deduct from payout",
+          "CUSTOM": "Custom"
+        },
+        "approvalStepOptions": {
+          "manager": "Manager",
+          "owner": "Owner",
+          "manager_owner": "Manager and owner",
+          "finance": "Finance",
+          "none": "None"
+        },
+        "payoutCadenceOptions": {
+          "AFTER_CHECKOUT": "After checkout",
+          "PER_BOOKING": "Per booking",
+          "WEEKLY": "Weekly",
+          "FIFTEEN_DAY": "15-day",
+          "MONTHLY": "Monthly",
+          "CUSTOM_CRON": "Custom cron",
+          "OTA_SPLIT_EXPECTED_SETTLEMENT": "OTA split expected settlement"
+        }
+      },
       "operating": {
         "title": "Operating profile",
         "formTitle": "Operating profile",

@@ -41,6 +41,9 @@ export const reservationTaskConfigSchema = z.object({
 });
 
 export const commissionConfigKey = "finance.commission";
+export const agreementNoticeConfigKey = "agreement.notice";
+export const agreementResponsibilitiesConfigKey = "agreement.responsibilities";
+export const agreementSpecialConditionsConfigKey = "agreement.special_conditions";
 export const reservationTaskTemplatesConfigKey = "ops.reservation_task_templates";
 
 export const commissionBasisSchema = z.enum([
@@ -78,32 +81,25 @@ const feeRuleSchema = z
   })
   .passthrough();
 
+export const expenseTreatmentSchema = z.enum([
+  "OWNER_PAID",
+  "ALVILLAS_PAID",
+  "INCLUDED_IN_COMMISSION",
+  "GUEST_PAID",
+  "SHARED",
+  "REIMBURSABLE",
+  "DEDUCT_FROM_PAYOUT",
+  "CUSTOM"
+]);
+
 export const expenseTreatmentConfigSchema = z
   .object({
-    default_treatment: z.enum([
-      "OWNER_PAID",
-      "ALVILLAS_PAID",
-      "INCLUDED_IN_COMMISSION",
-      "GUEST_PAID",
-      "SHARED",
-      "REIMBURSABLE",
-      "DEDUCT_FROM_PAYOUT",
-      "CUSTOM"
-    ]),
+    default_treatment: expenseTreatmentSchema,
     categories: z.record(
       configSlugSchema,
       z
         .object({
-          treatment: z.enum([
-            "OWNER_PAID",
-            "ALVILLAS_PAID",
-            "INCLUDED_IN_COMMISSION",
-            "GUEST_PAID",
-            "SHARED",
-            "REIMBURSABLE",
-            "DEDUCT_FROM_PAYOUT",
-            "CUSTOM"
-          ]),
+          treatment: expenseTreatmentSchema,
           owner_share_bps: z.number().int().min(0).max(10000).optional(),
           alvillas_share_bps: z.number().int().min(0).max(10000).optional(),
           approval_rule_key: configSlugSchema.optional()
@@ -113,7 +109,7 @@ export const expenseTreatmentConfigSchema = z
   })
   .passthrough();
 
-const approvalStepSchema = z.enum(["manager", "owner", "manager_owner", "finance", "none"]);
+export const approvalStepSchema = z.enum(["manager", "owner", "manager_owner", "finance", "none"]);
 
 export const approvalThresholdsConfigSchema = z
   .object({
@@ -133,23 +129,46 @@ export const approvalThresholdsConfigSchema = z
   })
   .passthrough();
 
+export const payoutCadenceSchema = z.enum([
+  "AFTER_CHECKOUT",
+  "PER_BOOKING",
+  "WEEKLY",
+  "FIFTEEN_DAY",
+  "MONTHLY",
+  "CUSTOM_CRON",
+  "OTA_SPLIT_EXPECTED_SETTLEMENT"
+]);
+
 export const payoutScheduleConfigSchema = z
   .object({
-    cadence: z.enum([
-      "AFTER_CHECKOUT",
-      "PER_BOOKING",
-      "WEEKLY",
-      "FIFTEEN_DAY",
-      "MONTHLY",
-      "CUSTOM_CRON",
-      "OTA_SPLIT_EXPECTED_SETTLEMENT"
-    ]),
+    cadence: payoutCadenceSchema,
     hold_days: z.number().int().min(0).max(366).optional(),
     holdback_amount: moneyAmountSchema.optional(),
     holdback_currency: currencySchema.optional(),
     holdback_bps: z.number().int().min(0).max(10000).optional(),
     cron: z.string().trim().min(5).max(120).optional(),
     rules: z.array(z.unknown()).optional()
+  })
+  .passthrough();
+
+const agreementResponsibilityItemSchema = z.string().trim().min(1).max(240);
+
+export const agreementResponsibilitiesConfigSchema = z
+  .object({
+    owner: z.array(agreementResponsibilityItemSchema).max(40).default([]),
+    alvillas: z.array(agreementResponsibilityItemSchema).max(40).default([])
+  })
+  .passthrough();
+
+export const agreementNoticeConfigSchema = z
+  .object({
+    notice_period_days: z.number().int().min(0).max(1095)
+  })
+  .passthrough();
+
+export const agreementSpecialConditionsConfigSchema = z
+  .object({
+    conditions: z.array(agreementResponsibilityItemSchema).max(80).default([])
   })
   .passthrough();
 
@@ -285,6 +304,9 @@ export const configRuleSchemas = {
   "finance.expense_allocation": expenseTreatmentConfigSchema,
   "finance.approval_thresholds": approvalThresholdsConfigSchema,
   "finance.payout_schedule": payoutScheduleConfigSchema,
+  [agreementResponsibilitiesConfigKey]: agreementResponsibilitiesConfigSchema,
+  [agreementNoticeConfigKey]: agreementNoticeConfigSchema,
+  [agreementSpecialConditionsConfigKey]: agreementSpecialConditionsConfigSchema,
   "staff.compensation": staffCompensationSchema,
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
@@ -299,6 +321,9 @@ export const configRuleSchemas = {
 
 export type ConfigRuleKey = keyof typeof configRuleSchemas | `feature_flag.${string}`;
 export type CommissionRuleValue = z.infer<typeof commissionRuleValueSchema>;
+export type AgreementNoticeConfig = z.infer<typeof agreementNoticeConfigSchema>;
+export type AgreementResponsibilitiesConfig = z.infer<typeof agreementResponsibilitiesConfigSchema>;
+export type AgreementSpecialConditionsConfig = z.infer<typeof agreementSpecialConditionsConfigSchema>;
 export type ApprovalThresholdsConfig = z.infer<typeof approvalThresholdsConfigSchema>;
 export type ExpenseTreatmentConfig = z.infer<typeof expenseTreatmentConfigSchema>;
 export type FeatureFlagConfig = z.infer<typeof featureFlagConfigSchema>;

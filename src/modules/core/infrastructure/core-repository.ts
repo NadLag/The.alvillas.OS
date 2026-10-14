@@ -4,6 +4,9 @@ import type {
   OwnerPayoutMethodSummary,
   OwnerRepresentativeSummary,
   OwnerSummary,
+  ManagementAgreementInput,
+  ManagementAgreementRuleSummary,
+  ManagementAgreementSummary,
   PropertyInput,
   PropertyOperatingProfileInput,
   PropertyOperatingProfileSummary,
@@ -56,6 +59,17 @@ type PropertyWithOwners = Prisma.PropertyGetPayload<{
         owner: true;
       };
     };
+  };
+}>;
+type ManagementAgreementRecord = Prisma.ManagementAgreementGetPayload<{
+  select: {
+    id: true;
+    propertyId: true;
+    reference: true;
+    status: true;
+    effectiveFrom: true;
+    effectiveTo: true;
+    createdAt: true;
   };
 }>;
 
@@ -209,6 +223,36 @@ function operatingProfileToSummary(
     wellnessAvailable: profile.wellnessAvailable,
     otherServices,
     automationNotes: profile.automationNotes
+  };
+}
+
+function jsonRecord(value: Prisma.JsonValue): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function managementAgreementToSummary(
+  agreement: ManagementAgreementRecord,
+  rules: readonly ManagementAgreementRuleSummary[]
+): ManagementAgreementSummary {
+  return {
+    id: agreement.id,
+    propertyId: agreement.propertyId,
+    reference: agreement.reference,
+    status: agreement.status as ManagementAgreementSummary["status"],
+    effectiveFrom: agreement.effectiveFrom,
+    effectiveTo: agreement.effectiveTo,
+    createdAt: agreement.createdAt,
+    rules: [...rules].sort((left, right) => {
+      const keyOrder = left.key.localeCompare(right.key);
+
+      if (keyOrder !== 0) {
+        return keyOrder;
+      }
+
+      return right.version - left.version;
+    })
   };
 }
 
@@ -493,6 +537,97 @@ export class CoreRepository {
     });
 
     return property ? propertyToSummary(property) : null;
+  }
+
+  async createManagementAgreement(
+    input: ManagementAgreementInput,
+    actorId: string
+  ): Promise<ManagementAgreementSummary> {
+    const agreement = await this.tx.managementAgreement.create({
+      data: {
+        organizationId: this.organizationId,
+        propertyId: input.propertyId,
+        reference: input.reference,
+        status: input.status,
+        effectiveFrom: input.effectiveFrom,
+        effectiveTo: input.effectiveTo ?? null,
+        createdBy: actorId
+      }
+    });
+
+    return managementAgreementToSummary(agreement, []);
+  }
+
+  async listManagementAgreementsForProperty(
+    propertyId: string,
+    keys: readonly string[]
+  ): Promise<ManagementAgreementSummary[]> {
+    const agreements = await this.tx.managementAgreement.findMany({
+      where: {
+        organizationId: this.organizationId,
+        propertyId,
+        archivedAt: null
+      },
+      orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }]
+    });
+    const agreementIds = agreements.map((agreement) => agreement.id);
+
+    if (agreementIds.length === 0) {
+      return [];
+    }
+
+    const rules = await this.tx.configRule.findMany({
+      where: {
+        organizationId: this.organizationId,
+        archivedAt: null,
+        scopeType: "agreement",
+        scopeId: {
+          in: agreementIds
+        },
+        key: {
+          in: [...keys]
+        }
+      },
+      orderBy: [
+        { scopeId: "asc" },
+        { key: "asc" },
+        { effectiveFrom: "desc" },
+        { version: "desc" }
+      ],
+      select: {
+        id: true,
+        key: true,
+        scopeId: true,
+        value: true,
+        version: true,
+        lifecycle: true,
+        effectiveFrom: true,
+        effectiveTo: true
+      }
+    });
+    const rulesByAgreementId = new Map<string, ManagementAgreementRuleSummary[]>();
+
+    for (const rule of rules) {
+      if (!rule.scopeId) {
+        continue;
+      }
+
+      const entries = rulesByAgreementId.get(rule.scopeId) ?? [];
+      entries.push({
+        id: rule.id,
+        key: rule.key,
+        version: rule.version,
+        lifecycle: rule.lifecycle as ManagementAgreementRuleSummary["lifecycle"],
+        effectiveFrom: rule.effectiveFrom,
+        effectiveTo: rule.effectiveTo,
+        value: jsonRecord(rule.value)
+      });
+      rulesByAgreementId.set(rule.scopeId, entries);
+    }
+
+    return agreements.map((agreement) =>
+      managementAgreementToSummary(agreement, rulesByAgreementId.get(agreement.id) ?? [])
+    );
   }
 
   async replacePropertyOperatingProfile(

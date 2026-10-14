@@ -11,10 +11,13 @@ import {
 } from "@/modules/identity/application/identity-access";
 import type { CoreActorContext } from "@/modules/core/application/core-access";
 import {
+  CoreAuthorizationError,
+  createManagementAgreement,
   createOwner,
   createProperty,
   getOwner,
   getProperty,
+  listPropertyManagementAgreements,
   listProperties,
   updatePropertyOperatingProfile,
   updatePropertyOwnership
@@ -1605,6 +1608,285 @@ describe("PostgreSQL baseline", () => {
     await expect(
       withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
         tx.propertyOperatingProfile.delete({ where: { propertyId: property.id } })
+      )
+    ).rejects.toThrow(/archived, not deleted|business rows/u);
+  });
+
+  it("creates management agreements as audited agreement-scoped config history", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Management Agreement A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Management Agreement B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const ctx: CoreActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        permissions: new Set([
+          permissionKey("owner", "view"),
+          permissionKey("owner", "create"),
+          permissionKey("property", "view"),
+          permissionKey("property", "create"),
+          permissionKey("property", "edit"),
+          permissionKey("config_rule", "view"),
+          permissionKey("config_rule", "create"),
+          permissionKey("config_rule", "configure")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const owner = await createOwner(
+      ctx,
+      {
+        displayName: "Management Agreement Owner",
+        email: `management-agreement-${randomUUID()}@example.test`,
+        preferredLocale: "en",
+        representatives: [],
+        payoutMethods: []
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-management-agreement-owner",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const property = await createProperty(
+      ctx,
+      {
+        ownerId: owner.id,
+        name: "Villa Management Agreement",
+        addressLine1: "Route de Fes",
+        city: "Marrakech",
+        countryCode: "MA",
+        propertyType: "Villa",
+        bedrooms: 5,
+        bathrooms: 5,
+        livingSpaces: 2,
+        hasPool: true,
+        hasGarden: true,
+        parkingSpaces: 2,
+        maxGuests: 10,
+        timezone: "Africa/Casablanca",
+        amenities: ["pool", "garden"],
+        photoUrls: [],
+        status: "ACTIVE",
+        onboardingProfile: {
+          headline: "Management agreement villa",
+          houseRules: []
+        }
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-management-agreement-property",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const input = {
+      propertyId: property.id,
+      reference: "MA-2026-001",
+      status: "ACTIVE" as const,
+      effectiveFrom: new Date("2026-02-01T00:00:00.000Z"),
+      effectiveTo: new Date("2028-02-01T00:00:00.000Z"),
+      commissionRateBps: 1800,
+      commissionBasis: "GROSS_ACCOMMODATION" as const,
+      commissionAccrualEvent: "ON_CHECKOUT" as const,
+      expenseDefaultTreatment: "DEDUCT_FROM_PAYOUT" as const,
+      approvalThresholdKey: "maintenance",
+      approvalThresholdAmount: "2500.00",
+      approvalThresholdCurrency: "MAD",
+      approvalRequires: ["manager" as const, "owner" as const],
+      payoutCadence: "MONTHLY" as const,
+      payoutHoldDays: 7,
+      payoutHoldbackBps: 500,
+      noticePeriodDays: 60,
+      ownerResponsibilities: ["insurance", "major repairs"],
+      alvillasResponsibilities: ["guest operations", "owner reporting"],
+      specialConditions: ["ramadan staffing plan"],
+      reason: "Signed owner management agreement"
+    };
+
+    await expect(
+      createManagementAgreement(
+        {
+          ...ctx,
+          authContext: {
+            ...ctx.authContext,
+            permissions: new Set([
+              permissionKey("property", "edit"),
+              permissionKey("config_rule", "view"),
+              permissionKey("config_rule", "create")
+            ])
+          }
+        },
+        input,
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-org-management-agreement-denied",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(CoreAuthorizationError);
+
+    const agreement = await createManagementAgreement(ctx, input, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-org-management-agreement-create",
+      ipAddress: "127.0.0.1"
+    });
+    const orgCommissionRule = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        new ConfigRuleRepository(tx, orgA.id).createVersion({
+          key: "finance.commission",
+          scopeType: "organization",
+          value: {
+            rate_bps: 900,
+            basis: "NET_OF_OTA_FEES",
+            accrual_event: "ON_RECEIPT"
+          },
+          effectiveFrom: new Date("2026-01-01T00:00:00.000Z"),
+          lifecycle: "ACTIVE",
+          createdBy: actorId,
+          reason: "lower-precedence organization commission"
+        })
+    );
+    const stored = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => {
+      const agreementRow = await tx.managementAgreement.findUniqueOrThrow({
+        where: { id: agreement.id }
+      });
+      const rules = await tx.configRule.findMany({
+        where: {
+          organizationId: orgA.id,
+          scopeType: "agreement",
+          scopeId: agreement.id
+        },
+        orderBy: [{ key: "asc" }]
+      });
+      const audit = await tx.auditLog.findFirstOrThrow({
+        where: {
+          organizationId: orgA.id,
+          action: "owner_agreement.changed",
+          resourceId: property.id,
+          requestId: "integration-org-management-agreement-create"
+        }
+      });
+      const resolvedCommission = await new ConfigRuleRepository(tx, orgA.id).resolve({
+        key: "finance.commission",
+        asOf: new Date("2026-06-01T00:00:00.000Z"),
+        scopes: [
+          { scopeType: "agreement", scopeId: agreement.id },
+          { scopeType: "property", scopeId: property.id },
+          { scopeType: "organization", scopeId: null }
+        ]
+      });
+
+      return { agreementRow, audit, resolvedCommission, rules };
+    });
+    const listed = await listPropertyManagementAgreements(ctx, property.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const visibleToOrgB = await withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, async (tx) => ({
+      agreements: await tx.managementAgreement.findMany({ where: { id: agreement.id } }),
+      audits: await tx.auditLog.findMany({ where: { resourceId: property.id } }),
+      rules: await tx.configRule.findMany({ where: { scopeId: agreement.id } })
+    }));
+    const rulesByKey = new Map(stored.rules.map((rule) => [rule.key, rule]));
+    const commission = rulesByKey.get("finance.commission")?.value as Record<string, unknown> | undefined;
+    const expense = rulesByKey.get("finance.expense_treatment")?.value as Record<string, unknown> | undefined;
+    const approval = rulesByKey.get("finance.approval_thresholds")?.value as Record<string, unknown> | undefined;
+    const payout = rulesByKey.get("finance.payout_schedule")?.value as Record<string, unknown> | undefined;
+    const responsibilities = rulesByKey.get("agreement.responsibilities")?.value as Record<string, unknown> | undefined;
+    const notice = rulesByKey.get("agreement.notice")?.value as Record<string, unknown> | undefined;
+    const conditions = rulesByKey.get("agreement.special_conditions")?.value as Record<string, unknown> | undefined;
+    const firstThreshold = Array.isArray(approval?.thresholds)
+      ? (approval.thresholds[0] as Record<string, unknown> | undefined)
+      : undefined;
+    const auditAfter = stored.audit.after as {
+      id?: string;
+      propertyId?: string;
+      reference?: string;
+      ruleIds?: Array<{ key?: string; version?: number }>;
+    };
+
+    expect(agreement.rules).toHaveLength(7);
+    expect(stored.agreementRow).toMatchObject({
+      organizationId: orgA.id,
+      propertyId: property.id,
+      reference: "MA-2026-001",
+      status: "ACTIVE"
+    });
+    expect(stored.rules).toHaveLength(7);
+    expect(stored.rules.every((rule) => rule.version === 1 && rule.lifecycle === "ACTIVE")).toBe(true);
+    expect(commission).toMatchObject({
+      rate_bps: 1800,
+      basis: "GROSS_ACCOMMODATION",
+      accrual_event: "ON_CHECKOUT"
+    });
+    expect(expense).toMatchObject({
+      default_treatment: "DEDUCT_FROM_PAYOUT"
+    });
+    expect(firstThreshold).toMatchObject({
+      key: "maintenance",
+      amount: "2500.00",
+      currency: "MAD",
+      requires_approval_from: ["manager", "owner"]
+    });
+    expect(payout).toMatchObject({
+      cadence: "MONTHLY",
+      hold_days: 7,
+      holdback_bps: 500
+    });
+    expect(responsibilities).toMatchObject({
+      owner: ["insurance", "major repairs"],
+      alvillas: ["guest operations", "owner reporting"]
+    });
+    expect(notice).toMatchObject({
+      notice_period_days: 60
+    });
+    expect(conditions).toMatchObject({
+      conditions: ["ramadan staffing plan"]
+    });
+    expect(stored.resolvedCommission?.id).not.toBe(orgCommissionRule.id);
+    expect(stored.resolvedCommission?.scopeType).toBe("agreement");
+    expect(stored.resolvedCommission?.scopeId).toBe(agreement.id);
+    expect(listed.map((item) => item.id)).toContain(agreement.id);
+    expect(auditAfter).toMatchObject({
+      id: agreement.id,
+      propertyId: property.id,
+      reference: "MA-2026-001"
+    });
+    expect(auditAfter.ruleIds).toHaveLength(7);
+    expect(visibleToOrgB).toEqual({
+      agreements: [],
+      audits: [],
+      rules: []
+    });
+
+    const commissionRule = rulesByKey.get("finance.commission");
+
+    if (!commissionRule) {
+      throw new Error("commission rule should have been created");
+    }
+
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.configRule.update({
+          where: { id: commissionRule.id },
+          data: { reason: "forbidden agreement history mutation" }
+        })
+      )
+    ).rejects.toThrow(/append-only|permission denied/u);
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.managementAgreement.delete({
+          where: { id: agreement.id }
+        })
       )
     ).rejects.toThrow(/archived, not deleted|business rows/u);
   });
