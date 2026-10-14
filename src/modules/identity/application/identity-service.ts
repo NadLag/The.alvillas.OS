@@ -225,13 +225,13 @@ export async function ensureStandardIdentitySetup(
   deps: IdentityServiceDeps = {}
 ): Promise<void> {
   await withTenant(db(deps), organizationId, async (tx) => {
-    const repository = new IdentityRepository(tx, organizationId);
     const expectedRoleKeys = standardRoles.map((role) => role.key);
+    const expectedPermissionKeys = permissionCatalog.map((permission) => permission.key);
     const [permissionCount, fieldPolicyCount, existingRoles] = await Promise.all([
       tx.permission.count({
         where: {
           organizationId,
-          key: { in: permissionCatalog.map((permission) => permission.key) }
+          key: { in: expectedPermissionKeys }
         }
       }),
       tx.fieldPolicy.count({
@@ -282,19 +282,130 @@ export async function ensureStandardIdentitySetup(
       return;
     }
 
-    for (const permission of permissionCatalog) {
-      await repository.ensurePermission(permission);
-    }
+    await tx.permission.createMany({
+      data: permissionCatalog.map((permission) => ({
+        organizationId,
+        key: permission.key,
+        resource: permission.resource,
+        action: permission.action,
+        description: permission.description
+      })),
+      skipDuplicates: true
+    });
 
-    for (const role of standardRoles) {
-      await repository.ensureRole({
+    await tx.role.createMany({
+      data: standardRoles.map((role) => ({
+        organizationId,
         key: role.key,
         name: role.name,
         description: role.description,
-        permissions: role.permissions,
-        isSystem: true
+        isSystem: true,
+        archivedAt: null
+      })),
+      skipDuplicates: true
+    });
+
+    const [permissions, roles] = await Promise.all([
+      tx.permission.findMany({
+        where: {
+          organizationId,
+          key: { in: expectedPermissionKeys }
+        },
+        select: { id: true, key: true, resource: true, action: true, description: true }
+      }),
+      tx.role.findMany({
+        where: {
+          organizationId,
+          key: { in: expectedRoleKeys }
+        },
+        select: { id: true, key: true, name: true, description: true, isSystem: true, archivedAt: true }
+      })
+    ]);
+    const permissionsByKey = new Map(permissions.map((permission) => [permission.key, permission]));
+    const rolesByKey = new Map(roles.map((role) => [role.key, role]));
+
+    const permissionUpdates = permissionCatalog.filter((permission) => {
+      const existing = permissionsByKey.get(permission.key);
+
+      return (
+        !existing ||
+        existing.resource !== permission.resource ||
+        existing.action !== permission.action ||
+        existing.description !== permission.description
+      );
+    });
+    const roleUpdates = standardRoles.filter((role) => {
+      const existing = rolesByKey.get(role.key);
+
+      return (
+        !existing ||
+        existing.name !== role.name ||
+        existing.description !== role.description ||
+        !existing.isSystem ||
+        existing.archivedAt !== null
+      );
+    });
+
+    await Promise.all([
+      ...permissionUpdates.map((permission) =>
+        tx.permission.updateMany({
+          where: {
+            organizationId,
+            key: permission.key
+          },
+          data: {
+            resource: permission.resource,
+            action: permission.action,
+            description: permission.description
+          }
+        })
+      ),
+      ...roleUpdates.map((role) =>
+        tx.role.updateMany({
+          where: {
+            organizationId,
+            key: role.key
+          },
+          data: {
+            name: role.name,
+            description: role.description,
+            isSystem: true,
+            archivedAt: null
+          }
+        })
+      )
+    ]);
+
+    const permissionIdsByKey = new Map(permissions.map((permission) => [permission.key, permission.id]));
+    const roleIdsByKey = new Map(roles.map((role) => [role.key, role.id]));
+    const expectedRolePermissions = standardRoles.flatMap((role) => {
+      const roleId = roleIdsByKey.get(role.key);
+
+      if (!roleId) {
+        return [];
+      }
+
+      return role.permissions.flatMap((permissionKey) => {
+        const permissionId = permissionIdsByKey.get(permissionKey);
+
+        return permissionId
+          ? [{
+              organizationId,
+              roleId,
+              permissionId
+            }]
+          : [];
+      });
+    });
+
+    if (expectedRolePermissions.length > 0) {
+      await tx.rolePermission.createMany({
+        data: expectedRolePermissions,
+        skipDuplicates: true
       });
     }
+
+    const repository = new IdentityRepository(tx, organizationId);
 
     for (const fieldPolicy of fieldPolicyCatalog) {
       await repository.ensureFieldPolicy(fieldPolicy);
