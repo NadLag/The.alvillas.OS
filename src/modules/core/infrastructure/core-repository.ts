@@ -1,5 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type {
+  BookingChannelInput,
+  BookingChannelSummary,
   OwnerInput,
   OwnerPayoutMethodSummary,
   OwnerRepresentativeSummary,
@@ -49,6 +51,7 @@ type OwnerWithDetails = Prisma.OwnerGetPayload<{
 }>;
 type PropertyWithOwners = Prisma.PropertyGetPayload<{
   include: {
+    bookingChannels: true;
     cityRef: {
       include: {
         region: true;
@@ -63,6 +66,7 @@ type PropertyWithOwners = Prisma.PropertyGetPayload<{
     };
   };
 }>;
+type BookingChannelRecord = Prisma.BookingChannelGetPayload<Record<string, never>>;
 type ManagementAgreementRecord = Prisma.ManagementAgreementGetPayload<{
   select: {
     id: true;
@@ -80,6 +84,15 @@ function maskedPayoutAccount(details: string): string {
   const tail = compact.slice(-4).toUpperCase();
 
   return tail ? `**** ${tail}` : "**** stored";
+}
+
+function maskedSyncEndpoint(endpoint: string): string {
+  try {
+    const url = new URL(endpoint);
+    return `${url.protocol}//${url.host}/***`;
+  } catch {
+    return "*** stored";
+  }
 }
 
 function representativeToSummary(
@@ -270,6 +283,26 @@ function lifecycleEventToSummary(event: {
   };
 }
 
+function bookingChannelToSummary(channel: BookingChannelRecord): BookingChannelSummary {
+  return {
+    id: channel.id,
+    propertyId: channel.propertyId,
+    sourceKey: channel.sourceKey,
+    displayName: channel.displayName,
+    externalListingId: channel.externalListingId,
+    listingUrl: channel.listingUrl,
+    syncMode: channel.syncMode as BookingChannelSummary["syncMode"],
+    importEnabled: channel.importEnabled,
+    exportEnabled: channel.exportEnabled,
+    maskedSyncEndpoint: channel.maskedSyncEndpoint,
+    status: channel.status as BookingChannelSummary["status"],
+    lastSyncAt: channel.lastSyncAt,
+    lastSyncStatus: channel.lastSyncStatus,
+    lastSyncMessage: channel.lastSyncMessage,
+    createdAt: channel.createdAt
+  };
+}
+
 function managementAgreementToSummary(
   agreement: ManagementAgreementRecord,
   rules: readonly ManagementAgreementRuleSummary[]
@@ -327,6 +360,10 @@ function propertyToSummary(property: PropertyWithOwners): PropertySummary {
         isPrimary: link.isPrimary
       })),
     lifecycleEvents: [],
+    bookingChannels: property.bookingChannels
+      .filter((channel) => !channel.archivedAt)
+      .sort((left, right) => left.sourceKey.localeCompare(right.sourceKey))
+      .map(bookingChannelToSummary),
     createdAt: property.createdAt
   };
 }
@@ -499,6 +536,12 @@ export class CoreRepository {
         }
       },
       include: {
+        bookingChannels: {
+          where: {
+            archivedAt: null
+          },
+          orderBy: [{ sourceKey: "asc" }]
+        },
         cityRef: {
           include: {
             region: true
@@ -526,6 +569,12 @@ export class CoreRepository {
       orderBy: [{ city: "asc" }, { name: "asc" }],
       take: 1000,
       include: {
+        bookingChannels: {
+          where: {
+            archivedAt: null
+          },
+          orderBy: [{ sourceKey: "asc" }]
+        },
         cityRef: {
           include: {
             region: true
@@ -556,6 +605,12 @@ export class CoreRepository {
         archivedAt: null
       },
       include: {
+        bookingChannels: {
+          where: {
+            archivedAt: null
+          },
+          orderBy: [{ sourceKey: "asc" }]
+        },
         cityRef: {
           include: {
             region: true
@@ -640,6 +695,85 @@ export class CoreRepository {
     });
 
     return this.findProperty(propertyId);
+  }
+
+  async findBookingChannel(
+    propertyId: string,
+    sourceKey: string
+  ): Promise<BookingChannelSummary | null> {
+    const channel = await this.tx.bookingChannel.findFirst({
+      where: {
+        organizationId: this.organizationId,
+        propertyId,
+        sourceKey,
+        archivedAt: null
+      }
+    });
+
+    return channel ? bookingChannelToSummary(channel) : null;
+  }
+
+  async upsertBookingChannel(
+    input: BookingChannelInput,
+    actorId: string
+  ): Promise<BookingChannelSummary | null> {
+    const property = await this.tx.property.findFirst({
+      where: {
+        id: input.propertyId,
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!property) {
+      return null;
+    }
+
+    const existing = await this.tx.bookingChannel.findFirst({
+      where: {
+        organizationId: this.organizationId,
+        propertyId: input.propertyId,
+        sourceKey: input.sourceKey
+      }
+    });
+    const endpointPatch = input.syncEndpointUrl
+      ? {
+          syncEndpointEncrypted: encryptSecret(input.syncEndpointUrl),
+          maskedSyncEndpoint: maskedSyncEndpoint(input.syncEndpointUrl)
+        }
+      : {};
+    const data = {
+      displayName: input.displayName,
+      externalListingId: input.externalListingId ?? null,
+      listingUrl: input.listingUrl ?? null,
+      syncMode: input.syncMode,
+      importEnabled: input.importEnabled,
+      exportEnabled: input.exportEnabled,
+      status: input.status,
+      archivedAt: null,
+      ...endpointPatch
+    };
+    const channel = existing
+      ? await this.tx.bookingChannel.update({
+          where: {
+            id: existing.id
+          },
+          data
+        })
+      : await this.tx.bookingChannel.create({
+          data: {
+            organizationId: this.organizationId,
+            propertyId: input.propertyId,
+            sourceKey: input.sourceKey,
+            createdBy: actorId,
+            ...data
+          }
+        });
+
+    return bookingChannelToSummary(channel);
   }
 
   async createManagementAgreement(

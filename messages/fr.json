@@ -569,6 +569,36 @@
         "save": "Enregistrer les parts",
         "saved": "Parts enregistrees."
       },
+      "bookingChannels": {
+        "title": "Canaux de reservation",
+        "empty": "Aucun canal de reservation n'est encore configure pour cette propriete.",
+        "count": "{count, plural, one {# canal} other {# canaux}}",
+        "sourceKey": "Cle source",
+        "displayName": "Nom affiche",
+        "externalListingId": "ID annonce externe",
+        "listingUrl": "URL annonce",
+        "syncMode": "Mode de synchronisation",
+        "importEnabled": "Import active",
+        "exportEnabled": "Export active",
+        "syncEndpointUrl": "URL de synchronisation",
+        "maskedSyncEndpoint": "Point de synchronisation",
+        "status": "Statut",
+        "lastSync": "Derniere synchronisation",
+        "save": "Enregistrer le canal",
+        "saved": "Canal de reservation enregistre.",
+        "statusOptions": {
+          "ACTIVE": "Actif",
+          "PAUSED": "En pause",
+          "DISCONNECTED": "Deconnecte"
+        },
+        "syncModeOptions": {
+          "MANUAL": "Manuel",
+          "ICAL": "iCal",
+          "API": "API",
+          "CSV": "CSV",
+          "CHANNEL_MANAGER": "Channel manager"
+        }
+      },
       "agreement": {
         "title": "Contrat de gestion",
         "formTitle": "Creer un contrat de gestion",

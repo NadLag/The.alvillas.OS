@@ -8,6 +8,7 @@ import {
   createOwner,
   getProperty,
   listOwners,
+  parseBookingChannelInput,
   parseManagementAgreementAmendmentInput,
   parseManagementAgreementInput,
   parsePropertyLifecycleTransitionInput,
@@ -15,7 +16,8 @@ import {
   parsePropertyOwnershipInput,
   transitionPropertyLifecycle,
   updatePropertyOperatingProfile,
-  updatePropertyOwnership
+  updatePropertyOwnership,
+  upsertPropertyBookingChannel
 } from "@/modules/core/application/core-service";
 import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
 import type { TenantTransactionRunner } from "@/platform/db/tenant";
@@ -78,6 +80,18 @@ const validManagementAgreementAmendmentInput = {
   alvillasResponsibilities: ["guest operations"],
   specialConditions: ["summer staffing"],
   reason: "Signed amendment with new effective terms"
+};
+const validBookingChannelInput = {
+  propertyId: "00000000-0000-7000-8000-000000000100",
+  sourceKey: "airbnb listing",
+  displayName: "Airbnb Palmeraie",
+  externalListingId: "airbnb-123",
+  listingUrl: "https://www.airbnb.com/rooms/123",
+  syncMode: "ICAL",
+  importEnabled: true,
+  exportEnabled: false,
+  syncEndpointUrl: "https://calendar.airbnb.com/ical/private-token.ics",
+  status: "ACTIVE"
 };
 
 describe("core service authorization", () => {
@@ -315,6 +329,41 @@ describe("core service authorization", () => {
         { db: deniedDb }
       )
     ).rejects.toBeInstanceOf(CoreAuthorizationError);
+  });
+
+  it("validates booking channel configuration and normalizes source keys", () => {
+    const valid = parseBookingChannelInput(validBookingChannelInput);
+    const invalidSource = parseBookingChannelInput({
+      ...validBookingChannelInput,
+      sourceKey: "--"
+    });
+    const invalidUrl = parseBookingChannelInput({
+      ...validBookingChannelInput,
+      listingUrl: "not-a-url"
+    });
+
+    expect(valid.success).toBe(true);
+    expect(valid.success && valid.data.sourceKey).toBe("AIRBNB_LISTING");
+    expect(valid.success && valid.data.importEnabled).toBe(true);
+    expect(invalidSource.success).toBe(false);
+    expect(invalidUrl.success).toBe(false);
+  });
+
+  it("denies booking channel updates without property edit permission", async () => {
+    const parsed = parseBookingChannelInput(validBookingChannelInput);
+    const ctx = actor({
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("property", "view")]),
+      scopes: [{ organizationId: "org-a" }]
+    });
+
+    if (!parsed.success) {
+      throw new Error("booking channel fixture should parse");
+    }
+
+    await expect(upsertPropertyBookingChannel(ctx, parsed.data, { db: deniedDb })).rejects.toBeInstanceOf(
+      CoreAuthorizationError
+    );
   });
 
   it("validates management agreements as config-backed rule bundles", () => {

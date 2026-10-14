@@ -12,9 +12,12 @@ import {
   createPropertyAction,
   transitionPropertyLifecycleAction,
   updatePropertyOperatingProfileAction,
-  updatePropertyOwnershipAction
+  updatePropertyOwnershipAction,
+  upsertPropertyBookingChannelAction
 } from "@/modules/core/application/core-actions";
 import {
+  bookingChannelStatusSchema,
+  bookingChannelSyncModeSchema,
   propertyLifecycleStatuses,
   type PropertyLifecycleStatus,
   type PropertyOperatingCadence,
@@ -114,6 +117,24 @@ type PropertyLifecycleLabels = FormLabels & {
   save: string;
   saved: string;
   statusOptions: Record<PropertyLifecycleStatus, string>;
+};
+
+type BookingChannelLabels = FormLabels & {
+  displayName: string;
+  externalListingId: string;
+  exportEnabled: string;
+  importEnabled: string;
+  listingUrl: string;
+  maskedSyncEndpoint: string;
+  save: string;
+  saved: string;
+  sourceKey: string;
+  status: string;
+  statusOptions: Record<(typeof bookingChannelStatusSchema.options)[number], string>;
+  syncEndpointUrl: string;
+  syncMode: string;
+  syncModeOptions: Record<(typeof bookingChannelSyncModeSchema.options)[number], string>;
+  title: string;
 };
 
 type PropertyOperatingProfileLabels = FormLabels & {
@@ -229,6 +250,8 @@ const operatingCadences: PropertyOperatingCadence[] = [
   "CUSTOM_RULE"
 ];
 const lifecycleStatuses = propertyLifecycleStatuses;
+const bookingChannelStatuses = bookingChannelStatusSchema.options;
+const bookingChannelSyncModes = bookingChannelSyncModeSchema.options;
 const agreementStatuses = ["DRAFT", "ACTIVE", "ENDED"] as const;
 const commissionBasisOptions = [
   "GROSS_ACCOMMODATION",
@@ -1327,6 +1350,146 @@ export function PropertyLifecycleForm({
         </p>
       ) : null}
       <button className="primary-button" data-testid="property-lifecycle-submit" disabled={pending} type="submit">
+        {pending ? labels.saving : labels.save}
+      </button>
+    </form>
+  );
+}
+
+export function PropertyBookingChannelForm({
+  labels,
+  locale,
+  propertyId
+}: LocalizedFormProps<BookingChannelLabels> & {
+  propertyId: string;
+}) {
+  const schema = useMemo(
+    () =>
+      z.object({
+        displayName: z.string().trim().min(1, labels.validation).max(120, labels.validation),
+        externalListingId: z.string().optional(),
+        exportEnabled: z.boolean().optional(),
+        importEnabled: z.boolean().optional(),
+        listingUrl: z.string().trim().url(labels.validation).or(z.literal("")),
+        sourceKey: z.string().trim().min(2, labels.validation).max(40, labels.validation),
+        status: z.enum(bookingChannelStatuses),
+        syncEndpointUrl: z.string().trim().url(labels.validation).or(z.literal("")),
+        syncMode: z.enum(bookingChannelSyncModes)
+      }),
+    [labels.validation]
+  );
+  const [state, formAction, pending] = useActionState(
+    upsertPropertyBookingChannelAction.bind(null, locale, propertyId),
+    initialCoreFormState
+  );
+  const form = useZodForm(schema, {
+    defaultValues: {
+      displayName: "",
+      externalListingId: "",
+      exportEnabled: false,
+      importEnabled: false,
+      listingUrl: "",
+      sourceKey: "AIRBNB",
+      status: "ACTIVE",
+      syncEndpointUrl: "",
+      syncMode: "ICAL"
+    }
+  });
+  const validateSubmit = useServerActionValidation(form, formAction);
+  const message = state.status === "success" ? labels.saved : messageForState(state, labels);
+
+  return (
+    <form
+      action={formAction}
+      className="resource-form booking-channel-form"
+      data-testid="booking-channel-form"
+      onSubmit={validateSubmit}
+    >
+      <p className="panel-label">{labels.title}</p>
+      <div className="form-grid three">
+        <label className="field">
+          <span>{labels.sourceKey}</span>
+          <input data-testid="booking-channel-source-key" required {...form.register("sourceKey")} />
+          <ErrorText testId="booking-channel-source-key-error">
+            {firstClientError(form.formState.errors.sourceKey) ?? fieldError(state, "sourceKey")}
+          </ErrorText>
+        </label>
+        <label className="field">
+          <span>{labels.displayName}</span>
+          <input data-testid="booking-channel-display-name" required {...form.register("displayName")} />
+          <ErrorText testId="booking-channel-display-name-error">
+            {firstClientError(form.formState.errors.displayName) ?? fieldError(state, "displayName")}
+          </ErrorText>
+        </label>
+        <label className="field">
+          <span>{labels.status}</span>
+          <select data-testid="booking-channel-status" {...form.register("status")}>
+            {bookingChannelStatuses.map((status) => (
+              <option key={status} value={status}>
+                {labels.statusOptions[status]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <div className="form-grid three">
+        <label className="field">
+          <span>{labels.syncMode}</span>
+          <select data-testid="booking-channel-sync-mode" {...form.register("syncMode")}>
+            {bookingChannelSyncModes.map((mode) => (
+              <option key={mode} value={mode}>
+                {labels.syncModeOptions[mode]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>{labels.externalListingId}</span>
+          <input data-testid="booking-channel-external-listing-id" {...form.register("externalListingId")} />
+        </label>
+        <label className="field">
+          <span>{labels.listingUrl}</span>
+          <input data-testid="booking-channel-listing-url" type="url" {...form.register("listingUrl")} />
+          <ErrorText testId="booking-channel-listing-url-error">
+            {firstClientError(form.formState.errors.listingUrl) ?? fieldError(state, "listingUrl")}
+          </ErrorText>
+        </label>
+      </div>
+      <label className="field">
+        <span>{labels.syncEndpointUrl}</span>
+        <input data-testid="booking-channel-sync-endpoint" type="url" {...form.register("syncEndpointUrl")} />
+        <ErrorText testId="booking-channel-sync-endpoint-error">
+          {firstClientError(form.formState.errors.syncEndpointUrl) ?? fieldError(state, "syncEndpointUrl")}
+        </ErrorText>
+      </label>
+      <div className="check-row">
+        <label>
+          <input
+            data-testid="booking-channel-import-enabled"
+            type="checkbox"
+            {...form.register("importEnabled")}
+          />
+          <span>{labels.importEnabled}</span>
+        </label>
+        <label>
+          <input
+            data-testid="booking-channel-export-enabled"
+            type="checkbox"
+            {...form.register("exportEnabled")}
+          />
+          <span>{labels.exportEnabled}</span>
+        </label>
+      </div>
+      {message ? (
+        <p
+          className={state.status === "success" ? "form-success" : "form-error"}
+          data-testid={state.status === "success" ? "booking-channel-form-success" : "booking-channel-form-error"}
+          role={state.status === "success" ? "status" : "alert"}
+        >
+          {message}
+        </p>
+      ) : null}
+      <button className="primary-button" data-testid="booking-channel-submit" disabled={pending} type="submit">
         {pending ? labels.saving : labels.save}
       </button>
     </form>

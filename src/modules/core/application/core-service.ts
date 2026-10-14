@@ -11,6 +11,7 @@ import {
 } from "@/platform/config/rule-registry";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import {
+  bookingChannelInputSchema,
   managementAgreementInputSchema,
   managementAgreementAmendmentInputSchema,
   ownerInputSchema,
@@ -18,6 +19,8 @@ import {
   propertyOperatingProfileInputSchema,
   propertyInputSchema,
   propertyOwnershipInputSchema,
+  type BookingChannelInput,
+  type BookingChannelSummary,
   type ManagementAgreementAmendmentInput,
   type ManagementAgreementInput,
   type ManagementAgreementRuleSummary,
@@ -181,6 +184,10 @@ export function parsePropertyLifecycleTransitionInput(input: unknown) {
   return propertyLifecycleTransitionInputSchema.safeParse(input);
 }
 
+export function parseBookingChannelInput(input: unknown) {
+  return bookingChannelInputSchema.safeParse(input);
+}
+
 export function parseManagementAgreementInput(input: unknown) {
   return managementAgreementInputSchema.safeParse(input);
 }
@@ -220,6 +227,22 @@ function compactAgreementSummary(agreement: ManagementAgreementSummary): Record<
       key: rule.key,
       version: rule.version
     }))
+  };
+}
+
+function compactBookingChannelSummary(channel: BookingChannelSummary): Record<string, unknown> {
+  return {
+    id: channel.id,
+    propertyId: channel.propertyId,
+    sourceKey: channel.sourceKey,
+    displayName: channel.displayName,
+    externalListingId: channel.externalListingId,
+    listingUrl: channel.listingUrl,
+    syncMode: channel.syncMode,
+    importEnabled: channel.importEnabled,
+    exportEnabled: channel.exportEnabled,
+    maskedSyncEndpoint: channel.maskedSyncEndpoint,
+    status: channel.status
   };
 }
 
@@ -551,6 +574,48 @@ export async function transitionPropertyLifecycle(
       ...property,
       lifecycleEvents: await repository.listPropertyLifecycleEvents(property.id)
     };
+  });
+}
+
+export async function upsertPropertyBookingChannel(
+  ctx: CoreActorContext,
+  input: BookingChannelInput,
+  deps: CoreServiceDeps = {}
+): Promise<BookingChannelSummary> {
+  assertAllowed(ctx, "edit", "property", input.propertyId);
+  const meta = await auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new CoreRepository(tx, ctx.organizationId);
+    const property = await repository.findProperty(input.propertyId);
+
+    if (!property) {
+      throw new CoreNotFoundError();
+    }
+
+    const before = await repository.findBookingChannel(input.propertyId, input.sourceKey);
+    const channel = await repository.upsertBookingChannel(input, ctx.actorId);
+
+    if (!channel) {
+      throw new CoreNotFoundError();
+    }
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "property.booking_channel.upsert",
+      resourceType: "booking_channel",
+      resourceId: channel.id,
+      ipAddress: meta.ipAddress,
+      propertyScopeId: input.propertyId,
+      before: before ? compactBookingChannelSummary(before) : null,
+      after: compactBookingChannelSummary(channel),
+      reason: `F-ORG-10 ${input.sourceKey} booking channel configuration`,
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
+
+    return channel;
   });
 }
 

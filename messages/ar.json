@@ -569,6 +569,36 @@
         "save": "Save ownership",
         "saved": "Ownership saved."
       },
+      "bookingChannels": {
+        "title": "Booking channels",
+        "empty": "No booking channels are configured for this property yet.",
+        "count": "{count, plural, one {# channel} other {# channels}}",
+        "sourceKey": "Source key",
+        "displayName": "Display name",
+        "externalListingId": "External listing ID",
+        "listingUrl": "Listing URL",
+        "syncMode": "Sync mode",
+        "importEnabled": "Import enabled",
+        "exportEnabled": "Export enabled",
+        "syncEndpointUrl": "Sync endpoint URL",
+        "maskedSyncEndpoint": "Sync endpoint",
+        "status": "Status",
+        "lastSync": "Last sync",
+        "save": "Save booking channel",
+        "saved": "Booking channel saved.",
+        "statusOptions": {
+          "ACTIVE": "Active",
+          "PAUSED": "Paused",
+          "DISCONNECTED": "Disconnected"
+        },
+        "syncModeOptions": {
+          "MANUAL": "Manual",
+          "ICAL": "iCal",
+          "API": "API",
+          "CSV": "CSV",
+          "CHANNEL_MANAGER": "Channel manager"
+        }
+      },
       "agreement": {
         "title": "Management agreement",
         "formTitle": "Create management agreement",
