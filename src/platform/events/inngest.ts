@@ -1,4 +1,5 @@
 import type { OutboxEvent as PrismaOutboxEvent } from "@prisma/client";
+import type { OutboxHandlers } from "@/platform/events/outbox-dispatcher";
 
 export type InngestSendResult = {
   ids: string[];
@@ -76,5 +77,18 @@ export function createInngestOutboxHandler(
       ids: Array.isArray(body.ids) ? body.ids.map(String) : [],
       status: typeof body.status === "number" ? body.status : response.status
     };
+  };
+}
+
+export function createInngestOutboxHandlers(
+  env: InngestEnv = process.env,
+  transport: InngestTransport = fetch
+): OutboxHandlers {
+  const handler = createInngestOutboxHandler(env, transport);
+
+  return {
+    "*": async (event) => {
+      await handler(event);
+    }
   };
 }

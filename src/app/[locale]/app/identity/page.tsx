@@ -67,18 +67,27 @@ export default async function IdentityPage({
       <IdentityAdmin
         accounts={dashboard.accounts}
         assignments={dashboard.assignments}
+        duplicateContacts={dashboard.duplicateContacts}
         invitations={dashboard.invitations.map((invitation) => ({
           ...invitation,
           expiresAtLabel: formatDateTime(appLocale, invitation.expiresAt)
         }))}
+        people={dashboard.people}
         permissions={dashboard.permissions}
         roles={dashboard.roles}
         simulations={dashboard.simulations}
         labels={{
           createInvitation: t("createInvitation"),
+          people: t("people"),
+          createPerson: t("createPerson"),
+          duplicateContacts: t("duplicateContacts"),
+          noDuplicateContacts: t("noDuplicateContacts"),
           displayName: t("displayName"),
           email: t("email"),
           phone: t("phone"),
+          preferredLocale: t("preferredLocale"),
+          accountCount: t("accountCount"),
+          openInvitations: t("openInvitations"),
           role: t("role"),
           scope: t("scope"),
           expires: t("expires"),
@@ -93,6 +102,7 @@ export default async function IdentityPage({
           description: t("description"),
           permissions: t("permissions"),
           saveRole: t("saveRole"),
+          savePerson: t("savePerson"),
           createRole: t("createRole"),
           permissionCatalog: t("permissionCatalog"),
           assignmentWorkflow: t("assignmentWorkflow"),
@@ -120,9 +130,19 @@ export default async function IdentityPage({
           status: t("status"),
           roles: t("roles"),
           sessions: t("sessions"),
+          devices: t("devices"),
+          credentials: t("credentials"),
+          activeDevices: t("activeDevices"),
+          lastSeen: t("lastSeen"),
+          revokeSession: t("revokeSession"),
+          revokeDevice: t("revokeDevice"),
+          revokeCredential: t("revokeCredential"),
           passkeys: t("passkeys"),
           suspend: t("suspend"),
           reactivate: t("reactivate"),
+          deactivate: t("deactivate"),
+          resetPin: t("resetPin"),
+          newPin: t("newPin"),
           recovery: t("recoveryAction"),
           recoveryCode: t("recoveryCode"),
           admin: t("rolesList.admin"),
@@ -160,9 +180,12 @@ export default async function IdentityPage({
           fieldTeam: t("scopes.fieldTeam"),
           roleCreated: t("forms.roleCreated"),
           roleUpdated: t("forms.roleUpdated"),
+          personCreated: t("forms.personCreated"),
+          personUpdated: t("forms.personUpdated"),
           assignmentCreated: t("forms.assignmentCreated"),
           successCreated: t("forms.created"),
           successRecovery: t("forms.recoveryIssued"),
+          successPinReset: t("forms.pinReset"),
           validation: t("forms.validation"),
           forbidden: t("forms.forbidden"),
           conflict: t("forms.conflict"),

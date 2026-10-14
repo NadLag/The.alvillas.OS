@@ -536,6 +536,11 @@ textarea:disabled {
   box-shadow: var(--shadow-sm);
 }
 
+.danger-button {
+  border-color: color-mix(in oklab, var(--warning) 38%, var(--border));
+  color: var(--warning);
+}
+
 .workspace-grid,
 .resource-layout {
   display: grid;
@@ -972,6 +977,10 @@ textarea:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.form-grid.four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .form-grid.five {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
@@ -1296,6 +1305,10 @@ textarea:disabled {
   padding: var(--space-6);
 }
 
+.identity-account-row-expanded {
+  grid-template-columns: minmax(160px, 1.2fr) repeat(5, minmax(72px, 0.55fr)) minmax(220px, 1fr);
+}
+
 .identity-account-row span {
   display: grid;
   gap: var(--space-1);
@@ -1324,11 +1337,56 @@ textarea:disabled {
   grid-template-columns: minmax(160px, 1.1fr) minmax(120px, 0.8fr) minmax(180px, 1.2fr) minmax(100px, 0.5fr);
 }
 
+.person-profile-row {
+  align-items: start;
+  grid-template-columns: minmax(180px, 1.2fr) repeat(3, minmax(96px, 0.4fr)) minmax(260px, 1.4fr);
+}
+
+.duplicate-contact-row {
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1fr);
+}
+
 .identity-row-actions,
 .identity-security-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
+}
+
+.identity-security-list {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-6);
+  border-block-start: 1px solid var(--border);
+  padding-block-start: var(--space-5);
+}
+
+.identity-security-list > div {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.identity-security-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: center;
+  gap: var(--space-4);
+  min-block-size: 48px;
+  border-block-start: 1px solid var(--border);
+  padding-block-start: var(--space-3);
+}
+
+.pin-reset-form {
+  align-items: end;
+}
+
+.compact-field {
+  min-inline-size: 104px;
+}
+
+.compact-field input {
+  inline-size: 104px;
 }
 
 .subsection-block {
@@ -1900,6 +1958,7 @@ textarea:disabled {
   .resource-layout,
   .form-grid.two,
   .form-grid.three,
+  .form-grid.four,
   .form-grid.five,
   .operating-service-row,
   .ownership-row,
@@ -1908,9 +1967,11 @@ textarea:disabled {
   .settlement-import-form,
   .settlement-chain,
   .identity-account-row,
-    .permission-checklist,
-    .permission-catalog-list,
-    .role-assignment-form .conditions-fieldset,
+  .identity-security-list,
+  .identity-security-row,
+  .permission-checklist,
+  .permission-catalog-list,
+  .role-assignment-form .conditions-fieldset,
   .config-admin-grid,
   .config-rule-summary,
   .config-rule-meta,

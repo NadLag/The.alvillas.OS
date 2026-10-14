@@ -1084,12 +1084,16 @@ model OutboxEvent {
   idempotencyKey String       @map("idempotency_key")
   occurredAt     DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
   processedAt    DateTime?    @map("processed_at") @db.Timestamptz(6)
+  attemptCount   Int          @default(0) @map("attempt_count")
+  nextAttemptAt  DateTime?    @map("next_attempt_at") @db.Timestamptz(6)
+  lastError      String?      @map("last_error")
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organizationId, idempotencyKey], map: "outbox_event_org_idempotency_key")
   @@index([organizationId, status, occurredAt], map: "outbox_event_org_status_occurred_idx")
+  @@index([organizationId, status, nextAttemptAt, occurredAt], map: "outbox_event_org_status_retry_idx")
   @@map("outbox_event")
 }
 

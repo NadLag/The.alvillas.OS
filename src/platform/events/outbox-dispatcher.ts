@@ -15,13 +15,50 @@ export type DispatchOutboxResult = {
 
 export type OutboxErrorReporter = (error: unknown, event: PrismaOutboxEvent) => Promise<void>;
 
+type OutboxRetryOptions = {
+  maxAttempts?: number;
+  backoffSeconds?: number;
+};
+
+type OrganizationListRunner = TenantTransactionRunner & {
+  organization: {
+    findMany(args: {
+      select: { id: true };
+      orderBy: { createdAt: "asc" };
+    }): Promise<Array<{ id: string }>>;
+  };
+};
+
+function retryAt(now: Date, attemptCount: number, backoffSeconds: number): Date {
+  return new Date(now.getTime() + Math.max(1, attemptCount) * backoffSeconds * 1000);
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message.slice(0, 2000);
+  }
+
+  return String(error).slice(0, 2000);
+}
+
+function handlerFor(handlers: OutboxHandlers, eventType: string): OutboxHandler | undefined {
+  return handlers[eventType] ?? handlers["*"];
+}
+
 export async function dispatchOutboxBatch(
   db: TenantTransactionRunner,
   organizationId: string,
   handlers: OutboxHandlers,
-  options: { limit?: number; now?: Date; errorReporter?: OutboxErrorReporter } = {}
+  options: {
+    limit?: number;
+    now?: Date;
+    errorReporter?: OutboxErrorReporter;
+    retry?: OutboxRetryOptions;
+  } = {}
 ): Promise<DispatchOutboxResult> {
   const limit = options.limit ?? 50;
+  const maxAttempts = options.retry?.maxAttempts ?? 5;
+  const backoffSeconds = options.retry?.backoffSeconds ?? 60;
   const errorReporter =
     options.errorReporter ??
     (async (error: unknown, event: PrismaOutboxEvent) => {
@@ -41,22 +78,41 @@ export async function dispatchOutboxBatch(
     throw new Error("outbox dispatch limit must be an integer between 1 and 500");
   }
 
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 25) {
+    throw new Error("outbox maxAttempts must be an integer between 1 and 25");
+  }
+
+  if (!Number.isInteger(backoffSeconds) || backoffSeconds < 1 || backoffSeconds > 3600) {
+    throw new Error("outbox backoffSeconds must be an integer between 1 and 3600");
+  }
+
   return withTenant(db, organizationId, async (tx) => {
+    const now = options.now ?? new Date();
     const events = await tx.outboxEvent.findMany({
-      where: { organizationId, status: "PENDING" },
+      where: {
+        organizationId,
+        status: "PENDING",
+        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }]
+      },
       orderBy: { occurredAt: "asc" },
       take: limit
     });
     const result: DispatchOutboxResult = { dispatched: 0, failed: 0, skipped: 0 };
 
     for (const event of events) {
-      const handler = handlers[event.type];
+      const handler = handlerFor(handlers, event.type);
       const processedAt = options.now ?? new Date();
 
       if (!handler) {
         await tx.outboxEvent.update({
           where: { id: event.id },
-          data: { status: "FAILED", processedAt }
+          data: {
+            status: "FAILED",
+            processedAt,
+            attemptCount: { increment: 1 },
+            nextAttemptAt: null,
+            lastError: `No outbox handler registered for ${event.type}`
+          }
         });
         result.skipped += 1;
         continue;
@@ -66,10 +122,17 @@ export async function dispatchOutboxBatch(
         await handler(event);
         await tx.outboxEvent.update({
           where: { id: event.id },
-          data: { status: "DISPATCHED", processedAt }
+          data: {
+            status: "DISPATCHED",
+            processedAt,
+            nextAttemptAt: null,
+            lastError: null
+          }
         });
         result.dispatched += 1;
       } catch (error) {
+        const nextAttemptCount = event.attemptCount + 1;
+        const exhausted = nextAttemptCount >= maxAttempts;
         logger.error(
           "outbox dispatch failed",
           { organizationId, jobId: event.id },
@@ -78,7 +141,13 @@ export async function dispatchOutboxBatch(
         await errorReporter(error, event);
         await tx.outboxEvent.update({
           where: { id: event.id },
-          data: { status: "FAILED", processedAt }
+          data: {
+            status: exhausted ? "FAILED" : "PENDING",
+            processedAt,
+            attemptCount: { increment: 1 },
+            nextAttemptAt: exhausted ? null : retryAt(processedAt, nextAttemptCount, backoffSeconds),
+            lastError: errorMessage(error)
+          }
         });
         result.failed += 1;
       }
@@ -86,4 +155,40 @@ export async function dispatchOutboxBatch(
 
     return result;
   });
+}
+
+export async function dispatchOutboxForAllOrganizations(
+  db: OrganizationListRunner,
+  handlers: OutboxHandlers,
+  options: {
+    limitPerOrganization?: number;
+    now?: Date;
+    errorReporter?: OutboxErrorReporter;
+    retry?: OutboxRetryOptions;
+  } = {}
+): Promise<DispatchOutboxResult & { organizations: number }> {
+  const organizations = await db.organization.findMany({
+    select: { id: true },
+    orderBy: { createdAt: "asc" }
+  });
+  const total = {
+    organizations: organizations.length,
+    dispatched: 0,
+    failed: 0,
+    skipped: 0
+  };
+
+  for (const organization of organizations) {
+    const result = await dispatchOutboxBatch(db, organization.id, handlers, {
+      limit: options.limitPerOrganization,
+      now: options.now,
+      errorReporter: options.errorReporter,
+      retry: options.retry
+    });
+    total.dispatched += result.dispatched;
+    total.failed += result.failed;
+    total.skipped += result.skipped;
+  }
+
+  return total;
 }

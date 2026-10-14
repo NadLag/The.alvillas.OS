@@ -18,14 +18,20 @@ import {
   customRoleInputSchema,
   identityActionForMutation,
   invitationInputSchema,
+  pinResetInputSchema,
+  personProfileInputSchema,
   recoveryInputSchema,
   roleAssignmentInputSchema,
+  updatePersonProfileInputSchema,
   updateCustomRoleInputSchema,
   type ActivationInput,
   type CustomRoleInput,
   type InvitationInput,
+  type PinResetInput,
+  type PersonProfileInput,
   type RecoveryInput,
   type RoleAssignmentInput,
+  type UpdatePersonProfileInput,
   type UpdateCustomRoleInput
 } from "@/modules/identity/domain/identity";
 import {
@@ -51,7 +57,7 @@ import { hashCredentialSecret, hashPassword, verifyPassword } from "@/platform/a
 import { encryptSecret, decryptSecret } from "@/platform/auth/secret-encryption";
 import { generateTotpSecret, totpUri, verifyTotpCode } from "@/platform/auth/totp";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import {
   consumeRateLimit
@@ -80,6 +86,8 @@ type IdentityServiceDeps = {
 };
 
 export type IdentityDashboard = {
+  people: Awaited<ReturnType<IdentityRepository["listPeople"]>>;
+  duplicateContacts: Awaited<ReturnType<IdentityRepository["listDuplicateContacts"]>>;
   accounts: IdentityAccountSummary[];
   invitations: InvitationSummary[];
   roles: Awaited<ReturnType<IdentityRepository["listRoles"]>>;
@@ -135,8 +143,48 @@ function webAuthnOrigin(deps: IdentityServiceDeps): string {
   return deps.origin ?? process.env.APP_URL ?? "http://localhost:3000";
 }
 
+function identityUrl(deps: IdentityServiceDeps, path: string): string {
+  const origin = webAuthnOrigin(deps).replace(/\/$/u, "");
+
+  return `${origin}${path}`;
+}
+
 function rpIdFromOrigin(origin: string): string {
   return new URL(origin).hostname;
+}
+
+async function enqueueIdentityDelivery(
+  tx: TenantTransaction,
+  input: {
+    organizationId: string;
+    type: string;
+    idempotencyKey: string;
+    payload: Prisma.InputJsonObject;
+  }
+): Promise<void> {
+  await tx.outboxEvent.upsert({
+    where: {
+      organizationId_idempotencyKey: {
+        organizationId: input.organizationId,
+        idempotencyKey: input.idempotencyKey
+      }
+    },
+    update: {
+      type: input.type,
+      payload: input.payload,
+      status: "PENDING",
+      processedAt: null,
+      attemptCount: 0,
+      nextAttemptAt: null,
+      lastError: null
+    },
+    create: {
+      organizationId: input.organizationId,
+      type: input.type,
+      payload: input.payload,
+      idempotencyKey: input.idempotencyKey
+    }
+  });
 }
 
 export function parseInvitationInput(input: unknown) {
@@ -149,6 +197,18 @@ export function parseActivationInput(input: unknown) {
 
 export function parseRecoveryInput(input: unknown) {
   return recoveryInputSchema.safeParse(input);
+}
+
+export function parsePinResetInput(input: unknown) {
+  return pinResetInputSchema.safeParse(input);
+}
+
+export function parsePersonProfileInput(input: unknown) {
+  return personProfileInputSchema.safeParse(input);
+}
+
+export function parseUpdatePersonProfileInput(input: unknown) {
+  return updatePersonProfileInputSchema.safeParse(input);
 }
 
 export function parseCustomRoleInput(input: unknown) {
@@ -465,6 +525,8 @@ export async function listIdentityDashboard(
     const accounts = await repository.listAccounts();
 
     return {
+      people: await repository.listPeople(),
+      duplicateContacts: await repository.listDuplicateContacts(),
       accounts,
       invitations: await repository.listOpenInvitations(new Map()),
       roles: await repository.listRoles(),
@@ -475,6 +537,107 @@ export async function listIdentityDashboard(
         db: { $transaction: (callback) => callback(tx) }
       })
     };
+  });
+}
+
+export async function createPersonProfile(
+  ctx: IdentityActorContext,
+  input: PersonProfileInput,
+  deps: IdentityServiceDeps = {}
+): Promise<{ id: string }> {
+  assertIdentityAllowed(ctx, "create");
+  const parsed = personProfileInputSchema.parse(input);
+  const meta = auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new IdentityRepository(tx, ctx.organizationId);
+
+    try {
+      const person = await repository.createStandalonePerson(parsed);
+
+      await writeAuditEvent(tx, {
+        organizationId: ctx.organizationId,
+        actorId: ctx.actorId,
+        action: "identity.person.create",
+        resourceType: "identity",
+        resourceId: person.id,
+        ipAddress: meta.ipAddress,
+        after: {
+          personId: person.id,
+          displayName: person.displayName,
+          email: person.email,
+          phone: person.phone,
+          preferredLocale: person.preferredLocale
+        },
+        reason: "Person profile created",
+        requestId: meta.requestId,
+        occurredAt: new Date()
+      });
+
+      return { id: person.id };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new IdentityConflictError("Person contact already exists");
+      }
+
+      throw error;
+    }
+  });
+}
+
+export async function updatePersonProfile(
+  ctx: IdentityActorContext,
+  input: UpdatePersonProfileInput,
+  deps: IdentityServiceDeps = {}
+): Promise<{ id: string }> {
+  assertIdentityAllowed(ctx, "edit", input.personId);
+  const parsed = updatePersonProfileInputSchema.parse(input);
+  const meta = auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new IdentityRepository(tx, ctx.organizationId);
+
+    try {
+      const update = await repository.updatePersonProfile(parsed);
+
+      await writeAuditEvent(tx, {
+        organizationId: ctx.organizationId,
+        actorId: ctx.actorId,
+        action: "identity.person.update",
+        resourceType: "identity",
+        resourceId: update.after.id,
+        ipAddress: meta.ipAddress,
+        before: {
+          personId: update.before.id,
+          displayName: update.before.displayName,
+          email: update.before.email,
+          phone: update.before.phone,
+          preferredLocale: update.before.preferredLocale
+        },
+        after: {
+          personId: update.after.id,
+          displayName: update.after.displayName,
+          email: update.after.email,
+          phone: update.after.phone,
+          preferredLocale: update.after.preferredLocale
+        },
+        reason: "Person profile updated",
+        requestId: meta.requestId,
+        occurredAt: new Date()
+      });
+
+      return { id: update.after.id };
+    } catch (error) {
+      if (error instanceof Error && error.message === "Person was not found") {
+        throw new IdentityNotFoundError("Person was not found");
+      }
+
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new IdentityConflictError("Person contact already exists");
+      }
+
+      throw error;
+    }
   });
 }
 
@@ -705,6 +868,28 @@ export async function createInvitation(
       codeHash: hashCode(code),
       expiresAt,
       actorId: ctx.actorId
+    });
+    const activationUrl = identityUrl(deps, `/en/activate/${code}`);
+
+    await enqueueIdentityDelivery(tx, {
+      organizationId: ctx.organizationId,
+      type: "identity.invitation.delivery_requested",
+      idempotencyKey: `identity.invitation.delivery:${invitation.id}`,
+      payload: {
+        invitationId: invitation.id,
+        personId: person.id,
+        displayName: input.displayName,
+        channel: input.email ? "email" : input.phone ? "manual_phone" : "manual",
+        toEmail: input.email ?? null,
+        toPhone: input.phone ?? null,
+        roleKey: input.roleKey,
+        scopeType: input.scopeType,
+        scopeId: input.scopeId ?? null,
+        activationCode: code,
+        activationUrl,
+        locale: "en",
+        expiresAt: expiresAt.toISOString()
+      }
     });
 
     await writeAuditEvent(tx, {
@@ -979,6 +1164,187 @@ export async function reactivateAccount(
   });
 }
 
+export async function deactivateAccount(
+  ctx: IdentityActorContext,
+  userAccountId: string,
+  deps: IdentityServiceDeps = {}
+): Promise<void> {
+  assertIdentityAllowed(ctx, identityActionForMutation("deactivate"), userAccountId);
+
+  if (ctx.actorId === userAccountId) {
+    throw new IdentityConflictError("Accounts cannot deactivate themselves");
+  }
+
+  const meta = auditMeta(deps);
+
+  await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const before = await tx.userAccount.findFirst({
+      where: { id: userAccountId, organizationId: ctx.organizationId },
+      select: {
+        status: true,
+        suspendedAt: true,
+        deactivatedAt: true,
+        sessionVersion: true
+      }
+    });
+
+    if (!before) {
+      throw new IdentityNotFoundError();
+    }
+
+    const now = new Date();
+    const account = await tx.userAccount.update({
+      where: { id: userAccountId },
+      data: {
+        status: "DEACTIVATED",
+        suspendedAt: null,
+        deactivatedAt: now,
+        sessionVersion: { increment: 1 }
+      }
+    });
+    const [sessions, devices, assignments] = await Promise.all([
+      tx.authSession.updateMany({
+        where: {
+          organizationId: ctx.organizationId,
+          userAccountId,
+          revokedAt: null
+        },
+        data: { revokedAt: now }
+      }),
+      tx.authDevice.updateMany({
+        where: {
+          organizationId: ctx.organizationId,
+          userAccountId,
+          revokedAt: null
+        },
+        data: { revokedAt: now }
+      }),
+      tx.roleAssignment.updateMany({
+        where: {
+          organizationId: ctx.organizationId,
+          userAccountId,
+          archivedAt: null
+        },
+        data: { archivedAt: now }
+      })
+    ]);
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.account.deactivate",
+      resourceType: "identity",
+      resourceId: userAccountId,
+      ipAddress: meta.ipAddress,
+      before,
+      after: {
+        status: account.status,
+        suspendedAt: account.suspendedAt,
+        deactivatedAt: account.deactivatedAt,
+        sessionVersion: account.sessionVersion,
+        revokedSessionCount: sessions.count,
+        revokedDeviceCount: devices.count,
+        archivedAssignmentCount: assignments.count
+      },
+      reason: "Account deactivated and offboarded",
+      requestId: meta.requestId,
+      occurredAt: now
+    });
+  });
+}
+
+export async function resetAccountPin(
+  ctx: IdentityActorContext,
+  input: PinResetInput,
+  deps: IdentityServiceDeps = {}
+): Promise<void> {
+  const parsed = pinResetInputSchema.parse(input);
+  assertIdentityAllowed(ctx, identityActionForMutation("recover"), parsed.userAccountId);
+  const meta = auditMeta(deps);
+
+  await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const account = await tx.userAccount.findFirst({
+      where: {
+        id: parsed.userAccountId,
+        organizationId: ctx.organizationId
+      },
+      select: {
+        id: true,
+        phone: true,
+        status: true,
+        sessionVersion: true
+      }
+    });
+
+    if (!account) {
+      throw new IdentityNotFoundError();
+    }
+
+    const now = new Date();
+    const existingPins = await tx.authCredential.updateMany({
+      where: {
+        organizationId: ctx.organizationId,
+        userAccountId: account.id,
+        type: "PIN",
+        revokedAt: null
+      },
+      data: {
+        revokedAt: now
+      }
+    });
+    const credential = await tx.authCredential.create({
+      data: {
+        organizationId: ctx.organizationId,
+        userAccountId: account.id,
+        type: "PIN",
+        label: "Supervisor PIN reset",
+        secretHash: await hashCredentialSecret(parsed.pin)
+      },
+      select: { id: true }
+    });
+    const sessionRevoke = await tx.authSession.updateMany({
+      where: {
+        organizationId: ctx.organizationId,
+        userAccountId: account.id,
+        revokedAt: null
+      },
+      data: { revokedAt: now }
+    });
+    const updatedAccount = await tx.userAccount.update({
+      where: { id: account.id },
+      data: {
+        sessionVersion: { increment: 1 }
+      },
+      select: {
+        sessionVersion: true
+      }
+    });
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.pin.reset",
+      resourceType: "identity",
+      resourceId: account.id,
+      ipAddress: meta.ipAddress,
+      before: {
+        status: account.status,
+        phone: account.phone,
+        sessionVersion: account.sessionVersion,
+        activePinCount: existingPins.count
+      },
+      after: {
+        authCredentialRecordId: credential.id,
+        sessionVersion: updatedAccount.sessionVersion,
+        revokedSessionCount: sessionRevoke.count
+      },
+      reason: "Supervisor reset field PIN",
+      requestId: meta.requestId,
+      occurredAt: now
+    });
+  });
+}
+
 export async function issueRecoveryCode(
   ctx: IdentityActorContext,
   userAccountId: string,
@@ -1007,6 +1373,22 @@ export async function issueRecoveryCode(
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
       },
       select: { id: true, expiresAt: true }
+    });
+
+    await enqueueIdentityDelivery(tx, {
+      organizationId: ctx.organizationId,
+      type: "identity.recovery.delivery_requested",
+      idempotencyKey: `identity.recovery.delivery:${credential.id}`,
+      payload: {
+        userAccountId,
+        channel: account.email ? "email" : account.phone ? "manual_phone" : "manual",
+        toEmail: account.email ?? null,
+        toPhone: account.phone ?? null,
+        recoveryCode: code,
+        recoveryUrl: identityUrl(deps, "/en/recover"),
+        locale: "en",
+        expiresAt: credential.expiresAt?.toISOString() ?? null
+      }
     });
 
     await writeAuditEvent(tx, {
@@ -1198,6 +1580,188 @@ export async function revokeSession(
       reason: "Session revoked",
       requestId: meta.requestId,
       occurredAt: new Date()
+    });
+  });
+}
+
+export async function revokeDevice(
+  ctx: IdentityActorContext,
+  deviceRecordId: string,
+  deps: IdentityServiceDeps = {}
+): Promise<void> {
+  assertIdentityAllowed(ctx, identityActionForMutation("revoke"));
+  const meta = auditMeta(deps);
+
+  await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const device = await tx.authDevice.findFirst({
+      where: {
+        id: deviceRecordId,
+        organizationId: ctx.organizationId,
+        revokedAt: null
+      },
+      select: {
+        id: true,
+        userAccountId: true,
+        deviceId: true,
+        label: true,
+        platform: true,
+        trusted: true,
+        lastSeenAt: true,
+        registeredAt: true
+      }
+    });
+
+    if (!device) {
+      throw new IdentityNotFoundError();
+    }
+
+    const now = new Date();
+    const result = await tx.authDevice.updateMany({
+      where: {
+        id: deviceRecordId,
+        organizationId: ctx.organizationId,
+        revokedAt: null
+      },
+      data: {
+        revokedAt: now
+      }
+    });
+
+    if (result.count !== 1) {
+      throw new IdentityNotFoundError();
+    }
+
+    const sessions = await tx.authSession.updateMany({
+      where: {
+        organizationId: ctx.organizationId,
+        userAccountId: device.userAccountId,
+        deviceId: device.deviceId,
+        revokedAt: null
+      },
+      data: {
+        revokedAt: now
+      }
+    });
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.device.revoke",
+      resourceType: "identity",
+      resourceId: device.userAccountId,
+      ipAddress: meta.ipAddress,
+      deviceId: device.deviceId,
+      before: {
+        authDeviceRecordId: device.id,
+        userAccountId: device.userAccountId,
+        label: device.label,
+        platform: device.platform,
+        trusted: device.trusted,
+        lastSeenAt: device.lastSeenAt?.toISOString() ?? null,
+        registeredAt: device.registeredAt.toISOString()
+      },
+      after: {
+        authDeviceRecordId: device.id,
+        revokedAt: now.toISOString(),
+        revokedSessionCount: sessions.count
+      },
+      reason: "Device revoked",
+      requestId: meta.requestId,
+      occurredAt: now
+    });
+  });
+}
+
+export async function revokeCredential(
+  ctx: IdentityActorContext,
+  credentialId: string,
+  deps: IdentityServiceDeps = {}
+): Promise<void> {
+  assertIdentityAllowed(ctx, identityActionForMutation("revoke"));
+  const meta = auditMeta(deps);
+
+  await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const credential = await tx.authCredential.findFirst({
+      where: {
+        id: credentialId,
+        organizationId: ctx.organizationId,
+        revokedAt: null
+      },
+      select: {
+        id: true,
+        userAccountId: true,
+        type: true,
+        label: true,
+        lastUsedAt: true,
+        expiresAt: true
+      }
+    });
+
+    if (!credential) {
+      throw new IdentityNotFoundError();
+    }
+
+    const now = new Date();
+    const result = await tx.authCredential.updateMany({
+      where: {
+        id: credentialId,
+        organizationId: ctx.organizationId,
+        revokedAt: null
+      },
+      data: {
+        revokedAt: now
+      }
+    });
+
+    if (result.count !== 1) {
+      throw new IdentityNotFoundError();
+    }
+
+    const [account, sessions] = await Promise.all([
+      tx.userAccount.update({
+        where: { id: credential.userAccountId },
+        data: {
+          sessionVersion: { increment: 1 }
+        },
+        select: {
+          sessionVersion: true
+        }
+      }),
+      tx.authSession.updateMany({
+        where: {
+          organizationId: ctx.organizationId,
+          userAccountId: credential.userAccountId,
+          revokedAt: null
+        },
+        data: {
+          revokedAt: now
+        }
+      })
+    ]);
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "identity.credential.revoke",
+      resourceType: "identity",
+      resourceId: credential.userAccountId,
+      ipAddress: meta.ipAddress,
+      before: {
+        authCredentialRecordId: credential.id,
+        type: credential.type,
+        label: credential.label,
+        lastUsedAt: credential.lastUsedAt?.toISOString() ?? null,
+        expiresAt: credential.expiresAt?.toISOString() ?? null
+      },
+      after: {
+        authCredentialRecordId: credential.id,
+        revokedAt: now.toISOString(),
+        sessionVersion: account.sessionVersion,
+        revokedSessionCount: sessions.count
+      },
+      reason: "Credential revoked",
+      requestId: meta.requestId,
+      occurredAt: now
     });
   });
 }
