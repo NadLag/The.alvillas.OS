@@ -535,6 +535,19 @@
       "onboardingProfile": "Profil onboarding",
       "noOnboardingProfile": "Aucun profil onboarding renseigne.",
       "photoCount": "Photos",
+      "ownership": {
+        "title": "Parts de propriete",
+        "formTitle": "Gerer les parts proprietaires",
+        "owner": "Proprietaire",
+        "sharePercent": "Part %",
+        "primary": "Principal",
+        "shareTotal": "Total",
+        "shareTotalInvalid": "Les parts doivent totaliser 100 %, chaque proprietaire doit apparaitre une seule fois, et un proprietaire principal doit etre choisi.",
+        "addOwner": "Ajouter proprietaire",
+        "removeOwner": "Retirer",
+        "save": "Enregistrer les parts",
+        "saved": "Parts enregistrees."
+      },
       "status": {
         "DRAFT": "Brouillon",
         "ONBOARDING": "Onboarding",

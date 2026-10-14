@@ -10,7 +10,9 @@ import {
   createOwner,
   createProperty,
   parseOwnerInput,
-  parsePropertyInput
+  parsePropertyInput,
+  parsePropertyOwnershipInput,
+  updatePropertyOwnership
 } from "@/modules/core/application/core-service";
 import {
   normalizeAmenities,
@@ -21,7 +23,7 @@ import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
 export type CoreFormState = {
-  status: "idle" | "error";
+  status: "idle" | "error" | "success";
   messageKey?: "validation" | "unauthorized" | "forbidden" | "notFound" | "generic";
   fieldErrors?: Record<string, string[]>;
 };
@@ -41,6 +43,25 @@ function stringValue(formData: FormData, key: string): string {
 
 function checkboxValue(formData: FormData, key: string): boolean {
   return formData.get(key) === "on";
+}
+
+function sharePercentToBps(value: FormDataEntryValue | undefined): number {
+  if (typeof value !== "string") {
+    return Number.NaN;
+  }
+
+  const trimmed = value.trim();
+  const match = /^(?<whole>\d{1,3})(?:\.(?<fraction>\d{1,2}))?$/u.exec(trimmed);
+
+  if (!match?.groups) {
+    return Number.NaN;
+  }
+
+  const whole = Number.parseInt(match.groups.whole, 10);
+  const fraction = Number.parseInt((match.groups.fraction ?? "").padEnd(2, "0"), 10);
+  const bps = whole * 100 + fraction;
+
+  return bps <= 10000 ? bps : Number.NaN;
 }
 
 function optionalOwnerRepresentatives(formData: FormData) {
@@ -103,6 +124,26 @@ function actionErrorState(error: unknown): CoreFormState {
   }
 
   return { status: "error", messageKey: "generic" };
+}
+
+function propertyOwnershipShares(formData: FormData) {
+  const ownerIds = formData.getAll("ownershipOwnerId");
+  const sharePercents = formData.getAll("ownershipSharePercent");
+  const primaryOwnerId = stringValue(formData, "primaryOwnerId");
+
+  return ownerIds.flatMap((ownerId, index) => {
+    if (typeof ownerId !== "string" || ownerId.trim() === "") {
+      return [];
+    }
+
+    return [
+      {
+        ownerId,
+        shareBps: sharePercentToBps(sharePercents[index]),
+        isPrimary: ownerId === primaryOwnerId
+      }
+    ];
+  });
 }
 
 export async function createOwnerAction(
@@ -205,4 +246,39 @@ export async function createPropertyAction(
 
   revalidatePath(`/${appLocale}/app/properties`);
   redirect(`/${appLocale}/app/properties/${propertyId}`);
+}
+
+export async function updatePropertyOwnershipAction(
+  locale: string,
+  propertyId: string,
+  _state: CoreFormState,
+  formData: FormData
+): Promise<CoreFormState> {
+  const appLocale = safeLocale(locale);
+  const session = await auth();
+  const ctx = coreActorContextFromSession(session);
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parsePropertyOwnershipInput({
+    propertyId,
+    shares: propertyOwnershipShares(formData)
+  });
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await updatePropertyOwnership(ctx, parsed.data);
+  } catch (error) {
+    return actionErrorState(error);
+  }
+
+  revalidatePath(`/${appLocale}/app/properties/${propertyId}`);
+  revalidatePath(`/${appLocale}/app/properties`);
+
+  return { status: "success" };
 }

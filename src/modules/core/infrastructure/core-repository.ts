@@ -5,6 +5,7 @@ import type {
   OwnerRepresentativeSummary,
   OwnerSummary,
   PropertyInput,
+  PropertyOwnershipInput,
   PropertyOnboardingProfileSummary,
   PropertySummary
 } from "@/modules/core/domain/owner-property";
@@ -419,6 +420,111 @@ export class CoreRepository {
     });
 
     return property ? propertyToSummary(property) : null;
+  }
+
+  async replacePropertyOwnership(input: PropertyOwnershipInput, actorId: string): Promise<PropertySummary | null> {
+    const property = await this.tx.property.findFirst({
+      where: {
+        id: input.propertyId,
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!property) {
+      return null;
+    }
+
+    const ownerIds = input.shares.map((share) => share.ownerId);
+    const owners = await this.tx.owner.findMany({
+      where: {
+        id: {
+          in: ownerIds
+        },
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (owners.length !== new Set(ownerIds).size) {
+      throw new Error("Owner does not exist in this tenant");
+    }
+
+    const existingLinks = await this.tx.propertyOwner.findMany({
+      where: {
+        organizationId: this.organizationId,
+        propertyId: input.propertyId
+      },
+      select: {
+        id: true,
+        ownerId: true
+      }
+    });
+    const existingByOwnerId = new Map(existingLinks.map((link) => [link.ownerId, link]));
+    const nextOwnerIds = new Set(ownerIds);
+    const archiveAt = new Date();
+
+    await this.tx.propertyOwner.updateMany({
+      where: {
+        organizationId: this.organizationId,
+        propertyId: input.propertyId,
+        archivedAt: null
+      },
+      data: {
+        isPrimary: false
+      }
+    });
+
+    await this.tx.propertyOwner.updateMany({
+      where: {
+        organizationId: this.organizationId,
+        propertyId: input.propertyId,
+        ownerId: {
+          notIn: [...nextOwnerIds]
+        },
+        archivedAt: null
+      },
+      data: {
+        archivedAt: archiveAt,
+        isPrimary: false
+      }
+    });
+
+    for (const share of input.shares) {
+      const existing = existingByOwnerId.get(share.ownerId);
+
+      if (existing) {
+        await this.tx.propertyOwner.update({
+          where: {
+            id: existing.id
+          },
+          data: {
+            shareBps: share.shareBps,
+            isPrimary: share.isPrimary,
+            archivedAt: null
+          }
+        });
+      } else {
+        await this.tx.propertyOwner.create({
+          data: {
+            organizationId: this.organizationId,
+            propertyId: input.propertyId,
+            ownerId: share.ownerId,
+            shareBps: share.shareBps,
+            isPrimary: share.isPrimary,
+            createdBy: actorId
+          }
+        });
+      }
+    }
+
+    return this.findProperty(input.propertyId);
   }
 
   private async resolvePropertyGeography(

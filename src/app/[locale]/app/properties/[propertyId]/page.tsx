@@ -4,7 +4,9 @@ import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
-import { CoreNotFoundError, getProperty } from "@/modules/core/application/core-service";
+import { CoreNotFoundError, getProperty, listOwners } from "@/modules/core/application/core-service";
+import { PropertyOwnershipForm } from "@/modules/core/ui/core-forms";
+import { authorize } from "@/platform/authz/authorize";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -14,6 +16,10 @@ const idSchema = z.string().uuid();
 
 function safeLocale(locale: string): AppLocale {
   return routing.locales.includes(locale as AppLocale) ? (locale as AppLocale) : routing.defaultLocale;
+}
+
+function shareLabel(shareBps: number): string {
+  return `${(shareBps / 100).toFixed(2).replace(/\.00$/u, "")}%`;
 }
 
 export default async function PropertyDetailPage({
@@ -50,6 +56,15 @@ export default async function PropertyDetailPage({
 
     throw error;
   }
+  const canEditOwnership = authorize(ctx.authContext, "edit", {
+    type: "property",
+    organizationId: ctx.organizationId,
+    id: property.id,
+    propertyId: property.id,
+    city: property.cityId,
+    region: property.regionId
+  });
+  const ownerOptions = canEditOwnership ? await listOwners(ctx) : [];
 
   return (
     <AdminShell className="resource-page" testId="property-detail-page">
@@ -69,7 +84,9 @@ export default async function PropertyDetailPage({
           <div>
             <dt>{t("properties.form.owner")}</dt>
             <dd data-testid="property-detail-owner">
-              {property.owners.map((owner) => owner.displayName).join(", ")}
+              {property.owners
+                .map((owner) => `${owner.displayName} (${shareLabel(owner.shareBps)})`)
+                .join(", ")}
             </dd>
           </div>
           <div>
@@ -109,6 +126,45 @@ export default async function PropertyDetailPage({
             <dd>{property.photoUrls.length > 0 ? property.photoUrls.join(", ") : t("common.notProvided")}</dd>
           </div>
         </dl>
+      </section>
+
+      <section className="detail-panel">
+        <p className="panel-label">{t("properties.ownership.title")}</p>
+        <div className="ownership-summary" data-testid="property-ownership-summary">
+          {property.owners.map((owner) => (
+            <div className="ownership-summary-row" key={owner.id}>
+              <span>{owner.displayName}</span>
+              <strong>{shareLabel(owner.shareBps)}</strong>
+              {owner.isPrimary ? <small>{t("properties.ownership.primary")}</small> : null}
+            </div>
+          ))}
+        </div>
+        {canEditOwnership ? (
+          <PropertyOwnershipForm
+            labels={{
+              addOwner: t("properties.ownership.addOwner"),
+              owner: t("properties.ownership.owner"),
+              ownershipSection: t("properties.ownership.formTitle"),
+              primary: t("properties.ownership.primary"),
+              removeOwner: t("properties.ownership.removeOwner"),
+              saved: t("properties.ownership.saved"),
+              saveOwnership: t("properties.ownership.save"),
+              sharePercent: t("properties.ownership.sharePercent"),
+              shareTotal: t("properties.ownership.shareTotal"),
+              shareTotalInvalid: t("properties.ownership.shareTotalInvalid"),
+              saving: t("common.saving"),
+              validation: t("forms.validation"),
+              unauthorized: t("forms.unauthorized"),
+              forbidden: t("forms.forbidden"),
+              notFound: t("forms.notFound"),
+              generic: t("forms.generic")
+            }}
+            locale={appLocale}
+            ownerOptions={ownerOptions.map((owner) => ({ id: owner.id, displayName: owner.displayName }))}
+            propertyId={property.id}
+            shares={property.owners}
+          />
+        ) : null}
       </section>
 
       <section className="detail-panel">
