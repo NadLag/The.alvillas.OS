@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { bootstrapFirstAdmin, bootstrapOrganizationId } from "../../prisma/bootstrap-admin";
+import { fieldPolicyCatalog, permissionCatalog, standardRoles } from "@/platform/authz/catalog";
 import type { TenantTransaction, TenantTransactionRunner } from "@/platform/db/tenant";
 
 type ConfigRuleFindFirstArgs = {
@@ -54,6 +55,44 @@ type RoleAssignmentCreateArgs = {
   };
 };
 
+function readyStandardIdentityCatalogMocks() {
+  const permission = {
+    count: vi.fn(() => Promise.resolve(permissionCatalog.length)),
+    createMany: vi.fn(() => Promise.resolve({ count: 0 })),
+    updateMany: vi.fn(() => Promise.resolve({ count: 0 })),
+    findMany: vi.fn(() => Promise.resolve([]))
+  };
+  const role = {
+    findMany: vi.fn(() =>
+      Promise.resolve(
+        standardRoles.map((roleTemplate) => ({
+          key: roleTemplate.key,
+          rolePermissions: roleTemplate.permissions.map((permissionKey) => ({
+            permission: { key: permissionKey }
+          }))
+        }))
+      )
+    ),
+    findFirst: vi.fn(() => Promise.resolve({ id: "role-admin", key: "admin" })),
+    createMany: vi.fn(() => Promise.resolve({ count: 0 })),
+    updateMany: vi.fn(() => Promise.resolve({ count: 0 }))
+  };
+  const rolePermission = {
+    createMany: vi.fn(() => Promise.resolve({ count: 0 }))
+  };
+  const fieldPolicy = {
+    count: vi.fn(() => Promise.resolve(fieldPolicyCatalog.length)),
+    upsert: vi.fn(() => Promise.resolve({}))
+  };
+
+  return {
+    fieldPolicy,
+    permission,
+    role,
+    rolePermission
+  };
+}
+
 describe("first-admin bootstrap", () => {
   it("requires explicit admin credentials", async () => {
     await expect(
@@ -82,27 +121,7 @@ describe("first-admin bootstrap", () => {
       }),
       update: vi.fn(() => Promise.resolve({ id: "018f0a0b-0000-7000-9000-000000000006" }))
     };
-    const permission = {
-      upsert: vi.fn((args: { where: { organizationId_key: { key: string } } }) =>
-        Promise.resolve({
-          id: `permission-${args.where.organizationId_key.key}`
-        })
-      )
-    };
-    const role = {
-      upsert: vi.fn((args: { where: { organizationId_key: { key: string } } }) =>
-        Promise.resolve({
-          id: `role-${args.where.organizationId_key.key}`
-        })
-      ),
-      findFirst: vi.fn(() => Promise.resolve({ id: "role-admin", key: "admin" }))
-    };
-    const rolePermission = {
-      upsert: vi.fn(() => Promise.resolve({}))
-    };
-    const fieldPolicy = {
-      upsert: vi.fn(() => Promise.resolve({}))
-    };
+    const { fieldPolicy, permission, role, rolePermission } = readyStandardIdentityCatalogMocks();
     const roleAssignment = {
       findFirst: vi.fn(() => Promise.resolve(null)),
       create: vi.fn((args: RoleAssignmentCreateArgs) => {
@@ -213,27 +232,7 @@ describe("first-admin bootstrap", () => {
       }),
       update: vi.fn((args: AuthCredentialUpdateArgs) => Promise.resolve({ id: args.where.id }))
     };
-    const permission = {
-      upsert: vi.fn((args: { where: { organizationId_key: { key: string } } }) =>
-        Promise.resolve({
-          id: `permission-${args.where.organizationId_key.key}`
-        })
-      )
-    };
-    const role = {
-      upsert: vi.fn((args: { where: { organizationId_key: { key: string } } }) =>
-        Promise.resolve({
-          id: `role-${args.where.organizationId_key.key}`
-        })
-      ),
-      findFirst: vi.fn(() => Promise.resolve({ id: "role-admin", key: "admin" }))
-    };
-    const rolePermission = {
-      upsert: vi.fn(() => Promise.resolve({}))
-    };
-    const fieldPolicy = {
-      upsert: vi.fn(() => Promise.resolve({}))
-    };
+    const { fieldPolicy, permission, role, rolePermission } = readyStandardIdentityCatalogMocks();
     const roleAssignment = {
       findFirst: vi.fn(() => Promise.resolve({ id: existingRoleAssignmentId })),
       create: vi.fn((args: RoleAssignmentCreateArgs) => {
