@@ -12,6 +12,7 @@ import {
 import type { CoreActorContext } from "@/modules/core/application/core-access";
 import {
   CoreAuthorizationError,
+  CoreValidationError,
   createManagementAgreement,
   amendManagementAgreement,
   createOwner,
@@ -20,6 +21,7 @@ import {
   getProperty,
   listPropertyManagementAgreements,
   listProperties,
+  transitionPropertyLifecycle,
   updatePropertyOperatingProfile,
   updatePropertyOwnership
 } from "@/modules/core/application/core-service";
@@ -1973,6 +1975,293 @@ describe("PostgreSQL baseline", () => {
         })
       )
     ).rejects.toThrow(/archived, not deleted|business rows/u);
+  });
+
+  it("moves properties through lifecycle states with activation prerequisites and audit history", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Property Lifecycle A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Property Lifecycle B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+    const actorId = randomUUID();
+    const ctx: CoreActorContext = {
+      organizationId: orgA.id,
+      actorId,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: actorId,
+        permissions: new Set([
+          permissionKey("owner", "view"),
+          permissionKey("owner", "create"),
+          permissionKey("property", "view"),
+          permissionKey("property", "create"),
+          permissionKey("property", "edit"),
+          permissionKey("config_rule", "view"),
+          permissionKey("config_rule", "create"),
+          permissionKey("config_rule", "configure")
+        ]),
+        scopes: [{ organizationId: orgA.id }]
+      }
+    };
+    const owner = await createOwner(
+      ctx,
+      {
+        displayName: "Lifecycle Owner",
+        email: `lifecycle-owner-${randomUUID()}@example.test`,
+        preferredLocale: "en",
+        representatives: [],
+        payoutMethods: []
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-lifecycle-owner",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const property = await createProperty(
+      ctx,
+      {
+        ownerId: owner.id,
+        name: "Villa Lifecycle",
+        addressLine1: "Route de Fes",
+        city: "Marrakech",
+        countryCode: "MA",
+        propertyType: "Villa",
+        bedrooms: 5,
+        bathrooms: 5,
+        livingSpaces: 2,
+        hasPool: true,
+        hasGarden: true,
+        parkingSpaces: 2,
+        maxGuests: 10,
+        timezone: "Africa/Casablanca",
+        amenities: ["pool", "garden"],
+        photoUrls: ["https://assets.example.test/lifecycle-villa.jpg"],
+        status: "DRAFT",
+        operatingProfile: {
+          cleaningEnabled: true,
+          cleaningFrequency: "BETWEEN_STAYS",
+          inspectionEnabled: true,
+          inspectionFrequency: "CHECKOUT",
+          poolServiceEnabled: true,
+          poolServiceFrequency: "DAILY",
+          gardenServiceEnabled: true,
+          gardenServiceFrequency: "WEEKLY",
+          laundryManaged: true,
+          linenManaged: true,
+          maintenanceTrackingEnabled: true,
+          preventiveMaintenanceFrequency: "MONTHLY",
+          midStayCleaningEnabled: true,
+          midStayCleaningRuleKey: "ops.mid_stay_threshold",
+          breakfastAvailable: true,
+          chefAvailable: true,
+          transfersAvailable: true,
+          groceriesAvailable: true,
+          wellnessAvailable: false,
+          otherServices: ["hammam"],
+          automationNotes: "Lifecycle activation profile"
+        },
+        onboardingProfile: {
+          headline: "Lifecycle-ready villa",
+          description: "Owner-approved activation profile.",
+          publicDirections: "Meet at the main gate.",
+          internalAccessNotes: "Key safe behind service door.",
+          houseRules: ["No parties"],
+          onboardingNotes: "Ready for activation checks."
+        }
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-lifecycle-property",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    await expect(
+      transitionPropertyLifecycle(
+        ctx,
+        {
+          propertyId: property.id,
+          status: "ACTIVE",
+          reason: "Attempt to skip onboarding"
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-org-lifecycle-invalid-skip",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(CoreValidationError);
+
+    const onboarding = await transitionPropertyLifecycle(
+      ctx,
+      {
+        propertyId: property.id,
+        status: "ONBOARDING",
+        reason: "Onboarding checklist started"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-lifecycle-onboarding",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(onboarding.status).toBe("ONBOARDING");
+    await expect(
+      transitionPropertyLifecycle(
+        ctx,
+        {
+          propertyId: property.id,
+          status: "ACTIVE",
+          reason: "Attempt to activate before agreement"
+        },
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-org-lifecycle-missing-agreement",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(CoreValidationError);
+
+    await createManagementAgreement(
+      ctx,
+      {
+        propertyId: property.id,
+        reference: `MA-LIFECYCLE-${randomUUID()}`,
+        status: "ACTIVE",
+        effectiveFrom: new Date("2026-02-01T00:00:00.000Z"),
+        effectiveTo: new Date("2028-02-01T00:00:00.000Z"),
+        commissionRateBps: 1800,
+        commissionBasis: "GROSS_ACCOMMODATION",
+        commissionAccrualEvent: "ON_CHECKOUT",
+        expenseDefaultTreatment: "DEDUCT_FROM_PAYOUT",
+        approvalThresholdKey: "maintenance",
+        approvalThresholdAmount: "2500.00",
+        approvalThresholdCurrency: "MAD",
+        approvalRequires: ["manager", "owner"],
+        payoutCadence: "MONTHLY",
+        payoutHoldDays: 7,
+        payoutHoldbackBps: 500,
+        noticePeriodDays: 60,
+        ownerResponsibilities: ["insurance", "major repairs"],
+        alvillasResponsibilities: ["guest operations", "owner reporting"],
+        specialConditions: ["lifecycle activation"],
+        reason: "Signed owner management agreement"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-lifecycle-agreement",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    const active = await transitionPropertyLifecycle(
+      ctx,
+      {
+        propertyId: property.id,
+        status: "ACTIVE",
+        reason: "Activation requirements complete"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-lifecycle-active",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const paused = await transitionPropertyLifecycle(
+      ctx,
+      {
+        propertyId: property.id,
+        status: "PAUSED",
+        reason: "Owner requested temporary pause"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-lifecycle-paused",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const offboarded = await transitionPropertyLifecycle(
+      ctx,
+      {
+        propertyId: property.id,
+        status: "OFFBOARDED",
+        reason: "Owner offboarded property"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-lifecycle-offboarded",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    expect(active.status).toBe("ACTIVE");
+    expect(paused.status).toBe("PAUSED");
+    expect(offboarded.status).toBe("OFFBOARDED");
+
+    const stored = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => {
+      const auditRows = await tx.auditLog.findMany({
+        where: {
+          organizationId: orgA.id,
+          action: "property.lifecycle.transition",
+          resourceId: property.id
+        },
+        orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }]
+      });
+      const finalProperty = await tx.property.findUniqueOrThrow({ where: { id: property.id } });
+
+      return { auditRows, finalProperty };
+    });
+    const visibleToOrgB = await withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, async (tx) => ({
+      audits: await tx.auditLog.findMany({ where: { resourceId: property.id } }),
+      property: await tx.property.findFirst({ where: { id: property.id } })
+    }));
+    const detail = await getProperty(ctx, property.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const activeAudit = stored.auditRows.find((row) => row.requestId === "integration-org-lifecycle-active");
+    const activeAuditAfter = activeAudit?.after as
+      | { readiness?: Array<{ key?: string; passed?: boolean }>; status?: string }
+      | undefined;
+
+    expect(stored.finalProperty.status).toBe("OFFBOARDED");
+    expect(stored.auditRows).toHaveLength(4);
+    expect(stored.auditRows.map((row) => row.reason)).toEqual([
+      "Onboarding checklist started",
+      "Activation requirements complete",
+      "Owner requested temporary pause",
+      "Owner offboarded property"
+    ]);
+    expect(activeAuditAfter?.status).toBe("ACTIVE");
+    expect(activeAuditAfter?.readiness?.every((requirement) => requirement.passed)).toBe(true);
+    expect(detail.status).toBe("OFFBOARDED");
+    expect(detail.lifecycleEvents.map((event) => event.toStatus)).toEqual([
+      "OFFBOARDED",
+      "PAUSED",
+      "ACTIVE",
+      "ONBOARDING"
+    ]);
+    expect(visibleToOrgB).toEqual({
+      audits: [],
+      property: null
+    });
+
+    if (!activeAudit) {
+      throw new Error("Expected ACTIVE lifecycle audit row");
+    }
+
+    await expect(
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) =>
+        tx.auditLog.update({
+          where: { id: activeAudit.id },
+          data: { reason: "forbidden lifecycle audit mutation" }
+        })
+      )
+    ).rejects.toThrow(/append-only|permission denied/u);
   });
 
   it("enforces scoped RBAC, ABAC, simulator and field masking from PostgreSQL assignments", async () => {

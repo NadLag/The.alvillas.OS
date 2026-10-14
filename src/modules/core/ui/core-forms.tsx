@@ -10,12 +10,15 @@ import {
   createManagementAgreementAction,
   createOwnerAction,
   createPropertyAction,
+  transitionPropertyLifecycleAction,
   updatePropertyOperatingProfileAction,
   updatePropertyOwnershipAction
 } from "@/modules/core/application/core-actions";
-import type {
-  PropertyOperatingCadence,
-  PropertyOperatingProfileSummary
+import {
+  propertyLifecycleStatuses,
+  type PropertyLifecycleStatus,
+  type PropertyOperatingCadence,
+  type PropertyOperatingProfileSummary
 } from "@/modules/core/domain/owner-property";
 
 type FormLabels = {
@@ -102,6 +105,15 @@ type PropertyLabels = FormLabels & {
   cadence: string;
   cadenceOptions: Record<PropertyOperatingCadence, string>;
   saveProperty: string;
+};
+
+type PropertyLifecycleLabels = FormLabels & {
+  noTransitions: string;
+  nextStatus: string;
+  reason: string;
+  save: string;
+  saved: string;
+  statusOptions: Record<PropertyLifecycleStatus, string>;
 };
 
 type PropertyOperatingProfileLabels = FormLabels & {
@@ -216,6 +228,7 @@ const operatingCadences: PropertyOperatingCadence[] = [
   "CHECKOUT",
   "CUSTOM_RULE"
 ];
+const lifecycleStatuses = propertyLifecycleStatuses;
 const agreementStatuses = ["DRAFT", "ACTIVE", "ENDED"] as const;
 const commissionBasisOptions = [
   "GROSS_ACCOMMODATION",
@@ -1232,6 +1245,89 @@ export function ManagementAgreementForm({
       ) : null}
       <button className="primary-button" data-testid={`${testIdPrefix}-submit`} disabled={pending} type="submit">
         {pending ? labels.saving : isAmendment ? labels.saveAmendment : labels.save}
+      </button>
+    </form>
+  );
+}
+
+export function PropertyLifecycleForm({
+  currentStatus,
+  labels,
+  locale,
+  propertyId,
+  transitions
+}: LocalizedFormProps<PropertyLifecycleLabels> & {
+  currentStatus: PropertyLifecycleStatus;
+  propertyId: string;
+  transitions: readonly PropertyLifecycleStatus[];
+}) {
+  const hasTransitions = transitions.length > 0;
+  const schema = useMemo(
+    () =>
+      z.object({
+        reason: z.string().trim().min(6, labels.validation),
+        status: z.enum(lifecycleStatuses)
+      }),
+    [labels.validation]
+  );
+  const [state, formAction, pending] = useActionState(
+    transitionPropertyLifecycleAction.bind(null, locale, propertyId),
+    initialCoreFormState
+  );
+  const form = useZodForm(schema, {
+    defaultValues: {
+      reason: "",
+      status: transitions[0] ?? currentStatus
+    }
+  });
+  const validateSubmit = useServerActionValidation(form, formAction);
+  const message = state.status === "success" ? labels.saved : messageForState(state, labels);
+
+  if (!hasTransitions) {
+    return (
+      <p className="field-hint" data-testid="property-lifecycle-no-transitions">
+        {labels.noTransitions}
+      </p>
+    );
+  }
+
+  return (
+    <form
+      action={formAction}
+      className="resource-form lifecycle-form"
+      data-testid="property-lifecycle-form"
+      onSubmit={validateSubmit}
+    >
+      <div className="form-grid two">
+        <label className="field">
+          <span>{labels.nextStatus}</span>
+          <select data-testid="property-lifecycle-status" {...form.register("status")}>
+            {transitions.map((status) => (
+              <option key={status} value={status}>
+                {labels.statusOptions[status]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>{labels.reason}</span>
+          <input data-testid="property-lifecycle-reason" required {...form.register("reason")} />
+          <ErrorText testId="property-lifecycle-reason-error">
+            {firstClientError(form.formState.errors.reason) ?? fieldError(state, "reason")}
+          </ErrorText>
+        </label>
+      </div>
+      {message ? (
+        <p
+          className={state.status === "success" ? "form-success" : "form-error"}
+          data-testid={state.status === "success" ? "property-lifecycle-form-success" : "property-lifecycle-form-error"}
+          role={state.status === "success" ? "status" : "alert"}
+        >
+          {message}
+        </p>
+      ) : null}
+      <button className="primary-button" data-testid="property-lifecycle-submit" disabled={pending} type="submit">
+        {pending ? labels.saving : labels.save}
       </button>
     </form>
   );

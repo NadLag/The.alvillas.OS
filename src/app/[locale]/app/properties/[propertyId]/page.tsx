@@ -6,12 +6,15 @@ import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { agreementActorContextFromSession, coreActorContextFromSession } from "@/modules/core/application/core-access";
 import {
   CoreNotFoundError,
+  allowedPropertyLifecycleTransitions,
   getProperty,
   listOwners,
-  listPropertyManagementAgreements
+  listPropertyManagementAgreements,
+  propertyLifecycleReadiness
 } from "@/modules/core/application/core-service";
 import {
   ManagementAgreementForm,
+  PropertyLifecycleForm,
   PropertyOperatingProfileForm,
   PropertyOwnershipForm
 } from "@/modules/core/ui/core-forms";
@@ -210,6 +213,43 @@ export default async function PropertyDetailPage({
   const managementAgreements = canViewAgreements && agreementCtx
     ? await listPropertyManagementAgreements(agreementCtx, property.id)
     : [];
+  const lifecycleTransitions = allowedPropertyLifecycleTransitions(property.status);
+  const lifecycleRequirements = propertyLifecycleReadiness(property, managementAgreements);
+  const lifecycleStatusLabels = {
+    DRAFT: t("properties.status.DRAFT"),
+    ONBOARDING: t("properties.status.ONBOARDING"),
+    ACTIVE: t("properties.status.ACTIVE"),
+    PAUSED: t("properties.status.PAUSED"),
+    OFFBOARDED: t("properties.status.OFFBOARDED")
+  };
+  const lifecycleLabels = {
+    blocked: t("properties.lifecycle.blocked"),
+    current: t("properties.lifecycle.current"),
+    forbidden: t("forms.forbidden"),
+    generic: t("forms.generic"),
+    history: t("properties.lifecycle.history"),
+    noHistory: t("properties.lifecycle.noHistory"),
+    noTransitions: t("properties.lifecycle.noTransitions"),
+    nextStatus: t("properties.lifecycle.nextStatus"),
+    notFound: t("forms.notFound"),
+    passed: t("properties.lifecycle.passed"),
+    reason: t("properties.lifecycle.reason"),
+    requirementLabels: {
+      management_agreement: t("properties.lifecycle.requirementLabels.management_agreement"),
+      onboarding_profile: t("properties.lifecycle.requirementLabels.onboarding_profile"),
+      operating_profile: t("properties.lifecycle.requirementLabels.operating_profile"),
+      ownership: t("properties.lifecycle.requirementLabels.ownership"),
+      photos: t("properties.lifecycle.requirementLabels.photos")
+    },
+    requirements: t("properties.lifecycle.requirements"),
+    save: t("properties.lifecycle.save"),
+    saved: t("properties.lifecycle.saved"),
+    saving: t("common.saving"),
+    statusOptions: lifecycleStatusLabels,
+    title: t("properties.lifecycle.title"),
+    unauthorized: t("forms.unauthorized"),
+    validation: t("forms.validation")
+  };
   const agreementLabels = {
     alvillasResponsibilities: t("properties.agreement.alvillasResponsibilities"),
     amendmentFormTitle: t("properties.agreement.amendmentFormTitle"),
@@ -351,6 +391,53 @@ export default async function PropertyDetailPage({
             <dd>{property.photoUrls.length > 0 ? property.photoUrls.join(", ") : t("common.notProvided")}</dd>
           </div>
         </dl>
+      </section>
+
+      <section className="detail-panel" data-testid="property-lifecycle-panel">
+        <div className="section-heading">
+          <p className="panel-label">{lifecycleLabels.title}</p>
+          <span data-testid="property-lifecycle-current">
+            {lifecycleLabels.current}: {lifecycleStatusLabels[property.status]}
+          </span>
+        </div>
+        <p className="field-hint">{lifecycleLabels.requirements}</p>
+        <ul className="config-rule-list" data-testid="property-lifecycle-requirements">
+          {lifecycleRequirements.map((requirement) => (
+            <li
+              className="config-rule-row"
+              data-testid={`property-lifecycle-requirement-${requirement.key}`}
+              key={requirement.key}
+            >
+              <span>{lifecycleLabels.requirementLabels[requirement.key]}</span>
+              <strong>{requirement.passed ? lifecycleLabels.passed : lifecycleLabels.blocked}</strong>
+            </li>
+          ))}
+        </ul>
+        <div className="config-rule-history" data-testid="property-lifecycle-history">
+          <p className="field-hint">{lifecycleLabels.history}</p>
+          {property.lifecycleEvents.length > 0 ? (
+            <ul>
+              {property.lifecycleEvents.map((event) => (
+                <li key={event.id}>
+                  {event.fromStatus ? lifecycleStatusLabels[event.fromStatus] : t("common.notProvided")} -{" "}
+                  {lifecycleStatusLabels[event.toStatus]} - {event.reason ?? t("common.notProvided")} -{" "}
+                  {event.occurredAt.toLocaleString()}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="field-hint">{lifecycleLabels.noHistory}</p>
+          )}
+        </div>
+        {canEditOwnership ? (
+          <PropertyLifecycleForm
+            currentStatus={property.status}
+            labels={lifecycleLabels}
+            locale={appLocale}
+            propertyId={property.id}
+            transitions={lifecycleTransitions}
+          />
+        ) : null}
       </section>
 
       <section className="detail-panel">

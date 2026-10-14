@@ -535,6 +535,27 @@
       "onboardingProfile": "Onboarding profile",
       "noOnboardingProfile": "No onboarding profile recorded.",
       "photoCount": "Photos",
+      "lifecycle": {
+        "title": "دورة حياة العقار",
+        "current": "الحالة الحالية",
+        "requirements": "قائمة تفعيل العقار",
+        "history": "سجل دورة الحياة",
+        "noHistory": "لا توجد انتقالات مسجلة بعد.",
+        "noTransitions": "لا توجد انتقالات اخرى متاحة.",
+        "nextStatus": "الحالة التالية",
+        "reason": "السبب",
+        "save": "حفظ انتقال الحالة",
+        "saved": "تم تحديث دورة حياة العقار.",
+        "passed": "جاهز",
+        "blocked": "يحتاج الى عمل",
+        "requirementLabels": {
+          "ownership": "حصص الملكية تساوي 100% مع مالك اساسي واحد",
+          "operating_profile": "تم ضبط الملف التشغيلي",
+          "onboarding_profile": "تم تسجيل عنوان ملف التجهيز",
+          "photos": "تم تسجيل صورة واحدة على الاقل للعقار",
+          "management_agreement": "اتفاقية ادارة نشطة مع قواعد مضبوطة"
+        }
+      },
       "ownership": {
         "title": "Ownership shares",
         "formTitle": "Manage owner shares",

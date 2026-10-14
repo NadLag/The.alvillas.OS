@@ -14,6 +14,7 @@ import {
   managementAgreementInputSchema,
   managementAgreementAmendmentInputSchema,
   ownerInputSchema,
+  propertyLifecycleTransitionInputSchema,
   propertyOperatingProfileInputSchema,
   propertyInputSchema,
   propertyOwnershipInputSchema,
@@ -24,6 +25,8 @@ import {
   type OwnerInput,
   type OwnerSummary,
   type PropertyInput,
+  type PropertyLifecycleStatus,
+  type PropertyLifecycleTransitionInput,
   type PropertyOperatingProfileInput,
   type PropertyOwnershipInput,
   type PropertySummary
@@ -45,6 +48,13 @@ export class CoreNotFoundError extends Error {
   constructor(message = "Core resource was not found") {
     super(message);
     this.name = "CoreNotFoundError";
+  }
+}
+
+export class CoreValidationError extends Error {
+  constructor(message = "Core input is invalid") {
+    super(message);
+    this.name = "CoreValidationError";
   }
 }
 
@@ -89,6 +99,30 @@ const agreementConfigKeys = [
   agreementNoticeConfigKey,
   agreementSpecialConditionsConfigKey
 ] as const;
+
+const propertyLifecycleTransitions: Record<PropertyLifecycleStatus, readonly PropertyLifecycleStatus[]> = {
+  DRAFT: ["ONBOARDING"],
+  ONBOARDING: ["ACTIVE"],
+  ACTIVE: ["PAUSED"],
+  PAUSED: ["ACTIVE", "OFFBOARDED"],
+  OFFBOARDED: []
+};
+
+export type PropertyLifecycleRequirement = {
+  key:
+    | "ownership"
+    | "operating_profile"
+    | "onboarding_profile"
+    | "photos"
+    | "management_agreement";
+  passed: boolean;
+};
+
+export function allowedPropertyLifecycleTransitions(
+  status: PropertyLifecycleStatus
+): readonly PropertyLifecycleStatus[] {
+  return propertyLifecycleTransitions[status];
+}
 
 function assertConfigAllowed(
   ctx: CoreActorContext,
@@ -143,6 +177,10 @@ export function parsePropertyOwnershipInput(input: unknown) {
   return propertyOwnershipInputSchema.safeParse(input);
 }
 
+export function parsePropertyLifecycleTransitionInput(input: unknown) {
+  return propertyLifecycleTransitionInputSchema.safeParse(input);
+}
+
 export function parseManagementAgreementInput(input: unknown) {
   return managementAgreementInputSchema.safeParse(input);
 }
@@ -183,6 +221,66 @@ function compactAgreementSummary(agreement: ManagementAgreementSummary): Record<
       version: rule.version
     }))
   };
+}
+
+export function propertyLifecycleReadiness(
+  property: PropertySummary,
+  agreements: readonly ManagementAgreementSummary[]
+): PropertyLifecycleRequirement[] {
+  const shareTotal = property.owners.reduce((total, owner) => total + owner.shareBps, 0);
+  const primaryOwners = property.owners.filter((owner) => owner.isPrimary).length;
+  const activeAgreement = agreements.some(
+    (agreement) =>
+      agreement.status === "ACTIVE" &&
+      agreementConfigKeys.every((key) =>
+        agreement.rules.some((rule) => rule.key === key && rule.lifecycle === "ACTIVE")
+      )
+  );
+
+  return [
+    {
+      key: "ownership",
+      passed: property.owners.length > 0 && shareTotal === 10000 && primaryOwners === 1
+    },
+    {
+      key: "operating_profile",
+      passed: Boolean(property.operatingProfile)
+    },
+    {
+      key: "onboarding_profile",
+      passed: Boolean(property.onboardingProfile?.headline)
+    },
+    {
+      key: "photos",
+      passed: property.photoUrls.length > 0 || Boolean(property.onboardingProfile?.photoGallery.length)
+    },
+    {
+      key: "management_agreement",
+      passed: activeAgreement
+    }
+  ];
+}
+
+function assertLifecycleTransitionAllowed(
+  property: PropertySummary,
+  nextStatus: PropertyLifecycleStatus,
+  agreements: readonly ManagementAgreementSummary[]
+): void {
+  const allowed = allowedPropertyLifecycleTransitions(property.status);
+
+  if (!allowed.includes(nextStatus)) {
+    throw new CoreValidationError(`Property cannot move from ${property.status} to ${nextStatus}`);
+  }
+
+  if (nextStatus === "ACTIVE") {
+    const failed = propertyLifecycleReadiness(property, agreements).filter((requirement) => !requirement.passed);
+
+    if (failed.length > 0) {
+      throw new CoreValidationError(
+        `Property is missing activation requirements: ${failed.map((requirement) => requirement.key).join(", ")}`
+      );
+    }
+  }
 }
 
 function agreementRuleValues(
@@ -402,6 +500,58 @@ export async function getProperty(
   }
 
   return property;
+}
+
+export async function transitionPropertyLifecycle(
+  ctx: CoreActorContext,
+  input: PropertyLifecycleTransitionInput,
+  deps: CoreServiceDeps = {}
+): Promise<PropertySummary> {
+  assertAllowed(ctx, "edit", "property", input.propertyId);
+  const meta = await auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new CoreRepository(tx, ctx.organizationId);
+    const before = await repository.findProperty(input.propertyId);
+
+    if (!before) {
+      throw new CoreNotFoundError();
+    }
+
+    const agreements = await repository.listManagementAgreementsForProperty(input.propertyId, agreementConfigKeys);
+    assertLifecycleTransitionAllowed(before, input.status, agreements);
+
+    const property = await repository.updatePropertyStatus(input.propertyId, input.status);
+
+    if (!property) {
+      throw new CoreNotFoundError();
+    }
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "property.lifecycle.transition",
+      resourceType: "property",
+      resourceId: property.id,
+      ipAddress: meta.ipAddress,
+      propertyScopeId: property.id,
+      before: {
+        status: before.status
+      },
+      after: {
+        status: property.status,
+        readiness: propertyLifecycleReadiness(before, agreements)
+      },
+      reason: input.reason,
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
+
+    return {
+      ...property,
+      lifecycleEvents: await repository.listPropertyLifecycleEvents(property.id)
+    };
+  });
 }
 
 export async function listPropertyManagementAgreements(

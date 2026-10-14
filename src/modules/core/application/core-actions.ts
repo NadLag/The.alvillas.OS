@@ -8,15 +8,18 @@ import {
   amendManagementAgreement,
   CoreAuthorizationError,
   CoreNotFoundError,
+  CoreValidationError,
   createManagementAgreement,
   createOwner,
   createProperty,
   parseManagementAgreementAmendmentInput,
   parseManagementAgreementInput,
   parseOwnerInput,
+  parsePropertyLifecycleTransitionInput,
   parsePropertyOperatingProfileInput,
   parsePropertyInput,
   parsePropertyOwnershipInput,
+  transitionPropertyLifecycle,
   updatePropertyOperatingProfile,
   updatePropertyOwnership
 } from "@/modules/core/application/core-service";
@@ -129,6 +132,10 @@ function actionErrorState(error: unknown): CoreFormState {
 
   if (error instanceof CoreNotFoundError) {
     return { status: "error", messageKey: "notFound" };
+  }
+
+  if (error instanceof CoreValidationError) {
+    return { status: "error", messageKey: "validation" };
   }
 
   return { status: "error", messageKey: "generic" };
@@ -379,6 +386,42 @@ export async function updatePropertyOwnershipAction(
 
   try {
     await updatePropertyOwnership(ctx, parsed.data);
+  } catch (error) {
+    return actionErrorState(error);
+  }
+
+  revalidatePath(`/${appLocale}/app/properties/${propertyId}`);
+  revalidatePath(`/${appLocale}/app/properties`);
+
+  return { status: "success" };
+}
+
+export async function transitionPropertyLifecycleAction(
+  locale: string,
+  propertyId: string,
+  _state: CoreFormState,
+  formData: FormData
+): Promise<CoreFormState> {
+  const appLocale = safeLocale(locale);
+  const session = await auth();
+  const ctx = coreActorContextFromSession(session);
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parsePropertyLifecycleTransitionInput({
+    propertyId,
+    status: formValue(formData, "status"),
+    reason: formValue(formData, "reason")
+  });
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await transitionPropertyLifecycle(ctx, parsed.data);
   } catch (error) {
     return actionErrorState(error);
   }

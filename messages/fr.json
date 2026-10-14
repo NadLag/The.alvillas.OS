@@ -535,6 +535,27 @@
       "onboardingProfile": "Profil onboarding",
       "noOnboardingProfile": "Aucun profil onboarding renseigne.",
       "photoCount": "Photos",
+      "lifecycle": {
+        "title": "Cycle de vie de la propriete",
+        "current": "Statut actuel",
+        "requirements": "Checklist d'activation",
+        "history": "Historique du cycle",
+        "noHistory": "Aucune transition de cycle enregistree.",
+        "noTransitions": "Aucune autre transition de cycle n'est disponible.",
+        "nextStatus": "Prochain statut",
+        "reason": "Motif",
+        "save": "Enregistrer la transition",
+        "saved": "Cycle de vie de la propriete mis a jour.",
+        "passed": "Pret",
+        "blocked": "A completer",
+        "requirementLabels": {
+          "ownership": "Les parts totalisent 100 % avec un proprietaire principal",
+          "operating_profile": "Profil operationnel configure",
+          "onboarding_profile": "Accroche du profil onboarding renseignee",
+          "photos": "Au moins une photo de propriete renseignee",
+          "management_agreement": "Contrat de gestion actif avec regles configurees"
+        }
+      },
       "ownership": {
         "title": "Parts de propriete",
         "formTitle": "Gerer les parts proprietaires",
