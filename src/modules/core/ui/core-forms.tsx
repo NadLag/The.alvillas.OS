@@ -6,6 +6,7 @@ import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import { appLocales, compactLocaleLabels } from "@/i18n/routing";
 import type { CoreFormState } from "@/modules/core/application/core-actions";
 import {
+  amendManagementAgreementAction,
   createManagementAgreementAction,
   createOwnerAction,
   createPropertyAction,
@@ -131,6 +132,7 @@ type PropertyOperatingProfileLabels = FormLabels & {
 type ManagementAgreementLabels = FormLabels & {
   title: string;
   formTitle: string;
+  amendmentFormTitle: string;
   empty: string;
   reference: string;
   status: string;
@@ -153,7 +155,10 @@ type ManagementAgreementLabels = FormLabels & {
   specialConditions: string;
   reason: string;
   save: string;
+  saveAmendment: string;
   saved: string;
+  amendmentSaved: string;
+  historyTitle: string;
   statusOptions: Record<"DRAFT" | "ACTIVE" | "ENDED", string>;
   commissionBasisOptions: Record<string, string>;
   commissionAccrualOptions: Record<string, string>;
@@ -305,6 +310,10 @@ function localDateTime(date = new Date()): string {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
 
   return local.toISOString().slice(0, 16);
+}
+
+function optionDefault<T extends string>(allowed: readonly T[], value: string | undefined, fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
 }
 
 function CadenceSelect({
@@ -928,12 +937,39 @@ export function PropertyCreateForm({
 }
 
 export function ManagementAgreementForm({
+  agreementId,
+  defaults,
   labels,
   locale,
   propertyId
 }: LocalizedFormProps<ManagementAgreementLabels> & {
+  agreementId?: string;
+  defaults?: Partial<{
+    approvalRequires: string;
+    approvalThresholdAmount: string;
+    approvalThresholdCurrency: string;
+    approvalThresholdKey: string;
+    alvillasResponsibilities: string;
+    commissionAccrualEvent: string;
+    commissionBasis: string;
+    commissionRateBps: number;
+    effectiveFrom: string;
+    effectiveTo: string;
+    expenseDefaultTreatment: string;
+    noticePeriodDays: number;
+    ownerResponsibilities: string;
+    payoutCadence: string;
+    payoutHoldDays: string;
+    payoutHoldbackBps: string;
+    reason: string;
+    reference: string;
+    specialConditions: string;
+    status: string;
+  }>;
   propertyId: string;
 }) {
+  const isAmendment = Boolean(agreementId);
+  const testIdPrefix = isAmendment ? "management-agreement-amendment" : "management-agreement";
   const schema = useMemo(
     () =>
       z.object({
@@ -961,56 +997,80 @@ export function ManagementAgreementForm({
     [labels.validation]
   );
   const [state, formAction, pending] = useActionState(
-    createManagementAgreementAction.bind(null, locale, propertyId),
+    agreementId
+      ? amendManagementAgreementAction.bind(null, locale, propertyId, agreementId)
+      : createManagementAgreementAction.bind(null, locale, propertyId),
     initialCoreFormState
   );
   const form = useZodForm(schema, {
     defaultValues: {
-      approvalRequires: "owner",
-      approvalThresholdCurrency: "MAD",
-      commissionAccrualEvent: "ON_CHECKOUT",
-      commissionBasis: "GROSS_ACCOMMODATION",
-      effectiveFrom: localDateTime(),
-      expenseDefaultTreatment: "OWNER_PAID",
-      noticePeriodDays: 30,
-      payoutCadence: "MONTHLY",
-      reference: "",
-      status: "ACTIVE"
+      approvalRequires: defaults?.approvalRequires ?? "owner",
+      approvalThresholdAmount: defaults?.approvalThresholdAmount,
+      approvalThresholdCurrency: defaults?.approvalThresholdCurrency ?? "MAD",
+      approvalThresholdKey: defaults?.approvalThresholdKey,
+      alvillasResponsibilities: defaults?.alvillasResponsibilities,
+      commissionAccrualEvent: optionDefault(commissionAccrualOptions, defaults?.commissionAccrualEvent, "ON_CHECKOUT"),
+      commissionBasis: optionDefault(commissionBasisOptions, defaults?.commissionBasis, "GROSS_ACCOMMODATION"),
+      commissionRateBps: defaults?.commissionRateBps,
+      effectiveFrom: defaults?.effectiveFrom ?? localDateTime(),
+      effectiveTo: defaults?.effectiveTo,
+      expenseDefaultTreatment: optionDefault(expenseTreatmentOptions, defaults?.expenseDefaultTreatment, "OWNER_PAID"),
+      noticePeriodDays: defaults?.noticePeriodDays ?? 30,
+      ownerResponsibilities: defaults?.ownerResponsibilities,
+      payoutCadence: optionDefault(payoutCadenceOptions, defaults?.payoutCadence, "MONTHLY"),
+      payoutHoldDays: defaults?.payoutHoldDays,
+      payoutHoldbackBps: defaults?.payoutHoldbackBps,
+      reference: defaults?.reference ?? "",
+      specialConditions: defaults?.specialConditions,
+      status: optionDefault(agreementStatuses, defaults?.status, "ACTIVE")
     }
   });
   const validateSubmit = useServerActionValidation(form, formAction);
-  const message = state.status === "success" ? labels.saved : messageForState(state, labels);
+  const message = state.status === "success"
+    ? isAmendment
+      ? labels.amendmentSaved
+      : labels.saved
+    : messageForState(state, labels);
 
   return (
     <form
       action={formAction}
       className="resource-form management-agreement-form"
-      data-testid="management-agreement-form"
+      data-testid={`${testIdPrefix}-form`}
       onSubmit={validateSubmit}
     >
-      <p className="panel-label">{labels.formTitle}</p>
-      <div className="form-grid three">
-        <label className="field">
-          <span>{labels.reference}</span>
-          <input data-testid="management-agreement-reference" required {...form.register("reference")} />
-          <ErrorText testId="management-agreement-reference-error">
-            {firstClientError(form.formState.errors.reference) ?? fieldError(state, "reference")}
-          </ErrorText>
-        </label>
-        <label className="field">
-          <span>{labels.status}</span>
-          <select data-testid="management-agreement-status" {...form.register("status")}>
-            {agreementStatuses.map((status) => (
-              <option key={status} value={status}>
-                {labels.statusOptions[status]}
-              </option>
-            ))}
-          </select>
-        </label>
+      <p className="panel-label">{isAmendment ? labels.amendmentFormTitle : labels.formTitle}</p>
+      <div className={isAmendment ? "form-grid two" : "form-grid three"}>
+        {isAmendment ? (
+          <>
+            <input type="hidden" {...form.register("reference")} />
+            <input type="hidden" {...form.register("status")} />
+          </>
+        ) : (
+          <>
+            <label className="field">
+              <span>{labels.reference}</span>
+              <input data-testid="management-agreement-reference" required {...form.register("reference")} />
+              <ErrorText testId="management-agreement-reference-error">
+                {firstClientError(form.formState.errors.reference) ?? fieldError(state, "reference")}
+              </ErrorText>
+            </label>
+            <label className="field">
+              <span>{labels.status}</span>
+              <select data-testid="management-agreement-status" {...form.register("status")}>
+                {agreementStatuses.map((status) => (
+                  <option key={status} value={status}>
+                    {labels.statusOptions[status]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
         <label className="field">
           <span>{labels.reason}</span>
-          <input data-testid="management-agreement-reason" required {...form.register("reason")} />
-          <ErrorText testId="management-agreement-reason-error">
+          <input data-testid={`${testIdPrefix}-reason`} required {...form.register("reason")} />
+          <ErrorText testId={`${testIdPrefix}-reason-error`}>
             {firstClientError(form.formState.errors.reason) ?? fieldError(state, "reason")}
           </ErrorText>
         </label>
@@ -1019,7 +1079,7 @@ export function ManagementAgreementForm({
         <label className="field">
           <span>{labels.effectiveFrom}</span>
           <input
-            data-testid="management-agreement-effective-from"
+            data-testid={`${testIdPrefix}-effective-from`}
             required
             type="datetime-local"
             {...form.register("effectiveFrom")}
@@ -1027,27 +1087,27 @@ export function ManagementAgreementForm({
         </label>
         <label className="field">
           <span>{labels.effectiveTo}</span>
-          <input data-testid="management-agreement-effective-to" type="datetime-local" {...form.register("effectiveTo")} />
+          <input data-testid={`${testIdPrefix}-effective-to`} type="datetime-local" {...form.register("effectiveTo")} />
         </label>
       </div>
       <div className="form-grid three">
         <label className="field">
           <span>{labels.commissionRateBps}</span>
           <input
-            data-testid="management-agreement-commission-rate"
+            data-testid={`${testIdPrefix}-commission-rate`}
             min={0}
             max={10000}
             required
             type="number"
             {...form.register("commissionRateBps")}
           />
-          <ErrorText testId="management-agreement-commission-rate-error">
+          <ErrorText testId={`${testIdPrefix}-commission-rate-error`}>
             {firstClientError(form.formState.errors.commissionRateBps) ?? fieldError(state, "commissionRateBps")}
           </ErrorText>
         </label>
         <label className="field">
           <span>{labels.commissionBasis}</span>
-          <select data-testid="management-agreement-commission-basis" {...form.register("commissionBasis")}>
+          <select data-testid={`${testIdPrefix}-commission-basis`} {...form.register("commissionBasis")}>
             {commissionBasisOptions.map((option) => (
               <option key={option} value={option}>
                 {labels.commissionBasisOptions[option]}
@@ -1057,7 +1117,7 @@ export function ManagementAgreementForm({
         </label>
         <label className="field">
           <span>{labels.commissionAccrualEvent}</span>
-          <select data-testid="management-agreement-accrual-event" {...form.register("commissionAccrualEvent")}>
+          <select data-testid={`${testIdPrefix}-accrual-event`} {...form.register("commissionAccrualEvent")}>
             {commissionAccrualOptions.map((option) => (
               <option key={option} value={option}>
                 {labels.commissionAccrualOptions[option]}
@@ -1069,7 +1129,7 @@ export function ManagementAgreementForm({
       <div className="form-grid three">
         <label className="field">
           <span>{labels.expenseDefaultTreatment}</span>
-          <select data-testid="management-agreement-expense-treatment" {...form.register("expenseDefaultTreatment")}>
+          <select data-testid={`${testIdPrefix}-expense-treatment`} {...form.register("expenseDefaultTreatment")}>
             {expenseTreatmentOptions.map((option) => (
               <option key={option} value={option}>
                 {labels.expenseTreatmentOptions[option]}
@@ -1079,12 +1139,12 @@ export function ManagementAgreementForm({
         </label>
         <label className="field">
           <span>{labels.approvalThresholdAmount}</span>
-          <input data-testid="management-agreement-approval-amount" {...form.register("approvalThresholdAmount")} />
+          <input data-testid={`${testIdPrefix}-approval-amount`} {...form.register("approvalThresholdAmount")} />
         </label>
         <label className="field">
           <span>{labels.approvalThresholdCurrency}</span>
           <input
-            data-testid="management-agreement-approval-currency"
+            data-testid={`${testIdPrefix}-approval-currency`}
             maxLength={3}
             {...form.register("approvalThresholdCurrency")}
           />
@@ -1093,11 +1153,11 @@ export function ManagementAgreementForm({
       <div className="form-grid three">
         <label className="field">
           <span>{labels.approvalThresholdKey}</span>
-          <input data-testid="management-agreement-approval-key" {...form.register("approvalThresholdKey")} />
+          <input data-testid={`${testIdPrefix}-approval-key`} {...form.register("approvalThresholdKey")} />
         </label>
         <label className="field">
           <span>{labels.approvalRequires}</span>
-          <select data-testid="management-agreement-approval-requires" {...form.register("approvalRequires")}>
+          <select data-testid={`${testIdPrefix}-approval-requires`} {...form.register("approvalRequires")}>
             {approvalStepOptions.map((option) => (
               <option key={option} value={option}>
                 {labels.approvalStepOptions[option]}
@@ -1108,7 +1168,7 @@ export function ManagementAgreementForm({
         <label className="field">
           <span>{labels.noticePeriodDays}</span>
           <input
-            data-testid="management-agreement-notice-days"
+            data-testid={`${testIdPrefix}-notice-days`}
             min={0}
             max={1095}
             required
@@ -1120,7 +1180,7 @@ export function ManagementAgreementForm({
       <div className="form-grid three">
         <label className="field">
           <span>{labels.payoutCadence}</span>
-          <select data-testid="management-agreement-payout-cadence" {...form.register("payoutCadence")}>
+          <select data-testid={`${testIdPrefix}-payout-cadence`} {...form.register("payoutCadence")}>
             {payoutCadenceOptions.map((option) => (
               <option key={option} value={option}>
                 {labels.payoutCadenceOptions[option]}
@@ -1130,12 +1190,12 @@ export function ManagementAgreementForm({
         </label>
         <label className="field">
           <span>{labels.payoutHoldDays}</span>
-          <input data-testid="management-agreement-payout-hold-days" min={0} type="number" {...form.register("payoutHoldDays")} />
+          <input data-testid={`${testIdPrefix}-payout-hold-days`} min={0} type="number" {...form.register("payoutHoldDays")} />
         </label>
         <label className="field">
           <span>{labels.payoutHoldbackBps}</span>
           <input
-            data-testid="management-agreement-payout-holdback-bps"
+            data-testid={`${testIdPrefix}-payout-holdback-bps`}
             min={0}
             max={10000}
             type="number"
@@ -1146,32 +1206,32 @@ export function ManagementAgreementForm({
       <div className="form-grid three">
         <label className="field">
           <span>{labels.ownerResponsibilities}</span>
-          <textarea data-testid="management-agreement-owner-responsibilities" rows={4} {...form.register("ownerResponsibilities")} />
+          <textarea data-testid={`${testIdPrefix}-owner-responsibilities`} rows={4} {...form.register("ownerResponsibilities")} />
         </label>
         <label className="field">
           <span>{labels.alvillasResponsibilities}</span>
           <textarea
-            data-testid="management-agreement-alvillas-responsibilities"
+            data-testid={`${testIdPrefix}-alvillas-responsibilities`}
             rows={4}
             {...form.register("alvillasResponsibilities")}
           />
         </label>
         <label className="field">
           <span>{labels.specialConditions}</span>
-          <textarea data-testid="management-agreement-special-conditions" rows={4} {...form.register("specialConditions")} />
+          <textarea data-testid={`${testIdPrefix}-special-conditions`} rows={4} {...form.register("specialConditions")} />
         </label>
       </div>
       {message ? (
         <p
           className={state.status === "success" ? "form-status" : "form-error"}
-          data-testid={state.status === "success" ? "management-agreement-form-success" : "management-agreement-form-error"}
+          data-testid={state.status === "success" ? `${testIdPrefix}-form-success` : `${testIdPrefix}-form-error`}
           role={state.status === "success" ? "status" : "alert"}
         >
           {message}
         </p>
       ) : null}
-      <button className="primary-button" data-testid="management-agreement-submit" disabled={pending} type="submit">
-        {pending ? labels.saving : labels.save}
+      <button className="primary-button" data-testid={`${testIdPrefix}-submit`} disabled={pending} type="submit">
+        {pending ? labels.saving : isAmendment ? labels.saveAmendment : labels.save}
       </button>
     </form>
   );

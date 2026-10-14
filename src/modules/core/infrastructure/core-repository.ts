@@ -602,7 +602,9 @@ export class CoreRepository {
         version: true,
         lifecycle: true,
         effectiveFrom: true,
-        effectiveTo: true
+        effectiveTo: true,
+        reason: true,
+        createdAt: true
       }
     });
     const rulesByAgreementId = new Map<string, ManagementAgreementRuleSummary[]>();
@@ -620,6 +622,8 @@ export class CoreRepository {
         lifecycle: rule.lifecycle as ManagementAgreementRuleSummary["lifecycle"],
         effectiveFrom: rule.effectiveFrom,
         effectiveTo: rule.effectiveTo,
+        reason: rule.reason,
+        createdAt: rule.createdAt,
         value: jsonRecord(rule.value)
       });
       rulesByAgreementId.set(rule.scopeId, entries);
@@ -628,6 +632,27 @@ export class CoreRepository {
     return agreements.map((agreement) =>
       managementAgreementToSummary(agreement, rulesByAgreementId.get(agreement.id) ?? [])
     );
+  }
+
+  async findManagementAgreement(
+    agreementId: string,
+    keys: readonly string[]
+  ): Promise<ManagementAgreementSummary | null> {
+    const agreement = await this.tx.managementAgreement.findFirst({
+      where: {
+        id: agreementId,
+        organizationId: this.organizationId,
+        archivedAt: null
+      }
+    });
+
+    if (!agreement) {
+      return null;
+    }
+
+    const summaries = await this.listManagementAgreementsForProperty(agreement.propertyId, keys);
+
+    return summaries.find((candidate) => candidate.id === agreementId) ?? null;
   }
 
   async replacePropertyOperatingProfile(

@@ -5,11 +5,13 @@ import { redirect } from "next/navigation";
 import type { ZodError } from "zod";
 import { agreementActorContextFromSession, coreActorContextFromSession } from "@/modules/core/application/core-access";
 import {
+  amendManagementAgreement,
   CoreAuthorizationError,
   CoreNotFoundError,
   createManagementAgreement,
   createOwner,
   createProperty,
+  parseManagementAgreementAmendmentInput,
   parseManagementAgreementInput,
   parseOwnerInput,
   parsePropertyOperatingProfileInput,
@@ -210,6 +212,13 @@ function managementAgreementInput(propertyId: string, formData: FormData) {
   };
 }
 
+function managementAgreementAmendmentInput(propertyId: string, agreementId: string, formData: FormData) {
+  return {
+    ...managementAgreementInput(propertyId, formData),
+    agreementId
+  };
+}
+
 export async function createOwnerAction(
   locale: string,
   _state: CoreFormState,
@@ -402,6 +411,41 @@ export async function createManagementAgreementAction(
 
   try {
     await createManagementAgreement(ctx, parsed.data);
+  } catch (error) {
+    return actionErrorState(error);
+  }
+
+  revalidatePath(`/${appLocale}/app/properties/${propertyId}`);
+  revalidatePath(`/${appLocale}/app/properties`);
+
+  return { status: "success" };
+}
+
+export async function amendManagementAgreementAction(
+  locale: string,
+  propertyId: string,
+  agreementId: string,
+  _state: CoreFormState,
+  formData: FormData
+): Promise<CoreFormState> {
+  const appLocale = safeLocale(locale);
+  const session = await auth();
+  const ctx = await agreementActorContextFromSession(session);
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parseManagementAgreementAmendmentInput(
+    managementAgreementAmendmentInput(propertyId, agreementId, formData)
+  );
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await amendManagementAgreement(ctx, parsed.data);
   } catch (error) {
     return actionErrorState(error);
   }

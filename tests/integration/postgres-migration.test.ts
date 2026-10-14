@@ -13,6 +13,7 @@ import type { CoreActorContext } from "@/modules/core/application/core-access";
 import {
   CoreAuthorizationError,
   createManagementAgreement,
+  amendManagementAgreement,
   createOwner,
   createProperty,
   getOwner,
@@ -1867,6 +1868,89 @@ describe("PostgreSQL baseline", () => {
       audits: [],
       rules: []
     });
+
+    const amended = await amendManagementAgreement(
+      ctx,
+      {
+        propertyId: property.id,
+        agreementId: agreement.id,
+        effectiveFrom: new Date("2026-09-01T00:00:00.000Z"),
+        effectiveTo: new Date("2028-02-01T00:00:00.000Z"),
+        commissionRateBps: 2000,
+        commissionBasis: "NET_OF_OTA_FEES",
+        commissionAccrualEvent: "ON_RECEIPT",
+        expenseDefaultTreatment: "OWNER_PAID",
+        approvalThresholdKey: "maintenance",
+        approvalThresholdAmount: "3000.00",
+        approvalThresholdCurrency: "MAD",
+        approvalRequires: ["owner" as const],
+        payoutCadence: "MONTHLY",
+        payoutHoldDays: 10,
+        payoutHoldbackBps: 250,
+        noticePeriodDays: 75,
+        ownerResponsibilities: ["insurance"],
+        alvillasResponsibilities: ["guest operations", "owner reporting"],
+        specialConditions: ["summer staffing plan"],
+        reason: "Signed amendment v2 with new owner terms"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-org-management-agreement-amend",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const amendmentStored = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async (tx) => {
+      const rules = await tx.configRule.findMany({
+        where: {
+          organizationId: orgA.id,
+          scopeType: "agreement",
+          scopeId: agreement.id,
+          key: "finance.commission"
+        },
+        orderBy: [{ version: "asc" }]
+      });
+      const historicalCommission = await new ConfigRuleRepository(tx, orgA.id).resolve({
+        key: "finance.commission",
+        asOf: new Date("2026-06-01T00:00:00.000Z"),
+        scopes: [
+          { scopeType: "agreement", scopeId: agreement.id },
+          { scopeType: "property", scopeId: property.id },
+          { scopeType: "organization", scopeId: null }
+        ]
+      });
+      const amendedCommission = await new ConfigRuleRepository(tx, orgA.id).resolve({
+        key: "finance.commission",
+        asOf: new Date("2026-10-01T00:00:00.000Z"),
+        scopes: [
+          { scopeType: "agreement", scopeId: agreement.id },
+          { scopeType: "property", scopeId: property.id },
+          { scopeType: "organization", scopeId: null }
+        ]
+      });
+      const amendmentAudit = await tx.auditLog.findFirstOrThrow({
+        where: {
+          organizationId: orgA.id,
+          action: "owner_agreement.changed",
+          resourceId: property.id,
+          requestId: "integration-org-management-agreement-amend"
+        }
+      });
+      const agreementRows = await tx.managementAgreement.findMany({
+        where: { organizationId: orgA.id, propertyId: property.id }
+      });
+
+      return { amendedCommission, amendmentAudit, agreementRows, historicalCommission, rules };
+    });
+
+    expect(amended.rules.filter((rule) => rule.key === "finance.commission")).toHaveLength(2);
+    expect(amendmentStored.rules.map((rule) => rule.version)).toEqual([1, 2]);
+    expect(amendmentStored.rules[0]?.value).toMatchObject({ rate_bps: 1800 });
+    expect(amendmentStored.rules[1]?.value).toMatchObject({ rate_bps: 2000 });
+    expect(amendmentStored.historicalCommission?.version).toBe(1);
+    expect(amendmentStored.amendedCommission?.version).toBe(2);
+    expect(amendmentStored.agreementRows).toHaveLength(1);
+    expect(amendmentStored.amendmentAudit.before).toBeTruthy();
+    expect(amendmentStored.amendmentAudit.after).toBeTruthy();
 
     const commissionRule = rulesByKey.get("finance.commission");
 

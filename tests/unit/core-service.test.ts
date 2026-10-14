@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { CoreActorContext } from "@/modules/core/application/core-access";
 import {
+  amendManagementAgreement,
   CoreAuthorizationError,
   createManagementAgreement,
   createOwner,
   getProperty,
   listOwners,
+  parseManagementAgreementAmendmentInput,
   parseManagementAgreementInput,
   parsePropertyOperatingProfileInput,
   parsePropertyOwnershipInput,
@@ -51,6 +53,28 @@ const validManagementAgreementInput = {
   alvillasResponsibilities: ["guest operations", "owner reporting"],
   specialConditions: ["ramadan staffing plan"],
   reason: "Signed owner management agreement"
+};
+const validManagementAgreementAmendmentInput = {
+  propertyId: validManagementAgreementInput.propertyId,
+  agreementId: "00000000-0000-7000-8000-000000000200",
+  effectiveFrom: "2026-06-01T00:00:00.000Z",
+  effectiveTo: "2027-06-01T00:00:00.000Z",
+  commissionRateBps: "2000",
+  commissionBasis: "NET_OF_OTA_FEES",
+  commissionAccrualEvent: "ON_RECEIPT",
+  expenseDefaultTreatment: "OWNER_PAID",
+  approvalThresholdKey: "maintenance",
+  approvalThresholdAmount: "3000.00",
+  approvalThresholdCurrency: "mad",
+  approvalRequires: ["owner"],
+  payoutCadence: "MONTHLY",
+  payoutHoldDays: "10",
+  payoutHoldbackBps: "250",
+  noticePeriodDays: "75",
+  ownerResponsibilities: ["insurance"],
+  alvillasResponsibilities: ["guest operations"],
+  specialConditions: ["summer staffing"],
+  reason: "Signed amendment with new effective terms"
 };
 
 describe("core service authorization", () => {
@@ -269,6 +293,18 @@ describe("core service authorization", () => {
     expect(invalidCommission.success).toBe(false);
   });
 
+  it("validates management agreement amendments as effective-dated terms", () => {
+    const valid = parseManagementAgreementAmendmentInput(validManagementAgreementAmendmentInput);
+    const invalidRange = parseManagementAgreementAmendmentInput({
+      ...validManagementAgreementAmendmentInput,
+      effectiveTo: "2026-05-01T00:00:00.000Z"
+    });
+
+    expect(valid.success).toBe(true);
+    expect(valid.success && valid.data.approvalThresholdCurrency).toBe("MAD");
+    expect(invalidRange.success).toBe(false);
+  });
+
   it("denies management agreement creation without config permissions before reaching the database", async () => {
     const parsed = parseManagementAgreementInput(validManagementAgreementInput);
     const ctx = actor({
@@ -282,6 +318,23 @@ describe("core service authorization", () => {
     }
 
     await expect(createManagementAgreement(ctx, parsed.data, { db: deniedDb })).rejects.toBeInstanceOf(
+      CoreAuthorizationError
+    );
+  });
+
+  it("denies management agreement amendments without config permissions before reaching the database", async () => {
+    const parsed = parseManagementAgreementAmendmentInput(validManagementAgreementAmendmentInput);
+    const ctx = actor({
+      organizationId: "org-a",
+      permissions: new Set([permissionKey("property", "edit")]),
+      scopes: [{ organizationId: "org-a" }]
+    });
+
+    if (!parsed.success) {
+      throw new Error("management agreement amendment fixture should parse");
+    }
+
+    await expect(amendManagementAgreement(ctx, parsed.data, { db: deniedDb })).rejects.toBeInstanceOf(
       CoreAuthorizationError
     );
   });

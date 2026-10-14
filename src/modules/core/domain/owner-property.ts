@@ -260,48 +260,68 @@ export type PropertyOperatingProfileInput = z.infer<typeof propertyOperatingProf
 
 export const managementAgreementStatusSchema = z.enum(["DRAFT", "ACTIVE", "ENDED"]);
 
+const managementAgreementTermFields = {
+  effectiveFrom: z.coerce.date(),
+  effectiveTo: optionalDate,
+  commissionRateBps: z.coerce.number().int().min(0).max(10000),
+  commissionBasis: commissionBasisSchema,
+  commissionAccrualEvent: commissionAccrualEventSchema,
+  expenseDefaultTreatment: expenseTreatmentSchema,
+  approvalThresholdKey: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    configRuleKey.optional()
+  ),
+  approvalThresholdAmount: optionalMoneyAmountText,
+  approvalThresholdCurrency: z
+    .string()
+    .trim()
+    .length(3)
+    .transform((value) => value.toUpperCase())
+    .default("MAD"),
+  approvalRequires: z.array(approvalStepSchema).min(1).default(["owner"]),
+  payoutCadence: payoutCadenceSchema,
+  payoutHoldDays: optionalNonNegativeInteger,
+  payoutHoldbackBps: optionalBps,
+  noticePeriodDays: z.coerce.number().int().min(0).max(1095),
+  ownerResponsibilities: z.array(z.string().trim().min(1).max(240)).max(40).default([]),
+  alvillasResponsibilities: z.array(z.string().trim().min(1).max(240)).max(40).default([]),
+  specialConditions: z.array(z.string().trim().min(1).max(240)).max(80).default([]),
+  reason: requiredText(500)
+} as const;
+
+function validManagementAgreementDateRange(value: {
+  effectiveFrom: Date;
+  effectiveTo?: Date | null;
+}): boolean {
+  return !value.effectiveTo || value.effectiveTo.getTime() > value.effectiveFrom.getTime();
+}
+
 export const managementAgreementInputSchema = z
   .object({
     propertyId: z.string().uuid(),
     reference: requiredText(160),
     status: managementAgreementStatusSchema.default("ACTIVE"),
-    effectiveFrom: z.coerce.date(),
-    effectiveTo: optionalDate,
-    commissionRateBps: z.coerce.number().int().min(0).max(10000),
-    commissionBasis: commissionBasisSchema,
-    commissionAccrualEvent: commissionAccrualEventSchema,
-    expenseDefaultTreatment: expenseTreatmentSchema,
-    approvalThresholdKey: z.preprocess(
-      (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
-      configRuleKey.optional()
-    ),
-    approvalThresholdAmount: optionalMoneyAmountText,
-    approvalThresholdCurrency: z
-      .string()
-      .trim()
-      .length(3)
-      .transform((value) => value.toUpperCase())
-      .default("MAD"),
-    approvalRequires: z.array(approvalStepSchema).min(1).default(["owner"]),
-    payoutCadence: payoutCadenceSchema,
-    payoutHoldDays: optionalNonNegativeInteger,
-    payoutHoldbackBps: optionalBps,
-    noticePeriodDays: z.coerce.number().int().min(0).max(1095),
-    ownerResponsibilities: z.array(z.string().trim().min(1).max(240)).max(40).default([]),
-    alvillasResponsibilities: z.array(z.string().trim().min(1).max(240)).max(40).default([]),
-    specialConditions: z.array(z.string().trim().min(1).max(240)).max(80).default([]),
-    reason: requiredText(500)
+    ...managementAgreementTermFields
   })
-  .refine(
-    (value) =>
-      !value.effectiveTo || value.effectiveTo.getTime() > value.effectiveFrom.getTime(),
-    {
-      message: "Agreement end date must be after the effective date",
-      path: ["effectiveTo"]
-    }
-  );
+  .refine(validManagementAgreementDateRange, {
+    message: "Agreement end date must be after the effective date",
+    path: ["effectiveTo"]
+  });
 
 export type ManagementAgreementInput = z.infer<typeof managementAgreementInputSchema>;
+
+export const managementAgreementAmendmentInputSchema = z
+  .object({
+    propertyId: z.string().uuid(),
+    agreementId: z.string().uuid(),
+    ...managementAgreementTermFields
+  })
+  .refine(validManagementAgreementDateRange, {
+    message: "Agreement end date must be after the effective date",
+    path: ["effectiveTo"]
+  });
+
+export type ManagementAgreementAmendmentInput = z.infer<typeof managementAgreementAmendmentInputSchema>;
 
 export type ManagementAgreementRuleSummary = {
   id: string;
@@ -310,6 +330,8 @@ export type ManagementAgreementRuleSummary = {
   lifecycle: "DRAFT" | "ACTIVE" | "RETIRED";
   effectiveFrom: Date;
   effectiveTo: Date | null;
+  reason: string;
+  createdAt: Date;
   value: Record<string, unknown>;
 };
 

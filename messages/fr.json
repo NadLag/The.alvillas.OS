@@ -551,6 +551,9 @@
       "agreement": {
         "title": "Contrat de gestion",
         "formTitle": "Creer un contrat de gestion",
+        "amendmentFormTitle": "Modifier les conditions du contrat",
+        "historyTitle": "Historique des avenants",
+        "versionLabel": "Version {version}",
         "empty": "Aucun contrat de gestion n'a ete renseigne pour cette propriete.",
         "reference": "Reference du contrat",
         "status": "Statut",
@@ -573,7 +576,9 @@
         "specialConditions": "Conditions particulieres",
         "reason": "Motif",
         "save": "Enregistrer le contrat",
+        "saveAmendment": "Enregistrer l'avenant",
         "saved": "Contrat de gestion enregistre.",
+        "amendmentSaved": "Avenant du contrat enregistre.",
         "statusOptions": {
           "DRAFT": "Brouillon",
           "ACTIVE": "Actif",

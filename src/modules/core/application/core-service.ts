@@ -12,10 +12,12 @@ import {
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import {
   managementAgreementInputSchema,
+  managementAgreementAmendmentInputSchema,
   ownerInputSchema,
   propertyOperatingProfileInputSchema,
   propertyInputSchema,
   propertyOwnershipInputSchema,
+  type ManagementAgreementAmendmentInput,
   type ManagementAgreementInput,
   type ManagementAgreementRuleSummary,
   type ManagementAgreementSummary,
@@ -145,6 +147,10 @@ export function parseManagementAgreementInput(input: unknown) {
   return managementAgreementInputSchema.safeParse(input);
 }
 
+export function parseManagementAgreementAmendmentInput(input: unknown) {
+  return managementAgreementAmendmentInputSchema.safeParse(input);
+}
+
 function latestRule(
   agreement: ManagementAgreementSummary,
   key: string
@@ -179,7 +185,9 @@ function compactAgreementSummary(agreement: ManagementAgreementSummary): Record<
   };
 }
 
-function agreementRuleValues(input: ManagementAgreementInput): Array<{ key: string; value: unknown }> {
+function agreementRuleValues(
+  input: ManagementAgreementInput | ManagementAgreementAmendmentInput
+): Array<{ key: string; value: unknown }> {
   const approvalThresholds = input.approvalThresholdAmount
     ? {
         thresholds: [
@@ -244,6 +252,16 @@ function agreementRuleValues(input: ManagementAgreementInput): Array<{ key: stri
       }
     }
   ];
+}
+
+function validateAgreementRule(rule: { key: string; value: unknown }): void {
+  if (rule.key === "finance.approval_thresholds") {
+    approvalThresholdsConfigSchema.parse(rule.value);
+  } else if (rule.key === "finance.expense_treatment") {
+    expenseTreatmentConfigSchema.parse(rule.value);
+  } else if (rule.key === "finance.payout_schedule") {
+    payoutScheduleConfigSchema.parse(rule.value);
+  }
 }
 
 export async function createOwner(
@@ -428,13 +446,7 @@ export async function createManagementAgreement(
     const configRepository = new ConfigRuleRepository(tx, ctx.organizationId);
 
     for (const rule of agreementRuleValues(input)) {
-      if (rule.key === "finance.approval_thresholds") {
-        approvalThresholdsConfigSchema.parse(rule.value);
-      } else if (rule.key === "finance.expense_treatment") {
-        expenseTreatmentConfigSchema.parse(rule.value);
-      } else if (rule.key === "finance.payout_schedule") {
-        payoutScheduleConfigSchema.parse(rule.value);
-      }
+      validateAgreementRule(rule);
 
       await configRepository.createVersion({
         key: rule.key,
@@ -472,6 +484,67 @@ export async function createManagementAgreement(
     });
 
     return created;
+  });
+}
+
+export async function amendManagementAgreement(
+  ctx: CoreActorContext,
+  input: ManagementAgreementAmendmentInput,
+  deps: CoreServiceDeps = {}
+): Promise<ManagementAgreementSummary> {
+  assertAllowed(ctx, "edit", "property", input.propertyId);
+  assertConfigAllowed(ctx, "create", input.propertyId);
+  assertConfigAllowed(ctx, "configure", input.propertyId);
+  const meta = await auditMeta(deps);
+
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new CoreRepository(tx, ctx.organizationId);
+    const before = await repository.findManagementAgreement(input.agreementId, agreementConfigKeys);
+
+    if (!before || before.propertyId !== input.propertyId) {
+      throw new CoreNotFoundError();
+    }
+
+    const configRepository = new ConfigRuleRepository(tx, ctx.organizationId);
+
+    for (const rule of agreementRuleValues(input)) {
+      validateAgreementRule(rule);
+
+      await configRepository.createVersion({
+        key: rule.key,
+        scopeType: "agreement",
+        scopeId: before.id,
+        value: rule.value,
+        effectiveFrom: input.effectiveFrom,
+        effectiveTo: input.effectiveTo,
+        lifecycle: "ACTIVE",
+        createdBy: ctx.actorId,
+        reason: input.reason
+      });
+    }
+
+    const after = await repository.findManagementAgreement(input.agreementId, agreementConfigKeys);
+
+    if (!after) {
+      throw new CoreNotFoundError("Management agreement amendment was not created");
+    }
+
+    await writeAuditEvent(tx, {
+      organizationId: ctx.organizationId,
+      actorId: ctx.actorId,
+      action: "owner_agreement.changed",
+      resourceType: "property",
+      resourceId: after.propertyId,
+      ipAddress: meta.ipAddress,
+      propertyScopeId: after.propertyId,
+      before: compactAgreementSummary(before),
+      after: compactAgreementSummary(after),
+      reason: input.reason,
+      requestId: meta.requestId,
+      occurredAt: new Date()
+    });
+
+    return after;
   });
 }
 
