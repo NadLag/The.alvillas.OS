@@ -599,6 +599,77 @@
           "CHANNEL_MANAGER": "Channel manager"
         }
       },
+      "workspace": {
+        "tabsLabel": "Property workspace sections",
+        "tabs": {
+          "overview": "Overview",
+          "calendar": "Calendar",
+          "reservations": "Reservations",
+          "operations": "Operations",
+          "finance": "Finance",
+          "inventory": "Inventory",
+          "laundry": "Laundry",
+          "maintenance": "Maintenance",
+          "assets": "Assets",
+          "documents": "Documents",
+          "team": "Team",
+          "rules": "Rules"
+        },
+        "metrics": {
+          "owners": "Owners",
+          "channels": "Channels",
+          "reservations": "Reservations",
+          "openTasks": "Open tasks",
+          "agreements": "Agreements"
+        },
+        "calendar": {
+          "title": "Calendar",
+          "count": "{count, plural, one {# stay} other {# stays}}",
+          "empty": "No reservation dates are scheduled for this property."
+        },
+        "reservations": {
+          "title": "Reservations",
+          "count": "{count, plural, one {# reservation} other {# reservations}}",
+          "empty": "No reservations are recorded for this property.",
+          "rowMeta": "{source} - {status}",
+          "nights": "{nights, plural, one {# night} other {# nights}}"
+        },
+        "operations": {
+          "title": "Operations",
+          "count": "{count, plural, one {# task} other {# tasks}}",
+          "empty": "No operation tasks are open for this property.",
+          "noReservation": "No reservation"
+        },
+        "finance": {
+          "title": "Finance",
+          "currency": "Base currency {currency}",
+          "agreements": "Agreements",
+          "bookingChannels": "Booking channels",
+          "activeOwners": "Active owners",
+          "lifecycle": "Lifecycle"
+        },
+        "inventory": {
+          "title": "Inventory",
+          "amenityCount": "{count, plural, one {# amenity} other {# amenities}}"
+        },
+        "laundry": {
+          "title": "Laundry"
+        },
+        "maintenance": {
+          "title": "Maintenance"
+        },
+        "assets": {
+          "title": "Assets"
+        },
+        "documents": {
+          "title": "Documents",
+          "agreements": "Agreements"
+        },
+        "team": {
+          "title": "Team",
+          "count": "{count, plural, one {# owner} other {# owners}}"
+        }
+      },
       "agreement": {
         "title": "Management agreement",
         "formTitle": "Create management agreement",

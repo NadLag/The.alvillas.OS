@@ -338,6 +338,8 @@ function propertyToSummary(property: PropertyWithOwners): PropertySummary {
     propertyType: property.propertyType,
     bedrooms: property.bedrooms,
     bathrooms: property.bathrooms,
+    livingSpaces: property.livingSpaces,
+    parkingSpaces: property.parkingSpaces,
     maxGuests: property.maxGuests,
     timezone: property.timezone,
     status: property.status as PropertySummary["status"],

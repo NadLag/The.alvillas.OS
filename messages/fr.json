@@ -599,6 +599,77 @@
           "CHANNEL_MANAGER": "Channel manager"
         }
       },
+      "workspace": {
+        "tabsLabel": "Sections de l'espace propriete",
+        "tabs": {
+          "overview": "Apercu",
+          "calendar": "Calendrier",
+          "reservations": "Reservations",
+          "operations": "Operations",
+          "finance": "Finance",
+          "inventory": "Inventaire",
+          "laundry": "Blanchisserie",
+          "maintenance": "Maintenance",
+          "assets": "Actifs",
+          "documents": "Documents",
+          "team": "Equipe",
+          "rules": "Regles"
+        },
+        "metrics": {
+          "owners": "Proprietaires",
+          "channels": "Canaux",
+          "reservations": "Reservations",
+          "openTasks": "Taches ouvertes",
+          "agreements": "Contrats"
+        },
+        "calendar": {
+          "title": "Calendrier",
+          "count": "{count, plural, one {# sejour} other {# sejours}}",
+          "empty": "Aucune date de reservation n'est planifiee pour cette propriete."
+        },
+        "reservations": {
+          "title": "Reservations",
+          "count": "{count, plural, one {# reservation} other {# reservations}}",
+          "empty": "Aucune reservation n'est enregistree pour cette propriete.",
+          "rowMeta": "{source} - {status}",
+          "nights": "{nights, plural, one {# nuit} other {# nuits}}"
+        },
+        "operations": {
+          "title": "Operations",
+          "count": "{count, plural, one {# tache} other {# taches}}",
+          "empty": "Aucune tache operationnelle n'est ouverte pour cette propriete.",
+          "noReservation": "Sans reservation"
+        },
+        "finance": {
+          "title": "Finance",
+          "currency": "Devise de base {currency}",
+          "agreements": "Contrats",
+          "bookingChannels": "Canaux de reservation",
+          "activeOwners": "Proprietaires actifs",
+          "lifecycle": "Cycle"
+        },
+        "inventory": {
+          "title": "Inventaire",
+          "amenityCount": "{count, plural, one {# equipement} other {# equipements}}"
+        },
+        "laundry": {
+          "title": "Blanchisserie"
+        },
+        "maintenance": {
+          "title": "Maintenance"
+        },
+        "assets": {
+          "title": "Actifs"
+        },
+        "documents": {
+          "title": "Documents",
+          "agreements": "Contrats"
+        },
+        "team": {
+          "title": "Equipe",
+          "count": "{count, plural, one {# proprietaire} other {# proprietaires}}"
+        }
+      },
       "agreement": {
         "title": "Contrat de gestion",
         "formTitle": "Creer un contrat de gestion",
