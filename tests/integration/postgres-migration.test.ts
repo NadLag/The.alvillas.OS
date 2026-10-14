@@ -312,6 +312,37 @@ describe("PostgreSQL baseline", () => {
     expect(rows.map((row) => row.migration_name)).toEqual(migrationNames());
   });
 
+  it("supports password MFA challenges with atomic consumption and tenant isolation", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({ data: { name: "MFA tenant A", baseCurrency: "MAD" } }),
+      prisma.organization.create({ data: { name: "MFA tenant B", baseCurrency: "MAD" } })
+    ]);
+    const challenge = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, (tx) =>
+      tx.authChallenge.create({ data: {
+        organizationId: orgA.id, type: "PASSWORD_MFA", challenge: randomUUID(),
+        expiresAt: new Date(Date.now() + 60_000)
+      } })
+    );
+    const wrongTenant = await withTenant(prisma as unknown as TenantTransactionRunner, orgB.id, (tx) =>
+      tx.authChallenge.updateMany({ where: { id: challenge.id, consumedAt: null }, data: { consumedAt: new Date() } })
+    );
+    expect(wrongTenant.count).toBe(0);
+    const attempts = await Promise.all([1, 2].map(() =>
+      withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, (tx) =>
+        tx.authChallenge.updateMany({
+          where: { id: challenge.id, consumedAt: null, expiresAt: { gt: new Date() } },
+          data: { consumedAt: new Date() }
+        })
+      )
+    ));
+    expect(attempts.map((attempt) => attempt.count).sort()).toEqual([0, 1]);
+    await expect(withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, (tx) =>
+      tx.authChallenge.create({ data: {
+        organizationId: orgA.id, type: "UNSUPPORTED", challenge: randomUUID(), expiresAt: new Date()
+      } })
+    )).rejects.toThrow(/auth_challenge_type_check/u);
+  });
+
   it("enforces audit log append-only behavior", async () => {
     const org = await prisma.organization.create({
       data: { name: "ALVILLAS Test", baseCurrency: "MAD" }

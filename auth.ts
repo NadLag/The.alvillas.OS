@@ -1,8 +1,9 @@
 import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { z } from "zod";
-import { consumeLoginRateLimit, loginRateLimitIp } from "@/platform/auth/login-rate-limit";
+import { consumeLoginRateLimit, loginRateLimitIp, loginRateLimitWasChecked } from "@/platform/auth/login-rate-limit";
 import {
+  authenticateMfaChallenge,
   authenticatePassword,
   authenticatePin,
   validateAuthSession,
@@ -13,7 +14,7 @@ const authSecret =
   process.env.AUTH_SECRET ??
   (process.env.NODE_ENV === "production" ? undefined : "dev-only-alvillas-os-auth-secret");
 
-const emptyString = z.literal("").transform(() => undefined);
+const emptyString = z.union([z.literal(""), z.null()]).transform(() => undefined);
 const optionalTrimmedString = z
   .string()
   .transform((value) => value.trim())
@@ -21,7 +22,7 @@ const optionalTrimmedString = z
   .or(emptyString);
 
 const credentialsSchema = z.object({
-  method: z.enum(["password", "pin"]).default("password"),
+  method: z.enum(["password", "pin", "mfa"]).default("password"),
   email: z
     .string()
     .trim()
@@ -40,8 +41,8 @@ const credentialsSchema = z.object({
   pin: optionalTrimmedString,
   mfaCode: optionalTrimmedString,
   recoveryCode: optionalTrimmedString,
-  deviceId: optionalTrimmedString.default("server-action-device-default"),
-  rateLimitChecked: z.literal("1").optional()
+  mfaChallenge: optionalTrimmedString,
+  deviceId: optionalTrimmedString.default("server-action-device-default")
 });
 
 class InvalidCredentialsSignin extends CredentialsSignin {
@@ -69,7 +70,7 @@ async function authorizeCredentials(
   const rateLimitKey =
     parsed.data.method === "pin" ? (parsed.data.phone ?? "missing-phone") : (parsed.data.email ?? "missing-email");
 
-  if (parsed.data.rateLimitChecked !== "1") {
+  if (!loginRateLimitWasChecked(rateLimitKey, loginRateLimitIp(request.headers))) {
     const rateLimit = await consumeLoginRateLimit(rateLimitKey, loginRateLimitIp(request.headers));
 
     if (!rateLimit.allowed) {
@@ -78,7 +79,18 @@ async function authorizeCredentials(
   }
 
   const authorizedUser =
-    parsed.data.method === "pin"
+    parsed.data.method === "mfa"
+      ? parsed.data.email && parsed.data.mfaChallenge
+        ? await authenticateMfaChallenge({
+            email: parsed.data.email,
+            challengeToken: parsed.data.mfaChallenge,
+            mfaCode: parsed.data.mfaCode,
+            recoveryCode: parsed.data.recoveryCode,
+            deviceId: parsed.data.deviceId,
+            headers: request.headers
+          })
+        : null
+      : parsed.data.method === "pin"
       ? parsed.data.phone && parsed.data.pin
         ? await authenticatePin({
             phone: parsed.data.phone,
@@ -127,8 +139,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         pin: { label: "PIN", type: "password" },
         mfaCode: { label: "MFA code", type: "text" },
         recoveryCode: { label: "Recovery code", type: "text" },
+        mfaChallenge: { label: "MFA challenge", type: "text" },
         deviceId: { label: "Device", type: "text" },
-        rateLimitChecked: { label: "Rate limit checked", type: "text" }
       },
       async authorize(credentials, request) {
         return authorizeCredentials(credentials, request);

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
@@ -6,6 +7,17 @@ import {
   type RateLimitClient,
   type RateLimitDecision
 } from "@/platform/rate-limit/postgres-rate-limiter";
+
+const checkedLogin = new AsyncLocalStorage<{ key: string; ip: string }>();
+
+export function withCheckedLoginRateLimit<T>(key: string, ip: string, callback: () => T): T {
+  return checkedLogin.run({ key, ip }, callback);
+}
+
+export function loginRateLimitWasChecked(key: string, ip: string): boolean {
+  const checked = checkedLogin.getStore();
+  return checked?.key === key && checked.ip === ip;
+}
 
 export function loginRateLimitIp(headers: Headers): string {
   return (

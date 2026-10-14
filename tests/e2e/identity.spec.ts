@@ -146,9 +146,9 @@ test.describe("identity lifecycle", () => {
 
     await page.context().clearCookies();
     await page.goto("/en/login");
+    await page.getByRole("radio", { name: "PIN" }).check();
     await page.getByTestId("login-phone").fill(invitedPhone);
     await page.getByTestId("login-pin").fill("123456");
-    await page.getByRole("radio", { name: "PIN" }).check();
     await page.getByTestId("login-submit").click();
     await expect(page).toHaveURL(/\/en\/app/u);
     await page.goto("/en/app/reservations");
@@ -184,9 +184,9 @@ test.describe("identity lifecycle", () => {
 
     await page.context().clearCookies();
     await page.goto("/en/login");
+    await page.getByRole("radio", { name: "PIN" }).check();
     await page.getByTestId("login-phone").fill(invitedPhone);
     await page.getByTestId("login-pin").fill("123456");
-    await page.getByRole("radio", { name: "PIN" }).check();
     await page.getByTestId("login-submit").click();
     await expect(page.getByTestId("login-error")).toBeVisible();
 
