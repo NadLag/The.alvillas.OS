@@ -32,6 +32,7 @@ export const envSchema = z.object({
   NEXT_PUBLIC_WHATSAPP_NUMBER: z.string().optional(),
   PAYPAL_CLIENT_ID: z.string().optional(),
   PAYPAL_SECRET: z.string().optional(),
+  PAYPAL_BASE_URL: optionalUrl,
   PDF_RENDERER_ENDPOINT: optionalUrl,
   PDF_RENDERER_TOKEN: z.string().optional(),
   INNGEST_EVENT_URL: optionalUrl,
@@ -43,4 +44,64 @@ export type AppEnv = z.infer<typeof envSchema>;
 
 export function readEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   return envSchema.parse(source);
+}
+
+export type EnvValidationIssue = {
+  key: keyof AppEnv | "schema";
+  severity: "error" | "warning";
+  message: string;
+};
+
+const productionRequiredKeys: Array<keyof AppEnv> = [
+  "DATABASE_URL",
+  "APP_URL",
+  "AUTH_SECRET",
+  "ENCRYPTION_KEYS"
+];
+
+export function validateRuntimeEnv(source: NodeJS.ProcessEnv = process.env): {
+  ok: boolean;
+  issues: EnvValidationIssue[];
+} {
+  const parsed = envSchema.safeParse(source);
+
+  if (!parsed.success) {
+    return {
+      ok: false,
+      issues: parsed.error.issues.map((issue) => ({
+        key: (issue.path[0] as keyof AppEnv | undefined) ?? "schema",
+        severity: "error",
+        message: issue.message
+      }))
+    };
+  }
+
+  const env = parsed.data;
+  const isProductionRuntime = source.NODE_ENV === "production" || source.VERCEL_ENV === "production";
+  const issues: EnvValidationIssue[] = [];
+
+  if (isProductionRuntime) {
+    for (const key of productionRequiredKeys) {
+      if (!env[key]) {
+        issues.push({
+          key,
+          severity: "error",
+          message: `${key} is required in production`
+        });
+      }
+    }
+  }
+
+  if (env.SENTRY_DSN && !env.NEXT_PUBLIC_SENTRY_DSN) {
+    issues.push({
+      key: "NEXT_PUBLIC_SENTRY_DSN",
+      severity: "warning",
+      message: "NEXT_PUBLIC_SENTRY_DSN is recommended when SENTRY_DSN is configured"
+    });
+  }
+
+  return {
+    ok: issues.every((issue) => issue.severity !== "error"),
+    issues
+  };
 }

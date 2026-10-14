@@ -10,9 +10,31 @@ export type IdentityAccountSummary = {
   status: string;
   mfaRequired: boolean;
   passkeyCount: number;
+  credentials: CredentialSummary[];
   activeSessionCount: number;
+  activeDeviceCount: number;
+  recentSessions: SessionSummary[];
+  devices: DeviceSummary[];
   roles: string[];
   lastLoginAt: Date | null;
+};
+
+export type PersonProfileSummary = {
+  id: string;
+  displayName: string;
+  email: string | null;
+  phone: string | null;
+  preferredLocale: string;
+  accountCount: number;
+  openInvitationCount: number;
+  activeAssignmentCount: number;
+};
+
+export type DuplicateContactSummary = {
+  contactType: "email" | "phone";
+  value: string;
+  personIds: string[];
+  displayNames: string[];
 };
 
 export type InvitationSummary = {
@@ -37,6 +59,29 @@ export type SessionSummary = {
   revokedAt: Date | null;
   lastSeenAt: Date;
 };
+
+export type DeviceSummary = {
+  id: string;
+  deviceId: string;
+  label: string | null;
+  platform: string | null;
+  trusted: boolean;
+  registeredAt: Date;
+  lastSeenAt: Date | null;
+  revokedAt: Date | null;
+};
+
+export type CredentialSummary = {
+  id: string;
+  type: string;
+  label: string | null;
+  lastUsedAt: Date | null;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+  createdAt: Date;
+};
+
+export type AccountSessionSummary = SessionSummary;
 
 export type RoleCatalogSummary = {
   id: string;
@@ -79,6 +124,7 @@ type AccountRow = Prisma.UserAccountGetPayload<{
     person: true;
     authCredentials: true;
     authSessions: true;
+    authDevices: true;
     roleAssignments: {
       include: {
         role: true;
@@ -94,6 +140,19 @@ function activeNow(validFrom: Date, validTo: Date | null): boolean {
 }
 
 function accountToSummary(account: AccountRow): IdentityAccountSummary {
+  const sessions = [...account.authSessions]
+    .sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime())
+    .slice(0, 5)
+    .map(sessionToSummary);
+  const devices = [...account.authDevices]
+    .sort((a, b) => (b.lastSeenAt ?? b.registeredAt).getTime() - (a.lastSeenAt ?? a.registeredAt).getTime())
+    .slice(0, 5)
+    .map(deviceToSummary);
+  const credentials = [...account.authCredentials]
+    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+    .slice(0, 8)
+    .map(credentialToSummary);
+
   return {
     id: account.id,
     personId: account.personId,
@@ -105,14 +164,86 @@ function accountToSummary(account: AccountRow): IdentityAccountSummary {
     passkeyCount: account.authCredentials.filter(
       (credential) => credential.type === "PASSKEY" && !credential.revokedAt
     ).length,
+    credentials,
     activeSessionCount: account.authSessions.filter(
       (session) => !session.revokedAt && session.expiresAt.getTime() > Date.now()
     ).length,
+    activeDeviceCount: account.authDevices.filter((device) => !device.revokedAt).length,
+    recentSessions: sessions,
+    devices,
     roles: account.roleAssignments
       .filter((assignment) => !assignment.archivedAt && activeNow(assignment.validFrom, assignment.validTo))
       .map((assignment) => assignment.role.key),
     lastLoginAt: account.lastLoginAt
   };
+}
+
+function credentialToSummary(credential: AccountRow["authCredentials"][number]): CredentialSummary {
+  return {
+    id: credential.id,
+    type: credential.type,
+    label: credential.label,
+    lastUsedAt: credential.lastUsedAt,
+    expiresAt: credential.expiresAt,
+    revokedAt: credential.revokedAt,
+    createdAt: credential.createdAt
+  };
+}
+
+function sessionToSummary(session: AccountRow["authSessions"][number]): SessionSummary {
+  return {
+    id: session.id,
+    deviceId: session.deviceId,
+    userAgent: session.userAgent,
+    ipAddress: session.ipAddress,
+    expiresAt: session.expiresAt,
+    revokedAt: session.revokedAt,
+    lastSeenAt: session.lastSeenAt
+  };
+}
+
+function deviceToSummary(device: AccountRow["authDevices"][number]): DeviceSummary {
+  return {
+    id: device.id,
+    deviceId: device.deviceId,
+    label: device.label,
+    platform: device.platform,
+    trusted: device.trusted,
+    registeredAt: device.registeredAt,
+    lastSeenAt: device.lastSeenAt,
+    revokedAt: device.revokedAt
+  };
+}
+
+function duplicateContacts(people: PersonProfileSummary[]): DuplicateContactSummary[] {
+  const groups = new Map<string, PersonProfileSummary[]>();
+
+  for (const person of people) {
+    for (const [contactType, value] of [
+      ["email", person.email],
+      ["phone", person.phone]
+    ] as const) {
+      if (!value) {
+        continue;
+      }
+
+      const key = `${contactType}:${value}`;
+      groups.set(key, [...(groups.get(key) ?? []), person]);
+    }
+  }
+
+  return [...groups.entries()]
+    .filter(([, group]) => group.length > 1)
+    .map(([key, group]) => {
+      const [contactType, value] = key.split(":", 2) as ["email" | "phone", string];
+
+      return {
+        contactType,
+        value,
+        personIds: group.map((person) => person.id),
+        displayNames: group.map((person) => person.displayName)
+      };
+    });
 }
 
 export class IdentityRepository {
@@ -574,6 +705,7 @@ export class IdentityRepository {
           person: true,
           authCredentials: true,
           authSessions: true,
+          authDevices: true,
           roleAssignments: {
             include: {
               role: true
@@ -582,6 +714,52 @@ export class IdentityRepository {
         }
       })
       .then((accounts) => accounts.map(accountToSummary));
+  }
+
+  async listPeople(): Promise<PersonProfileSummary[]> {
+    const people = await this.tx.person.findMany({
+      where: {
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      orderBy: [{ updatedAt: "desc" }],
+      take: 150,
+      include: {
+        userAccounts: {
+          select: { id: true }
+        },
+        invitations: {
+          where: {
+            acceptedAt: null,
+            revokedAt: null
+          },
+          select: { id: true }
+        },
+        roleAssignments: {
+          where: {
+            archivedAt: null,
+            validFrom: { lte: new Date() },
+            OR: [{ validTo: null }, { validTo: { gt: new Date() } }]
+          },
+          select: { id: true }
+        }
+      }
+    });
+
+    return people.map((person) => ({
+      id: person.id,
+      displayName: person.displayName,
+      email: person.email,
+      phone: person.phone,
+      preferredLocale: person.preferredLocale,
+      accountCount: person.userAccounts.length,
+      openInvitationCount: person.invitations.length,
+      activeAssignmentCount: person.roleAssignments.length
+    }));
+  }
+
+  async listDuplicateContacts(): Promise<DuplicateContactSummary[]> {
+    return duplicateContacts(await this.listPeople());
   }
 
   listSessions(userAccountId: string): Promise<SessionSummary[]> {
@@ -632,6 +810,116 @@ export class IdentityRepository {
       },
       select: { id: true }
     });
+  }
+
+  createStandalonePerson(input: {
+    displayName: string;
+    email?: string | null;
+    phone?: string | null;
+    preferredLocale: string;
+  }): Promise<PersonProfileSummary> {
+    return this.tx.person
+      .create({
+        data: {
+          organizationId: this.organizationId,
+          displayName: input.displayName,
+          email: input.email ?? null,
+          phone: input.phone ?? null,
+          preferredLocale: input.preferredLocale
+        },
+        include: {
+          userAccounts: { select: { id: true } },
+          invitations: { select: { id: true } },
+          roleAssignments: { select: { id: true } }
+        }
+      })
+      .then((person) => ({
+        id: person.id,
+        displayName: person.displayName,
+        email: person.email,
+        phone: person.phone,
+        preferredLocale: person.preferredLocale,
+        accountCount: person.userAccounts.length,
+        openInvitationCount: person.invitations.length,
+        activeAssignmentCount: person.roleAssignments.length
+      }));
+  }
+
+  async updatePersonProfile(input: {
+    personId: string;
+    displayName: string;
+    email?: string | null;
+    phone?: string | null;
+    preferredLocale: string;
+  }): Promise<{
+    before: PersonProfileSummary;
+    after: PersonProfileSummary;
+  }> {
+    const before = await this.tx.person.findFirst({
+      where: {
+        id: input.personId,
+        organizationId: this.organizationId,
+        archivedAt: null
+      },
+      include: {
+        userAccounts: { select: { id: true } },
+        invitations: {
+          where: {
+            acceptedAt: null,
+            revokedAt: null
+          },
+          select: { id: true }
+        },
+        roleAssignments: {
+          where: { archivedAt: null },
+          select: { id: true }
+        }
+      }
+    });
+
+    if (!before) {
+      throw new Error("Person was not found");
+    }
+
+    const after = await this.tx.person.update({
+      where: { id: input.personId },
+      data: {
+        displayName: input.displayName,
+        email: input.email ?? null,
+        phone: input.phone ?? null,
+        preferredLocale: input.preferredLocale
+      },
+      include: {
+        userAccounts: { select: { id: true } },
+        invitations: {
+          where: {
+            acceptedAt: null,
+            revokedAt: null
+          },
+          select: { id: true }
+        },
+        roleAssignments: {
+          where: { archivedAt: null },
+          select: { id: true }
+        }
+      }
+    });
+
+    const toSummary = (person: typeof before): PersonProfileSummary => ({
+      id: person.id,
+      displayName: person.displayName,
+      email: person.email,
+      phone: person.phone,
+      preferredLocale: person.preferredLocale,
+      accountCount: person.userAccounts.length,
+      openInvitationCount: person.invitations.length,
+      activeAssignmentCount: person.roleAssignments.length
+    });
+
+    return {
+      before: toSummary(before),
+      after: toSummary(after)
+    };
   }
 
   async updatePersonPreferredLocale(

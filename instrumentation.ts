@@ -1,4 +1,5 @@
 import type { Instrumentation } from "next";
+import { validateRuntimeEnv } from "@/platform/env/env";
 import { logger } from "@/platform/observability/logger";
 
 export async function register(): Promise<void> {
@@ -7,6 +8,7 @@ export async function register(): Promise<void> {
   }
 
   const { isSentryConfigured } = await import("@/platform/observability/sentry");
+  const envValidation = validateRuntimeEnv();
 
   logger.info("server instrumentation registered", {
     requestId: process.env.VERCEL_DEPLOYMENT_ID,
@@ -14,8 +16,18 @@ export async function register(): Promise<void> {
   }, {
     sentryConfigured: isSentryConfigured({
       SENTRY_DSN: process.env.SENTRY_DSN
-    })
+    }),
+    envValidation
   });
+
+  if (!envValidation.ok && process.env.VERCEL_ENV === "production") {
+    throw new Error(
+      `Production environment validation failed: ${envValidation.issues
+        .filter((issue) => issue.severity === "error")
+        .map((issue) => issue.key)
+        .join(", ")}`
+    );
+  }
 }
 
 export const onRequestError: Instrumentation.onRequestError = async (error, request, context) => {

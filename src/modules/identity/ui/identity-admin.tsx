@@ -7,23 +7,34 @@ import {
   assignRoleAction,
   createCustomRoleAction,
   createInvitationAction,
+  createPersonProfileAction,
+  deactivateAccountAction,
   issueRecoveryCodeAction,
   reactivateAccountAction,
+  resetPinAction,
+  revokeCredentialAction,
+  revokeDeviceAction,
+  revokeSessionAction,
   suspendAccountAction,
+  updatePersonProfileAction,
   updateCustomRoleAction,
   type IdentityFormState
 } from "@/modules/identity/application/identity-actions";
 import type { AccountPermissionSimulation } from "@/modules/identity/application/identity-service";
 import type {
   IdentityAccountSummary,
+  DuplicateContactSummary,
   InvitationSummary,
   PermissionCatalogSummary,
+  PersonProfileSummary,
   RoleAssignmentSummary,
   RoleCatalogSummary
 } from "@/modules/identity/infrastructure/identity-repository";
 
 type IdentityAdminProps = {
   locale: string;
+  people: PersonProfileSummary[];
+  duplicateContacts: DuplicateContactSummary[];
   accounts: IdentityAccountSummary[];
   invitations: Array<InvitationSummary & { expiresAtLabel: string }>;
   roles: RoleCatalogSummary[];
@@ -32,9 +43,16 @@ type IdentityAdminProps = {
   simulations: AccountPermissionSimulation[];
   labels: {
     createInvitation: string;
+    people: string;
+    createPerson: string;
+    duplicateContacts: string;
+    noDuplicateContacts: string;
     displayName: string;
     email: string;
     phone: string;
+    preferredLocale: string;
+    accountCount: string;
+    openInvitations: string;
     role: string;
     scope: string;
     expires: string;
@@ -49,6 +67,7 @@ type IdentityAdminProps = {
     description: string;
     permissions: string;
     saveRole: string;
+    savePerson: string;
     createRole: string;
     permissionCatalog: string;
     assignmentWorkflow: string;
@@ -76,9 +95,19 @@ type IdentityAdminProps = {
     status: string;
     roles: string;
     sessions: string;
+    devices: string;
+    credentials: string;
+    activeDevices: string;
+    lastSeen: string;
+    revokeSession: string;
+    revokeDevice: string;
+    revokeCredential: string;
     passkeys: string;
     suspend: string;
     reactivate: string;
+    deactivate: string;
+    resetPin: string;
+    newPin: string;
     recovery: string;
     recoveryCode: string;
     admin: string;
@@ -116,9 +145,12 @@ type IdentityAdminProps = {
     fieldTeam: string;
     roleCreated: string;
     roleUpdated: string;
+    personCreated: string;
+    personUpdated: string;
     assignmentCreated: string;
     successCreated: string;
     successRecovery: string;
+    successPinReset: string;
     validation: string;
     forbidden: string;
     conflict: string;
@@ -132,6 +164,10 @@ function stateMessage(state: IdentityFormState, labels: IdentityAdminProps["labe
   switch (state.messageKey) {
     case "created":
       return labels.successCreated;
+    case "personCreated":
+      return labels.personCreated;
+    case "personUpdated":
+      return labels.personUpdated;
     case "roleCreated":
       return labels.roleCreated;
     case "roleUpdated":
@@ -140,6 +176,8 @@ function stateMessage(state: IdentityFormState, labels: IdentityAdminProps["labe
       return labels.assignmentCreated;
     case "recoveryIssued":
       return labels.successRecovery;
+    case "pinReset":
+      return labels.successPinReset;
     case "validation":
       return labels.validation;
     case "forbidden":
@@ -180,6 +218,219 @@ function RecoveryForm({
         </code>
       ) : null}
     </form>
+  );
+}
+
+function ResetPinForm({
+  locale,
+  userAccountId,
+  labels
+}: {
+  locale: string;
+  userAccountId: string;
+  labels: IdentityAdminProps["labels"];
+}) {
+  const [state, action, pending] = useActionState(
+    resetPinAction.bind(null, locale, userAccountId),
+    initialState
+  );
+  const message = stateMessage(state, labels);
+
+  return (
+    <form className="inline-form pin-reset-form" action={action}>
+      <label className="field compact-field">
+        <span>{labels.newPin}</span>
+        <input
+          autoComplete="new-password"
+          data-testid="reset-pin-input"
+          inputMode="numeric"
+          maxLength={6}
+          name="pin"
+          pattern="\d{6}"
+          required
+          type="password"
+        />
+      </label>
+      <button className="secondary-button" data-testid="reset-pin-button" disabled={pending} type="submit">
+        {labels.resetPin}
+      </button>
+      {message ? <span className="inline-message">{message}</span> : null}
+    </form>
+  );
+}
+
+const profileLocales = ["en", "fr", "ar"] as const;
+
+function PersonCreateForm({
+  locale,
+  labels
+}: {
+  locale: string;
+  labels: IdentityAdminProps["labels"];
+}) {
+  const [state, action, pending] = useActionState(createPersonProfileAction.bind(null, locale), initialState);
+  const message = stateMessage(state, labels);
+
+  return (
+    <form className="resource-form" action={action} data-testid="person-create-form">
+      <div className="form-grid four">
+        <label className="field">
+          <span>{labels.displayName}</span>
+          <input data-testid="person-display-name" name="displayName" required />
+        </label>
+        <label className="field">
+          <span>{labels.email}</span>
+          <input data-testid="person-email" name="email" type="email" />
+        </label>
+        <label className="field">
+          <span>{labels.phone}</span>
+          <input data-testid="person-phone" name="phone" type="tel" />
+        </label>
+        <label className="field">
+          <span>{labels.preferredLocale}</span>
+          <select data-testid="person-preferred-locale" name="preferredLocale" defaultValue="en">
+            {profileLocales.map((profileLocale) => (
+              <option key={profileLocale} value={profileLocale}>
+                {profileLocale.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {message ? (
+        <p className={state.status === "success" ? "form-status" : "form-error"} role="status">
+          {message}
+        </p>
+      ) : null}
+      <button className="primary-button" data-testid="person-create-submit" disabled={pending} type="submit">
+        {labels.createPerson}
+      </button>
+    </form>
+  );
+}
+
+function PersonEditForm({
+  locale,
+  person,
+  labels
+}: {
+  locale: string;
+  person: PersonProfileSummary;
+  labels: IdentityAdminProps["labels"];
+}) {
+  const [state, action, pending] = useActionState(
+    updatePersonProfileAction.bind(null, locale, person.id),
+    initialState
+  );
+  const message = stateMessage(state, labels);
+
+  return (
+    <form className="resource-form profile-edit-form" action={action} data-testid="person-edit-form">
+      <div className="form-grid four">
+        <label className="field">
+          <span>{labels.displayName}</span>
+          <input data-testid="edit-person-display-name" name="displayName" defaultValue={person.displayName} required />
+        </label>
+        <label className="field">
+          <span>{labels.email}</span>
+          <input name="email" defaultValue={person.email ?? ""} type="email" />
+        </label>
+        <label className="field">
+          <span>{labels.phone}</span>
+          <input name="phone" defaultValue={person.phone ?? ""} type="tel" />
+        </label>
+        <label className="field">
+          <span>{labels.preferredLocale}</span>
+          <select name="preferredLocale" defaultValue={person.preferredLocale}>
+            {profileLocales.map((profileLocale) => (
+              <option key={profileLocale} value={profileLocale}>
+                {profileLocale.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {message ? (
+        <p className={state.status === "success" ? "form-status" : "form-error"} role="status">
+          {message}
+        </p>
+      ) : null}
+      <button className="secondary-button" data-testid="person-edit-submit" disabled={pending} type="submit">
+        {labels.savePerson}
+      </button>
+    </form>
+  );
+}
+
+function PersonProfileList({
+  people,
+  locale,
+  labels
+}: {
+  people: PersonProfileSummary[];
+  locale: string;
+  labels: IdentityAdminProps["labels"];
+}) {
+  return (
+    <div className="identity-account-list">
+      {people.map((person) => (
+        <article className="identity-account-row person-profile-row" data-testid="person-profile-row" key={person.id}>
+          <span>
+            <strong>{person.displayName}</strong>
+            <small>{person.email ?? person.phone ?? person.id}</small>
+          </span>
+          <span>
+            <small>{labels.accountCount}</small>
+            <strong>{person.accountCount}</strong>
+          </span>
+          <span>
+            <small>{labels.openInvitations}</small>
+            <strong>{person.openInvitationCount}</strong>
+          </span>
+          <span>
+            <small>{labels.activeAssignments}</small>
+            <strong>{person.activeAssignmentCount}</strong>
+          </span>
+          <details className="role-edit-details">
+            <summary>{labels.savePerson}</summary>
+            <PersonEditForm labels={labels} locale={locale} person={person} />
+          </details>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function DuplicateContactList({
+  duplicateContacts,
+  labels
+}: {
+  duplicateContacts: DuplicateContactSummary[];
+  labels: IdentityAdminProps["labels"];
+}) {
+  if (duplicateContacts.length === 0) {
+    return <p className="empty-state">{labels.noDuplicateContacts}</p>;
+  }
+
+  return (
+    <div className="identity-account-list">
+      {duplicateContacts.map((duplicate) => (
+        <article
+          className="identity-account-row duplicate-contact-row"
+          data-testid="duplicate-contact-row"
+          key={`${duplicate.contactType}:${duplicate.value}`}
+        >
+          <span>
+            <strong>{duplicate.value}</strong>
+            <small>{duplicate.contactType}</small>
+          </span>
+          <span>
+            <small>{labels.people}</small>
+            <strong>{duplicate.displayNames.join(", ")}</strong>
+          </span>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -536,6 +787,8 @@ function PermissionCatalog({
 
 export function IdentityAdmin({
   locale,
+  people,
+  duplicateContacts,
   accounts,
   invitations,
   roles,
@@ -620,11 +873,29 @@ export function IdentityAdmin({
 
       <section className="detail-panel">
         <div className="section-heading">
+          <h2>{labels.people}</h2>
+        </div>
+        <div className="subsection-block">
+          <p className="panel-label">{labels.createPerson}</p>
+          <PersonCreateForm labels={labels} locale={locale} />
+        </div>
+        <PersonProfileList labels={labels} locale={locale} people={people} />
+      </section>
+
+      <section className="detail-panel">
+        <div className="section-heading">
+          <h2>{labels.duplicateContacts}</h2>
+        </div>
+        <DuplicateContactList duplicateContacts={duplicateContacts} labels={labels} />
+      </section>
+
+      <section className="detail-panel">
+        <div className="section-heading">
           <h2>{labels.accounts}</h2>
         </div>
         <div className="identity-account-list">
           {accounts.map((account) => (
-            <article className="identity-account-row" data-testid="identity-account-row" key={account.id}>
+            <article className="identity-account-row identity-account-row-expanded" data-testid="identity-account-row" key={account.id}>
               <span>
                 <strong>{account.displayName}</strong>
                 <small>{account.email ?? account.phone}</small>
@@ -640,6 +911,10 @@ export function IdentityAdmin({
               <span>
                 <small>{labels.sessions}</small>
                 <strong>{account.activeSessionCount}</strong>
+              </span>
+              <span>
+                <small>{labels.activeDevices}</small>
+                <strong>{account.activeDeviceCount}</strong>
               </span>
               <span>
                 <small>{labels.passkeys}</small>
@@ -681,7 +956,145 @@ export function IdentityAdmin({
                     {labels.reactivate}
                   </button>
                 )}
+                {account.status !== "DEACTIVATED" ? (
+                  <button
+                    className="secondary-button danger-button"
+                    data-testid="deactivate-account-button"
+                    disabled={busyAccount === account.id}
+                    onClick={() => {
+                      setBusyAccount(account.id);
+                      startTransition(() => {
+                        void deactivateAccountAction(locale, account.id).finally(() => {
+                          setBusyAccount(null);
+                        });
+                      });
+                    }}
+                    type="button"
+                  >
+                    {labels.deactivate}
+                  </button>
+                ) : null}
                 <RecoveryForm labels={labels} locale={locale} userAccountId={account.id} />
+                <ResetPinForm labels={labels} locale={locale} userAccountId={account.id} />
+              </div>
+              <div className="identity-security-list" data-testid="identity-session-device-list">
+                <div>
+                  <strong>{labels.sessions}</strong>
+                  {account.recentSessions.length === 0 ? (
+                    <small>-</small>
+                  ) : (
+                    account.recentSessions.map((session) => (
+                      <div className="identity-security-row" data-testid="identity-session-row" key={session.id}>
+                        <span>
+                          <small>{labels.lastSeen}</small>
+                          <strong>{formatDate(appLocale, session.lastSeenAt)}</strong>
+                        </span>
+                        <span>
+                          <small>{labels.expires}</small>
+                          <strong>{formatDate(appLocale, session.expiresAt)}</strong>
+                        </span>
+                        <span>
+                          <small>{labels.status}</small>
+                          <strong>{session.revokedAt ? "REVOKED" : "ACTIVE"}</strong>
+                        </span>
+                        <button
+                          className="secondary-button"
+                          data-testid="revoke-session-button"
+                          disabled={Boolean(session.revokedAt) || busyAccount === session.id}
+                          onClick={() => {
+                            setBusyAccount(session.id);
+                            startTransition(() => {
+                              void revokeSessionAction(locale, session.id).finally(() => {
+                                setBusyAccount(null);
+                              });
+                            });
+                          }}
+                          type="button"
+                        >
+                          {labels.revokeSession}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div>
+                  <strong>{labels.devices}</strong>
+                  {account.devices.length === 0 ? (
+                    <small>-</small>
+                  ) : (
+                    account.devices.map((device) => (
+                      <div className="identity-security-row" data-testid="identity-device-row" key={device.id}>
+                        <span>
+                          <small>{labels.devices}</small>
+                          <strong>{device.label ?? device.deviceId}</strong>
+                        </span>
+                        <span>
+                          <small>{labels.lastSeen}</small>
+                          <strong>{device.lastSeenAt ? formatDate(appLocale, device.lastSeenAt) : "-"}</strong>
+                        </span>
+                        <span>
+                          <small>{labels.status}</small>
+                          <strong>{device.revokedAt ? "REVOKED" : "ACTIVE"}</strong>
+                        </span>
+                        <button
+                          className="secondary-button"
+                          data-testid="revoke-device-button"
+                          disabled={Boolean(device.revokedAt) || busyAccount === device.id}
+                          onClick={() => {
+                            setBusyAccount(device.id);
+                            startTransition(() => {
+                              void revokeDeviceAction(locale, device.id).finally(() => {
+                                setBusyAccount(null);
+                              });
+                            });
+                          }}
+                          type="button"
+                        >
+                          {labels.revokeDevice}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div>
+                  <strong>{labels.credentials}</strong>
+                  {account.credentials.length === 0 ? (
+                    <small>-</small>
+                  ) : (
+                    account.credentials.map((credential) => (
+                      <div className="identity-security-row" data-testid="identity-credential-row" key={credential.id}>
+                        <span>
+                          <small>{labels.credentials}</small>
+                          <strong>{credential.label ?? credential.type}</strong>
+                        </span>
+                        <span>
+                          <small>{labels.status}</small>
+                          <strong>{credential.revokedAt ? "REVOKED" : "ACTIVE"}</strong>
+                        </span>
+                        <span>
+                          <small>{labels.expires}</small>
+                          <strong>{credential.expiresAt ? formatDate(appLocale, credential.expiresAt) : "-"}</strong>
+                        </span>
+                        <button
+                          className="secondary-button"
+                          data-testid="revoke-credential-button"
+                          disabled={Boolean(credential.revokedAt) || busyAccount === credential.id}
+                          onClick={() => {
+                            setBusyAccount(credential.id);
+                            startTransition(() => {
+                              void revokeCredentialAction(locale, credential.id).finally(() => {
+                                setBusyAccount(null);
+                              });
+                            });
+                          }}
+                          type="button"
+                        >
+                          {labels.revokeCredential}
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </article>
           ))}

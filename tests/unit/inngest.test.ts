@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createInngestOutboxHandlers,
   createInngestOutboxHandler,
   InngestConfigurationError,
   type InngestTransport
@@ -14,6 +15,9 @@ const event = {
   idempotencyKey: "reservation-created-101",
   occurredAt: new Date("2026-10-11T00:00:00.000Z"),
   processedAt: null,
+  attemptCount: 0,
+  nextAttemptAt: null,
+  lastError: null,
   createdAt: new Date("2026-10-11T00:00:00.000Z"),
   updatedAt: new Date("2026-10-11T00:00:00.000Z")
 };
@@ -66,5 +70,20 @@ describe("Inngest outbox forwarding", () => {
       },
       ts: new Date("2026-10-11T00:00:00.000Z").getTime()
     });
+  });
+
+  it("creates a wildcard outbox handler for every event type", async () => {
+    const transport = vi.fn<InngestTransport>(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ ids: ["evt_1"], status: 200 }),
+        text: () => Promise.resolve("")
+      })
+    );
+    const handlers = createInngestOutboxHandlers({ INNGEST_EVENT_KEY: "event-key" }, transport);
+
+    await expect(handlers["*"]?.(event)).resolves.toBeUndefined();
+    expect(transport).toHaveBeenCalledOnce();
   });
 });

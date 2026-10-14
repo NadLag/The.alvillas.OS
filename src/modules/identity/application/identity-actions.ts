@@ -19,19 +19,28 @@ import {
   confirmTotpEnrollment,
   createCustomRole,
   createInvitation,
+  createPersonProfile,
+  deactivateAccount,
   finishPasskeyRegistration,
   issueRecoveryCode,
   parseActivationInput,
   parseCustomRoleInput,
   parseInvitationInput,
+  parsePinResetInput,
+  parsePersonProfileInput,
   parseRoleAssignmentInput,
   parseRecoveryInput,
+  parseUpdatePersonProfileInput,
   parseUpdateCustomRoleInput,
   reactivateAccount,
   recoverPassword,
+  resetAccountPin,
+  revokeCredential,
+  revokeDevice,
   revokeSession,
   startTotpEnrollment,
   suspendAccount,
+  updatePersonProfile,
   updateCustomRole,
   verifyPasskeyAuthentication
 } from "@/modules/identity/application/identity-service";
@@ -48,11 +57,15 @@ export type IdentityFormState = {
     | "conflict"
     | "generic"
     | "created"
+    | "personCreated"
+    | "personUpdated"
     | "roleCreated"
     | "roleUpdated"
     | "assignmentCreated"
     | "suspended"
     | "reactivated"
+    | "deactivated"
+    | "pinReset"
     | "recoveryIssued"
     | "recovered"
     | "revoked"
@@ -232,6 +245,76 @@ export async function assignRoleAction(
   }
 }
 
+export async function createPersonProfileAction(
+  locale: string,
+  _state: IdentityFormState,
+  formData: FormData
+): Promise<IdentityFormState> {
+  const appLocale = safeLocale(locale);
+  const ctx = await identityContext();
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parsePersonProfileInput({
+    displayName: formValue(formData, "displayName"),
+    email: formValue(formData, "email"),
+    phone: formValue(formData, "phone"),
+    preferredLocale: formValue(formData, "preferredLocale") ?? "en"
+  });
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await createPersonProfile(ctx, parsed.data, await requestMeta());
+    revalidatePath(`/${appLocale}/app/identity`);
+    refresh();
+
+    return { status: "success", messageKey: "personCreated" };
+  } catch (error) {
+    return actionErrorState(error);
+  }
+}
+
+export async function updatePersonProfileAction(
+  locale: string,
+  personId: string,
+  _state: IdentityFormState,
+  formData: FormData
+): Promise<IdentityFormState> {
+  const appLocale = safeLocale(locale);
+  const ctx = await identityContext();
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parseUpdatePersonProfileInput({
+    personId,
+    displayName: formValue(formData, "displayName"),
+    email: formValue(formData, "email"),
+    phone: formValue(formData, "phone"),
+    preferredLocale: formValue(formData, "preferredLocale") ?? "en"
+  });
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await updatePersonProfile(ctx, parsed.data, await requestMeta());
+    revalidatePath(`/${appLocale}/app/identity`);
+    refresh();
+
+    return { status: "success", messageKey: "personUpdated" };
+  } catch (error) {
+    return actionErrorState(error);
+  }
+}
+
 export async function createInvitationAction(
   locale: string,
   _state: IdentityFormState,
@@ -331,6 +414,55 @@ export async function reactivateAccountAction(
   refresh();
 }
 
+export async function deactivateAccountAction(
+  locale: string,
+  userAccountId: string
+): Promise<void> {
+  const appLocale = safeLocale(locale);
+  const ctx = await identityContext();
+
+  if (!ctx) {
+    redirect(`/${appLocale}/login`);
+  }
+
+  await deactivateAccount(ctx, userAccountId, await requestMeta());
+  revalidatePath(`/${appLocale}/app/identity`);
+  refresh();
+}
+
+export async function resetPinAction(
+  locale: string,
+  userAccountId: string,
+  _state: IdentityFormState,
+  formData: FormData
+): Promise<IdentityFormState> {
+  const appLocale = safeLocale(locale);
+  const ctx = await identityContext();
+
+  if (!ctx) {
+    return { status: "error", messageKey: "unauthorized" };
+  }
+
+  const parsed = parsePinResetInput({
+    userAccountId,
+    pin: formValue(formData, "pin")
+  });
+
+  if (!parsed.success) {
+    return flattenZodError(parsed.error);
+  }
+
+  try {
+    await resetAccountPin(ctx, parsed.data, await requestMeta());
+    revalidatePath(`/${appLocale}/app/identity`);
+    refresh();
+
+    return { status: "success", messageKey: "pinReset" };
+  } catch (error) {
+    return actionErrorState(error);
+  }
+}
+
 export async function issueRecoveryCodeAction(
   _locale: string,
   userAccountId: string,
@@ -390,6 +522,32 @@ export async function revokeSessionAction(locale: string, sessionId: string): Pr
   }
 
   await revokeSession(ctx, sessionId, await requestMeta());
+  revalidatePath(`/${appLocale}/app/identity`);
+  refresh();
+}
+
+export async function revokeDeviceAction(locale: string, deviceRecordId: string): Promise<void> {
+  const appLocale = safeLocale(locale);
+  const ctx = await identityContext();
+
+  if (!ctx) {
+    redirect(`/${appLocale}/login`);
+  }
+
+  await revokeDevice(ctx, deviceRecordId, await requestMeta());
+  revalidatePath(`/${appLocale}/app/identity`);
+  refresh();
+}
+
+export async function revokeCredentialAction(locale: string, credentialId: string): Promise<void> {
+  const appLocale = safeLocale(locale);
+  const ctx = await identityContext();
+
+  if (!ctx) {
+    redirect(`/${appLocale}/login`);
+  }
+
+  await revokeCredential(ctx, credentialId, await requestMeta());
   revalidatePath(`/${appLocale}/app/identity`);
   refresh();
 }

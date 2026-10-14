@@ -29,7 +29,17 @@ import {
 import {
   assignRoleToAccount,
   createCustomRole,
+  createInvitation,
+  createPersonProfile,
+  deactivateAccount,
   ensureStandardIdentitySetup,
+  IdentityConflictError,
+  issueRecoveryCode,
+  listIdentityDashboard,
+  resetAccountPin,
+  revokeCredential,
+  revokeDevice,
+  updatePersonProfile,
   updateCustomRole
 } from "@/modules/identity/application/identity-service";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
@@ -94,6 +104,7 @@ import { pushSyncOps } from "@/modules/reservations/application/sync-service";
 import { requiredAuditEventCoverage } from "@/platform/audit/audit-event-catalog";
 import { REDACTED_AUDIT_VALUE, writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, permissionKey, type AuthContext, type DataClass } from "@/platform/authz/authorize";
+import { hashCredentialSecret, verifyPassword } from "@/platform/auth/password";
 import { present, maskedValue, type FieldPolicy, type PresentationContext } from "@/platform/authz/present";
 import { coHostSpecScenarios, simulateAccess } from "@/platform/authz/simulator";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
@@ -2472,6 +2483,542 @@ describe("PostgreSQL baseline", () => {
         })
       )
     ).rejects.toThrow(/append-only|permission denied/u);
+  });
+
+  it("offboards identity accounts with PIN reset, device revoke, assignment archive and tenant isolation", async () => {
+    const [orgA, orgB] = await Promise.all([
+      prisma.organization.create({
+        data: { name: `ALVILLAS Identity Lifecycle A ${randomUUID()}`, baseCurrency: "MAD" }
+      }),
+      prisma.organization.create({
+        data: { name: `ALVILLAS Identity Lifecycle B ${randomUUID()}`, baseCurrency: "MAD" }
+      })
+    ]);
+
+    await ensureStandardIdentitySetup(orgA.id, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+
+    const fixture = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const adminPerson = await tx.person.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Identity Lifecycle Admin",
+            email: `identity-admin-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const adminAccount = await tx.userAccount.create({
+          data: {
+            organizationId: orgA.id,
+            personId: adminPerson.id,
+            email: `identity-admin-account-${randomUUID()}@example.test`,
+            status: "ACTIVE"
+          }
+        });
+        const targetPerson = await tx.person.create({
+          data: {
+            organizationId: orgA.id,
+            displayName: "Identity Lifecycle Field",
+            email: `identity-field-${randomUUID()}@example.test`,
+            phone: `+212610${Date.now().toString().slice(-6)}`,
+            preferredLocale: "en"
+          }
+        });
+        const targetAccount = await tx.userAccount.create({
+          data: {
+            organizationId: orgA.id,
+            personId: targetPerson.id,
+            email: targetPerson.email,
+            phone: targetPerson.phone,
+            status: "ACTIVE"
+          }
+        });
+        const role = await tx.role.findFirstOrThrow({
+          where: { organizationId: orgA.id, key: "field_staff" }
+        });
+        const assignment = await tx.roleAssignment.create({
+          data: {
+            organizationId: orgA.id,
+            personId: targetPerson.id,
+            userAccountId: targetAccount.id,
+            roleId: role.id,
+            scopeType: "organization",
+            createdBy: adminAccount.id
+          }
+        });
+        const pinCredential = await tx.authCredential.create({
+          data: {
+            organizationId: orgA.id,
+            userAccountId: targetAccount.id,
+            type: "PIN",
+            label: "Original PIN",
+            secretHash: await hashCredentialSecret("123456")
+          }
+        });
+        const device = await tx.authDevice.create({
+          data: {
+            organizationId: orgA.id,
+            userAccountId: targetAccount.id,
+            deviceId: "identity-lifecycle-device-a",
+            label: "Field tablet",
+            platform: "Playwright",
+            lastSeenAt: new Date()
+          }
+        });
+        const session = await tx.authSession.create({
+          data: {
+            organizationId: orgA.id,
+            userAccountId: targetAccount.id,
+            deviceId: device.deviceId,
+            sessionVersion: targetAccount.sessionVersion,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+            lastSeenAt: new Date()
+          }
+        });
+
+        return { adminPerson, adminAccount, targetPerson, targetAccount, assignment, pinCredential, device, session };
+      }
+    );
+    const otherTenantDevice = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgB.id,
+      async (tx) => {
+        const person = await tx.person.create({
+          data: {
+            organizationId: orgB.id,
+            displayName: "Other Tenant Field",
+            email: `other-field-${randomUUID()}@example.test`,
+            preferredLocale: "en"
+          }
+        });
+        const account = await tx.userAccount.create({
+          data: {
+            organizationId: orgB.id,
+            personId: person.id,
+            email: person.email,
+            status: "ACTIVE"
+          }
+        });
+
+        return tx.authDevice.create({
+          data: {
+            organizationId: orgB.id,
+            userAccountId: account.id,
+            deviceId: "identity-lifecycle-other-tenant",
+            label: "Other tenant tablet"
+          }
+        });
+      }
+    );
+    const permissions = new Set([
+      permissionKey("identity", "view"),
+      permissionKey("identity", "create"),
+      permissionKey("identity", "edit"),
+      permissionKey("identity", "assign"),
+      permissionKey("identity", "override")
+    ]);
+    const ctx = {
+      organizationId: orgA.id,
+      actorId: fixture.adminAccount.id,
+      personId: fixture.adminPerson.id,
+      authContext: {
+        organizationId: orgA.id,
+        userAccountId: fixture.adminAccount.id,
+        personId: fixture.adminPerson.id,
+        permissions,
+        scopes: [{ organizationId: orgA.id, scopeType: "organization" as const }],
+        assignments: [
+          {
+            roleKey: "admin",
+            permissions,
+            scope: { organizationId: orgA.id, scopeType: "organization" as const }
+          }
+        ]
+      }
+    };
+    const duplicatePhone = `+212612${Date.now().toString().slice(-6)}`;
+    const profile = await createPersonProfile(
+      ctx,
+      {
+        displayName: "Standalone Person",
+        email: `standalone-person-${randomUUID()}@example.test`,
+        phone: duplicatePhone,
+        preferredLocale: "fr"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-idn-person-create",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await updatePersonProfile(
+      ctx,
+      {
+        personId: profile.id,
+        displayName: "Standalone Person Updated",
+        email: `standalone-person-updated-${randomUUID()}@example.test`,
+        phone: duplicatePhone,
+        preferredLocale: "en"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-idn-person-update",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    await createPersonProfile(
+      ctx,
+      {
+        displayName: "Duplicate Phone Person",
+        email: `duplicate-phone-${randomUUID()}@example.test`,
+        phone: duplicatePhone,
+        preferredLocale: "en"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-idn-person-duplicate",
+        ipAddress: "127.0.0.1"
+      }
+    );
+    const profileDashboard = await listIdentityDashboard(ctx, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const updatedProfile = profileDashboard.people.find((person) => person.id === profile.id);
+
+    expect(updatedProfile?.displayName).toBe("Standalone Person Updated");
+    expect(updatedProfile?.accountCount).toBe(0);
+    expect(
+      profileDashboard.duplicateContacts.some(
+        (duplicate) => duplicate.contactType === "phone" && duplicate.value === duplicatePhone
+      )
+    ).toBe(true);
+
+    const invitation = await createInvitation(
+      ctx,
+      {
+        displayName: "Identity Delivery Invite",
+        email: `identity-delivery-${randomUUID()}@example.test`,
+        phone: "+212611000000",
+        roleKey: "field_staff",
+        scopeType: "organization",
+        expiresInHours: 24
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-idn-invitation-delivery",
+        ipAddress: "127.0.0.1",
+        origin: "https://staging.example.test"
+      }
+    );
+    const recoveryCode = await issueRecoveryCode(ctx, fixture.targetAccount.id, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-idn-recovery-delivery",
+      ipAddress: "127.0.0.1",
+      origin: "https://staging.example.test"
+    });
+    const deliveryEvents = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) =>
+        tx.outboxEvent.findMany({
+          where: {
+            organizationId: orgA.id,
+            type: {
+              in: ["identity.invitation.delivery_requested", "identity.recovery.delivery_requested"]
+            }
+          }
+        })
+    );
+    const invitationDelivery = deliveryEvents.find((event) =>
+      event.idempotencyKey.endsWith(invitation.invitationId)
+    );
+    const recoveryDelivery = deliveryEvents.find(
+      (event) => event.type === "identity.recovery.delivery_requested"
+    );
+    const invitationPayload = invitationDelivery?.payload as Record<string, unknown> | undefined;
+    const recoveryPayload = recoveryDelivery?.payload as Record<string, unknown> | undefined;
+
+    expect(invitationDelivery?.status).toBe("PENDING");
+    expect(invitationPayload?.activationCode).toBe(invitation.code);
+    expect(invitationPayload?.activationUrl).toBe(`https://staging.example.test/en/activate/${invitation.code}`);
+    expect(invitationPayload?.channel).toBe("email");
+    expect(recoveryDelivery?.status).toBe("PENDING");
+    expect(recoveryPayload?.recoveryCode).toBe(recoveryCode);
+    expect(recoveryPayload?.recoveryUrl).toBe("https://staging.example.test/en/recover");
+
+    await expect(
+      deactivateAccount(
+        { ...ctx, actorId: fixture.targetAccount.id, personId: fixture.targetPerson.id },
+        fixture.targetAccount.id,
+        {
+          db: prisma as unknown as TenantTransactionRunner,
+          requestId: "integration-idn-self-deactivate",
+          ipAddress: "127.0.0.1"
+        }
+      )
+    ).rejects.toBeInstanceOf(IdentityConflictError);
+
+    await resetAccountPin(
+      ctx,
+      {
+        userAccountId: fixture.targetAccount.id,
+        pin: "987654"
+      },
+      {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-idn-pin-reset",
+        ipAddress: "127.0.0.1"
+      }
+    );
+
+    const afterPinReset = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => ({
+        credentials: await tx.authCredential.findMany({
+          where: {
+            organizationId: orgA.id,
+            userAccountId: fixture.targetAccount.id,
+            type: "PIN"
+          },
+          orderBy: { createdAt: "asc" }
+        }),
+        session: await tx.authSession.findFirstOrThrow({
+          where: {
+            id: fixture.session.id,
+            organizationId: orgA.id
+          }
+        })
+      })
+    );
+    const activePin = afterPinReset.credentials.find((credential) => !credential.revokedAt);
+    const originalPin = afterPinReset.credentials.find((credential) => credential.id === fixture.pinCredential.id);
+
+    expect(activePin?.secretHash).toBeTruthy();
+    expect(originalPin?.revokedAt).not.toBeNull();
+    expect(afterPinReset.session.revokedAt).not.toBeNull();
+    expect(activePin?.secretHash ? await verifyPassword("987654", activePin.secretHash) : false).toBe(true);
+
+    const revocableCredential = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const credential = await tx.authCredential.create({
+          data: {
+            organizationId: orgA.id,
+            userAccountId: fixture.targetAccount.id,
+            type: "PASSWORD",
+            label: "Temporary password",
+            secretHash: await hashCredentialSecret("temporary-password")
+          }
+        });
+        const session = await tx.authSession.create({
+          data: {
+            organizationId: orgA.id,
+            userAccountId: fixture.targetAccount.id,
+            deviceId: "identity-lifecycle-credential-device",
+            sessionVersion: fixture.targetAccount.sessionVersion + 1,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+            lastSeenAt: new Date()
+          }
+        });
+
+        return { credential, session };
+      }
+    );
+    const credentialDashboard = await listIdentityDashboard(ctx, {
+      db: prisma as unknown as TenantTransactionRunner
+    });
+    const targetAccountWithCredentials = credentialDashboard.accounts.find(
+      (account) => account.id === fixture.targetAccount.id
+    );
+
+    expect(
+      targetAccountWithCredentials?.credentials.some(
+        (credential) => credential.id === revocableCredential.credential.id
+      )
+    ).toBe(true);
+
+    await revokeCredential(ctx, revocableCredential.credential.id, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-idn-credential-revoke",
+      ipAddress: "127.0.0.1"
+    });
+
+    const afterCredentialRevoke = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => ({
+        credential: await tx.authCredential.findFirstOrThrow({
+          where: { id: revocableCredential.credential.id, organizationId: orgA.id }
+        }),
+        session: await tx.authSession.findFirstOrThrow({
+          where: { id: revocableCredential.session.id, organizationId: orgA.id }
+        })
+      })
+    );
+
+    expect(afterCredentialRevoke.credential.revokedAt).not.toBeNull();
+    expect(afterCredentialRevoke.session.revokedAt).not.toBeNull();
+
+    const revocable = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const device = await tx.authDevice.create({
+          data: {
+            organizationId: orgA.id,
+            userAccountId: fixture.targetAccount.id,
+            deviceId: "identity-lifecycle-device-b",
+            label: "Supervisor phone",
+            lastSeenAt: new Date()
+          }
+        });
+        const session = await tx.authSession.create({
+          data: {
+            organizationId: orgA.id,
+            userAccountId: fixture.targetAccount.id,
+            deviceId: device.deviceId,
+            sessionVersion: fixture.targetAccount.sessionVersion + 1,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+            lastSeenAt: new Date()
+          }
+        });
+
+        return { device, session };
+      }
+    );
+
+    await expect(
+      revokeDevice(ctx, otherTenantDevice.id, {
+        db: prisma as unknown as TenantTransactionRunner,
+        requestId: "integration-idn-cross-tenant-device",
+        ipAddress: "127.0.0.1"
+      })
+    ).rejects.toThrow();
+
+    await revokeDevice(ctx, revocable.device.id, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-idn-device-revoke",
+      ipAddress: "127.0.0.1"
+    });
+
+    const afterDeviceRevoke = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => ({
+        device: await tx.authDevice.findFirstOrThrow({
+          where: { id: revocable.device.id, organizationId: orgA.id }
+        }),
+        session: await tx.authSession.findFirstOrThrow({
+          where: { id: revocable.session.id, organizationId: orgA.id }
+        })
+      })
+    );
+
+    expect(afterDeviceRevoke.device.revokedAt).not.toBeNull();
+    expect(afterDeviceRevoke.session.revokedAt).not.toBeNull();
+
+    const activeForOffboard = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => {
+        const device = await tx.authDevice.create({
+          data: {
+            organizationId: orgA.id,
+            userAccountId: fixture.targetAccount.id,
+            deviceId: "identity-lifecycle-device-c",
+            label: "Offboard tablet",
+            lastSeenAt: new Date()
+          }
+        });
+        const session = await tx.authSession.create({
+          data: {
+            organizationId: orgA.id,
+            userAccountId: fixture.targetAccount.id,
+            deviceId: device.deviceId,
+            sessionVersion: fixture.targetAccount.sessionVersion + 1,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+            lastSeenAt: new Date()
+          }
+        });
+
+        return { device, session };
+      }
+    );
+
+    await deactivateAccount(ctx, fixture.targetAccount.id, {
+      db: prisma as unknown as TenantTransactionRunner,
+      requestId: "integration-idn-deactivate",
+      ipAddress: "127.0.0.1"
+    });
+
+    const afterDeactivate = await withTenant(
+      prisma as unknown as TenantTransactionRunner,
+      orgA.id,
+      async (tx) => ({
+        account: await tx.userAccount.findFirstOrThrow({
+          where: { id: fixture.targetAccount.id, organizationId: orgA.id }
+        }),
+        activeSessionCount: await tx.authSession.count({
+          where: {
+            organizationId: orgA.id,
+            userAccountId: fixture.targetAccount.id,
+            revokedAt: null
+          }
+        }),
+        activeDeviceCount: await tx.authDevice.count({
+          where: {
+            organizationId: orgA.id,
+            userAccountId: fixture.targetAccount.id,
+            revokedAt: null
+          }
+        }),
+        assignment: await tx.roleAssignment.findFirstOrThrow({
+          where: { id: fixture.assignment.id, organizationId: orgA.id }
+        }),
+        offboardSession: await tx.authSession.findFirstOrThrow({
+          where: { id: activeForOffboard.session.id, organizationId: orgA.id }
+        }),
+        offboardDevice: await tx.authDevice.findFirstOrThrow({
+          where: { id: activeForOffboard.device.id, organizationId: orgA.id }
+        }),
+        auditActions: await tx.auditLog.findMany({
+          where: {
+            organizationId: orgA.id,
+            resourceType: "identity",
+            resourceId: fixture.targetAccount.id,
+            action: {
+              in: [
+                "identity.pin.reset",
+                "identity.credential.revoke",
+                "identity.device.revoke",
+                "identity.account.deactivate"
+              ]
+            }
+          },
+          select: { action: true }
+        })
+      })
+    );
+
+    expect(afterDeactivate.account.status).toBe("DEACTIVATED");
+    expect(afterDeactivate.account.deactivatedAt).not.toBeNull();
+    expect(afterDeactivate.activeSessionCount).toBe(0);
+    expect(afterDeactivate.activeDeviceCount).toBe(0);
+    expect(afterDeactivate.assignment.archivedAt).not.toBeNull();
+    expect(afterDeactivate.offboardSession.revokedAt).not.toBeNull();
+    expect(afterDeactivate.offboardDevice.revokedAt).not.toBeNull();
+    expect(afterDeactivate.auditActions.map((row) => row.action).sort()).toEqual([
+      "identity.account.deactivate",
+      "identity.credential.revoke",
+      "identity.device.revoke",
+      "identity.pin.reset"
+    ]);
   });
 
   it("enforces scoped RBAC, ABAC, simulator and field masking from PostgreSQL assignments", async () => {

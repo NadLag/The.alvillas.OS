@@ -77,6 +77,33 @@ export const invitationInputSchema = z.object({
 
 export type InvitationInput = z.infer<typeof invitationInputSchema>;
 
+export const personProfileInputSchema = z.object({
+  displayName: z.string().trim().min(2).max(120),
+  email: z
+    .string()
+    .trim()
+    .email()
+    .transform((value) => value.toLowerCase())
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  phone: z
+    .string()
+    .trim()
+    .min(6)
+    .max(32)
+    .transform((value) => value.toLowerCase())
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+  preferredLocale: z.enum(["en", "fr", "ar"]).default("en")
+});
+
+export const updatePersonProfileInputSchema = personProfileInputSchema.extend({
+  personId: z.string().uuid()
+});
+
+export type PersonProfileInput = z.infer<typeof personProfileInputSchema>;
+export type UpdatePersonProfileInput = z.infer<typeof updatePersonProfileInputSchema>;
+
 export const customRoleInputSchema = z.object({
   key: roleKeySchema,
   name: z.string().trim().min(2).max(120),
@@ -182,12 +209,20 @@ export const recoveryInputSchema = z.object({
 
 export type RecoveryInput = z.infer<typeof recoveryInputSchema>;
 
+export const pinResetInputSchema = z.object({
+  userAccountId: z.string().uuid(),
+  pin: z.string().trim().regex(/^\d{6}$/u, "PIN must be six digits")
+});
+
+export type PinResetInput = z.infer<typeof pinResetInputSchema>;
+
 export function identityActionForMutation(
-  mutation: "invite" | "suspend" | "recover" | "revoke" | "mfa"
+  mutation: "invite" | "suspend" | "deactivate" | "recover" | "revoke" | "mfa"
 ): Action {
   switch (mutation) {
     case "invite":
       return "create";
+    case "deactivate":
     case "revoke":
       return "override";
     case "mfa":
