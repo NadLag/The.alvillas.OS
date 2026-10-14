@@ -57,11 +57,14 @@ export default async function IdentityPage({
           confirmTotp: t("security.confirmTotp"),
           totpCode: t("security.totpCode"),
           totpSecret: t("security.totpSecret"),
+          totpInvalid: t("security.totpInvalid"),
           recoveryCodes: t("security.recoveryCodes"),
           registerPasskey: t("security.registerPasskey"),
           passkeyReady: t("security.passkeyReady"),
           validation: t("forms.validation"),
-          generic: t("forms.generic")
+          generic: t("forms.generic"),
+          unauthorized: t("forms.unauthorized"),
+          forbidden: t("forms.forbidden")
         }}
       />
       <IdentityAdmin

@@ -259,6 +259,7 @@
       "confirmTotp": "Confirm MFA",
       "totpCode": "Authenticator code",
       "totpSecret": "Setup secret",
+      "totpInvalid": "لم يتم قبول الرمز. استخدم رمزًا حاليًا لمفتاح الإعداد هذا، أو ابدأ إعدادًا جديدًا إذا انتهت صلاحيته.",
       "recoveryCodes": "Recovery codes",
       "registerPasskey": "Register passkey",
       "passkeyReady": "Passkey registered."

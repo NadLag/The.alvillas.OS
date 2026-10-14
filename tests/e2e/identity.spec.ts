@@ -258,11 +258,22 @@ test.describe("identity lifecycle", () => {
     await page.getByTestId("start-totp-button").click();
     const secretText = await page.getByTestId("totp-secret").innerText();
     const secret = secretText.split(":").pop()?.trim() ?? "";
+    const validCodes = new Set([-1, 0, 1].map((window) => totpCode(secret, new Date(Date.now() + window * 30_000))));
+    let rejectedCode = "000000";
+    while (validCodes.has(rejectedCode)) rejectedCode = String(Number(rejectedCode) + 1).padStart(6, "0");
+    await page.getByTestId("totp-code").fill(rejectedCode);
+    await page.getByTestId("confirm-totp-button").click();
+    await expect(page.locator(".identity-security-panel [role=status]")).toBeVisible();
+    await expect(page.getByTestId("totp-secret")).toBeVisible();
+    await expect(page.getByTestId("totp-code")).toBeVisible();
+    await expect(page.getByTestId("mfa-recovery-code")).toHaveCount(0);
     await page.getByTestId("totp-code").fill(totpCode(secret));
     const confirmTotpButton = page.getByTestId("confirm-totp-button");
     await expect(confirmTotpButton).toBeEnabled();
     await confirmTotpButton.click();
     await expect(page.getByTestId("mfa-recovery-code").first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId("mfa-recovery-code")).toHaveCount(8);
+    await expect(page.getByTestId("totp-secret")).toHaveCount(0);
 
     const client = await page.context().newCDPSession(page);
     await client.send("WebAuthn.enable");
