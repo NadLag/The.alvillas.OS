@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
 import { localizedTextSchema } from "@/i18n/content";
+import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
 
 const moneyAmountSchema = z
   .string()
@@ -299,6 +300,11 @@ export const featureFlagConfigSchema = z
   .passthrough();
 
 export const configRuleSchemas = {
+  "notification.routing.language_updated": notificationRoutingSchema,
+  "notification.routing.task_assigned": notificationRoutingSchema,
+  "notification.routing.task_completed": notificationRoutingSchema,
+  "notification.routing.reservation_created": notificationRoutingSchema,
+  "notification.routing.security_session_revoked": notificationRoutingSchema,
   [pinLockoutConfigKey]: pinLockoutPolicySchema,
   [commissionConfigKey]: commissionRuleValueSchema,
   "finance.ota_fee": feeRuleSchema,

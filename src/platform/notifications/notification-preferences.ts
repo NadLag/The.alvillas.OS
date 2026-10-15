@@ -18,6 +18,6 @@ export function shouldDeliverNotification(kind: string, channel: "in_app" | "ema
   const settings = (preferences ?? defaultNotificationPreferences()).in_app;
   if (!settings.enabled) return false;
   if (kind === "language_updated") return settings.account;
-  if (kind === "task_assigned") return settings.operations;
+  if (kind === "task_assigned" || kind === "task_completed" || kind === "reservation_created") return settings.operations;
   return false;
 }

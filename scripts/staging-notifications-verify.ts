@@ -54,6 +54,83 @@ try {
   expect(session.user?.id).toBeTruthy();
   if (process.env.STAGING_AUTH_ONLY === "1") {
     console.log(JSON.stringify({ authenticated: true, identityOrCredentialMutations: 0 }));
+  } else if (process.env.STAGING_ROUTING_ONLY === "1") {
+    const ids = ["notification-in-app-enabled", "notification-account", "notification-operations"] as const;
+    const preferences: Record<string, boolean> = {};
+    let originalChannel: boolean | undefined;
+    const openRouting = async () => {
+      await page.goto("/en/app/notifications");
+      await expect(page.getByTestId("routing-in-app")).toBeVisible();
+      await page.getByTestId("routing-event").selectOption("language_updated");
+      await expect(page.getByTestId("routing-in-app")).toBeEnabled();
+    };
+    const saveRouting = async (checked: boolean, reason: string) => {
+      await page.getByTestId("routing-in-app").setChecked(checked);
+      await page.getByTestId("routing-reason").fill(reason);
+      await page.getByTestId("routing-save").click();
+      await expect(page.getByTestId("routing-status")).toContainText("Routing saved");
+      await expect(page.getByTestId("routing-reason")).toHaveValue("");
+    };
+    const savePreferences = async () => {
+      const button = page.getByTestId("notification-preferences-save");
+      if (await button.isEnabled()) { await button.click(); await expect(button).toBeDisabled(); }
+    };
+    await page.goto("/en/app");
+    originalLocale = await page.getByTestId("preferred-locale-select").inputValue();
+    const nextLocale = originalLocale === "fr" ? "en" : "fr";
+    try {
+      step = "routing-capture-and-optional-preferences";
+      await openRouting();
+      for (const id of ids) { await expect(page.getByTestId(id)).toBeVisible(); preferences[id] = await page.getByTestId(id).isChecked(); }
+      await page.getByTestId(ids[0]).check(); await page.getByTestId(ids[1]).check(); await savePreferences();
+      originalChannel = await page.getByTestId("routing-in-app").isChecked();
+      step = "routing-disable-channel";
+      await saveRouting(false, "Staging acceptance: verify channel suppression");
+      await page.goto("/en/app");
+      await expect(page.getByTestId("notification-count")).toBeVisible();
+      const baseline = Number(await page.getByTestId("notification-count").textContent());
+      await page.getByTestId("preferred-locale-select").selectOption(nextLocale);
+      await page.getByTestId("preferred-locale-submit").click();
+      await expect(page).toHaveURL(new RegExp(`/${nextLocale}/app$`, "u"));
+      await expect(page.getByTestId("notification-count")).toHaveText(String(baseline));
+      step = "routing-enable-and-real-event";
+      await openRouting(); await expect(page.getByTestId("routing-in-app")).not.toBeChecked();
+      await saveRouting(true, "Staging acceptance: verify one real event delivery");
+      await page.goto("/en/app");
+      await page.getByTestId("preferred-locale-select").selectOption(originalLocale);
+      await page.getByTestId("preferred-locale-submit").click();
+      await expect(page).toHaveURL(new RegExp(`/${originalLocale}/app$`, "u"));
+      await expect(page.getByTestId("notification-count")).toHaveText(String(baseline + 1));
+      await page.goto("/en/app");
+      await page.getByTestId("notification-bell").click();
+      const notice = page.getByTestId("notification-item").first();
+      await expect(notice).toContainText("Your language preference was updated.");
+      await notice.getByRole("button", { name: "Mark as read", exact: true }).click();
+      await expect(page.getByTestId("notification-count")).toHaveText(String(baseline));
+      for (const width of [1440, 360]) for (const locale of ["en", "fr", "ar"]) {
+        step = `routing-accessibility-${locale}-${width}`;
+        await page.setViewportSize({ width, height: 900 }); await page.goto(`/${locale}/app/notifications`);
+        await expect(page.getByTestId("routing-in-app")).toBeVisible();
+        await page.getByTestId("routing-event").selectOption("security_session_revoked");
+        await expect(page.getByTestId("routing-in-app")).toBeChecked(); await expect(page.getByTestId("routing-in-app")).toBeDisabled();
+        await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      }
+    } finally {
+      step = "restore-routing-and-preferences";
+      if (originalChannel !== undefined) { await openRouting(); await saveRouting(originalChannel, "Restore original routing after staging acceptance"); }
+      await page.goto("/en/app/notifications");
+      if (Object.keys(preferences).length === ids.length) {
+        await page.getByTestId(ids[0]).check();
+        for (const id of ids.slice(1)) await page.getByTestId(id).setChecked(preferences[id]);
+        await page.getByTestId(ids[0]).setChecked(preferences[ids[0]]); await savePreferences();
+      }
+    }
+    await context.storageState({ path: stateFile });
+    console.log(JSON.stringify({ sha: version.version, authenticated: true, routingPersistence: "passed", disabledChannel: "suppressed a real event",
+      enabledChannel: "one real event, exact unread count and mark-read", mandatorySecurity: "checked and locked", locales: "EN/FR/AR RTL", widths: "1440/360",
+      accessibility: "axe passed", originalRoutingAndPreferencesRestored: true, credentialChanges: 0, externalDeliveryClaimed: false }));
   } else if (process.env.STAGING_PREFERENCES_ONLY === "1") {
     step = "notification-settings";
     await page.goto("/en/app/notifications");
