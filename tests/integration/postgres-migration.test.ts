@@ -10,6 +10,9 @@ import { beginPasskeyRegistration, finishPasskeyRegistration, startTotpEnrollmen
 import { authenticatePassword, authenticateMfaChallenge, beginVerifiedPasskeyLogin, validateAuthSession } from "@/platform/auth/identity-auth";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
 import { totpCode } from "@/platform/auth/totp";
+import { ResendEmailProvider, type HttpTransport } from "@/platform/providers/real";
+import { createInngestOutboxHandlers } from "@/platform/events/inngest";
+import { dispatchOutboxBatch } from "@/platform/events/outbox-dispatcher";
 import {
   IdentityAuthorizationError,
   authContextForAccount
@@ -321,6 +324,55 @@ describe("PostgreSQL baseline", () => {
     `;
 
     expect(rows.map((row) => row.migration_name)).toEqual(migrationNames());
+  });
+
+  it("dispatches localized invitation emails and persists redacted provider retries in PostgreSQL", async () => {
+    if (!adminPrisma) throw new Error("Expected local administrator connection");
+    const email = `delivery-admin-${randomUUID()}@example.test`;
+    const password = "local delivery integration password";
+    const runner = prisma as unknown as TenantTransactionRunner;
+    await bootstrapFirstAdmin(adminPrisma, { ADMIN_EMAIL: email, ADMIN_PASSWORD: password });
+    const first = await authenticatePassword({ email, password, deviceId: "delivery-integration-device", headers: new Headers() });
+    if (!first) throw new Error("Expected verified first-factor setup");
+    const setup = await identityActorContextFromSession({ user: { ...first, sessionRevoked: false }, expires: new Date(Date.now() + 3600000).toISOString() }, { db: runner });
+    if (!setup) throw new Error("Expected own-factor setup context");
+    const authenticator = new IntegrationAuthenticator();
+    const origin = "https://staging.example.test";
+    const registration = await beginPasskeyRegistration(setup, { db: runner, origin });
+    await finishPasskeyRegistration(setup, registration.challengeId, authenticator.registration(registration.options, origin), { db: runner, origin });
+    const totp = await startTotpEnrollment(setup, { db: runner });
+    await confirmTotpEnrollment(setup, totp.credentialId, totpCode(totp.secret), { db: runner });
+    const authenticated = await authenticatePassword({ email, password, mfaCode: totpCode(totp.secret), deviceId: "delivery-integration-device", headers: new Headers() });
+    if (!authenticated || authenticated.securitySetupRequired) throw new Error("Expected real MFA before requesting delivery");
+    const ctx = await identityActorContextFromSession({ user: { ...authenticated, sessionRevoked: false }, expires: new Date(Date.now() + 3600000).toISOString() }, { db: runner });
+    if (!ctx) throw new Error("Expected the authenticated delivery actor");
+    const organization = { id: authenticated.organizationId };
+    const invitation = await createInvitation(ctx, { displayName: "French recipient", email: `delivery-recipient-${randomUUID()}@example.test`,
+      roleKey: "field_staff", scopeType: "organization", preferredLocale: "fr", expiresInHours: 24 }, { db: runner, origin: "https://staging.example.test" });
+    const requests: Parameters<HttpTransport>[1][] = [];
+    const transport: HttpTransport = (_url, request) => {
+      requests.push(request);
+      const ok = requests.length > 1;
+      return Promise.resolve({ ok, status: ok ? 200 : 429, json: () => Promise.resolve({ id: "contract-email-id" }),
+        text: () => Promise.resolve('private-recipient@example.test private-recovery-code'), arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) });
+    };
+    const provider = new ResendEmailProvider({ RESEND_API_KEY: "transport-contract-key", EMAIL_FROM: "ops@example.test" }, transport);
+    const handlers = createInngestOutboxHandlers({ INNGEST_EVENT_KEY: "transport-contract-event-key", APP_URL: "https://staging.example.test" }, undefined, provider);
+    const now = new Date();
+    const rejected = await dispatchOutboxBatch(runner, organization.id, handlers, { now, errorReporter: () => Promise.resolve() });
+    expect(rejected).toEqual({ dispatched: 0, failed: 1, skipped: 0 });
+    const failed = await withTenant(runner, organization.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { idempotencyKey: `identity.invitation.delivery:${invitation.invitationId}` } }));
+    expect(failed).toMatchObject({ status: "PENDING", attemptCount: 1, lastError: "Resend email request failed with status 429" });
+    expect(failed.nextAttemptAt!.getTime()).toBeGreaterThan(now.getTime());
+    expect(await dispatchOutboxBatch(runner, organization.id, handlers, { now, errorReporter: () => Promise.resolve() })).toEqual({ dispatched: 0, failed: 0, skipped: 0 });
+    expect(await dispatchOutboxBatch(runner, organization.id, handlers, { now: failed.nextAttemptAt!, errorReporter: () => Promise.resolve() })).toEqual({ dispatched: 1, failed: 0, skipped: 0 });
+    expect(requests[0]?.headers?.["Idempotency-Key"]).toBe(requests[1]?.headers?.["Idempotency-Key"]);
+    const sent: unknown = JSON.parse(requests[1].body!);
+    expect(sent).toMatchObject({ subject: "Votre invitation ALVILLAS OS", html: expect.stringContaining(`https://staging.example.test/fr/activate/${invitation.code}`) as unknown });
+    const delivered = await withTenant(runner, organization.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { id: failed.id } }));
+    expect(requests).toHaveLength(2);
+    expect(delivered).toMatchObject({ status: "DISPATCHED", attemptCount: 1, lastError: null });
+    expect(delivered.processedAt).not.toBeNull();
   });
 
   it("persists configurable PIN backoff across concurrent transactions and isolates tenant state", async () => {
@@ -2865,6 +2917,7 @@ describe("PostgreSQL baseline", () => {
         phone: "+212611000000",
         roleKey: "field_staff",
         scopeType: "organization",
+        preferredLocale: "fr",
         expiresInHours: 24
       },
       {
@@ -2904,7 +2957,8 @@ describe("PostgreSQL baseline", () => {
 
     expect(invitationDelivery?.status).toBe("PENDING");
     expect(invitationPayload?.activationCode).toBe(invitation.code);
-    expect(invitationPayload?.activationUrl).toBe(`https://staging.example.test/en/activate/${invitation.code}`);
+    expect(invitationPayload?.activationUrl).toBe(`https://staging.example.test/fr/activate/${invitation.code}`);
+    expect(invitationPayload?.locale).toBe("fr");
     expect(invitationPayload?.channel).toBe("email");
     expect(recoveryDelivery?.status).toBe("PENDING");
     expect(recoveryPayload?.recoveryCode).toBe(recoveryCode);

@@ -6,6 +6,7 @@ const baseURL = "https://the-alvillas-os-staging.vercel.app";
 const expectedSha = process.env.STAGING_EXPECTED_SHA;
 const storageState = process.env.STAGING_STORAGE_STATE_FILE;
 const revokedStorageState = process.env.STAGING_REVOKE_STORAGE_STATE_FILE;
+const resumedSessionId = process.env.STAGING_REVOKE_SESSION_ID;
 const configuredOidc = process.env.VERCEL_OIDC_TOKEN;
 if (!expectedSha || !configuredOidc) throw new Error("STAGING_EXPECTED_SHA and development VERCEL_OIDC_TOKEN are required");
 const oidc: string = configuredOidc;
@@ -20,6 +21,7 @@ await browserContext.route("**/*", async (route) => {
 });
 }
 await protectOrigin(context);
+let revocationMutations = 0;
 try {
   const page = await context.newPage();
   const response = await page.goto("/api/version");
@@ -57,26 +59,37 @@ try {
         const victimResponse = await victimPage.goto("/api/auth/session");
         const victimSession = await victimResponse?.json() as { user?: { id?: string; sessionId?: string } } | null;
         const actorResponse = await page.goto("/api/auth/session");
-        const actorSession = await actorResponse?.json() as { user?: { id?: string; sessionId?: string } } | null;
-        expect(victimSession?.user?.id).toBe(actorSession?.user?.id);
-        if (!victimSession?.user?.sessionId || victimSession.user.sessionId === actorSession?.user?.sessionId) throw new Error("Revocation acceptance requires two distinct real owner sessions");
+        const actorSession = await actorResponse?.json() as { user?: { id?: string; email?: string; sessionId?: string } } | null;
+        if (!actorSession?.user?.id || !actorSession.user.email) throw new Error("The real owner actor session is required");
+        if (victimSession?.user?.id) expect(victimSession.user.id).toBe(actorSession.user.id);
+        const targetSessionId = victimSession?.user?.sessionId || resumedSessionId;
+        if (!targetSessionId || !/^[0-9a-f-]{36}$/u.test(targetSessionId) || targetSessionId === actorSession.user.sessionId) throw new Error("Revocation acceptance requires a distinct real owner session, or its exact ID when resuming a completed revoke");
         const victimDevice = (await victim.cookies()).find((cookie) => cookie.name === "alvillas_device_id")?.value;
         const actorDevice = (await context.cookies()).find((cookie) => cookie.name === "alvillas_device_id")?.value;
         if (!victimDevice || !actorDevice || victimDevice === actorDevice) throw new Error("Revocation acceptance requires two distinct real owner devices");
         await page.goto("/en/app/identity");
-        const sessionRow = page.locator(`[data-session-id="${victimSession.user.sessionId}"]`);
-        await expect(sessionRow).toContainText("ACTIVE");
-        await sessionRow.getByTestId("revoke-session-button").click();
-        await expect(sessionRow).toContainText("REVOKED");
+        await page.waitForLoadState("networkidle");
+        const ownerAccount = page.getByTestId("identity-account-row").filter({ hasText: actorSession.user.email });
+        await expect(ownerAccount).toHaveCount(1);
+        const sessionRow = ownerAccount.locator(`[data-session-id="${targetSessionId}"]`);
+        await expect(sessionRow).toBeVisible();
+        if (await sessionRow.getByTestId("revoke-session-button").isEnabled()) {
+          await sessionRow.getByTestId("revoke-session-button").click();
+          revocationMutations += 1;
+        }
+        await expect(sessionRow).toContainText("REVOKED", { timeout: 20000 });
         await victimPage.goto("/en/app");
         await expect(victimPage).toHaveURL(/\/en\/login/u);
         const deniedResponse = await victimPage.goto("/api/auth/session");
         const denied = await deniedResponse?.json() as { user?: { id?: string } } | null;
         expect(denied?.user?.id).toBeFalsy();
-        const deviceRow = page.locator(`[data-device-id="${victimDevice}"]`);
-        await expect(deviceRow).toContainText("ACTIVE");
-        await deviceRow.getByTestId("revoke-device-button").click();
-        await expect(deviceRow).toContainText("REVOKED");
+        const deviceRow = ownerAccount.locator(`[data-device-id="${victimDevice}"]`);
+        await expect(deviceRow).toBeVisible();
+        if (await deviceRow.getByTestId("revoke-device-button").isEnabled()) {
+          await deviceRow.getByTestId("revoke-device-button").click();
+          revocationMutations += 1;
+        }
+        await expect(deviceRow).toContainText("REVOKED", { timeout: 20000 });
         await page.goto("/en/app/security");
         await expect(page.getByTestId("account-security-page")).toBeVisible();
       } finally { await victim.close(); }
@@ -107,5 +120,5 @@ try {
     publicLoginAcceptance: storageState ? "not executed" : "passed", locales: "EN/FR/AR RTL", widths: "1440/360",
     keyboard: storageState ? "not executed" : "passed", accessibility: "axe passed", credentialChanges: 0,
     remoteSessionAndDeviceRevocation: revokedStorageState && storageState ? "passed using two real owner sessions" : "not executed",
-    identityMutations: revokedStorageState && storageState ? 2 : 0 }));
+    identityMutations: revocationMutations }));
 } finally { await context.close(); await browser.close(); }

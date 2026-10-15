@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
+import type { AppLocale } from "@/i18n/routing";
 
 export type IdentityAccountSummary = {
   id: string;
@@ -847,7 +848,8 @@ export class IdentityRepository {
     displayName: string;
     email?: string | null;
     phone?: string | null;
-  }): Promise<{ id: string }> {
+    preferredLocale?: AppLocale;
+  }): Promise<{ id: string; preferredLocale: string }> {
     if (input.email) {
       return this.tx.person.upsert({
         where: {
@@ -858,16 +860,17 @@ export class IdentityRepository {
         },
         update: {
           displayName: input.displayName,
-          phone: input.phone ?? undefined
+          phone: input.phone ?? undefined,
+          preferredLocale: input.preferredLocale
         },
         create: {
           organizationId: this.organizationId,
           displayName: input.displayName,
           email: input.email,
           phone: input.phone ?? null,
-          preferredLocale: "en"
+          preferredLocale: input.preferredLocale ?? "en"
         },
-        select: { id: true }
+        select: { id: true, preferredLocale: true }
       });
     }
 
@@ -876,9 +879,16 @@ export class IdentityRepository {
         organizationId: this.organizationId,
         displayName: input.displayName,
         phone: input.phone ?? null,
-        preferredLocale: "en"
+        preferredLocale: input.preferredLocale ?? "en"
       },
-      select: { id: true }
+      select: { id: true, preferredLocale: true }
+    });
+  }
+
+  findRecoveryDeliveryAccount(id: string) {
+    return this.tx.userAccount.findFirst({
+      where: { id, organizationId: this.organizationId },
+      include: { person: { select: { preferredLocale: true } } }
     });
   }
 

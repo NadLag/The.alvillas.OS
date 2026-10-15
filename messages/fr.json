@@ -1029,5 +1029,23 @@
       "PAYOUT": "Paiement",
       "ADJUSTMENT": "Ajustement"
     }
+  },
+  "emailTemplates": {
+    "invitation": {
+      "subject": "Votre invitation ALVILLAS OS",
+      "body": "Vous avez re?u une invitation ? ALVILLAS OS. Activez votre compte avec ce lien ? usage unique et confirmez le num?ro de t?l?phone invit?.",
+      "action": "Activer le compte",
+      "code": "Code d?invitation",
+      "expires": "Valable jusqu?au {date}.",
+      "footer": "Gardez ce code confidentiel. Contactez votre responsable si vous n?attendiez pas cette invitation."
+    },
+    "recovery": {
+      "subject": "R?cup?rer votre compte ALVILLAS OS",
+      "body": "Votre responsable a demand? la r?cup?ration du compte. Utilisez ce code ? usage unique pour choisir un nouveau mot de passe. Si vous utilisez un authentificateur, son code reste n?cessaire.",
+      "action": "R?cup?rer le compte",
+      "code": "Code de r?cup?ration",
+      "expires": "Valable jusqu?au {date}.",
+      "footer": "Gardez ce code confidentiel. Contactez votre responsable si vous n?avez pas demand? cette r?cup?ration."
+    }
   }
 }

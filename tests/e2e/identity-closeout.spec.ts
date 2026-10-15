@@ -53,6 +53,40 @@ async function activate(page: Page, code: string, phone: string) {
 test.describe("identity closeout acceptance", () => {
   test.skip(!process.env.DATABASE_URL, "Real PostgreSQL is required");
 
+  test("invitation activation and sign-in use the recipient's selected language", async ({ page }, testInfo) => {
+    const suffix = `${testInfo.project.name}-${Date.now()}`;
+    const adminEmail = e2eEmail(`localized-invite-admin-${suffix}`, testInfo.project.name);
+    const email = e2eEmail(`localized-invite-${suffix}`, testInfo.project.name);
+    const phone = `+21264${Date.now().toString().slice(-7)}`;
+    await ensureE2EAdmin(adminEmail, password);
+    await login(page, adminEmail);
+    await page.goto(`${origin}/en/app/identity`);
+    await page.getByTestId("invite-display-name").fill("French recipient");
+    await page.getByTestId("invite-email").fill(email);
+    await page.getByTestId("invite-phone").fill(phone);
+    await page.getByTestId("invite-role").selectOption("field_staff");
+    await page.getByTestId("invite-preferred-locale").selectOption("fr");
+    await page.getByTestId("invite-submit").click();
+    const code = (await page.getByTestId("invitation-code").innerText()).split(":").pop()?.trim();
+    expect(code).toBeTruthy();
+    const profile = page.getByTestId("person-profile-row").filter({ hasText: email });
+    await profile.locator("summary").click();
+    await expect(profile.locator('[name="preferredLocale"]')).toHaveValue("fr");
+    await page.context().clearCookies();
+    await page.goto(`${origin}/fr/activate/${code}`);
+    await page.getByTestId("activation-phone").fill(phone);
+    await page.getByTestId("activation-pin").fill("654321");
+    await page.getByTestId("activation-password").fill(password);
+    await page.getByTestId("activation-submit").click();
+    await expect(page).toHaveURL(/\/fr\/login/u);
+    await page.getByTestId("login-email").fill(email);
+    await page.getByTestId("login-password").fill(password);
+    await page.getByTestId("login-submit").click();
+    await expect(page).toHaveURL(/\/fr\/app/u);
+    expect((await session(page)).user?.id).toBeTruthy();
+  });
+
+
   test("finance invitation restricts access until real passkey and authenticator enrollment", async ({ page }, testInfo) => {
     test.setTimeout(120000);
     const suffix = `${testInfo.project.name}-${Date.now()}`;

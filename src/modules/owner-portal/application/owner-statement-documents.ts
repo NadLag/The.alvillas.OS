@@ -7,6 +7,7 @@ import {
 } from "@/modules/owner-portal/domain/owner-statement";
 import type { OwnerStatementView } from "@/modules/owner-portal/application/owner-statement-presenter";
 import type { EmailProvider, PdfRenderer } from "@/platform/providers";
+import { escapeHtml } from "@/platform/encoding/html";
 
 const ownerStatementTemplate = "owner.statement";
 
@@ -127,14 +128,6 @@ function label(key: keyof typeof documentLabels, locale: AppLocale): string {
 
 function interpolate(template: string, values: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/gu, (_, key: string) => values[key] ?? "");
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 function periodText(statement: OwnerStatementView, locale: AppLocale): string {

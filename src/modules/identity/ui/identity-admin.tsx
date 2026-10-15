@@ -836,6 +836,12 @@ export function IdentityAdmin({
               <input data-testid="invite-phone" name="phone" type="tel" />
             </label>
             <label className="field">
+              <span>{labels.preferredLocale}</span>
+              <select data-testid="invite-preferred-locale" name="preferredLocale" defaultValue={locale}>
+                {profileLocales.map((profileLocale) => <option key={profileLocale} value={profileLocale}>{profileLocale.toUpperCase()}</option>)}
+              </select>
+            </label>
+            <label className="field">
               <span>{labels.role}</span>
               <select data-testid="invite-role" name="roleKey" required>
                 {roles.map((role) => (
