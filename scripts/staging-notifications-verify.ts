@@ -73,7 +73,11 @@ try {
     };
     const savePreferences = async () => {
       const button = page.getByTestId("notification-preferences-save");
-      if (await button.isEnabled()) { await button.click(); await expect(button).toBeDisabled(); }
+      if (await button.isEnabled()) {
+        await button.click();
+        await expect(page.locator(".notification-settings").getByRole("status")).toContainText("Your preferences have been saved.");
+        await expect(button).toBeDisabled();
+      }
     };
     await page.goto("/en/app");
     originalLocale = await page.getByTestId("preferred-locale-select").inputValue();
