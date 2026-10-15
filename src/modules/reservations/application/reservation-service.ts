@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { publishNotification } from "@/platform/notifications/notification-service";
 import {
   manualReservationInputSchema,
   completeTaskInputSchema,
@@ -243,6 +244,9 @@ export async function createManualReservation(
       tasks.push(result.task);
       if (result.created) {
         await auditTaskCreate(tx, ctx, meta, result.task, reservation.propertyId);
+        if (result.task.assignedToUserAccountId) await publishNotification(tx, ctx.organizationId, {
+          kind: "task_assigned", recipientId: result.task.assignedToUserAccountId, targetId: result.task.id
+        }, `notification:task:${result.task.id}:assigned`);
       }
     }
 

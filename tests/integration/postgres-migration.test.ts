@@ -123,11 +123,15 @@ import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { bootstrapFirstAdmin, bootstrapOrganizationId } from "../../prisma/bootstrap-admin";
 import { PinSecurityRepository } from "@/modules/identity/infrastructure/pin-security-repository";
 import { pinLockoutConfigKey, pinLockoutState } from "@/modules/identity/domain/pin-lockout";
+import { getNotificationPage, openNotification, readNotification, NotificationAccessError, deliverNotificationEvent, publishNotification } from "@/platform/notifications/notification-service";
+import { ownNotificationContext } from "@/platform/notifications/notification";
+import { updateOwnPreferredLocale } from "@/modules/identity/application/identity-service";
 
 let prisma: PrismaClient;
 let adminPrisma: PrismaClient | undefined;
 let containerName: string;
 let ownsContainer = false;
+let notificationTestDatabaseUrl: string;
 
 function runNpx(args: string[], env: NodeJS.ProcessEnv): void {
   const command = process.platform === "win32" ? "cmd.exe" : "npx";
@@ -303,6 +307,7 @@ describe("PostgreSQL baseline", () => {
     runNpx(["prisma", "migrate", "deploy"], { ...process.env, DATABASE_URL: databaseUrl });
 
     databaseUrl = await configureAppRole(databaseUrl);
+    notificationTestDatabaseUrl = databaseUrl;
 
     prisma = new PrismaClient({
       datasources: { db: { url: databaseUrl } }
@@ -315,6 +320,107 @@ describe("PostgreSQL baseline", () => {
     if (ownsContainer && containerName) {
       execFileSync("docker", ["stop", containerName], { stdio: "ignore" });
     }
+  });
+
+  it("persists recipient notifications, denies tenant and recipient access, and replays events without duplicate unread counts", async () => {
+    const org = await prisma.organization.create({ data: { name: `Notification integration ${randomUUID()}` } });
+    const foreignOrg = await prisma.organization.create({ data: { name: `Notification isolation ${randomUUID()}` } });
+    const accounts = await withTenant(prisma, org.id, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId: org.id, displayName: "Notification test" } });
+      const one = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id } });
+      const two = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id } });
+      return { one, two, person };
+    });
+    const context = (accountId: string, organizationId = org.id) => ({ organizationId, accountId,
+      authContext: ownNotificationContext({ organizationId, permissions: new Set<string>(), scopes: [{ organizationId }] }, accountId) });
+    const actor = context(accounts.one.id);
+    const deps = { db: prisma as TenantTransactionRunner, requestId: randomUUID() };
+    // The actual business service, not a seeded notification, produces the first event.
+    await updateOwnPreferredLocale({ organizationId: org.id, actorId: accounts.one.id, personId: accounts.person.id, authContext: actor.authContext }, "fr", deps);
+    const first = await getNotificationPage(actor, {}, deps);
+    expect(first.unreadCount).toBe(1);
+    expect(first.items[0]).toMatchObject({ kind: "language_updated", readAt: null, available: true });
+    expect(first.items[0]).not.toHaveProperty("targetId");
+    const event = await withTenant(prisma, org.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { organizationId: org.id, idempotencyKey: `notification:language:${accounts.one.id}:${deps.requestId}` } }));
+    expect(event.status).toBe("DISPATCHED");
+    await Promise.all([deliverNotificationEvent(event, deps), deliverNotificationEvent(event, deps)]);
+    await createInngestOutboxHandlers({})[event.type](event);
+    expect((await getNotificationPage(actor, {}, deps)).unreadCount).toBe(1);
+    expect((await getNotificationPage(context(accounts.two.id), {}, deps)).items).toEqual([]);
+    const id = first.items[0].id;
+    await expect(readNotification(context(accounts.two.id), id, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await expect(openNotification(context(accounts.one.id, foreignOrg.id), id, "en", deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await expect(readNotification({ ...actor, organizationId: foreignOrg.id }, id, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await withTenant(prisma, foreignOrg.id, async (tx) => {
+      expect(await tx.notification.findMany({ where: { id } })).toEqual([]);
+      await expect(tx.notification.create({ data: { organizationId: foreignOrg.id, recipientId: accounts.one.id, eventId: event.id, kind: "language_updated", targetId: accounts.one.id } })).rejects.toThrow();
+    });
+    await Promise.all([readNotification(actor, id, deps), readNotification(actor, id, deps)]);
+    const read = await getNotificationPage(actor, {}, deps);
+    expect(read.unreadCount).toBe(0);
+    expect(read.items[0].readAt).not.toBeNull();
+    expect(await openNotification(actor, id, "fr", deps)).toBe("/fr/app");
+    await withTenant(prisma, org.id, async (tx) => {
+      expect(await tx.auditLog.count({ where: { organizationId: org.id, action: "notification.read", resourceId: id } })).toBe(1);
+    });
+    await expect(withTenant(prisma, org.id, (tx) => tx.notification.update({ where: { id }, data: { readAt: null } }))).rejects.toThrow("first notification read timestamp");
+    await expect(withTenant(prisma, org.id, (tx) => tx.notification.delete({ where: { id } }))).rejects.toThrow("append-only");
+    // Many real events with identical times exercise the UUID keyset tie breaker.
+    await withTenant(prisma, org.id, async (tx) => {
+      for (let index = 0; index < 23; index += 1) await publishNotification(tx, org.id, { kind: "language_updated", recipientId: accounts.one.id, targetId: accounts.one.id }, `notification:pagination:${index}`);
+    });
+    const pageOne = await getNotificationPage(actor, {}, deps);
+    const pageTwo = await getNotificationPage(actor, { cursor: pageOne.nextCursor }, deps);
+    expect(pageOne.items).toHaveLength(20);
+    expect(pageTwo.items).toHaveLength(4);
+    expect(new Set([...pageOne.items, ...pageTwo.items].map((item) => item.id)).size).toBe(24);
+    expect(pageOne.unreadCount).toBe(23);
+    const freshConnection = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } } });
+    try {
+      const persisted = await getNotificationPage(actor, {}, { db: freshConnection });
+      expect(persisted).toEqual(pageOne);
+    } finally { await freshConnection.$disconnect(); }
+  });
+
+  it("rechecks task record permissions after notification delivery and batches target authorization", async () => {
+    const org = await prisma.organization.create({ data: { name: `Notification task ${randomUUID()}` } });
+    const fixture = await withTenant(prisma, org.id, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId: org.id, displayName: "Assigned worker" } });
+      const account = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id } });
+      const property = await tx.property.create({ data: { organizationId: org.id, name: "Test notification villa", addressLine1: "Test", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      const task = await tx.operationTask.create({ data: { organizationId: org.id, propertyId: property.id, assignedToUserAccountId: account.id,
+        type: "ARRIVAL_PREPARATION", dueDate: new Date("2026-10-16"), titleTranslations: { en: "Private record title" }, idempotencyKey: randomUUID() } });
+      await publishNotification(tx, org.id, { kind: "task_assigned", recipientId: account.id, targetId: task.id }, `notification:task:${task.id}`);
+      for (let index = 0; index < 19; index += 1) {
+        const another = await tx.operationTask.create({ data: { organizationId: org.id, propertyId: property.id, assignedToUserAccountId: account.id,
+          type: "ARRIVAL_PREPARATION", dueDate: new Date("2026-10-16"), titleTranslations: { en: "Private record title" }, idempotencyKey: randomUUID() } });
+        await publishNotification(tx, org.id, { kind: "task_assigned", recipientId: account.id, targetId: another.id }, `notification:task:${another.id}`);
+      }
+      return { account, property, task };
+    });
+    const actor = { organizationId: org.id, accountId: fixture.account.id, authContext: ownNotificationContext({ organizationId: org.id,
+      permissions: new Set(["task:view"]), scopes: [{ organizationId: org.id, scopeType: "property" as const, scopeId: fixture.property.id }] }, fixture.account.id) };
+    const deps = { db: prisma as TenantTransactionRunner };
+    const page = await getNotificationPage(actor, {}, deps);
+    expect(page.items).toHaveLength(20);
+    const item = page.items.at(-1)!;
+    expect(page.items[0].available).toBe(true);
+    const measured = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } }, log: [{ emit: "event", level: "query" }] });
+    const queries: string[] = [];
+    measured.$on("query", (event) => { queries.push(event.query); });
+    try {
+      await getNotificationPage(actor, {}, { db: measured });
+      expect(queries.filter((query) => query.startsWith("SELECT"))).toHaveLength(5);
+    } finally { await measured.$disconnect(); }
+    expect(await openNotification(actor, item.id, "en", deps)).toBe(`/en/app/field/${fixture.task.id}`);
+    const denied = { ...actor, authContext: ownNotificationContext({ organizationId: org.id, permissions: new Set<string>(), scopes: [{ organizationId: org.id }] }, actor.accountId) };
+    expect((await getNotificationPage(denied, {}, deps)).items[0].available).toBe(false);
+    await expect(openNotification(denied, item.id, "en", deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await withTenant(prisma, org.id, (tx) => tx.operationTask.update({ where: { id: fixture.task.id }, data: { assignedToUserAccountId: null } }));
+    await expect(openNotification(actor, item.id, "en", deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    expect((await getNotificationPage(actor, {}, deps)).unreadCount).toBe(20);
+    await readNotification(actor, item.id, deps);
+    expect((await getNotificationPage(actor, {}, deps)).unreadCount).toBe(19);
   });
 
   it("applies all migrations against an empty PostgreSQL database", async () => {

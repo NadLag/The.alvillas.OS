@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { publishNotification } from "@/platform/notifications/notification-service";
 import {
   generateAuthenticationOptions,
   generateRegistrationOptions,
@@ -772,6 +773,9 @@ export async function updateOwnPreferredLocale(
       requestId: meta.requestId,
       occurredAt: new Date()
     });
+    await publishNotification(tx, ctx.organizationId, {
+      kind: "language_updated", recipientId: ctx.actorId, targetId: ctx.actorId
+    }, `notification:language:${ctx.actorId}:${meta.requestId}`);
   });
 }
 

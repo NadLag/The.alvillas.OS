@@ -3,6 +3,8 @@ import type { OutboxHandlers } from "@/platform/events/outbox-dispatcher";
 import type { EmailProvider } from "@/platform/providers";
 import { ResendEmailProvider } from "@/platform/providers/real";
 import { renderIdentityEmail } from "@/platform/email/identity-templates";
+import { deliverNotificationEvent } from "@/platform/notifications/notification-service";
+import { notificationEventType } from "@/platform/notifications/notification";
 
 export type InngestSendResult = {
   ids: string[];
@@ -87,7 +89,7 @@ export function createInngestOutboxHandlers(
   transport: InngestTransport = fetch,
   emailProvider?: EmailProvider
 ): OutboxHandlers {
-  const handler = createInngestOutboxHandler(env, transport);
+  const handler = (event: PrismaOutboxEvent) => createInngestOutboxHandler(env, transport)(event);
   const identityDelivery = async (event: PrismaOutboxEvent) => {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     if (payload.channel !== "email") {
@@ -100,6 +102,7 @@ export function createInngestOutboxHandlers(
   };
 
   return {
+    [notificationEventType]: async (event) => { await deliverNotificationEvent(event); },
     "identity.invitation.delivery_requested": identityDelivery,
     "identity.recovery.delivery_requested": identityDelivery,
     "*": async (event) => {

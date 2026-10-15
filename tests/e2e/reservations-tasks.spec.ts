@@ -71,6 +71,13 @@ test.describe("manual reservation to operations tasks journey", () => {
     await expect(propertyTasks.filter({ hasText: "Arrival preparation" })).toHaveCount(1);
     await expect(propertyTasks.filter({ hasText: "Checkout cleaning" })).toHaveCount(1);
 
+    await expect(page.getByTestId("notification-count")).toHaveText("2");
+    await page.getByTestId("notification-bell").click();
+    await expect(page.getByTestId("notification-item")).toHaveCount(2);
+    await page.getByRole("button", { name: "Open record", exact: true }).first().click();
+    await expect(page.getByTestId("notification-panel")).not.toBeVisible();
+    await expect(page.getByTestId("field-task-page")).toBeVisible();
+    await expect(page.getByTestId("notification-count")).toHaveText("1");
     await page.goto("/en/app/field");
     const fieldTask = page.getByTestId("field-task-card").filter({ hasText: propertyName }).first();
     await expect(fieldTask).toBeVisible();

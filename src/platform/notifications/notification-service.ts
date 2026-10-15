@@ -1,0 +1,88 @@
+import type { Session } from "next-auth";
+import type { OutboxEvent } from "@prisma/client";
+import { authContextForAccount } from "@/platform/authz/account-context";
+import { authorize, type AuthContext } from "@/platform/authz/authorize";
+import { present } from "@/platform/authz/present";
+import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { prisma } from "@/platform/db/client";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { NotificationRepository } from "./notification-repository";
+import { notificationDestination, notificationInputSchema, notificationPageSchema, ownNotificationContext,
+  type NotificationInput, type NotificationPage } from "./notification";
+import { z } from "zod";
+
+export type NotificationActor = { organizationId: string; accountId: string; authContext: AuthContext };
+type Deps = { db?: TenantTransactionRunner; requestId?: string };
+export class NotificationAccessError extends Error {}
+
+export async function notificationActorFromSession(session: Session | null): Promise<NotificationActor | null> {
+  const user = session?.user;
+  if (!user?.id || !user.organizationId || user.securitySetupRequired) return null;
+  const ctx = await authContextForAccount(user.organizationId, user.id);
+  return { organizationId: user.organizationId, accountId: user.id, authContext: ownNotificationContext(ctx, user.id) };
+}
+
+function assertInbox(actor: NotificationActor, action: "view" | "edit") {
+  if (actor.accountId !== actor.authContext.userAccountId || !authorize(actor.authContext, action, {
+    type: "notification", organizationId: actor.organizationId, id: actor.accountId
+  })) throw new NotificationAccessError();
+}
+
+export async function publishNotification(tx: TenantTransaction, organizationId: string, input: NotificationInput, key: string) {
+  await new NotificationRepository(tx, organizationId).publish(input, key);
+}
+export async function deliverNotificationEvent(event: OutboxEvent, deps: Deps = {}) {
+  return withTenant(deps.db ?? prisma, event.organizationId, (tx) => new NotificationRepository(tx, event.organizationId).deliver(event));
+}
+
+export async function getNotificationPage(actor: NotificationActor, input: unknown = {}, deps: Deps = {}): Promise<NotificationPage> {
+  const { cursor } = notificationPageSchema.parse(input);
+  assertInbox(actor, "view");
+  return withTenant(deps.db ?? prisma, actor.organizationId, async (tx) => {
+    const repository = new NotificationRepository(tx, actor.organizationId);
+    const [rows, unreadCount] = await Promise.all([repository.page(actor.accountId, cursor), repository.unreadCount(actor.accountId)]);
+    const visible = rows.slice(0, 20);
+    const targets = await repository.targets(visible);
+    const last = visible.at(-1);
+    return { unreadCount, nextCursor: rows.length > 20 && last ? { createdAt: last.createdAt.toISOString(), id: last.id } : null,
+      items: visible.map((row) => {
+        const input = notificationInputSchema.parse({ kind: row.kind, targetId: row.targetId, recipientId: row.recipientId });
+        const data = { id: row.id, kind: input.kind, createdAt: row.createdAt.toISOString(), readAt: row.readAt?.toISOString() ?? null,
+          available: Boolean(notificationDestination(actor.authContext, input, targets.get(row.targetId) ?? null, "en")) };
+        return present({ ...actor.authContext, visibleDataClasses: new Set() }, "view", {
+          type: "notification", organizationId: actor.organizationId, id: actor.accountId, data
+        }, {}) as typeof data;
+      }) };
+  }, { isolationLevel: "RepeatableRead" });
+}
+
+export async function readNotification(actor: NotificationActor, id: string, deps: Deps = {}): Promise<void> {
+  z.string().uuid().parse(id);
+  assertInbox(actor, "edit");
+  await withTenant(deps.db ?? prisma, actor.organizationId, async (tx) => {
+    const repository = new NotificationRepository(tx, actor.organizationId);
+    const row = await repository.find(actor.accountId, id);
+    if (!row) throw new NotificationAccessError();
+    const now = new Date();
+    const changed = await repository.markRead(actor.accountId, id, now);
+    if (changed.count) await writeAuditEvent(tx, {
+      organizationId: actor.organizationId, actorId: actor.accountId, action: "notification.read", resourceType: "notification", resourceId: id,
+      before: { readAt: null }, after: { readAt: now.toISOString() }, reason: null, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now
+    });
+  });
+}
+
+export async function openNotification(actor: NotificationActor, id: string, locale: "en" | "fr" | "ar", deps: Deps = {}): Promise<string> {
+  z.string().uuid().parse(id);
+  assertInbox(actor, "view");
+  return withTenant(deps.db ?? prisma, actor.organizationId, async (tx) => {
+    const repository = new NotificationRepository(tx, actor.organizationId);
+    const row = await repository.find(actor.accountId, id);
+    if (!row) throw new NotificationAccessError();
+    const input = notificationInputSchema.parse({ kind: row.kind, targetId: row.targetId, recipientId: row.recipientId });
+    const targets = await repository.targets([row]);
+    const destination = notificationDestination(actor.authContext, input, targets.get(row.targetId) ?? null, locale);
+    if (!destination) throw new NotificationAccessError();
+    return destination;
+  });
+}
