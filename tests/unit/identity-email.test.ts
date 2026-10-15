@@ -61,7 +61,7 @@ describe("localized identity email delivery", () => {
   });
 
   it("keeps manual phone delivery in the existing event path", async () => {
-    const inngestTransport = vi.fn<InngestTransport>(() => Promise.resolve(response()));
+    const inngestTransport = vi.fn<InngestTransport>(() => Promise.resolve({ ...response(), json: () => Promise.resolve({ ids: ["accepted-manual-reference"], status: 200 }) }));
     const handlers = createInngestOutboxHandlers({ INNGEST_EVENT_KEY: "test-event-key", APP_URL: origin }, inngestTransport);
     await handlers[event.type]({ ...event, payload: { channel: "manual_phone" } });
     expect(inngestTransport).toHaveBeenCalledOnce();

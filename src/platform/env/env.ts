@@ -38,6 +38,7 @@ export const envSchema = z.object({
   PDF_RENDERER_TOKEN: z.string().optional(),
   INNGEST_EVENT_URL: optionalUrl,
   INNGEST_ENV: z.string().optional(),
+  INNGEST_DEV: z.enum(["0", "1"]).optional().or(z.literal("")),
   ALVILLAS_STRICT_READINESS: z.enum(["0", "1"]).optional()
 });
 

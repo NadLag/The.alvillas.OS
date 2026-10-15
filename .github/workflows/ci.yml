@@ -58,11 +58,13 @@ jobs:
           node --input-type=module <<'NODE'
           import { appendFileSync } from "node:fs";
           import webpush from "web-push";
+          import { randomBytes } from "node:crypto";
           const keys = webpush.generateVAPIDKeys();
           appendFileSync(process.env.GITHUB_ENV, [
             `VAPID_PUBLIC_KEY=${keys.publicKey}`,
             `VAPID_PRIVATE_KEY=${keys.privateKey}`,
             "VAPID_SUBJECT=mailto:notifications@example.test",
+            `INNGEST_SIGNING_KEY=signkey-test-${randomBytes(32).toString("hex")}`,
             ""
           ].join("\n"));
           NODE
