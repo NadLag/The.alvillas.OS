@@ -1066,7 +1066,37 @@
     "more": "Load older updates",
     "kinds": {
       "language_updated": "Your language preference was updated.",
-      "task_assigned": "A task was assigned to you."
+      "task_assigned": "A task was assigned to you.",
+      "security_session_revoked": "A session on your account was revoked."
+    },
+    "settings": {
+      "eyebrow": "Your account",
+      "title": "Notification Settings",
+      "description": "Choose how you hear about account updates and assigned work.",
+      "back": "Back to workspace",
+      "mandatory": "Security notifications are always on. Optional channel and category choices cannot disable them.",
+      "inApp": "In-app",
+      "inAppDescription": "Updates in your notification center.",
+      "enabled": "Receive optional in-app updates",
+      "account": "Account updates",
+      "accountDescription": "Changes to your language preference.",
+      "operations": "Assigned work",
+      "operationsDescription": "New tasks assigned to you.",
+      "security": "Security · required",
+      "securityDescription": "Alerts when a session on your account is revoked.",
+      "email": "Email",
+      "emailDescription": "Required account-access messages when email is used for your account.",
+      "emailSecurityDescription": "Invitation and recovery instructions.",
+      "offline": "You are offline. Your changes stay on this screen; reconnect to save.",
+      "loadError": "Your notification settings could not be loaded. Please try again.",
+      "saveError": "Your settings were not saved. Your choices are still here; please try again.",
+      "retry": "Try again",
+      "loading": "Loading notification settings…",
+      "save": "Save preferences",
+      "saving": "Saving…",
+      "saved": "Your preferences have been saved.",
+      "unsaved": "You have unsaved changes.",
+      "upToDate": "Your preferences are up to date."
     }
   }
 }

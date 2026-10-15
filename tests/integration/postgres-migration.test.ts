@@ -126,6 +126,9 @@ import { pinLockoutConfigKey, pinLockoutState } from "@/modules/identity/domain/
 import { getNotificationPage, openNotification, readNotification, NotificationAccessError, deliverNotificationEvent, publishNotification } from "@/platform/notifications/notification-service";
 import { ownNotificationContext } from "@/platform/notifications/notification";
 import { updateOwnPreferredLocale } from "@/modules/identity/application/identity-service";
+import { revokeSession } from "@/modules/identity/application/identity-service";
+import { getNotificationPreferences, saveNotificationPreferences } from "@/platform/notifications/notification-service";
+import { defaultNotificationPreferences } from "@/platform/notifications/notification-preferences";
 
 let prisma: PrismaClient;
 let adminPrisma: PrismaClient | undefined;
@@ -320,6 +323,114 @@ describe("PostgreSQL baseline", () => {
     if (ownsContainer && containerName) {
       execFileSync("docker", ["stop", containerName], { stdio: "ignore" });
     }
+  });
+
+  it("persists authorized tenant preferences, rejects invalid and mandatory opt-outs, and audits serialized changes", async () => {
+    const org = await prisma.organization.create({ data: { name: `Preference test ${randomUUID()}` } });
+    const other = await prisma.organization.create({ data: { name: `Preference isolation ${randomUUID()}` } });
+    const fixture = await withTenant(prisma, org.id, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId: org.id, displayName: "Preferences" } });
+      const one = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id } });
+      const two = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id } });
+      return { one, two };
+    });
+    const actor = { organizationId: org.id, accountId: fixture.one.id,
+      authContext: ownNotificationContext({ organizationId: org.id, permissions: new Set<string>(), scopes: [] }, fixture.one.id) };
+    const deps = { db: prisma as TenantTransactionRunner, requestId: randomUUID() };
+    const defaults = defaultNotificationPreferences();
+    const changed = { ...defaults, in_app: { ...defaults.in_app, account: false } };
+    expect(await getNotificationPreferences(actor, deps)).toEqual(defaults);
+    const denied = [
+      { ...actor, organizationId: other.id },
+      { ...actor, accountId: fixture.two.id },
+      { ...actor, authContext: { ...actor.authContext, permissions: new Set<string>(), assignments: [] } },
+      { ...actor, authContext: { ...actor.authContext, scopes: [], assignments: [{ scope: { organizationId: other.id }, permissions: actor.authContext.permissions }] } },
+      { ...actor, organizationId: other.id, authContext: ownNotificationContext({ organizationId: other.id, permissions: new Set<string>(), scopes: [] }, fixture.one.id) }
+    ];
+    for (const forbidden of denied) {
+      await expect(getNotificationPreferences(forbidden, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+      await expect(saveNotificationPreferences(forbidden, changed, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    }
+    await saveNotificationPreferences(actor, changed, deps);
+    for (const invalid of [{ ...changed, userAccountId: fixture.two.id }, { ...changed, in_app: { ...changed.in_app, security: false } },
+      { ...changed, email: { security: false } }, { ...changed, push: true }, { in_app: {} }]) {
+      await expect(saveNotificationPreferences(actor, invalid, deps)).rejects.toThrow();
+      expect(await getNotificationPreferences(actor, deps)).toEqual(changed);
+    }
+    const fresh = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } } });
+    try { expect(await getNotificationPreferences(actor, { db: fresh })).toEqual(changed); } finally { await fresh.$disconnect(); }
+    expect(await getNotificationPreferences({ ...actor, accountId: fixture.two.id,
+      authContext: ownNotificationContext({ organizationId: org.id, permissions: new Set<string>(), scopes: [] }, fixture.two.id) }, deps)).toEqual(defaults);
+    await withTenant(prisma, other.id, async (tx) => {
+      expect(await tx.notificationPreference.findMany({ where: { userAccountId: fixture.one.id } })).toEqual([]);
+    });
+    for (const data of [{ organizationId: other.id, userAccountId: fixture.one.id }, { organizationId: org.id, userAccountId: randomUUID() }]) {
+      await expect(withTenant(prisma, other.id, (tx) => tx.notificationPreference.create({ data }))).rejects.toThrow();
+    }
+    for (const data of [{ inAppSecurity: false }, { emailSecurity: false }]) {
+      await expect(withTenant(prisma, org.id, (tx) => tx.notificationPreference.updateMany({ where: { userAccountId: fixture.one.id }, data }))).rejects.toThrow();
+    }
+    await Promise.all([saveNotificationPreferences(actor, defaults, deps), saveNotificationPreferences(actor, { ...changed, in_app: { ...changed.in_app, operations: false } }, deps)]);
+    const audits = await withTenant(prisma, org.id, (tx) => tx.auditLog.findMany({ where: { action: "notification.preferences.update", resourceId: fixture.one.id }, orderBy: { id: "asc" } }));
+    expect(audits).toHaveLength(3);
+    expect(audits[0]).toMatchObject({ actorId: fixture.one.id, before: { inApp: defaults.in_app, emailSecurity: true }, after: { inApp: changed.in_app, emailSecurity: true } });
+    expect(audits[1].before).toEqual(audits[0].after);
+    expect(audits[2].before).toEqual(audits[1].after);
+    await withTenant(prisma, org.id, (tx) => tx.userAccount.update({ where: { id: fixture.one.id }, data: { status: "SUSPENDED" } }));
+    await expect(getNotificationPreferences(actor, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await expect(saveNotificationPreferences(actor, changed, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+  });
+
+  it("applies category and channel preferences in the real delivery pipeline while preserving security and terminal suppression", async () => {
+    const org = await prisma.organization.create({ data: { name: `Preference delivery ${randomUUID()}` } });
+    const fixture = await withTenant(prisma, org.id, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId: org.id, displayName: "Preference delivery" } });
+      const account = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id, email: `preference-${randomUUID()}@example.test` } });
+      const property = await tx.property.create({ data: { organizationId: org.id, name: "Preference villa", addressLine1: "Test", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      const task = await tx.operationTask.create({ data: { organizationId: org.id, propertyId: property.id, type: "CLEANING", state: "PLANNED", assignedToUserAccountId: account.id, dueDate: new Date(), titleTranslations: { en: "Test", fr: "Test" }, idempotencyKey: randomUUID() } });
+      const session = await tx.authSession.create({ data: { organizationId: org.id, userAccountId: account.id, deviceId: "preference-test", sessionVersion: 1, expiresAt: new Date(Date.now() + 3600000) } });
+      return { person, account, task, session };
+    });
+    const actor = { organizationId: org.id, accountId: fixture.account.id,
+      authContext: ownNotificationContext({ organizationId: org.id, permissions: new Set<string>(), scopes: [] }, fixture.account.id) };
+    const deps = { db: prisma as TenantTransactionRunner, requestId: randomUUID() };
+    const defaults = defaultNotificationPreferences();
+    const send = async (kind: "language_updated" | "task_assigned", key: string) => withTenant(prisma, org.id, (tx) => publishNotification(tx, org.id,
+      { kind, recipientId: fixture.account.id, targetId: kind === "task_assigned" ? fixture.task.id : fixture.account.id }, key));
+    await saveNotificationPreferences(actor, { ...defaults, in_app: { ...defaults.in_app, account: false } }, deps);
+    await updateOwnPreferredLocale({ organizationId: org.id, actorId: actor.accountId, personId: fixture.person.id, authContext: actor.authContext }, "fr", deps);
+    await send("task_assigned", "task-enabled");
+    expect((await getNotificationPage(actor, {}, deps)).items.map((item) => item.kind)).toEqual(["task_assigned"]);
+    await saveNotificationPreferences(actor, { ...defaults, in_app: { ...defaults.in_app, operations: false } }, deps);
+    await send("task_assigned", "task-disabled");
+    await send("language_updated", "account-enabled");
+    expect((await getNotificationPage(actor, {}, deps)).unreadCount).toBe(2);
+    await saveNotificationPreferences(actor, { ...defaults, in_app: { ...defaults.in_app, enabled: false } }, deps);
+    await send("language_updated", "channel-disabled");
+    await send("task_assigned", "channel-disabled-task");
+    const identityContext = { organizationId: org.id, actorId: actor.accountId, personId: fixture.person.id,
+      authContext: { organizationId: org.id, permissions: new Set(["identity:override"]), scopes: [{ organizationId: org.id }] } };
+    await revokeSession(identityContext, fixture.session.id, deps);
+    const inbox = await getNotificationPage(actor, {}, deps);
+    expect(inbox.unreadCount).toBe(3);
+    const security = inbox.items.find((item) => item.kind === "security_session_revoked")!;
+    expect(await openNotification(actor, security.id, "fr", deps)).toBe("/fr/app/security");
+    const recoveryContext = { ...identityContext, authContext: { ...identityContext.authContext, permissions: new Set(["identity:edit"]) } };
+    await issueRecoveryCode(recoveryContext, actor.accountId, deps);
+    const sent: string[] = [];
+    const handlers = createInngestOutboxHandlers({ APP_URL: "http://localhost:3000" }, undefined, {
+      send: (input) => { sent.push(input.template); return Promise.resolve({ id: "postgres-test-transport" }); }
+    });
+    expect(await dispatchOutboxBatch(prisma, org.id, handlers)).toMatchObject({ dispatched: 1, failed: 0 });
+    expect(sent).toEqual(["identity.recovery"]);
+    await saveNotificationPreferences(actor, defaults, deps);
+    const events = await withTenant(prisma, org.id, (tx) => tx.outboxEvent.findMany({ where: { organizationId: org.id, type: "notification.requested" } }));
+    expect(events).toHaveLength(7);
+    expect(events.every((event) => event.status === "DISPATCHED")).toBe(true);
+    for (const event of events) await deliverNotificationEvent(event, deps);
+    expect((await getNotificationPage(actor, {}, deps)).unreadCount).toBe(3);
+    await send("language_updated", "channel-disabled");
+    expect((await getNotificationPage(actor, {}, deps)).unreadCount).toBe(3);
   });
 
   it("persists recipient notifications, denies tenant and recipient access, and replays events without duplicate unread counts", async () => {

@@ -2,16 +2,39 @@ import type { Notification, OutboxEvent } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
 import { notificationEventType, notificationInputSchema, type NotificationCursor, type NotificationInput } from "./notification";
+import { Prisma } from "@prisma/client";
+import { defaultNotificationPreferences, shouldDeliverNotification, type NotificationPreferences } from "./notification-preferences";
 
 export class NotificationRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
 
+  async activeRecipient(accountId: string, lock = false) {
+    if (lock) await this.tx.$queryRaw(Prisma.sql`SELECT id FROM user_account WHERE organization_id = ${this.organizationId}::uuid AND id = ${accountId}::uuid FOR UPDATE`);
+    return this.tx.userAccount.findFirst({ where: { organizationId: this.organizationId, id: accountId, status: "ACTIVE" }, select: { id: true } });
+  }
+
+  async preferences(accountId: string): Promise<NotificationPreferences> {
+    const row = await this.tx.notificationPreference.findUnique({ where: { organizationId_userAccountId: { organizationId: this.organizationId, userAccountId: accountId } } });
+    return row ? { in_app: { enabled: row.inAppEnabled, account: row.inAppAccount, operations: row.inAppOperations, security: true }, email: { security: true } } : defaultNotificationPreferences();
+  }
+
+  savePreferences(accountId: string, preferences: NotificationPreferences) {
+    const data = { inAppEnabled: preferences.in_app.enabled, inAppAccount: preferences.in_app.account, inAppOperations: preferences.in_app.operations, inAppSecurity: true, emailSecurity: true };
+    return this.tx.notificationPreference.upsert({
+      where: { organizationId_userAccountId: { organizationId: this.organizationId, userAccountId: accountId } },
+      create: { organizationId: this.organizationId, userAccountId: accountId, ...data }, update: data
+    });
+  }
+
   async deliver(event: OutboxEvent): Promise<void> {
     if (event.organizationId !== this.organizationId || event.type !== notificationEventType) throw new Error("Invalid notification event");
+    // A terminal decision must not be reversed by replay after preferences change.
+    if (event.status === "DISPATCHED") return;
     const input = notificationInputSchema.parse(event.payload);
     const recipient = await this.tx.userAccount.findFirst({ where: { organizationId: this.organizationId, id: input.recipientId, status: "ACTIVE" }, select: { id: true } });
     if (!recipient) return;
-    if (input.kind === "language_updated" && input.targetId !== input.recipientId) throw new Error("Invalid notification subject");
+    if (input.kind !== "task_assigned" && input.targetId !== input.recipientId) throw new Error("Invalid notification subject");
+    if (!shouldDeliverNotification(input.kind, "in_app", await this.preferences(input.recipientId))) return;
     if (input.kind === "task_assigned") {
       const task = await this.tx.operationTask.findFirst({ where: { organizationId: this.organizationId, id: input.targetId, assignedToUserAccountId: input.recipientId }, select: { id: true } });
       // An old event must not re-notify a former assignee.
@@ -58,7 +81,7 @@ export class NotificationRepository {
       propertyId: task.propertyId, region: task.property.regionId, city: task.property.cityId,
       status: task.state, assignedUserAccountId: task.assignedToUserAccountId
     }]));
-    for (const row of rows) if (row.kind === "language_updated") targets.set(row.targetId, { type: "identity", organizationId: this.organizationId, id: row.targetId });
+    for (const row of rows) if (row.kind === "language_updated" || row.kind === "security_session_revoked") targets.set(row.targetId, { type: "identity", organizationId: this.organizationId, id: row.targetId });
     return targets;
   }
 }

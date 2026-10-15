@@ -66,6 +66,7 @@ test.describe("persistent personal notification center", () => {
     await expect(page.getByRole("alert")).toHaveCount(0);
     await page.keyboard.press("Escape");
     await page.getByTestId("logout-button").click();
+    await expect(page).toHaveURL(/\/(en|fr)\/login$/u);
     await login();
     await expect(page.getByTestId("notification-count")).toHaveText("0");
     await page.getByTestId("notification-bell").click();
