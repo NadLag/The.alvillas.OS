@@ -6,4 +6,6 @@ Dispatch requests contain an organization ID and an outbox event ID. The worker 
 
 The existing HTTP drain and Inngest share a PostgreSQL transaction advisory lock per organization. Independent drains therefore cannot forward the same pending source concurrently; consumer idempotency still covers retries after uncertain network acknowledgement. Inngest step memoization and event deduplication supplement durable database state.
 
+The mixed cron/event function has no function-wide admission deduplication. Real Inngest timer events omit `id`; using `event.id` as an idempotency key suppresses later cron ticks for 24 hours. Event API source IDs and database delivery state provide deduplication while each scheduled recovery remains eligible. A signed SDK sync regression checks the actual registration payload, and staging must show consecutive cron executions.
+
 Cloud signatures are always verified on deployed Preview and Production environments, even if a development flag is accidentally present. Preview uses the staging environment's independent event/signing keys and permanent staging origin. Production configuration and promotion are separate owner actions. Unverified provider delivery remains IN-PROGRESS.

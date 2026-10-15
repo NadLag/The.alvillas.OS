@@ -21,6 +21,24 @@ describe("Inngest signed outbox dispatcher", () => {
     expect(dispatchOutbox.opts.concurrency).toEqual({ limit: 1 });
   });
 
+  it("syncs recurring recovery without an event-id admission limit because timer events have no id", async () => {
+    vi.stubEnv("INNGEST_SIGNING_KEY", `signkey-test-${"1".repeat(64)}`);
+    const { PUT } = await import("@/app/api/inngest/route");
+    const url = "http://localhost:3000/api/inngest";
+    const body = JSON.stringify({ url });
+    const seconds = String(Math.floor(Date.now() / 1000));
+    const digest = createHmac("sha256", "1".repeat(64)).update(body).update(seconds).digest("hex");
+    const response = await PUT(new NextRequest(url, { method: "PUT", body, headers: {
+      "content-type": "application/json", "x-inngest-sync-kind": "in_band", "x-inngest-signature": `t=${seconds}&s=${digest}`
+    } }), {});
+    expect(response.status).toBe(200);
+    const registration = await response.json() as { functions: Array<{ idempotency?: string; rateLimit?: unknown; steps: { step: { retries: { attempts: number } } } }> };
+    expect(registration.functions).toHaveLength(1);
+    expect(registration.functions[0].idempotency).toBeUndefined();
+    expect(registration.functions[0].rateLimit).toBeUndefined();
+    expect(registration.functions[0].steps.step.retries.attempts).toBe(3);
+  });
+
   it("loads the canonical reference under the claimed tenant", async () => {
     const { db, findFirst } = database({ id: outboxEventId, organizationId, type: outboxDispatchEvent, status: "DISPATCHED" });
     await expect(dispatchRequestOrganization({ organizationId, outboxEventId }, db)).resolves.toBe(organizationId);

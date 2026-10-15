@@ -31,8 +31,10 @@ export async function dispatchOrganization(organizationId: string, db: OutboxDat
 // This is infrastructure polling cadence; business schedules and push retry policy
 // continue to resolve through their existing configuration/consumer paths.
 export const dispatchOutbox = inngest.createFunction({ id: "dispatch-outbox", name: "ALVILLAS OS outbox dispatcher",
-  triggers: [{ cron: "* * * * *" }, { event: outboxDispatchEvent }], concurrency: { limit: 1 }, retries: 3,
-  idempotency: "event.id"
+  // Timer events have no event.id: function-level admission deduplication would
+  // suppress subsequent cron ticks. Stable Event API IDs and the database guard
+  // duplicate forwarding and delivery without blocking recurring recovery.
+  triggers: [{ cron: "* * * * *" }, { event: outboxDispatchEvent }], concurrency: { limit: 1 }, retries: 3
 }, async ({ event, step }) => {
   const organizations = event.name === "inngest/scheduled.timer"
     ? await step.run("list-organizations", () => OutboxRepository.organizations(prisma))
