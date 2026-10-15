@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { e2eEmail, ensureE2EAdmin } from "./support/auth";
+import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { totpCode } from "@/platform/auth/totp";
 import { PrismaClient } from "@prisma/client";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
@@ -16,9 +16,11 @@ async function session(page: Page) {
 
 async function login(page: Page, email: string, accountPassword = password) {
   await page.goto(`${origin}/en/login`);
+  await waitForE2EAdminLoginWindow(page, email);
   await page.getByTestId("login-email").fill(email);
   await page.getByTestId("login-password").fill(accountPassword);
   await page.getByTestId("login-submit").click();
+  await completeE2EAdminMfa(page, email);
   await expect(page).toHaveURL(/\/en\/app/u);
 }
 
@@ -50,6 +52,60 @@ async function activate(page: Page, code: string, phone: string) {
 
 test.describe("identity closeout acceptance", () => {
   test.skip(!process.env.DATABASE_URL, "Real PostgreSQL is required");
+
+  test("finance invitation restricts access until real passkey and authenticator enrollment", async ({ page }, testInfo) => {
+    test.setTimeout(120000);
+    const suffix = `${testInfo.project.name}-${Date.now()}`;
+    const adminEmail = e2eEmail(`finance-enrollment-admin-${suffix}`, testInfo.project.name);
+    const email = e2eEmail(`finance-enrollment-${suffix}`, testInfo.project.name);
+    const phone = `+21265${Date.now().toString().slice(-7)}`;
+    await ensureE2EAdmin(adminEmail, password);
+    await login(page, adminEmail);
+    const code = await invite(page, email, phone, "finance");
+    await page.context().clearCookies();
+    await page.goto(`${origin}/en/activate/${code}`);
+    await page.getByTestId("activation-phone").fill(phone);
+    await page.getByTestId("activation-pin").fill("654321");
+    await page.getByTestId("activation-password").fill(password);
+    await page.getByTestId("activation-submit").click();
+    await expect(page).toHaveURL(/\/en\/login/u);
+    await page.locator('input[name="method"][value="pin"]').check();
+    await page.getByTestId("login-phone").fill(phone);
+    await page.getByTestId("login-pin").fill("654321");
+    await page.getByTestId("login-submit").click();
+    await expect(page.getByTestId("login-error")).toBeVisible();
+    expect((await session(page)).user?.id).toBeFalsy();
+    await page.goto(`${origin}/en/login`);
+    await page.getByTestId("login-email").fill(email);
+    await page.getByTestId("login-password").fill(password);
+    await page.getByTestId("login-submit").click();
+    await expect(page).toHaveURL(/\/en\/app\/security/u);
+    await page.goto(`${origin}/en/app/identity`);
+    await expect(page).toHaveURL(/\/en\/app\/security/u);
+    const client = await page.context().newCDPSession(page);
+    await client.send("WebAuthn.enable");
+    await client.send("WebAuthn.addVirtualAuthenticator", { options: {
+      protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true
+    } });
+    await page.getByTestId("register-passkey-button").click();
+    await expect(page.getByText("Passkey registered.", { exact: true })).toBeVisible();
+    await page.getByTestId("start-totp-button").click();
+    const secret = (await page.getByTestId("totp-secret").innerText()).split(":").pop()?.trim() ?? "";
+    await page.getByTestId("totp-code").fill(totpCode(secret));
+    await page.getByTestId("confirm-totp-button").click();
+    await expect(page.getByTestId("mfa-recovery-code")).toHaveCount(8);
+    expect((await session(page)).user?.id).toBeFalsy();
+    await page.context().clearCookies();
+    await page.goto(`${origin}/en/login`);
+    await page.getByTestId("login-email").fill(email);
+    await page.getByTestId("login-passkey").click();
+    await expect(page.getByTestId("login-mfa-step")).toBeVisible();
+    await page.getByTestId("login-mfa-code").fill(totpCode(secret));
+    await page.getByTestId("login-submit").click();
+    await expect(page.getByTestId("app-shell")).toBeVisible();
+    const authenticated = await (await page.request.get(`${origin}/api/auth/session`)).json() as { user?: { securitySetupRequired?: boolean } } | null;
+    expect(authenticated?.user?.securitySetupRequired).toBe(false);
+  });
 
   test("owner passkey sign-in creates a real session and optional MFA cannot be bypassed with PIN", async ({ page }, testInfo) => {
     test.setTimeout(90_000);

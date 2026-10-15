@@ -5,7 +5,7 @@ import { authorize } from "@/platform/authz/authorize";
 
 const org = "018f0a0b-0000-7000-9000-000000000001";
 vi.mock("@/platform/authz/account-context", () => ({
-  authContextForAccount: () => Promise.resolve({ organizationId: org, permissions: new Set(), scopes: [], assignments: [] })
+  authContextForAccount: () => Promise.resolve({ organizationId: org, permissions: new Set(), scopes: [{ organizationId: org }], assignments: [] })
 }));
 
 describe("own account security", () => {

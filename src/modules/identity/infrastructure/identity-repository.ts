@@ -262,6 +262,35 @@ export class IdentityRepository {
     await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${this.organizationId}:${key}`}, 0))`);
   }
 
+  findSessionSecurityAccount(id: string, now = new Date()) {
+    return this.tx.userAccount.findFirst({
+      where: { id, organizationId: this.organizationId, status: "ACTIVE" },
+      select: {
+        sessionVersion: true, mfaRequired: true,
+        person: { select: { preferredLocale: true } },
+        authCredentials: { where: { revokedAt: null }, select: { type: true, expiresAt: true, revokedAt: true } },
+        roleAssignments: {
+          where: { archivedAt: null, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] },
+          select: { role: { select: { key: true } } }
+        }
+      }
+    });
+  }
+
+  async confirmTotpCredential(id: string, userAccountId: string, now: Date) {
+    const confirmed = await this.tx.authCredential.count({ where: {
+      organizationId: this.organizationId, userAccountId, type: "TOTP", revokedAt: null, expiresAt: null
+    } });
+    await this.tx.authCredential.update({ where: { id }, data: { expiresAt: null, lastUsedAt: now } });
+    await this.tx.userAccount.update({ where: { id: userAccountId }, data: {
+      mfaRequired: true, ...(confirmed === 0 ? { sessionVersion: { increment: 1 } } : {})
+    } });
+    const revoked = confirmed === 0 ? await this.tx.authSession.updateMany({
+      where: { organizationId: this.organizationId, userAccountId, revokedAt: null }, data: { revokedAt: now }
+    }) : { count: 0 };
+    return { firstEnrollment: confirmed === 0, revokedSessionCount: revoked.count };
+  }
+
   findActivePinAccount(phone: string, now: Date) {
     return this.tx.userAccount.findFirst({
       where: { organizationId: this.organizationId, phone, status: "ACTIVE" },

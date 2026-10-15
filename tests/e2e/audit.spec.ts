@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { expect, test, type Page } from "@playwright/test";
-import { e2eEmail, ensureE2EAdmin } from "./support/auth";
+import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
 import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
@@ -15,9 +15,11 @@ const hasDatabase = Boolean(process.env.DATABASE_URL);
 
 async function login(page: Page, email: string, password = adminPassword) {
   await page.goto("/en/login");
+  await waitForE2EAdminLoginWindow(page, email);
   await page.getByTestId("login-email").fill(email);
   await page.getByTestId("login-password").fill(password);
   await page.getByTestId("login-submit").click();
+  await completeE2EAdminMfa(page, email);
   await expect(page).toHaveURL(/\/en\/app/u);
 }
 

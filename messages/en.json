@@ -264,7 +264,9 @@
       "totpInvalid": "The code was not accepted. Use a current code for this setup key, or start a new setup if it has expired.",
       "recoveryCodes": "Recovery codes",
       "registerPasskey": "Register passkey",
-      "passkeyReady": "Passkey registered."
+      "passkeyReady": "Passkey registered.",
+      "requiredSubtitle": "Register a passkey and confirm your authenticator before opening the workspace. Save your recovery codes, then sign in again.",
+      "signInAgain": "Sign in after saving these codes"
     },
     "activation": {
       "eyebrow": "Account activation",
@@ -859,8 +861,7 @@
         "saveProperty": "Create property"
       }
     }
-  }
-  ,
+  },
   "Reservations": {
     "eyebrow": "Reservations",
     "title": "Manual reservations",

@@ -17,14 +17,14 @@ export default async function AccountSecurityPage({ params }: { params: Promise<
   const t = await getTranslations("Identity");
   return (
     <AdminShell className="resource-page" testId="account-security-page">
-      <ShellHeader eyebrow={t("security.title")} title={t("security.title")} subtitle={t("security.subtitle")}
+      <ShellHeader eyebrow={t("security.title")} title={t("security.title")} subtitle={t(session.user.securitySetupRequired ? "security.requiredSubtitle" : "security.subtitle")}
         actions={<Link className="secondary-button" href={`/${appLocale}/app`}>{t("backToWorkspace")}</Link>} />
-      <SecurityPanel labels={{
+      <SecurityPanel signInHref={`/${appLocale}/login`} labels={{
         title: t("security.title"), subtitle: t("security.subtitle"), startTotp: t("security.startTotp"),
         confirmTotp: t("security.confirmTotp"), totpCode: t("security.totpCode"), totpSecret: t("security.totpSecret"),
         totpInvalid: t("security.totpInvalid"), recoveryCodes: t("security.recoveryCodes"), registerPasskey: t("security.registerPasskey"),
         passkeyReady: t("security.passkeyReady"), validation: t("forms.validation"), generic: t("forms.generic"),
-        unauthorized: t("forms.unauthorized"), forbidden: t("forms.forbidden")
+        unauthorized: t("forms.unauthorized"), forbidden: t("forms.forbidden"), signInAgain: t("security.signInAgain")
       }} />
     </AdminShell>
   );

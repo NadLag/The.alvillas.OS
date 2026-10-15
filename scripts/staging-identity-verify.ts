@@ -5,16 +5,21 @@ if (!process.env.VERCEL_OIDC_TOKEN) process.loadEnvFile(".env.local");
 const baseURL = "https://the-alvillas-os-staging.vercel.app";
 const expectedSha = process.env.STAGING_EXPECTED_SHA;
 const storageState = process.env.STAGING_STORAGE_STATE_FILE;
-const oidc = process.env.VERCEL_OIDC_TOKEN;
-if (!expectedSha || !oidc) throw new Error("STAGING_EXPECTED_SHA and development VERCEL_OIDC_TOKEN are required");
+const revokedStorageState = process.env.STAGING_REVOKE_STORAGE_STATE_FILE;
+const configuredOidc = process.env.VERCEL_OIDC_TOKEN;
+if (!expectedSha || !configuredOidc) throw new Error("STAGING_EXPECTED_SHA and development VERCEL_OIDC_TOKEN are required");
+const oidc: string = configuredOidc;
 const browser = await chromium.launch();
 const context = await browser.newContext({ baseURL, storageState, viewport: { width: 1440, height: 1000 } });
-await context.route("**/*", async (route) => {
+async function protectOrigin(browserContext: typeof context) {
+await browserContext.route("**/*", async (route) => {
   const request = route.request();
   const headers = request.headers();
   if (new URL(request.url()).origin === baseURL) headers["x-vercel-trusted-oidc-idp-token"] = oidc;
   await route.continue({ headers });
 });
+}
+await protectOrigin(context);
 try {
   const page = await context.newPage();
   const response = await page.goto("/api/version");
@@ -44,6 +49,38 @@ try {
     await page.goto("/en/app/identity");
     await expect(page.getByTestId("identity-page")).toBeVisible();
     await expect(page.getByTestId("person-create-form")).toBeVisible();
+    if (revokedStorageState) {
+      const victim = await browser.newContext({ baseURL, storageState: revokedStorageState });
+      await protectOrigin(victim);
+      try {
+        const victimPage = await victim.newPage();
+        const victimResponse = await victimPage.goto("/api/auth/session");
+        const victimSession = await victimResponse?.json() as { user?: { id?: string; sessionId?: string } } | null;
+        const actorResponse = await page.goto("/api/auth/session");
+        const actorSession = await actorResponse?.json() as { user?: { id?: string; sessionId?: string } } | null;
+        expect(victimSession?.user?.id).toBe(actorSession?.user?.id);
+        if (!victimSession?.user?.sessionId || victimSession.user.sessionId === actorSession?.user?.sessionId) throw new Error("Revocation acceptance requires two distinct real owner sessions");
+        const victimDevice = (await victim.cookies()).find((cookie) => cookie.name === "alvillas_device_id")?.value;
+        const actorDevice = (await context.cookies()).find((cookie) => cookie.name === "alvillas_device_id")?.value;
+        if (!victimDevice || !actorDevice || victimDevice === actorDevice) throw new Error("Revocation acceptance requires two distinct real owner devices");
+        await page.goto("/en/app/identity");
+        const sessionRow = page.locator(`[data-session-id="${victimSession.user.sessionId}"]`);
+        await expect(sessionRow).toContainText("ACTIVE");
+        await sessionRow.getByTestId("revoke-session-button").click();
+        await expect(sessionRow).toContainText("REVOKED");
+        await victimPage.goto("/en/app");
+        await expect(victimPage).toHaveURL(/\/en\/login/u);
+        const deniedResponse = await victimPage.goto("/api/auth/session");
+        const denied = await deniedResponse?.json() as { user?: { id?: string } } | null;
+        expect(denied?.user?.id).toBeFalsy();
+        const deviceRow = page.locator(`[data-device-id="${victimDevice}"]`);
+        await expect(deviceRow).toContainText("ACTIVE");
+        await deviceRow.getByTestId("revoke-device-button").click();
+        await expect(deviceRow).toContainText("REVOKED");
+        await page.goto("/en/app/security");
+        await expect(page.getByTestId("account-security-page")).toBeVisible();
+      } finally { await victim.close(); }
+    }
   } else {
     for (const width of [1440, 360]) {
       await page.setViewportSize({ width, height: 900 });
@@ -68,5 +105,7 @@ try {
   console.log(JSON.stringify({ sha: version.version, environment: version.environment, stagingUrl: baseURL,
     authenticatedReadAcceptance: storageState ? "passed using the supplied owner session" : "blocked: STAGING_STORAGE_STATE_FILE is required",
     publicLoginAcceptance: storageState ? "not executed" : "passed", locales: "EN/FR/AR RTL", widths: "1440/360",
-    keyboard: storageState ? "not executed" : "passed", accessibility: "axe passed", credentialChanges: 0, identityMutations: 0 }));
+    keyboard: storageState ? "not executed" : "passed", accessibility: "axe passed", credentialChanges: 0,
+    remoteSessionAndDeviceRevocation: revokedStorageState && storageState ? "passed using two real owner sessions" : "not executed",
+    identityMutations: revokedStorageState && storageState ? 2 : 0 }));
 } finally { await context.close(); await browser.close(); }

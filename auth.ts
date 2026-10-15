@@ -158,6 +158,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         token.authSessionId = authorizedUser.sessionId;
         token.sessionVersion = authorizedUser.sessionVersion;
         token.sessionRevoked = false;
+        token.securitySetupRequired = authorizedUser.securitySetupRequired;
       } else if (
         typeof token.userId === "string" &&
         typeof token.organizationId === "string" &&
@@ -172,6 +173,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         });
 
         token.sessionRevoked = !validation.valid;
+        token.securitySetupRequired = validation.securitySetupRequired === true;
 
         if (validation.valid && validation.preferredLocale) {
           token.preferredLocale = validation.preferredLocale;
@@ -189,6 +191,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.preferredLocale = tokenString(token.preferredLocale, "en");
         session.user.sessionId = revoked ? "" : tokenString(token.authSessionId, "");
         session.user.sessionRevoked = revoked;
+        session.user.securitySetupRequired = token.securitySetupRequired === true;
       }
 
       return session;

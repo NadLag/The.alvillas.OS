@@ -11,6 +11,7 @@ import { safeLocale, type AppLocale } from "@/i18n/routing";
 import { PinSecurityRepository } from "@/modules/identity/infrastructure/pin-security-repository";
 import { pinLockoutState } from "@/modules/identity/domain/pin-lockout";
 import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
+import { securityEnrollment } from "@/platform/auth/security-enrollment";
 
 export type AuthorizedIdentityUser = {
   id: string;
@@ -21,11 +22,13 @@ export type AuthorizedIdentityUser = {
   preferredLocale: AppLocale;
   sessionId: string;
   sessionVersion: number;
+  securitySetupRequired: boolean;
 };
 
 export type AuthSessionValidation = {
   valid: boolean;
   preferredLocale?: AppLocale;
+  securitySetupRequired?: boolean;
 };
 
 type AuthAccount = Awaited<ReturnType<typeof findAccountByEmail>>;
@@ -156,17 +159,7 @@ async function findAccountById(organizationId: string, userAccountId: string) {
 }
 
 function accountRequiresMfa(account: NonNullable<AuthAccount>): boolean {
-  const hasMfaCredential = account.authCredentials.some(
-    (credential) => credential.type === "TOTP" || credential.type === "RECOVERY_CODE"
-  );
-
-  return (
-    account.mfaRequired ||
-    (hasMfaCredential &&
-      account.roleAssignments.some((assignment) =>
-        assignment.role.key === "admin" || assignment.role.key === "finance"
-      ))
-  );
+  return securityEnrollment(account).secondFactorRequired;
 }
 
 async function verifyMfa(account: NonNullable<AuthAccount>, input: {
@@ -177,23 +170,22 @@ async function verifyMfa(account: NonNullable<AuthAccount>, input: {
     return true;
   }
 
-  const totp = account.authCredentials.find((credential) => credential.type === "TOTP");
-
-  if (totp?.secretEncrypted && input.mfaCode) {
-    if (verifyTotpCode(decryptSecret(totp.secretEncrypted), input.mfaCode)) {
-      await withTenant(prisma as unknown as TenantTransactionRunner, account.organizationId, async (tx) =>
-        tx.authCredential.update({
-          where: { id: totp.id },
-          data: { lastUsedAt: new Date() }
-        })
-      );
-
-      return true;
+  if (input.mfaCode) {
+    for (const totp of account.authCredentials.filter((credential) => credential.type === "TOTP" && credential.expiresAt == null)) {
+      if (totp.secretEncrypted && verifyTotpCode(decryptSecret(totp.secretEncrypted), input.mfaCode)) {
+        await withTenant(prisma as unknown as TenantTransactionRunner, account.organizationId, async (tx) =>
+          tx.authCredential.update({
+            where: { id: totp.id },
+            data: { lastUsedAt: new Date() }
+          })
+        );
+        return true;
+      }
     }
   }
 
   const recoveryCredentials = account.authCredentials.filter(
-    (credential) => credential.type === "RECOVERY_CODE" && credential.secretHash
+    (credential) => credential.type === "RECOVERY_CODE" && credential.expiresAt == null && credential.secretHash
   );
 
   if (input.recoveryCode) {
@@ -363,7 +355,8 @@ function authorizedUser(account: NonNullable<AuthAccount>, sessionId: string): A
     organizationId: account.organizationId,
     preferredLocale: safeLocale(account.person.preferredLocale),
     sessionId,
-    sessionVersion: account.sessionVersion
+    sessionVersion: account.sessionVersion,
+    securitySetupRequired: securityEnrollment(account).setupRequired
   };
 }
 
@@ -493,7 +486,7 @@ export async function authenticatePin(input: {
     if (state.locked) return null;
     const account = await new IdentityRepository(tx, bootstrapOrganizationId).findActivePinAccount(phone, now);
     const pinCredential = account?.authCredentials.find((credential) => credential.type === "PIN" && credential.secretHash);
-    const valid = Boolean(account && !accountRequiresMfa(account) && pinCredential?.secretHash &&
+    const valid = Boolean(account && !securityEnrollment(account).mandatory && !accountRequiresMfa(account) && pinCredential?.secretHash &&
       await verifyPassword(input.pin, pinCredential.secretHash));
     await repository.save(phone, valid ? 0 : state.failures + 1, now);
     if (!valid && account) await writeAuditEvent(tx, {
@@ -531,21 +524,7 @@ export async function validateAuthSession(input: {
   sessionVersion: number;
 }): Promise<AuthSessionValidation> {
   return withTenant(prisma as unknown as TenantTransactionRunner, input.organizationId, async (tx) => {
-    const account = await tx.userAccount.findFirst({
-      where: {
-        id: input.userAccountId,
-        organizationId: input.organizationId,
-        status: "ACTIVE"
-      },
-      select: {
-        sessionVersion: true,
-        person: {
-          select: {
-            preferredLocale: true
-          }
-        }
-      }
-    });
+    const account = await new IdentityRepository(tx, input.organizationId).findSessionSecurityAccount(input.userAccountId);
 
     if (!account || account.sessionVersion !== input.sessionVersion) {
       return { valid: false };
@@ -566,7 +545,7 @@ export async function validateAuthSession(input: {
     });
 
     return updated.count === 1
-      ? { valid: true, preferredLocale: safeLocale(account.person.preferredLocale) }
+      ? { valid: true, preferredLocale: safeLocale(account.person.preferredLocale), securitySetupRequired: securityEnrollment(account).setupRequired }
       : { valid: false };
   }).catch((error: unknown) => {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {

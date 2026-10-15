@@ -26,6 +26,7 @@ export default async function IdentityPage({
   setRequestLocale(appLocale);
 
   const session = await auth();
+  if (session?.user?.securitySetupRequired) redirect(`/${appLocale}/app/security`);
   const ctx = await identityActorContextFromSession(session);
 
   if (!ctx) {
@@ -59,6 +60,7 @@ export default async function IdentityPage({
         title={t("title")}
       />
       <SecurityPanel
+        signInHref={`/${appLocale}/login`}
         labels={{
           title: t("security.title"),
           subtitle: t("security.subtitle"),
@@ -70,6 +72,7 @@ export default async function IdentityPage({
           recoveryCodes: t("security.recoveryCodes"),
           registerPasskey: t("security.registerPasskey"),
           passkeyReady: t("security.passkeyReady"),
+          signInAgain: t("security.signInAgain"),
           validation: t("forms.validation"),
           generic: t("forms.generic"),
           unauthorized: t("forms.unauthorized"),

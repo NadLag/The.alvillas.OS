@@ -5,6 +5,8 @@ import {
 } from "@/platform/authz/authorize";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
+import { securityEnrollment } from "@/platform/auth/security-enrollment";
 
 type RolePermissionRow = {
   role: {
@@ -36,6 +38,10 @@ export async function authContextForAccount(
   deps: AccountAuthContextDeps = {}
 ): Promise<AuthContext> {
   return withTenant(db(deps), organizationId, async (tx) => {
+    const account = await new IdentityRepository(tx, organizationId).findSessionSecurityAccount(userAccountId);
+    if (!account || securityEnrollment(account).setupRequired) {
+      return { organizationId, userAccountId, permissions: new Set<string>(), scopes: [{ organizationId }], assignments: [] };
+    }
     const assignments = (await tx.roleAssignment.findMany({
       where: {
         organizationId,

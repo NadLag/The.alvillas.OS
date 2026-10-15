@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { e2eEmail, ensureE2EAdmin } from "./support/auth";
+import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
@@ -19,9 +19,11 @@ test.describe("organization settings journey", () => {
     await ensureE2EAdmin(loginEmail, adminPassword);
 
     await page.goto("/en/login");
+    await waitForE2EAdminLoginWindow(page, loginEmail);
     await page.getByTestId("login-email").fill(loginEmail);
     await page.getByTestId("login-password").fill(adminPassword);
     await page.getByTestId("login-submit").click();
+    await completeE2EAdminMfa(page, loginEmail);
     await expect(page).toHaveURL(/\/en\/app/u);
 
     await page.getByRole("link", { name: "Organization" }).click();
@@ -59,9 +61,11 @@ test.describe("organization settings journey", () => {
     await ensureE2EAdmin(loginEmail, adminPassword);
 
     await page.goto("/en/login");
+    await waitForE2EAdminLoginWindow(page, loginEmail);
     await page.getByTestId("login-email").fill(loginEmail);
     await page.getByTestId("login-password").fill(adminPassword);
     await page.getByTestId("login-submit").click();
+    await completeE2EAdminMfa(page, loginEmail);
     await expect(page).toHaveURL(/\/en\/app/u);
 
     await page.goto("/en/app/organization/geography");

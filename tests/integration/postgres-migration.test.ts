@@ -5,6 +5,11 @@ import { PrismaClient } from "@prisma/client";
 import Decimal from "decimal.js";
 import type { Session } from "next-auth";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { IntegrationAuthenticator } from "./support/authenticator";
+import { beginPasskeyRegistration, finishPasskeyRegistration, startTotpEnrollment, confirmTotpEnrollment, beginPasskeyAuthentication, verifyPasskeyAuthentication } from "@/modules/identity/application/identity-service";
+import { authenticatePassword, authenticateMfaChallenge, beginVerifiedPasskeyLogin, validateAuthSession } from "@/platform/auth/identity-auth";
+import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
+import { totpCode } from "@/platform/auth/totp";
 import {
   IdentityAuthorizationError,
   authContextForAccount
@@ -219,6 +224,7 @@ function sessionForOwnerPortal(input: {
       preferredLocale: "en",
       sessionId: "integration-session",
       sessionRevoked: false,
+      securitySetupRequired: false,
       email: input.email,
       name: input.email
     },
@@ -362,9 +368,22 @@ describe("PostgreSQL baseline", () => {
     const admin = await withTenant(runner, bootstrapOrganizationId, (tx) => tx.userAccount.findFirstOrThrow({ where: { email } }));
     const credentialBefore = await withTenant(runner, bootstrapOrganizationId, async (tx) => {
       await tx.person.update({ where: { id: admin.personId }, data: { displayName: "Owner-managed profile" } });
-      await tx.userAccount.update({ where: { id: admin.id }, data: { mfaRequired: true } });
       return tx.authCredential.findFirstOrThrow({ where: { userAccountId: admin.id, type: "PASSWORD" } });
     });
+    const firstFactor = await authenticatePassword({ email, password: "local integration bootstrap password", deviceId: "integration-enrollment-device", headers: new Headers() });
+    if (!firstFactor) throw new Error("Expected a real verified first factor");
+    expect(firstFactor.securitySetupRequired).toBe(true);
+    const setup = await identityActorContextFromSession({ user: { ...firstFactor, sessionRevoked: false }, expires: new Date(Date.now() + 3600000).toISOString() }, { db: runner });
+    if (!setup) throw new Error("Expected authenticated own-factor setup");
+    expect(setup.authContext.permissions.has("identity:create")).toBe(false);
+    await expect(createInvitation(setup, { displayName: "Denied during setup", roleKey: "field_staff", scopeType: "organization", expiresInHours: 1 }, { db: runner })).rejects.toThrow(IdentityAuthorizationError);
+    const authenticator = new IntegrationAuthenticator();
+    const origin = "https://staging.example.test";
+    const registration = await beginPasskeyRegistration(setup, { db: runner, origin });
+    await finishPasskeyRegistration(setup, registration.challengeId, authenticator.registration(registration.options, origin), { db: runner, origin });
+    const totp = await startTotpEnrollment(setup, { db: runner });
+    await confirmTotpEnrollment(setup, totp.credentialId, totpCode(totp.secret), { db: runner });
+    const enrolled = await withTenant(runner, bootstrapOrganizationId, (tx) => tx.authCredential.findFirstOrThrow({ where: { id: totp.credentialId } }));
     await bootstrapFirstAdmin(adminPrisma, { ADMIN_EMAIL: email, ADMIN_PASSWORD: "must not replace enrolled credentials" });
     await withTenant(runner, bootstrapOrganizationId, async (tx) => {
       const preserved = await tx.userAccount.findFirstOrThrow({ where: { id: admin.id }, include: { person: true } });
@@ -372,9 +391,19 @@ describe("PostgreSQL baseline", () => {
       expect(preserved.mfaRequired).toBe(true);
       expect(preserved.person.displayName).toBe("Owner-managed profile");
       expect((await tx.authCredential.findFirstOrThrow({ where: { id: credentialBefore.id } })).secretHash).toBe(credentialBefore.secretHash);
+      expect((await tx.authCredential.findFirstOrThrow({ where: { id: totp.credentialId } })).secretEncrypted === enrolled.secretEncrypted).toBe(true);
     });
+    expect(await validateAuthSession({ organizationId: firstFactor.organizationId, userAccountId: firstFactor.id, sessionId: firstFactor.sessionId, sessionVersion: firstFactor.sessionVersion })).toEqual({ valid: false });
+    const assertion = await beginPasskeyAuthentication(email, { db: runner, origin });
+    const proof = await verifyPasskeyAuthentication(email, assertion.challengeId, authenticator.authentication(assertion.options, origin), { db: runner, origin });
+    const handoff = await beginVerifiedPasskeyLogin({ email, ...proof, deviceId: "integration-enrollment-device" });
+    const authenticated = await authenticateMfaChallenge({ email, challengeToken: handoff.challengeToken, deviceId: "integration-enrollment-device", mfaCode: totpCode(totp.secret), headers: new Headers() });
+    if (!authenticated) throw new Error("Expected real passkey and TOTP authentication");
+    expect(authenticated.securitySetupRequired).toBe(false);
     const ctx = { organizationId: bootstrapOrganizationId, actorId: admin.id, personId: admin.personId,
       authContext: await authContextForAccount(bootstrapOrganizationId, admin.id, { db: runner }) };
+    const passwordReset = await issueRecoveryCode(ctx, admin.id, { db: runner });
+    expect(await authenticatePassword({ email, password: "local integration bootstrap password", recoveryCode: passwordReset, deviceId: "integration-enrollment-device", headers: new Headers() })).toBeNull();
     const invitedEmail = `idn-invitation-${randomUUID()}@example.test`;
     const invitation = await createInvitation(ctx, { displayName: "Identity integration invite", email: invitedEmail,
       phone: "+212699000002", roleKey: "field_staff", scopeType: "organization", expiresInHours: 1 }, { db: runner });
