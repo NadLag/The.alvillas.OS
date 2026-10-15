@@ -1047,5 +1047,26 @@
       "expires": "Valid until {date}.",
       "footer": "Keep this code private. Contact your supervisor if you did not request recovery."
     }
+  },
+  "Notifications": {
+    "title": "Notifications",
+    "description": "Updates for your account and assigned work.",
+    "close": "Close notifications",
+    "bellCount": "Notifications, {count, plural, one {# unread} other {# unread}}",
+    "offline": "You are offline. Your last updates remain visible; reconnect to make changes.",
+    "error": "Notifications could not be updated. Please try again.",
+    "retry": "Try again",
+    "loading": "Loading notifications…",
+    "empty": "You are all caught up. Updates will appear here.",
+    "read": "Read",
+    "unread": "Unread",
+    "unavailable": "This record is no longer available to your account.",
+    "open": "Open record",
+    "markRead": "Mark as read",
+    "more": "Load older updates",
+    "kinds": {
+      "language_updated": "Your language preference was updated.",
+      "task_assigned": "A task was assigned to you."
+    }
   }
 }

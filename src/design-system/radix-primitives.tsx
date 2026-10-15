@@ -43,15 +43,24 @@ export function DesignDialog({
   title,
   description,
   children,
-  closeLabel
+  closeLabel,
+  open: controlledOpen,
+  onOpenChange
 }: {
   trigger: ReactNode;
   title: string;
   description?: string;
   children: ReactNode;
   closeLabel: string;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = (value: boolean) => {
+    setInternalOpen(value);
+    onOpenChange?.(value);
+  };
   const triggerNode = isValidElement<DialogTriggerProps>(trigger)
     ? cloneElement(trigger, {
         onClick: composeOpenHandler(trigger, () => setOpen(true))

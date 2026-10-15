@@ -2207,3 +2207,17 @@ textarea:disabled {
     transition-duration: 1ms !important;
   }
 }
+
+/* Personal notification center */
+.notification-toolbar { display: flex; justify-content: flex-end; margin-block-end: var(--space-6); }
+.notification-bell { display: inline-flex; align-items: center; gap: 8px; }
+.notification-count { min-inline-size: 24px; padding-inline: 6px; border-radius: var(--radius-lg); background: var(--color-green-700); color: var(--color-white); font-variant-numeric: tabular-nums; }
+.notification-panel { max-block-size: 65dvh; overflow-y: auto; overscroll-behavior: contain; }
+.notification-list { list-style: none; margin: 0; padding: 0; }
+.notification-item { padding-block: var(--space-5); border-block-end: 1px solid var(--border-subtle); }
+.notification-title { margin-block: 0 8px; font-weight: 600; overflow-wrap: anywhere; }
+.notification-item time, .notification-state { font-size: 0.875rem; }
+.notification-state { display: inline-block; margin-inline-start: 12px; }
+.notification-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 12px; }
+.notification-actions button { min-block-size: 48px; }
+.notification-item[data-read='true'] .notification-title { font-weight: 400; }

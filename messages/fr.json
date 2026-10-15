@@ -1047,5 +1047,26 @@
       "expires": "Valable jusqu?au {date}.",
       "footer": "Gardez ce code confidentiel. Contactez votre responsable si vous n?avez pas demand? cette r?cup?ration."
     }
+  },
+  "Notifications": {
+    "title": "Notifications",
+    "description": "Les mises à jour de votre compte et de vos missions.",
+    "close": "Fermer les notifications",
+    "bellCount": "Notifications, {count, plural, one {# non lue} other {# non lues}}",
+    "offline": "Vous êtes hors ligne. Les dernières mises à jour restent visibles. Reconnectez-vous pour les modifier.",
+    "error": "Impossible de mettre à jour les notifications. Veuillez réessayer.",
+    "retry": "Réessayer",
+    "loading": "Chargement des notifications…",
+    "empty": "Vous êtes à jour. Les nouveautés apparaîtront ici.",
+    "read": "Lue",
+    "unread": "Non lue",
+    "unavailable": "Votre compte ne peut plus accéder à cet élément.",
+    "open": "Ouvrir la fiche",
+    "markRead": "Marquer comme lue",
+    "more": "Charger les mises à jour précédentes",
+    "kinds": {
+      "language_updated": "Votre langue préférée a été modifiée.",
+      "task_assigned": "Une mission vous a été attribuée."
+    }
   }
 }

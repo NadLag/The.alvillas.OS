@@ -19,6 +19,7 @@ model Organization {
   configRules               ConfigRule[]
   reservationSnapshots      ReservationConfigSnapshot[]
   outboxEvents              OutboxEvent[]
+  notifications             Notification[]
   auditLogs                 AuditLog[]
   referenceSequences        ReferenceSequence[]
   exchangeRates             ExchangeRate[]
@@ -177,6 +178,9 @@ model UserAccount {
   completedChecks     OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
   syncOps             SyncOp[]                     @relation("SyncOpActorAccount")
   ownerPortalAccesses OwnerPortalAccess[]
+  notifications       Notification[]
+
+  @@unique([organizationId, id], map: "user_account_org_id_unique")
 
   @@unique([organizationId, email], map: "user_account_org_email_unique")
   @@unique([organizationId, phone], map: "user_account_org_phone_unique")
@@ -1095,6 +1099,24 @@ model OutboxEvent {
   @@index([organizationId, status, occurredAt], map: "outbox_event_org_status_occurred_idx")
   @@index([organizationId, status, nextAttemptAt, occurredAt], map: "outbox_event_org_status_retry_idx")
   @@map("outbox_event")
+}
+
+model Notification {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  recipientId    String       @map("recipient_id") @db.Uuid
+  eventId        String       @map("event_id") @db.Uuid
+  kind           String
+  targetId       String       @map("target_id") @db.Uuid
+  readAt         DateTime?    @map("read_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  recipient      UserAccount  @relation(fields: [organizationId, recipientId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "notification_recipient_tenant_fk")
+
+  @@unique([organizationId, recipientId, eventId], map: "notification_org_recipient_event_unique")
+  @@index([organizationId, recipientId, createdAt(sort: Desc), id(sort: Desc)], map: "notification_inbox_idx")
+  @@index([organizationId, recipientId, readAt], map: "notification_unread_idx")
+  @@map("notification")
 }
 
 model AuditLog {
