@@ -33,7 +33,7 @@ test.describe("personal notification settings", () => {
     await expect(account).not.toBeChecked();
     await operations.uncheck();
     await save.click();
-    await expect(page.getByRole("status")).toContainText("Your preferences have been saved.");
+    await expect(page.getByTestId("notification-preferences").getByRole("status")).toContainText("Your preferences have been saved.");
     await channel.uncheck();
     await expect(account).toBeDisabled();
     for (const id of ["notification-security-in-app", "notification-security-email"]) {
@@ -62,7 +62,7 @@ test.describe("personal notification settings", () => {
     await page.goto("/en/app/notifications");
     await channel.check(); await account.check();
     await page.context().setOffline(true);
-    await expect(page.getByText(/You are offline/u)).toBeVisible(); await expect(save).toBeDisabled();
+    await expect(page.getByTestId("notification-preferences").getByText(/You are offline/u)).toBeVisible(); await expect(save).toBeDisabled();
     await page.context().setOffline(false);
     await expect(save).toBeEnabled();
     let failNext = true;
@@ -71,10 +71,10 @@ test.describe("personal notification settings", () => {
       else await route.continue();
     });
     await save.click();
-    await expect(page.locator(".notification-settings").getByRole("alert")).toContainText("Your settings were not saved");
+    await expect(page.getByTestId("notification-preferences").getByRole("alert")).toContainText("Your settings were not saved");
     await expect(account).toBeChecked(); await expect(operations).not.toBeChecked();
     await save.click();
-    await expect(page.getByRole("status")).toContainText("Your preferences have been saved.");
+    await expect(page.getByTestId("notification-preferences").getByRole("status")).toContainText("Your preferences have been saved.");
     await page.reload(); await expect(account).toBeChecked(); await expect(operations).not.toBeChecked();
     await page.unrouteAll({ behavior: "wait" });
     let failLoad = true;
@@ -83,9 +83,9 @@ test.describe("personal notification settings", () => {
       else await route.continue();
     });
     await page.reload();
-    await expect(page.locator(".notification-settings").getByRole("alert")).toContainText("Your notification settings could not be loaded");
+    await expect(page.getByTestId("notification-preferences").getByRole("alert")).toContainText("Your notification settings could not be loaded");
     failLoad = false;
-    await page.getByRole("button", { name: "Try again", exact: true }).click();
+    await page.getByTestId("notification-preferences").getByRole("button", { name: "Try again", exact: true }).click();
     await expect(account).toBeChecked();
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   });

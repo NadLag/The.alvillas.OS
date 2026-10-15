@@ -10,9 +10,10 @@ import type { getApproval } from "./approval-service";
 export function ApprovalForm({ propertyId, approval }: { propertyId?: string; approval?: Awaited<ReturnType<typeof getApproval>> }) {
   const t = useTranslations("Approvals"); const locale = useLocale(); const router = useRouter();
   const [pending, startTransition] = useTransition(); const [offline, setOffline] = useState(false); const [error, setError] = useState(false);
+  const [ready, setReady] = useState(false);
   const key = useRef<string | null>(null);
   useEffect(() => {
-    const network = () => setOffline(!navigator.onLine); queueMicrotask(network);
+    const network = () => setOffline(!navigator.onLine); queueMicrotask(() => { network(); setReady(true); });
     window.addEventListener("online", network); window.addEventListener("offline", network);
     return () => { window.removeEventListener("online", network); window.removeEventListener("offline", network); };
   }, []);
@@ -33,7 +34,7 @@ export function ApprovalForm({ propertyId, approval }: { propertyId?: string; ap
           else { const result = await approvalRequestAction(input.data); if (!result.ok) setError(true); else router.push(`/${locale}/app/approvals/${result.data.id}`); }
         } catch { setError(true); }
       });
-    }}><fieldset className="notification-channel" disabled={pending || offline}><legend>{t(approval ? "decision" : "request")}</legend>
+    }}><fieldset className="notification-channel" disabled={pending || offline || !ready}><legend>{t(approval ? "decision" : "request")}</legend>
       {!approval ? <><label className="field"><span>{t("subject")}</span><input name="title" data-testid="approval-title" minLength={3} maxLength={160} required /></label>
         <label className="field"><span>{t("details")}</span><textarea name="details" data-testid="approval-details" minLength={6} maxLength={2000} required /></label></> :
         <label className="field"><span>{t("reason")}</span><textarea name="reason" data-testid="approval-reason" minLength={6} maxLength={500} required /></label>}

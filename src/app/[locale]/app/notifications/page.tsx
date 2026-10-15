@@ -8,6 +8,7 @@ import { NotificationSettings } from "@/platform/notifications/notification-sett
 import { NotificationRoutingSettings } from "@/platform/notifications/notification-routing-settings";
 import { notificationActorFromSession } from "@/platform/notifications/notification-service";
 import { authorize } from "@/platform/authz/authorize";
+import { PushSettings } from "@/platform/notifications/push-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export default async function NotificationSettingsPage({ params }: { params: Pro
     <ShellHeader eyebrow={t("eyebrow")} title={t("title")} subtitle={t("description")}
       actions={<Link className="secondary-button" href={`/${locale}/app`}>{t("back")}</Link>} />
     <NotificationSettings />
+    <PushSettings />
     {canConfigure ? <NotificationRoutingSettings /> : null}
   </AdminShell>;
 }

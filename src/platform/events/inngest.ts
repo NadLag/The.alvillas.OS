@@ -7,6 +7,7 @@ import { renderIdentityEmail } from "@/platform/email/identity-templates";
 import { deliverNotificationEvent } from "@/platform/notifications/notification-service";
 import { notificationEventType } from "@/platform/notifications/notification";
 import { shouldDeliverNotification } from "@/platform/notifications/notification-preferences";
+import { deliverPushChannel } from "@/platform/notifications/push-delivery-service";
 
 export type InngestSendResult = {
   ids: string[];
@@ -108,6 +109,7 @@ export function createInngestOutboxHandlers(
 
   return {
     [notificationChannelEventType]: async (event) => {
+      if ((event.payload as Record<string, unknown>).channel === "push") { await deliverPushChannel(event, { env }); return; }
       await deliverNotificationChannel(event, { appUrl: env.APP_URL ?? "http://localhost:3000", channels: {
         ...(emailProvider || (env.RESEND_API_KEY && env.EMAIL_FROM) ? { email: new EmailNotificationChannel(emailProvider ?? new ResendEmailProvider(env)) } : {})
       } });

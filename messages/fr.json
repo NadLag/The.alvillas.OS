@@ -1103,7 +1103,8 @@
       "unsaved": "Vous avez des modifications non enregistrées.",
       "upToDate": "Vos préférences sont à jour.",
       "push": "Notifications push",
-      "externalPending": "Les canaux externes nécessitent un fournisseur connecté et le consentement de chaque destinataire. La livraison reste non vérifiée avant confirmation réelle."
+      "externalPending": "Les canaux externes nécessitent un fournisseur connecté et le consentement de chaque destinataire. La livraison reste non vérifiée avant confirmation réelle.",
+      "pushDescription": "Choisissez les catégories push, enregistrez vos préférences, puis activez ce navigateur ci-dessous."
     },
     "routing": {
       "title": "Routage des événements",
@@ -1138,6 +1139,53 @@
       "PENDING": "En attente de décision",
       "APPROVED": "Approuvée",
       "REJECTED": "Refusée"
+    },
+    "pushDelivery": {
+      "title": "Notifications du navigateur",
+      "description": "Activez ce navigateur, puis choisissez les catégories push ci-dessus. Chaque appareil peut être révoqué séparément.",
+      "installHint": "Sur iPhone et iPad, ajoutez ALVILLAS OS à votre écran d’accueil, puis ouvrez l’application pour activer les notifications.",
+      "offline": "Vous êtes hors ligne. Reconnectez-vous pour modifier les notifications du navigateur.",
+      "error": "Impossible de modifier les notifications. Vos préférences enregistrées sont conservées.",
+      "retry": "Réessayer",
+      "default": "L’autorisation du navigateur n’a pas encore été accordée.",
+      "granted": "Les notifications sont autorisées par le navigateur.",
+      "denied": "Les notifications sont bloquées. Autorisez-les dans les paramètres du site de votre navigateur, puis revenez ici.",
+      "unsupported": "Ce navigateur ne prend pas en charge les notifications. Ouvrez un navigateur compatible ou l’application installée.",
+      "notConfigured": "L’envoi au navigateur attend la configuration du fournisseur. Les notifications dans l’application restent disponibles.",
+      "enable": "Activer ce navigateur",
+      "working": "Mise à jour…",
+      "devices": "Navigateurs activés",
+      "noDevices": "Aucun navigateur n’est activé.",
+      "thisDevice": "Cette connexion",
+      "otherDevice": "Autre connexion",
+      "disable": "Révoquer le navigateur",
+      "history": "Historique des envois push",
+      "historyDescription": "Accepté signifie que le service push a accepté le message. L’affichage et l’ouverture sont confirmés séparément par votre navigateur.",
+      "empty": "Aucune tentative d’envoi push pour le moment.",
+      "attempts": "Tentatives : {count}",
+      "nextAttempt": "Prochaine tentative : {time}",
+      "more": "Afficher plus d’envois",
+      "opened": "Ouvert",
+      "displayed": "Affiché",
+      "statuses": {
+        "PENDING": "En attente d’une nouvelle tentative",
+        "ACCEPTED": "Accepté par le service push",
+        "FAILED": "Échec de l’envoi",
+        "SUPPRESSED": "Envoi interrompu",
+        "NO_SUBSCRIPTION": "Aucun navigateur activé"
+      },
+      "errors": {
+        "no_subscription": "Activez un navigateur pour recevoir les prochains messages push.",
+        "access_or_consent_revoked": "L’accès, le consentement ou la connexion n’est plus valide.",
+        "vapid_key_rotated": "Les clés de signature ont changé. Réactivez ce navigateur.",
+        "subscription_expired": "L’abonnement du navigateur a expiré. Réactivez-le.",
+        "vapid_rejected": "Le service push a rejeté les identifiants de signature.",
+        "rate_limited": "Le service push a demandé une nouvelle tentative ultérieure.",
+        "transport_failed": "Le service push est inaccessible.",
+        "provider_rejected": "Le service push a rejeté cet envoi.",
+        "provider_not_configured": "La signature push n’est pas configurée."
+      },
+      "jobsPending": "L’activation du navigateur est disponible. L’envoi automatique attend la configuration du service en arrière-plan."
     }
   },
   "Approvals": {

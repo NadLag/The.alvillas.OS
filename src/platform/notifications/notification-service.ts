@@ -13,7 +13,7 @@ import { z } from "zod";
 import { notificationPreferencesSchema, type NotificationPreferences } from "./notification-preferences";
 import { notificationRoutingKey, notificationRoutingSaveSchema, routedNotificationKindSchema } from "./notification-routing";
 
-export type NotificationActor = { organizationId: string; accountId: string; authContext: AuthContext };
+export type NotificationActor = { organizationId: string; accountId: string; sessionId?: string; authContext: AuthContext };
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 export class NotificationAccessError extends Error {}
 
@@ -21,10 +21,10 @@ export async function notificationActorFromSession(session: Session | null): Pro
   const user = session?.user;
   if (!user?.id || !user.organizationId || user.securitySetupRequired) return null;
   const ctx = await authContextForAccount(user.organizationId, user.id);
-  return { organizationId: user.organizationId, accountId: user.id, authContext: ownNotificationContext(ctx, user.id) };
+  return { organizationId: user.organizationId, accountId: user.id, sessionId: user.sessionId, authContext: ownNotificationContext(ctx, user.id) };
 }
 
-function assertInbox(actor: NotificationActor, action: "view" | "edit") {
+export function assertInbox(actor: NotificationActor, action: "view" | "edit") {
   if (actor.accountId !== actor.authContext.userAccountId || !authorize(actor.authContext, action, {
     type: "notification", organizationId: actor.organizationId, id: actor.accountId
   })) throw new NotificationAccessError();

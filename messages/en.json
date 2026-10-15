@@ -1103,7 +1103,8 @@
       "unsaved": "You have unsaved changes.",
       "upToDate": "Your preferences are up to date.",
       "push": "Push",
-      "externalPending": "External delivery requires a connected provider and each recipient?s consent. Delivery remains unverified until accepted by the real provider."
+      "externalPending": "External delivery requires a connected provider and each recipient?s consent. Delivery remains unverified until accepted by the real provider.",
+      "pushDescription": "Choose the push categories, save your preferences, then enable this browser below."
     },
     "routing": {
       "title": "Event routing",
@@ -1138,6 +1139,53 @@
       "PENDING": "Awaiting decision",
       "APPROVED": "Approved",
       "REJECTED": "Rejected"
+    },
+    "pushDelivery": {
+      "title": "Browser notifications",
+      "description": "Enable this browser, then choose the push categories above. Each device can be revoked separately.",
+      "installHint": "On iPhone and iPad, add ALVILLAS OS to your Home Screen, then open it there to enable notifications.",
+      "offline": "You are offline. Reconnect to change browser notifications.",
+      "error": "We could not update browser notifications. Your saved preferences are retained.",
+      "retry": "Try again",
+      "default": "Browser permission has not been granted yet.",
+      "granted": "Browser permission is allowed.",
+      "denied": "Notifications are blocked. Allow them in your browser’s site settings, then return here.",
+      "unsupported": "This browser does not support notifications. Open a supported browser or the installed app.",
+      "notConfigured": "Browser delivery is awaiting provider configuration. In-app notifications remain available.",
+      "enable": "Enable this browser",
+      "working": "Updating…",
+      "devices": "Enabled browsers",
+      "noDevices": "No browsers are enabled.",
+      "thisDevice": "This sign-in",
+      "otherDevice": "Another sign-in",
+      "disable": "Revoke browser",
+      "history": "Push delivery history",
+      "historyDescription": "Accepted means the push service accepted the message. Displayed and opened are confirmed separately by your browser.",
+      "empty": "No push delivery attempts yet.",
+      "attempts": "Attempts: {count}",
+      "nextAttempt": "Next attempt: {time}",
+      "more": "Load more deliveries",
+      "opened": "Opened",
+      "displayed": "Displayed",
+      "statuses": {
+        "PENDING": "Waiting for retry",
+        "ACCEPTED": "Accepted by push service",
+        "FAILED": "Delivery failed",
+        "SUPPRESSED": "Delivery stopped",
+        "NO_SUBSCRIPTION": "No enabled browser"
+      },
+      "errors": {
+        "no_subscription": "Enable a browser to receive future pushes.",
+        "access_or_consent_revoked": "Access, consent or the sign-in is no longer valid.",
+        "vapid_key_rotated": "Signing keys changed. Enable this browser again.",
+        "subscription_expired": "The browser subscription expired. Enable it again.",
+        "vapid_rejected": "The push service rejected the signing credentials.",
+        "rate_limited": "The push service requested a later retry.",
+        "transport_failed": "The push service could not be reached.",
+        "provider_rejected": "The push service rejected this delivery.",
+        "provider_not_configured": "Push signing is not configured."
+      },
+      "jobsPending": "Browser registration is available. Automatic delivery is awaiting the background delivery service."
     }
   },
   "Approvals": {

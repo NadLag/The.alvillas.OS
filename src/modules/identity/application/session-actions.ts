@@ -188,7 +188,10 @@ export async function loginAction(
 
 export async function logoutAction(locale: string): Promise<void> {
   const appLocale = safeLocale(locale);
-
+  const { notificationActorFromSession } = await import("@/platform/notifications/notification-service");
+  const { revokePushSubscription } = await import("@/platform/notifications/push-service");
+  const actor = await notificationActorFromSession(await auth());
+  if (actor?.sessionId) await revokePushSubscription(actor, { id: null, reason: "logout" });
   await signOut({ redirectTo: `/${appLocale}/login` });
 }
 

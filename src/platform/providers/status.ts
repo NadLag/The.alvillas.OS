@@ -1,4 +1,5 @@
 import { parseSentryDsn } from "@/platform/observability/sentry";
+import { pushConfiguration } from "./web-push";
 
 export type ProviderStatus = {
   name: string;
@@ -43,8 +44,13 @@ const providerRequirements: ProviderRequirement[] = [
   },
   {
     name: "notification",
-    requiredKeys: ["RESEND_API_KEY", "EMAIL_FROM", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY"],
+    requiredKeys: ["RESEND_API_KEY", "EMAIL_FROM", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"],
+    configuredWhen: (env) => Boolean(env.RESEND_API_KEY && env.EMAIL_FROM && pushConfiguration(env)),
     detail: "Email and web-push notification channel"
+  },
+  {
+    name: "web_push", requiredKeys: ["VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "VAPID_SUBJECT"],
+    configuredWhen: (env) => Boolean(pushConfiguration(env)), detail: "VAPID web-push signing"
   },
   {
     name: "pdf",

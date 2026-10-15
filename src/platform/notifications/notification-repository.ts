@@ -68,7 +68,7 @@ export class NotificationRepository {
       for (const channel of ["email", "push"] as const) {
         if (!routing.channels.includes(channel) || !shouldDeliverNotification(input.kind, channel, this.preferenceValue(candidate.notificationPreference))) continue;
         await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } }, update: {},
-          create: { organizationId: this.organizationId, type: "notification.channel.requested", payload: { channel, recipientId: candidate.id, kind: input.kind, targetId: input.targetId }, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } });
+          create: { organizationId: this.organizationId, type: "notification.channel.requested", payload: { channel, recipientId: candidate.id, kind: input.kind, targetId: input.targetId, sourceEventId: event.id }, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } });
       }
       if (!mandatory && (!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
       data.push({ organizationId: this.organizationId, recipientId: candidate.id,
@@ -168,6 +168,9 @@ export class NotificationRepository {
   }
   find(recipientId: string, id: string) {
     return this.tx.notification.findFirst({ where: { organizationId: this.organizationId, recipientId, id } });
+  }
+  findSource(recipientId: string, eventId: string) {
+    return this.tx.notification.findFirst({ where: { organizationId: this.organizationId, recipientId, eventId } });
   }
   markRead(recipientId: string, id: string, readAt: Date) {
     return this.tx.notification.updateMany({ where: { organizationId: this.organizationId, recipientId, id, readAt: null }, data: { readAt } });

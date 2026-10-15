@@ -7,6 +7,12 @@ export type OutboxHandler = (event: PrismaOutboxEvent) => Promise<void>;
 
 export type OutboxHandlers = Record<string, OutboxHandler>;
 
+// A consumer may commit durable per-device diagnostics before asking the shared
+// dispatcher to retry its source. Messages must contain only safe error codes.
+export class OutboxRetryError extends Error {
+  constructor(message: string, readonly nextAttemptAt: Date | null, readonly exhausted = false) { super(message); }
+}
+
 export type DispatchOutboxResult = {
   dispatched: number;
   failed: number;
@@ -132,7 +138,7 @@ export async function dispatchOutboxBatch(
         result.dispatched += 1;
       } catch (error) {
         const nextAttemptCount = event.attemptCount + 1;
-        const exhausted = nextAttemptCount >= maxAttempts;
+        const exhausted = error instanceof OutboxRetryError ? error.exhausted : nextAttemptCount >= maxAttempts;
         logger.error(
           "outbox dispatch failed",
           { organizationId, jobId: event.id },
@@ -145,7 +151,7 @@ export async function dispatchOutboxBatch(
             status: exhausted ? "FAILED" : "PENDING",
             processedAt,
             attemptCount: { increment: 1 },
-            nextAttemptAt: exhausted ? null : retryAt(processedAt, nextAttemptCount, backoffSeconds),
+            nextAttemptAt: exhausted ? null : error instanceof OutboxRetryError ? error.nextAttemptAt : retryAt(processedAt, nextAttemptCount, backoffSeconds),
             lastError: errorMessage(error)
           }
         });
