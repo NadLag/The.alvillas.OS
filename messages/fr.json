@@ -1066,7 +1066,37 @@
     "more": "Charger les mises à jour précédentes",
     "kinds": {
       "language_updated": "Votre langue préférée a été modifiée.",
-      "task_assigned": "Une mission vous a été attribuée."
+      "task_assigned": "Une mission vous a été attribuée.",
+      "security_session_revoked": "Une session de votre compte a été révoquée."
+    },
+    "settings": {
+      "eyebrow": "Votre compte",
+      "title": "Paramètres de notification",
+      "description": "Choisissez comment recevoir les actualités de votre compte et du travail attribué.",
+      "back": "Retour à votre espace",
+      "mandatory": "Les notifications de sécurité sont toujours activées. Les choix de canaux et de catégories facultatifs ne peuvent pas les désactiver.",
+      "inApp": "Dans l’application",
+      "inAppDescription": "Les actualités dans votre centre de notifications.",
+      "enabled": "Recevoir les notifications facultatives dans l’application",
+      "account": "Actualités du compte",
+      "accountDescription": "Les modifications de votre langue préférée.",
+      "operations": "Travail attribué",
+      "operationsDescription": "Les nouvelles tâches qui vous sont attribuées.",
+      "security": "Sécurité · obligatoire",
+      "securityDescription": "Les alertes lorsqu’une session de votre compte est révoquée.",
+      "email": "E-mail",
+      "emailDescription": "Les messages d’accès obligatoires lorsque votre compte utilise un e-mail.",
+      "emailSecurityDescription": "Les instructions d’invitation et de récupération.",
+      "offline": "Vous êtes hors ligne. Vos choix restent sur cet écran ; reconnectez-vous pour les enregistrer.",
+      "loadError": "Impossible de charger vos paramètres de notification. Veuillez réessayer.",
+      "saveError": "Vos paramètres n’ont pas été enregistrés. Vos choix sont conservés ; veuillez réessayer.",
+      "retry": "Réessayer",
+      "loading": "Chargement des paramètres de notification…",
+      "save": "Enregistrer les préférences",
+      "saving": "Enregistrement…",
+      "saved": "Vos préférences ont été enregistrées.",
+      "unsaved": "Vous avez des modifications non enregistrées.",
+      "upToDate": "Vos préférences sont à jour."
     }
   }
 }

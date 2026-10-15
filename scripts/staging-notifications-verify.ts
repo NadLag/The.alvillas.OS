@@ -54,6 +54,65 @@ try {
   expect(session.user?.id).toBeTruthy();
   if (process.env.STAGING_AUTH_ONLY === "1") {
     console.log(JSON.stringify({ authenticated: true, identityOrCredentialMutations: 0 }));
+  } else if (process.env.STAGING_PREFERENCES_ONLY === "1") {
+    step = "notification-settings";
+    await page.goto("/en/app/notifications");
+    const ids = ["notification-in-app-enabled", "notification-account", "notification-operations"] as const;
+    const original: Record<string, boolean> = {};
+    for (const id of ids) { await expect(page.getByTestId(id)).toBeVisible(); original[id] = await page.getByTestId(id).isChecked(); }
+    const save = async () => {
+      await page.getByTestId("notification-preferences-save").click();
+      await expect(page.getByTestId("notification-preferences-save")).toBeDisabled();
+      await expect(page.getByRole("status")).toContainText("Your preferences have been saved.");
+    };
+    const restore = async () => {
+      await page.goto("/en/app/notifications");
+      await expect(page.getByTestId(ids[0])).toBeVisible();
+      await page.getByTestId(ids[0]).check();
+      for (const id of ids.slice(1)) await page.getByTestId(id).setChecked(original[id]);
+      await page.getByTestId(ids[0]).setChecked(original[ids[0]]);
+      if (await page.getByTestId("notification-preferences-save").isEnabled()) await save();
+      await page.reload();
+      for (const id of ids) await expect(page.getByTestId(id)).toBeChecked({ checked: original[id] });
+    };
+    try {
+      await page.getByTestId(ids[0]).check();
+      await page.getByTestId(ids[1]).setChecked(!original[ids[1]]);
+      await page.getByTestId(ids[2]).setChecked(!original[ids[2]]);
+      await save();
+      step = "fresh-context-preference-persistence";
+      const fresh = await browser.newContext({ baseURL: origin, storageState: await context.storageState() });
+      try {
+        await fresh.route("**/*", async (route) => {
+          const headers = route.request().headers();
+          if (new URL(route.request().url()).origin === origin) headers["x-vercel-trusted-oidc-idp-token"] = oidc;
+          await route.continue({ headers });
+        });
+        const reopened = await fresh.newPage(); await reopened.goto("/en/app/notifications");
+        await expect(reopened.getByTestId(ids[1])).toBeChecked({ checked: !original[ids[1]] });
+        await expect(reopened.getByTestId(ids[2])).toBeChecked({ checked: !original[ids[2]] });
+      } finally { await fresh.close(); }
+      step = "channel-and-security-policy";
+      await page.getByTestId(ids[0]).uncheck(); await save();
+      for (const width of [1440, 360]) for (const locale of ["en", "fr", "ar"]) {
+        step = `settings-accessibility-${locale}-${width}`;
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(`/${locale}/app/notifications`);
+        await expect(page.getByTestId(ids[0])).not.toBeChecked();
+        await expect(page.getByTestId(ids[1])).toBeDisabled();
+        for (const id of ["notification-security-in-app", "notification-security-email"]) {
+          await expect(page.getByTestId(id)).toBeChecked(); await expect(page.getByTestId(id)).toBeDisabled();
+        }
+        await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      }
+    } finally { step = "restore-original-notification-preferences"; await restore(); }
+    await context.storageState({ path: stateFile });
+    console.log(JSON.stringify({ sha: version.version, environment: version.environment, authenticated: true,
+      preferencePersistence: "passed across browser contexts", channelAndCategoryChoices: "passed", mandatorySecurity: "checked and locked",
+      locales: "EN/FR/AR RTL", widths: "1440/360", accessibility: "axe passed", originalNotificationPreferencesRestored: true,
+      credentialChanges: 0, externalDeliveryClaimed: false }));
   } else {
     step = "open-workspace";
     await page.goto("/en/app");

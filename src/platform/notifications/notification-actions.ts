@@ -5,6 +5,7 @@ import { auth } from "@/platform/auth/session";
 import { captureException } from "@/platform/observability/sentry";
 import { logger } from "@/platform/observability/logger";
 import { getNotificationPage, notificationActorFromSession, NotificationAccessError, openNotification, readNotification, type NotificationActor } from "./notification-service";
+import { getNotificationPreferences, saveNotificationPreferences } from "./notification-service";
 
 async function actor() {
   const context = await notificationActorFromSession(await auth());
@@ -25,6 +26,12 @@ async function safely<T>(work: (context: NotificationActor, requestId: string) =
 }
 export async function notificationPageAction(input: unknown) {
   return safely(async (context) => getNotificationPage(context, input));
+}
+export async function notificationPreferencesAction() {
+  return safely(async (context) => getNotificationPreferences(context));
+}
+export async function notificationPreferencesSaveAction(input: unknown) {
+  return safely(async (context, requestId) => saveNotificationPreferences(context, input, { requestId }));
 }
 export async function notificationReadAction(id: string) {
   return safely(async (context, requestId) => { await readNotification(context, id, { requestId }); return null; });

@@ -20,6 +20,7 @@ model Organization {
   reservationSnapshots      ReservationConfigSnapshot[]
   outboxEvents              OutboxEvent[]
   notifications             Notification[]
+  notificationPreferences   NotificationPreference[]
   auditLogs                 AuditLog[]
   referenceSequences        ReferenceSequence[]
   exchangeRates             ExchangeRate[]
@@ -179,6 +180,7 @@ model UserAccount {
   syncOps             SyncOp[]                     @relation("SyncOpActorAccount")
   ownerPortalAccesses OwnerPortalAccess[]
   notifications       Notification[]
+  notificationPreference NotificationPreference?
 
   @@unique([organizationId, id], map: "user_account_org_id_unique")
 
@@ -1099,6 +1101,24 @@ model OutboxEvent {
   @@index([organizationId, status, occurredAt], map: "outbox_event_org_status_occurred_idx")
   @@index([organizationId, status, nextAttemptAt, occurredAt], map: "outbox_event_org_status_retry_idx")
   @@map("outbox_event")
+}
+
+model NotificationPreference {
+  id                String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId    String       @map("organization_id") @db.Uuid
+  userAccountId     String       @map("user_account_id") @db.Uuid
+  inAppEnabled      Boolean      @default(true) @map("in_app_enabled")
+  inAppAccount      Boolean      @default(true) @map("in_app_account")
+  inAppOperations   Boolean      @default(true) @map("in_app_operations")
+  inAppSecurity     Boolean      @default(true) @map("in_app_security")
+  emailSecurity     Boolean      @default(true) @map("email_security")
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount       UserAccount  @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "notification_preference_account_tenant_fk")
+
+  @@unique([organizationId, userAccountId], map: "notification_preference_org_account_unique")
+  @@map("notification_preference")
 }
 
 model Notification {

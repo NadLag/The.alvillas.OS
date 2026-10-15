@@ -5,6 +5,7 @@ import { ResendEmailProvider } from "@/platform/providers/real";
 import { renderIdentityEmail } from "@/platform/email/identity-templates";
 import { deliverNotificationEvent } from "@/platform/notifications/notification-service";
 import { notificationEventType } from "@/platform/notifications/notification";
+import { shouldDeliverNotification } from "@/platform/notifications/notification-preferences";
 
 export type InngestSendResult = {
   ids: string[];
@@ -97,6 +98,9 @@ export function createInngestOutboxHandlers(
       return;
     }
     const email = renderIdentityEmail(event.type, payload, env.APP_URL ?? "http://localhost:3000");
+    // Required account-access emails share the notification policy and always
+    // survive optional channel/category opt-outs (including before activation).
+    if (!shouldDeliverNotification(event.type, "email", null)) return;
     const provider = emailProvider ?? new ResendEmailProvider(env);
     await provider.send({ ...email, idempotencyKey: `identity-email:${event.organizationId}:${event.id}` });
   };

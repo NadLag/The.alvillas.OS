@@ -1695,6 +1695,9 @@ export async function revokeSession(
       requestId: meta.requestId,
       occurredAt: new Date()
     });
+    await publishNotification(tx, ctx.organizationId, {
+      kind: "security_session_revoked", recipientId: session.userAccountId, targetId: session.userAccountId
+    }, `notification:session-revoked:${session.id}`);
   });
 }
 
