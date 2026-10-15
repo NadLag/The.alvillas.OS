@@ -78,7 +78,7 @@ export class NotificationRepository {
     await this.finish(event.id);
   }
 
-  private finish(id: string) {
+  finish(id: string) {
     return this.tx.outboxEvent.update({ where: { id, organizationId: this.organizationId }, data: { status: "DISPATCHED", processedAt: new Date(), nextAttemptAt: null, lastError: null } }).then(() => undefined);
   }
 
@@ -195,5 +195,10 @@ export class NotificationRepository {
   async channelRecipient(id: string) {
     const candidates = await this.candidates({ roles: [], people: [], assigned: true, channels: [] }, id);
     return candidates.find((candidate) => candidate.id === id) ?? null;
+  }
+
+  async channelEvent(id: string) {
+    await this.tx.$queryRaw(Prisma.sql`SELECT id FROM outbox_event WHERE organization_id = ${this.organizationId}::uuid AND id = ${id}::uuid FOR UPDATE`);
+    return this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id, type: "notification.channel.requested" } });
   }
 }

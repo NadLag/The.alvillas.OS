@@ -1,4 +1,4 @@
-import { Prisma, type OutboxEvent } from "@prisma/client";
+import type { OutboxEvent } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
@@ -19,12 +19,11 @@ export async function deliverNotificationChannel(event: OutboxEvent, deps: {
   db?: TenantTransactionRunner; channels: Partial<Record<"email" | "push", NotificationChannel>>; appUrl: string;
 }) {
   return withTenant(deps.db ?? prisma, event.organizationId, async (tx) => {
-    await tx.$queryRaw(Prisma.sql`SELECT id FROM outbox_event WHERE organization_id = ${event.organizationId}::uuid AND id = ${event.id}::uuid FOR UPDATE`);
-    const stored = await tx.outboxEvent.findFirst({ where: { organizationId: event.organizationId, id: event.id, type: notificationChannelEventType } });
+    const repository = new NotificationRepository(tx, event.organizationId);
+    const stored = await repository.channelEvent(event.id);
     if (!stored || stored.status === "DISPATCHED") return;
     const payload = z.object({ channel: z.enum(["email", "push"]), recipientId: z.string().uuid(), kind: z.string(), targetId: z.string().uuid() }).strict().parse(stored.payload);
     const input = notificationInputSchema.parse({ kind: payload.kind, recipientId: payload.recipientId, targetId: payload.targetId });
-    const repository = new NotificationRepository(tx, event.organizationId);
     const candidate = await repository.channelRecipient(input.recipientId);
     const target = (await repository.targets([input])).get(input.targetId);
     const preferences = await repository.preferences(input.recipientId);
@@ -48,6 +47,6 @@ export async function deliverNotificationChannel(event: OutboxEvent, deps: {
         if (!result.id) throw new Error("Missing provider acknowledgement");
       } catch { throw new Error(`Notification ${payload.channel} provider did not acknowledge delivery`); }
     }
-    await tx.outboxEvent.update({ where: { id: stored.id, organizationId: event.organizationId }, data: { status: "DISPATCHED", processedAt: new Date(), lastError: null, nextAttemptAt: null } });
+    await repository.finish(stored.id);
   });
 }
