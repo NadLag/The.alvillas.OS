@@ -7,14 +7,29 @@ import { authorize } from "@/platform/authz/authorize";
 import { contextForRoleAssignments } from "@/platform/authz/account-context";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
 import { safeLocale } from "@/i18n/routing";
-import en from "../../../messages/en.json";
-import fr from "../../../messages/fr.json";
-import ar from "../../../messages/ar.json";
+import en from "../../../messages/en.json" with { type: "json" };
+import fr from "../../../messages/fr.json" with { type: "json" };
+import ar from "../../../messages/ar.json" with { type: "json" };
 import { NotificationRepository } from "./notification-repository";
 import { notificationInputSchema, notificationDestination } from "./notification";
 import { shouldDeliverNotification } from "./notification-preferences";
 
 export const notificationChannelEventType = "notification.channel.requested";
+export const channelPayloadSchema = z.object({ channel: z.enum(["email", "push"]), recipientId: z.string().uuid(), kind: z.string(), targetId: z.string().uuid(), sourceEventId: z.string().uuid().optional() }).strict();
+export async function resolveNotificationChannel(repository: NotificationRepository, payload: z.infer<typeof channelPayloadSchema>) {
+  const input = notificationInputSchema.parse({ kind: payload.kind, recipientId: payload.recipientId, targetId: payload.targetId });
+  const candidate = await repository.channelRecipient(input.recipientId);
+  const target = (await repository.targets([input])).get(input.targetId);
+  const preferences = await repository.preferences(input.recipientId);
+  const ctx = candidate ? contextForRoleAssignments(candidate.organizationId, candidate.id, candidate.roleAssignments) : null;
+  const locale = safeLocale(candidate?.person.preferredLocale ?? "en");
+  const destination = ctx && target ? notificationDestination(ctx, input, target, locale) : null;
+  const allowed = Boolean(candidate && ctx && target && destination && !securityEnrollment(candidate).setupRequired
+    && (target.type === "identity" || authorize(ctx, "view", target))
+    && (input.kind !== "approval_requested" || (target.status === "PENDING" && (authorize(ctx, "approve", target) || authorize(ctx, "reject", target))))
+    && shouldDeliverNotification(input.kind, payload.channel, preferences));
+  return { input, candidate, target, locale, destination, allowed, labels: { en, fr, ar }[locale].Notifications };
+}
 export async function deliverNotificationChannel(event: OutboxEvent, deps: {
   db?: TenantTransactionRunner; channels: Partial<Record<"email" | "push", NotificationChannel>>; appUrl: string;
 }) {
@@ -22,23 +37,13 @@ export async function deliverNotificationChannel(event: OutboxEvent, deps: {
     const repository = new NotificationRepository(tx, event.organizationId);
     const stored = await repository.channelEvent(event.id);
     if (!stored || stored.status === "DISPATCHED") return;
-    const payload = z.object({ channel: z.enum(["email", "push"]), recipientId: z.string().uuid(), kind: z.string(), targetId: z.string().uuid() }).strict().parse(stored.payload);
-    const input = notificationInputSchema.parse({ kind: payload.kind, recipientId: payload.recipientId, targetId: payload.targetId });
-    const candidate = await repository.channelRecipient(input.recipientId);
-    const target = (await repository.targets([input])).get(input.targetId);
-    const preferences = await repository.preferences(input.recipientId);
-    const ctx = candidate ? contextForRoleAssignments(event.organizationId, candidate.id, candidate.roleAssignments) : null;
-    const locale = safeLocale(candidate?.person.preferredLocale ?? "en");
-    const destination = ctx && target ? notificationDestination(ctx, input, target, locale) : null;
-    const allowed = candidate && ctx && target && destination && !securityEnrollment(candidate).setupRequired && (target.type === "identity" || authorize(ctx, "view", target))
-      && (input.kind !== "approval_requested" || (target.status === "PENDING" && (authorize(ctx, "approve", target) || authorize(ctx, "reject", target))))
-      && shouldDeliverNotification(input.kind, payload.channel, preferences);
-    if (allowed) {
+    const payload = channelPayloadSchema.parse(stored.payload);
+    const { input, candidate, locale, destination, allowed, labels } = await resolveNotificationChannel(repository, payload);
+    if (allowed && candidate && destination) {
       const channel = deps.channels[payload.channel];
       if (!channel) throw new Error(`Notification ${payload.channel} provider is not configured`);
       const address = payload.channel === "email" ? candidate.email : candidate.id;
       if (!address) throw new Error("Notification recipient has no channel address");
-      const labels = { en, fr, ar }[locale].Notifications;
       const origin = new URL(deps.appUrl);
       if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["localhost", "127.0.0.1"].includes(origin.hostname))) throw new Error("Invalid notification origin");
       try {

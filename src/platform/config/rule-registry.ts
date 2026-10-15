@@ -2,6 +2,7 @@ import { z } from "zod";
 import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
 import { localizedTextSchema } from "@/i18n/content";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
+import { pushPolicyKey, pushPolicySchema } from "@/platform/notifications/web-push";
 
 const moneyAmountSchema = z
   .string()
@@ -300,6 +301,7 @@ export const featureFlagConfigSchema = z
   .passthrough();
 
 export const configRuleSchemas = {
+  [pushPolicyKey]: pushPolicySchema,
   "notification.routing.approval_requested": notificationRoutingSchema,
   "notification.routing.approval_decided": notificationRoutingSchema,
   "notification.routing.language_updated": notificationRoutingSchema,

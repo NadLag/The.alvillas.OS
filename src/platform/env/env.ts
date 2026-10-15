@@ -29,6 +29,7 @@ export const envSchema = z.object({
   DOCUMENSO_WEBHOOK_SECRET: z.string().optional(),
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().optional(),
   NEXT_PUBLIC_WHATSAPP_NUMBER: z.string().optional(),
   PAYPAL_CLIENT_ID: z.string().optional(),
   PAYPAL_SECRET: z.string().optional(),

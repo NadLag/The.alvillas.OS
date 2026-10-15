@@ -1,8 +1,13 @@
-import { expect, test } from "@playwright/test";
+import { chromium, expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { setPropertyCity } from "./support/property-form";
+import { installTestPushSubscription, displayAndClickPush } from "./support/push";
+import { deliverPushChannel } from "@/platform/notifications/push-delivery-service";
+import { WebPushNotificationChannel } from "@/platform/providers/web-push";
+import { withTenant } from "@/platform/db/tenant";
+import webpush from "web-push";
 
 test.describe("approval notification lifecycle", () => {
   test.skip(!process.env.DATABASE_URL, "DATABASE_URL is required for real approval E2E");
@@ -40,6 +45,7 @@ test.describe("approval notification lifecycle", () => {
       for (const decision of ["APPROVED", "REJECTED"] as const) {
         await page.goto(`/en/app/properties/${property.id}/approvals/new`);
         await page.getByTestId("approval-title").fill(`Review inspection ${decision}`); await page.getByTestId("approval-details").fill("Please review the proposed inspection schedule for this property.");
+        await expect(page.getByTestId("approval-request")).toBeEnabled();
         await page.context().setOffline(true); await expect(page.getByTestId("approval-request")).toBeDisabled(); await page.context().setOffline(false);
         await page.getByTestId("approval-request").click(); await expect(page).toHaveURL(/\/en\/app\/approvals\/[a-f0-9-]+$/u);
         const id = page.url().split("/").at(-1)!; await expect(page.getByTestId("approval-approve")).toHaveCount(0);
@@ -71,6 +77,40 @@ test.describe("approval notification lifecycle", () => {
         await expect(page.getByTestId("notification-item").filter({ hasText: "An approval decision was recorded." })).toHaveCount(decision === "APPROVED" ? 1 : 2);
         await page.keyboard.press("Escape");
       }
+      const pushBrowser = await chromium.launch({ channel: "chromium" });
+      const pushContext = await pushBrowser.newContext({ baseURL: "http://127.0.0.1:3000", storageState: await approverContext.storageState(), viewport: testInfo.project.name === "field-mobile" ? { width: 360, height: 800 } : { width: 1440, height: 1000 } });
+      try {
+        const pushPage = await pushContext.newPage(); await installTestPushSubscription(pushPage, suffix);
+        await pushPage.goto("/en/app/notifications");
+        await pushPage.getByTestId("notification-push-enabled").check(); await pushPage.getByTestId("notification-push-operations").check();
+        await pushPage.getByTestId("notification-preferences-save").click();
+        await expect(pushPage.getByTestId("notification-preferences").getByRole("status")).toContainText("Your preferences have been saved.");
+        await pushPage.getByTestId("push-enable").click(); await expect(pushPage.getByTestId("push-disable")).toHaveCount(1);
+        await page.goto("/en/app/notifications"); await expect(page.getByTestId("routing-in-app")).toBeVisible();
+        await page.getByTestId("routing-event").selectOption("approval_requested"); await expect(page.getByTestId("routing-in-app")).toBeVisible();
+        await page.getByTestId("routing-scope").selectOption(property.id); await page.getByTestId("routing-push").check();
+        await page.getByTestId("routing-reason").fill("Enable consented browser delivery for the selected reviewer"); await page.getByTestId("routing-save").click();
+        await expect(page.getByTestId("routing-status")).toContainText("Routing saved");
+        await page.goto(`/en/app/properties/${property.id}/approvals/new`);
+        await page.getByTestId("approval-title").fill("Review browser notification delivery"); await page.getByTestId("approval-details").fill("Review this operational notification from the authorized browser push.");
+        await page.getByTestId("approval-request").click(); await expect(page).toHaveURL(/\/en\/app\/approvals\/[a-f0-9-]+$/u);
+        const id = page.url().split("/").at(-1)!;
+        const event = await withTenant(client, approver.organizationId, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { type: "notification.channel.requested", payload: { path: ["targetId"], equals: id } } }));
+        let transportCalls = 0;
+        const channel = new WebPushNotificationChannel(process.env, (subscription, payload, options) => {
+          webpush.generateRequestDetails(subscription, payload ?? undefined, options); transportCalls++;
+          return Promise.resolve({ statusCode: 201, headers: {}, body: "" });
+        });
+        await deliverPushChannel(event, { db: client, channel }); await deliverPushChannel(event, { db: client, channel }); expect(transportCalls).toBe(1);
+        const delivery = await withTenant(client, approver.organizationId, (tx) => tx.notificationDelivery.findFirstOrThrow({ where: { eventId: event.id } }));
+        await displayAndClickPush(pushPage, delivery.id); await expect(pushPage).toHaveURL(`http://127.0.0.1:3000/en/app/approvals/${id}`);
+        await expect(pushPage.getByTestId("approval-reason")).toBeVisible();
+        await expect.poll(async () => withTenant(client, approver.organizationId, (tx) => tx.notificationDelivery.findFirstOrThrow({ where: { id: delivery.id } }))).toMatchObject({ displayedAt: expect.any(Date), openedAt: expect.any(Date) });
+        expect((await page.request.get(`/api/notifications/push/${delivery.id}`)).status()).toBe(404);
+        expect((await pushPage.request.post(`/api/notifications/push/${delivery.id}`)).status()).toBe(403);
+        const historyPage = await pushContext.newPage(); await historyPage.goto("/en/app/notifications");
+        await expect(historyPage.getByTestId("push-history").getByText("Opened", { exact: true })).toHaveCount(1);
+      } finally { await pushContext.close(); await pushBrowser.close(); }
     } finally { await approverContext.close(); await client.$disconnect(); }
   });
 });

@@ -21,6 +21,8 @@ model Organization {
   outboxEvents              OutboxEvent[]
   notifications             Notification[]
   notificationPreferences   NotificationPreference[]
+  pushSubscriptions         PushSubscription[]
+  notificationDeliveries    NotificationDelivery[]
   approvalRequests          ApprovalRequest[]
   approvalRecipients        ApprovalRecipient[]
   auditLogs                 AuditLog[]
@@ -186,6 +188,8 @@ model UserAccount {
   notifications          Notification[]
   approvalRecipients     ApprovalRecipient[]
   notificationPreference NotificationPreference?
+  pushSubscriptions      PushSubscription[]
+  notificationDeliveries NotificationDelivery[]
 
   @@unique([organizationId, id], map: "user_account_org_id_unique")
   @@unique([organizationId, email], map: "user_account_org_email_unique")
@@ -223,6 +227,7 @@ model AuthCredential {
 }
 
 model AuthSession {
+  pushSubscriptions PushSubscription[]
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   userAccountId  String       @map("user_account_id") @db.Uuid
@@ -238,6 +243,7 @@ model AuthSession {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   userAccount    UserAccount  @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@unique([organizationId, userAccountId, id], map: "auth_session_tenant_account_id_unique")
   @@index([organizationId, userAccountId, revokedAt, expiresAt], map: "auth_session_org_user_active_idx")
   @@index([organizationId, deviceId], map: "auth_session_org_device_idx")
   @@map("auth_session")
@@ -1087,6 +1093,7 @@ model Variance {
 }
 
 model OutboxEvent {
+  notificationDeliveries NotificationDelivery[]
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   type           String
@@ -1102,10 +1109,63 @@ model OutboxEvent {
   updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@unique([organizationId, id], map: "outbox_event_org_id_unique")
   @@unique([organizationId, idempotencyKey], map: "outbox_event_org_idempotency_key")
   @@index([organizationId, status, occurredAt], map: "outbox_event_org_status_occurred_idx")
   @@index([organizationId, status, nextAttemptAt, occurredAt], map: "outbox_event_org_status_retry_idx")
   @@map("outbox_event")
+}
+
+model PushSubscription {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  userAccountId  String       @map("user_account_id") @db.Uuid
+  sessionId      String       @map("session_id") @db.Uuid
+  endpointHash   String       @map("endpoint_hash")
+  encrypted      String
+  vapidPublicKey String       @map("vapid_public_key")
+  expiresAt      DateTime?    @map("expires_at") @db.Timestamptz(6)
+  revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz(6)
+  revokedReason  String?      @map("revoked_reason")
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount    UserAccount @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  session        AuthSession @relation(fields: [organizationId, userAccountId, sessionId], references: [organizationId, userAccountId, id], onDelete: Restrict, onUpdate: NoAction)
+  deliveries     NotificationDelivery[]
+
+  @@unique([organizationId, userAccountId, id], map: "push_subscription_tenant_account_id_unique")
+  @@unique([organizationId, endpointHash], map: "push_subscription_org_endpoint_unique")
+  @@index([organizationId, userAccountId, revokedAt], map: "push_subscription_recipient_idx")
+  @@map("push_subscription")
+}
+
+model NotificationDelivery {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  userAccountId  String       @map("user_account_id") @db.Uuid
+  eventId        String       @map("event_id") @db.Uuid
+  subscriptionId String?      @map("subscription_id") @db.Uuid
+  deliveryKey    String       @map("delivery_key")
+  kind           String
+  status         String       @default("PENDING")
+  attemptCount   Int          @default(0) @map("attempt_count")
+  nextAttemptAt  DateTime?    @map("next_attempt_at") @db.Timestamptz(6)
+  providerStatus Int?         @map("provider_status")
+  errorCode      String?      @map("error_code")
+  acceptedAt     DateTime?    @map("accepted_at") @db.Timestamptz(6)
+  displayedAt    DateTime?    @map("displayed_at") @db.Timestamptz(6)
+  openedAt       DateTime?    @map("opened_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount    UserAccount @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  event          OutboxEvent @relation(fields: [organizationId, eventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  subscription   PushSubscription? @relation(fields: [organizationId, userAccountId, subscriptionId], references: [organizationId, userAccountId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, eventId, deliveryKey], map: "notification_delivery_event_device_unique")
+  @@index([organizationId, userAccountId, createdAt(sort: Desc), id(sort: Desc)], map: "notification_delivery_history_idx")
+  @@map("notification_delivery")
 }
 
 model NotificationPreference {

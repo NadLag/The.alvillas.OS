@@ -75,7 +75,7 @@ try {
       const button = page.getByTestId("notification-preferences-save");
       if (await button.isEnabled()) {
         await button.click();
-        await expect(page.locator(".notification-settings").getByRole("status")).toContainText("Your preferences have been saved.");
+        await expect(page.getByTestId("notification-preferences").getByRole("status")).toContainText("Your preferences have been saved.");
         await expect(button).toBeDisabled();
       }
     };

@@ -9,8 +9,10 @@ import { DesignDialog } from "@/design-system/radix-primitives";
 import { EmptyState, SkeletonBlock } from "@/design-system/shells";
 import { notificationOpenAction, notificationPageAction, notificationReadAction } from "./notification-actions";
 import type { NotificationPage } from "./notification";
+import { usePushLifecycle } from "./push-lifecycle";
 
 export function NotificationCenter() {
+  usePushLifecycle();
   const t = useTranslations("Notifications");
   const locale = useLocale();
   const router = useRouter();

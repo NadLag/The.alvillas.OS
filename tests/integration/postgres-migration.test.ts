@@ -135,6 +135,10 @@ import { notificationRoutingKey, type NotificationRouting } from "@/platform/not
 import { requestApproval, decideApproval, getApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
 import { deliverNotificationChannel, notificationChannelEventType } from "@/platform/notifications/notification-channel-service";
+import webpush from "web-push";
+import { deliverPushChannel } from "@/platform/notifications/push-delivery-service";
+import { pushSettings, savePushSubscription, revokePushSubscription, pushRecord } from "@/platform/notifications/push-service";
+import { WebPushNotificationChannel } from "@/platform/providers/web-push";
 
 let prisma: PrismaClient;
 let adminPrisma: PrismaClient | undefined;
@@ -280,6 +284,31 @@ async function configureAppRole(databaseUrl: string): Promise<string> {
 }
 
 describe("PostgreSQL baseline", () => {
+  async function pushFixture() {
+    const organization = await prisma.organization.create({ data: { name: `Push ${randomUUID()}` } });
+    const fixture = await withTenant(prisma, organization.id, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId: organization.id, displayName: "Push recipient", preferredLocale: "fr" } });
+      const account = await tx.userAccount.create({ data: { organizationId: organization.id, personId: person.id } });
+      const session = await tx.authSession.create({ data: { organizationId: organization.id, userAccountId: account.id, deviceId: "push-test", sessionVersion: 1, expiresAt: new Date(Date.now() + 3600000) } });
+      await tx.notificationPreference.create({ data: { organizationId: organization.id, userAccountId: account.id, pushEnabled: true, pushAccount: true, pushOperations: true } });
+      await new ConfigRuleRepository(tx, organization.id).createVersion({ key: "notification.routing.language_updated", scopeType: "organization", effectiveFrom: new Date(0), value: { roles: [], people: [], assigned: true, channels: ["in_app", "push"] }, reason: "Enable consented browser notifications" });
+      return { person, account, session };
+    });
+    const actor = { organizationId: organization.id, accountId: fixture.account.id, sessionId: fixture.session.id,
+      authContext: ownNotificationContext({ organizationId: organization.id, permissions: new Set<string>(), scopes: [] }, fixture.account.id) };
+    const pair = webpush.generateVAPIDKeys();
+    const env = { VAPID_PUBLIC_KEY: pair.publicKey, VAPID_PRIVATE_KEY: pair.privateKey, VAPID_SUBJECT: "mailto:push@example.test" };
+    const deps = { db: prisma as TenantTransactionRunner, env };
+    const subscription = (token: string) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${token}`, expirationTime: null, keys: { p256dh: webpush.generateVAPIDKeys().publicKey, auth: Buffer.alloc(16, 7).toString("base64url") } });
+    const publish = async (key: string) => {
+      await withTenant(prisma, organization.id, (tx) => publishNotification(tx, organization.id, { kind: "language_updated", recipientId: fixture.account.id, targetId: fixture.account.id }, key));
+      return withTenant(prisma, organization.id, async (tx) => {
+        const source = await tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: { organizationId: organization.id, idempotencyKey: key } } });
+        return tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: { organizationId: organization.id, idempotencyKey: `notification:${source.id}:${fixture.account.id}:push` } } });
+      });
+    };
+    return { ...fixture, organization, actor, env, deps, subscription, publish };
+  }
   beforeAll(async () => {
     let databaseUrl = process.env.TEST_DATABASE_URL;
 
@@ -329,6 +358,114 @@ describe("PostgreSQL baseline", () => {
     if (ownsContainer && containerName) {
       execFileSync("docker", ["stop", containerName], { stdio: "ignore" });
     }
+  });
+
+  it("persists encrypted browser subscriptions with own-session authorization, tenant FKs, audited revocation and mandatory security history", async () => {
+    const f = await pushFixture(); const input = f.subscription("lifecycle");
+    await expect(savePushSubscription(f.actor, { ...input, keys: { ...input.keys, p256dh: "A".repeat(87) } }, f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    const saved = await savePushSubscription(f.actor, input, f.deps);
+    expect(await savePushSubscription(f.actor, input, f.deps)).toEqual(saved);
+    expect((await pushSettings(f.actor, {}, f.deps)).subscriptions).toHaveLength(1);
+    const stored = await withTenant(prisma, f.organization.id, (tx) => tx.pushSubscription.findFirstOrThrow());
+    expect(stored.encrypted).not.toContain(input.endpoint); expect(stored.encrypted).not.toContain(input.keys.auth);
+    const denied = { ...f.actor, authContext: { ...f.actor.authContext, permissions: new Set<string>() } };
+    await expect(savePushSubscription(denied, input, f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await expect(pushSettings(denied, {}, f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    const other = await pushFixture();
+    expect((await pushSettings(other.actor, {}, other.deps)).subscriptions).toEqual([]);
+    await revokePushSubscription(other.actor, { id: saved.id, reason: "user_disabled" }, other.deps);
+    expect((await pushSettings(f.actor, {}, f.deps)).subscriptions).toHaveLength(1);
+    await expect(savePushSubscription({ ...f.actor, sessionId: other.session.id }, f.subscription("foreign-session"), f.deps)).rejects.toThrow();
+    await expect(withTenant(prisma, other.organization.id, (tx) => tx.pushSubscription.create({ data: { organizationId: other.organization.id, userAccountId: f.account.id, sessionId: other.session.id, endpointHash: "foreign", encrypted: "invalid", vapidPublicKey: other.env.VAPID_PUBLIC_KEY } }))).rejects.toThrow();
+    const second = await withTenant(prisma, f.organization.id, (tx) => tx.userAccount.create({ data: { organizationId: f.organization.id, personId: f.person.id } }));
+    const secondActor = { ...f.actor, accountId: second.id, authContext: ownNotificationContext({ organizationId: f.organization.id, permissions: new Set<string>(), scopes: [] }, second.id) };
+    await expect(savePushSubscription(secondActor, input, f.deps)).rejects.toThrow();
+    await revokePushSubscription(f.actor, { id: saved.id, reason: "permission_revoked" }, f.deps);
+    expect((await pushSettings(f.actor, {}, f.deps)).subscriptions).toEqual([]);
+    await savePushSubscription(f.actor, input, f.deps);
+    await saveNotificationPreferences(f.actor, { ...defaultNotificationPreferences(), in_app: { enabled: false, account: false, operations: false, security: true }, push: { enabled: false, account: false, operations: false } }, f.deps);
+    await withTenant(prisma, f.organization.id, (tx) => publishNotification(tx, f.organization.id, { kind: "security_session_revoked", recipientId: f.account.id, targetId: f.account.id }, "mandatory-security"));
+    expect((await getNotificationPage(f.actor, {}, f.deps)).items.map((row) => row.kind)).toEqual(["security_session_revoked"]);
+    const audit = await withTenant(prisma, f.organization.id, (tx) => tx.auditLog.findMany({ where: { action: { startsWith: "notification.push." } } }));
+    expect(audit.filter((row) => row.action === "notification.push.subscribe")).toHaveLength(2);
+    expect(audit.filter((row) => row.action === "notification.push.revoke")).toHaveLength(1);
+    expect(JSON.stringify(audit)).not.toContain(input.endpoint); expect(JSON.stringify(audit)).not.toContain(input.keys.auth);
+    await expect(withTenant(prisma, f.organization.id, (tx) => tx.pushSubscription.delete({ where: { id: saved.id } }))).rejects.toThrow(/cannot be deleted/u);
+  });
+
+  it("commits per-browser delivery diagnostics, retries only failed devices, invalidates 410 subscriptions and deduplicates concurrent replays", async () => {
+    const f = await pushFixture();
+    for (const name of ["accepted", "transient", "expired"]) await savePushSubscription(f.actor, f.subscription(name), f.deps);
+    const calls: string[] = []; let fail = true;
+    const channel = new WebPushNotificationChannel(f.env, (subscription, payload, options) => {
+      webpush.generateRequestDetails(subscription, payload ?? undefined, options); // Real encryption/signing, test-only transport.
+      const name = subscription.endpoint.split("/").at(-1)!; calls.push(name);
+      if (name === "expired" || (name === "transient" && fail)) return Promise.reject(Object.assign(new Error("PRIVATE ENDPOINT MUST NOT LEAK"), { statusCode: name === "expired" ? 410 : 503, headers: { "retry-after": "120" } }));
+      return Promise.resolve({ statusCode: 201, headers: {}, body: "" });
+    });
+    const event = await f.publish("push-delivery"); await f.publish("push-delivery"); const now = new Date();
+    const handlers = { [notificationChannelEventType]: (outbox: typeof event) => deliverPushChannel(outbox, { ...f.deps, channel, now }) };
+    expect(await dispatchOutboxBatch(prisma, f.organization.id, handlers, { now, errorReporter: async () => {} })).toMatchObject({ failed: 1 });
+    let history = (await pushSettings(f.actor, {}, f.deps)).items;
+    expect(history).toHaveLength(3); expect(history.map((row) => row.status).sort()).toEqual(["ACCEPTED", "FAILED", "PENDING"]);
+    expect(JSON.stringify(history)).not.toContain("PRIVATE");
+    expect((await pushSettings(f.actor, {}, f.deps)).subscriptions).toHaveLength(2);
+    expect(history.find((row) => row.status === "PENDING")?.nextAttemptAt).toBe(new Date(now.getTime() + 120000).toISOString());
+    fail = false; const later = new Date(now.getTime() + 120001);
+    await Promise.all(Array.from({ length: 3 }, () => deliverPushChannel(event, { ...f.deps, channel, now: later }).catch((error: unknown) => { expect((error as Error).message).toBe("push_delivery_failed"); })));
+    expect(calls.filter((name) => name === "accepted")).toHaveLength(1); expect(calls.filter((name) => name === "transient")).toHaveLength(2); expect(calls.filter((name) => name === "expired")).toHaveLength(1);
+    history = (await pushSettings(f.actor, {}, f.deps)).items;
+    const accepted = history.find((row) => row.status === "ACCEPTED")!;
+    expect(await pushRecord(f.actor, accepted.id, "display", f.deps)).toMatchObject({ locale: "fr", url: "/fr/app" });
+    await pushRecord(f.actor, accepted.id, "displayed", f.deps);
+    await expect(pushRecord(f.actor, accepted.id, "display", f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await pushRecord(f.actor, accepted.id, "open", f.deps);
+    await pushRecord(f.actor, accepted.id, "open", f.deps);
+    const readAt = (await getNotificationPage(f.actor, {}, f.deps)).items[0].readAt; expect(readAt).not.toBeNull();
+    const foreign = await pushFixture(); await expect(pushRecord(foreign.actor, accepted.id, "open", foreign.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    expect((await pushSettings(foreign.actor, {}, foreign.deps)).items).toEqual([]);
+    await withTenant(prisma, f.organization.id, (tx) => tx.authSession.update({ where: { id: f.session.id }, data: { revokedAt: new Date() } }));
+    await expect(pushRecord(f.actor, accepted.id, "display", f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await expect(withTenant(prisma, f.organization.id, (tx) => tx.notificationDelivery.update({ where: { id: accepted.id }, data: { status: "PENDING" } }))).rejects.toThrow(/cannot be rewritten/u);
+    await expect(withTenant(prisma, f.organization.id, (tx) => tx.notificationDelivery.delete({ where: { id: accepted.id } }))).rejects.toThrow(/cannot be deleted/u);
+  });
+
+  it("rechecks property permissions, consent, session expiry and key rotation before network delivery, and exhausts configured retries", async () => {
+    const f = await pushFixture(); const saved = await savePushSubscription(f.actor, f.subscription("scope"), f.deps);
+    const task = await withTenant(prisma, f.organization.id, async (tx) => {
+      const property = await tx.property.create({ data: { organizationId: f.organization.id, name: "Push villa", addressLine1: "Test", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      const role = await tx.role.create({ data: { organizationId: f.organization.id, key: "push-worker", name: "Worker" } });
+      const permission = await tx.permission.create({ data: { organizationId: f.organization.id, key: "task:view", resource: "task", action: "view" } });
+      await tx.rolePermission.create({ data: { organizationId: f.organization.id, roleId: role.id, permissionId: permission.id } });
+      const assignment = await tx.roleAssignment.create({ data: { organizationId: f.organization.id, personId: f.person.id, userAccountId: f.account.id, roleId: role.id, scopeType: "property", scopeId: property.id } });
+      const task = await tx.operationTask.create({ data: { organizationId: f.organization.id, propertyId: property.id, type: "CLEANING", state: "PLANNED", assignedToUserAccountId: f.account.id, dueDate: new Date(), titleTranslations: { en: "Test", fr: "Test" }, idempotencyKey: randomUUID() } });
+      await new ConfigRuleRepository(tx, f.organization.id).createVersion({ key: "notification.routing.task_assigned", scopeType: "organization", effectiveFrom: new Date(0), value: { roles: [], people: [], assigned: true, channels: ["push"] }, reason: "Task browser routing" });
+      await publishNotification(tx, f.organization.id, { kind: "task_assigned", recipientId: f.account.id, targetId: task.id }, "task-push");
+      return { task, assignment };
+    });
+    const event = await withTenant(prisma, f.organization.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { type: notificationChannelEventType, status: "PENDING" } }));
+    await withTenant(prisma, f.organization.id, (tx) => tx.roleAssignment.update({ where: { id: task.assignment.id }, data: { archivedAt: new Date() } }));
+    let calls = 0; const channel = { notify: () => { calls++; return Promise.reject(new Error("private transport")); } };
+    await deliverPushChannel(event, { ...f.deps, channel }); expect(calls).toBe(0);
+    expect((await pushSettings(f.actor, {}, f.deps)).items[0].status).toBe("SUPPRESSED");
+    await withTenant(prisma, f.organization.id, async (tx) => { await new ConfigRuleRepository(tx, f.organization.id).createVersion({ key: "notification.push.delivery_policy", scopeType: "organization", effectiveFrom: new Date(0), value: { maxAttempts: 2, backoffSeconds: 1, maxBackoffSeconds: 1, ttlSeconds: 60 }, reason: "Test retry exhaustion" }); });
+    const retry = await f.publish("retry-exhaustion"); const now = new Date();
+    await expect(deliverPushChannel(retry, { ...f.deps, channel, now })).rejects.toThrow("push_delivery_retry");
+    await expect(deliverPushChannel(retry, { ...f.deps, channel, now: new Date(now.getTime() + 1001) })).rejects.toThrow("push_delivery_failed"); expect(calls).toBe(2);
+    const rotation = await f.publish("rotated-keys"); const pair = webpush.generateVAPIDKeys();
+    const rotatedDeps = { ...f.deps, env: { ...f.env, VAPID_PUBLIC_KEY: pair.publicKey, VAPID_PRIVATE_KEY: pair.privateKey } };
+    await expect(savePushSubscription(f.actor, f.subscription("scope"), rotatedDeps)).rejects.toThrow(/must be renewed/u);
+    expect((await pushSettings(f.actor, {}, rotatedDeps)).subscriptions).toHaveLength(0);
+    await deliverPushChannel(rotation, { ...rotatedDeps, channel }); expect(calls).toBe(2);
+    expect((await pushSettings(f.actor, {}, f.deps)).subscriptions).toHaveLength(0);
+    await savePushSubscription(f.actor, f.subscription("scope"), f.deps);
+    const consent = await f.publish("withdrawn-consent");
+    await saveNotificationPreferences(f.actor, { ...defaultNotificationPreferences(), push: { enabled: false, account: false, operations: false } }, f.deps);
+    await deliverPushChannel(consent, { ...f.deps, channel }); expect(calls).toBe(2);
+    await revokePushSubscription(f.actor, { id: saved.id, reason: "logout" }, f.deps);
+    await saveNotificationPreferences(f.actor, { ...defaultNotificationPreferences(), push: { enabled: true, account: true, operations: true } }, f.deps);
+    const none = await f.publish("no-active-browser"); await deliverPushChannel(none, { ...f.deps, channel });
+    expect((await pushSettings(f.actor, {}, f.deps)).items[0].status).toBe("NO_SUBSCRIPTION");
   });
 
   it("persists authorized tenant preferences, rejects invalid and mandatory opt-outs, and audits serialized changes", async () => {

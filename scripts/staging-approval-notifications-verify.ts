@@ -46,7 +46,7 @@ try {
   originalRouting = { roles: await selected("routing-role-"), people: await selected("routing-person-"), assigned: false, channels: [] };
   for (const channel of ["in_app", "email", "push"]) if (await page.getByTestId(channel === "in_app" ? "routing-in-app" : `routing-${channel}`).isChecked()) originalRouting.channels.push(channel);
   for (const id of ["notification-in-app-enabled", "notification-operations"]) { originalPreferences[id] = await page.getByTestId(id).isChecked(); await page.getByTestId(id).check(); }
-  if (await page.getByTestId("notification-preferences-save").isEnabled()) { await page.getByTestId("notification-preferences-save").click(); await expect(page.locator(".notification-settings").getByRole("status")).toContainText("Your preferences have been saved."); }
+  if (await page.getByTestId("notification-preferences-save").isEnabled()) { await page.getByTestId("notification-preferences-save").click(); await expect(page.getByTestId("notification-preferences").getByRole("status")).toContainText("Your preferences have been saved."); }
   for (const id of originalRouting.roles) await page.getByTestId(`routing-role-${id}`).uncheck();
   for (const id of originalRouting.people) await page.getByTestId(`routing-person-${id}`).uncheck();
   await page.getByTestId(`routing-person-${session.user.personId}`).check(); await page.getByTestId("routing-in-app").check();
@@ -94,7 +94,7 @@ finally {
       await saveRouting("Restore the original approval routing after staging acceptance");
       await page.getByTestId("notification-in-app-enabled").check(); await page.getByTestId("notification-operations").setChecked(originalPreferences["notification-operations"]);
       await page.getByTestId("notification-in-app-enabled").setChecked(originalPreferences["notification-in-app-enabled"]);
-      if (await page.getByTestId("notification-preferences-save").isEnabled()) { await page.getByTestId("notification-preferences-save").click(); await expect(page.locator(".notification-settings").getByRole("status")).toContainText("Your preferences have been saved."); }
+      if (await page.getByTestId("notification-preferences-save").isEnabled()) { await page.getByTestId("notification-preferences-save").click(); await expect(page.getByTestId("notification-preferences").getByRole("status")).toContainText("Your preferences have been saved."); }
       console.log(JSON.stringify({ originalRoutingAndPreferencesRestored: true }));
     } catch { console.error(JSON.stringify({ step: "restore-routing-and-preferences", status: "failed" })); process.exitCode = 1; }
   }

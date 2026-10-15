@@ -52,7 +52,7 @@ export function NotificationSettings() {
     });
   }
   const dirty = JSON.stringify(draft) !== JSON.stringify(committed);
-  return <div className="notification-settings" aria-busy={pending}>
+  return <div className="notification-settings" data-testid="notification-preferences" aria-busy={pending}>
     {offline ? <p role="status">{t("offline")}</p> : null}
     {error ? <div role="alert"><p>{t(error === "load" ? "loadError" : "saveError")}</p>
       {error === "load" ? <button className="secondary-button" type="button" onClick={load} disabled={pending || offline}>{t("retry")}</button> : null}</div> : null}
@@ -79,7 +79,7 @@ export function NotificationSettings() {
           <span><strong>{t("security")}</strong><span className="notification-choice-description">{t("emailSecurityDescription")}</span></span></label>
       </fieldset>
       {(["email", "push"] as const).map((channel) => <fieldset className="notification-channel" key={channel} disabled={pending || offline}>
-        <legend>{t(channel)}</legend><p>{t("externalPending")}</p>
+        <legend>{t(channel)}</legend><p>{t(channel === "push" ? "pushDescription" : "externalPending")}</p>
         {(["enabled", "account", "operations"] as const).map((category) => <label className="notification-choice" key={category}>
           <input type="checkbox" data-testid={`notification-${channel}-${category}`} checked={draft[channel]?.[category] ?? false} onChange={(event) => {
             setSaved(false); setError(null);

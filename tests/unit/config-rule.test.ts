@@ -53,6 +53,7 @@ describe("config rule registry", () => {
       "finance.tax",
       "identity.pin_lockout",
       "inventory.minimums",
+      "notification.push.delivery_policy",
       "notification.routing.approval_decided",
       "notification.routing.approval_requested",
       "notification.routing.language_updated",
