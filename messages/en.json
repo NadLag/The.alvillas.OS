@@ -859,7 +859,8 @@
         "houseRules": "House rules",
         "onboardingNotes": "Onboarding notes",
         "saveProperty": "Create property"
-      }
+      },
+      "requestApproval": "Request approval"
     }
   },
   "Reservations": {
@@ -1069,7 +1070,9 @@
       "task_assigned": "A task was assigned to you.",
       "security_session_revoked": "A session on your account was revoked.",
       "reservation_created": "A reservation was created.",
-      "task_completed": "A task was completed."
+      "task_completed": "A task was completed.",
+      "approval_requested": "An approval needs your decision.",
+      "approval_decided": "An approval decision was recorded."
     },
     "settings": {
       "eyebrow": "Your account",
@@ -1098,7 +1101,9 @@
       "saving": "Saving…",
       "saved": "Your preferences have been saved.",
       "unsaved": "You have unsaved changes.",
-      "upToDate": "Your preferences are up to date."
+      "upToDate": "Your preferences are up to date.",
+      "push": "Push",
+      "externalPending": "External delivery requires a connected provider and each recipient?s consent. Delivery remains unverified until accepted by the real provider."
     },
     "routing": {
       "title": "Event routing",
@@ -1114,7 +1119,7 @@
       "people": "Specific people",
       "channels": "Channels",
       "inApp": "In-app notifications",
-      "externalPending": "Email and push notifications are not available yet.",
+      "externalPending": "External delivery requires a connected provider and each recipient?s consent. Delivery remains unverified until accepted by the real provider.",
       "scopePolicy": "Recipients must have current access to the property and record. Personal notification preferences still apply.",
       "securityPolicy": "Account events are private to the affected person. Security alerts are always delivered in-app, even when optional notifications are disabled.",
       "reason": "Reason for this change",
@@ -1125,7 +1130,35 @@
       "retry": "Try again",
       "loading": "Loading routing…",
       "offline": "Reconnect to update event routing.",
-      "empty": "No eligible recipients."
+      "empty": "No eligible recipients.",
+      "email": "Email",
+      "push": "Push"
+    },
+    "resolution": {
+      "PENDING": "Awaiting decision",
+      "APPROVED": "Approved",
+      "REJECTED": "Rejected"
+    }
+  },
+  "Approvals": {
+    "title": "Approval",
+    "request": "Request approval",
+    "description": "Describe the operational decision for this property. Configured approvers will be notified.",
+    "next": "Review the request and record your decision with a reason.",
+    "back": "Back",
+    "subject": "Subject",
+    "details": "Details",
+    "reason": "Decision reason",
+    "decision": "Your decision",
+    "approve": "Approve",
+    "reject": "Reject",
+    "saving": "Saving…",
+    "error": "The request could not be saved. Check your access and the configured approvers, then try again.",
+    "offline": "You are offline. Reconnect to save your decision.",
+    "states": {
+      "PENDING": "Awaiting decision",
+      "APPROVED": "Approved",
+      "REJECTED": "Rejected"
     }
   }
 }

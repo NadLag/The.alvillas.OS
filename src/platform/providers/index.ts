@@ -29,7 +29,7 @@ export interface ReservationAdapter {
 }
 
 export interface NotificationChannel {
-  notify(input: { userId: string; subject: string; body: string }): Promise<{ id: string }>;
+  notify(input: { userId: string; subject: string; body: string; locale?: AppLocale; idempotencyKey?: string }): Promise<{ id: string }>;
 }
 
 export interface PdfRenderer {

@@ -52,7 +52,7 @@ export async function saveNotificationPreferences(actor: NotificationActor, inpu
     await repository.savePreferences(actor.accountId, preferences);
     if (JSON.stringify(before) !== JSON.stringify(preferences)) await writeAuditEvent(tx, {
       organizationId: actor.organizationId, actorId: actor.accountId, action: "notification.preferences.update", resourceType: "notification", resourceId: actor.accountId,
-      before: { inApp: before.in_app, emailSecurity: before.email.security }, after: { inApp: preferences.in_app, emailSecurity: preferences.email.security },
+      before: { inApp: before.in_app, emailSecurity: before.email.security, emailSettings: before.email, push: before.push ?? null }, after: { inApp: preferences.in_app, emailSecurity: preferences.email.security, emailSettings: preferences.email, push: preferences.push ?? null },
       reason: null, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: new Date()
     });
     return preferences;
@@ -107,7 +107,7 @@ export async function getNotificationPage(actor: NotificationActor, input: unkno
       items: visible.map((row) => {
         const input = notificationInputSchema.parse({ kind: row.kind, targetId: row.targetId, recipientId: row.recipientId });
         const data = { id: row.id, kind: input.kind, createdAt: row.createdAt.toISOString(), readAt: row.readAt?.toISOString() ?? null,
-          available: Boolean(notificationDestination(actor.authContext, input, targets.get(row.targetId) ?? null, "en")) };
+          available: Boolean(notificationDestination(actor.authContext, input, targets.get(row.targetId) ?? null, "en")), ...(row.resolution ? { resolution: row.resolution } : {}) };
         return present({ ...actor.authContext, visibleDataClasses: new Set() }, "view", {
           type: "notification", organizationId: actor.organizationId, id: actor.accountId, data
         }, {}) as typeof data;

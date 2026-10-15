@@ -300,6 +300,8 @@ export const featureFlagConfigSchema = z
   .passthrough();
 
 export const configRuleSchemas = {
+  "notification.routing.approval_requested": notificationRoutingSchema,
+  "notification.routing.approval_decided": notificationRoutingSchema,
   "notification.routing.language_updated": notificationRoutingSchema,
   "notification.routing.task_assigned": notificationRoutingSchema,
   "notification.routing.task_completed": notificationRoutingSchema,

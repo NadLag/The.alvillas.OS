@@ -859,7 +859,8 @@
         "houseRules": "Regles de maison",
         "onboardingNotes": "Notes onboarding",
         "saveProperty": "Creer la propriete"
-      }
+      },
+      "requestApproval": "Demander une approbation"
     }
   },
   "Reservations": {
@@ -1069,7 +1070,9 @@
       "task_assigned": "Une mission vous a été attribuée.",
       "security_session_revoked": "Une session de votre compte a été révoquée.",
       "reservation_created": "Une réservation a été créée.",
-      "task_completed": "Une tâche a été terminée."
+      "task_completed": "Une tâche a été terminée.",
+      "approval_requested": "Une approbation attend votre décision.",
+      "approval_decided": "Une décision d’approbation a été enregistrée."
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -1098,7 +1101,9 @@
       "saving": "Enregistrement…",
       "saved": "Vos préférences ont été enregistrées.",
       "unsaved": "Vous avez des modifications non enregistrées.",
-      "upToDate": "Vos préférences sont à jour."
+      "upToDate": "Vos préférences sont à jour.",
+      "push": "Notifications push",
+      "externalPending": "Les canaux externes nécessitent un fournisseur connecté et le consentement de chaque destinataire. La livraison reste non vérifiée avant confirmation réelle."
     },
     "routing": {
       "title": "Routage des événements",
@@ -1114,7 +1119,7 @@
       "people": "Personnes spécifiques",
       "channels": "Canaux",
       "inApp": "Notifications dans l’application",
-      "externalPending": "Les notifications par e-mail et push ne sont pas encore disponibles.",
+      "externalPending": "Les canaux externes nécessitent un fournisseur connecté et le consentement de chaque destinataire. La livraison reste non vérifiée avant confirmation réelle.",
       "scopePolicy": "Les destinataires doivent avoir accès au bien et à la fiche. Leurs préférences de notification restent applicables.",
       "securityPolicy": "Les événements du compte sont réservés à la personne concernée. Les alertes de sécurité sont toujours envoyées dans l’application, même si les notifications facultatives sont désactivées.",
       "reason": "Motif de la modification",
@@ -1125,7 +1130,35 @@
       "retry": "Réessayer",
       "loading": "Chargement du routage…",
       "offline": "Reconnectez-vous pour modifier le routage.",
-      "empty": "Aucun destinataire éligible."
+      "empty": "Aucun destinataire éligible.",
+      "email": "E-mail",
+      "push": "Notifications push"
+    },
+    "resolution": {
+      "PENDING": "En attente de décision",
+      "APPROVED": "Approuvée",
+      "REJECTED": "Refusée"
+    }
+  },
+  "Approvals": {
+    "title": "Approbation",
+    "request": "Demander une approbation",
+    "description": "Décrivez la décision opérationnelle pour cette propriété. Les approbateurs configurés seront informés.",
+    "next": "Examinez la demande et enregistrez votre décision avec un motif.",
+    "back": "Retour",
+    "subject": "Objet",
+    "details": "Détails",
+    "reason": "Motif de la décision",
+    "decision": "Votre décision",
+    "approve": "Approuver",
+    "reject": "Refuser",
+    "saving": "Enregistrement…",
+    "error": "La demande n’a pas pu être enregistrée. Vérifiez vos accès et les approbateurs configurés, puis réessayez.",
+    "offline": "Vous êtes hors ligne. Reconnectez-vous pour enregistrer votre décision.",
+    "states": {
+      "PENDING": "En attente de décision",
+      "APPROVED": "Approuvée",
+      "REJECTED": "Refusée"
     }
   }
 }

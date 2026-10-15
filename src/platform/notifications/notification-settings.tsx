@@ -78,6 +78,15 @@ export function NotificationSettings() {
         <label className="notification-choice"><input type="checkbox" data-testid="notification-security-email" checked disabled aria-describedby="notification-security-policy" />
           <span><strong>{t("security")}</strong><span className="notification-choice-description">{t("emailSecurityDescription")}</span></span></label>
       </fieldset>
+      {(["email", "push"] as const).map((channel) => <fieldset className="notification-channel" key={channel} disabled={pending || offline}>
+        <legend>{t(channel)}</legend><p>{t("externalPending")}</p>
+        {(["enabled", "account", "operations"] as const).map((category) => <label className="notification-choice" key={category}>
+          <input type="checkbox" data-testid={`notification-${channel}-${category}`} checked={draft[channel]?.[category] ?? false} onChange={(event) => {
+            setSaved(false); setError(null);
+            setDraft({ ...draft, [channel]: { ...(channel === "email" ? { security: true } : {}), enabled: false, account: false, operations: false, ...draft[channel], [category]: event.target.checked } });
+          }} /><span>{t(category)}</span>
+        </label>)}
+      </fieldset>)}
       <div className="notification-save-bar">
         <p role="status" aria-live="polite">{saved ? t("saved") : dirty ? t("unsaved") : t("upToDate")}</p>
         <button className="primary-button" type="submit" data-testid="notification-preferences-save" disabled={pending || offline || !dirty}>{t(pending ? "saving" : "save")}</button>

@@ -1,4 +1,5 @@
 import { createHash, createHmac } from "node:crypto";
+import { escapeHtml } from "@/platform/encoding/html";
 import type {
   EmailProvider,
   NotificationChannel,
@@ -8,6 +9,7 @@ import type {
   SignatureProvider,
   StorageProvider
 } from "@/platform/providers";
+import type { AppLocale } from "@/i18n/routing";
 import type { AppEnv } from "@/platform/env/env";
 
 export type HttpTransport = (
@@ -316,14 +318,17 @@ export class EmailNotificationChannel implements NotificationChannel {
     userId: string;
     subject: string;
     body: string;
+    locale?: AppLocale;
+    idempotencyKey?: string;
   }): Promise<{ id: string }> {
     return this.emailProvider.send({
       to: input.userId,
       subject: input.subject,
-      html: `<p>${input.body}</p>`,
+      html: `<p>${escapeHtml(input.body)}</p>`,
       text: input.body,
-      locale: "en",
-      template: "notification.system"
+      locale: input.locale ?? "en",
+      template: "notification.system",
+      ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {})
     });
   }
 }

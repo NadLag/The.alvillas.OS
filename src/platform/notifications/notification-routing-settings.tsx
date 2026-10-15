@@ -76,7 +76,7 @@ export function NotificationRoutingSettings() {
       <p className="notification-policy">{identity ? t("securityPolicy") : t("scopePolicy")}</p>
       {!identity ? <fieldset className="notification-channel" disabled={pending || offline}>
         <legend>{t("recipients")}</legend>
-        {kind !== "reservation_created" ? <label className="notification-choice"><input type="checkbox" data-testid="routing-assigned" checked={draft.assigned} onChange={(event) => { setSaved(false); setDraft({ ...draft, assigned: event.target.checked }); }} /><span>{t("assigned")}</span></label> : null}
+        {kind !== "reservation_created" && kind !== "approval_requested" ? <label className="notification-choice"><input type="checkbox" data-testid="routing-assigned" checked={draft.assigned} onChange={(event) => { setSaved(false); setDraft({ ...draft, assigned: event.target.checked }); }} /><span>{t("assigned")}</span></label> : null}
         <label className="field"><span>{t("search")}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         <fieldset className="notification-channel"><legend>{t("roles")}</legend>
           {model.roles.filter((role) => role.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map((role) => <label className="notification-choice" key={role.id}>
@@ -93,7 +93,8 @@ export function NotificationRoutingSettings() {
       </fieldset> : null}
       <fieldset className="notification-channel" disabled={pending || offline || kind === "security_session_revoked"}>
         <legend>{t("channels")}</legend>
-        <label className="notification-choice"><input type="checkbox" data-testid="routing-in-app" checked={kind === "security_session_revoked" || draft.channels.includes("in_app")} onChange={(event) => { setSaved(false); setDraft({ ...draft, channels: event.target.checked ? ["in_app"] : [] }); }} /><span>{t("inApp")}</span></label>
+        <label className="notification-choice"><input type="checkbox" data-testid="routing-in-app" checked={kind === "security_session_revoked" || draft.channels.includes("in_app")} onChange={(event) => { setSaved(false); setDraft({ ...draft, channels: event.target.checked ? [...draft.channels, "in_app"] : draft.channels.filter((value) => value !== "in_app") }); }} /><span>{t("inApp")}</span></label>
+        {(["email", "push"] as const).map((channel) => <label className="notification-choice" key={channel}><input type="checkbox" data-testid={`routing-${channel}`} checked={draft.channels.includes(channel)} onChange={(event) => { setSaved(false); setDraft({ ...draft, channels: event.target.checked ? [...draft.channels, channel] : draft.channels.filter((value) => value !== channel) }); }} /><span>{t(channel)}</span></label>)}
         <p>{t("externalPending")}</p>
       </fieldset>
       <label className="field"><span>{t("reason")}</span><input data-testid="routing-reason" value={reason} onChange={(event) => setReason(event.target.value)} minLength={6} maxLength={500} required disabled={pending || offline} /></label>
