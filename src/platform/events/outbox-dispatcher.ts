@@ -2,6 +2,7 @@ import type { OutboxEvent as PrismaOutboxEvent } from "@prisma/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { captureException } from "@/platform/observability/sentry";
 import { logger } from "@/platform/observability/logger";
+import { OutboxRepository, type OutboxDatabase } from "./outbox-repository";
 
 export type OutboxHandler = (event: PrismaOutboxEvent) => Promise<void>;
 
@@ -24,15 +25,6 @@ export type OutboxErrorReporter = (error: unknown, event: PrismaOutboxEvent) => 
 type OutboxRetryOptions = {
   maxAttempts?: number;
   backoffSeconds?: number;
-};
-
-type OrganizationListRunner = TenantTransactionRunner & {
-  organization: {
-    findMany(args: {
-      select: { id: true };
-      orderBy: { createdAt: "asc" };
-    }): Promise<Array<{ id: string }>>;
-  };
 };
 
 function retryAt(now: Date, attemptCount: number, backoffSeconds: number): Date {
@@ -93,16 +85,10 @@ export async function dispatchOutboxBatch(
   }
 
   return withTenant(db, organizationId, async (tx) => {
+    const repository = new OutboxRepository(tx, organizationId);
+    await repository.lockDispatcher();
     const now = options.now ?? new Date();
-    const events = await tx.outboxEvent.findMany({
-      where: {
-        organizationId,
-        status: "PENDING",
-        OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }]
-      },
-      orderBy: { occurredAt: "asc" },
-      take: limit
-    });
+    const events = await repository.due(now, limit);
     const result: DispatchOutboxResult = { dispatched: 0, failed: 0, skipped: 0 };
 
     for (const event of events) {
@@ -110,15 +96,12 @@ export async function dispatchOutboxBatch(
       const processedAt = options.now ?? new Date();
 
       if (!handler) {
-        await tx.outboxEvent.update({
-          where: { id: event.id },
-          data: {
+        await repository.update(event.id, {
             status: "FAILED",
             processedAt,
             attemptCount: { increment: 1 },
             nextAttemptAt: null,
             lastError: `No outbox handler registered for ${event.type}`
-          }
         });
         result.skipped += 1;
         continue;
@@ -126,14 +109,11 @@ export async function dispatchOutboxBatch(
 
       try {
         await handler(event);
-        await tx.outboxEvent.update({
-          where: { id: event.id },
-          data: {
+        await repository.update(event.id, {
             status: "DISPATCHED",
             processedAt,
             nextAttemptAt: null,
             lastError: null
-          }
         });
         result.dispatched += 1;
       } catch (error) {
@@ -145,15 +125,12 @@ export async function dispatchOutboxBatch(
           { eventType: event.type, idempotencyKey: event.idempotencyKey, error }
         );
         await errorReporter(error, event);
-        await tx.outboxEvent.update({
-          where: { id: event.id },
-          data: {
+        await repository.update(event.id, {
             status: exhausted ? "FAILED" : "PENDING",
             processedAt,
             attemptCount: { increment: 1 },
             nextAttemptAt: exhausted ? null : error instanceof OutboxRetryError ? error.nextAttemptAt : retryAt(processedAt, nextAttemptCount, backoffSeconds),
             lastError: errorMessage(error)
-          }
         });
         result.failed += 1;
       }
@@ -164,7 +141,7 @@ export async function dispatchOutboxBatch(
 }
 
 export async function dispatchOutboxForAllOrganizations(
-  db: OrganizationListRunner,
+  db: OutboxDatabase,
   handlers: OutboxHandlers,
   options: {
     limitPerOrganization?: number;
@@ -173,10 +150,7 @@ export async function dispatchOutboxForAllOrganizations(
     retry?: OutboxRetryOptions;
   } = {}
 ): Promise<DispatchOutboxResult & { organizations: number }> {
-  const organizations = await db.organization.findMany({
-    select: { id: true },
-    orderBy: { createdAt: "asc" }
-  });
+  const organizations = await OutboxRepository.organizations(db);
   const total = {
     organizations: organizations.length,
     dispatched: 0,

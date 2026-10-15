@@ -1,0 +1,58 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+import { NonRetriableError } from "inngest";
+import { createHmac } from "node:crypto";
+import { dispatchOutbox, dispatchRequestOrganization, inngestFunctions, outboxDispatchEvent } from "@/platform/events/inngest-functions";
+import type { OutboxDatabase } from "@/platform/events/outbox-repository";
+
+const organizationId = "018f0a0b-0000-7000-9000-000000000001";
+const outboxEventId = "018f0a0b-0000-7000-9000-000000000011";
+function database(found: object | null) {
+  const findFirst = vi.fn(() => Promise.resolve(found));
+  const tx = { $executeRaw: vi.fn(() => Promise.resolve(1)), outboxEvent: { findFirst } };
+  return { db: { $transaction: (work: (value: unknown) => unknown) => Promise.resolve(work(tx)) } as unknown as OutboxDatabase, findFirst };
+}
+afterEach(() => vi.unstubAllEnvs());
+
+describe("Inngest signed outbox dispatcher", () => {
+  it("registers one function for scheduled recovery and durable dispatch requests", () => {
+    expect(inngestFunctions).toHaveLength(1);
+    expect(dispatchOutbox.opts.triggers).toEqual([{ cron: "* * * * *" }, { event: outboxDispatchEvent }]);
+    expect(dispatchOutbox.opts.concurrency).toEqual({ limit: 1 });
+  });
+
+  it("loads the canonical reference under the claimed tenant", async () => {
+    const { db, findFirst } = database({ id: outboxEventId, organizationId, type: outboxDispatchEvent, status: "DISPATCHED" });
+    await expect(dispatchRequestOrganization({ organizationId, outboxEventId }, db)).resolves.toBe(organizationId);
+    expect(findFirst).toHaveBeenCalledWith({ where: { organizationId, id: outboxEventId } });
+  });
+
+  it("denies missing, forged, terminal and non-dispatch event references", async () => {
+    for (const found of [null, { type: "notification.requested", status: "PENDING" }, { type: outboxDispatchEvent, status: "FAILED" }]) {
+      await expect(dispatchRequestOrganization({ organizationId, outboxEventId }, database(found).db)).rejects.toBeInstanceOf(NonRetriableError);
+    }
+    const { db, findFirst } = database(null);
+    await expect(dispatchRequestOrganization({ organizationId, outboxEventId, payload: "untrusted" }, db)).rejects.toBeInstanceOf(NonRetriableError);
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it("authenticates discovery and rejects unsigned, tampered and expired requests through the real SDK", async () => {
+    vi.stubEnv("INNGEST_SIGNING_KEY", `signkey-test-${"1".repeat(64)}`);
+    const { GET, POST } = await import("@/app/api/inngest/route");
+    const signature = (body: string, seconds = Math.floor(Date.now() / 1000)) => {
+      const digest = createHmac("sha256", "1".repeat(64)).update(body).update(String(seconds)).digest("hex");
+      return { "x-inngest-signature": `t=${seconds}&s=${digest}` };
+    };
+    expect((await GET(new NextRequest("http://localhost:3000/api/inngest"), {})).status).toBe(401);
+    const discovery = await GET(new NextRequest("http://localhost:3000/api/inngest", { headers: signature("") }), {});
+    expect(discovery.status).toBe(200);
+    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(1);
+    expect(JSON.stringify(body)).not.toContain(process.env.INNGEST_SIGNING_KEY!);
+    const execution = await POST(new NextRequest("http://localhost:3000/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { method: "POST", body: "{}" }), {});
+    expect(execution.status).toBe(401);
+    const expired = await GET(new NextRequest("http://localhost:3000/api/inngest", { headers: signature("", Math.floor(Date.now() / 1000) - 600) }), {});
+    expect(expired.status).toBe(401);
+    const tampered = await POST(new NextRequest("http://localhost:3000/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { method: "POST", body: '{"forged":true}', headers: signature("{}") }), {});
+    expect(tampered.status).toBe(401);
+  });
+});

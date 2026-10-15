@@ -70,7 +70,7 @@ describe("dispatchOutboxBatch", () => {
 
     expect(handler).toHaveBeenCalledOnce();
     expect(update).toHaveBeenCalledWith({
-      where: { id: "evt-1" },
+      where: { id: "evt-1", organizationId },
       data: {
         status: "DISPATCHED",
         processedAt: new Date("2026-10-11T01:00:00.000Z"),

@@ -13,6 +13,9 @@ import { totpCode } from "@/platform/auth/totp";
 import { ResendEmailProvider, type HttpTransport } from "@/platform/providers/real";
 import { createInngestOutboxHandlers } from "@/platform/events/inngest";
 import { dispatchOutboxBatch } from "@/platform/events/outbox-dispatcher";
+import { createInngestOutboxHandler, type InngestTransport } from "@/platform/events/inngest";
+import { dispatchRequestOrganization } from "@/platform/events/inngest-functions";
+import { OutboxRepository } from "@/platform/events/outbox-repository";
 import {
   IdentityAuthorizationError,
   authContextForAccount
@@ -854,6 +857,51 @@ describe("PostgreSQL baseline", () => {
     expect(await withTenant(runner, foreign.id, (tx) => tx.approvalRequest.count())).toBe(0);
     await expect(withTenant(runner, foreign.id, (tx) => tx.approvalRecipient.create({ data: { organizationId: foreign.id, approvalId: id, userAccountId: approver.id } }))).rejects.toThrow();
     await expect(withTenant(runner, org.id, (tx) => tx.approvalRequest.delete({ where: { id } }))).rejects.toThrow(/cannot be deleted/u);
+  });
+
+  it("validates durable Inngest dispatch references against real tenant isolation", async () => {
+    const first = await prisma.organization.create({ data: { name: "Inngest first tenant" } });
+    const second = await prisma.organization.create({ data: { name: "Inngest second tenant" } });
+    const event = await withTenant(prisma, first.id, tx => new OutboxRepository(tx, first.id).requestDispatch("same-key"));
+    expect((await withTenant(prisma, first.id, tx => new OutboxRepository(tx, first.id).requestDispatch("same-key"))).id).toBe(event.id);
+    await expect(dispatchRequestOrganization({ organizationId: first.id, outboxEventId: event.id }, prisma)).resolves.toBe(first.id);
+    await expect(dispatchRequestOrganization({ organizationId: second.id, outboxEventId: event.id }, prisma)).rejects.toThrow("outbox_dispatch_reference_denied");
+    expect(await withTenant(prisma, second.id, tx => tx.outboxEvent.count())).toBe(0);
+  });
+
+  it("serializes independent outbox drains and forwards tenant-safe idempotent references once", async () => {
+    const first = await prisma.organization.create({ data: { name: "Inngest concurrent first" } });
+    const second = await prisma.organization.create({ data: { name: "Inngest concurrent second" } });
+    const event = await withTenant(prisma, first.id, tx => new OutboxRepository(tx, first.id).requestDispatch("same-key"));
+    const other = await withTenant(prisma, second.id, tx => new OutboxRepository(tx, second.id).requestDispatch("same-key"));
+    const received: Array<{ id: string; data: unknown }> = [];
+    const transport: InngestTransport = async (_url, input) => {
+      received.push(JSON.parse(input.body) as { id: string; data: unknown }); await new Promise(resolve => setTimeout(resolve, 30));
+      return { ok: true, status: 200, json: () => Promise.resolve({ ids: ["accepted"], status: 200 }), text: () => Promise.resolve("") };
+    };
+    const handlers = { "*": async (row: typeof event) => { await createInngestOutboxHandler({ INNGEST_EVENT_KEY: "isolated-test" }, transport)(row); } };
+    const results = await Promise.all(Array.from({ length: 3 }, () => dispatchOutboxBatch(prisma, first.id, handlers)));
+    expect(results.reduce((count, result) => count + result.dispatched, 0)).toBe(1);
+    expect(received).toHaveLength(1); expect(received[0].data).toEqual({ organizationId: first.id, outboxEventId: event.id });
+    expect(await withTenant(prisma, second.id, tx => new OutboxRepository(tx, second.id).event(other.id))).toMatchObject({ status: "PENDING", attemptCount: 0 });
+    await dispatchOutboxBatch(prisma, second.id, handlers);
+    expect(received).toHaveLength(2); expect(received[0].id).not.toBe(received[1].id);
+  });
+
+  it("persists malformed Inngest acknowledgements for retry without secrets and retains the same event id", async () => {
+    const org = await prisma.organization.create({ data: { name: "Inngest acknowledgement retries" } });
+    const event = await withTenant(prisma, org.id, tx => new OutboxRepository(tx, org.id).requestDispatch("ack-retry"));
+    let valid = false; const ids: string[] = [];
+    const transport: InngestTransport = (_url, input) => { ids.push((JSON.parse(input.body) as { id: string }).id); return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ ids: valid ? ["accepted"] : [], status: 200 }), text: () => Promise.resolve("") }); };
+    const handlers = { "*": async (row: typeof event) => { await createInngestOutboxHandler({ INNGEST_EVENT_KEY: "isolated-secret" }, transport)(row); } };
+    const now = new Date();
+    expect(await dispatchOutboxBatch(prisma, org.id, handlers, { now, errorReporter: async () => {} })).toMatchObject({ failed: 1 });
+    const failed = await withTenant(prisma, org.id, tx => new OutboxRepository(tx, org.id).event(event.id));
+    expect(failed).toMatchObject({ status: "PENDING", attemptCount: 1, lastError: "Inngest event response did not acknowledge delivery", nextAttemptAt: expect.any(Date) as Date });
+    valid = true;
+    expect(await dispatchOutboxBatch(prisma, org.id, handlers, { now })).toMatchObject({ dispatched: 0 });
+    expect(await dispatchOutboxBatch(prisma, org.id, handlers, { now: failed!.nextAttemptAt! })).toMatchObject({ dispatched: 1 });
+    expect(ids).toHaveLength(2); expect(ids[0]).toBe(ids[1]);
   });
 
   it("routes external channels through provider interfaces with durable retries, replay suppression and consent rechecks", async () => {

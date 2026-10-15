@@ -8,6 +8,8 @@ import { deliverNotificationEvent } from "@/platform/notifications/notification-
 import { notificationEventType } from "@/platform/notifications/notification";
 import { shouldDeliverNotification } from "@/platform/notifications/notification-preferences";
 import { deliverPushChannel } from "@/platform/notifications/push-delivery-service";
+import type { TenantTransactionRunner } from "@/platform/db/tenant";
+import { z } from "zod";
 
 export type InngestSendResult = {
   ids: string[];
@@ -20,6 +22,7 @@ export type InngestTransport = (
     method: "POST";
     headers: Record<string, string>;
     body: string;
+    signal?: AbortSignal;
   }
 ) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
 
@@ -51,12 +54,11 @@ export function createInngestOutboxHandler(
 
   return async function sendOutboxEventToInngest(event: PrismaOutboxEvent): Promise<InngestSendResult> {
     const payload = {
-      id: `${event.type}:${event.idempotencyKey}`,
+      id: `${event.organizationId}:${event.id}`,
       name: event.type,
       data: {
         organizationId: event.organizationId,
-        outboxEventId: event.id,
-        ...((event.payload ?? {}) as Record<string, unknown>)
+        outboxEventId: event.id
       },
       ts: event.occurredAt.getTime()
     };
@@ -68,29 +70,24 @@ export function createInngestOutboxHandler(
       headers["x-inngest-env"] = env.INNGEST_ENV;
     }
 
-    const response = await transport(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload)
-    });
+    let response;
+    try { response = await transport(url, { method: "POST", headers, body: JSON.stringify(payload), signal: AbortSignal.timeout(10000) }); }
+    catch { throw new Error("Inngest event transport did not acknowledge delivery"); }
 
     if (!response.ok) {
       throw new Error(`Inngest event dispatch failed with status ${response.status}`);
     }
 
-    const body = (await response.json()) as Partial<InngestSendResult>;
-
-    return {
-      ids: Array.isArray(body.ids) ? body.ids.map(String) : [],
-      status: typeof body.status === "number" ? body.status : response.status
-    };
+    try { return z.object({ ids: z.array(z.string().min(1)).min(1), status: z.number().int().min(200).max(299) }).parse(await response.json()); }
+    catch { throw new Error("Inngest event response did not acknowledge delivery"); }
   };
 }
 
 export function createInngestOutboxHandlers(
   env: InngestEnv = process.env,
   transport: InngestTransport = fetch,
-  emailProvider?: EmailProvider
+  emailProvider?: EmailProvider,
+  deps: { db?: TenantTransactionRunner } = {}
 ): OutboxHandlers {
   const handler = (event: PrismaOutboxEvent) => createInngestOutboxHandler(env, transport)(event);
   const identityDelivery = async (event: PrismaOutboxEvent) => {
@@ -109,12 +106,12 @@ export function createInngestOutboxHandlers(
 
   return {
     [notificationChannelEventType]: async (event) => {
-      if ((event.payload as Record<string, unknown>).channel === "push") { await deliverPushChannel(event, { env }); return; }
-      await deliverNotificationChannel(event, { appUrl: env.APP_URL ?? "http://localhost:3000", channels: {
+      if ((event.payload as Record<string, unknown>).channel === "push") { await deliverPushChannel(event, { env, db: deps.db }); return; }
+      await deliverNotificationChannel(event, { db: deps.db, appUrl: env.APP_URL ?? "http://localhost:3000", channels: {
         ...(emailProvider || (env.RESEND_API_KEY && env.EMAIL_FROM) ? { email: new EmailNotificationChannel(emailProvider ?? new ResendEmailProvider(env)) } : {})
       } });
     },
-    [notificationEventType]: async (event) => { await deliverNotificationEvent(event); },
+    [notificationEventType]: async (event) => { await deliverNotificationEvent(event, { db: deps.db }); },
     "identity.invitation.delivery_requested": identityDelivery,
     "identity.recovery.delivery_requested": identityDelivery,
     "*": async (event) => {
