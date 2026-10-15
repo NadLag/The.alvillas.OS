@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { e2eEmail, ensureE2EAdmin } from "./support/auth";
+import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { setPropertyCity } from "./support/property-form";
 import { ensureReservationRevenuePostingSetup } from "./support/reservation-revenue";
 import { formatCurrencyAmount } from "@/i18n/format";
@@ -26,9 +26,11 @@ test.describe("manual reservation to operations tasks journey", () => {
     await ensureE2EAdmin(loginEmail, adminPassword);
 
     await page.goto("/en/login");
+    await waitForE2EAdminLoginWindow(page, loginEmail);
     await page.getByTestId("login-email").fill(loginEmail);
     await page.getByTestId("login-password").fill(adminPassword);
     await page.getByTestId("login-submit").click();
+    await completeE2EAdminMfa(page, loginEmail);
     await expect(page).toHaveURL(/\/en\/app/u);
 
     await page.goto("/en/app/owners");
@@ -102,9 +104,11 @@ test.describe("manual reservation to operations tasks journey", () => {
     await ensureE2EAdmin(loginEmail, adminPassword);
 
     await page.goto("/en/login");
+    await waitForE2EAdminLoginWindow(page, loginEmail);
     await page.getByTestId("login-email").fill(loginEmail);
     await page.getByTestId("login-password").fill(adminPassword);
     await page.getByTestId("login-submit").click();
+    await completeE2EAdminMfa(page, loginEmail);
     await expect(page).toHaveURL(/\/en\/app/u);
 
     await page.goto("/en/app/owners");
@@ -156,9 +160,11 @@ test.describe("manual reservation to operations tasks journey", () => {
 
     await page.context().clearCookies();
     await page.goto("/en/login");
+    await waitForE2EAdminLoginWindow(page, ownerEmail);
     await page.getByTestId("login-email").fill(ownerEmail);
     await page.getByTestId("login-password").fill(adminPassword);
     await page.getByTestId("login-submit").click();
+    await completeE2EAdminMfa(page, ownerEmail);
     await expect(page).toHaveURL(/\/en\/app/u);
 
     await page.goto("/en/app/owner-portal");
@@ -184,9 +190,11 @@ test.describe("manual reservation to operations tasks journey", () => {
     await ensureE2EAdmin(loginEmail, adminPassword);
 
     await page.goto("/en/login");
+    await waitForE2EAdminLoginWindow(page, loginEmail);
     await page.getByTestId("login-email").fill(loginEmail);
     await page.getByTestId("login-password").fill(adminPassword);
     await page.getByTestId("login-submit").click();
+    await completeE2EAdminMfa(page, loginEmail);
     await expect(page).toHaveURL(/\/en\/app/u);
 
     await page.goto("/en/app/owners");

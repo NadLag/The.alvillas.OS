@@ -9,6 +9,7 @@ declare module "next-auth" {
       preferredLocale: string;
       sessionId: string;
       sessionRevoked: boolean;
+      securitySetupRequired: boolean;
     } & DefaultSession["user"];
   }
 
@@ -18,6 +19,7 @@ declare module "next-auth" {
     preferredLocale?: string;
     sessionId?: string;
     sessionRevoked?: boolean;
+    securitySetupRequired?: boolean;
   }
 }
 
@@ -30,5 +32,6 @@ declare module "next-auth/jwt" {
     authSessionId?: string;
     sessionVersion?: number;
     sessionRevoked?: boolean;
+    securitySetupRequired?: boolean;
   }
 }

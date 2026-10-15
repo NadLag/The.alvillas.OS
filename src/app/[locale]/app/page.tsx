@@ -31,6 +31,7 @@ export default async function AppPage({
   if (!session?.user?.id || !session.user.organizationId) {
     redirect(`/${appLocale}/login`);
   }
+  if (session.user.securitySetupRequired) redirect(`/${appLocale}/app/security`);
 
   const [t, dsnT, ownerPortalFlag] = await Promise.all([
     getTranslations("AppShell"),

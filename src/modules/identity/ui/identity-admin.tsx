@@ -993,7 +993,7 @@ export function IdentityAdmin({
                     <small>-</small>
                   ) : (
                     account.recentSessions.map((session) => (
-                      <div className="identity-security-row" data-testid="identity-session-row" key={session.id}>
+                      <div className="identity-security-row" data-testid="identity-session-row" data-session-id={session.id} key={session.id}>
                         <span>
                           <small>{labels.lastSeen}</small>
                           <strong>{dateLabels[session.lastSeenAt.toISOString()]}</strong>
@@ -1032,7 +1032,7 @@ export function IdentityAdmin({
                     <small>-</small>
                   ) : (
                     account.devices.map((device) => (
-                      <div className="identity-security-row" data-testid="identity-device-row" key={device.id}>
+                      <div className="identity-security-row" data-testid="identity-device-row" data-device-id={device.deviceId} key={device.id}>
                         <span>
                           <small>{labels.devices}</small>
                           <strong>{device.label ?? device.deviceId}</strong>

@@ -674,7 +674,7 @@ Occupancy = occupied nights ÷ available nights (blocks excluded; configurable) 
 | 4 | Property created | Template applied; overrides visible |
 | 5 | Onboarding wizard steps 01–11 | Review blocks on invalid config; activation job completes |
 | 6 | Team assigned | Multiple scoped assignments incl. compensation |
-| 7 | Permissions verified | Simulator for co-host shows spec §16 lists; negative tests pass |
+| 7 | Permissions verified | Simulator for co-host shows spec §16 lists; negative tests pass; admin/finance enrollment denies business access before passkey + confirmed TOTP, invalidates earlier sessions, and requires real MFA on sign-in (`identity-closeout.spec.ts`) |
 | 8 | Owner report generated | FR + EN PDFs contain only configured services |
 | 9 | Owner email sent | Language per owner; delivery logged |
 | 10 | Booking received (iCal + payout CSV) | Reservation + snapshot; tasks generated; no duplicates on re-sync |

@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
-import { e2eEmail, ensureE2EAdmin } from "./support/auth";
+import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
@@ -13,9 +13,11 @@ type Box = {
 
 async function login(page: Page, email: string) {
   await page.goto("/en/login");
+  await waitForE2EAdminLoginWindow(page, email);
   await page.getByTestId("login-email").fill(email);
   await page.getByTestId("login-password").fill(adminPassword);
   await page.getByTestId("login-submit").click();
+  await completeE2EAdminMfa(page, email);
   await expect(page).toHaveURL(/\/en\/app/u);
 }
 

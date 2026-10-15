@@ -264,7 +264,9 @@
       "totpInvalid": "Le code n'a pas été accepté. Utilisez un code actuel correspondant à cette clé, ou recommencez la configuration si elle a expiré.",
       "recoveryCodes": "Codes de recuperation",
       "registerPasskey": "Enregistrer passkey",
-      "passkeyReady": "Passkey enregistre."
+      "passkeyReady": "Passkey enregistre.",
+      "requiredSubtitle": "Enregistrez une cl? d?acc?s et confirmez votre authentificateur avant d?ouvrir l?espace de travail. Conservez vos codes de r?cup?ration, puis reconnectez-vous.",
+      "signInAgain": "Se reconnecter apr?s avoir conserv? ces codes"
     },
     "activation": {
       "eyebrow": "Activation du compte",

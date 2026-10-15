@@ -2,6 +2,7 @@
 
 import { startRegistration } from "@simplewebauthn/browser";
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import {
   beginPasskeyRegistrationAction,
   confirmTotpEnrollmentAction,
@@ -11,6 +12,7 @@ import {
 } from "@/modules/identity/application/identity-actions";
 
 type SecurityPanelProps = {
+  signInHref: string;
   labels: {
     title: string;
     subtitle: string;
@@ -26,10 +28,11 @@ type SecurityPanelProps = {
     generic: string;
     unauthorized: string;
     forbidden: string;
+    signInAgain: string;
   };
 };
 
-export function SecurityPanel({ labels }: SecurityPanelProps) {
+export function SecurityPanel({ labels, signInHref }: SecurityPanelProps) {
   const [state, setState] = useState<IdentityFormState>({ status: "idle" });
   const [totpCode, setTotpCode] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -120,6 +123,7 @@ export function SecurityPanel({ labels }: SecurityPanelProps) {
               {code}
             </code>
           ))}
+          <Link className="secondary-button" href={signInHref}>{labels.signInAgain}</Link>
         </div>
       ) : null}
 

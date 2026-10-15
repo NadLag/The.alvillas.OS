@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { expect, test, type Page } from "@playwright/test";
-import { e2eEmail, ensureE2EAdmin } from "./support/auth";
+import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { totpCode } from "@/platform/auth/totp";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
@@ -12,9 +12,11 @@ const passkeyOrigin = "http://localhost:3000";
 
 async function loginAdmin(page: Page, email: string, origin = "") {
   await page.goto(`${origin}/en/login`);
+  await waitForE2EAdminLoginWindow(page, email);
   await page.getByTestId("login-email").fill(email);
   await page.getByTestId("login-password").fill(adminPassword);
   await page.getByTestId("login-submit").click();
+  await completeE2EAdminMfa(page, email);
   await expect(page).toHaveURL(/\/en\/app/u);
 }
 
@@ -207,14 +209,16 @@ test.describe("identity lifecycle", () => {
     await page.getByTestId("recovery-password").fill("correct horse recovered staple");
     await page.getByTestId("recovery-submit").click();
     await expect(page).toHaveURL(/\/en\/login/u, { timeout: 15_000 });
+    await waitForE2EAdminLoginWindow(page, invitedEmail);
     await page.getByTestId("login-email").fill(invitedEmail);
     await page.getByTestId("login-password").fill("correct horse recovered staple");
     await page.getByTestId("login-submit").click();
+    await completeE2EAdminMfa(page, invitedEmail);
     await expect(page).toHaveURL(/\/en\/app/u);
   });
 
   test("denies expired invitations and supports MFA plus passkey registration", async ({ page }, testInfo) => {
-    test.setTimeout(60_000);
+    test.setTimeout(90_000);
 
     const adminEmail = e2eEmail(`identity-security-${Date.now()}-${testInfo.retry}`, testInfo.project.name);
     const invitedEmail = e2eEmail(`identity-expired-${Date.now()}`, testInfo.project.name);
@@ -292,6 +296,7 @@ test.describe("identity lifecycle", () => {
     await expect(page.getByText("Passkey registered.")).toBeVisible();
     await page.context().clearCookies();
     await page.goto(`${passkeyOrigin}/en/login`);
+    await waitForE2EAdminLoginWindow(page, adminEmail);
     await page.getByTestId("login-email").fill(adminEmail);
     await page.getByTestId("login-passkey").click();
     await expect(page.getByTestId("login-mfa-step")).toBeVisible();

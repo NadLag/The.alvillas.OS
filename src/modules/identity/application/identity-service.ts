@@ -1940,6 +1940,8 @@ export async function confirmTotpEnrollment(
   const recoveryCodes = Array.from({ length: 8 }, () => newRecoveryCode());
 
   await withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new IdentityRepository(tx, ctx.organizationId);
+    await repository.lockIdentityOperation(`totp-confirm:${ctx.actorId}`);
     const credential = await tx.authCredential.findFirst({
       where: {
         id: credentialId,
@@ -1955,14 +1957,7 @@ export async function confirmTotpEnrollment(
       throw new IdentityConflictError("TOTP code is invalid");
     }
 
-    await tx.authCredential.update({
-      where: { id: credential.id },
-      data: { expiresAt: null, lastUsedAt: new Date() }
-    });
-    await tx.userAccount.update({
-      where: { id: ctx.actorId },
-      data: { mfaRequired: true }
-    });
+    const confirmation = await repository.confirmTotpCredential(credential.id, ctx.actorId, new Date());
     for (const recoveryCode of recoveryCodes) {
       await tx.authCredential.create({
         data: {
@@ -1989,7 +1984,8 @@ export async function confirmTotpEnrollment(
       after: {
         authCredentialRecordId: credential.id,
         mfaRequired: true,
-        recoveryCodeCount: recoveryCodes.length
+        recoveryCodeCount: recoveryCodes.length,
+        firstEnrollment: confirmation.firstEnrollment, revokedSessionCount: confirmation.revokedSessionCount
       },
       reason: "TOTP enrollment confirmed",
       requestId: meta.requestId,
