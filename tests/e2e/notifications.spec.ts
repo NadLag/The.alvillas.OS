@@ -70,5 +70,31 @@ test.describe("persistent personal notification center", () => {
     await expect(page.getByTestId("notification-count")).toHaveText("0");
     await page.getByTestId("notification-bell").click();
     await expect(page.getByTestId("notification-item")).toHaveAttribute("data-read", "true");
+    await page.keyboard.press("Escape");
+    // Real preference events create enough history to scroll on both viewports.
+    for (const locale of ["en", "fr", "en", "fr", "en"]) {
+      await page.getByTestId("preferred-locale-select").selectOption(locale);
+      await page.getByTestId("preferred-locale-submit").click();
+      await expect(page).toHaveURL(new RegExp(`/${locale}/app$`, "u"));
+    }
+    await expect(page.getByTestId("notification-count")).toHaveText("5");
+    let release = () => {};
+    const refreshGate = new Promise<void>((resolve) => { release = resolve; });
+    await page.route("**/en/app", async (route) => {
+      if (route.request().method() === "POST") await refreshGate;
+      await route.continue();
+    });
+    try {
+      await page.getByTestId("notification-bell").click();
+      const panel = page.getByTestId("notification-panel");
+      await expect(panel).toHaveAttribute("aria-busy", "true");
+      await expect(page.getByTestId("notification-item")).toHaveCount(6);
+      await panel.focus();
+      await expect(panel).toBeFocused();
+      await page.keyboard.press("End");
+      await expect.poll(() => panel.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    } finally { release(); }
+    await expect(page.getByTestId("notification-panel")).toHaveAttribute("aria-busy", "false");
   });
 });

@@ -84,7 +84,7 @@ export function NotificationCenter() {
         <span>{t("title")}</span>
         {page ? <span className="notification-count" data-testid="notification-count" aria-live="polite">{page.unreadCount.toLocaleString(locale)}</span> : null}
       </button>}>
-      <div className="notification-panel" data-testid="notification-panel" aria-busy={pending}>
+      <div className="notification-panel" data-testid="notification-panel" aria-busy={pending} role="region" aria-label={t("title")} tabIndex={0}>
         {offline ? <p role="status">{t("offline")}</p> : null}
         {error ? <div role="alert"><p>{t("error")}</p><button className="secondary-button" type="button" onClick={refresh} disabled={pending || offline}>{t("retry")}</button></div> : null}
         {!page && pending ? <><p role="status">{t("loading")}</p><SkeletonBlock /></> : null}

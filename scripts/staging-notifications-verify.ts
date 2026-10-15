@@ -1,7 +1,11 @@
 import { readFile } from "node:fs/promises";
-import { chromium, expect } from "@playwright/test";
+import { chromium, expect as playwrightExpect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { totpCode } from "../src/platform/auth/totp";
+
+// Match the existing protected-staging verifier's remote navigation deadline.
+// Assertions still require the committed read state and exact unread counts.
+const expect = playwrightExpect.configure({ timeout: 30000 });
 
 process.loadEnvFile(".env.local");
 const origin = "https://the-alvillas-os-staging.vercel.app";
@@ -51,34 +55,43 @@ try {
   if (process.env.STAGING_AUTH_ONLY === "1") {
     console.log(JSON.stringify({ authenticated: true, identityOrCredentialMutations: 0 }));
   } else {
-    step = "notification-flow";
+    step = "open-workspace";
     await page.goto("/en/app");
     await expect(page.getByTestId("notification-count")).toBeVisible();
     const baseline = Number(await page.getByTestId("notification-count").textContent());
     originalLocale = await page.getByTestId("preferred-locale-select").inputValue();
+    console.log(JSON.stringify({ step: "preference-captured", originalLocale, baseline }));
     const nextLocale = originalLocale === "fr" ? "en" : "fr";
+    step = "change-preference";
     await page.getByTestId("preferred-locale-select").selectOption(nextLocale);
     await page.getByTestId("preferred-locale-submit").click();
     await expect(page).toHaveURL(new RegExp(`/${nextLocale}/app$`, "u"));
+    step = "updated-unread-count";
     await expect(page.getByTestId("notification-count")).toHaveText(String(baseline + 1));
     await page.getByTestId("notification-bell").click();
+    step = "open-panel";
     const newest = page.getByTestId("notification-item").first();
     await expect(newest).toContainText(nextLocale === "fr" ? "Votre langue préférée a été modifiée." : "Your language preference was updated.");
+    step = "mark-read";
     await newest.getByRole("button", { name: nextLocale === "fr" ? "Marquer comme lue" : "Mark as read", exact: true }).click();
     await expect(page.getByTestId("notification-count")).toHaveText(String(baseline));
+    step = "open-record";
     await newest.getByRole("button", { name: nextLocale === "fr" ? "Ouvrir la fiche" : "Open record", exact: true }).click();
     await expect(page.getByTestId("notification-panel")).not.toBeVisible();
     await expect(page).toHaveURL(new RegExp(`/${nextLocale}/app$`, "u"));
+    step = "restore-preference";
     await page.getByTestId("preferred-locale-select").selectOption(originalLocale);
     await page.getByTestId("preferred-locale-submit").click();
     await expect(page).toHaveURL(new RegExp(`/${originalLocale}/app$`, "u"));
     restored = true;
+    step = "read-restoration-event";
     await page.goto("/en/app");
     await page.getByTestId("notification-bell").click();
     await page.getByTestId("notification-item").first().getByRole("button", { name: "Mark as read", exact: true }).click();
     await expect(page.getByTestId("notification-count")).toHaveText(String(baseline));
     await page.keyboard.press("Escape");
     for (const width of [1440, 360]) for (const locale of ["en", "fr", "ar"]) {
+      step = `accessibility-${locale}-${width}`;
       await page.setViewportSize({ width, height: 900 });
       await page.goto(`/${locale}/app`);
       await expect(page.getByTestId("notification-count")).toHaveText(baseline.toLocaleString(locale));
@@ -90,6 +103,7 @@ try {
       await page.keyboard.press("Escape");
       await expect(page.getByTestId("notification-bell")).toBeFocused();
     }
+    step = "fresh-context-persistence";
     const fresh = await browser.newContext({ baseURL: origin, storageState: await context.storageState() });
     try {
       await fresh.route("**/*", async (route) => {
@@ -107,16 +121,25 @@ try {
       realPreferenceEvents: 2, originalPreferenceRestored: restored, unreadCounts: "passed", readPersistence: "passed across browser contexts",
       authorizedNavigation: "passed", locales: "EN/FR/AR RTL", widths: "1440/360", accessibility: "axe passed", credentialChanges: 0 }));
   }
-} catch {
+} catch (error) {
   // Playwright assertion objects can include filled login fields. Never print them.
-  console.error(JSON.stringify({ status: "failed", step, authenticatedStagingAcceptance: "incomplete" }));
+  const firstLine = error instanceof Error ? error.message.split("\n")[0] : "";
+  console.error(JSON.stringify({ status: "failed", step, originalLocale, restored, assertion: firstLine.startsWith("expect(") ? firstLine : "browser action failed", authenticatedStagingAcceptance: "incomplete" }));
   process.exitCode = 1;
 } finally {
   if (originalLocale && !restored) {
-    await page.keyboard.press("Escape");
-    await page.goto("/en/app");
-    await page.getByTestId("preferred-locale-select").selectOption(originalLocale);
-    await page.getByTestId("preferred-locale-submit").click();
+    try {
+      const cleanupPage = await context.newPage();
+      await cleanupPage.goto("/en/app");
+      if (await cleanupPage.getByTestId("preferred-locale-select").inputValue() !== originalLocale) {
+        await cleanupPage.getByTestId("preferred-locale-select").selectOption(originalLocale);
+        const saved = cleanupPage.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).origin === origin);
+        await cleanupPage.getByTestId("preferred-locale-submit").click();
+        await (await saved).finished();
+        await expect(cleanupPage).toHaveURL(new RegExp(`/${originalLocale}/app$`, "u"));
+      }
+      await cleanupPage.close();
+    } catch { console.error(JSON.stringify({ preferenceRestoration: "requires-verification" })); }
   }
   await context.close(); await browser.close();
 }
