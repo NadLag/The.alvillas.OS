@@ -5,6 +5,8 @@ export const notificationEventType = "notification.requested";
 export const notificationInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("language_updated"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("task_assigned"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("reservation_created"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("task_completed"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("security_session_revoked"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict()
 ]);
 export type NotificationInput = z.infer<typeof notificationInputSchema>;
@@ -45,5 +47,8 @@ export function notificationDestination(
       assignments: [{ scope: self, permissions }] };
     return authorize(selfContext, "configure", target) ? `/${locale}/app${input.kind === "security_session_revoked" ? "/security" : ""}` : null;
   }
-  return target.type === "task" && target.assignedUserAccountId === ctx.userAccountId && authorize(ctx, "view", target) ? `/${locale}/app/field/${target.id}` : null;
+  if (!authorize(ctx, "view", target)) return null;
+  if (input.kind === "reservation_created") return target.type === "reservation" ? `/${locale}/app/reservations` : null;
+  if (target.type !== "task") return null;
+  return target.assignedUserAccountId === ctx.userAccountId ? `/${locale}/app/field/${target.id}` : `/${locale}/app/operations`;
 }

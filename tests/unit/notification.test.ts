@@ -20,7 +20,9 @@ describe("personal notification permissions and safe destinations", () => {
     expect(authorize(ctx, "view", resource)).toBe(false);
   });
   it("checks current task permissions, scope, assignment and tenant before generating any URL", () => {
-    const ctx = ownNotificationContext({ organizationId: org, permissions: new Set(["task:view"]), scopes: [{ organizationId: org, scopeType: "property", scopeId: "property-a" }] }, account);
+    const scope = { organizationId: org, scopeType: "property" as const, scopeId: "property-a" };
+    const ctx = ownNotificationContext({ organizationId: org, permissions: new Set(["task:view"]), scopes: [scope],
+      assignments: [{ scope, permissions: new Set(["task:view"]), conditions: { assignedToMe: true } }] }, account);
     expect(notificationDestination(ctx, input, resource, "fr")).toBe(`/fr/app/field/${task}`);
     for (const target of [null, { ...resource, organizationId: task }, { ...resource, propertyId: "property-b" }, { ...resource, assignedUserAccountId: task }, { ...resource, id: account }]) {
       expect(notificationDestination(ctx, input, target, "en")).toBeNull();

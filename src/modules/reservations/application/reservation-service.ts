@@ -212,6 +212,7 @@ export async function createManualReservation(
       createdBy: ctx.actorId
     });
     await auditReservationCreate(tx, ctx, meta, reservation);
+    await publishNotification(tx, ctx.organizationId, { kind: "reservation_created", recipientId: ctx.actorId, targetId: reservation.id }, `notification:reservation:${reservation.id}:created`);
 
     const overlaps = await repository.listOverlaps(input, reservation.id);
     for (const overlap of overlaps) {
@@ -430,5 +431,6 @@ export async function completeAssignedFieldTaskInTransaction(
     occurredAt: new Date()
   });
 
+  await publishNotification(tx, ctx.organizationId, { kind: "task_completed", recipientId: ctx.actorId, targetId: completed.id }, `notification:task:${completed.id}:completed`);
   return completed;
 }

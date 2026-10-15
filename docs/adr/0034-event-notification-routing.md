@@ -1,0 +1,11 @@
+# F-NTF-04 — Routing through versioned configuration
+
+Each supported event has a `notification.routing.<kind>` rule using the existing scope, lifecycle and effective-version resolver. Organization defaults are persisted on first use under a tenant/key transaction lock; property overrides replace the whole routing value. Rules select custom/system roles, specific people, current assignees and available channels. Both the dedicated controls and the existing configuration editor validate references in the tenant. Configuration writes retain their reason and the existing audit history.
+
+The dedicated routing editor requires organization-wide configuration permission, matching its page access check and its organization-wide recipient directory. Property scopes on rules govern delivery; they do not grant access to the directory.
+
+The existing notification repository resolves recipients in batches. A selected role must itself authorize access in the event's property scope; a different role cannot lend it wider access. Explicit people and assignees still require current record permissions. Account events stay private to their subject. Session-security notifications always reach the active affected account, regardless of optional preferences or routing switches. Invitation/recovery email policy remains in its existing path.
+
+The existing outbox row is the delivery decision lock. Recipient inserts and the terminal decision commit together, including when every recipient is suppressed. Delivery re-reads the stored event under lock, so stale/concurrent retries cannot add recipients after configuration or preferences change. Existing uniqueness protects history. The only migration expands accepted notification kinds without rewriting history.
+
+Reservation creation, task assignment/completion and session revocation are real event producers. No persisted approval lifecycle exists yet; an approval policy preview is not an approval event. Approval routing acceptance therefore remains a prerequisite blocker for F-NTF-04. Only in-app is offered by this routing editor. External email/push acceptance remains unfinished under F-NTF-01/F-NTF-05; no provider success or unsupported channel is presented as delivered.

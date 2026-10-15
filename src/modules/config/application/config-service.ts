@@ -18,6 +18,8 @@ import { authorize, authorizeCollection } from "@/platform/authz/authorize";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import type { ConfigActorContext } from "@/modules/config/application/config-access";
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
 
 export class ConfigAuthorizationError extends Error {
   constructor(message = "Configuration action is not authorized") {
@@ -386,6 +388,9 @@ export async function createConfigRuleVersion(
       scopeId: scope.scopeId
     });
 
+    if (key.startsWith("notification.routing.")) await new NotificationRepository(tx, ctx.organizationId)
+      .validateRoutingReferences(notificationRoutingSchema.parse(rawValue), scope.scopeId);
+
     const created = await repository.createVersion({
       key,
       scopeType: scope.scopeType,
@@ -433,6 +438,8 @@ export async function activateConfigRuleVersion(
     }
 
     assertRuleAllowed(ctx, "configure", source);
+    if (source.key.startsWith("notification.routing.")) await new NotificationRepository(tx, ctx.organizationId)
+      .validateRoutingReferences(notificationRoutingSchema.parse(source.value), source.scopeId);
     const created = await repository.activateVersion({
       ruleId: input.ruleId,
       effectiveFrom: input.effectiveFrom,

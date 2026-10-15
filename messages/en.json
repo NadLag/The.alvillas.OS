@@ -1067,7 +1067,9 @@
     "kinds": {
       "language_updated": "Your language preference was updated.",
       "task_assigned": "A task was assigned to you.",
-      "security_session_revoked": "A session on your account was revoked."
+      "security_session_revoked": "A session on your account was revoked.",
+      "reservation_created": "A reservation was created.",
+      "task_completed": "A task was completed."
     },
     "settings": {
       "eyebrow": "Your account",
@@ -1097,6 +1099,33 @@
       "saved": "Your preferences have been saved.",
       "unsaved": "You have unsaved changes.",
       "upToDate": "Your preferences are up to date."
+    },
+    "routing": {
+      "title": "Event routing",
+      "description": "Choose recipients and channels for each event. Property rules take precedence over organization rules.",
+      "eventScope": "Event and scope",
+      "event": "Event",
+      "scope": "Scope",
+      "organization": "Whole organization",
+      "recipients": "Recipients",
+      "assigned": "People currently assigned to the record",
+      "search": "Find a role or person",
+      "roles": "Roles",
+      "people": "Specific people",
+      "channels": "Channels",
+      "inApp": "In-app notifications",
+      "externalPending": "Email and push notifications are not available yet.",
+      "scopePolicy": "Recipients must have current access to the property and record. Personal notification preferences still apply.",
+      "securityPolicy": "Account events are private to the affected person. Security alerts are always delivered in-app, even when optional notifications are disabled.",
+      "reason": "Reason for this change",
+      "save": "Save routing",
+      "saving": "Saving…",
+      "saved": "Routing saved as a new configuration version.",
+      "error": "Routing could not be loaded or saved. Check your choices and try again.",
+      "retry": "Try again",
+      "loading": "Loading routing…",
+      "offline": "Reconnect to update event routing.",
+      "empty": "No eligible recipients."
     }
   }
 }

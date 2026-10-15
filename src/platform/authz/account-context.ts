@@ -8,7 +8,7 @@ import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
 
-type RolePermissionRow = {
+export type RolePermissionRow = {
   role: {
     key: string;
     rolePermissions: Array<{
@@ -63,6 +63,11 @@ export async function authContextForAccount(
       }
     })) as RolePermissionRow[];
 
+    return contextForRoleAssignments(organizationId, userAccountId, assignments);
+  });
+}
+
+export function contextForRoleAssignments(organizationId: string, userAccountId: string, assignments: RolePermissionRow[]): AuthContext {
     const permissions = new Set<string>();
     const authAssignments = assignments.map((assignment) => {
       const assignmentPermissions = new Set<string>();
@@ -98,5 +103,4 @@ export async function authContextForAccount(
       scopes: scopes.length > 0 ? scopes : [{ organizationId }],
       assignments: authAssignments
     };
-  });
 }

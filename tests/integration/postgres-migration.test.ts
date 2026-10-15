@@ -129,6 +129,9 @@ import { updateOwnPreferredLocale } from "@/modules/identity/application/identit
 import { revokeSession } from "@/modules/identity/application/identity-service";
 import { getNotificationPreferences, saveNotificationPreferences } from "@/platform/notifications/notification-service";
 import { defaultNotificationPreferences } from "@/platform/notifications/notification-preferences";
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { getNotificationRouting, saveNotificationRouting } from "@/platform/notifications/notification-service";
+import { notificationRoutingKey, type NotificationRouting } from "@/platform/notifications/notification-routing";
 
 let prisma: PrismaClient;
 let adminPrisma: PrismaClient | undefined;
@@ -387,6 +390,10 @@ describe("PostgreSQL baseline", () => {
       const person = await tx.person.create({ data: { organizationId: org.id, displayName: "Preference delivery" } });
       const account = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id, email: `preference-${randomUUID()}@example.test` } });
       const property = await tx.property.create({ data: { organizationId: org.id, name: "Preference villa", addressLine1: "Test", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      const role = await tx.role.create({ data: { organizationId: org.id, key: "preference-worker", name: "Preference worker" } });
+      const permission = await tx.permission.create({ data: { organizationId: org.id, key: "task:view", resource: "task", action: "view" } });
+      await tx.rolePermission.create({ data: { organizationId: org.id, roleId: role.id, permissionId: permission.id } });
+      await tx.roleAssignment.create({ data: { organizationId: org.id, personId: person.id, userAccountId: account.id, roleId: role.id, scopeType: "property", scopeId: property.id } });
       const task = await tx.operationTask.create({ data: { organizationId: org.id, propertyId: property.id, type: "CLEANING", state: "PLANNED", assignedToUserAccountId: account.id, dueDate: new Date(), titleTranslations: { en: "Test", fr: "Test" }, idempotencyKey: randomUUID() } });
       const session = await tx.authSession.create({ data: { organizationId: org.id, userAccountId: account.id, deviceId: "preference-test", sessionVersion: 1, expiresAt: new Date(Date.now() + 3600000) } });
       return { person, account, task, session };
@@ -499,6 +506,10 @@ describe("PostgreSQL baseline", () => {
       const person = await tx.person.create({ data: { organizationId: org.id, displayName: "Assigned worker" } });
       const account = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id } });
       const property = await tx.property.create({ data: { organizationId: org.id, name: "Test notification villa", addressLine1: "Test", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      const role = await tx.role.create({ data: { organizationId: org.id, key: "notification-worker", name: "Assigned worker" } });
+      const permission = await tx.permission.create({ data: { organizationId: org.id, key: "task:view", resource: "task", action: "view" } });
+      await tx.rolePermission.create({ data: { organizationId: org.id, roleId: role.id, permissionId: permission.id } });
+      await tx.roleAssignment.create({ data: { organizationId: org.id, personId: person.id, userAccountId: account.id, roleId: role.id, scopeType: "property", scopeId: property.id, conditions: { assignedToMe: true } } });
       const task = await tx.operationTask.create({ data: { organizationId: org.id, propertyId: property.id, assignedToUserAccountId: account.id,
         type: "ARRIVAL_PREPARATION", dueDate: new Date("2026-10-16"), titleTranslations: { en: "Private record title" }, idempotencyKey: randomUUID() } });
       await publishNotification(tx, org.id, { kind: "task_assigned", recipientId: account.id, targetId: task.id }, `notification:task:${task.id}`);
@@ -510,7 +521,8 @@ describe("PostgreSQL baseline", () => {
       return { account, property, task };
     });
     const actor = { organizationId: org.id, accountId: fixture.account.id, authContext: ownNotificationContext({ organizationId: org.id,
-      permissions: new Set(["task:view"]), scopes: [{ organizationId: org.id, scopeType: "property" as const, scopeId: fixture.property.id }] }, fixture.account.id) };
+      permissions: new Set(["task:view"]), scopes: [{ organizationId: org.id, scopeType: "property" as const, scopeId: fixture.property.id }],
+      assignments: [{ scope: { organizationId: org.id, scopeType: "property", scopeId: fixture.property.id }, permissions: new Set(["task:view"]), conditions: { assignedToMe: true } }] }, fixture.account.id) };
     const deps = { db: prisma as TenantTransactionRunner };
     const page = await getNotificationPage(actor, {}, deps);
     expect(page.items).toHaveLength(20);
@@ -532,6 +544,95 @@ describe("PostgreSQL baseline", () => {
     expect((await getNotificationPage(actor, {}, deps)).unreadCount).toBe(20);
     await readNotification(actor, item.id, deps);
     expect((await getNotificationPage(actor, {}, deps)).unreadCount).toBe(19);
+  });
+
+  it("routes events by effective property configuration with scoped roles, people, preferences, terminal replay and mandatory security", async () => {
+    const runner = prisma as TenantTransactionRunner;
+    const org = await prisma.organization.create({ data: { name: "Routing tenant" } });
+    const other = await prisma.organization.create({ data: { name: "Other routing tenant" } });
+    const fixture = await withTenant(runner, org.id, async (tx) => {
+      const propertyData = { organizationId: org.id, addressLine1: "Test", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] };
+      const property = await tx.property.create({ data: { ...propertyData, name: "Routing villa" } });
+      const second = await tx.property.create({ data: { ...propertyData, name: "Other routing villa" } });
+      const role = await tx.role.create({ data: { organizationId: org.id, key: "routing-custom", name: "Routing custom role" } });
+      const broad = await tx.role.create({ data: { organizationId: org.id, key: "routing-broad", name: "Unselected broad role" } });
+      const permission = await tx.permission.create({ data: { organizationId: org.id, key: "task:view", resource: "task", action: "view" } });
+      for (const roleId of [role.id, broad.id]) await tx.rolePermission.create({ data: { organizationId: org.id, roleId, permissionId: permission.id } });
+      const accounts = [];
+      for (const name of ["assigned", "selected", "wrong-scope", "disabled", "expired", "inactive"]) {
+        const person = await tx.person.create({ data: { organizationId: org.id, displayName: name } });
+        const account = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id, status: name === "inactive" ? "SUSPENDED" : "ACTIVE" } });
+        await tx.roleAssignment.create({ data: { organizationId: org.id, personId: person.id, userAccountId: account.id, roleId: role.id,
+          scopeType: "property", scopeId: name === "wrong-scope" ? second.id : property.id,
+          validFrom: new Date("2020-01-01"), validTo: name === "expired" ? new Date("2020-01-02") : null } });
+        if (name === "wrong-scope") await tx.roleAssignment.create({ data: { organizationId: org.id, personId: person.id, userAccountId: account.id, roleId: broad.id, scopeType: "organization" } });
+        if (name === "disabled") await tx.notificationPreference.create({ data: { organizationId: org.id, userAccountId: account.id, inAppOperations: false } });
+        accounts.push(account);
+      }
+      const task = await tx.operationTask.create({ data: { organizationId: org.id, propertyId: property.id, assignedToUserAccountId: accounts[0].id,
+        type: "INSPECTION", dueDate: new Date("2026-10-16"), titleTranslations: { en: "Real routing record" }, idempotencyKey: randomUUID() } });
+      return { property, second, role, task, accounts };
+    });
+    const [assigned, selected, wrongScope, disabled, expired, inactive] = fixture.accounts;
+    const admin = { organizationId: org.id, accountId: assigned.id, authContext: { organizationId: org.id, userAccountId: assigned.id, personId: assigned.personId,
+      permissions: new Set(["config_rule:configure", "config_rule:view"]), scopes: [{ organizationId: org.id }] } };
+    const deps = { db: runner, requestId: "routing-configuration" };
+    const routing: NotificationRouting = { roles: [fixture.role.id], people: [selected.personId], assigned: true, channels: ["in_app"] };
+    const kind = "task_assigned" as const;
+    await saveNotificationRouting(admin, { kind, propertyId: null, routing: { ...routing, channels: [] }, reason: "Disable organization delivery" }, deps);
+    await saveNotificationRouting(admin, { kind, propertyId: fixture.property.id, routing, reason: "Property team receives assignments" }, deps);
+    expect((await getNotificationRouting(admin, { kind, propertyId: fixture.property.id }, deps)).routing).toEqual(routing);
+    await withTenant(runner, org.id, async (tx) => {
+      const repo = new ConfigRuleRepository(tx, org.id);
+      await repo.createVersion({ key: notificationRoutingKey(kind), scopeType: "property", scopeId: fixture.property.id,
+        value: { ...routing, channels: [] }, effectiveFrom: new Date(Date.now() + 3600000), reason: "Future configuration must not win yet" });
+      await publishNotification(tx, org.id, { kind, recipientId: assigned.id, targetId: fixture.task.id }, "routing-real-assignment");
+    });
+    const event = await withTenant(runner, org.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { organizationId: org.id, idempotencyKey: "routing-real-assignment" } }));
+    const recipients = await withTenant(runner, org.id, (tx) => tx.notification.findMany({ where: { eventId: event.id } }));
+    expect(recipients.map((row) => row.recipientId).sort()).toEqual([assigned.id, selected.id].sort());
+    for (const denied of [wrongScope, disabled, expired, inactive]) expect(recipients.map((row) => row.recipientId)).not.toContain(denied.id);
+    // A stale payload cannot change the terminal selection after scope/preferences/config change.
+    await saveNotificationRouting(admin, { kind, propertyId: fixture.property.id, routing: { ...routing, people: [wrongScope.personId, disabled.personId] }, reason: "Change future notification recipients" }, deps);
+    await Promise.all(Array.from({ length: 3 }, () => deliverNotificationEvent({ ...event, status: "PENDING" }, deps)));
+    expect(await withTenant(runner, org.id, (tx) => tx.notification.count({ where: { eventId: event.id } }))).toBe(2);
+    const foreignPerson = await withTenant(runner, other.id, (tx) => tx.person.create({ data: { organizationId: other.id, displayName: "Foreign person" } }));
+    for (const forbidden of [{ ...admin, accountId: selected.id }, { ...admin, organizationId: other.id }, { ...admin, authContext: { ...admin.authContext, permissions: new Set<string>() } },
+      { ...admin, authContext: { ...admin.authContext, scopes: [{ organizationId: org.id, scopeType: "property" as const, scopeId: fixture.second.id }] } }]) {
+      await expect(saveNotificationRouting(forbidden, { kind, propertyId: fixture.property.id, routing, reason: "Forbidden routing change" }, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+      await expect(getNotificationRouting(forbidden, { kind, propertyId: fixture.property.id }, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    }
+    await expect(saveNotificationRouting(admin, { kind, propertyId: null, routing: { ...routing, people: [foreignPerson.id] }, reason: "Foreign recipient denied" }, deps)).rejects.toThrow("Invalid routing references");
+    await expect(withTenant(runner, other.id, (tx) => new NotificationRepository(tx, org.id).publish({ kind, recipientId: assigned.id, targetId: fixture.task.id }, "cross-tenant-routing"))).rejects.toThrow(/row-level security/u);
+    await saveNotificationRouting(admin, { kind: "task_completed", propertyId: fixture.property.id, routing: { ...routing, channels: [] }, reason: "Disable completion delivery channel" }, deps);
+    await withTenant(runner, org.id, async (tx) => {
+      await tx.notificationPreference.create({ data: { organizationId: org.id, userAccountId: assigned.id, inAppEnabled: false } });
+      await new ConfigRuleRepository(tx, org.id).createVersion({ key: notificationRoutingKey("security_session_revoked"), scopeType: "organization",
+        value: { roles: [], people: [], assigned: false, channels: [] }, effectiveFrom: new Date(0), reason: "Security routing cannot opt out" });
+      await publishNotification(tx, org.id, { kind: "security_session_revoked", recipientId: assigned.id, targetId: assigned.id }, "routing-mandatory-security");
+      expect(await tx.notification.count({ where: { recipientId: assigned.id, kind: "security_session_revoked" } })).toBe(1);
+      await publishNotification(tx, org.id, { kind: "task_completed", recipientId: assigned.id, targetId: fixture.task.id }, "routing-disabled-event");
+    });
+    const suppressed = await withTenant(runner, org.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { idempotencyKey: "routing-disabled-event" } }));
+    await saveNotificationRouting(admin, { kind: "task_completed", propertyId: fixture.property.id, routing, reason: "Enable subsequent completions" }, deps);
+    await deliverNotificationEvent({ ...suppressed, status: "PENDING" }, deps);
+    expect(await withTenant(runner, org.id, (tx) => tx.notification.count({ where: { eventId: suppressed.id } }))).toBe(0);
+    expect(await withTenant(runner, org.id, (tx) => tx.auditLog.count({ where: { action: "config_rule.version.created", requestId: deps.requestId } }))).toBe(5);
+  });
+
+  it("rolls routing decisions back on failure and delivers concurrent pending events once", async () => {
+    const org = await prisma.organization.create({ data: { name: "Routing retries" } });
+    const fixture = await withTenant(prisma, org.id, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId: org.id, displayName: "Routing retry person" } });
+      const account = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id } });
+      const event = await tx.outboxEvent.create({ data: { organizationId: org.id, type: "notification.requested", payload: { kind: "language_updated", recipientId: account.id, targetId: account.id }, idempotencyKey: "routing-retry" } });
+      return { account, event };
+    });
+    await expect(withTenant(prisma, org.id, async (tx) => { await new NotificationRepository(tx, org.id).deliver(fixture.event); throw new Error("Transactional failure"); })).rejects.toThrow("Transactional failure");
+    expect(await withTenant(prisma, org.id, (tx) => tx.notification.count())).toBe(0);
+    await Promise.all(Array.from({ length: 4 }, () => deliverNotificationEvent(fixture.event, { db: prisma })));
+    expect(await withTenant(prisma, org.id, (tx) => tx.notification.count())).toBe(1);
+    expect((await withTenant(prisma, org.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { id: fixture.event.id } }))).status).toBe("DISPATCHED");
   });
 
   it("applies all migrations against an empty PostgreSQL database", async () => {

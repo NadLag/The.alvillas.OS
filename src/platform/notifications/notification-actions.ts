@@ -6,6 +6,7 @@ import { captureException } from "@/platform/observability/sentry";
 import { logger } from "@/platform/observability/logger";
 import { getNotificationPage, notificationActorFromSession, NotificationAccessError, openNotification, readNotification, type NotificationActor } from "./notification-service";
 import { getNotificationPreferences, saveNotificationPreferences } from "./notification-service";
+import { getNotificationRouting, saveNotificationRouting } from "./notification-service";
 
 async function actor() {
   const context = await notificationActorFromSession(await auth());
@@ -32,6 +33,12 @@ export async function notificationPreferencesAction() {
 }
 export async function notificationPreferencesSaveAction(input: unknown) {
   return safely(async (context, requestId) => saveNotificationPreferences(context, input, { requestId }));
+}
+export async function notificationRoutingAction(input: unknown) {
+  return safely(async (context) => getNotificationRouting(context, input));
+}
+export async function notificationRoutingSaveAction(input: unknown) {
+  return safely(async (context, requestId) => saveNotificationRouting(context, input, { requestId }));
 }
 export async function notificationReadAction(id: string) {
   return safely(async (context, requestId) => { await readNotification(context, id, { requestId }); return null; });

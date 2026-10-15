@@ -2223,7 +2223,8 @@ textarea:disabled {
 .notification-actions button { min-block-size: 48px; }
 .notification-item[data-read='true'] .notification-title { font-weight: 400; }
 
-.notification-settings { max-inline-size: 800px; }
+.notification-settings, .notification-routing-settings { max-inline-size: 800px; }
+.notification-routing-settings { margin-block-start: var(--space-8); padding-block-start: var(--space-6); border-block-start: 1px solid var(--border-subtle); }
 .notification-policy { padding: var(--space-5); background: var(--surface-muted); border-radius: var(--radius-md); }
 .notification-channel { margin: 0; padding: var(--space-6) 0; border: 0; border-block-end: 1px solid var(--border-subtle); min-inline-size: 0; }
 .notification-channel legend { font-size: var(--font-size-xl); font-weight: var(--font-weight-semibold); padding: 0; }
@@ -2233,8 +2234,8 @@ textarea:disabled {
 .notification-choice input:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .notification-choice-description { display: block; color: var(--text-secondary); font-size: var(--font-size-sm); }
 .notification-categories { margin-inline-start: var(--space-6); }
-.notification-save-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding-block: var(--space-5); background: var(--surface-canvas); }
-.notification-save-bar button { min-block-size: 48px; }
+.notification-save-bar, .notification-routing-save-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding-block: var(--space-5); background: var(--surface-canvas); }
+.notification-save-bar button, .notification-routing-save-bar button { min-block-size: 48px; }
 @media (max-width: 600px) {
   .notification-save-bar { position: sticky; inset-block-end: 0; flex-direction: column; align-items: stretch; }
   .notification-save-bar p { margin: 0; }

@@ -11,6 +11,7 @@ import { notificationDestination, notificationInputSchema, notificationPageSchem
   type NotificationInput, type NotificationPage } from "./notification";
 import { z } from "zod";
 import { notificationPreferencesSchema, type NotificationPreferences } from "./notification-preferences";
+import { notificationRoutingKey, notificationRoutingSaveSchema, routedNotificationKindSchema } from "./notification-routing";
 
 export type NotificationActor = { organizationId: string; accountId: string; authContext: AuthContext };
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
@@ -63,6 +64,34 @@ export async function publishNotification(tx: TenantTransaction, organizationId:
 }
 export async function deliverNotificationEvent(event: OutboxEvent, deps: Deps = {}) {
   return withTenant(deps.db ?? prisma, event.organizationId, (tx) => new NotificationRepository(tx, event.organizationId).deliver(event));
+}
+
+export async function getNotificationRouting(actor: NotificationActor, input: unknown, deps: Deps = {}) {
+  const parsed = z.object({ kind: routedNotificationKindSchema, propertyId: z.string().uuid().nullable() }).strict().parse(input);
+  if (actor.accountId !== actor.authContext.userAccountId || actor.authContext.organizationId !== actor.organizationId || !authorize(actor.authContext, "configure", {
+    type: "config_rule", organizationId: actor.organizationId
+  })) throw new NotificationAccessError();
+  return withTenant(deps.db ?? prisma, actor.organizationId, async (tx) => {
+    const repository = new NotificationRepository(tx, actor.organizationId);
+    await repository.validateRoutingReferences({ roles: [], people: [], assigned: false, channels: [] }, parsed.propertyId);
+    const options = await repository.routingOptions();
+    return { routing: await repository.routing(parsed.kind, parsed.propertyId),
+      roles: options.roles, people: options.people,
+      properties: options.properties.filter((property) => authorize(actor.authContext, "configure", { type: "config_rule", organizationId: actor.organizationId, propertyId: property.id })) };
+  });
+}
+
+export async function saveNotificationRouting(actor: NotificationActor, input: unknown, deps: Deps = {}) {
+  const parsed = notificationRoutingSaveSchema.parse(input);
+  if (actor.accountId !== actor.authContext.userAccountId || actor.authContext.organizationId !== actor.organizationId || !authorize(actor.authContext, "configure", {
+    type: "config_rule", organizationId: actor.organizationId
+  })) throw new NotificationAccessError();
+  const { createConfigRuleVersion } = await import("@/modules/config/application/config-service");
+  await createConfigRuleVersion({ organizationId: actor.organizationId, actorId: actor.accountId, personId: actor.authContext.personId ?? actor.accountId, authContext: actor.authContext }, {
+    key: notificationRoutingKey(parsed.kind), scopeType: parsed.propertyId ? "property" : "organization", scopeId: parsed.propertyId ?? undefined,
+    lifecycle: "ACTIVE", valueJson: JSON.stringify(parsed.routing), effectiveFrom: new Date(), reason: parsed.reason
+  }, { db: deps.db, requestId: deps.requestId ?? crypto.randomUUID() });
+  return parsed.routing;
 }
 
 export async function getNotificationPage(actor: NotificationActor, input: unknown = {}, deps: Deps = {}): Promise<NotificationPage> {

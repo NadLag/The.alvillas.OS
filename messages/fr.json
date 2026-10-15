@@ -1067,7 +1067,9 @@
     "kinds": {
       "language_updated": "Votre langue préférée a été modifiée.",
       "task_assigned": "Une mission vous a été attribuée.",
-      "security_session_revoked": "Une session de votre compte a été révoquée."
+      "security_session_revoked": "Une session de votre compte a été révoquée.",
+      "reservation_created": "Une réservation a été créée.",
+      "task_completed": "Une tâche a été terminée."
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -1097,6 +1099,33 @@
       "saved": "Vos préférences ont été enregistrées.",
       "unsaved": "Vous avez des modifications non enregistrées.",
       "upToDate": "Vos préférences sont à jour."
+    },
+    "routing": {
+      "title": "Routage des événements",
+      "description": "Choisissez les destinataires et les canaux de chaque événement. Les règles du bien prévalent sur celles de l’organisation.",
+      "eventScope": "Événement et périmètre",
+      "event": "Événement",
+      "scope": "Périmètre",
+      "organization": "Toute l’organisation",
+      "recipients": "Destinataires",
+      "assigned": "Personnes actuellement affectées à la fiche",
+      "search": "Rechercher un rôle ou une personne",
+      "roles": "Rôles",
+      "people": "Personnes spécifiques",
+      "channels": "Canaux",
+      "inApp": "Notifications dans l’application",
+      "externalPending": "Les notifications par e-mail et push ne sont pas encore disponibles.",
+      "scopePolicy": "Les destinataires doivent avoir accès au bien et à la fiche. Leurs préférences de notification restent applicables.",
+      "securityPolicy": "Les événements du compte sont réservés à la personne concernée. Les alertes de sécurité sont toujours envoyées dans l’application, même si les notifications facultatives sont désactivées.",
+      "reason": "Motif de la modification",
+      "save": "Enregistrer le routage",
+      "saving": "Enregistrement…",
+      "saved": "Routage enregistré dans une nouvelle version de configuration.",
+      "error": "Impossible de charger ou d’enregistrer le routage. Vérifiez vos choix et réessayez.",
+      "retry": "Réessayer",
+      "loading": "Chargement du routage…",
+      "offline": "Reconnectez-vous pour modifier le routage.",
+      "empty": "Aucun destinataire éligible."
     }
   }
 }
