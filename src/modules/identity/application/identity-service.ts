@@ -62,7 +62,7 @@ import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import {
   consumeRateLimit
 } from "@/platform/rate-limit/postgres-rate-limiter";
-import type { AppLocale } from "@/i18n/routing";
+import { safeLocale, type AppLocale } from "@/i18n/routing";
 import { PinSecurityRepository } from "@/modules/identity/infrastructure/pin-security-repository";
 
 export class IdentityNotFoundError extends Error {
@@ -954,7 +954,8 @@ export async function createInvitation(
     const person = await repository.createPerson({
       displayName: input.displayName,
       email: input.email,
-      phone: input.phone
+      phone: input.phone,
+      preferredLocale: input.preferredLocale
     });
     const expiresAt = new Date(Date.now() + input.expiresInHours * 60 * 60 * 1000);
     const invitation = await repository.createInvitation({
@@ -968,7 +969,8 @@ export async function createInvitation(
       expiresAt,
       actorId: ctx.actorId
     });
-    const activationUrl = identityUrl(deps, `/en/activate/${code}`);
+    const recipientLocale = safeLocale(person.preferredLocale);
+    const activationUrl = identityUrl(deps, `/${recipientLocale}/activate/${code}`);
 
     await enqueueIdentityDelivery(tx, {
       organizationId: ctx.organizationId,
@@ -986,7 +988,7 @@ export async function createInvitation(
         scopeId: input.scopeId ?? null,
         activationCode: code,
         activationUrl,
-        locale: "en",
+        locale: recipientLocale,
         expiresAt: expiresAt.toISOString()
       }
     });
@@ -1456,9 +1458,7 @@ export async function issueRecoveryCode(
   const code = newRecoveryCode();
 
   await withTenant(db(deps), ctx.organizationId, async (tx) => {
-    const account = await tx.userAccount.findFirst({
-      where: { id: userAccountId, organizationId: ctx.organizationId }
-    });
+    const account = await new IdentityRepository(tx, ctx.organizationId).findRecoveryDeliveryAccount(userAccountId);
 
     if (!account) {
       throw new IdentityNotFoundError();
@@ -1486,8 +1486,8 @@ export async function issueRecoveryCode(
         toEmail: account.email ?? null,
         toPhone: account.phone ?? null,
         recoveryCode: code,
-        recoveryUrl: identityUrl(deps, "/en/recover"),
-        locale: "en",
+        recoveryUrl: identityUrl(deps, `/${safeLocale(account.person.preferredLocale)}/recover`),
+        locale: safeLocale(account.person.preferredLocale),
         expiresAt: credential.expiresAt?.toISOString() ?? null
       }
     });

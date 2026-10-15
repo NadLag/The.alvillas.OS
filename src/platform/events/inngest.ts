@@ -1,5 +1,8 @@
 import type { OutboxEvent as PrismaOutboxEvent } from "@prisma/client";
 import type { OutboxHandlers } from "@/platform/events/outbox-dispatcher";
+import type { EmailProvider } from "@/platform/providers";
+import { ResendEmailProvider } from "@/platform/providers/real";
+import { renderIdentityEmail } from "@/platform/email/identity-templates";
 
 export type InngestSendResult = {
   ids: string[];
@@ -67,8 +70,7 @@ export function createInngestOutboxHandler(
     });
 
     if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(`Inngest event dispatch failed with ${response.status}: ${detail}`);
+      throw new Error(`Inngest event dispatch failed with status ${response.status}`);
     }
 
     const body = (await response.json()) as Partial<InngestSendResult>;
@@ -82,11 +84,24 @@ export function createInngestOutboxHandler(
 
 export function createInngestOutboxHandlers(
   env: InngestEnv = process.env,
-  transport: InngestTransport = fetch
+  transport: InngestTransport = fetch,
+  emailProvider?: EmailProvider
 ): OutboxHandlers {
   const handler = createInngestOutboxHandler(env, transport);
+  const identityDelivery = async (event: PrismaOutboxEvent) => {
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    if (payload.channel !== "email") {
+      await handler(event);
+      return;
+    }
+    const email = renderIdentityEmail(event.type, payload, env.APP_URL ?? "http://localhost:3000");
+    const provider = emailProvider ?? new ResendEmailProvider(env);
+    await provider.send({ ...email, idempotencyKey: `identity-email:${event.organizationId}:${event.id}` });
+  };
 
   return {
+    "identity.invitation.delivery_requested": identityDelivery,
+    "identity.recovery.delivery_requested": identityDelivery,
     "*": async (event) => {
       await handler(event);
     }

@@ -8,6 +8,7 @@ export interface EmailProvider {
     text?: string;
     locale: AppLocale;
     template: string;
+    idempotencyKey?: string;
   }): Promise<{ id: string }>;
 }
 

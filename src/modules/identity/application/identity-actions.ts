@@ -334,6 +334,7 @@ export async function createInvitationAction(
     displayName: formValue(formData, "displayName"),
     email: formValue(formData, "email"),
     phone: formValue(formData, "phone"),
+    preferredLocale: formValue(formData, "preferredLocale") ?? appLocale,
     roleKey: formValue(formData, "roleKey"),
     scopeType: formValue(formData, "scopeType") ?? "organization",
     scopeId: formValue(formData, "scopeId"),

@@ -1029,5 +1029,23 @@
       "PAYOUT": "Payout",
       "ADJUSTMENT": "Adjustment"
     }
+  },
+  "emailTemplates": {
+    "invitation": {
+      "subject": "Your ALVILLAS OS invitation",
+      "body": "You have been invited to ALVILLAS OS. Activate your account using the single-use link and confirm your invited phone number.",
+      "action": "Activate account",
+      "code": "Invitation code",
+      "expires": "Valid until {date}.",
+      "footer": "Keep this code private. Contact your supervisor if you did not expect this invitation."
+    },
+    "recovery": {
+      "subject": "Recover your ALVILLAS OS account",
+      "body": "Your supervisor requested account recovery. Use this single-use code to choose a new password. If you use an authenticator, you will still need its code.",
+      "action": "Recover account",
+      "code": "Recovery code",
+      "expires": "Valid until {date}.",
+      "footer": "Keep this code private. Contact your supervisor if you did not request recovery."
+    }
   }
 }

@@ -66,6 +66,7 @@ export const invitationInputSchema = z.object({
     .optional()
     .or(z.literal("").transform(() => undefined)),
   roleKey: roleKeySchema,
+  preferredLocale: z.enum(["en", "fr", "ar"]).optional(),
   scopeType: scopeTypeSchema.default("organization"),
   scopeId: z
     .string()

@@ -79,13 +79,17 @@ export class ResendEmailProvider implements EmailProvider {
   }
 
   async send(input: Parameters<EmailProvider["send"]>[0]): Promise<{ id: string }> {
-    const response = await jsonRequest<{ id?: string }>(this.transport, "https://api.resend.com/emails", {
+    const content = { to: input.to, subject: input.subject, html: input.html, text: input.text, locale: input.locale, template: input.template };
+    const idempotencyKey = input.idempotencyKey ?? `email:${createHash("sha256").update(JSON.stringify(content)).digest("hex")}`;
+    if (!/^[\x21-\x7e]{1,256}$/u.test(idempotencyKey)) throw new Error("Invalid email idempotency key");
+    const response = await this.transport("https://api.resend.com/emails", {
       method: "POST",
       headers: {
+        "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
-        "Idempotency-Key": `${input.template}:${input.to}:${input.locale}`
+        "Idempotency-Key": idempotencyKey
       },
-      body: {
+      body: JSON.stringify({
         from: this.from,
         to: [input.to],
         subject: input.subject,
@@ -95,14 +99,16 @@ export class ResendEmailProvider implements EmailProvider {
           { name: "template", value: input.template },
           { name: "locale", value: input.locale }
         ]
-      }
-    });
-
-    if (!response.id) {
+      })
+    }).catch(() => { throw new Error("Resend email transport failed"); });
+    // Provider response bodies can contain recipients, codes or credentials.
+    // Persist only a stable status in the existing outbox error channel.
+    if (!response.ok) throw new Error(`Resend email request failed with status ${response.status}`);
+    const body = await response.json().catch(() => { throw new Error("Invalid Resend email response"); }) as { id?: unknown };
+    if (typeof body.id !== "string" || !body.id) {
       throw new Error("Resend response did not include an email id");
     }
-
-    return { id: response.id };
+    return { id: body.id };
   }
 }
 
