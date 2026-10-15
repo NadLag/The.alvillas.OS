@@ -3,6 +3,8 @@ import { authorize, type AuthContext, type Resource } from "@/platform/authz/aut
 
 export const notificationEventType = "notification.requested";
 export const notificationInputSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("approval_requested"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("approval_decided"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("language_updated"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("task_assigned"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("reservation_created"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
@@ -20,6 +22,7 @@ export type NotificationItem = {
   createdAt: string;
   readAt: string | null;
   available: boolean;
+  resolution?: string | null;
 };
 export type NotificationPage = { items: NotificationItem[]; unreadCount: number; nextCursor: NotificationCursor | null };
 
@@ -48,6 +51,7 @@ export function notificationDestination(
     return authorize(selfContext, "configure", target) ? `/${locale}/app${input.kind === "security_session_revoked" ? "/security" : ""}` : null;
   }
   if (!authorize(ctx, "view", target)) return null;
+  if (input.kind === "approval_requested" || input.kind === "approval_decided") return target.type === "property" ? `/${locale}/app/approvals/${target.id}` : null;
   if (input.kind === "reservation_created") return target.type === "reservation" ? `/${locale}/app/reservations` : null;
   if (target.type !== "task") return null;
   return target.assignedUserAccountId === ctx.userAccountId ? `/${locale}/app/field/${target.id}` : `/${locale}/app/operations`;

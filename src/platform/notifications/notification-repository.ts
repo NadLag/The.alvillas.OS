@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import { defaultNotificationPreferences, shouldDeliverNotification, type NotificationPreferences } from "./notification-preferences";
 import { authorize } from "@/platform/authz/authorize";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
+import { approvalResource } from "@/platform/approvals/approval";
 import { contextForRoleAssignments } from "@/platform/authz/account-context";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { initialNotificationRouting, notificationRoutingKey, notificationRoutingSchema, type NotificationRouting, type RoutedNotificationKind } from "./notification-routing";
@@ -24,7 +25,9 @@ export class NotificationRepository {
   }
 
   savePreferences(accountId: string, preferences: NotificationPreferences) {
-    const data = { inAppEnabled: preferences.in_app.enabled, inAppAccount: preferences.in_app.account, inAppOperations: preferences.in_app.operations, inAppSecurity: true, emailSecurity: true };
+    const data = { inAppEnabled: preferences.in_app.enabled, inAppAccount: preferences.in_app.account, inAppOperations: preferences.in_app.operations, inAppSecurity: true, emailSecurity: true,
+      emailEnabled: preferences.email.enabled ?? false, emailAccount: preferences.email.account ?? false, emailOperations: preferences.email.operations ?? false,
+      pushEnabled: preferences.push?.enabled ?? false, pushAccount: preferences.push?.account ?? false, pushOperations: preferences.push?.operations ?? false };
     return this.tx.notificationPreference.upsert({
       where: { organizationId_userAccountId: { organizationId: this.organizationId, userAccountId: accountId } },
       create: { organizationId: this.organizationId, userAccountId: accountId, ...data }, update: data
@@ -45,20 +48,28 @@ export class NotificationRepository {
     if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id);
     const identity = target.type === "identity";
     if (identity && input.targetId !== input.recipientId) throw new Error("Invalid notification subject");
-    const routing = await this.routing(input.kind, target.propertyId ?? null, event.occurredAt);
+    const approval = input.kind === "approval_requested" ? await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: input.targetId }, include: { recipients: true } }) : null;
+    const routing = approval ? notificationRoutingSchema.parse(approval.routingSnapshot) : await this.routing(input.kind, target.propertyId ?? null, event.occurredAt);
     const mandatory = input.kind === "security_session_revoked";
     const assignedId = identity ? input.targetId : target.assignedUserAccountId;
-    const candidates = await this.candidates(routing, (mandatory || routing.assigned) ? assignedId : null);
+    const candidates = await this.candidates(routing, (mandatory || routing.assigned) ? assignedId : null, approval?.recipients.map((row) => row.userAccountId));
     const data = [];
     for (const candidate of candidates) {
       // Account notices never reveal one person's security/account activity to another.
       if (identity && candidate.id !== input.targetId) continue;
+      if (approval && !approval.recipients.some((row) => row.userAccountId === candidate.id)) continue;
       const selected = (mandatory || routing.assigned) && candidate.id === assignedId;
       const explicit = routing.people.includes(candidate.personId);
       const roleAssignments = candidate.roleAssignments.filter((assignment) => routing.roles.includes(assignment.role.id));
-      const ctx = contextForRoleAssignments(this.organizationId, candidate.id, explicit || selected ? candidate.roleAssignments : roleAssignments);
+      const ctx = contextForRoleAssignments(this.organizationId, candidate.id, explicit || selected || approval ? candidate.roleAssignments : roleAssignments);
       if (!identity && securityEnrollment(candidate).setupRequired) continue;
       if (!identity && !authorize(ctx, "view", target)) continue;
+      if (approval && !authorize(ctx, "approve", target) && !authorize(ctx, "reject", target)) continue;
+      for (const channel of ["email", "push"] as const) {
+        if (!routing.channels.includes(channel) || !shouldDeliverNotification(input.kind, channel, this.preferenceValue(candidate.notificationPreference))) continue;
+        await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } }, update: {},
+          create: { organizationId: this.organizationId, type: "notification.channel.requested", payload: { channel, recipientId: candidate.id, kind: input.kind, targetId: input.targetId }, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } });
+      }
       if (!mandatory && (!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
       data.push({ organizationId: this.organizationId, recipientId: candidate.id,
         eventId: event.id, kind: input.kind, targetId: input.targetId, createdAt: event.occurredAt });
@@ -71,16 +82,27 @@ export class NotificationRepository {
     return this.tx.outboxEvent.update({ where: { id, organizationId: this.organizationId }, data: { status: "DISPATCHED", processedAt: new Date(), nextAttemptAt: null, lastError: null } }).then(() => undefined);
   }
 
-  private preferenceValue(row: { inAppEnabled: boolean; inAppAccount: boolean; inAppOperations: boolean } | null): NotificationPreferences {
-    return row ? { in_app: { enabled: row.inAppEnabled, account: row.inAppAccount, operations: row.inAppOperations, security: true }, email: { security: true } } : defaultNotificationPreferences();
+  private preferenceValue(row: { inAppEnabled: boolean; inAppAccount: boolean; inAppOperations: boolean; emailEnabled?: boolean; emailAccount?: boolean; emailOperations?: boolean; pushEnabled?: boolean; pushAccount?: boolean; pushOperations?: boolean } | null): NotificationPreferences {
+    return row ? { in_app: { enabled: row.inAppEnabled, account: row.inAppAccount, operations: row.inAppOperations, security: true },
+      email: { security: true, ...(row.emailEnabled || row.emailAccount || row.emailOperations ? { enabled: row.emailEnabled ?? false, account: row.emailAccount ?? false, operations: row.emailOperations ?? false } : {}) },
+      ...(row.pushEnabled || row.pushAccount || row.pushOperations ? { push: { enabled: row.pushEnabled ?? false, account: row.pushAccount ?? false, operations: row.pushOperations ?? false } } : {}) } : defaultNotificationPreferences();
   }
 
-  private candidates(routing: NotificationRouting, assignedId?: string | null) {
+  async approvers(routing: NotificationRouting, resource: Resource): Promise<string[]> {
+    const candidates = await this.candidates(routing);
+    return candidates.filter((candidate) => {
+      const assignments = routing.people.includes(candidate.personId) ? candidate.roleAssignments : candidate.roleAssignments.filter((assignment) => routing.roles.includes(assignment.role.id));
+      const ctx = contextForRoleAssignments(this.organizationId, candidate.id, assignments);
+      return !securityEnrollment(candidate).setupRequired && authorize(ctx, "view", resource) && (authorize(ctx, "approve", resource) || authorize(ctx, "reject", resource));
+    }).map((candidate) => candidate.id);
+  }
+
+  private candidates(routing: NotificationRouting, assignedId?: string | null, recipientIds?: string[]) {
     const now = new Date();
     return this.tx.userAccount.findMany({ where: { organizationId: this.organizationId, status: "ACTIVE", person: { archivedAt: null }, OR: [
-      ...(assignedId ? [{ id: assignedId }] : []), { personId: { in: routing.people } },
+      ...(assignedId ? [{ id: assignedId }] : []), ...(recipientIds ? [{ id: { in: recipientIds } }] : []), { personId: { in: routing.people } },
       { roleAssignments: { some: { organizationId: this.organizationId, archivedAt: null, roleId: { in: routing.roles }, role: { archivedAt: null }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] } } }
-    ] }, include: { authCredentials: { where: { revokedAt: null }, select: { type: true, expiresAt: true, revokedAt: true } }, notificationPreference: true, roleAssignments: { where: {
+    ] }, include: { person: { select: { preferredLocale: true } }, authCredentials: { where: { revokedAt: null }, select: { type: true, expiresAt: true, revokedAt: true } }, notificationPreference: true, roleAssignments: { where: {
       organizationId: this.organizationId, archivedAt: null, role: { archivedAt: null }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }]
     }, include: { role: { include: { rolePermissions: { include: { permission: true } } } } } } } });
   }
@@ -97,8 +119,11 @@ export class NotificationRepository {
       const versions = await repository.list({ key, scopeType: "organization", scopeId: null, take: 1 });
       if (!versions.length) {
         await repository.createVersion({ key, scopeType: "organization", value: initialNotificationRouting(kind), effectiveFrom: new Date(0), reason: "Initialize configurable notification routing" });
-        resolved = await repository.resolve({ key, asOf, scopes: [{ scopeType: "organization", scopeId: null }] });
       }
+      // Another transaction may have initialized the rule while we waited.
+      resolved = await repository.resolve({ key, asOf, scopes: [
+        ...(propertyId ? [{ scopeType: "property", scopeId: propertyId }] : []), { scopeType: "organization", scopeId: null }
+      ] });
     }
     // An inactive/retired/future rule is an explicit absence, never a fallback recipient list.
     return resolved ? notificationRoutingSchema.parse(resolved.parsedValue) : { roles: [], people: [], assigned: false, channels: [] };
@@ -161,6 +186,14 @@ export class NotificationRepository {
     const reservationIds = rows.filter((row) => row.kind === "reservation_created").map((row) => row.targetId);
     const reservations = reservationIds.length ? await this.tx.reservation.findMany({ where: { organizationId: this.organizationId, id: { in: reservationIds }, archivedAt: null }, select: { id: true, propertyId: true, status: true, property: { select: { regionId: true, cityId: true } } } }) : [];
     for (const row of reservations) targets.set(row.id, { type: "reservation", organizationId: this.organizationId, id: row.id, reservationId: row.id, propertyId: row.propertyId, region: row.property.regionId, city: row.property.cityId, status: row.status });
+    const approvalIds = rows.filter((row) => row.kind === "approval_requested" || row.kind === "approval_decided").map((row) => row.targetId);
+    const approvals = approvalIds.length ? await this.tx.approvalRequest.findMany({ where: { organizationId: this.organizationId, id: { in: approvalIds }, property: { archivedAt: null } }, include: { property: true } }) : [];
+    for (const row of approvals) targets.set(row.id, { ...approvalResource(row), assignedUserAccountId: row.requestedBy });
     return targets;
+  }
+
+  async channelRecipient(id: string) {
+    const candidates = await this.candidates({ roles: [], people: [], assigned: true, channels: [] }, id);
+    return candidates.find((candidate) => candidate.id === id) ?? null;
   }
 }

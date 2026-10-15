@@ -21,6 +21,8 @@ model Organization {
   outboxEvents              OutboxEvent[]
   notifications             Notification[]
   notificationPreferences   NotificationPreference[]
+  approvalRequests          ApprovalRequest[]
+  approvalRecipients        ApprovalRecipient[]
   auditLogs                 AuditLog[]
   referenceSequences        ReferenceSequence[]
   exchangeRates             ExchangeRate[]
@@ -152,38 +154,40 @@ model Person {
 }
 
 model UserAccount {
-  id                  String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId      String                       @map("organization_id") @db.Uuid
-  personId            String                       @map("person_id") @db.Uuid
-  email               String?
-  phone               String?
-  passwordHash        String?                      @map("password_hash")
-  status              String                       @default("ACTIVE")
-  sessionVersion      Int                          @default(1) @map("session_version")
-  mfaRequired         Boolean                      @default(false) @map("mfa_required")
-  lastLoginAt         DateTime?                    @map("last_login_at") @db.Timestamptz(6)
-  suspendedAt         DateTime?                    @map("suspended_at") @db.Timestamptz(6)
-  deactivatedAt       DateTime?                    @map("deactivated_at") @db.Timestamptz(6)
-  createdAt           DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization        Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  person              Person                       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  authCredentials     AuthCredential[]
-  authSessions        AuthSession[]
-  authDevices         AuthDevice[]
-  authChallenges      AuthChallenge[]
-  invitations         Invitation[]
-  roleAssignments     RoleAssignment[]
-  assignedTasks       OperationTask[]              @relation("OperationTaskAssignedAccount")
-  completedTasks      OperationTask[]              @relation("OperationTaskCompletedAccount")
-  completedChecks     OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
-  syncOps             SyncOp[]                     @relation("SyncOpActorAccount")
-  ownerPortalAccesses OwnerPortalAccess[]
-  notifications       Notification[]
+  requestedApprovals     ApprovalRequest[]            @relation("ApprovalRequester")
+  decidedApprovals       ApprovalRequest[]            @relation("ApprovalDecider")
+  id                     String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId         String                       @map("organization_id") @db.Uuid
+  personId               String                       @map("person_id") @db.Uuid
+  email                  String?
+  phone                  String?
+  passwordHash           String?                      @map("password_hash")
+  status                 String                       @default("ACTIVE")
+  sessionVersion         Int                          @default(1) @map("session_version")
+  mfaRequired            Boolean                      @default(false) @map("mfa_required")
+  lastLoginAt            DateTime?                    @map("last_login_at") @db.Timestamptz(6)
+  suspendedAt            DateTime?                    @map("suspended_at") @db.Timestamptz(6)
+  deactivatedAt          DateTime?                    @map("deactivated_at") @db.Timestamptz(6)
+  createdAt              DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization           Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person                 Person                       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  authCredentials        AuthCredential[]
+  authSessions           AuthSession[]
+  authDevices            AuthDevice[]
+  authChallenges         AuthChallenge[]
+  invitations            Invitation[]
+  roleAssignments        RoleAssignment[]
+  assignedTasks          OperationTask[]              @relation("OperationTaskAssignedAccount")
+  completedTasks         OperationTask[]              @relation("OperationTaskCompletedAccount")
+  completedChecks        OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
+  syncOps                SyncOp[]                     @relation("SyncOpActorAccount")
+  ownerPortalAccesses    OwnerPortalAccess[]
+  notifications          Notification[]
+  approvalRecipients     ApprovalRecipient[]
   notificationPreference NotificationPreference?
 
   @@unique([organizationId, id], map: "user_account_org_id_unique")
-
   @@unique([organizationId, email], map: "user_account_org_email_unique")
   @@unique([organizationId, phone], map: "user_account_org_phone_unique")
   @@index([organizationId, personId], map: "user_account_org_person_idx")
@@ -497,6 +501,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  approvalRequests     ApprovalRequest[]
   id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId       String                      @map("organization_id") @db.Uuid
   regionId             String?                     @map("region_id") @db.Uuid
@@ -1104,18 +1109,24 @@ model OutboxEvent {
 }
 
 model NotificationPreference {
-  id                String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId    String       @map("organization_id") @db.Uuid
-  userAccountId     String       @map("user_account_id") @db.Uuid
-  inAppEnabled      Boolean      @default(true) @map("in_app_enabled")
-  inAppAccount      Boolean      @default(true) @map("in_app_account")
-  inAppOperations   Boolean      @default(true) @map("in_app_operations")
-  inAppSecurity     Boolean      @default(true) @map("in_app_security")
-  emailSecurity     Boolean      @default(true) @map("email_security")
-  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  userAccount       UserAccount  @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "notification_preference_account_tenant_fk")
+  id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  userAccountId   String       @map("user_account_id") @db.Uuid
+  inAppEnabled    Boolean      @default(true) @map("in_app_enabled")
+  inAppAccount    Boolean      @default(true) @map("in_app_account")
+  inAppOperations Boolean      @default(true) @map("in_app_operations")
+  inAppSecurity   Boolean      @default(true) @map("in_app_security")
+  emailEnabled    Boolean      @default(false) @map("email_enabled")
+  emailAccount    Boolean      @default(false) @map("email_account")
+  emailOperations Boolean      @default(false) @map("email_operations")
+  pushEnabled     Boolean      @default(false) @map("push_enabled")
+  pushAccount     Boolean      @default(false) @map("push_account")
+  pushOperations  Boolean      @default(false) @map("push_operations")
+  emailSecurity   Boolean      @default(true) @map("email_security")
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount     UserAccount  @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "notification_preference_account_tenant_fk")
 
   @@unique([organizationId, userAccountId], map: "notification_preference_org_account_unique")
   @@map("notification_preference")
@@ -1128,6 +1139,8 @@ model Notification {
   eventId        String       @map("event_id") @db.Uuid
   kind           String
   targetId       String       @map("target_id") @db.Uuid
+  resolvedAt     DateTime?    @map("resolved_at") @db.Timestamptz(6)
+  resolution     String?
   readAt         DateTime?    @map("read_at") @db.Timestamptz(6)
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -1160,4 +1173,43 @@ model AuditLog {
   @@index([organizationId, occurredAt], map: "audit_log_org_occurred_idx")
   @@index([organizationId, resourceType, resourceId], map: "audit_log_org_resource_idx")
   @@map("audit_log")
+}
+
+model ApprovalRequest {
+  id              String              @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String              @map("organization_id") @db.Uuid
+  propertyId      String              @map("property_id") @db.Uuid
+  requestedBy     String              @map("requested_by") @db.Uuid
+  title           String
+  details         String
+  state           String              @default("PENDING")
+  routingSnapshot Json                @map("routing_snapshot")
+  idempotencyKey  String              @map("idempotency_key")
+  decidedBy       String?             @map("decided_by") @db.Uuid
+  decisionReason  String?             @map("decision_reason")
+  decidedAt       DateTime?           @map("decided_at") @db.Timestamptz(6)
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property        Property            @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  requester       UserAccount         @relation("ApprovalRequester", fields: [organizationId, requestedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "approval_request_requester_tenant_fk")
+  decider         UserAccount?        @relation("ApprovalDecider", fields: [organizationId, decidedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "approval_request_decider_tenant_fk")
+  recipients      ApprovalRecipient[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, propertyId, state, createdAt])
+  @@map("approval_request")
+}
+
+model ApprovalRecipient {
+  id             String          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String          @map("organization_id") @db.Uuid
+  approvalId     String          @map("approval_id") @db.Uuid
+  userAccountId  String          @map("user_account_id") @db.Uuid
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  approval       ApprovalRequest @relation(fields: [organizationId, approvalId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  account        UserAccount     @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, approvalId, userAccountId])
+  @@map("approval_recipient")
 }

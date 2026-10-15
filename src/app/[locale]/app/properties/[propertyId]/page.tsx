@@ -459,9 +459,10 @@ export default async function PropertyDetailPage({
     <AdminShell className="resource-page" testId="property-detail-page">
       <ShellHeader
         actions={
+        <>{canEditOwnership ? <Link className="secondary-button" href={`/${appLocale}/app/properties/${property.id}/approvals/new`}>{t("properties.requestApproval")}</Link> : null}
         <Link className="secondary-button" href={`/${appLocale}/app/properties`}>
           {t("properties.backToProperties")}
-        </Link>
+        </Link></>
         }
         eyebrow={t("properties.detailEyebrow")}
         subtitle={t("properties.rowMeta", { city: property.city, type: property.propertyType })}

@@ -97,6 +97,7 @@ export function NotificationCenter() {
               <p className="notification-title">{t(`kinds.${item.kind}`)}</p>
               <time dateTime={item.createdAt}>{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.createdAt))}</time>
               <span className="notification-state">{t(item.readAt ? "read" : "unread")}</span>
+              {item.resolution ? <span data-testid="notification-resolution">{t(`resolution.${item.resolution}`)}</span> : null}
             </div>
             {!item.available ? <p className="muted">{t("unavailable")}</p> : null}
             <div className="notification-actions">

@@ -132,6 +132,9 @@ import { defaultNotificationPreferences } from "@/platform/notifications/notific
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
 import { getNotificationRouting, saveNotificationRouting } from "@/platform/notifications/notification-service";
 import { notificationRoutingKey, type NotificationRouting } from "@/platform/notifications/notification-routing";
+import { requestApproval, decideApproval, getApproval } from "@/platform/approvals/approval-service";
+import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
+import { deliverNotificationChannel, notificationChannelEventType } from "@/platform/notifications/notification-channel-service";
 
 let prisma: PrismaClient;
 let adminPrisma: PrismaClient | undefined;
@@ -633,6 +636,144 @@ describe("PostgreSQL baseline", () => {
     await Promise.all(Array.from({ length: 4 }, () => deliverNotificationEvent(fixture.event, { db: prisma })));
     expect(await withTenant(prisma, org.id, (tx) => tx.notification.count())).toBe(1);
     expect((await withTenant(prisma, org.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { id: fixture.event.id } }))).status).toBe("DISPATCHED");
+  });
+
+  it("produces real approval events once, selects configured scoped approvers and resolves notifications on approval or rejection", async () => {
+    const org = await prisma.organization.create({ data: { name: "Approval routing" } });
+    const runner = prisma as TenantTransactionRunner;
+    const fixture = await withTenant(runner, org.id, async (tx) => {
+      const propertyData = { organizationId: org.id, addressLine1: "Approval road", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] };
+      const property = await tx.property.create({ data: { ...propertyData, name: "Approval villa" } });
+      const second = await tx.property.create({ data: { ...propertyData, name: "Other approval villa" } });
+      const role = await tx.role.create({ data: { organizationId: org.id, key: "approval-custom", name: "Configured approvers" } });
+      const broad = await tx.role.create({ data: { organizationId: org.id, key: "approval-broad", name: "Unselected wider role" } });
+      const keys = ["property:view", "property:edit", "property:approve", "property:reject", "config_rule:view", "config_rule:configure"];
+      for (const key of keys) {
+        const [resource, action] = key.split(":");
+        const permission = await tx.permission.create({ data: { organizationId: org.id, key, resource, action } });
+        for (const roleId of [role.id, broad.id]) await tx.rolePermission.create({ data: { organizationId: org.id, roleId, permissionId: permission.id } });
+      }
+      const accounts = [];
+      for (const name of ["requester", "approver", "wrong-scope", "opted-out", "unselected"]) {
+        const person = await tx.person.create({ data: { organizationId: org.id, displayName: name, preferredLocale: "fr" } });
+        const account = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id, email: `${name}@example.test` } });
+        await tx.roleAssignment.create({ data: { organizationId: org.id, roleId: name === "unselected" || name === "requester" ? broad.id : role.id, personId: person.id, userAccountId: account.id,
+          scopeType: "property", scopeId: name === "wrong-scope" ? second.id : property.id } });
+        if (name === "wrong-scope") await tx.roleAssignment.create({ data: { organizationId: org.id, roleId: broad.id, personId: person.id, userAccountId: account.id, scopeType: "organization" } });
+        if (name === "opted-out") await tx.notificationPreference.create({ data: { organizationId: org.id, userAccountId: account.id, inAppOperations: false } });
+        accounts.push(account);
+      }
+      return { property, second, role, accounts, keys };
+    });
+    const [requester, approver, wrongScope, optedOut, unselected] = fixture.accounts;
+    function actor(account: typeof requester) {
+      return { organizationId: org.id, accountId: account.id, authContext: ownNotificationContext({ organizationId: org.id, userAccountId: account.id, personId: account.personId,
+        permissions: new Set(fixture.keys), scopes: [{ organizationId: org.id, scopeType: "property" as const, scopeId: fixture.property.id }] }, account.id) };
+    }
+    const admin = { ...actor(requester), authContext: { ...actor(requester).authContext, assignments: undefined, scopes: [{ organizationId: org.id }] } };
+    const deps = { db: runner, requestId: "approval-routing" };
+    await saveNotificationRouting(admin, { kind: "approval_requested", propertyId: fixture.property.id, routing: { roles: [fixture.role.id], people: [], assigned: false, channels: ["in_app"] }, reason: "Configure scoped approval recipients" }, deps);
+    const input = { propertyId: fixture.property.id, title: "Approve inspection schedule", details: "Review the requested inspection schedule", idempotencyKey: randomUUID() };
+    const requests = await Promise.all(Array.from({ length: 4 }, () => requestApproval(actor(requester), input, deps)));
+    expect(new Set(requests.map((row) => row.id)).size).toBe(1);
+    const id = requests[0].id;
+    const events = await withTenant(runner, org.id, (tx) => tx.outboxEvent.findMany({ where: { idempotencyKey: `approval:${id}:requested` } }));
+    expect(events).toHaveLength(1);
+    const rows = await withTenant(runner, org.id, (tx) => tx.notification.findMany({ where: { targetId: id } }));
+    expect(rows.map((row) => row.recipientId)).toEqual([approver.id]);
+    const rollbackKey = randomUUID();
+    const rollbackRunner: TenantTransactionRunner = { $transaction: (work, options) => runner.$transaction(async (tx) => { await work(tx); throw new Error("Forced approval rollback"); }, options) };
+    await expect(requestApproval(actor(requester), { ...input, idempotencyKey: rollbackKey }, { db: rollbackRunner })).rejects.toThrow("Forced approval rollback");
+    expect(await withTenant(runner, org.id, (tx) => tx.approvalRequest.count({ where: { idempotencyKey: rollbackKey } }))).toBe(0);
+    expect(await withTenant(runner, org.id, (tx) => tx.auditLog.count({ where: { action: "approval.requested" } }))).toBe(1);
+    expect((await withTenant(runner, org.id, (tx) => tx.approvalRecipient.findMany({ where: { approvalId: id } }))).map((row) => row.userAccountId).sort()).toEqual([approver.id, optedOut.id].sort());
+    await Promise.all(Array.from({ length: 3 }, () => deliverNotificationEvent({ ...events[0], status: "PENDING" }, deps)));
+    expect(await withTenant(runner, org.id, (tx) => tx.notification.count({ where: { targetId: id } }))).toBe(1);
+    expect(await openNotification(actor(approver), rows[0].id, "fr", deps)).toBe(`/fr/app/approvals/${id}`);
+    for (const account of [wrongScope, unselected, requester]) await expect(decideApproval(actor(account), { id, decision: "APPROVED", reason: "Unauthorized decision attempt" }, deps)).rejects.toBeInstanceOf(ApprovalAccessError);
+    const deniedScope = { ...actor(approver), authContext: ownNotificationContext({ ...actor(approver).authContext, assignments: undefined, scopes: [{ organizationId: org.id, scopeType: "property", scopeId: fixture.second.id }] }, approver.id) };
+    await expect(getApproval(deniedScope, id, deps)).rejects.toBeInstanceOf(ApprovalAccessError);
+    await expect(decideApproval(deniedScope, { id, decision: "APPROVED", reason: "Wrong property scope denied" }, deps)).rejects.toBeInstanceOf(ApprovalAccessError);
+    const deniedPermission = { ...actor(approver), authContext: { ...actor(approver).authContext, permissions: new Set(["property:view", "notification:view"]) } };
+    await expect(decideApproval(deniedPermission, { id, decision: "APPROVED", reason: "Missing decision permission denied" }, deps)).rejects.toBeInstanceOf(ApprovalAccessError);
+    await readNotification(actor(approver), rows[0].id, deps);
+    const readAt = (await withTenant(runner, org.id, (tx) => tx.notification.findFirstOrThrow({ where: { id: rows[0].id } }))).readAt;
+    const decision = { id, decision: "APPROVED", reason: "Inspection schedule reviewed and accepted" };
+    await Promise.all(Array.from({ length: 3 }, () => decideApproval(actor(approver), decision, deps)));
+    expect((await getApproval(actor(approver), id, deps)).state).toBe("APPROVED");
+    expect(await withTenant(runner, org.id, (tx) => tx.outboxEvent.count({ where: { idempotencyKey: `approval:${id}:decided` } }))).toBe(1);
+    expect(await withTenant(runner, org.id, (tx) => tx.notification.count({ where: { targetId: id, recipientId: requester.id, kind: "approval_decided" } }))).toBe(1);
+    expect(await withTenant(runner, org.id, (tx) => tx.notification.findFirstOrThrow({ where: { id: rows[0].id } }))).toMatchObject({ resolution: "APPROVED", readAt, resolvedAt: expect.any(Date) as Date });
+    await expect(decideApproval(actor(approver), { ...decision, decision: "REJECTED" }, deps)).rejects.toBeInstanceOf(ApprovalConflictError);
+    expect(await withTenant(runner, org.id, (tx) => tx.auditLog.count({ where: { action: "approval.approved", resourceId: id } }))).toBe(1);
+    const rejected = await requestApproval(actor(requester), { ...input, idempotencyKey: randomUUID() }, deps);
+    await decideApproval(actor(approver), { id: rejected.id, decision: "REJECTED", reason: "Please propose another inspection date" }, deps);
+    expect(await withTenant(runner, org.id, (tx) => tx.notification.findFirstOrThrow({ where: { targetId: rejected.id, kind: "approval_requested" } }))).toMatchObject({ resolution: "REJECTED", readAt: expect.any(Date) as Date });
+    const foreign = await prisma.organization.create({ data: { name: "Foreign approval tenant" } });
+    const foreignActor = { ...actor(approver), organizationId: foreign.id, authContext: { ...actor(approver).authContext, organizationId: foreign.id } };
+    await expect(getApproval(foreignActor, id, deps)).rejects.toBeInstanceOf(ApprovalAccessError);
+    await expect(decideApproval(foreignActor, decision, deps)).rejects.toBeInstanceOf(ApprovalAccessError);
+    await expect(requestApproval(foreignActor, { ...input, idempotencyKey: randomUUID() }, deps)).rejects.toBeInstanceOf(ApprovalAccessError);
+    expect(await withTenant(runner, foreign.id, (tx) => tx.approvalRequest.count())).toBe(0);
+    await expect(withTenant(runner, foreign.id, (tx) => tx.approvalRecipient.create({ data: { organizationId: foreign.id, approvalId: id, userAccountId: approver.id } }))).rejects.toThrow();
+    await expect(withTenant(runner, org.id, (tx) => tx.approvalRequest.delete({ where: { id } }))).rejects.toThrow(/cannot be deleted/u);
+  });
+
+  it("routes external channels through provider interfaces with durable retries, replay suppression and consent rechecks", async () => {
+    const org = await prisma.organization.create({ data: { name: "External notification retries" } });
+    const runner = prisma as TenantTransactionRunner;
+    const fixture = await withTenant(runner, org.id, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId: org.id, displayName: "Consenting recipient", preferredLocale: "fr" } });
+      const account = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id, email: "consenting@example.test" } });
+      await tx.notificationPreference.create({ data: { organizationId: org.id, userAccountId: account.id, emailEnabled: true, emailAccount: true, pushEnabled: true, pushAccount: true } });
+      await new ConfigRuleRepository(tx, org.id).createVersion({ key: "notification.routing.language_updated", scopeType: "organization", effectiveFrom: new Date(0), value: { roles: [], people: [], assigned: true, channels: ["in_app", "email", "push"] }, reason: "Enable consented external channels" });
+      await publishNotification(tx, org.id, { kind: "language_updated", targetId: account.id, recipientId: account.id }, "external-real-source");
+      return { account };
+    });
+    let fail = true; const calls: Array<{ channel: string; key?: string; locale?: string }> = [];
+    const channels = Object.fromEntries((["email", "push"] as const).map((channel) => [channel, { notify: (input: { idempotencyKey?: string; locale?: string }) => {
+      calls.push({ channel, key: input.idempotencyKey, locale: input.locale });
+      if (fail && channel === "email") return Promise.reject(new Error("private transport detail must be redacted"));
+      return Promise.resolve({ id: "test-provider-acknowledgement" });
+    } }]));
+    const handler = (event: Parameters<typeof deliverNotificationChannel>[0]) => deliverNotificationChannel(event, { db: runner, channels, appUrl: "https://staging.example.test" });
+    const handlers = { [notificationChannelEventType]: handler };
+    const now = new Date();
+    expect(await dispatchOutboxBatch(runner, org.id, handlers, { now, errorReporter: async () => {} })).toMatchObject({ failed: 1, dispatched: 1 });
+    const failed = await withTenant(runner, org.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { status: "PENDING" } }));
+    expect(failed).toMatchObject({ attemptCount: 1, lastError: "Notification email provider did not acknowledge delivery", nextAttemptAt: expect.any(Date) as Date });
+    expect(await dispatchOutboxBatch(runner, org.id, handlers, { now, errorReporter: async () => {} })).toMatchObject({ failed: 0, dispatched: 0 });
+    fail = false;
+    expect(await dispatchOutboxBatch(runner, org.id, handlers, { now: failed.nextAttemptAt!, errorReporter: async () => {} })).toMatchObject({ failed: 0, dispatched: 1 });
+    await Promise.all(Array.from({ length: 3 }, () => handler(failed)));
+    expect(calls.filter((call) => call.channel === "email")).toHaveLength(2);
+    expect(new Set(calls.filter((call) => call.channel === "email").map((call) => call.key)).size).toBe(1);
+    expect(calls.every((call) => call.locale === "fr")).toBe(true);
+    await withTenant(runner, org.id, async (tx) => {
+      await publishNotification(tx, org.id, { kind: "language_updated", targetId: fixture.account.id, recipientId: fixture.account.id }, "external-consent-revoked");
+    });
+    const unconfigured = await withTenant(runner, org.id, (tx) => tx.outboxEvent.findMany({ where: { type: notificationChannelEventType, status: "PENDING" } }));
+    expect(unconfigured).toHaveLength(2);
+    for (const event of unconfigured) await expect(deliverNotificationChannel(event, { db: runner, channels: {}, appUrl: "https://staging.example.test" })).rejects.toThrow(/provider is not configured/u);
+    await withTenant(runner, org.id, (tx) => tx.notificationPreference.updateMany({ where: { userAccountId: fixture.account.id }, data: { emailEnabled: false, pushEnabled: false } }));
+    const before = calls.length;
+    expect(await dispatchOutboxBatch(runner, org.id, handlers, { errorReporter: async () => {} })).toMatchObject({ failed: 0, dispatched: 2 });
+    expect(calls).toHaveLength(before);
+  });
+
+  it("resolves a concurrently initialized routing rule for every independent source event", async () => {
+    const org = await prisma.organization.create({ data: { name: "Concurrent first routing use" } });
+    const accounts = await withTenant(prisma, org.id, async (tx) => {
+      const result = [];
+      for (let index = 0; index < 4; index += 1) {
+        const person = await tx.person.create({ data: { organizationId: org.id, displayName: `Concurrent recipient ${index}` } });
+        result.push(await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id } }));
+      }
+      return result;
+    });
+    await Promise.all(accounts.map((account) => withTenant(prisma, org.id, (tx) => publishNotification(tx, org.id, { kind: "language_updated", recipientId: account.id, targetId: account.id }, `concurrent-initial:${account.id}`))));
+    expect(await withTenant(prisma, org.id, (tx) => tx.notification.count())).toBe(4);
+    expect(await withTenant(prisma, org.id, (tx) => tx.configRule.count({ where: { key: "notification.routing.language_updated" } }))).toBe(1);
   });
 
   it("applies all migrations against an empty PostgreSQL database", async () => {

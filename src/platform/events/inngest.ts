@@ -1,7 +1,8 @@
 import type { OutboxEvent as PrismaOutboxEvent } from "@prisma/client";
 import type { OutboxHandlers } from "@/platform/events/outbox-dispatcher";
 import type { EmailProvider } from "@/platform/providers";
-import { ResendEmailProvider } from "@/platform/providers/real";
+import { ResendEmailProvider, EmailNotificationChannel } from "@/platform/providers/real";
+import { deliverNotificationChannel, notificationChannelEventType } from "@/platform/notifications/notification-channel-service";
 import { renderIdentityEmail } from "@/platform/email/identity-templates";
 import { deliverNotificationEvent } from "@/platform/notifications/notification-service";
 import { notificationEventType } from "@/platform/notifications/notification";
@@ -106,6 +107,11 @@ export function createInngestOutboxHandlers(
   };
 
   return {
+    [notificationChannelEventType]: async (event) => {
+      await deliverNotificationChannel(event, { appUrl: env.APP_URL ?? "http://localhost:3000", channels: {
+        ...(emailProvider || (env.RESEND_API_KEY && env.EMAIL_FROM) ? { email: new EmailNotificationChannel(emailProvider ?? new ResendEmailProvider(env)) } : {})
+      } });
+    },
     [notificationEventType]: async (event) => { await deliverNotificationEvent(event); },
     "identity.invitation.delivery_requested": identityDelivery,
     "identity.recovery.delivery_requested": identityDelivery,

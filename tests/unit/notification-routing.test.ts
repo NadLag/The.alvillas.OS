@@ -7,8 +7,8 @@ describe("event routing contracts", () => {
   it("rejects arbitrary channels, unknown events, unvalidated recipients and injected targets", () => {
     const routing = { roles: [], people: [], assigned: true, channels: ["in_app"] };
     expect(notificationRoutingSchema.safeParse(routing).success).toBe(true);
-    for (const value of [{ ...routing, roles: ["admin"] }, { ...routing, people: ["someone"] }, { ...routing, channels: ["push"] }, { ...routing, href: "https://example.test" }]) expect(notificationRoutingSchema.safeParse(value).success).toBe(false);
-    expect(notificationRoutingSaveSchema.safeParse({ kind: "approval_requested", propertyId: null, routing, reason: "A real change" }).success).toBe(false);
+    for (const value of [{ ...routing, roles: ["admin"] }, { ...routing, people: ["someone"] }, { ...routing, channels: ["sms"] }, { ...routing, href: "https://example.test" }]) expect(notificationRoutingSchema.safeParse(value).success).toBe(false);
+    expect(notificationRoutingSaveSchema.safeParse({ kind: "unknown_event", propertyId: null, routing, reason: "A real change" }).success).toBe(false);
   });
   it("uses operational preferences for reservation and completion events", () => {
     const preferences = defaultNotificationPreferences();
