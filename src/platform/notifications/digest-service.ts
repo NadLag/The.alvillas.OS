@@ -33,8 +33,8 @@ async function authorizedItems(notifications: NotificationRepository, recipientI
   return { candidate, items };
 }
 async function audit(tx: TenantTransaction, organizationId: string, accountId: string, id: string, action: string, after: Record<string, unknown>) {
-  await writeAuditEvent(tx, { organizationId, actorId: accountId, action: `notification.digest.${action}`, resourceType: "notification", resourceId: id,
-    before: null, after, reason: null, requestId: crypto.randomUUID(), occurredAt: new Date() });
+  await writeAuditEvent(tx, { organizationId, actorId: null, action: `notification.digest.${action}`, resourceType: "notification", resourceId: id,
+    before: null, after: { recipientId: accountId, ...after }, reason: null, requestId: crypto.randomUUID(), occurredAt: new Date() });
 }
 export async function digestSettings(actor: NotificationActor, input: unknown = {}, deps: Deps = {}) {
   assertInbox(actor, "view");

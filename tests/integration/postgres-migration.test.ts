@@ -447,6 +447,7 @@ describe("PostgreSQL baseline", () => {
     await expect(withTenant(prisma, f.organization.id, (tx) => tx.notification.update({ where: { id: otherNotice.id }, data: { digestDeliveryId: row.id } }))).rejects.toThrow();
     const audit = await withTenant(prisma, f.organization.id, (tx) => tx.auditLog.findMany({ where: { action: { startsWith: "notification.digest." } } }));
     expect(audit.map((row) => row.action)).toContain("notification.digest.accepted"); expect(JSON.stringify(audit)).not.toContain(f.account.email!);
+    expect(audit.every((row) => row.actorId === null && (row.after as { recipientId: string }).recipientId === f.account.id)).toBe(true);
   });
 
   it("retries digest delivery through the shared outbox with identical bytes and a stable key after a lost provider response", async () => {
