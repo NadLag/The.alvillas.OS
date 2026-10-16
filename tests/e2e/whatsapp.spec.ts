@@ -16,6 +16,9 @@ test.describe("manual WhatsApp notification", () => {
       const account = await client.userAccount.findFirstOrThrow({ where: { email } });
       const owner = await client.owner.create({ data: { organizationId: account.organizationId, displayName: `WA owner ${suffix}`, phone: "+33612345678", preferredLocale: "en" } });
       const property = await client.property.create({ data: { organizationId: account.organizationId, name: `WA villa ${suffix}`, addressLine1: "Private road", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [], propertyOwners: { create: { organizationId: account.organizationId, ownerId: owner.id } } } });
+      // Keep the existing revenue controls present: the WhatsApp action must stay
+      // reachable beside financial controls as well as on an empty database.
+      await client.ledgerAccount.create({ data: { organizationId: account.organizationId, code: `WA_${Date.now()}_${testInfo.workerIndex}`, name: `WA bank ${suffix}`, accountType: "ASSET_LOCATION", normalSide: "DEBIT" } });
       await page.goto("/en/login"); await waitForE2EAdminLoginWindow(page, email);
       await page.getByTestId("login-email").fill(email); await page.getByTestId("login-password").fill(password); await page.getByTestId("login-submit").click();
       await completeE2EAdminMfa(page, email); await expect(page).toHaveURL(/\/en\/app$/u);
@@ -31,7 +34,13 @@ test.describe("manual WhatsApp notification", () => {
       const reservation = await client.reservation.findFirstOrThrow({ where: { propertyId: property.id } });
       expect(reservation.guestPhone).toBe("+212612345678");
       await page.goto("/en/app/reservations");
-      await page.getByTestId("reservation-row").filter({ hasText: reservation.reference }).getByTestId("reservation-whatsapp").click();
+      const reservationRow = page.getByTestId("reservation-row").filter({ hasText: reservation.reference });
+      await expect(reservationRow.getByTestId("reservation-revenue-account")).toBeVisible();
+      const panel = await page.locator(".workspace-main").boundingBox();
+      const entry = await reservationRow.getByTestId("reservation-whatsapp").boundingBox();
+      expect(entry!.x).toBeGreaterThanOrEqual(panel!.x);
+      expect(entry!.x + entry!.width).toBeLessThanOrEqual(panel!.x + panel!.width);
+      await reservationRow.getByTestId("reservation-whatsapp").click();
       await expect(page.getByTestId("whatsapp-recipient")).toContainText("Guest"); await expect(page.getByTestId("whatsapp-locale")).toHaveValue("fr");
       await context.setOffline(true); await expect(page.getByTestId("whatsapp-prepare")).toBeDisabled(); await context.setOffline(false);
       let abort = true;

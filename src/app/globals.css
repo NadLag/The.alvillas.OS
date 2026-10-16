@@ -902,11 +902,14 @@ textarea:disabled {
 }
 
 .reservation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
 }
 
 .reservation-row-main {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-7);
@@ -914,9 +917,14 @@ textarea:disabled {
   min-width: 0;
 }
 
+.reservation-row-main > span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
 .reservation-revenue-form {
   display: grid;
-  grid-template-columns: minmax(96px, 1fr) 74px minmax(140px, 1.2fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
   align-items: end;
   gap: var(--space-4);
   flex: 0 1 560px;
