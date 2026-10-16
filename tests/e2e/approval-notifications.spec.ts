@@ -53,6 +53,12 @@ test.describe("approval notification lifecycle", () => {
         const notice = reviewer.getByTestId("notification-item").filter({ hasText: "An approval needs your decision." }).filter({ has: reviewer.getByText("Unread", { exact: true }) });
         await expect(notice).toHaveCount(1); await notice.getByRole("button", { name: "Open record", exact: true }).click();
         await expect(reviewer).toHaveURL(new RegExp(`/en/app/approvals/${id}$`, "u"));
+        const digestLinkNotice = await withTenant(client, approver.organizationId, (tx) => tx.notification.findFirstOrThrow({ where: { recipientId: approver.id, targetId: id, kind: "approval_requested" } }));
+        await reviewer.goto(`/fr/app/notifications/open/${digestLinkNotice.id}`);
+        await expect(reviewer).toHaveURL(new RegExp(`/fr/app/approvals/${id}$`, "u"));
+        // Another authorized operator still cannot open this recipient's inbox link.
+        expect((await page.request.get(`/en/app/notifications/open/${digestLinkNotice.id}`)).status()).toBe(404);
+        await reviewer.goto(`/en/app/approvals/${id}`);
         await reviewer.getByTestId("approval-reason").fill(`Inspection schedule ${decision.toLowerCase()} after review`);
         if (decision === "APPROVED") {
           let failNext = true;

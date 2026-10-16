@@ -10,6 +10,7 @@ export interface EmailProvider {
     locale: AppLocale;
     template: string;
     idempotencyKey?: string;
+    deliveryReference?: { organizationId: string; deliveryId: string };
   }): Promise<{ id: string }>;
 }
 

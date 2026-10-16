@@ -10,6 +10,8 @@ import { shouldDeliverNotification } from "@/platform/notifications/notification
 import { deliverPushChannel } from "@/platform/notifications/push-delivery-service";
 import type { TenantTransactionRunner } from "@/platform/db/tenant";
 import { z } from "zod";
+import { digestEventType } from "@/platform/notifications/digest";
+import { deliverDigest } from "@/platform/notifications/digest-service";
 
 export type InngestSendResult = {
   ids: string[];
@@ -87,7 +89,7 @@ export function createInngestOutboxHandlers(
   env: InngestEnv = process.env,
   transport: InngestTransport = fetch,
   emailProvider?: EmailProvider,
-  deps: { db?: TenantTransactionRunner } = {}
+  deps: { db?: TenantTransactionRunner; now?: Date } = {}
 ): OutboxHandlers {
   const handler = (event: PrismaOutboxEvent) => createInngestOutboxHandler(env, transport)(event);
   const identityDelivery = async (event: PrismaOutboxEvent) => {
@@ -105,6 +107,7 @@ export function createInngestOutboxHandlers(
   };
 
   return {
+    [digestEventType]: async (event) => { await deliverDigest(event, { env, db: deps.db, now: deps.now, provider: emailProvider }); },
     [notificationChannelEventType]: async (event) => {
       if ((event.payload as Record<string, unknown>).channel === "push") { await deliverPushChannel(event, { env, db: deps.db }); return; }
       await deliverNotificationChannel(event, { db: deps.db, appUrl: env.APP_URL ?? "http://localhost:3000", channels: {

@@ -1143,29 +1143,38 @@ model PushSubscription {
 }
 
 model NotificationDelivery {
-  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  userAccountId  String       @map("user_account_id") @db.Uuid
-  eventId        String       @map("event_id") @db.Uuid
-  subscriptionId String?      @map("subscription_id") @db.Uuid
-  deliveryKey    String       @map("delivery_key")
-  kind           String
-  status         String       @default("PENDING")
-  attemptCount   Int          @default(0) @map("attempt_count")
-  nextAttemptAt  DateTime?    @map("next_attempt_at") @db.Timestamptz(6)
-  providerStatus Int?         @map("provider_status")
-  errorCode      String?      @map("error_code")
-  acceptedAt     DateTime?    @map("accepted_at") @db.Timestamptz(6)
-  displayedAt    DateTime?    @map("displayed_at") @db.Timestamptz(6)
-  openedAt       DateTime?    @map("opened_at") @db.Timestamptz(6)
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  userAccount    UserAccount @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  event          OutboxEvent @relation(fields: [organizationId, eventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  subscription   PushSubscription? @relation(fields: [organizationId, userAccountId, subscriptionId], references: [organizationId, userAccountId, id], onDelete: Restrict, onUpdate: NoAction)
+  id               String            @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId   String            @map("organization_id") @db.Uuid
+  userAccountId    String            @map("user_account_id") @db.Uuid
+  eventId          String            @map("event_id") @db.Uuid
+  subscriptionId   String?           @map("subscription_id") @db.Uuid
+  deliveryKey      String            @map("delivery_key")
+  channel          String            @default("push")
+  scheduledAt      DateTime?         @map("scheduled_at") @db.Timestamptz(6)
+  preparedAt       DateTime?         @map("prepared_at") @db.Timestamptz(6)
+  payloadEncrypted String?           @map("payload_encrypted")
+  providerId       String?           @map("provider_id")
+  deliveredAt      DateTime?         @map("delivered_at") @db.Timestamptz(6)
+  digestItems      Notification[]    @relation("DigestItems")
+  kind             String
+  status           String            @default("PENDING")
+  attemptCount     Int               @default(0) @map("attempt_count")
+  nextAttemptAt    DateTime?         @map("next_attempt_at") @db.Timestamptz(6)
+  providerStatus   Int?              @map("provider_status")
+  errorCode        String?           @map("error_code")
+  acceptedAt       DateTime?         @map("accepted_at") @db.Timestamptz(6)
+  displayedAt      DateTime?         @map("displayed_at") @db.Timestamptz(6)
+  openedAt         DateTime?         @map("opened_at") @db.Timestamptz(6)
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount      UserAccount       @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  event            OutboxEvent       @relation(fields: [organizationId, eventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  subscription     PushSubscription? @relation(fields: [organizationId, userAccountId, subscriptionId], references: [organizationId, userAccountId, id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@unique([organizationId, userAccountId, id], map: "notification_delivery_tenant_account_id_unique")
   @@unique([organizationId, eventId, deliveryKey], map: "notification_delivery_event_device_unique")
+  @@index([organizationId, channel, status, createdAt], map: "notification_delivery_channel_status_idx")
   @@index([organizationId, userAccountId, createdAt(sort: Desc), id(sort: Desc)], map: "notification_delivery_history_idx")
   @@map("notification_delivery")
 }
@@ -1185,32 +1194,39 @@ model NotificationPreference {
   pushAccount     Boolean      @default(false) @map("push_account")
   pushOperations  Boolean      @default(false) @map("push_operations")
   emailSecurity   Boolean      @default(true) @map("email_security")
+  digestSettings  Json?        @map("digest_settings")
+  digestNextAt    DateTime?    @map("digest_next_at") @db.Timestamptz(6)
+  digestRevision  Int          @default(0) @map("digest_revision")
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   userAccount     UserAccount  @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "notification_preference_account_tenant_fk")
 
   @@unique([organizationId, userAccountId], map: "notification_preference_org_account_unique")
+  @@index([organizationId, digestNextAt, userAccountId], map: "notification_preference_digest_due_idx")
   @@map("notification_preference")
 }
 
 model Notification {
-  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  recipientId    String       @map("recipient_id") @db.Uuid
-  eventId        String       @map("event_id") @db.Uuid
-  kind           String
-  targetId       String       @map("target_id") @db.Uuid
-  resolvedAt     DateTime?    @map("resolved_at") @db.Timestamptz(6)
-  resolution     String?
-  readAt         DateTime?    @map("read_at") @db.Timestamptz(6)
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  recipient      UserAccount  @relation(fields: [organizationId, recipientId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "notification_recipient_tenant_fk")
+  id               String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId   String                @map("organization_id") @db.Uuid
+  recipientId      String                @map("recipient_id") @db.Uuid
+  eventId          String                @map("event_id") @db.Uuid
+  kind             String
+  targetId         String                @map("target_id") @db.Uuid
+  digestDeliveryId String?               @map("digest_delivery_id") @db.Uuid
+  digestDelivery   NotificationDelivery? @relation("DigestItems", fields: [organizationId, recipientId, digestDeliveryId], references: [organizationId, userAccountId, id], onDelete: Restrict, onUpdate: NoAction)
+  resolvedAt       DateTime?             @map("resolved_at") @db.Timestamptz(6)
+  resolution       String?
+  readAt           DateTime?             @map("read_at") @db.Timestamptz(6)
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  recipient        UserAccount           @relation(fields: [organizationId, recipientId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "notification_recipient_tenant_fk")
 
   @@unique([organizationId, recipientId, eventId], map: "notification_org_recipient_event_unique")
   @@index([organizationId, recipientId, createdAt(sort: Desc), id(sort: Desc)], map: "notification_inbox_idx")
   @@index([organizationId, recipientId, readAt], map: "notification_unread_idx")
+  @@index([organizationId, recipientId, digestDeliveryId, readAt, createdAt, id], map: "notification_digest_unread_idx")
   @@map("notification")
 }
 

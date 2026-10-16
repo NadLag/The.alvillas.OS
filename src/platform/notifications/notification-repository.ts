@@ -3,6 +3,7 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
 import { notificationEventType, notificationInputSchema, type NotificationCursor, type NotificationInput } from "./notification";
 import { Prisma } from "@prisma/client";
+import { digestSettingsSchema, nextDigestAt } from "./digest";
 import { defaultNotificationPreferences, shouldDeliverNotification, type NotificationPreferences } from "./notification-preferences";
 import { authorize } from "@/platform/authz/authorize";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
@@ -24,13 +25,17 @@ export class NotificationRepository {
     return this.preferenceValue(row);
   }
 
-  savePreferences(accountId: string, preferences: NotificationPreferences) {
+  async savePreferences(accountId: string, preferences: NotificationPreferences, now = new Date()) {
+    const previous = await this.tx.notificationPreference.findUnique({ where: { organizationId_userAccountId: { organizationId: this.organizationId, userAccountId: accountId } } });
+    const previousDigest = previous?.digestSettings ? digestSettingsSchema.parse(previous.digestSettings) : null;
+    const reschedule = preferences.digest && (JSON.stringify(previousDigest) !== JSON.stringify(preferences.digest) || previous?.emailEnabled !== (preferences.email.enabled ?? false) || previous?.emailOperations !== (preferences.email.operations ?? false));
     const data = { inAppEnabled: preferences.in_app.enabled, inAppAccount: preferences.in_app.account, inAppOperations: preferences.in_app.operations, inAppSecurity: true, emailSecurity: true,
       emailEnabled: preferences.email.enabled ?? false, emailAccount: preferences.email.account ?? false, emailOperations: preferences.email.operations ?? false,
       pushEnabled: preferences.push?.enabled ?? false, pushAccount: preferences.push?.account ?? false, pushOperations: preferences.push?.operations ?? false };
+    const digest = preferences.digest ? { digestSettings: preferences.digest, ...(reschedule ? { digestRevision: (previous?.digestRevision ?? 0) + 1, digestNextAt: preferences.email.enabled && preferences.email.operations ? nextDigestAt(preferences.digest, now) : null } : {}) } : {};
     return this.tx.notificationPreference.upsert({
       where: { organizationId_userAccountId: { organizationId: this.organizationId, userAccountId: accountId } },
-      create: { organizationId: this.organizationId, userAccountId: accountId, ...data }, update: data
+      create: { organizationId: this.organizationId, userAccountId: accountId, ...data, ...digest }, update: { ...data, ...digest }
     });
   }
 
@@ -82,8 +87,8 @@ export class NotificationRepository {
     return this.tx.outboxEvent.update({ where: { id, organizationId: this.organizationId }, data: { status: "DISPATCHED", processedAt: new Date(), nextAttemptAt: null, lastError: null } }).then(() => undefined);
   }
 
-  private preferenceValue(row: { inAppEnabled: boolean; inAppAccount: boolean; inAppOperations: boolean; emailEnabled?: boolean; emailAccount?: boolean; emailOperations?: boolean; pushEnabled?: boolean; pushAccount?: boolean; pushOperations?: boolean } | null): NotificationPreferences {
-    return row ? { in_app: { enabled: row.inAppEnabled, account: row.inAppAccount, operations: row.inAppOperations, security: true },
+  private preferenceValue(row: { inAppEnabled: boolean; inAppAccount: boolean; inAppOperations: boolean; emailEnabled?: boolean; emailAccount?: boolean; emailOperations?: boolean; pushEnabled?: boolean; pushAccount?: boolean; pushOperations?: boolean; digestSettings?: unknown } | null): NotificationPreferences {
+    return row ? { ...(row.digestSettings ? { digest: digestSettingsSchema.parse(row.digestSettings) } : {}), in_app: { enabled: row.inAppEnabled, account: row.inAppAccount, operations: row.inAppOperations, security: true },
       email: { security: true, ...(row.emailEnabled || row.emailAccount || row.emailOperations ? { enabled: row.emailEnabled ?? false, account: row.emailAccount ?? false, operations: row.emailOperations ?? false } : {}) },
       ...(row.pushEnabled || row.pushAccount || row.pushOperations ? { push: { enabled: row.pushEnabled ?? false, account: row.pushAccount ?? false, operations: row.pushOperations ?? false } } : {}) } : defaultNotificationPreferences();
   }

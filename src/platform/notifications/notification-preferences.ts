@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { digestSettingsSchema } from "./digest";
 
 // Only channels with an existing delivery path are permitted. Security policy is
 // server-owned; neither a channel switch nor a category switch can override it.
 export const notificationPreferencesSchema = z.object({
+  digest: digestSettingsSchema.optional(),
   in_app: z.object({ enabled: z.boolean(), account: z.boolean(), operations: z.boolean(), security: z.literal(true) }).strict(),
   email: z.object({ security: z.literal(true), enabled: z.boolean().optional(), account: z.boolean().optional(), operations: z.boolean().optional() }).strict().refine((value) => [value.enabled, value.account, value.operations].every((item) => item === undefined) || [value.enabled, value.account, value.operations].every((item) => typeof item === "boolean")),
   push: z.object({ enabled: z.boolean(), account: z.boolean(), operations: z.boolean() }).strict().optional()

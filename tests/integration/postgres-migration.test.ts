@@ -1,3 +1,7 @@
+import type { EmailProvider } from "@/platform/providers";
+import { digestEventType } from "@/platform/notifications/digest";
+import { scheduleDigests, deliverDigest, digestSettings, recordDigestReceipt } from "@/platform/notifications/digest-service";
+import { saveDigestPreferences } from "@/platform/notifications/notification-service";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
@@ -362,6 +366,174 @@ describe("PostgreSQL baseline", () => {
     if (ownsContainer && containerName) {
       execFileSync("docker", ["stop", containerName], { stdio: "ignore" });
     }
+  });
+
+  async function digestFixture(language: "en" | "fr" | "ar" = "fr") {
+    const organization = await prisma.organization.create({ data: { name: "Digest isolation" } });
+    const fixture = await withTenant(prisma, organization.id, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId: organization.id, displayName: "PRIVATE PERSON", preferredLocale: "en" } });
+      const account = await tx.userAccount.create({ data: { organizationId: organization.id, personId: person.id, email: `${randomUUID()}@example.test` } });
+      const other = await tx.userAccount.create({ data: { organizationId: organization.id, personId: person.id, email: `${randomUUID()}@example.test` } });
+      const property = await tx.property.create({ data: { organizationId: organization.id, name: "PRIVATE PROPERTY", addressLine1: "PRIVATE ADDRESS", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      const hidden = await tx.property.create({ data: { organizationId: organization.id, name: "HIDDEN PROPERTY", addressLine1: "SECRET", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      const role = await tx.role.create({ data: { organizationId: organization.id, key: "digest-operator", name: "Operator" } });
+      for (const resource of ["task", "reservation"]) {
+        const permission = await tx.permission.create({ data: { organizationId: organization.id, resource, action: "view", key: `${resource}:view` } });
+        await tx.rolePermission.create({ data: { organizationId: organization.id, roleId: role.id, permissionId: permission.id } });
+      }
+      await tx.roleAssignment.create({ data: { organizationId: organization.id, userAccountId: account.id, personId: person.id, roleId: role.id, scopeType: "property", scopeId: property.id } });
+      const task = await tx.operationTask.create({ data: { organizationId: organization.id, propertyId: property.id, assignedToUserAccountId: account.id, assignedToPersonId: person.id,
+        titleTranslations: { en: "PRIVATE TASK", fr: "PRIVATE TASK", ar: "PRIVATE TASK" }, type: "INSPECTION", dueDate: new Date("2030-01-07T00:00:00Z"), idempotencyKey: randomUUID() } });
+      const secret = await tx.operationTask.create({ data: { organizationId: organization.id, propertyId: hidden.id, titleTranslations: { en: "UNAUTHORIZED" }, type: "INSPECTION", dueDate: new Date("2030-01-07T00:00:00Z"), idempotencyKey: randomUUID() } });
+      const reservation = await tx.reservation.create({ data: { organizationId: organization.id, propertyId: property.id, reference: "PRIVATE REFERENCE", source: "MANUAL", guestName: "PRIVATE GUEST", guestEmail: "private-guest@example.test", checkIn: new Date("2030-01-07Z"), checkOut: new Date("2030-01-09Z"), nights: 2, notes: "PRIVATE NOTES", idempotencyKey: randomUUID() } });
+      await publishNotification(tx, organization.id, { kind: "task_assigned", recipientId: account.id, targetId: task.id }, "digest-source");
+      await publishNotification(tx, organization.id, { kind: "task_assigned", recipientId: account.id, targetId: task.id }, "digest-source");
+      await tx.notification.createMany({ data: [
+        { organizationId: organization.id, recipientId: account.id, eventId: randomUUID(), targetId: reservation.id, kind: "reservation_created" },
+        { organizationId: organization.id, recipientId: account.id, eventId: randomUUID(), targetId: secret.id, kind: "task_assigned" },
+        { organizationId: organization.id, recipientId: account.id, eventId: randomUUID(), targetId: account.id, kind: "language_updated" },
+        { organizationId: organization.id, recipientId: account.id, eventId: randomUUID(), targetId: task.id, kind: "task_completed", readAt: new Date() },
+        { organizationId: organization.id, recipientId: other.id, eventId: randomUUID(), targetId: task.id, kind: "task_assigned" }
+      ] });
+      return { account, other, property, hidden, person, task, secret, reservation };
+    });
+    const ctx = await authContextForAccount(organization.id, fixture.account.id, { db: prisma });
+    const actor = { organizationId: organization.id, accountId: fixture.account.id, authContext: ownNotificationContext(ctx, fixture.account.id) };
+    const settings = { frequency: "daily" as const, language, timezone: "UTC", time: "09:00", weekday: 1, quietHours: null };
+    const now = new Date("2030-01-07T08:59:00Z"); const due = new Date("2030-01-07T09:00:00Z");
+    await saveDigestPreferences(actor, settings, "digest-fixture", { db: prisma, now });
+    const deps = { db: prisma as TenantTransactionRunner, now: due, env: { APP_URL: "https://os.example.test" } };
+    const event = async () => withTenant(prisma, organization.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { type: digestEventType } }));
+    const history = async () => (await digestSettings(actor, {}, deps)).history;
+    return { ...fixture, organization, actor, settings, now, due, deps, event, history };
+  }
+
+  it("schedules one localized authorized unread digest across concurrent cron runs and masks every recipient and record field", async () => {
+    const f = await digestFixture();
+    const results = await Promise.all([scheduleDigests(f.organization.id, f.deps), scheduleDigests(f.organization.id, f.deps)]);
+    expect(results.reduce((sum, result) => sum + result.scheduled, 0)).toBe(1);
+    const event = await f.event(); const sent: Parameters<EmailProvider["send"]>[0][] = [];
+    const provider: EmailProvider = { send: (email) => { sent.push(email); return Promise.resolve({ id: "resend-digest-accepted" }); } };
+    await Promise.all(Array.from({ length: 3 }, () => deliverDigest(event, { ...f.deps, provider })));
+    expect(sent).toHaveLength(1); expect(sent[0].locale).toBe("fr"); expect(sent[0].text).toContain("2 notifications");
+    expect(sent[0].html).toContain('lang="fr"'); expect(sent[0].to).toBe(f.account.email);
+    const content = `${sent[0].text} ${sent[0].html}`;
+    for (const secret of ["PRIVATE", "UNAUTHORIZED", f.other.email!, f.account.email!, f.reservation.id, f.secret.id, "private-guest@example.test"]) expect(content).not.toContain(secret);
+    const noticeIds = [...content.matchAll(/notifications\/open\/([a-f0-9-]+)/gu)].map((match) => match[1]);
+    expect(new Set(noticeIds).size).toBe(2);
+    for (const id of new Set(noticeIds)) expect(await openNotification(f.actor, id, "fr", f.deps)).toMatch(/^\/fr\/app\/(field|reservations)/u);
+    const second = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } } });
+    try { expect((await digestSettings(f.actor, {}, { db: second })).settings).toEqual(f.settings); } finally { await second.$disconnect(); }
+    const accepted = (await f.history())[0];
+    const receipt = { type: "email.delivered", created_at: f.due.toISOString(), data: { email_id: "resend-digest-accepted", tags: { template: "notification.digest", organization_id: f.organization.id, delivery_id: accepted.id } } };
+    expect(await recordDigestReceipt(receipt, f.deps)).toBe(true);
+    expect(await recordDigestReceipt(receipt, f.deps)).toBe(true);
+    expect(await recordDigestReceipt({ ...receipt, data: { ...receipt.data, tags: { ...receipt.data.tags, organization_id: crypto.randomUUID() } } }, f.deps)).toBe(false);
+    expect(await f.history()).toEqual([expect.objectContaining({ status: "DELIVERED", attemptCount: 1, deliveredAt: f.due.toISOString() })]);
+    await deliverDigest(event, { ...f.deps, provider, now: new Date("2030-01-09T09:00Z") }); expect(sent).toHaveLength(1);
+    expect((await scheduleDigests(f.organization.id, { ...f.deps, now: new Date("2030-01-08T09:00Z") })).scheduled).toBe(0);
+    const serialized = JSON.stringify(await digestSettings(f.actor, {}, f.deps)); expect(serialized).not.toContain(f.account.email!); expect(serialized).not.toContain("resend-digest-accepted");
+    const otherActor = { ...f.actor, accountId: f.other.id };
+    await expect(digestSettings(otherActor, {}, f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await expect(openNotification(otherActor, noticeIds[0], "en", f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    const foreign = await prisma.organization.create({ data: { name: "Foreign digest" } });
+    await expect(digestSettings({ ...f.actor, organizationId: foreign.id }, {}, f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    const forged = await withTenant(prisma, foreign.id, (tx) => tx.outboxEvent.create({ data: { organizationId: foreign.id, type: digestEventType, payload: event.payload!, idempotencyKey: randomUUID() } }));
+    await deliverDigest(forged, { ...f.deps, provider }); expect(sent).toHaveLength(1);
+    const row = await withTenant(prisma, f.organization.id, (tx) => tx.notificationDelivery.findFirstOrThrow({ where: { channel: "digest" } }));
+    expect(row.payloadEncrypted).not.toContain(f.account.email!); expect(row.payloadEncrypted).not.toContain("PRIVATE");
+    const otherNotice = await withTenant(prisma, f.organization.id, (tx) => tx.notification.findFirstOrThrow({ where: { recipientId: f.other.id } }));
+    await expect(withTenant(prisma, f.organization.id, (tx) => tx.notification.update({ where: { id: otherNotice.id }, data: { digestDeliveryId: row.id } }))).rejects.toThrow();
+    const audit = await withTenant(prisma, f.organization.id, (tx) => tx.auditLog.findMany({ where: { action: { startsWith: "notification.digest." } } }));
+    expect(audit.map((row) => row.action)).toContain("notification.digest.accepted"); expect(JSON.stringify(audit)).not.toContain(f.account.email!);
+  });
+
+  it("retries digest delivery through the shared outbox with identical bytes and a stable key after a lost provider response", async () => {
+    const f = await digestFixture("ar"); await scheduleDigests(f.organization.id, f.deps);
+    const requests: Array<{ body: string; key: string | undefined }> = []; let first = true;
+    const transport: HttpTransport = (_url, input) => {
+      requests.push({ body: input.body!, key: input.headers?.["Idempotency-Key"] });
+      // The provider accepted the request, but the connection lost its response.
+      if (first) { first = false; return Promise.reject(new Error(`PRIVATE ${f.account.email}`)); }
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: "resend-replayed" }), text: () => Promise.resolve(""), arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) });
+    };
+    const env = { APP_URL: "https://os.example.test", RESEND_API_KEY: "test-only-private", EMAIL_FROM: "notifications@example.test" };
+    const deliveryClock = new Date(f.due);
+    const handlers = createInngestOutboxHandlers(env, undefined, new ResendEmailProvider(env, transport), { db: prisma, now: deliveryClock });
+    const options = { now: f.due, errorReporter: async () => {} };
+    expect((await dispatchOutboxBatch(prisma, f.organization.id, handlers, options)).failed).toBe(1);
+    expect((await f.history())[0]).toMatchObject({ status: "PENDING", attemptCount: 1 });
+    expect((await dispatchOutboxBatch(prisma, f.organization.id, handlers, options)).dispatched).toBe(0); expect(requests).toHaveLength(1);
+    deliveryClock.setTime(f.due.getTime() + 61000);
+    expect((await dispatchOutboxBatch(prisma, f.organization.id, handlers, { ...options, now: deliveryClock })).dispatched).toBe(1);
+    expect(requests).toHaveLength(2); expect(requests[1]).toEqual(requests[0]);
+    expect(requests[0].body).toContain('"locale","value":"ar"');
+    expect((await f.history())[0]).toMatchObject({ status: "ACCEPTED", attemptCount: 2 });
+    const stored = await f.event(); expect(stored.status).toBe("DISPATCHED"); expect(stored.lastError).toBeNull();
+    const exhausted = await digestFixture(); await scheduleDigests(exhausted.organization.id, exhausted.deps);
+    let calls = 0; const provider: EmailProvider = { send: () => { calls++; return Promise.reject(new Error("lost response")); } };
+    await expect(deliverDigest(await exhausted.event(), { ...exhausted.deps, provider })).rejects.toThrow("digest_delivery_retry");
+    await expect(deliverDigest(await exhausted.event(), { ...exhausted.deps, provider, now: new Date(exhausted.due.getTime() + 24 * 3600000) })).rejects.toThrow("digest_delivery_failed");
+    expect(calls).toBe(1); expect((await exhausted.history())[0]).toMatchObject({ status: "FAILED", errorCode: "idempotency_window_expired" });
+  });
+
+  it("suppresses queued or retrying digests after consent, language, scope, unread state or recipient changes", async () => {
+    for (const scenario of ["language", "off", "channel", "scope", "read", "address", "inactive"] as const) {
+      const f = await digestFixture(); await scheduleDigests(f.organization.id, f.deps); const event = await f.event(); let calls = 0;
+      const provider: EmailProvider = { send: () => { calls++; return Promise.reject(new Error("PRIVATE transport body")); } };
+      await expect(deliverDigest(event, { ...f.deps, provider })).rejects.toThrow("digest_delivery_retry");
+      if (scenario === "language" || scenario === "off") await saveDigestPreferences(f.actor, { ...f.settings, ...(scenario === "language" ? { language: "en" as const } : { frequency: "off" as const }) }, "change", { ...f.deps, now: f.due });
+      else if (scenario === "channel") { const preferences = await getNotificationPreferences(f.actor, f.deps); await saveNotificationPreferences(f.actor, { ...preferences, email: { security: true, enabled: false, account: false, operations: false } }, f.deps); }
+      else await withTenant(prisma, f.organization.id, async (tx) => {
+        if (scenario === "scope") await tx.roleAssignment.updateMany({ where: { userAccountId: f.account.id }, data: { archivedAt: new Date() } });
+        if (scenario === "read") await tx.notification.updateMany({ where: { recipientId: f.account.id, readAt: null }, data: { readAt: new Date() } });
+        if (scenario === "address") await tx.userAccount.update({ where: { id: f.account.id }, data: { email: "changed@example.test" } });
+        if (scenario === "inactive") await tx.userAccount.update({ where: { id: f.account.id }, data: { status: "DEACTIVATED" } });
+      });
+      await deliverDigest(event, { ...f.deps, provider, now: new Date(f.due.getTime() + 61000) }); expect(calls).toBe(1);
+      const row = await withTenant(prisma, f.organization.id, (tx) => tx.notificationDelivery.findFirstOrThrow({ where: { channel: "digest" } }));
+      expect(row.status).toBe("SUPPRESSED"); expect(row.attemptCount).toBe(1);
+    }
+  });
+
+  it("persists timezone and quiet hours, defers due digests and respects read changes before the first attempt", async () => {
+    const f = await digestFixture();
+    await saveDigestPreferences(f.actor, { ...f.settings, timezone: "Africa/Casablanca", time: "23:00", quietHours: { start: "22:00", end: "07:00" } }, "quiet", { db: prisma, now: new Date("2030-07-07T20:00Z") });
+    expect((await scheduleDigests(f.organization.id, { ...f.deps, now: new Date("2030-07-07T22:00Z") })).scheduled).toBe(0);
+    const due = new Date("2030-07-08T06:00Z"); expect((await scheduleDigests(f.organization.id, { ...f.deps, now: due })).scheduled).toBe(1);
+    await withTenant(prisma, f.organization.id, (tx) => tx.notification.updateMany({ where: { recipientId: f.account.id, kind: "reservation_created" }, data: { readAt: new Date() } }));
+    let calls = 0; const provider: EmailProvider = { send: (email) => { calls++; expect(email.text).toContain("1 notification"); return Promise.resolve({ id: "quiet-resend" }); } };
+    await deliverDigest(await f.event(), { ...f.deps, now: due, provider }); expect(calls).toBe(1);
+    // Stale channel-only clients cannot overwrite newly saved digest settings.
+    const beforeSave = await withTenant(prisma, f.organization.id, (tx) => tx.notificationPreference.findFirstOrThrow({ where: { userAccountId: f.account.id } }));
+    await saveNotificationPreferences(f.actor, { in_app: { enabled: false, account: false, operations: false, security: true }, email: { security: true, enabled: true, account: false, operations: true } }, f.deps);
+    const afterSave = await withTenant(prisma, f.organization.id, (tx) => tx.notificationPreference.findFirstOrThrow({ where: { userAccountId: f.account.id } }));
+    expect(afterSave.digestRevision).toBe(beforeSave.digestRevision); expect(afterSave.digestNextAt).toEqual(beforeSave.digestNextAt);
+    expect((await digestSettings(f.actor, {}, f.deps)).settings.timezone).toBe("Africa/Casablanca");
+    await expect(saveDigestPreferences(f.actor, { ...f.settings, timezone: "invalid" }, "invalid", f.deps)).rejects.toThrow();
+  });
+
+  it("bounds digest target queries as inbox volume grows and keeps the scheduled claim and request immutable", async () => {
+    const small = await digestFixture(); const large = await digestFixture();
+    await withTenant(prisma, large.organization.id, (tx) => tx.notification.createMany({ data: Array.from({ length: 30 }, () => ({ organizationId: large.organization.id, recipientId: large.account.id,
+      eventId: randomUUID(), kind: "task_assigned", targetId: large.task.id })) }));
+    const measured = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } }, log: [{ emit: "event", level: "query" }] });
+    const queries: string[] = []; measured.$on("query", (event) => { if (event.query.startsWith("SELECT")) queries.push(event.query); });
+    try {
+      await scheduleDigests(small.organization.id, { ...small.deps, db: measured }); const count = queries.length;
+      queries.length = 0; await scheduleDigests(large.organization.id, { ...large.deps, db: measured });
+      expect(queries.length).toBe(count); expect(count).toBeLessThan(35);
+    } finally { await measured.$disconnect(); }
+    const event = await large.event();
+    await deliverDigest(event, { ...large.deps, provider: { send: () => Promise.resolve({ id: "immutable-digest" }) } });
+    const rows = await withTenant(prisma, large.organization.id, async (tx) => ({
+      delivery: await tx.notificationDelivery.findFirstOrThrow({ where: { eventId: event.id } }),
+      notice: await tx.notification.findFirstOrThrow({ where: { digestDeliveryId: { not: null } } })
+    }));
+    for (const data of [{ payloadEncrypted: "replacement" }, { providerId: "replacement" }, { channel: "push" }, { attemptCount: 0 }, { scheduledAt: new Date() }]) {
+      await expect(withTenant(prisma, large.organization.id, (tx) => tx.notificationDelivery.update({ where: { id: rows.delivery.id }, data }))).rejects.toThrow();
+    }
+    await expect(withTenant(prisma, large.organization.id, (tx) => tx.notification.update({ where: { id: rows.notice.id }, data: { digestDeliveryId: null } }))).rejects.toThrow();
   });
 
   it("prepares scoped manual WhatsApp drafts with current contacts, routing, locale, minimized data and redacted audits", async () => {

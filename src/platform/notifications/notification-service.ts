@@ -14,7 +14,7 @@ import { notificationPreferencesSchema, type NotificationPreferences } from "./n
 import { notificationRoutingKey, notificationRoutingSaveSchema, routedNotificationKindSchema } from "./notification-routing";
 
 export type NotificationActor = { organizationId: string; accountId: string; sessionId?: string; authContext: AuthContext };
-type Deps = { db?: TenantTransactionRunner; requestId?: string };
+type Deps = { db?: TenantTransactionRunner; requestId?: string; now?: Date };
 export class NotificationAccessError extends Error {}
 
 export async function notificationActorFromSession(session: Session | null): Promise<NotificationActor | null> {
@@ -42,21 +42,27 @@ export async function getNotificationPreferences(actor: NotificationActor, deps:
   });
 }
 
-export async function saveNotificationPreferences(actor: NotificationActor, input: unknown, deps: Deps = {}): Promise<NotificationPreferences> {
+export async function saveNotificationPreferences(actor: NotificationActor, input: unknown, deps: Deps & { digestOnly?: boolean } = {}): Promise<NotificationPreferences> {
   assertInbox(actor, "edit");
-  const preferences = notificationPreferencesSchema.parse(input);
+  const submitted = notificationPreferencesSchema.parse(input);
   return withTenant(deps.db ?? prisma, actor.organizationId, async (tx) => {
     const repository = new NotificationRepository(tx, actor.organizationId);
     if (!await repository.activeRecipient(actor.accountId, true)) throw new NotificationAccessError();
     const before = await repository.preferences(actor.accountId);
-    await repository.savePreferences(actor.accountId, preferences);
+    const preferences = { ...(deps.digestOnly ? { ...before, digest: submitted.digest, email: submitted.digest?.frequency !== "off" ? { ...before.email, enabled: true, operations: true, account: before.email.account ?? false } : before.email } : submitted), ...(submitted.digest ? {} : before.digest ? { digest: before.digest } : {}) };
+    await repository.savePreferences(actor.accountId, preferences, deps.now);
     if (JSON.stringify(before) !== JSON.stringify(preferences)) await writeAuditEvent(tx, {
       organizationId: actor.organizationId, actorId: actor.accountId, action: "notification.preferences.update", resourceType: "notification", resourceId: actor.accountId,
-      before: { inApp: before.in_app, emailSecurity: before.email.security, emailSettings: before.email, push: before.push ?? null }, after: { inApp: preferences.in_app, emailSecurity: preferences.email.security, emailSettings: preferences.email, push: preferences.push ?? null },
+      before: { inApp: before.in_app, emailSecurity: before.email.security, emailSettings: before.email, push: before.push ?? null, digest: before.digest ?? null }, after: { inApp: preferences.in_app, emailSecurity: preferences.email.security, emailSettings: preferences.email, push: preferences.push ?? null, digest: preferences.digest ?? null },
       reason: null, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: new Date()
     });
     return preferences;
   });
+}
+
+export async function saveDigestPreferences(actor: NotificationActor, settings: NonNullable<NotificationPreferences["digest"]>, requestId?: string, deps: Deps = {}) {
+  const preferences = await saveNotificationPreferences(actor, { in_app: { enabled: true, account: true, operations: true, security: true }, email: { security: true }, digest: settings }, { ...deps, requestId, digestOnly: true });
+  return preferences.digest!;
 }
 
 export async function publishNotification(tx: TenantTransaction, organizationId: string, input: NotificationInput, key: string) {
