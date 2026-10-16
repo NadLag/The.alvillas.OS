@@ -247,6 +247,8 @@ export class ReservationRepository {
         status: "CONFIRMED",
         guestName: input.guestName,
         guestEmail: input.guestEmail,
+        guestPhone: input.guestPhone,
+        guestPreferredLocale: input.guestPreferredLocale,
         checkIn: dateToUtc(input.checkIn),
         checkOut: dateToUtc(input.checkOut),
         nights: nightsBetween(input.checkIn, input.checkOut),

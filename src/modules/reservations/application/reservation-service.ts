@@ -178,6 +178,10 @@ export async function createManualReservation(
       throw new ReservationNotFoundError("Property does not exist in this tenant");
     }
 
+    if (input.guestPhone && !authorize(ctx.authContext, "create", { type: "guest", organizationId: ctx.organizationId, propertyId: property.id })) {
+      throw new ReservationAuthorizationError();
+    }
+
     if (
       !authorize(ctx.authContext, "create", {
         type: "reservation",

@@ -1208,5 +1208,48 @@
       "APPROVED": "Approved",
       "REJECTED": "Rejected"
     }
+  },
+  "Whatsapp": {
+    "eyebrow": "Manual notification",
+    "title": "Prepare WhatsApp message",
+    "description": "Choose an authorized recipient and review the message before opening WhatsApp.",
+    "back": "Back to workspace",
+    "manual": "You open WhatsApp and send the message yourself. Preparing or opening a message does not confirm delivery.",
+    "recipient": "Recipient",
+    "language": "Message language",
+    "guestPhone": "Guest phone (optional)",
+    "phoneHint": "Use an international number including + and the country code.",
+    "prepare": "Generate preview",
+    "preparing": "Preparing message…",
+    "preview": "Message preview",
+    "ready": "Your message is ready to review.",
+    "open": "Open WhatsApp in a new tab",
+    "empty": "No recipients are available with your current access and property routing.",
+    "offline": "Reconnect to prepare a message. Your drafts are not saved on this device.",
+    "unavailable": "This recipient or record is unavailable. Reopen the record and try again.",
+    "missingPhone": "This recipient has no phone number. Update their contact record before continuing.",
+    "invalidPhone": "This recipient’s phone number is invalid. Update their contact record with a valid international number.",
+    "kinds": {
+      "guest": "Guest",
+      "owner": "Owner",
+      "operations": "Operations"
+    },
+    "languages": {
+      "en": "English",
+      "fr": "French",
+      "ar": "Arabic"
+    },
+    "templates": {
+      "reservation": {
+        "guest": "Hello, this is ALVILLAS about your reservation {reference}, from {checkIn} to {checkOut}. Please contact us if you need assistance.",
+        "owner": "Hello, ALVILLAS has a reservation update for {reference}, from {checkIn} to {checkOut}. Please contact your manager for details.",
+        "operations": "Hello, please review reservation {reference}, from {checkIn} to {checkOut}, in ALVILLAS OS."
+      },
+      "task": "Hello, please review your ALVILLAS task: {title}. Scheduled for {date}. Open ALVILLAS OS for the authorized details."
+    },
+    "editContact": "Update guest contact",
+    "contactLanguage": "Preferred guest language",
+    "saveContact": "Save guest contact",
+    "savedContact": "Guest contact saved."
   }
 }

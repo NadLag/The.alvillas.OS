@@ -8,6 +8,7 @@ import {
 } from "@/platform/config/rule-registry";
 import { localizedText } from "@/i18n/content";
 import { safeLocale } from "@/i18n/routing";
+import { optionalGuestPhoneSchema } from "@/platform/notifications/whatsapp";
 
 const requiredText = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) =>
@@ -55,6 +56,8 @@ export const manualReservationInputSchema = z
     propertyId: z.string().uuid(),
     guestName: requiredText(160),
     guestEmail: optionalEmail,
+    guestPhone: optionalGuestPhoneSchema,
+    guestPreferredLocale: z.enum(["en", "fr", "ar"]).optional(),
     source: reservationSourceSchema.default("MANUAL"),
     externalId: optionalText(160),
     checkIn: dateStringSchema,

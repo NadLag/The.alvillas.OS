@@ -18,6 +18,7 @@ import { ManualReservationForm } from "@/modules/reservations/ui/reservation-for
 import { auth } from "@/platform/auth/session";
 import { permissionKey } from "@/platform/authz/authorize";
 import { routing, type AppLocale } from "@/i18n/routing";
+import { whatsappComposerPath } from "@/platform/notifications/whatsapp-path";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,7 @@ export default async function ReservationsPage({
     canReconcileSettlements ? listAirbnbSettlementVariances(ctx) : Promise.resolve([])
   ]);
   const postedRevenueReservations = new Set(postedRevenueReservationIds);
+  const whatsapp = await getTranslations("Whatsapp");
   const settlementVarianceViews = settlementVariances.map((variance) => ({
     id: variance.id,
     settlementId: variance.settlementId,
@@ -144,6 +146,7 @@ export default async function ReservationsPage({
                       }}
                     />
                   ) : null}
+                  <Link className="secondary-button" data-testid="reservation-whatsapp" href={whatsappComposerPath(appLocale, { type: "reservation", id: reservation.id })}>{whatsapp("title")}</Link>
                 </div>
               ))}
             </div>

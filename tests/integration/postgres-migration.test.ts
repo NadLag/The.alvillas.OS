@@ -142,6 +142,7 @@ import webpush from "web-push";
 import { deliverPushChannel } from "@/platform/notifications/push-delivery-service";
 import { pushSettings, savePushSubscription, revokePushSubscription, pushRecord } from "@/platform/notifications/push-service";
 import { WebPushNotificationChannel } from "@/platform/providers/web-push";
+import { prepareWhatsapp, saveWhatsappGuestContact, whatsappPage, whatsappOptions, WhatsappPhoneError } from "@/platform/notifications/whatsapp-service";
 
 let prisma: PrismaClient;
 let adminPrisma: PrismaClient | undefined;
@@ -361,6 +362,100 @@ describe("PostgreSQL baseline", () => {
     if (ownsContainer && containerName) {
       execFileSync("docker", ["stop", containerName], { stdio: "ignore" });
     }
+  });
+
+  it("prepares scoped manual WhatsApp drafts with current contacts, routing, locale, minimized data and redacted audits", async () => {
+    const org = await prisma.organization.create({ data: { name: "Manual WhatsApp" } });
+    const foreign = await prisma.organization.create({ data: { name: "Other WhatsApp tenant" } });
+    const f = await withTenant(prisma, org.id, async (tx) => {
+      const person = await tx.person.create({ data: { organizationId: org.id, displayName: "Operator", phone: "+212612345678", preferredLocale: "ar" } });
+      const account = await tx.userAccount.create({ data: { organizationId: org.id, personId: person.id } });
+      const property = await tx.property.create({ data: { organizationId: org.id, name: "Private property", addressLine1: "PRIVATE ADDRESS", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      const otherProperty = await tx.property.create({ data: { organizationId: org.id, name: "Other property", addressLine1: "Other", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      const reservation = await tx.reservation.create({ data: { organizationId: org.id, propertyId: property.id, reference: "RES-WA-1", source: "MANUAL", guestName: "PRIVATE GUEST", guestEmail: "private@example.test", guestPhone: "+212612345678", guestPreferredLocale: "fr", checkIn: new Date("2027-03-01Z"), checkOut: new Date("2027-03-05Z"), nights: 4, notes: "PRIVATE NOTES", idempotencyKey: randomUUID() } });
+      const owner = await tx.owner.create({ data: { organizationId: org.id, displayName: "Owner", phone: "+33612345678", preferredLocale: "en" } });
+      await tx.propertyOwner.create({ data: { organizationId: org.id, propertyId: property.id, ownerId: owner.id } });
+      const task = await tx.operationTask.create({ data: { organizationId: org.id, propertyId: property.id, reservationId: reservation.id, assignedToUserAccountId: account.id, assignedToPersonId: person.id, titleTranslations: { en: "Inspection & review", fr: "Inspection et contrôle", ar: "فحص ومراجعة" }, type: "ARRIVAL_PREPARATION", dueDate: new Date("2027-03-01Z"), idempotencyKey: randomUUID() } });
+      const role = await tx.role.create({ data: { organizationId: org.id, key: "whatsapp-operator", name: "Operator" } });
+      for (const key of ["task:view", "reservation:view"]) {
+        const [resource, action] = key.split(":"); const permission = await tx.permission.create({ data: { organizationId: org.id, resource, action, key } });
+        await tx.rolePermission.create({ data: { organizationId: org.id, roleId: role.id, permissionId: permission.id } });
+      }
+      await tx.roleAssignment.create({ data: { organizationId: org.id, userAccountId: account.id, personId: person.id, roleId: role.id, scopeType: "property", scopeId: property.id } });
+      await new ConfigRuleRepository(tx, org.id).createVersion({ key: "notification.routing.reservation_created", scopeType: "property", scopeId: property.id, effectiveFrom: new Date(0), value: { roles: [], people: [person.id], assigned: false, channels: ["in_app"] }, reason: "Route property notifications" });
+      await publishNotification(tx, org.id, { kind: "task_assigned", recipientId: account.id, targetId: task.id }, "whatsapp-task-notice");
+      return { person, account, property, otherProperty, reservation, owner, task, role };
+    });
+    const permissions = new Set(["reservation:view", "reservation:edit", "reservation:assign", "task:view", "task:assign", "guest:view", "guest:edit", "owner:view"]);
+    const actor = { organizationId: org.id, accountId: f.account.id, authContext: ownNotificationContext({ organizationId: org.id, userAccountId: f.account.id, permissions, scopes: [{ organizationId: org.id, scopeType: "property" as const, scopeId: f.property.id }] }, f.account.id) };
+    const deps = { db: prisma as TenantTransactionRunner, requestId: "whatsapp-scope-test" };
+    const source = { type: "reservation", id: f.reservation.id };
+    const input = { source, recipient: { kind: "guest", id: f.reservation.id } };
+    const options = await whatsappOptions(actor, source, deps);
+    expect(options.map((option) => option.kind).sort()).toEqual(["guest", "operations", "owner"]);
+    expect(JSON.stringify(options)).not.toContain("+212");
+    const measured = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } }, log: [{ emit: "event", level: "query" }] });
+    const queries: string[] = []; measured.$on("query", (event) => { if (event.query.startsWith("SELECT")) queries.push(event.query); });
+    try {
+      await whatsappOptions(actor, source, { db: measured }); const firstCount = queries.length;
+      await withTenant(prisma, org.id, async (tx) => {
+        const secondOwner = await tx.owner.create({ data: { organizationId: org.id, displayName: "Second owner" } });
+        await tx.propertyOwner.updateMany({ where: { propertyId: f.property.id }, data: { shareBps: 5000 } });
+        await tx.propertyOwner.create({ data: { organizationId: org.id, propertyId: f.property.id, ownerId: secondOwner.id, shareBps: 5000, isPrimary: false } });
+      });
+      queries.length = 0; await whatsappOptions(actor, source, { db: measured });
+      expect(queries.length).toBe(firstCount); expect(firstCount).toBeLessThan(24);
+    } finally { await measured.$disconnect(); }
+    const french = await prepareWhatsapp(actor, input, deps);
+    expect(french.locale).toBe("fr"); expect(french.message).toContain("Bonjour"); expect(french.message).toContain("1 mars 2027");
+    for (const locale of ["en", "fr", "ar"] as const) {
+      const draft = await prepareWhatsapp(actor, { ...input, locale }, deps);
+      expect(new URL(draft.url).searchParams.get("text")).toBe(draft.message);
+      expect(draft.message).not.toMatch(/PRIVATE|private@example|612345678/u);
+    }
+    expect((await prepareWhatsapp(actor, { source, recipient: { kind: "owner", id: f.owner.id } }, deps)).phone).toBe("+33612345678");
+    expect((await prepareWhatsapp(actor, { source, recipient: { kind: "operations", id: f.account.id } }, deps)).locale).toBe("ar");
+    const notice = await withTenant(prisma, org.id, (tx) => tx.notification.findFirstOrThrow({ where: { targetId: f.task.id } }));
+    const noticeSource = { type: "notification", id: notice.id };
+    expect((await prepareWhatsapp(actor, { source: noticeSource, recipient: { kind: "operations", id: f.account.id } }, deps)).message).toContain("فحص ومراجعة");
+    const denied = { ...actor, authContext: ownNotificationContext({ ...actor.authContext, assignments: undefined, permissions: new Set(["reservation:view", "task:view"]), scopes: [{ organizationId: org.id, scopeType: "property", scopeId: f.property.id }] }, f.account.id) };
+    expect(await whatsappOptions(denied, source, deps)).toEqual([]);
+    expect((await whatsappPage(denied, source, deps)).contact).toBeNull();
+    await expect(saveWhatsappGuestContact(denied, { source, phone: "+447911123456", locale: "en" }, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await expect(prepareWhatsapp(denied, input, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    const mixedScope = { ...actor, authContext: { ...actor.authContext, assignments: [
+      { permissions: new Set(["reservation:view"]), scope: { organizationId: org.id, scopeType: "property" as const, scopeId: f.property.id } },
+      { permissions: new Set(["guest:view"]), scope: { organizationId: org.id, scopeType: "property" as const, scopeId: f.otherProperty.id } }
+    ] } };
+    expect(await whatsappOptions(mixedScope, source, deps)).toEqual([]);
+    const wrongScope = { ...actor, authContext: { ...actor.authContext, assignments: undefined, scopes: [{ organizationId: org.id, scopeType: "property" as const, scopeId: f.otherProperty.id }] } };
+    await expect(whatsappOptions(wrongScope, source, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await expect(prepareWhatsapp({ ...actor, organizationId: foreign.id, authContext: { ...actor.authContext, organizationId: foreign.id } }, input, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await expect(prepareWhatsapp(actor, { ...input, recipient: { kind: "guest", id: randomUUID() } }, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    for (const [phone, code] of [[null, "missingPhone"], ["not-a-number", "invalidPhone"]] as const) {
+      await withTenant(prisma, org.id, (tx) => tx.reservation.update({ where: { id: f.reservation.id }, data: { guestPhone: phone } }));
+      await expect(prepareWhatsapp(actor, input, deps)).rejects.toMatchObject({ code });
+    }
+    expect(new WhatsappPhoneError("invalidPhone").code).toBe("invalidPhone");
+    await saveWhatsappGuestContact(actor, { source, phone: "+447911123456", locale: "en" }, deps);
+    const connection = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } } });
+    try { expect((await whatsappPage(actor, source, { db: connection })).contact).toEqual({ phone: "+447911123456", locale: "en" }); } finally { await connection.$disconnect(); }
+    await expect(prepareWhatsapp(actor, input, { ...deps, fingerprint: french.fingerprint }, "opened")).rejects.toBeInstanceOf(NotificationAccessError);
+    const updated = await prepareWhatsapp(actor, input, deps);
+    expect((await prepareWhatsapp(actor, input, { ...deps, fingerprint: updated.fingerprint }, "opened")).phone).toBe("+447911123456");
+    await withTenant(prisma, org.id, async (tx) => {
+      await tx.propertyOwner.updateMany({ where: { propertyId: f.property.id, ownerId: f.owner.id }, data: { archivedAt: new Date() } });
+      await tx.propertyOwner.updateMany({ where: { propertyId: f.property.id, ownerId: { not: f.owner.id } }, data: { shareBps: 10000, isPrimary: true } });
+    });
+    await expect(prepareWhatsapp(actor, { source, recipient: { kind: "owner", id: f.owner.id } }, deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    await withTenant(prisma, org.id, (tx) => tx.roleAssignment.updateMany({ where: { userAccountId: f.account.id }, data: { archivedAt: new Date() } }));
+    expect((await whatsappOptions(actor, source, deps)).map((option) => option.kind)).not.toContain("operations");
+    const audits = await withTenant(prisma, org.id, (tx) => tx.auditLog.findMany({ where: { action: { startsWith: "notification.whatsapp." } } }));
+    expect(audits.filter((audit) => audit.action === "notification.whatsapp.opened")).toHaveLength(1);
+    expect(JSON.stringify(audits)).not.toMatch(/PRIVATE|612345678|7911123456|wa\.me|Bonjour/u);
+    const contactAudit = await withTenant(prisma, org.id, (tx) => tx.auditLog.findFirstOrThrow({ where: { action: "reservation.guest_contact.updated" } }));
+    expect(JSON.stringify(contactAudit)).not.toContain("7911123456");
+    await expect(withTenant(prisma, org.id, (tx) => tx.auditLog.update({ where: { id: audits[0].id }, data: { action: "changed" } }))).rejects.toThrow();
   });
 
   it("persists encrypted browser subscriptions with own-session authorization, tenant FKs, audited revocation and mandatory security history", async () => {

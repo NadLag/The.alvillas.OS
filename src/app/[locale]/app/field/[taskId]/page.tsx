@@ -12,6 +12,7 @@ import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-ta
 import { FieldTaskCompletionForm } from "@/modules/reservations/ui/reservation-forms";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
+import { whatsappComposerPath } from "@/platform/notifications/whatsapp-path";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,7 @@ export default async function FieldTaskPage({
   }
 
   const t = await getTranslations("Field");
+  const whatsapp = await getTranslations("Whatsapp");
   let task;
 
   try {
@@ -94,6 +96,7 @@ export default async function FieldTaskPage({
         userId={ctx.actorId}
         taskId={task.id}
       />
+      <Link className="secondary-button whatsapp-entry" data-testid="task-whatsapp" href={whatsappComposerPath(appLocale, { type: "task", id: task.id })}>{whatsapp("title")}</Link>
     </FieldShell>
   );
 }

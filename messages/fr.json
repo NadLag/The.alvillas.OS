@@ -1208,5 +1208,48 @@
       "APPROVED": "Approuvée",
       "REJECTED": "Refusée"
     }
+  },
+  "Whatsapp": {
+    "eyebrow": "Notification manuelle",
+    "title": "Préparer un message WhatsApp",
+    "description": "Choisissez un destinataire autorisé et vérifiez le message avant d’ouvrir WhatsApp.",
+    "back": "Retour à l’espace de travail",
+    "manual": "Vous ouvrez WhatsApp et envoyez vous-même le message. La préparation ou l’ouverture ne confirme pas sa livraison.",
+    "recipient": "Destinataire",
+    "language": "Langue du message",
+    "guestPhone": "Téléphone du voyageur (facultatif)",
+    "phoneHint": "Utilisez un numéro international avec + et l’indicatif du pays.",
+    "prepare": "Générer l’aperçu",
+    "preparing": "Préparation du message…",
+    "preview": "Aperçu du message",
+    "ready": "Votre message est prêt à être vérifié.",
+    "open": "Ouvrir WhatsApp dans un nouvel onglet",
+    "empty": "Aucun destinataire disponible selon vos accès et le routage de la propriété.",
+    "offline": "Reconnectez-vous pour préparer un message. Les brouillons ne sont pas enregistrés sur cet appareil.",
+    "unavailable": "Ce destinataire ou ce dossier n’est plus accessible. Rouvrez le dossier et réessayez.",
+    "missingPhone": "Ce destinataire n’a pas de numéro de téléphone. Mettez à jour sa fiche avant de continuer.",
+    "invalidPhone": "Le numéro de ce destinataire est invalide. Renseignez un numéro international valide dans sa fiche.",
+    "kinds": {
+      "guest": "Voyageur",
+      "owner": "Propriétaire",
+      "operations": "Opérations"
+    },
+    "languages": {
+      "en": "Anglais",
+      "fr": "Français",
+      "ar": "Arabe"
+    },
+    "templates": {
+      "reservation": {
+        "guest": "Bonjour, ALVILLAS vous contacte au sujet de votre réservation {reference}, du {checkIn} au {checkOut}. Contactez-nous si vous avez besoin d’aide.",
+        "owner": "Bonjour, ALVILLAS a une information concernant la réservation {reference}, du {checkIn} au {checkOut}. Contactez votre gestionnaire pour les détails.",
+        "operations": "Bonjour, veuillez consulter la réservation {reference}, du {checkIn} au {checkOut}, dans ALVILLAS OS."
+      },
+      "task": "Bonjour, veuillez consulter votre tâche ALVILLAS : {title}. Prévue le {date}. Ouvrez ALVILLAS OS pour les détails autorisés."
+    },
+    "editContact": "Modifier le contact du voyageur",
+    "contactLanguage": "Langue préférée du voyageur",
+    "saveContact": "Enregistrer le contact",
+    "savedContact": "Contact du voyageur enregistré."
   }
 }

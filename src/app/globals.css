@@ -2223,6 +2223,13 @@ textarea:disabled {
 .notification-actions button { min-block-size: 48px; }
 .notification-item[data-read='true'] .notification-title { font-weight: 400; }
 
+.whatsapp-composer { max-inline-size: 720px; display: grid; gap: var(--space-5); }
+.whatsapp-composer select, .whatsapp-composer textarea { inline-size: 100%; min-inline-size: 0; }
+.whatsapp-entry, .whatsapp-composer button, .whatsapp-composer select { min-block-size: 48px; }
+.whatsapp-composer summary { min-block-size: 48px; padding-block: var(--space-3); cursor: pointer; }
+.whatsapp-preview { display: grid; gap: var(--space-4); overflow-wrap: anywhere; }
+.whatsapp-preview textarea { resize: vertical; min-block-size: 160px; }
+
 .notification-settings, .notification-routing-settings { max-inline-size: 800px; }
 .notification-routing-settings { margin-block-start: var(--space-8); padding-block-start: var(--space-6); border-block-start: 1px solid var(--border-subtle); }
 .notification-policy { padding: var(--space-5); background: var(--surface-muted); border-radius: var(--radius-md); }

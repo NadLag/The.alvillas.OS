@@ -7,6 +7,7 @@ import { listOperationTasks } from "@/modules/reservations/application/reservati
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
+import { whatsappComposerPath } from "@/platform/notifications/whatsapp-path";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export default async function OperationsPage({
   }
 
   const [t, tasks] = await Promise.all([getTranslations("Operations"), listOperationTasks(ctx)]);
+  const whatsapp = await getTranslations("Whatsapp");
 
   return (
     <ManagerShell className="resource-page" testId="operations-page">
@@ -77,6 +79,7 @@ export default async function OperationsPage({
                     dueDate: task.dueDate
                   })}
                 </span>
+                <Link className="secondary-button" data-testid="task-whatsapp" href={whatsappComposerPath(appLocale, { type: "task", id: task.id })}>{whatsapp("title")}</Link>
               </div>
             ))}
           </div>

@@ -97,12 +97,23 @@ export class NotificationRepository {
     }).map((candidate) => candidate.id);
   }
 
+  async manualRecipients(kind: RoutedNotificationKind, resource: Resource) {
+    const routing = await this.routing(kind, resource.propertyId ?? null);
+    const assignedId = routing.assigned ? resource.assignedUserAccountId : null;
+    const candidates = await this.candidates(routing, assignedId);
+    return candidates.filter((candidate) => {
+      const selected = candidate.id === assignedId || routing.people.includes(candidate.personId);
+      const assignments = selected ? candidate.roleAssignments : candidate.roleAssignments.filter((assignment) => routing.roles.includes(assignment.role.id));
+      return !securityEnrollment(candidate).setupRequired && authorize(contextForRoleAssignments(this.organizationId, candidate.id, assignments), "view", resource);
+    });
+  }
+
   private candidates(routing: NotificationRouting, assignedId?: string | null, recipientIds?: string[]) {
     const now = new Date();
     return this.tx.userAccount.findMany({ where: { organizationId: this.organizationId, status: "ACTIVE", person: { archivedAt: null }, OR: [
       ...(assignedId ? [{ id: assignedId }] : []), ...(recipientIds ? [{ id: { in: recipientIds } }] : []), { personId: { in: routing.people } },
       { roleAssignments: { some: { organizationId: this.organizationId, archivedAt: null, roleId: { in: routing.roles }, role: { archivedAt: null }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] } } }
-    ] }, include: { person: { select: { preferredLocale: true } }, authCredentials: { where: { revokedAt: null }, select: { type: true, expiresAt: true, revokedAt: true } }, notificationPreference: true, roleAssignments: { where: {
+    ] }, include: { person: { select: { preferredLocale: true, displayName: true, phone: true } }, authCredentials: { where: { revokedAt: null }, select: { type: true, expiresAt: true, revokedAt: true } }, notificationPreference: true, roleAssignments: { where: {
       organizationId: this.organizationId, archivedAt: null, role: { archivedAt: null }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }]
     }, include: { role: { include: { rolePermissions: { include: { permission: true } } } } } } } });
   }
