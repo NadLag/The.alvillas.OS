@@ -426,7 +426,7 @@ describe("PostgreSQL baseline", () => {
     const second = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } } });
     try { expect((await digestSettings(f.actor, {}, { db: second })).settings).toEqual(f.settings); } finally { await second.$disconnect(); }
     const accepted = (await f.history())[0];
-    const receipt = { type: "email.delivered", created_at: f.due.toISOString(), data: { email_id: "resend-digest-accepted", tags: { template: "notification.digest", organization_id: f.organization.id, delivery_id: accepted.id } } };
+    const receipt = { type: "email.delivered", created_at: f.due.toISOString(), data: { email_id: "resend-digest-accepted", tags: { template: "notification_digest", organization_id: f.organization.id, delivery_id: accepted.id } } };
     expect(await recordDigestReceipt(receipt, f.deps)).toBe(true);
     expect(await recordDigestReceipt(receipt, f.deps)).toBe(true);
     expect(await recordDigestReceipt({ ...receipt, data: { ...receipt.data, tags: { ...receipt.data.tags, organization_id: crypto.randomUUID() } } }, f.deps)).toBe(false);

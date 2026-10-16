@@ -87,6 +87,9 @@ export class ResendEmailProvider implements EmailProvider {
   }
 
   async send(input: Parameters<EmailProvider["send"]>[0]): Promise<{ id: string }> {
+    // Resend tag values permit ASCII letters, numbers, underscores and dashes.
+    const templateTag = input.template.replaceAll(".", "_");
+    if (!/^[A-Za-z0-9_-]{1,256}$/u.test(templateTag)) throw new Error("Invalid email template tag");
     const content = { to: input.to, subject: input.subject, html: input.html, text: input.text, locale: input.locale, template: input.template };
     const idempotencyKey = input.idempotencyKey ?? `email:${createHash("sha256").update(JSON.stringify(content)).digest("hex")}`;
     if (!/^[\x21-\x7e]{1,256}$/u.test(idempotencyKey)) throw new Error("Invalid email idempotency key");
@@ -105,7 +108,7 @@ export class ResendEmailProvider implements EmailProvider {
         html: input.html,
         text: input.text,
         tags: [
-          { name: "template", value: input.template },
+          { name: "template", value: templateTag },
           { name: "locale", value: input.locale },
           ...(input.deliveryReference ? [{ name: "organization_id", value: input.deliveryReference.organizationId }, { name: "delivery_id", value: input.deliveryReference.deliveryId }] : [])
         ]

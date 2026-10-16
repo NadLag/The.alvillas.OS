@@ -7,7 +7,7 @@ import { recordDigestReceipt } from "@/platform/notifications/digest-service";
 vi.mock("@/platform/notifications/digest-service", () => ({ recordDigestReceipt: vi.fn(() => Promise.resolve(true)) }));
 const secret = `whsec_${Buffer.alloc(32, 7).toString("base64")}`;
 const receipt = { type: "email.delivered", created_at: "2026-10-16T12:00:00Z", data: { email_id: crypto.randomUUID(), tags: {
-  template: "notification.digest", organization_id: crypto.randomUUID(), delivery_id: crypto.randomUUID()
+  template: "notification_digest", organization_id: crypto.randomUUID(), delivery_id: crypto.randomUUID()
 }, to: ["private-recipient@example.test"], subject: "PRIVATE SUBJECT" } };
 function signed(body: string, at = new Date()) {
   return new Headers({ "svix-id": "msg_digest_receipt", "svix-timestamp": String(Math.floor(at.getTime() / 1000)), "svix-signature": new Webhook(secret).sign("msg_digest_receipt", at, body) });
@@ -23,7 +23,7 @@ describe("signed Resend digest receipts", () => {
     expect(() => verifyDigestReceipt(body, new Headers(), secret)).toThrow();
   });
   it("ignores unrelated templates and rejects invalid tenant references without returning payload details", () => {
-    for (const tags of [{ ...receipt.data.tags, template: "identity.invitation" }, { ...receipt.data.tags, organization_id: "wrong" }]) {
+    for (const tags of [{ ...receipt.data.tags, template: "identity_invitation" }, { ...receipt.data.tags, organization_id: "wrong" }]) {
       const body = JSON.stringify({ ...receipt, data: { ...receipt.data, tags } }); expect(verifyDigestReceipt(body, signed(body), secret)).toBeNull();
     }
   });

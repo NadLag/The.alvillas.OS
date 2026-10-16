@@ -57,7 +57,7 @@ describe("localized identity email delivery", () => {
     expect(keys[0]).not.toContain("person@example.test");
     expect(inngestTransport).not.toHaveBeenCalled();
     const body: unknown = JSON.parse(emailTransport.mock.calls[0][1].body!);
-    expect(body).toMatchObject({ to: ["person@example.test"], tags: [{ name: "template", value: "identity.invitation" }, { name: "locale", value: "en" }] });
+    expect(body).toMatchObject({ to: ["person@example.test"], tags: [{ name: "template", value: "identity_invitation" }, { name: "locale", value: "en" }] });
   });
 
   it("keeps manual phone delivery in the existing event path", async () => {

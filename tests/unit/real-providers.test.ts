@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { digestReceiptSchema } from "@/platform/email/digest-receipt";
 import {
   DocumensoSignatureProvider,
   HttpPdfRenderer,
@@ -55,6 +56,25 @@ describe("real provider adapters", () => {
     expect(transport.mock.calls[0]?.[0]).toBe("https://api.resend.com/emails");
     expect(request?.method).toBe("POST");
     expect(request?.headers?.Authorization).toBe("Bearer re_test");
+    const sentBody = JSON.parse(request?.body ?? "{}") as { tags: Array<{ name: string; value: string }> };
+    expect(sentBody.tags).toContainEqual({ name: "template", value: "owner_invite" });
+  });
+
+  it("uses Resend-compatible tags that round-trip through the digest receipt contract", async () => {
+    const transport = vi.fn<HttpTransport>(() => Promise.resolve(response({ ok: true, status: 200, body: { id: "digest_1" } })));
+    const provider = new ResendEmailProvider({ RESEND_API_KEY: "re_test", EMAIL_FROM: "ops@example.test" }, transport);
+    const reference = { organizationId: crypto.randomUUID(), deliveryId: crypto.randomUUID() };
+    await provider.send({ to: "owner@example.test", subject: "Digest", html: "<p>Digest</p>", locale: "fr", template: "notification.digest", deliveryReference: reference });
+    const body = JSON.parse(transport.mock.calls[0][1].body ?? "{}") as { tags: Array<{ name: string; value: string }> };
+    expect(body.tags.every((tag) => /^[A-Za-z0-9_-]{1,256}$/u.test(tag.name) && /^[A-Za-z0-9_-]{1,256}$/u.test(tag.value))).toBe(true);
+    expect(digestReceiptSchema.parse({ type: "email.delivered", created_at: new Date().toISOString(), data: { email_id: "digest_1", tags: Object.fromEntries(body.tags.map((tag) => [tag.name, tag.value])) } }).data.tags.delivery_id).toBe(reference.deliveryId);
+  });
+
+  it("rejects invalid template tags before contacting Resend", async () => {
+    const transport = vi.fn<HttpTransport>();
+    const provider = new ResendEmailProvider({ RESEND_API_KEY: "re_test", EMAIL_FROM: "ops@example.test" }, transport);
+    await expect(provider.send({ to: "owner@example.test", subject: "Digest", html: "<p>Digest</p>", locale: "fr", template: "invalid template" })).rejects.toThrow("Invalid email template tag");
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it("creates and distributes a Documenso signature request", async () => {
