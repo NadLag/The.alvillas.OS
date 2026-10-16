@@ -82,6 +82,8 @@ export async function createManualReservationAction(
     propertyId: formValue(formData, "propertyId"),
     guestName: formValue(formData, "guestName"),
     guestEmail: formValue(formData, "guestEmail"),
+    guestPhone: formValue(formData, "guestPhone"),
+    guestPreferredLocale: formValue(formData, "guestPreferredLocale"),
     source: formValue(formData, "source") ?? "MANUAL",
     externalId: formValue(formData, "externalId"),
     checkIn: formValue(formData, "checkIn"),

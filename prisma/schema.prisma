@@ -699,6 +699,8 @@ model Reservation {
   status              String                      @default("CONFIRMED")
   guestName           String                      @map("guest_name")
   guestEmail          String?                     @map("guest_email")
+  guestPhone          String?                     @map("guest_phone")
+  guestPreferredLocale String                     @default("fr") @map("guest_preferred_locale") @db.Char(2)
   checkIn             DateTime                    @map("check_in") @db.Date
   checkOut            DateTime                    @map("check_out") @db.Date
   nights              Int

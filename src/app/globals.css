@@ -820,6 +820,15 @@ textarea:disabled {
     box-shadow var(--motion-duration-base) var(--motion-ease-standard);
 }
 
+.task-row {
+  flex-wrap: wrap;
+}
+
+.task-row > span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
 .data-row {
   display: flex;
   align-items: center;
@@ -893,11 +902,14 @@ textarea:disabled {
 }
 
 .reservation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
 }
 
 .reservation-row-main {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-7);
@@ -905,9 +917,14 @@ textarea:disabled {
   min-width: 0;
 }
 
+.reservation-row-main > span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
 .reservation-revenue-form {
   display: grid;
-  grid-template-columns: minmax(96px, 1fr) 74px minmax(140px, 1.2fr) auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
   align-items: end;
   gap: var(--space-4);
   flex: 0 1 560px;
@@ -2170,6 +2187,11 @@ textarea:disabled {
     display: grid;
   }
 
+  .task-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .reservation-row-main {
     display: grid;
   }
@@ -2221,7 +2243,16 @@ textarea:disabled {
 .notification-state { display: inline-block; margin-inline-start: 12px; }
 .notification-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 12px; }
 .notification-actions button { min-block-size: 48px; }
+.notification-actions > * { min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }
 .notification-item[data-read='true'] .notification-title { font-weight: 400; }
+
+.whatsapp-composer { max-inline-size: 720px; display: grid; gap: var(--space-5); }
+.whatsapp-composer select, .whatsapp-composer textarea { inline-size: 100%; min-inline-size: 0; }
+.whatsapp-entry, .whatsapp-composer button, .whatsapp-composer select { min-block-size: 48px; }
+.whatsapp-prepare-button { transition-property: border-color, box-shadow, transform; }
+.whatsapp-composer summary { min-block-size: 48px; padding-block: var(--space-3); cursor: pointer; }
+.whatsapp-preview { display: grid; gap: var(--space-4); overflow-wrap: anywhere; }
+.whatsapp-preview textarea { resize: vertical; min-block-size: 160px; }
 
 .notification-settings, .notification-routing-settings { max-inline-size: 800px; }
 .notification-routing-settings { margin-block-start: var(--space-8); padding-block-start: var(--space-6); border-block-start: 1px solid var(--border-subtle); }

@@ -10,10 +10,12 @@ import { EmptyState, SkeletonBlock } from "@/design-system/shells";
 import { notificationOpenAction, notificationPageAction, notificationReadAction } from "./notification-actions";
 import type { NotificationPage } from "./notification";
 import { usePushLifecycle } from "./push-lifecycle";
+import { whatsappComposerPath } from "./whatsapp-path";
 
 export function NotificationCenter() {
   usePushLifecycle();
   const t = useTranslations("Notifications");
+  const whatsapp = useTranslations("Whatsapp");
   const locale = useLocale();
   const router = useRouter();
   const pathname = usePathname();
@@ -104,6 +106,7 @@ export function NotificationCenter() {
             {!item.available ? <p className="muted">{t("unavailable")}</p> : null}
             <div className="notification-actions">
               {item.available ? <button type="button" className="secondary-button" disabled={pending || offline} onClick={() => act(item.id, true)}>{t("open")}</button> : null}
+              {item.available && ["reservation_created", "task_assigned", "task_completed"].includes(item.kind) ? <Link className="secondary-button" data-testid="notification-whatsapp" href={whatsappComposerPath(locale, { type: "notification", id: item.id })} onClick={() => setDialogOpen(false)}>{whatsapp("title")}</Link> : null}
               {!item.readAt ? <button type="button" className="secondary-button" disabled={pending || offline} onClick={() => act(item.id, false)}>{t("markRead")}</button> : null}
             </div>
           </li>)}

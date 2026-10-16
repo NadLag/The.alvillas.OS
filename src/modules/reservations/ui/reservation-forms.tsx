@@ -2,6 +2,8 @@
 
 import { useActionState, useEffect, useMemo, useState, type FormEvent } from "react";
 import { z } from "zod";
+import { useTranslations } from "next-intl";
+import { optionalGuestPhoneSchema } from "@/platform/notifications/whatsapp";
 import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import type {
   FieldTaskFormState,
@@ -426,6 +428,7 @@ export function ManualReservationForm({
   properties: PropertyOption[];
   idempotencyKey: string;
 }) {
+  const whatsapp = useTranslations("Whatsapp");
   const schema = useMemo(
     () =>
       z.object({
@@ -435,6 +438,8 @@ export function ManualReservationForm({
         childCount: z.coerce.number().min(0, labels.validation),
         externalId: z.string().optional(),
         guestEmail: z.string().trim().email(labels.validation).or(z.literal("")),
+        guestPhone: optionalGuestPhoneSchema,
+        guestPreferredLocale: z.enum(["en", "fr", "ar"]),
         guestName: z.string().trim().min(1, labels.validation),
         notes: z.string().optional(),
         propertyId: z.string().trim().min(1, labels.validation),
@@ -450,6 +455,8 @@ export function ManualReservationForm({
       childCount: 0,
       externalId: "",
       guestEmail: "",
+      guestPhone: "",
+      guestPreferredLocale: "fr",
       guestName: "",
       notes: "",
       source: "MANUAL"
@@ -504,6 +511,17 @@ export function ManualReservationForm({
         <ErrorText testId="reservation-guest-email-error">
           {firstClientError(form.formState.errors.guestEmail) ?? fieldError(state, "guestEmail")}
         </ErrorText>
+      </label>
+      <label className="field">
+        <span>{whatsapp("guestPhone")}</span>
+        <input type="tel" autoComplete="tel" data-testid="reservation-guest-phone" aria-describedby="guest-phone-hint" {...form.register("guestPhone")} />
+        <small id="guest-phone-hint">{whatsapp("phoneHint")}</small>
+        {form.formState.errors.guestPhone || fieldError(state, "guestPhone") ? <span role="alert">{labels.validation}</span> : null}
+      </label>
+      <label className="field"><span>{whatsapp("language")}</span>
+        <select data-testid="reservation-guest-locale" {...form.register("guestPreferredLocale")}>
+          {(["en", "fr", "ar"] as const).map((language) => <option key={language} value={language}>{whatsapp(`languages.${language}`)}</option>)}
+        </select>
       </label>
       <div className="form-grid two">
         <label className="field">
