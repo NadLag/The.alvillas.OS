@@ -60,6 +60,7 @@ test.describe("event notification routing", () => {
       await page.getByTestId("reservation-check-in").fill("2027-11-10"); await page.getByTestId("reservation-check-out").fill("2027-11-14");
       await page.getByTestId("reservation-adults").fill("2"); await page.getByTestId("reservation-children").fill("0");
       await page.getByTestId("reservation-submit").click(); await expect(page).toHaveURL(/\/en\/app\/operations/u);
+      expect(await page.evaluate((width) => document.documentElement.scrollWidth <= width, page.viewportSize()!.width)).toBe(true);
       await page.getByTestId("notification-bell").click();
       const notice = page.getByTestId("notification-item").filter({ hasText: "A reservation was created." });
       await expect(notice).toHaveCount(1);

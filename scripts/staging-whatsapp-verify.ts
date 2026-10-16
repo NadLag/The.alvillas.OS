@@ -10,6 +10,7 @@ const reservationId = process.env.STAGING_WHATSAPP_RESERVATION_ID;
 if (!expectedSha || !stateFile || (!taskId && !reservationId)) throw new Error("Existing staging authentication, expected SHA and a scoped record are required");
 const browser = await chromium.launch();
 const context = await browser.newContext({ baseURL: origin, storageState: stateFile });
+context.setDefaultTimeout(30000);
 let step = "version";
 let restoreContact: (() => Promise<void>) | undefined;
 let contactRestored = true;
@@ -60,7 +61,7 @@ try {
       await page.getByTestId("whatsapp-prepare").click();
       await expect(page.getByTestId("whatsapp-message")).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+      expect(await page.evaluate((viewportWidth) => document.documentElement.scrollWidth <= viewportWidth, width)).toBe(true);
       expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     }
     step = `manual-open-${width}`;

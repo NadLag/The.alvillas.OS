@@ -820,6 +820,15 @@ textarea:disabled {
     box-shadow var(--motion-duration-base) var(--motion-ease-standard);
 }
 
+.task-row {
+  flex-wrap: wrap;
+}
+
+.task-row > span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
 .data-row {
   display: flex;
   align-items: center;
@@ -2170,6 +2179,11 @@ textarea:disabled {
     display: grid;
   }
 
+  .task-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .reservation-row-main {
     display: grid;
   }
@@ -2221,6 +2235,7 @@ textarea:disabled {
 .notification-state { display: inline-block; margin-inline-start: 12px; }
 .notification-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: 12px; }
 .notification-actions button { min-block-size: 48px; }
+.notification-actions > * { min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }
 .notification-item[data-read='true'] .notification-title { font-weight: 400; }
 
 .whatsapp-composer { max-inline-size: 720px; display: grid; gap: var(--space-5); }

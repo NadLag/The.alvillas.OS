@@ -48,7 +48,7 @@ test.describe("manual WhatsApp notification", () => {
       for (const locale of ["en", "fr", "ar"]) {
         await page.goto(`/${locale}${base}`); await page.getByTestId("whatsapp-locale").selectOption(locale); await page.getByTestId("whatsapp-prepare").click();
         await expect(page.getByTestId("whatsapp-message")).toBeVisible(); await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        expect(await page.evaluate((width) => document.documentElement.scrollWidth <= width, page.viewportSize()!.width)).toBe(true);
         expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
       }
       await page.goto(`/en${base}`); await page.getByTestId("whatsapp-recipient").selectOption("1"); await expect(page.getByTestId("whatsapp-locale")).toHaveValue("en");
@@ -64,7 +64,9 @@ test.describe("manual WhatsApp notification", () => {
       await page.reload(); await expect(page.getByTestId("whatsapp-locale")).toHaveValue("en"); await page.getByTestId("whatsapp-prepare").click();
       await expect(page.getByTestId("whatsapp-preview")).toContainText("+447911123456");
       await page.getByText("Update guest contact", { exact: true }).click(); expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-      await page.goto("/en/app/operations"); await page.getByTestId("operation-task-row").filter({ hasText: property.name }).first().getByTestId("task-whatsapp").click();
+      await page.goto("/en/app/operations");
+      expect(await page.evaluate((width) => document.documentElement.scrollWidth <= width, page.viewportSize()!.width)).toBe(true);
+      await page.getByTestId("operation-task-row").filter({ hasText: property.name }).first().getByTestId("task-whatsapp").click();
       // The default property task routing includes the assigned account.
       await expect(page.getByTestId("whatsapp-recipient")).toContainText("Operations");
       await page.goto("/en/app/field"); await page.getByTestId("field-task-card").filter({ hasText: property.name }).first().click();
