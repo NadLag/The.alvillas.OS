@@ -2226,6 +2226,7 @@ textarea:disabled {
 .whatsapp-composer { max-inline-size: 720px; display: grid; gap: var(--space-5); }
 .whatsapp-composer select, .whatsapp-composer textarea { inline-size: 100%; min-inline-size: 0; }
 .whatsapp-entry, .whatsapp-composer button, .whatsapp-composer select { min-block-size: 48px; }
+.whatsapp-prepare-button { transition-property: border-color, box-shadow, transform; }
 .whatsapp-composer summary { min-block-size: 48px; padding-block: var(--space-3); cursor: pointer; }
 .whatsapp-preview { display: grid; gap: var(--space-4); overflow-wrap: anywhere; }
 .whatsapp-preview textarea { resize: vertical; min-block-size: 160px; }

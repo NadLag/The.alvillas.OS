@@ -45,7 +45,7 @@ export function WhatsappComposer({ source, options, contact }: { source: Whatsap
         {(["en", "fr", "ar"] as const).map((language) => <option key={language} value={language}>{t(`languages.${language}`)}</option>)}
       </select></label>
       {error ? <p role="alert">{t(error)}</p> : null}
-      <button type="button" className={draft ? "secondary-button" : "primary-button"} data-testid="whatsapp-prepare" disabled={pending || offline} onClick={prepare}>{t(pending ? "preparing" : "prepare")}</button>
+      <button type="button" className={`whatsapp-prepare-button ${draft ? "secondary-button" : "primary-button"}`} data-testid="whatsapp-prepare" disabled={pending || offline} onClick={prepare}>{t(pending ? "preparing" : "prepare")}</button>
       {draft ? <div className="whatsapp-preview" data-testid="whatsapp-preview">
         <p role="status">{t("ready")}</p><p><bdi dir="ltr">{draft.phone}</bdi></p>
         <label className="field"><span>{t("preview")}</span><textarea data-testid="whatsapp-message" readOnly dir="auto" value={draft.message} rows={6} /></label>
