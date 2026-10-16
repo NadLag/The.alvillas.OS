@@ -18,6 +18,7 @@ export type HttpTransport = (
     method: "GET" | "POST" | "PUT";
     headers?: Record<string, string>;
     body?: string;
+    signal?: AbortSignal;
   }
 ) => Promise<{
   ok: boolean;
@@ -25,6 +26,7 @@ export type HttpTransport = (
   json(): Promise<unknown>;
   text(): Promise<string>;
   arrayBuffer(): Promise<ArrayBuffer>;
+  headers?: { get(name: string): string | null };
 }>;
 
 type EnvLike = Partial<AppEnv> & Record<string, string | undefined>;
@@ -68,6 +70,10 @@ async function jsonRequest<T>(
   return (await response.json()) as T;
 }
 
+export class EmailRequestError extends Error {
+  constructor(readonly status: number, readonly retryAfterMs = 0) { super(`Resend email request failed with status ${status}`); }
+}
+
 export class ResendEmailProvider implements EmailProvider {
   private readonly apiKey: string;
   private readonly from: string;
@@ -86,6 +92,7 @@ export class ResendEmailProvider implements EmailProvider {
     if (!/^[\x21-\x7e]{1,256}$/u.test(idempotencyKey)) throw new Error("Invalid email idempotency key");
     const response = await this.transport("https://api.resend.com/emails", {
       method: "POST",
+      signal: AbortSignal.timeout(10000),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${this.apiKey}`,
@@ -99,13 +106,18 @@ export class ResendEmailProvider implements EmailProvider {
         text: input.text,
         tags: [
           { name: "template", value: input.template },
-          { name: "locale", value: input.locale }
+          { name: "locale", value: input.locale },
+          ...(input.deliveryReference ? [{ name: "organization_id", value: input.deliveryReference.organizationId }, { name: "delivery_id", value: input.deliveryReference.deliveryId }] : [])
         ]
       })
     }).catch(() => { throw new Error("Resend email transport failed"); });
     // Provider response bodies can contain recipients, codes or credentials.
     // Persist only a stable status in the existing outbox error channel.
-    if (!response.ok) throw new Error(`Resend email request failed with status ${response.status}`);
+    if (!response.ok) {
+      const value = response.headers?.get("retry-after");
+      const delay = value && /^\d+$/u.test(value) ? Number(value) * 1000 : value ? Date.parse(value) - Date.now() : 0;
+      throw new EmailRequestError(response.status, Number.isFinite(delay) ? Math.max(0, Math.min(delay, 86400000)) : 0);
+    }
     const body = await response.json().catch(() => { throw new Error("Invalid Resend email response"); }) as { id?: unknown };
     if (typeof body.id !== "string" || !body.id) {
       throw new Error("Resend response did not include an email id");

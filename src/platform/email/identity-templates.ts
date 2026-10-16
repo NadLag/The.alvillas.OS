@@ -4,6 +4,7 @@ import fr from "../../../messages/fr.json";
 import ar from "../../../messages/ar.json";
 import { formatDateTime } from "@/i18n/format";
 import type { EmailProvider } from "@/platform/providers";
+import { renderEmailDocument } from "./email-layout";
 import { escapeHtml } from "@/platform/encoding/html";
 
 const catalogs = { en, fr, ar };
@@ -42,7 +43,7 @@ export function renderIdentityEmail(type: string, payload: unknown, appUrl: stri
     const expires = labels.expires.replace("{date}", formatDateTime(data.locale, new Date(data.expiresAt)));
     const text = [labels.body, `${labels.action}: ${url.href}`, `${labels.code}: ${code}`, expires, labels.footer].join("\n\n");
     const paragraphs = [labels.body, `${labels.code}: ${code}`, expires, labels.footer].map((line) => `<p>${escapeHtml(line)}</p>`);
-    const html = `<!doctype html><html lang="${data.locale}" dir="${data.locale === "ar" ? "rtl" : "ltr"}"><head><meta charset="utf-8"><title>${escapeHtml(labels.subject)}</title></head><body><h1>${escapeHtml(labels.subject)}</h1>${paragraphs[0]}<p><a href="${escapeHtml(url.href)}">${escapeHtml(labels.action)}</a></p>${paragraphs.slice(1).join("")}</body></html>`;
+    const html = renderEmailDocument(data.locale, labels.subject, `${paragraphs[0]}<p><a href="${escapeHtml(url.href)}">${escapeHtml(labels.action)}</a></p>${paragraphs.slice(1).join("")}`);
     return { to: data.toEmail, subject: labels.subject, html, text, locale: data.locale, template: invitation ? "identity.invitation" : "identity.recovery" };
   } catch { throw new EmailDeliveryValidationError(); }
 }

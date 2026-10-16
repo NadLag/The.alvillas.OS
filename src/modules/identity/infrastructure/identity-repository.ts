@@ -263,6 +263,19 @@ export class IdentityRepository {
     await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${this.organizationId}:${key}`}, 0))`);
   }
 
+  async updateAccountEmail(input: { accountId: string; personId: string; email: string; expectedEmail: string }) {
+    await this.lockIdentityOperation(`account-email:${input.email}`);
+    await this.tx.$queryRaw(Prisma.sql`SELECT id FROM user_account WHERE organization_id = ${this.organizationId}::uuid AND id = ${input.accountId}::uuid FOR UPDATE`);
+    const before = await this.tx.userAccount.findFirst({ where: { organizationId: this.organizationId, id: input.accountId, personId: input.personId, status: "ACTIVE", person: { archivedAt: null } }, select: { id: true, personId: true, email: true } });
+    if (!before) throw new Error("Account was not found");
+    if (before.email === input.email) return { before, after: before, changed: false };
+    if (before.email?.toLowerCase() !== input.expectedEmail) throw new Error("Account contact changed");
+    const duplicate = await this.tx.userAccount.findFirst({ where: { organizationId: this.organizationId, id: { not: input.accountId }, email: { equals: input.email, mode: "insensitive" } }, select: { id: true } });
+    if (duplicate) throw new Error("Account email already exists");
+    const after = await this.tx.userAccount.update({ where: { organizationId: this.organizationId, id: before.id }, data: { email: input.email }, select: { id: true, personId: true, email: true } });
+    return { before, after, changed: true };
+  }
+
   findSessionSecurityAccount(id: string, now = new Date()) {
     return this.tx.userAccount.findFirst({
       where: { id, organizationId: this.organizationId, status: "ACTIVE" },

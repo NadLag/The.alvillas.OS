@@ -4,6 +4,8 @@ import { localizedTextSchema } from "@/i18n/content";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
 import { pushPolicyKey, pushPolicySchema } from "@/platform/notifications/web-push";
 
+import { digestPolicyKey, digestPolicySchema } from "@/platform/notifications/digest";
+
 const moneyAmountSchema = z
   .string()
   .trim()
@@ -302,6 +304,7 @@ export const featureFlagConfigSchema = z
 
 export const configRuleSchemas = {
   [pushPolicyKey]: pushPolicySchema,
+  [digestPolicyKey]: digestPolicySchema,
   "notification.routing.approval_requested": notificationRoutingSchema,
   "notification.routing.approval_decided": notificationRoutingSchema,
   "notification.routing.language_updated": notificationRoutingSchema,

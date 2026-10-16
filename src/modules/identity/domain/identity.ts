@@ -105,6 +105,14 @@ export const updatePersonProfileInputSchema = personProfileInputSchema.extend({
 export type PersonProfileInput = z.infer<typeof personProfileInputSchema>;
 export type UpdatePersonProfileInput = z.infer<typeof updatePersonProfileInputSchema>;
 
+export const updateAccountEmailInputSchema = z.object({
+  accountId: z.string().uuid(), personId: z.string().uuid(),
+  email: z.string().trim().email().transform((value) => value.toLowerCase()),
+  expectedEmail: z.string().trim().email().transform((value) => value.toLowerCase()),
+  reason: z.string().trim().min(8).max(500)
+}).strict();
+export type UpdateAccountEmailInput = z.infer<typeof updateAccountEmailInputSchema>;
+
 export const customRoleInputSchema = z.object({
   key: roleKeySchema,
   name: z.string().trim().min(2).max(120),

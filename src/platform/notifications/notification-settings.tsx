@@ -29,11 +29,16 @@ export function NotificationSettings() {
   }, []);
   useEffect(() => {
     load();
+    const consent = () => {
+      const email = (previous: NotificationPreferences | null) => previous ? { ...previous, email: { security: true as const, account: previous.email.account ?? false, enabled: true, operations: true } } : previous;
+      setDraft(email); setCommitted(email);
+    };
+    window.addEventListener("digest-email-consent-saved", consent);
     const network = () => setOffline(!navigator.onLine);
     queueMicrotask(network);
     window.addEventListener("online", network);
     window.addEventListener("offline", network);
-    return () => { generation.current += 1; window.removeEventListener("online", network); window.removeEventListener("offline", network); };
+    return () => { generation.current += 1; window.removeEventListener("digest-email-consent-saved", consent); window.removeEventListener("online", network); window.removeEventListener("offline", network); };
   }, [load]);
   function change(key: "enabled" | "account" | "operations", checked: boolean) {
     setSaved(false); setError(null);
@@ -45,8 +50,8 @@ export function NotificationSettings() {
     startTransition(async () => {
       setError(null); setSaved(false);
       try {
-        const result = await notificationPreferencesSaveAction(parsed.data);
-        if (result.ok) { setDraft(result.data); setCommitted(result.data); setSaved(true); }
+        const result = await notificationPreferencesSaveAction({ in_app: parsed.data.in_app, email: parsed.data.email, ...(parsed.data.push ? { push: parsed.data.push } : {}) });
+        if (result.ok) { setDraft(result.data); setCommitted(result.data); setSaved(true); window.dispatchEvent(new CustomEvent("notification-preferences-saved", { detail: result.data.email })); }
         else setError("save");
       } catch { setError("save"); }
     });

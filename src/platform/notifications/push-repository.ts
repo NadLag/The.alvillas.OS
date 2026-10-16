@@ -55,7 +55,7 @@ export class PushRepository {
     return this.tx.notificationDelivery.updateMany({ where: { organizationId: this.organizationId, id }, data });
   }
   history(accountId: string, before?: { createdAt: Date; id: string }) {
-    return this.tx.notificationDelivery.findMany({ where: { organizationId: this.organizationId, userAccountId: accountId,
+    return this.tx.notificationDelivery.findMany({ where: { organizationId: this.organizationId, userAccountId: accountId, channel: "push",
       ...(before ? { OR: [{ createdAt: { lt: before.createdAt } }, { createdAt: before.createdAt, id: { lt: before.id } }] } : {}) },
       select: { id: true, kind: true, status: true, attemptCount: true, nextAttemptAt: true, providerStatus: true, errorCode: true, acceptedAt: true, displayedAt: true, openedAt: true, createdAt: true },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 21 });

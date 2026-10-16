@@ -11,6 +11,7 @@ export const envSchema = z.object({
   ADMIN_PASSWORD: z.string().optional(),
   ENCRYPTION_KEYS: z.string().optional(),
   RESEND_API_KEY: z.string().optional(),
+  RESEND_WEBHOOK_SECRET: z.string().optional(),
   EMAIL_FROM: z.string().email().optional().or(z.literal("")),
   R2_ACCOUNT_ID: z.string().optional(),
   R2_ACCESS_KEY_ID: z.string().optional(),

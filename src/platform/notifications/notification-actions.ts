@@ -9,6 +9,10 @@ import { getNotificationPreferences, saveNotificationPreferences } from "./notif
 import { getNotificationRouting, saveNotificationRouting } from "./notification-service";
 import { pushSettings, savePushSubscription, revokePushSubscription } from "./push-service";
 
+import { saveDigestPreferences } from "./notification-service";
+import { digestSettings } from "./digest-service";
+import { digestSettingsSchema } from "./digest";
+
 async function actor() {
   const context = await notificationActorFromSession(await auth());
   if (!context) throw new NotificationAccessError();
@@ -50,3 +54,12 @@ export async function notificationOpenAction(id: string, locale: string) {
 export async function pushSettingsAction(input: unknown = {}) { return safely((context) => pushSettings(context, input)); }
 export async function pushSubscribeAction(input: unknown) { return safely((context, requestId) => savePushSubscription(context, input, { requestId })); }
 export async function pushRevokeAction(input: unknown) { return safely((context, requestId) => revokePushSubscription(context, input, { requestId })); }
+
+export async function digestSettingsAction(input: unknown = {}) { return safely((context) => digestSettings(context, input)); }
+export async function digestSaveAction(input: unknown) {
+  return safely(async (context, requestId) => {
+    const settings = digestSettingsSchema.parse(input);
+    // Use the same account lock and preference writer as all channel settings.
+    return saveDigestPreferences(context, settings, requestId);
+  });
+}

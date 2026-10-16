@@ -2272,3 +2272,11 @@ textarea:disabled {
   .notification-save-bar p { margin: 0; }
   .notification-categories { margin-inline-start: var(--space-4); }
 }
+
+.digest-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; }
+.digest-grid label { display: grid; gap: 0.5rem; align-content: start; }
+.digest-grid input, .digest-grid select { min-block-size: 44px; inline-size: 100%; min-inline-size: 0; }
+.digest-history { list-style: none; padding-inline-start: 0; }
+.digest-history li { display: flex; flex-wrap: wrap; gap: 0.75rem; padding-block: 1rem; border-block-end: 1px solid var(--border); }
+
+.digest-history-actions { display: flex; flex-wrap: wrap; gap: var(--space-4); padding-block: var(--space-5); }

@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { readServiceInfo, type ServiceInfo, type ServiceInfoEnv } from "./service-info";
 import { readProviderStatuses } from "@/platform/providers/status";
+import { currentTimezoneData } from "@/platform/time/timezone-data";
 
 export type ReadinessCheck = {
   name: string;
@@ -53,6 +54,7 @@ export async function checkReadiness(options: ReadinessOptions = {}): Promise<Re
   const checks: ReadinessCheck[] = [];
   const migrationSummary = options.migrationSummary ?? readMigrationSummary;
   const strictReadiness = env.ALVILLAS_STRICT_READINESS === "1";
+  checks.push({ name: "timezone_data", status: currentTimezoneData() ? "ok" : "error", detail: process.versions.tz ?? "unavailable", required: true });
 
   if (!env.DATABASE_URL) {
     checks.push({
