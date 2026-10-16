@@ -8,9 +8,12 @@ import { securityEnrollment } from "@/platform/auth/security-enrollment";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { encryptSecret, decryptSecret } from "@/platform/auth/secret-encryption";
 import type { EmailProvider } from "@/platform/providers";
-import { ResendEmailProvider, EmailRequestError } from "@/platform/providers/real";
+import { ResendEmailProvider } from "@/platform/providers/real";
 import { OutboxRetryError } from "@/platform/events/outbox-dispatcher";
 import { digestReceiptSchema } from "@/platform/email/digest-receipt";
+import { DeliveryRepository } from "./delivery-repository";
+import { emailFailure, recipientKey } from "./email-delivery";
+import { recordDeliveryReceipt } from "./delivery-service";
 import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
 import { renderDigestEmail } from "@/platform/email/digest-template";
 import { NotificationRepository } from "./notification-repository";
@@ -119,26 +122,34 @@ export async function deliverDigest(event: OutboxEvent, deps: Deps = {}) {
     const { candidate, items } = await authorizedItems(notifications, payload.recipientId, await repository.items(payload.recipientId, row.id), settings.language);
     if (!candidate?.email || !items.length) { await suppress("no_authorized_unread_items"); return; }
     const email = { ...renderDigestEmail({ to: candidate.email, settings, scheduledAt: new Date(payload.scheduledAt), items, appUrl: env.APP_URL ?? "http://localhost:3000" }), deliveryReference: { organizationId: event.organizationId, deliveryId: row.id } };
+    const diagnostics = new DeliveryRepository(tx, event.organizationId);
+    const key = recipientKey(event.organizationId, email.to);
+    await diagnostics.lockRecipient(key);
+    if (await diagnostics.suppressed(key)) { await suppress("recipient_suppressed"); return; }
     const serialized = JSON.stringify({ email, sender: env.EMAIL_FROM ?? null });
     if (row.payloadEncrypted && decryptSecret(row.payloadEncrypted) !== serialized) { await suppress("content_or_recipient_changed"); return; }
     if (prepare) {
-      if (!row.payloadEncrypted) await repository.update(row.id, { payloadEncrypted: encryptSecret(serialized), preparedAt: now });
+      if (!row.payloadEncrypted) await repository.update(row.id, { payloadEncrypted: encryptSecret(serialized), preparedAt: now, recipientKey: key });
       return;
     }
     if (!row.payloadEncrypted) throw new Error("digest_request_not_prepared");
+    if (row.attemptCount >= policy.maxAttempts) { await repository.update(row.id, { status: "FAILED", errorCode: "retry_exhausted", nextAttemptAt: null }); return; }
     const attempts = row.attemptCount + 1;
     try {
       const provider = deps.provider ?? new ResendEmailProvider(env);
       const result = await provider.send({ ...email, idempotencyKey: `digest:${event.organizationId}:${row.id}` });
       if (!result.id) throw new Error("digest_acknowledgement_missing");
-      await repository.update(row.id, { status: "ACCEPTED", attemptCount: attempts, acceptedAt: now, providerId: result.id, errorCode: null, nextAttemptAt: null });
+      await repository.update(row.id, { status: "ACCEPTED", attemptCount: attempts, acceptedAt: now, providerId: result.id, providerStatus: 200, errorCode: null, nextAttemptAt: null });
+      await diagnostics.log(row.id, `attempt:${attempts}`, { outcome: "ACCEPTED", attempt: attempts, providerStatus: 200, occurredAt: now });
       await audit(tx, event.organizationId, payload.recipientId, row.id, "accepted", { count: items.length, attempts });
     } catch (error) {
-      const status = error instanceof EmailRequestError ? error.status : null;
-      const retry = attempts < policy.maxAttempts && (status === null || status === 408 || status === 409 || status === 429 || status >= 500);
-      const delay = Math.max(Math.min(policy.maxBackoffSeconds, policy.backoffSeconds * 2 ** (attempts - 1)) * 1000, error instanceof EmailRequestError ? error.retryAfterMs : 0);
+      const failure = emailFailure(error); const status = failure.status;
+      const delay = Math.max(Math.min(policy.maxBackoffSeconds, policy.backoffSeconds * 2 ** (attempts - 1)) * 1000, failure.retryAfterMs);
+      const next = afterDigestQuietHours(settings, new Date(now.getTime() + delay));
+      const retry = attempts < policy.maxAttempts && failure.retryable && next.getTime() < row.preparedAt!.getTime() + policy.retryWindowHours * 3600000;
       await repository.update(row.id, { status: retry ? "PENDING" : "FAILED", attemptCount: attempts, providerStatus: status,
-        nextAttemptAt: retry ? afterDigestQuietHours(settings, new Date(now.getTime() + delay)) : null, errorCode: status === 429 ? "rate_limited" : status ? "provider_rejected" : "provider_unavailable" });
+        nextAttemptAt: retry ? next : null, errorCode: failure.code });
+      await diagnostics.log(row.id, `attempt:${attempts}`, { outcome: retry ? "RETRY" : "FAILED", attempt: attempts, providerStatus: status, code: failure.code, occurredAt: now });
       await audit(tx, event.organizationId, payload.recipientId, row.id, retry ? "retry" : "failed", { attempts, status });
     }
   });
@@ -151,16 +162,5 @@ export async function deliverDigest(event: OutboxEvent, deps: Deps = {}) {
 }
 
 export async function recordDigestReceipt(input: unknown, deps: Deps = {}) {
-  const receipt = digestReceiptSchema.parse(input); const { organization_id: organizationId, delivery_id: id } = receipt.data.tags;
-  return withTenant(deps.db ?? prisma, organizationId, async (tx) => {
-    const repository = new DigestRepository(tx, organizationId); const row = await repository.receiptDelivery(id);
-    // A receipt may beat the send transaction's acknowledgement; ask Resend to
-    // retry it. Matching provider references and terminal state guard replays.
-    if (!row || !row.providerId) return false;
-    if (row.providerId !== receipt.data.email_id || row.status !== "ACCEPTED") return true;
-    const delivered = receipt.type === "email.delivered";
-    await repository.update(id, delivered ? { status: "DELIVERED", deliveredAt: new Date(receipt.created_at) } : { status: "FAILED", errorCode: "provider_delivery_failed" });
-    await audit(tx, organizationId, row.userAccountId, id, delivered ? "delivered" : "failed", { providerReceipt: receipt.type });
-    return true;
-  });
+  return recordDeliveryReceipt(digestReceiptSchema.parse(input), deps);
 }

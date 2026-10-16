@@ -5,6 +5,8 @@ import type { NotificationChannel } from "@/platform/providers";
 import { WebPushNotificationChannel, pushConfiguration } from "@/platform/providers/web-push";
 import { decryptSecret } from "@/platform/auth/secret-encryption";
 import { OutboxRetryError } from "@/platform/events/outbox-dispatcher";
+import { DeliveryRepository } from "./delivery-repository";
+import { deliveryAudit } from "./delivery-service";
 import { NotificationRepository } from "./notification-repository";
 import { PushRepository } from "./push-repository";
 import { channelPayloadSchema, resolveNotificationChannel } from "./notification-channel-service";
@@ -48,12 +50,13 @@ export async function deliverPushChannel(event: OutboxEvent, deps: {
       || (subscription.expiresAt && subscription.expiresAt <= now) || !policy) {
       await repository.updateDelivery(id, { status: "SUPPRESSED", errorCode: "access_or_consent_revoked", nextAttemptAt: null }); return;
     }
+    const diagnostics = new DeliveryRepository(tx, event.organizationId);
     const config = pushConfiguration(env);
     const attempts = row.attemptCount + 1;
     try {
       if (!config) throw new Error("Missing push configuration");
       if (subscription.vapidPublicKey !== config.publicKey) {
-        await repository.revoke(row.userAccountId, subscription.id, "vapid_key_rotated");
+        await repository.revoke(row.userAccountId!, subscription.id, "vapid_key_rotated");
         await repository.updateDelivery(id, { status: "SUPPRESSED", errorCode: "vapid_key_rotated", nextAttemptAt: null }); return;
       }
       const channel = deps.channel ?? new WebPushNotificationChannel(env);
@@ -62,14 +65,18 @@ export async function deliverPushChannel(event: OutboxEvent, deps: {
         push: { subscription: pushSubscriptionSchema.parse(JSON.parse(decryptSecret(subscription.encrypted))), deliveryId: id, ttlSeconds: policy.ttlSeconds } });
       if (!result.id) throw new Error("Missing push acknowledgement");
       await repository.updateDelivery(id, { status: "ACCEPTED", acceptedAt: now, attemptCount: attempts, nextAttemptAt: null, errorCode: null, providerStatus: result.statusCode ?? null });
+      await diagnostics.log(id, `attempt:${attempts}`, { outcome: "ACCEPTED", attempt: attempts, providerStatus: result.statusCode ?? null, occurredAt: now });
+      await deliveryAudit(tx, event.organizationId, id, "accepted", { attempt: attempts, providerStatus: result.statusCode ?? null });
     } catch (error) {
       const failure = pushFailure(error, now);
-      if (failure.invalid) await repository.revoke(row.userAccountId, subscription.id, "subscription_expired");
+      if (failure.invalid) await repository.revoke(row.userAccountId!, subscription.id, "subscription_expired");
       const retry = failure.retryable && attempts < policy.maxAttempts;
       const delay = Math.max(Math.min(policy.maxBackoffSeconds, policy.backoffSeconds * 2 ** (attempts - 1)) * 1000, failure.retryAfterMs);
       await repository.updateDelivery(id, { status: retry ? "PENDING" : "FAILED", attemptCount: attempts,
         nextAttemptAt: retry ? new Date(now.getTime() + delay) : null, providerStatus: failure.status,
         errorCode: config ? failure.code : "provider_not_configured" });
+      await diagnostics.log(id, `attempt:${attempts}`, { outcome: retry ? "RETRY" : "FAILED", attempt: attempts, providerStatus: failure.status, code: config ? failure.code : "provider_not_configured", occurredAt: now });
+      await deliveryAudit(tx, event.organizationId, id, retry ? "retry" : "failed", { attempt: attempts, providerStatus: failure.status });
     }
   });
   const rows = await withTenant(db, event.organizationId, (tx) => new PushRepository(tx, event.organizationId).deliveries(event.id));

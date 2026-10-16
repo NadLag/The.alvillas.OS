@@ -23,6 +23,8 @@ model Organization {
   notificationPreferences   NotificationPreference[]
   pushSubscriptions         PushSubscription[]
   notificationDeliveries    NotificationDelivery[]
+  notificationDeliveryLogs NotificationDeliveryLog[]
+  notificationEmailSuppressions NotificationEmailSuppression[]
   approvalRequests          ApprovalRequest[]
   approvalRecipients        ApprovalRecipient[]
   auditLogs                 AuditLog[]
@@ -1145,7 +1147,7 @@ model PushSubscription {
 model NotificationDelivery {
   id               String            @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId   String            @map("organization_id") @db.Uuid
-  userAccountId    String            @map("user_account_id") @db.Uuid
+  userAccountId    String?           @map("user_account_id") @db.Uuid
   eventId          String            @map("event_id") @db.Uuid
   subscriptionId   String?           @map("subscription_id") @db.Uuid
   deliveryKey      String            @map("delivery_key")
@@ -1153,6 +1155,7 @@ model NotificationDelivery {
   scheduledAt      DateTime?         @map("scheduled_at") @db.Timestamptz(6)
   preparedAt       DateTime?         @map("prepared_at") @db.Timestamptz(6)
   payloadEncrypted String?           @map("payload_encrypted")
+  recipientKey     String?           @map("recipient_key")
   providerId       String?           @map("provider_id")
   deliveredAt      DateTime?         @map("delivered_at") @db.Timestamptz(6)
   digestItems      Notification[]    @relation("DigestItems")
@@ -1168,13 +1171,19 @@ model NotificationDelivery {
   createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  userAccount      UserAccount       @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount      UserAccount?      @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   event            OutboxEvent       @relation(fields: [organizationId, eventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   subscription     PushSubscription? @relation(fields: [organizationId, userAccountId, subscriptionId], references: [organizationId, userAccountId, id], onDelete: Restrict, onUpdate: NoAction)
 
+  logs         NotificationDeliveryLog[]
+  suppressions NotificationEmailSuppression[]
+
+  @@unique([organizationId, id], map: "notification_delivery_org_id_unique")
   @@unique([organizationId, userAccountId, id], map: "notification_delivery_tenant_account_id_unique")
   @@unique([organizationId, eventId, deliveryKey], map: "notification_delivery_event_device_unique")
   @@index([organizationId, channel, status, createdAt], map: "notification_delivery_channel_status_idx")
+  @@index([organizationId, createdAt(sort: Desc), id(sort: Desc)], map: "notification_delivery_admin_history_idx")
+  @@index([organizationId, channel, createdAt(sort: Desc), id(sort: Desc)], map: "notification_delivery_admin_channel_idx")
   @@index([organizationId, userAccountId, createdAt(sort: Desc), id(sort: Desc)], map: "notification_delivery_history_idx")
   @@map("notification_delivery")
 }
@@ -1290,4 +1299,38 @@ model ApprovalRecipient {
 
   @@unique([organizationId, approvalId, userAccountId])
   @@map("approval_recipient")
+}
+
+model NotificationDeliveryLog {
+  id             String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String               @map("organization_id") @db.Uuid
+  deliveryId     String               @map("delivery_id") @db.Uuid
+  key            String
+  outcome        String
+  attempt        Int?
+  providerStatus Int?                 @map("provider_status")
+  code           String?
+  occurredAt     DateTime             @map("occurred_at") @db.Timestamptz(6)
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  delivery       NotificationDelivery @relation(fields: [organizationId, deliveryId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, deliveryId, key], map: "notification_delivery_log_key_unique")
+  @@index([organizationId, deliveryId, createdAt(sort: Desc), id(sort: Desc)], map: "notification_delivery_log_history_idx")
+  @@index([organizationId, key], map: "notification_delivery_log_receipt_idx")
+  @@map("notification_delivery_log")
+}
+
+model NotificationEmailSuppression {
+  id             String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String               @map("organization_id") @db.Uuid
+  recipientKey   String               @map("recipient_key")
+  deliveryId     String               @map("delivery_id") @db.Uuid
+  code           String
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  delivery       NotificationDelivery @relation(fields: [organizationId, deliveryId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, recipientKey], map: "notification_email_suppression_recipient_unique")
+  @@map("notification_email_suppression")
 }

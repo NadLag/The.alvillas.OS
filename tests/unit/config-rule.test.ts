@@ -54,6 +54,7 @@ describe("config rule registry", () => {
       "identity.pin_lockout",
       "inventory.minimums",
       "notification.digest.delivery_policy",
+      "notification.email.delivery_policy",
       "notification.push.delivery_policy",
       "notification.routing.approval_decided",
       "notification.routing.approval_requested",

@@ -1,8 +1,4 @@
-import type { OutboxEvent } from "@prisma/client";
 import { z } from "zod";
-import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
-import type { NotificationChannel } from "@/platform/providers";
 import { authorize } from "@/platform/authz/authorize";
 import { contextForRoleAssignments } from "@/platform/authz/account-context";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
@@ -10,7 +6,7 @@ import { safeLocale } from "@/i18n/routing";
 import en from "../../../messages/en.json" with { type: "json" };
 import fr from "../../../messages/fr.json" with { type: "json" };
 import ar from "../../../messages/ar.json" with { type: "json" };
-import { NotificationRepository } from "./notification-repository";
+import type { NotificationRepository } from "./notification-repository";
 import { notificationInputSchema, notificationDestination } from "./notification";
 import { shouldDeliverNotification } from "./notification-preferences";
 
@@ -29,29 +25,4 @@ export async function resolveNotificationChannel(repository: NotificationReposit
     && (input.kind !== "approval_requested" || (target.status === "PENDING" && (authorize(ctx, "approve", target) || authorize(ctx, "reject", target))))
     && shouldDeliverNotification(input.kind, payload.channel, preferences));
   return { input, candidate, target, locale, destination, allowed, labels: { en, fr, ar }[locale].Notifications };
-}
-export async function deliverNotificationChannel(event: OutboxEvent, deps: {
-  db?: TenantTransactionRunner; channels: Partial<Record<"email" | "push", NotificationChannel>>; appUrl: string;
-}) {
-  return withTenant(deps.db ?? prisma, event.organizationId, async (tx) => {
-    const repository = new NotificationRepository(tx, event.organizationId);
-    const stored = await repository.channelEvent(event.id);
-    if (!stored || stored.status === "DISPATCHED") return;
-    const payload = channelPayloadSchema.parse(stored.payload);
-    const { input, candidate, locale, destination, allowed, labels } = await resolveNotificationChannel(repository, payload);
-    if (allowed && candidate && destination) {
-      const channel = deps.channels[payload.channel];
-      if (!channel) throw new Error(`Notification ${payload.channel} provider is not configured`);
-      const address = payload.channel === "email" ? candidate.email : candidate.id;
-      if (!address) throw new Error("Notification recipient has no channel address");
-      const origin = new URL(deps.appUrl);
-      if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["localhost", "127.0.0.1"].includes(origin.hostname))) throw new Error("Invalid notification origin");
-      try {
-        const result = await channel.notify({ userId: address, subject: labels.kinds[input.kind], body: `${labels.open}: ${new URL(destination, origin).href}`, locale,
-          idempotencyKey: `notification:${event.organizationId}:${event.id}` });
-        if (!result.id) throw new Error("Missing provider acknowledgement");
-      } catch { throw new Error(`Notification ${payload.channel} provider did not acknowledge delivery`); }
-    }
-    await repository.finish(stored.id);
-  });
 }

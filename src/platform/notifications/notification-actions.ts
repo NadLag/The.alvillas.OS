@@ -12,6 +12,7 @@ import { pushSettings, savePushSubscription, revokePushSubscription } from "./pu
 import { saveDigestPreferences } from "./notification-service";
 import { digestSettings } from "./digest-service";
 import { digestSettingsSchema } from "./digest";
+import { deliveryPage, deliveryLogs, retryDelivery } from "./delivery-service";
 
 async function actor() {
   const context = await notificationActorFromSession(await auth());
@@ -56,6 +57,9 @@ export async function pushSubscribeAction(input: unknown) { return safely((conte
 export async function pushRevokeAction(input: unknown) { return safely((context, requestId) => revokePushSubscription(context, input, { requestId })); }
 
 export async function digestSettingsAction(input: unknown = {}) { return safely((context) => digestSettings(context, input)); }
+export async function deliveryPageAction(input: unknown = {}) { return safely((context) => deliveryPage(context, input)); }
+export async function deliveryLogsAction(input: unknown) { return safely((context) => deliveryLogs(context, input)); }
+export async function deliveryRetryAction(input: unknown) { return safely((context, requestId) => retryDelivery(context, input, { requestId })); }
 export async function digestSaveAction(input: unknown) {
   return safely(async (context, requestId) => {
     const settings = digestSettingsSchema.parse(input);

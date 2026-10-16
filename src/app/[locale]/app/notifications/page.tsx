@@ -10,6 +10,8 @@ import { notificationActorFromSession } from "@/platform/notifications/notificat
 import { authorize } from "@/platform/authz/authorize";
 import { DigestSettings } from "@/platform/notifications/digest-settings";
 import { PushSettings } from "@/platform/notifications/push-settings";
+import { DeliverySettings } from "@/platform/notifications/delivery-settings";
+import { canManageDeliveries } from "@/platform/notifications/delivery-service";
 
 export const dynamic = "force-dynamic";
 
@@ -29,5 +31,6 @@ export default async function NotificationSettingsPage({ params }: { params: Pro
     <DigestSettings />
     <PushSettings />
     {canConfigure ? <NotificationRoutingSettings /> : null}
+    {actor && canManageDeliveries(actor) ? <DeliverySettings /> : null}
   </AdminShell>;
 }
