@@ -47,6 +47,7 @@ export async function authContextForAccount(
         organizationId,
         userAccountId,
         archivedAt: null,
+        role: { archivedAt: null },
         validFrom: { lte: new Date() },
         OR: [{ validTo: null }, { validTo: { gt: new Date() } }]
       },

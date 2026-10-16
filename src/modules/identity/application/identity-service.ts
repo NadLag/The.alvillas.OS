@@ -24,6 +24,7 @@ import {
   recoveryInputSchema,
   roleAssignmentInputSchema,
   updatePersonProfileInputSchema,
+  updateAccountEmailInputSchema,
   updateCustomRoleInputSchema,
   type ActivationInput,
   type CustomRoleInput,
@@ -33,6 +34,7 @@ import {
   type RecoveryInput,
   type RoleAssignmentInput,
   type UpdatePersonProfileInput,
+  type UpdateAccountEmailInput,
   type UpdateCustomRoleInput
 } from "@/modules/identity/domain/identity";
 import {
@@ -734,6 +736,26 @@ export async function updatePersonProfile(
         throw new IdentityConflictError("Person contact already exists");
       }
 
+      throw error;
+    }
+  });
+}
+
+export async function updateAccountEmail(ctx: IdentityActorContext, input: UpdateAccountEmailInput, deps: IdentityServiceDeps = {}): Promise<{ id: string }> {
+  const parsed = updateAccountEmailInputSchema.parse(input);
+  assertIdentityAllowed(ctx, "edit", parsed.accountId);
+  const meta = auditMeta(deps);
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    try {
+      const update = await new IdentityRepository(tx, ctx.organizationId).updateAccountEmail(parsed);
+      if (update.changed) await writeAuditEvent(tx, {
+        organizationId: ctx.organizationId, actorId: ctx.actorId, action: "identity.account.email.update", resourceType: "identity", resourceId: update.after.id,
+        ipAddress: meta.ipAddress, before: { email: update.before.email }, after: { email: update.after.email }, reason: parsed.reason, requestId: meta.requestId, occurredAt: new Date()
+      });
+      return { id: update.after.id };
+    } catch (error) {
+      if (error instanceof Error && error.message === "Account was not found") throw new IdentityNotFoundError();
+      if ((error instanceof Error && ["Account contact changed", "Account email already exists"].includes(error.message)) || (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")) throw new IdentityConflictError("Account email cannot be changed");
       throw error;
     }
   });

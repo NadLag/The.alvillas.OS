@@ -4,6 +4,7 @@ import type { Resource } from "@/platform/authz/authorize";
 import { notificationEventType, notificationInputSchema, type NotificationCursor, type NotificationInput } from "./notification";
 import { Prisma } from "@prisma/client";
 import { digestSettingsSchema, nextDigestAt } from "./digest";
+import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
 import { defaultNotificationPreferences, shouldDeliverNotification, type NotificationPreferences } from "./notification-preferences";
 import { authorize } from "@/platform/authz/authorize";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
@@ -29,6 +30,7 @@ export class NotificationRepository {
     const previous = await this.tx.notificationPreference.findUnique({ where: { organizationId_userAccountId: { organizationId: this.organizationId, userAccountId: accountId } } });
     const previousDigest = previous?.digestSettings ? digestSettingsSchema.parse(previous.digestSettings) : null;
     const reschedule = preferences.digest && (JSON.stringify(previousDigest) !== JSON.stringify(preferences.digest) || previous?.emailEnabled !== (preferences.email.enabled ?? false) || previous?.emailOperations !== (preferences.email.operations ?? false));
+    if (reschedule && preferences.digest?.frequency !== "off") requireCurrentTimezoneData();
     const data = { inAppEnabled: preferences.in_app.enabled, inAppAccount: preferences.in_app.account, inAppOperations: preferences.in_app.operations, inAppSecurity: true, emailSecurity: true,
       emailEnabled: preferences.email.enabled ?? false, emailAccount: preferences.email.account ?? false, emailOperations: preferences.email.operations ?? false,
       pushEnabled: preferences.push?.enabled ?? false, pushAccount: preferences.push?.account ?? false, pushOperations: preferences.push?.operations ?? false };

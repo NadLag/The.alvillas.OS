@@ -11,6 +11,7 @@ import type { EmailProvider } from "@/platform/providers";
 import { ResendEmailProvider, EmailRequestError } from "@/platform/providers/real";
 import { OutboxRetryError } from "@/platform/events/outbox-dispatcher";
 import { digestReceiptSchema } from "@/platform/email/digest-receipt";
+import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
 import { renderDigestEmail } from "@/platform/email/digest-template";
 import { NotificationRepository } from "./notification-repository";
 import { notificationDestination, notificationInputSchema } from "./notification";
@@ -57,6 +58,7 @@ export async function digestSettings(actor: NotificationActor, input: unknown = 
 export async function scheduleDigests(organizationId: string, deps: Deps = {}) {
   const db = deps.db ?? prisma; const now = deps.now ?? new Date();
   const due = await withTenant(db, organizationId, (tx) => new DigestRepository(tx, organizationId).due(now));
+  if (due.length) requireCurrentTimezoneData();
   let scheduled = 0;
   for (const { userAccountId } of due) await withTenant(db, organizationId, async (tx) => {
     const notifications = new NotificationRepository(tx, organizationId); const repository = new DigestRepository(tx, organizationId);
@@ -87,6 +89,7 @@ export async function scheduleDigests(organizationId: string, deps: Deps = {}) {
 }
 
 export async function deliverDigest(event: OutboxEvent, deps: Deps = {}) {
+  requireCurrentTimezoneData();
   if (event.type !== digestEventType) throw new Error("digest_event_invalid");
   const db = deps.db ?? prisma; const now = deps.now ?? new Date(); const env = deps.env ?? process.env;
   // Persist the exact encrypted request before contacting Resend. A crash between

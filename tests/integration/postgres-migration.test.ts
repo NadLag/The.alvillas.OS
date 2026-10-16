@@ -2,6 +2,7 @@ import type { EmailProvider } from "@/platform/providers";
 import { digestEventType } from "@/platform/notifications/digest";
 import { scheduleDigests, deliverDigest, digestSettings, recordDigestReceipt } from "@/platform/notifications/digest-service";
 import { saveDigestPreferences } from "@/platform/notifications/notification-service";
+import { updateAccountEmail } from "@/modules/identity/application/identity-service";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
@@ -478,7 +479,7 @@ describe("PostgreSQL baseline", () => {
   });
 
   it("suppresses queued or retrying digests after consent, language, scope, unread state or recipient changes", async () => {
-    for (const scenario of ["language", "off", "channel", "scope", "read", "address", "inactive"] as const) {
+    for (const scenario of ["language", "off", "channel", "scope", "role", "read", "address", "inactive"] as const) {
       const f = await digestFixture(); await scheduleDigests(f.organization.id, f.deps); const event = await f.event(); let calls = 0;
       const provider: EmailProvider = { send: () => { calls++; return Promise.reject(new Error("PRIVATE transport body")); } };
       await expect(deliverDigest(event, { ...f.deps, provider })).rejects.toThrow("digest_delivery_retry");
@@ -486,10 +487,16 @@ describe("PostgreSQL baseline", () => {
       else if (scenario === "channel") { const preferences = await getNotificationPreferences(f.actor, f.deps); await saveNotificationPreferences(f.actor, { ...preferences, email: { security: true, enabled: false, account: false, operations: false } }, f.deps); }
       else await withTenant(prisma, f.organization.id, async (tx) => {
         if (scenario === "scope") await tx.roleAssignment.updateMany({ where: { userAccountId: f.account.id }, data: { archivedAt: new Date() } });
+        if (scenario === "role") await tx.role.updateMany({ where: { organizationId: f.organization.id, key: "digest-operator" }, data: { archivedAt: new Date() } });
         if (scenario === "read") await tx.notification.updateMany({ where: { recipientId: f.account.id, readAt: null }, data: { readAt: new Date() } });
         if (scenario === "address") await tx.userAccount.update({ where: { id: f.account.id }, data: { email: "changed@example.test" } });
         if (scenario === "inactive") await tx.userAccount.update({ where: { id: f.account.id }, data: { status: "DEACTIVATED" } });
       });
+      if (scenario === "role") {
+        const revokedContext = await authContextForAccount(f.organization.id, f.account.id, { db: prisma });
+        const notice = await withTenant(prisma, f.organization.id, (tx) => tx.notification.findFirstOrThrow({ where: { targetId: f.task.id, recipientId: f.account.id } }));
+        await expect(openNotification({ ...f.actor, authContext: ownNotificationContext(revokedContext, f.account.id) }, notice.id, "en", f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+      }
       await deliverDigest(event, { ...f.deps, provider, now: new Date(f.due.getTime() + 61000) }); expect(calls).toBe(1);
       const row = await withTenant(prisma, f.organization.id, (tx) => tx.notificationDelivery.findFirstOrThrow({ where: { channel: "digest" } }));
       expect(row.status).toBe("SUPPRESSED"); expect(row.attemptCount).toBe(1);
@@ -500,7 +507,7 @@ describe("PostgreSQL baseline", () => {
     const f = await digestFixture();
     await saveDigestPreferences(f.actor, { ...f.settings, timezone: "Africa/Casablanca", time: "23:00", quietHours: { start: "22:00", end: "07:00" } }, "quiet", { db: prisma, now: new Date("2030-07-07T20:00Z") });
     expect((await scheduleDigests(f.organization.id, { ...f.deps, now: new Date("2030-07-07T22:00Z") })).scheduled).toBe(0);
-    const due = new Date("2030-07-08T06:00Z"); expect((await scheduleDigests(f.organization.id, { ...f.deps, now: due })).scheduled).toBe(1);
+    const due = new Date("2030-07-08T07:00Z"); expect((await scheduleDigests(f.organization.id, { ...f.deps, now: due })).scheduled).toBe(1);
     await withTenant(prisma, f.organization.id, (tx) => tx.notification.updateMany({ where: { recipientId: f.account.id, kind: "reservation_created" }, data: { readAt: new Date() } }));
     let calls = 0; const provider: EmailProvider = { send: (email) => { calls++; expect(email.text).toContain("1 notification"); return Promise.resolve({ id: "quiet-resend" }); } };
     await deliverDigest(await f.event(), { ...f.deps, now: due, provider }); expect(calls).toBe(1);
@@ -534,6 +541,32 @@ describe("PostgreSQL baseline", () => {
       await expect(withTenant(prisma, large.organization.id, (tx) => tx.notificationDelivery.update({ where: { id: rows.delivery.id }, data }))).rejects.toThrow();
     }
     await expect(withTenant(prisma, large.organization.id, (tx) => tx.notification.update({ where: { id: rows.notice.id }, data: { digestDeliveryId: null } }))).rejects.toThrow();
+  });
+
+  it("changes a digest recipient account email uniquely with an audit trail while preserving account, person and session security", async () => {
+    const f = await digestFixture();
+    const before = await withTenant(prisma, f.organization.id, async (tx) => {
+      await tx.authSession.create({ data: { organizationId: f.organization.id, userAccountId: f.account.id, deviceId: "digest-email-change-verification", sessionVersion: 1, expiresAt: new Date("2030-12-01T00:00:00Z") } });
+      return { account: await tx.userAccount.findUniqueOrThrow({ where: { id: f.account.id } }), person: await tx.person.findUniqueOrThrow({ where: { id: f.person.id } }),
+        sessions: await tx.authSession.findMany({ where: { userAccountId: f.account.id } }), roles: await tx.roleAssignment.findMany({ where: { userAccountId: f.account.id } }) };
+    });
+    const scope = { organizationId: f.organization.id };
+    const permissions = new Set(["identity:edit"]);
+    const actor = { organizationId: f.organization.id, actorId: f.account.id, personId: f.person.id,
+      authContext: { organizationId: f.organization.id, userAccountId: f.account.id, permissions, scopes: [scope], assignments: [{ scope, permissions }] } };
+    const input = { accountId: f.account.id, personId: f.person.id, email: "OWNER-INBOX@example.test", expectedEmail: f.account.email!, reason: "Owner-authorized staging inbox configuration" };
+    await expect(updateAccountEmail({ ...actor, authContext: { ...actor.authContext, permissions: new Set(), assignments: [] } }, input, f.deps)).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    await expect(updateAccountEmail(actor, { ...input, email: f.other.email! }, f.deps)).rejects.toBeInstanceOf(IdentityConflictError);
+    await expect(updateAccountEmail(actor, { ...input, expectedEmail: "changed@example.test" }, f.deps)).rejects.toBeInstanceOf(IdentityConflictError);
+    await expect(updateAccountEmail(actor, { ...input, personId: randomUUID() }, f.deps)).rejects.toThrow();
+    await expect(updateAccountEmail({ ...actor, organizationId: randomUUID() }, input, f.deps)).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    await updateAccountEmail(actor, input, f.deps); await updateAccountEmail(actor, input, f.deps);
+    const after = await withTenant(prisma, f.organization.id, async (tx) => ({ account: await tx.userAccount.findUniqueOrThrow({ where: { id: f.account.id } }), person: await tx.person.findUniqueOrThrow({ where: { id: f.person.id } }),
+      sessions: await tx.authSession.findMany({ where: { userAccountId: f.account.id } }), roles: await tx.roleAssignment.findMany({ where: { userAccountId: f.account.id } }),
+      audit: await tx.auditLog.findMany({ where: { action: "identity.account.email.update", resourceId: f.account.id } }) }));
+    const identity = (row: typeof before.account) => ({ ...row, email: undefined, updatedAt: undefined });
+    expect(identity(after.account)).toEqual(identity(before.account)); expect(after.account.email).toBe("owner-inbox@example.test"); expect(after.account.updatedAt).toBeInstanceOf(Date);
+    expect(after.person).toEqual(before.person); expect(after.sessions).toEqual(before.sessions); expect(after.roles).toEqual(before.roles); expect(after.audit).toHaveLength(1);
   });
 
   it("prepares scoped manual WhatsApp drafts with current contacts, routing, locale, minimized data and redacted audits", async () => {

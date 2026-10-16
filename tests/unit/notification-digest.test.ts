@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { digestSettingsSchema, initialDigestPolicy, digestPolicySchema, inDigestQuietHours, nextDigestAt, type DigestSettings } from "@/platform/notifications/digest";
 import { renderDigestEmail } from "@/platform/email/digest-template";
+import { currentTimezoneData } from "@/platform/time/timezone-data";
 
 const settings: DigestSettings = { frequency: "daily", language: "fr", timezone: "Africa/Casablanca", time: "09:00", weekday: 1, quietHours: null };
 describe("F-NTF-07 digest scheduling and templates", () => {
   it("resolves local calendar schedules and coalesces missed intervals without catch-up bursts", () => {
-    expect(nextDigestAt(settings, new Date("2026-10-16T07:59:00Z"))?.toISOString()).toBe("2026-10-16T08:00:00.000Z");
-    expect(nextDigestAt(settings, new Date("2026-10-16T08:00:00Z"))?.toISOString()).toBe("2026-10-17T08:00:00.000Z");
-    expect(nextDigestAt({ ...settings, frequency: "weekly" }, new Date("2026-10-16T12:00:00Z"))?.toISOString()).toBe("2026-10-19T08:00:00.000Z");
+    expect(nextDigestAt(settings, new Date("2026-10-16T08:59:00Z"))?.toISOString()).toBe("2026-10-16T09:00:00.000Z");
+    expect(nextDigestAt(settings, new Date("2026-10-16T09:00:00Z"))?.toISOString()).toBe("2026-10-17T09:00:00.000Z");
+    expect(nextDigestAt({ ...settings, frequency: "weekly" }, new Date("2026-10-16T12:00:00Z"))?.toISOString()).toBe("2026-10-19T09:00:00.000Z");
     expect(nextDigestAt({ ...settings, frequency: "off" }, new Date())).toBeNull();
   });
   it("handles DST gaps, repeated hours and Casablanca Ramadan clock changes", () => {
@@ -18,13 +19,19 @@ describe("F-NTF-07 digest scheduling and templates", () => {
   });
   it("defers overnight and daytime quiet intervals and treats the end as inclusive", () => {
     const quiet = { ...settings, time: "23:00", quietHours: { start: "22:00", end: "07:00" } };
-    expect(nextDigestAt(quiet, new Date("2026-10-16T20:00:00Z"))?.toISOString()).toBe("2026-10-17T06:00:00.000Z");
-    expect(inDigestQuietHours(quiet, new Date("2026-10-17T06:00:00Z"))).toBe(false);
-    expect(nextDigestAt({ ...settings, quietHours: { start: "08:00", end: "12:00" } }, new Date("2026-10-16T06:00:00Z"))?.toISOString()).toBe("2026-10-16T11:00:00.000Z");
+    expect(nextDigestAt(quiet, new Date("2026-10-16T20:00:00Z"))?.toISOString()).toBe("2026-10-17T07:00:00.000Z");
+    expect(inDigestQuietHours(quiet, new Date("2026-10-17T07:00:00Z"))).toBe(false);
+    expect(nextDigestAt({ ...settings, quietHours: { start: "08:00", end: "12:00" } }, new Date("2026-10-16T06:00:00Z"))?.toISOString()).toBe("2026-10-16T12:00:00.000Z");
   });
   it("rejects unknown timezones, invalid times, 24h quiet periods and unsafe retry windows", () => {
     for (const patch of [{ timezone: "Mars/Casablanca" }, { time: "24:00" }, { weekday: 7 }, { quietHours: { start: "09:00", end: "09:00" } }, { language: "xx" }]) expect(digestSettingsSchema.safeParse({ ...settings, ...patch }).success).toBe(false);
     expect(digestPolicySchema.safeParse({ ...initialDigestPolicy, retryWindowHours: 24 }).success).toBe(false);
+  });
+  it("requires current embedded IANA data and preserves pre-transition Casablanca history", () => {
+    expect(currentTimezoneData("2025b")).toBe(false); expect(currentTimezoneData("2026b")).toBe(false);
+    expect(currentTimezoneData("2026c")).toBe(true); expect(currentTimezoneData("2026d")).toBe(true); expect(currentTimezoneData("2027a")).toBe(true);
+    expect(nextDigestAt(settings, new Date("2026-08-16T07:59:00Z"))?.toISOString()).toBe("2026-08-16T08:00:00.000Z");
+    expect(nextDigestAt(settings, new Date("2026-09-19T09:00:00Z"))?.toISOString()).toBe("2026-09-20T09:00:00.000Z");
   });
   it.each(["en", "fr", "ar"] as const)("renders %s only from localized safe labels and authenticated notification references", (language) => {
     const id = "018f0a0b-0000-7000-9000-000000000001";
