@@ -1,3 +1,4 @@
+import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
 import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
 import { localizedTextSchema } from "@/i18n/content";
@@ -305,6 +306,7 @@ export const featureFlagConfigSchema = z
 export const configRuleSchemas = {
   [pushPolicyKey]: pushPolicySchema,
   [digestPolicyKey]: digestPolicySchema,
+  [emailPolicyKey]: emailPolicySchema,
   "notification.routing.approval_requested": notificationRoutingSchema,
   "notification.routing.approval_decided": notificationRoutingSchema,
   "notification.routing.language_updated": notificationRoutingSchema,

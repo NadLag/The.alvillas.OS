@@ -65,6 +65,7 @@ jobs:
             `VAPID_PRIVATE_KEY=${keys.privateKey}`,
             "VAPID_SUBJECT=mailto:notifications@example.test",
             `INNGEST_SIGNING_KEY=signkey-test-${randomBytes(32).toString("hex")}`,
+            `RESEND_WEBHOOK_SECRET=whsec_${randomBytes(32).toString("base64")}`,
             ""
           ].join("\n"));
           NODE

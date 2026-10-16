@@ -23,7 +23,7 @@ describe("signed Resend digest receipts", () => {
     expect(() => verifyDigestReceipt(body, new Headers(), secret)).toThrow();
   });
   it("ignores unrelated templates and rejects invalid tenant references without returning payload details", () => {
-    for (const tags of [{ ...receipt.data.tags, template: "identity_invitation" }, { ...receipt.data.tags, organization_id: "wrong" }]) {
+    for (const tags of [{ ...receipt.data.tags, template: "unrelated_template" }, { ...receipt.data.tags, organization_id: "wrong" }]) {
       const body = JSON.stringify({ ...receipt, data: { ...receipt.data, tags } }); expect(verifyDigestReceipt(body, signed(body), secret)).toBeNull();
     }
   });

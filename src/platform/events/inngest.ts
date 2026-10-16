@@ -1,12 +1,10 @@
 import type { OutboxEvent as PrismaOutboxEvent } from "@prisma/client";
 import type { OutboxHandlers } from "@/platform/events/outbox-dispatcher";
 import type { EmailProvider } from "@/platform/providers";
-import { ResendEmailProvider, EmailNotificationChannel } from "@/platform/providers/real";
-import { deliverNotificationChannel, notificationChannelEventType } from "@/platform/notifications/notification-channel-service";
-import { renderIdentityEmail } from "@/platform/email/identity-templates";
+import { deliverEmail } from "@/platform/notifications/email-delivery-service";
+import { notificationChannelEventType } from "@/platform/notifications/notification-channel-service";
 import { deliverNotificationEvent } from "@/platform/notifications/notification-service";
 import { notificationEventType } from "@/platform/notifications/notification";
-import { shouldDeliverNotification } from "@/platform/notifications/notification-preferences";
 import { deliverPushChannel } from "@/platform/notifications/push-delivery-service";
 import type { TenantTransactionRunner } from "@/platform/db/tenant";
 import { z } from "zod";
@@ -98,21 +96,14 @@ export function createInngestOutboxHandlers(
       await handler(event);
       return;
     }
-    const email = renderIdentityEmail(event.type, payload, env.APP_URL ?? "http://localhost:3000");
-    // Required account-access emails share the notification policy and always
-    // survive optional channel/category opt-outs (including before activation).
-    if (!shouldDeliverNotification(event.type, "email", null)) return;
-    const provider = emailProvider ?? new ResendEmailProvider(env);
-    await provider.send({ ...email, idempotencyKey: `identity-email:${event.organizationId}:${event.id}` });
+    await deliverEmail(event, { db: deps.db, env, now: deps.now, provider: emailProvider });
   };
 
   return {
     [digestEventType]: async (event) => { await deliverDigest(event, { env, db: deps.db, now: deps.now, provider: emailProvider }); },
     [notificationChannelEventType]: async (event) => {
       if ((event.payload as Record<string, unknown>).channel === "push") { await deliverPushChannel(event, { env, db: deps.db }); return; }
-      await deliverNotificationChannel(event, { db: deps.db, appUrl: env.APP_URL ?? "http://localhost:3000", channels: {
-        ...(emailProvider || (env.RESEND_API_KEY && env.EMAIL_FROM) ? { email: new EmailNotificationChannel(emailProvider ?? new ResendEmailProvider(env)) } : {})
-      } });
+      await deliverEmail(event, { db: deps.db, env, now: deps.now, provider: emailProvider });
     },
     [notificationEventType]: async (event) => { await deliverNotificationEvent(event, { db: deps.db }); },
     "identity.invitation.delivery_requested": identityDelivery,

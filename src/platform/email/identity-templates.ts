@@ -1,7 +1,7 @@
 import { z } from "zod";
-import en from "../../../messages/en.json";
-import fr from "../../../messages/fr.json";
-import ar from "../../../messages/ar.json";
+import en from "../../../messages/en.json" with { type: "json" };
+import fr from "../../../messages/fr.json" with { type: "json" };
+import ar from "../../../messages/ar.json" with { type: "json" };
 import { formatDateTime } from "@/i18n/format";
 import type { EmailProvider } from "@/platform/providers";
 import { renderEmailDocument } from "./email-layout";

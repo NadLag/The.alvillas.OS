@@ -71,7 +71,7 @@ async function jsonRequest<T>(
 }
 
 export class EmailRequestError extends Error {
-  constructor(readonly status: number, readonly retryAfterMs = 0) { super(`Resend email request failed with status ${status}`); }
+  constructor(readonly status: number, readonly retryAfterMs = 0, readonly code?: "invalid_idempotent_request" | "concurrent_idempotent_requests") { super(`Resend email request failed with status ${status}`); }
 }
 
 export class ResendEmailProvider implements EmailProvider {
@@ -119,7 +119,9 @@ export class ResendEmailProvider implements EmailProvider {
     if (!response.ok) {
       const value = response.headers?.get("retry-after");
       const delay = value && /^\d+$/u.test(value) ? Number(value) * 1000 : value ? Date.parse(value) - Date.now() : 0;
-      throw new EmailRequestError(response.status, Number.isFinite(delay) ? Math.max(0, Math.min(delay, 86400000)) : 0);
+      const body = await response.json().catch(() => null) as { name?: unknown } | null;
+      const code = body?.name === "invalid_idempotent_request" || body?.name === "concurrent_idempotent_requests" ? body.name : undefined;
+      throw new EmailRequestError(response.status, Number.isFinite(delay) ? Math.max(0, Math.min(delay, 86400000)) : 0, code);
     }
     const body = await response.json().catch(() => { throw new Error("Invalid Resend email response"); }) as { id?: unknown };
     if (typeof body.id !== "string" || !body.id) {

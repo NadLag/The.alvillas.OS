@@ -1,4 +1,9 @@
 import type { EmailProvider } from "@/platform/providers";
+import { EmailRequestError } from "@/platform/providers/real";
+import { deliveryPage, deliveryLogs, retryDelivery, recordDeliveryReceipt } from "@/platform/notifications/delivery-service";
+import { deliverEmail } from "@/platform/notifications/email-delivery-service";
+import { recipientKey } from "@/platform/notifications/email-delivery";
+import { DeliveryRepository } from "@/platform/notifications/delivery-repository";
 import { digestEventType } from "@/platform/notifications/digest";
 import { scheduleDigests, deliverDigest, digestSettings, recordDigestReceipt } from "@/platform/notifications/digest-service";
 import { saveDigestPreferences } from "@/platform/notifications/notification-service";
@@ -142,7 +147,7 @@ import { getNotificationRouting, saveNotificationRouting } from "@/platform/noti
 import { notificationRoutingKey, type NotificationRouting } from "@/platform/notifications/notification-routing";
 import { requestApproval, decideApproval, getApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
-import { deliverNotificationChannel, notificationChannelEventType } from "@/platform/notifications/notification-channel-service";
+import { notificationChannelEventType } from "@/platform/notifications/notification-channel-service";
 import webpush from "web-push";
 import { deliverPushChannel } from "@/platform/notifications/push-delivery-service";
 import { pushSettings, savePushSubscription, revokePushSubscription, pushRecord } from "@/platform/notifications/push-service";
@@ -288,6 +293,7 @@ async function configureAppRole(databaseUrl: string): Promise<string> {
     "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO alvillas_app_test"
   );
   await adminPrisma.$executeRawUnsafe("REVOKE UPDATE, DELETE ON audit_log FROM alvillas_app_test");
+  await adminPrisma.$executeRawUnsafe("REVOKE UPDATE, DELETE ON notification_delivery_log, notification_email_suppression FROM alvillas_app_test");
 
   return appRoleUrl(databaseUrl);
 }
@@ -409,6 +415,113 @@ describe("PostgreSQL baseline", () => {
     return { ...fixture, organization, actor, settings, now, due, deps, event, history };
   }
 
+  async function deliveryDiagnosticFixture() {
+    const f = await digestFixture();
+    const actor = { ...f.actor, authContext: { ...f.actor.authContext, permissions: new Set(["audit_log:view", "audit_log:edit", "config_rule:configure"]), assignments: undefined,
+      scopes: [{ organizationId: f.organization.id }] } };
+    const event = await withTenant(prisma, f.organization.id, tx => tx.outboxEvent.create({ data: { organizationId: f.organization.id, type: "identity.recovery.delivery_requested",
+      payload: { userAccountId: f.account.id, channel: "email", toEmail: f.account.email, locale: "fr", recoveryCode: "private-recovery-code", recoveryUrl: "http://localhost:3000/fr/recover", expiresAt: "2030-01-08T09:00:00Z" }, idempotencyKey: randomUUID() } }));
+    const env = { APP_URL: "http://localhost:3000", EMAIL_FROM: "ops@example.test" };
+    const stored = () => withTenant(prisma, f.organization.id, tx => tx.notificationDelivery.findFirstOrThrow({ where: { eventId: event.id, deliveryKey: "email" } }));
+    return { ...f, actor, eventDigest: f.event, event, env, stored };
+  }
+  it("delivery diagnostics persist attempts and stable retry bytes, honor cooldowns and make manual retries idempotent with redaction", async () => {
+    const f = await deliveryDiagnosticFixture(); const sent: Parameters<EmailProvider["send"]>[0][] = [];
+    const provider: EmailProvider = { send: input => { sent.push(input); return sent.length === 1 ? Promise.reject(new EmailRequestError(429, 120000)) : Promise.resolve({ id: "private-provider-reference" }); } };
+    const handlers = createInngestOutboxHandlers(f.env, undefined, provider, { db: prisma, now: f.due });
+    await dispatchOutboxBatch(prisma, f.organization.id, handlers, { now: f.due, errorReporter: () => Promise.resolve() });
+    const first = await f.stored(); expect(first).toMatchObject({ status: "PENDING", attemptCount: 1, providerStatus: 429, errorCode: "rate_limited" });
+    expect(first.nextAttemptAt!.getTime() - f.due.getTime()).toBe(120000);
+    await expect(retryDelivery(f.actor, { id: first.id, reason: "PRIVATE reason" }, f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    const due = { db: prisma, now: first.nextAttemptAt! };
+    await Promise.all(Array.from({ length: 3 }, () => retryDelivery(f.actor, { id: first.id, reason: "PRIVATE reason" }, due)));
+    expect((await deliveryLogs(f.actor, { id: first.id }, due)).items.filter(row => row.outcome === "RETRY_QUEUED")).toHaveLength(1);
+    const page = await deliveryPage(f.actor, {}, due); expect(page.items[0]).toMatchObject({ recipient: "••••••", canRetry: true });
+    expect(JSON.stringify(page)).not.toMatch(/private-provider|recovery-code|example.test|payloadEncrypted|PRIVATE/u);
+    await dispatchOutboxBatch(prisma, f.organization.id, createInngestOutboxHandlers(f.env, undefined, provider, due), { now: due.now, errorReporter: () => Promise.resolve() });
+    expect(sent).toHaveLength(2); expect(sent[0]).toEqual(sent[1]); expect(sent[0].deliveryReference?.deliveryId).toBe(first.id);
+    expect(await f.stored()).toMatchObject({ status: "ACCEPTED", attemptCount: 2 });
+    await deliverEmail(f.event, { ...due, env: f.env, provider }); expect(sent).toHaveLength(2);
+    const history = await deliveryLogs(f.actor, { id: first.id }, due); expect(history.items.map(row => row.outcome)).toEqual(["ACCEPTED", "RETRY_QUEUED", "RETRY"]);
+    const audit = await withTenant(prisma, f.organization.id, tx => tx.auditLog.findMany({ where: { action: { startsWith: "notification.delivery." } } }));
+    expect(JSON.stringify({ audit, history })).not.toMatch(/PRIVATE|private-provider|example.test|recovery-code/u);
+    await expect(retryDelivery(f.actor, { id: first.id, reason: "Terminal delivery" }, due)).rejects.toBeInstanceOf(NotificationAccessError);
+  });
+  it("delivery diagnostics deduplicate out-of-order receipts and suppress hard-bounced recipients across identity and digest paths", async () => {
+    const f = await deliveryDiagnosticFixture(); let calls = 0; const provider: EmailProvider = { send: () => { calls++; return Promise.resolve({ id: "provider-email-id" }); } };
+    await deliverEmail(f.event, { ...f.deps, provider, env: f.env }); const row = await f.stored();
+    const receipt = { type: "email.delivered" as const, eventId: "msg_delivered", created_at: f.due.toISOString(), data: { email_id: "provider-email-id", tags: { template: "identity_recovery" as const, organization_id: f.organization.id, delivery_id: row.id } } };
+    await Promise.all(Array.from({ length: 5 }, () => recordDeliveryReceipt(receipt, f.deps)));
+    expect(await f.stored()).toMatchObject({ status: "DELIVERED" });
+    const bounce = { ...receipt, type: "email.bounced" as const, eventId: "msg_bounced", data: { ...receipt.data, bounce: { type: "Permanent" as const } } };
+    await Promise.all(Array.from({ length: 3 }, () => recordDeliveryReceipt(bounce, f.deps)));
+    await recordDeliveryReceipt({ ...receipt, eventId: "msg_late_delivered" }, f.deps);
+    expect(await f.stored()).toMatchObject({ status: "BOUNCED", errorCode: "hard_bounce", deliveredAt: f.due });
+    expect((await deliveryLogs(f.actor, { id: row.id }, f.deps)).items.filter(log => log.outcome === "email.bounced")).toHaveLength(1);
+    expect(await withTenant(prisma, f.organization.id, tx => new DeliveryRepository(tx, f.organization.id).suppressed(recipientKey(f.organization.id, f.account.email!)))).toMatchObject({ code: "hard_bounce" });
+    const event2 = await withTenant(prisma, f.organization.id, tx => tx.outboxEvent.create({ data: { organizationId: f.organization.id, type: f.event.type, payload: f.event.payload!, idempotencyKey: randomUUID() } }));
+    await deliverEmail(event2, { ...f.deps, env: f.env, provider }); expect(calls).toBe(1);
+    await scheduleDigests(f.organization.id, f.deps); await deliverDigest(await f.eventDigest(), { ...f.deps, provider }); expect(calls).toBe(1);
+    expect((await f.history())[0]).toMatchObject({ status: "SUPPRESSED", errorCode: "recipient_suppressed" });
+  });
+  it("delivery diagnostics deny wrong tenant, wrong scope, foreign provider references and append-only history rewrites", async () => {
+    const f = await deliveryDiagnosticFixture(); await deliverEmail(f.event, { ...f.deps, env: f.env, provider: { send: () => Promise.resolve({ id: "provider-match" }) } }); const row = await f.stored();
+    for (const actor of [{ ...f.actor, accountId: f.other.id }, { ...f.actor, organizationId: randomUUID() },
+      { ...f.actor, authContext: { ...f.actor.authContext, scopes: [{ organizationId: f.organization.id, scopeType: "property" as const, scopeId: f.property.id }] } },
+      { ...f.actor, authContext: { ...f.actor.authContext, permissions: new Set(["audit_log:view"]) } }]) {
+      await expect(deliveryPage(actor, {}, f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+      await expect(deliveryLogs(actor, { id: row.id }, f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+      await expect(retryDelivery(actor, { id: row.id, reason: "Cross scope retry" }, f.deps)).rejects.toBeInstanceOf(NotificationAccessError);
+    }
+    const bad = { type: "email.bounced" as const, eventId: "wrong-provider", created_at: f.due.toISOString(), data: { email_id: "other-provider", tags: { template: "identity_recovery" as const, organization_id: f.organization.id, delivery_id: row.id } } };
+    await recordDeliveryReceipt(bad, f.deps); expect(await f.stored()).toMatchObject({ status: "ACCEPTED" });
+    expect(await recordDeliveryReceipt({ ...bad, data: { ...bad.data, tags: { ...bad.data.tags, organization_id: randomUUID() } } }, f.deps)).toBe(false);
+    const logs = await deliveryLogs(f.actor, { id: row.id }, f.deps);
+    await expect(withTenant(adminPrisma!, f.organization.id, tx => tx.notificationDeliveryLog.update({ where: { id: logs.items[0].id }, data: { code: "rewrite" } }))).rejects.toThrow("append-only");
+    await expect(withTenant(adminPrisma!, f.organization.id, tx => tx.notificationDeliveryLog.delete({ where: { id: logs.items[0].id } }))).rejects.toThrow("append-only");
+    await expect(withTenant(prisma, f.organization.id, tx => tx.notificationDeliveryLog.update({ where: { id: logs.items[0].id }, data: { code: "rewrite" } }))).rejects.toThrow(/permission denied/u);
+    const foreign = await prisma.organization.create({ data: { name: "Diagnostic RLS" } });
+    expect(await withTenant(prisma, foreign.id, tx => tx.notificationDeliveryLog.findMany({ where: { deliveryId: row.id } }))).toEqual([]);
+    expect(await withTenant(prisma, foreign.id, tx => tx.notificationEmailSuppression.findMany({}))).toEqual([]);
+  });
+  it("delivery diagnostics enforce retry budgets and retention windows and distinguish conflicts, soft bounces and complaints", async () => {
+    for (const scenario of ["budget", "window", "conflict", "soft", "complaint"]) {
+      const f = await deliveryDiagnosticFixture(); let calls = 0;
+      const provider: EmailProvider = { send: () => { calls++; return ["soft", "complaint"].includes(scenario) ? Promise.resolve({ id: "provider-bounce" }) : Promise.reject(scenario === "conflict" ? new EmailRequestError(409, 0, "invalid_idempotent_request") : new Error("PRIVATE transport failure")); } };
+      if (["soft", "complaint"].includes(scenario)) await deliverEmail(f.event, { ...f.deps, env: f.env, provider });
+      else await expect(deliverEmail(f.event, { ...f.deps, env: f.env, provider })).rejects.toThrow(scenario === "conflict" ? "email_delivery_failed" : "email_delivery_retry");
+      const row = await f.stored();
+      if (scenario === "window") await expect(deliverEmail(f.event, { ...f.deps, env: f.env, provider, now: new Date(f.due.getTime() + 23 * 3600000) })).rejects.toThrow("email_delivery_failed");
+      if (scenario === "budget") for (let i = 0; i < 5; i++) { const current = await f.stored(); await deliverEmail(f.event, { ...f.deps, env: f.env, provider, now: current.nextAttemptAt ?? f.due }).catch((error: unknown) => { expect(error).toBeInstanceOf(Error); expect((error as Error).message).toMatch(/^email_delivery_(retry|failed)$/u); }); }
+      if (["soft", "complaint"].includes(scenario)) {
+        await recordDeliveryReceipt({ type: scenario === "soft" ? "email.bounced" : "email.complained", eventId: "msg_bounce", created_at: f.due.toISOString(), data: { email_id: "provider-bounce", tags: { template: "identity_recovery", organization_id: f.organization.id, delivery_id: row.id }, bounce: { type: "Transient" } } }, f.deps);
+        const suppression = await withTenant(prisma, f.organization.id, tx => new DeliveryRepository(tx, f.organization.id).suppressed(recipientKey(f.organization.id, f.account.email!)));
+        expect(Boolean(suppression)).toBe(scenario === "complaint");
+      }
+      expect((await f.stored()).status).toBe(scenario === "soft" ? "BOUNCED" : scenario === "complaint" ? "COMPLAINED" : "FAILED");
+      expect(calls).toBe(scenario === "budget" ? 5 : 1);
+    }
+  });
+  it("delivery diagnostics paginate summaries and immutable events with a bounded query count as notification volume grows", async () => {
+    const f = await deliveryDiagnosticFixture();
+    await deliverEmail(f.event, { ...f.deps, env: f.env, provider: { send: () => Promise.resolve({ id: "private-provider-id" }) } });
+    await deliveryPage(f.actor, {}, f.deps);
+    const measured = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } }, log: [{ emit: "event", level: "query" }] }); const queries: string[] = [];
+    measured.$on("query", query => queries.push(query.query));
+    try {
+      await deliveryPage(f.actor, {}, { ...f.deps, db: measured }); const small = queries.length;
+      await withTenant(prisma, f.organization.id, tx => tx.notificationDelivery.createMany({ data: Array.from({ length: 44 }, (_, i) => ({ organizationId: f.organization.id, userAccountId: f.account.id, eventId: f.event.id, deliveryKey: `history-${i}`, channel: "email", kind: "identity.recovery.delivery_requested" })) }));
+      queries.length = 0; const page = await deliveryPage(f.actor, {}, { ...f.deps, db: measured });
+      expect(queries.length).toBe(small); expect(queries.length).toBeLessThan(25); expect(page.items).toHaveLength(20); expect(page.nextCursor).not.toBeNull();
+      const next = await deliveryPage(f.actor, { before: page.nextCursor! }, f.deps); expect(next.items).toHaveLength(20);
+      expect(new Set([...page.items, ...next.items].map(row => row.id)).size).toBe(40);
+      const delivery = await f.stored();
+      await withTenant(prisma, f.organization.id, tx => tx.notificationDeliveryLog.createMany({ data: Array.from({ length: 24 }, (_, i) => ({ organizationId: f.organization.id, deliveryId: delivery.id, key: `receipt-fixture-${i}`, outcome: "email.sent", occurredAt: f.due })) }));
+      const logs = await deliveryLogs(f.actor, { id: delivery.id }, f.deps); expect(logs.items).toHaveLength(20); expect(logs.nextCursor).not.toBeNull();
+      const rest = await deliveryLogs(f.actor, { id: delivery.id, before: logs.nextCursor! }, f.deps); expect(rest.items).toHaveLength(5);
+      expect(JSON.stringify({ page, next, logs, rest })).not.toMatch(/private-provider|example.test|payloadEncrypted/u);
+    } finally { await measured.$disconnect(); }
+  });
   it("schedules one localized authorized unread digest across concurrent cron runs and masks every recipient and record field", async () => {
     const f = await digestFixture();
     const results = await Promise.all([scheduleDigests(f.organization.id, f.deps), scheduleDigests(f.organization.id, f.deps)]);
@@ -1222,29 +1335,33 @@ describe("PostgreSQL baseline", () => {
       if (fail && channel === "email") return Promise.reject(new Error("private transport detail must be redacted"));
       return Promise.resolve({ id: "test-provider-acknowledgement" });
     } }]));
-    const handler = (event: Parameters<typeof deliverNotificationChannel>[0]) => deliverNotificationChannel(event, { db: runner, channels, appUrl: "https://staging.example.test" });
-    const handlers = { [notificationChannelEventType]: handler };
+    const provider: EmailProvider = { send: input => channels.email.notify(input) };
     const now = new Date();
-    expect(await dispatchOutboxBatch(runner, org.id, handlers, { now, errorReporter: async () => {} })).toMatchObject({ failed: 1, dispatched: 1 });
-    const failed = await withTenant(runner, org.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { status: "PENDING" } }));
-    expect(failed).toMatchObject({ attemptCount: 1, lastError: "Notification email provider did not acknowledge delivery", nextAttemptAt: expect.any(Date) as Date });
-    expect(await dispatchOutboxBatch(runner, org.id, handlers, { now, errorReporter: async () => {} })).toMatchObject({ failed: 0, dispatched: 0 });
+    const env = { APP_URL: "https://staging.example.test" };
+    const handlers = createInngestOutboxHandlers(env, undefined, provider, { db: runner, now });
+    expect(await dispatchOutboxBatch(runner, org.id, handlers, { now, errorReporter: () => Promise.resolve() })).toMatchObject({ failed: 1, dispatched: 1 });
+    const failed = await withTenant(runner, org.id, tx => tx.outboxEvent.findFirstOrThrow({ where: { status: "PENDING" } }));
+    expect(failed).toMatchObject({ attemptCount: 1, lastError: "email_delivery_retry", nextAttemptAt: expect.any(Date) as Date });
+    expect(await dispatchOutboxBatch(runner, org.id, handlers, { now, errorReporter: () => Promise.resolve() })).toMatchObject({ failed: 0, dispatched: 0 });
     fail = false;
-    expect(await dispatchOutboxBatch(runner, org.id, handlers, { now: failed.nextAttemptAt!, errorReporter: async () => {} })).toMatchObject({ failed: 0, dispatched: 1 });
-    await Promise.all(Array.from({ length: 3 }, () => handler(failed)));
-    expect(calls.filter((call) => call.channel === "email")).toHaveLength(2);
-    expect(new Set(calls.filter((call) => call.channel === "email").map((call) => call.key)).size).toBe(1);
-    expect(calls.every((call) => call.locale === "fr")).toBe(true);
-    await withTenant(runner, org.id, async (tx) => {
-      await publishNotification(tx, org.id, { kind: "language_updated", targetId: fixture.account.id, recipientId: fixture.account.id }, "external-consent-revoked");
-    });
-    const unconfigured = await withTenant(runner, org.id, (tx) => tx.outboxEvent.findMany({ where: { type: notificationChannelEventType, status: "PENDING" } }));
+    const retryHandlers = createInngestOutboxHandlers(env, undefined, provider, { db: runner, now: failed.nextAttemptAt! });
+    expect(await dispatchOutboxBatch(runner, org.id, retryHandlers, { now: failed.nextAttemptAt!, errorReporter: () => Promise.resolve() })).toMatchObject({ failed: 0, dispatched: 1 });
+    await Promise.all(Array.from({ length: 3 }, () => retryHandlers[notificationChannelEventType](failed)));
+    expect(calls.filter(call => call.channel === "email")).toHaveLength(2);
+    expect(new Set(calls.filter(call => call.channel === "email").map(call => call.key)).size).toBe(1);
+    expect(calls.every(call => call.locale === "fr")).toBe(true);
+    await withTenant(runner, org.id, tx => publishNotification(tx, org.id, { kind: "language_updated", targetId: fixture.account.id, recipientId: fixture.account.id }, "external-consent-revoked"));
+    const unconfigured = await withTenant(runner, org.id, tx => tx.outboxEvent.findMany({ where: { type: notificationChannelEventType, status: "PENDING" } }));
     expect(unconfigured).toHaveLength(2);
-    for (const event of unconfigured) await expect(deliverNotificationChannel(event, { db: runner, channels: {}, appUrl: "https://staging.example.test" })).rejects.toThrow(/provider is not configured/u);
-    await withTenant(runner, org.id, (tx) => tx.notificationPreference.updateMany({ where: { userAccountId: fixture.account.id }, data: { emailEnabled: false, pushEnabled: false } }));
+    const emailEvent = unconfigured.find(event => (event.payload as { channel: string }).channel === "email")!;
+    await expect(deliverEmail(emailEvent, { db: runner, env, now })).rejects.toThrow("email_delivery_retry");
+    await withTenant(runner, org.id, tx => tx.notificationPreference.updateMany({ where: { userAccountId: fixture.account.id }, data: { emailEnabled: false, pushEnabled: false } }));
+    const row = await withTenant(runner, org.id, tx => tx.notificationDelivery.findFirstOrThrow({ where: { eventId: emailEvent.id } }));
     const before = calls.length;
-    expect(await dispatchOutboxBatch(runner, org.id, handlers, { errorReporter: async () => {} })).toMatchObject({ failed: 0, dispatched: 2 });
+    const consentHandlers = createInngestOutboxHandlers(env, undefined, provider, { db: runner, now: row.nextAttemptAt! });
+    expect(await dispatchOutboxBatch(runner, org.id, consentHandlers, { now: row.nextAttemptAt!, errorReporter: () => Promise.resolve() })).toMatchObject({ failed: 0, dispatched: 2 });
     expect(calls).toHaveLength(before);
+    expect(await withTenant(runner, org.id, tx => tx.notificationDelivery.findFirstOrThrow({ where: { id: row.id } }))).toMatchObject({ status: "SUPPRESSED", errorCode: "preferences_or_access_changed" });
   });
 
   it("resolves a concurrently initialized routing rule for every independent source event", async () => {
@@ -1302,15 +1419,18 @@ describe("PostgreSQL baseline", () => {
         text: () => Promise.resolve('private-recipient@example.test private-recovery-code'), arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) });
     };
     const provider = new ResendEmailProvider({ RESEND_API_KEY: "transport-contract-key", EMAIL_FROM: "ops@example.test" }, transport);
-    const handlers = createInngestOutboxHandlers({ INNGEST_EVENT_KEY: "transport-contract-event-key", APP_URL: "https://staging.example.test" }, undefined, provider);
     const now = new Date();
+    const handlers = createInngestOutboxHandlers({ INNGEST_EVENT_KEY: "transport-contract-event-key", APP_URL: "https://staging.example.test" }, undefined, provider, { db: runner, now });
     const rejected = await dispatchOutboxBatch(runner, organization.id, handlers, { now, errorReporter: () => Promise.resolve() });
     expect(rejected).toEqual({ dispatched: 0, failed: 1, skipped: 0 });
     const failed = await withTenant(runner, organization.id, (tx) => tx.outboxEvent.findFirstOrThrow({ where: { idempotencyKey: `identity.invitation.delivery:${invitation.invitationId}` } }));
-    expect(failed).toMatchObject({ status: "PENDING", attemptCount: 1, lastError: "Resend email request failed with status 429" });
+    expect(failed).toMatchObject({ status: "PENDING", attemptCount: 1, lastError: "email_delivery_retry" });
+    const diagnostic = await withTenant(runner, organization.id, tx => tx.notificationDelivery.findFirstOrThrow({ where: { eventId: failed.id } }));
+    expect(diagnostic).toMatchObject({ status: "PENDING", attemptCount: 1, providerStatus: 429, errorCode: "rate_limited" });
     expect(failed.nextAttemptAt!.getTime()).toBeGreaterThan(now.getTime());
     expect(await dispatchOutboxBatch(runner, organization.id, handlers, { now, errorReporter: () => Promise.resolve() })).toEqual({ dispatched: 0, failed: 0, skipped: 0 });
-    expect(await dispatchOutboxBatch(runner, organization.id, handlers, { now: failed.nextAttemptAt!, errorReporter: () => Promise.resolve() })).toEqual({ dispatched: 1, failed: 0, skipped: 0 });
+    const retryHandlers = createInngestOutboxHandlers({ INNGEST_EVENT_KEY: "transport-contract-event-key", APP_URL: "https://staging.example.test" }, undefined, provider, { db: runner, now: failed.nextAttemptAt! });
+    expect(await dispatchOutboxBatch(runner, organization.id, retryHandlers, { now: failed.nextAttemptAt!, errorReporter: () => Promise.resolve() })).toEqual({ dispatched: 1, failed: 0, skipped: 0 });
     expect(requests[0]?.headers?.["Idempotency-Key"]).toBe(requests[1]?.headers?.["Idempotency-Key"]);
     const sent: unknown = JSON.parse(requests[1].body!);
     expect(sent).toMatchObject({ subject: "Votre invitation ALVILLAS OS", html: expect.stringContaining(`https://staging.example.test/fr/activate/${invitation.code}`) as unknown });

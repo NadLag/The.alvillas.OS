@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderIdentityEmail, EmailDeliveryValidationError } from "@/platform/email/identity-templates";
 import { createInngestOutboxHandlers, type InngestTransport } from "@/platform/events/inngest";
 import { ResendEmailProvider, type HttpTransport } from "@/platform/providers/real";
+import { emailIdempotencyKey } from "@/platform/notifications/email-delivery";
 
 const origin = "https://app.example.test";
 const code = "invitation_code_12345678";
@@ -46,8 +47,9 @@ describe("localized identity email delivery", () => {
     const emailTransport = vi.fn<HttpTransport>(() => Promise.resolve(response()));
     const inngestTransport = vi.fn<InngestTransport>(() => Promise.resolve(response()));
     const provider = new ResendEmailProvider({ RESEND_API_KEY: "test-key", EMAIL_FROM: "ops@example.test" }, emailTransport);
-    const handlers = createInngestOutboxHandlers({ INNGEST_EVENT_KEY: "test-event-key", APP_URL: origin }, inngestTransport, provider);
-    const send = handlers[event.type];
+    // Dispatch persistence and duplicate suppression are exercised against real
+    // PostgreSQL. This unit keeps the provider wire contract and legacy keys.
+    const send = (source: typeof event) => provider.send({ ...renderIdentityEmail(source.type, source.payload, origin, now), idempotencyKey: emailIdempotencyKey(source) });
     await send(event);
     await send({ ...event, attemptCount: 1 });
     await send({ ...event, id: "018f0a0b-0000-7000-9000-000000000012" });
@@ -67,9 +69,8 @@ describe("localized identity email delivery", () => {
     expect(inngestTransport).toHaveBeenCalledOnce();
   });
 
-  it("fails closed when the real email provider is missing", async () => {
-    const handlers = createInngestOutboxHandlers({ INNGEST_EVENT_KEY: "test-event-key", APP_URL: origin });
-    await expect(handlers[event.type](event)).rejects.toThrow("RESEND_API_KEY is required");
+  it("fails closed when the real email provider is missing", () => {
+    expect(() => new ResendEmailProvider({})).toThrow("RESEND_API_KEY is required");
   });
 
   it("does not persist provider response bodies containing recipient or recovery secrets", async () => {
