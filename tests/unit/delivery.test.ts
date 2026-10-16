@@ -4,8 +4,16 @@ import { emailFailure, recipientKey } from "@/platform/notifications/email-deliv
 import { retryAllowed, initialEmailPolicy, safeDeliveryCode, deliveryRetrySchema, emailPolicySchema } from "@/platform/notifications/delivery";
 import { EmailRequestError } from "@/platform/providers/real";
 import { verifyDigestReceipt } from "@/platform/email/digest-receipt";
+import en from "../../messages/en.json" with { type: "json" };
+import fr from "../../messages/fr.json" with { type: "json" };
+import ar from "../../messages/ar.json" with { type: "json" };
 
 describe("delivery diagnostics domain", () => {
+  it("preserves native French and Arabic diagnostic text without encoding replacement characters", () => {
+    expect(fr.Notifications.delivery.status).toBe("État de livraison");
+    expect(ar.Notifications.delivery.title).toBe("تشخيص الإشعارات");
+    for (const catalog of [en, fr, ar]) expect(JSON.stringify(catalog.Notifications.delivery)).not.toMatch(/\?{2,}|\uFFFD/u);
+  });
   it("retries transient failures and concurrent requests but permanently rejects payload conflicts and credential errors", () => {
     for (const status of [408, 409, 429, 500, 502, 503]) expect(emailFailure(new EmailRequestError(status, 123)).retryable).toBe(true);
     for (const status of [400, 401, 403, 404, 422]) expect(emailFailure(new EmailRequestError(status)).retryable).toBe(false);

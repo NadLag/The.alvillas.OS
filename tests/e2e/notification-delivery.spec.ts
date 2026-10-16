@@ -72,6 +72,8 @@ test.describe("notification delivery diagnostics", () => {
       await page.getByTestId("delivery-refresh").click(); await expect(panel).toHaveAttribute("aria-busy", "false");
       for (const locale of ["en", "fr", "ar"]) {
         await page.goto(`/${locale}/app/notifications`); await expect(panel.getByTestId("delivery-row").first()).toBeVisible();
+        if (locale === "ar") await expect(panel.getByRole("heading", { level: 2 })).toHaveText("تشخيص الإشعارات");
+        if (locale === "fr") await expect(panel.getByTestId("delivery-status").locator("..")).toContainText("État de livraison");
         await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
         expect(await panel.innerText()).not.toMatch(/PRIVATE|example.test|recovery-code/u);
         for (const row of rows) expect(await panel.innerText()).not.toContain(row.providerId);

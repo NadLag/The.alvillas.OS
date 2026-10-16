@@ -1248,7 +1248,7 @@
       "status": "Delivery status",
       "refresh": "Refresh deliveries",
       "none": "Not recorded",
-      "loading": "Loading delivery history?",
+      "loading": "Loading delivery history…",
       "empty": "No deliveries match these filters.",
       "error": "This action could not be completed. Refresh and check the retry policy and reason.",
       "offline": "You are offline. Delivery history stays visible; reconnect to refresh or retry.",
@@ -1324,6 +1324,7 @@
         "email_suppressed": "Recipient suppressed",
         "email_delivery_delayed": "Delivery delayed"
       },
+      "httpStatus": "HTTP {status}",
       "types": {
         "language_updated": "Your language preference was updated.",
         "task_assigned": "A task was assigned to you.",
@@ -1333,11 +1334,10 @@
         "approval_requested": "An approval needs your decision.",
         "approval_decided": "An approval decision was recorded.",
         "digest": "Email digests",
-        "identity_invitation_delivery_requested": "Your ALVILLAS OS invitation",
-        "identity_recovery_delivery_requested": "Recover your ALVILLAS OS account",
+        "identity_invitation_delivery_requested": "Account invitation",
+        "identity_recovery_delivery_requested": "Account recovery",
         "other": "Other notification"
-      },
-      "httpStatus": "HTTP {status}"
+      }
     }
   },
   "Approvals": {
