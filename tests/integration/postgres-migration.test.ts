@@ -1,3 +1,4 @@
+import { listAuditHistory, exportAuditHistoryCsv } from "@/modules/audit/application/audit-service";
 import type { EmailProvider } from "@/platform/providers";
 import { EmailRequestError } from "@/platform/providers/real";
 import { deliveryPage, deliveryLogs, retryDelivery, recordDeliveryReceipt } from "@/platform/notifications/delivery-service";
@@ -432,6 +433,25 @@ describe("PostgreSQL baseline", () => {
     const masked = await templateCatalog(operational, { kind: "SERVICE_CATALOG" }, f.deps);
     expect(masked.templates[0].values).toBeNull(); expect(masked.templates[0].restricted).toBe(true);
     await expect(changePropertyTemplate(operational, command, f.deps)).rejects.toBeInstanceOf(TemplateAccessError);
+    const auditPermissions = new Set(['audit_log:view', 'audit_log:export']);
+    const reader = { ...operational, authContext: { ...operational.authContext, permissions: auditPermissions } };
+    const financeReader = { ...reader, authContext: { ...reader.authContext, permissions: new Set([...auditPermissions, 'financial_transaction:view']) } };
+    const rawAudits = await withTenant(prisma, f.organization.id, tx => tx.auditLog.findMany({ where: { action: { startsWith: 'property_template.' } }, orderBy: { id: 'asc' } }));
+    const history = await listAuditHistory(reader, {}, f.deps);
+    const sensitive = history.rows.filter(row => row.resourceType.startsWith('property_template') || row.action === 'config_rule.version.created');
+    expect(sensitive).toHaveLength(3);
+    expect(sensitive.every(row => row.after === maskedValue)).toBe(true);
+    expect(JSON.stringify(history)).not.toContain('800.00');
+    expect(await exportAuditHistoryCsv(reader, {}, f.deps)).not.toContain('800.00');
+    expect(JSON.stringify(await listAuditHistory(financeReader, {}, f.deps))).toContain('800.00');
+    expect(await exportAuditHistoryCsv(financeReader, {}, f.deps)).toContain('800.00');
+    const wrongFinanceScope = { ...reader, authContext: { ...reader.authContext, assignments: [
+      { scope: { organizationId: f.organization.id, scopeType: 'organization' as const }, permissions: auditPermissions },
+      { scope: { organizationId: f.organization.id, scopeType: 'property' as const, scopeId: f.second.id }, permissions: new Set(['financial_transaction:view']) }
+    ] } };
+    expect(JSON.stringify(await listAuditHistory(wrongFinanceScope, {}, f.deps))).not.toContain('800.00');
+    expect(await withTenant(prisma, f.organization.id, tx => tx.auditLog.findMany({ where: { id: { in: rawAudits.map(row => row.id) } }, orderBy: { id: 'asc' } }))).toEqual(rawAudits);
+
   });
   it("validates workflow checklist and mid-stay rule references before changing a property", async () => {
     const f = await templateFixture();

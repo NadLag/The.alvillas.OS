@@ -7,6 +7,7 @@ import {
 import type { AuditActorContext } from "@/modules/audit/application/audit-access";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action } from "@/platform/authz/authorize";
+import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
@@ -63,6 +64,38 @@ export const auditFilterSchema = z.object({
 
 export type AuditFilterInput = z.input<typeof auditFilterSchema>;
 
+function containsServicePricing(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).some(
+    ([key, item]) =>
+      key === "services.pricing" ||
+      key.startsWith("/rules/services.pricing/") ||
+      (key === "kind" && item === "SERVICE_CATALOG") ||
+      (key === "key" && item === "services.pricing") ||
+      containsServicePricing(item)
+  );
+}
+
+export function presentAuditHistoryRow(
+  ctx: AuditActorContext,
+  row: AuditHistoryRow,
+  action: "view" | "export" = "view"
+): AuditHistoryRow {
+  if (
+    !["property_template", "property_template_revision", "config_rule"].includes(row.resourceType) ||
+    (!containsServicePricing(row.before) && !containsServicePricing(row.after))
+  )
+    return row;
+  const resource = { organizationId: ctx.organizationId, propertyId: row.propertyScopeId };
+  const financial = authorize(ctx.authContext, "view", { ...resource, type: "financial_transaction" });
+  return present(
+    { ...ctx.authContext, visibleDataClasses: new Set(financial ? ["financial"] : []) },
+    action,
+    { ...resource, type: auditLogResource, data: row },
+    { before: { dataClass: "financial" }, after: { dataClass: "financial" } }
+  ) as AuditHistoryRow;
+}
+
 function db(deps: AuditServiceDeps): TenantTransactionRunner {
   return deps.db ?? prisma;
 }
@@ -97,7 +130,7 @@ export async function listAuditHistory(
       repository.count(filters)
     ]);
 
-    return { rows, total, limit };
+    return { rows: rows.map((row) => presentAuditHistoryRow(ctx, row)), total, limit };
   });
 }
 
@@ -193,6 +226,6 @@ export async function exportAuditHistoryCsv(
       occurredAt: new Date()
     });
 
-    return auditHistoryCsv(rows);
+    return auditHistoryCsv(rows.map((row) => presentAuditHistoryRow(ctx, row, "export")));
   });
 }
