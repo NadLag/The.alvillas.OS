@@ -20,6 +20,9 @@ describe("notification channel and category policy", () => {
     const preferences = defaultNotificationPreferences();
     preferences.in_app = { enabled: false, account: false, operations: false, security: true };
     expect(shouldDeliverNotification("security_session_revoked", "in_app", preferences)).toBe(true);
+    preferences.email = { security: true, enabled: false, account: false, operations: false };
+    expect(shouldDeliverNotification("security_session_revoked", "email", preferences)).toBe(true);
+    expect(shouldDeliverNotification("security_session_revoked", "push", preferences)).toBe(false);
     for (const kind of ["identity.recovery.delivery_requested", "identity.invitation.delivery_requested"]) {
       expect(shouldDeliverNotification(kind, "email", preferences)).toBe(true);
       expect(shouldDeliverNotification(kind, "in_app", preferences)).toBe(false);

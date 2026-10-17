@@ -23,3 +23,10 @@ for 24 hours, so this does not claim indefinite exactly-once delivery.
 See [Resend idempotency](https://resend.com/docs/dashboard/emails/idempotency-keys).
 Live delivery acceptance remains required before the provider-dependent IDs
 can be DONE. No migration or alternative dispatcher is introduced.
+
+F-NTF-01 closeout (2026-10-16) completes the Arabic catalog and sends session
+revocation alerts through the same durable email consumer. These alerts remain
+mandatory in email and in-app even when optional preferences or routing are
+disabled. The recipient is still the affected active account, with its own
+localized security-page link; incomplete MFA enrollment cannot suppress a
+security alert. System emails use the shared locale/direction document wrapper.

@@ -228,6 +228,8 @@ test.describe("identity closeout acceptance", () => {
       expect(device).toBeTruthy();
       await page.reload();
       const account = page.getByTestId("identity-account-row").filter({ hasText: targetEmail });
+      // Credentials and sessions also display ACTIVE; wait for the account's own status.
+      const accountStatus = account.locator(":scope > span").filter({ has: page.getByText("Status", { exact: true }) }).locator("strong");
       await account.getByTestId("revoke-session-button").first().click();
       await expect(account.getByTestId("identity-session-row").first()).toContainText("REVOKED");
       await target.goto(`${origin}/en/app`);
@@ -250,11 +252,11 @@ test.describe("identity closeout acceptance", () => {
       await expect(target).toHaveURL(/\/en\/app/u);
       await page.reload();
       await account.getByTestId("suspend-account-button").click();
-      await expect(account).toContainText("SUSPENDED");
+      await expect(accountStatus).toHaveText("SUSPENDED");
       await target.goto(`${origin}/en/app`);
       await expect(target).toHaveURL(/\/en\/login/u);
       await account.getByTestId("reactivate-account-button").click();
-      await expect(account).toContainText("ACTIVE");
+      await expect(accountStatus).toHaveText("ACTIVE");
       await login(target, targetEmail);
       await page.reload();
       const passwordCredential = account.getByTestId("identity-credential-row").filter({ hasText: "Password" }).first();
@@ -267,7 +269,7 @@ test.describe("identity closeout acceptance", () => {
       await target.getByTestId("login-submit").click();
       await expect(target.getByTestId("login-error")).toBeVisible();
       await account.getByTestId("deactivate-account-button").click();
-      await expect(account).toContainText("DEACTIVATED");
+      await expect(accountStatus).toHaveText("DEACTIVATED");
       expect((await session(target)).user?.id).toBeFalsy();
     } finally { await targetContext.close(); }
   });

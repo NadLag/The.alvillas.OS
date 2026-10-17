@@ -20,7 +20,7 @@ export async function resolveNotificationChannel(repository: NotificationReposit
   const ctx = candidate ? contextForRoleAssignments(candidate.organizationId, candidate.id, candidate.roleAssignments) : null;
   const locale = safeLocale(candidate?.person.preferredLocale ?? "en");
   const destination = ctx && target ? notificationDestination(ctx, input, target, locale) : null;
-  const allowed = Boolean(candidate && ctx && target && destination && !securityEnrollment(candidate).setupRequired
+  const allowed = Boolean(candidate && ctx && target && destination && (target.type === "identity" || !securityEnrollment(candidate).setupRequired)
     && (target.type === "identity" || authorize(ctx, "view", target))
     && (input.kind !== "approval_requested" || (target.status === "PENDING" && (authorize(ctx, "approve", target) || authorize(ctx, "reject", target))))
     && shouldDeliverNotification(input.kind, payload.channel, preferences));

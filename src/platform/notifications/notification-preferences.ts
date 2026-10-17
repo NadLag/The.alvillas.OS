@@ -15,7 +15,7 @@ export function defaultNotificationPreferences(): NotificationPreferences {
 }
 
 export function shouldDeliverNotification(kind: string, channel: "in_app" | "email" | "push", preferences: NotificationPreferences | null): boolean {
-  if (kind === "security_session_revoked") return channel === "in_app";
+  if (kind === "security_session_revoked") return channel === "in_app" || channel === "email";
   if (kind === "identity.invitation.delivery_requested" || kind === "identity.recovery.delivery_requested") return channel === "email";
   const value = preferences ?? defaultNotificationPreferences();
   const settings = channel === "in_app" ? value.in_app : value[channel];

@@ -425,6 +425,40 @@ describe("PostgreSQL baseline", () => {
     const stored = () => withTenant(prisma, f.organization.id, tx => tx.notificationDelivery.findFirstOrThrow({ where: { eventId: event.id, deliveryKey: "email" } }));
     return { ...f, actor, eventDigest: f.event, event, env, stored };
   }
+  it.each(["en", "fr", "ar"] as const)("identity email closeout delivers mandatory %s security notices with opt-outs and tenant isolation", async (locale) => {
+    const f = await digestFixture();
+    await withTenant(prisma, f.organization.id, async tx => {
+      await tx.person.update({ where: { id: f.person.id }, data: { preferredLocale: locale } });
+      await new NotificationRepository(tx, f.organization.id).savePreferences(f.account.id, {
+        in_app: { enabled: false, account: false, operations: false, security: true },
+        email: { enabled: false, account: false, operations: false, security: true }
+      });
+      await new ConfigRuleRepository(tx, f.organization.id).createVersion({
+        key: notificationRoutingKey("security_session_revoked"), scopeType: "organization",
+        value: { roles: [], people: [f.person.id], assigned: false, channels: [] },
+        effectiveFrom: new Date(0), reason: "Security email must survive optional routing opt-outs"
+      });
+      await publishNotification(tx, f.organization.id, { kind: "security_session_revoked", recipientId: f.account.id, targetId: f.account.id }, "security-closeout");
+    });
+    const events = await withTenant(prisma, f.organization.id, tx => tx.outboxEvent.findMany({ where: { type: "notification.channel.requested", payload: { path: ["kind"], equals: "security_session_revoked" } } }));
+    expect(events).toHaveLength(1);
+    const sent: Parameters<EmailProvider["send"]>[0][] = [];
+    const provider: EmailProvider = { send: input => { sent.push(input); return Promise.resolve({ id: randomUUID() }); } };
+    const deps = { db: prisma, provider, env: { APP_URL: "https://os.example.test", EMAIL_FROM: "ops@example.test" } };
+    // A forged organization reference cannot find the persisted source.
+    await deliverEmail({ ...events[0], organizationId: randomUUID() }, deps);
+    expect(sent).toHaveLength(0);
+    await deliverEmail(events[0], deps);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ to: f.account.email, locale, template: "notification.system" });
+    expect(sent[0].html).toContain(`lang="${locale}" dir="${locale === "ar" ? "rtl" : "ltr"}"`);
+    expect(sent[0].html).toContain(`href="https://os.example.test/${locale}/app/security"`);
+    expect(sent[0].text).toContain(sent[0].subject);
+    if (locale === "ar") expect(sent[0].subject).toMatch(/[\u0600-\u06ff]/u);
+    await deliverEmail(events[0], deps);
+    expect(sent).toHaveLength(1);
+    expect(await withTenant(prisma, f.organization.id, tx => tx.notificationDelivery.findMany({ where: { eventId: events[0].id } }))).toMatchObject([{ status: "ACCEPTED", attemptCount: 1 }]);
+  });
   it("delivery diagnostics persist attempts and stable retry bytes, honor cooldowns and make manual retries idempotent with redaction", async () => {
     const f = await deliveryDiagnosticFixture(); const sent: Parameters<EmailProvider["send"]>[0][] = [];
     const provider: EmailProvider = { send: input => { sent.push(input); return sent.length === 1 ? Promise.reject(new EmailRequestError(429, 120000)) : Promise.resolve({ id: "private-provider-reference" }); } };
@@ -985,8 +1019,8 @@ describe("PostgreSQL baseline", () => {
     const handlers = createInngestOutboxHandlers({ APP_URL: "http://localhost:3000" }, undefined, {
       send: (input) => { sent.push(input.template); return Promise.resolve({ id: "postgres-test-transport" }); }
     });
-    expect(await dispatchOutboxBatch(prisma, org.id, handlers)).toMatchObject({ dispatched: 1, failed: 0 });
-    expect(sent).toEqual(["identity.recovery"]);
+    expect(await dispatchOutboxBatch(prisma, org.id, handlers)).toMatchObject({ dispatched: 2, failed: 0 });
+    expect(sent).toEqual(["notification.system", "identity.recovery"]);
     await saveNotificationPreferences(actor, defaults, deps);
     const events = await withTenant(prisma, org.id, (tx) => tx.outboxEvent.findMany({ where: { organizationId: org.id, type: "notification.requested" } }));
     expect(events).toHaveLength(7);
@@ -1531,10 +1565,31 @@ describe("PostgreSQL baseline", () => {
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
     const account = await withTenant(runner, bootstrapOrganizationId, (tx) => tx.userAccount.findFirstOrThrow({ where: { email: invitedEmail } }));
+    const invalidInput = { email: invitedEmail, recoveryCode: "invalid-recovery-code", newPassword: "rejected recovery password" };
+    await expect(recoverPassword(invalidInput, { db: runner, ipAddress: "ntf01-invalid" })).rejects.toThrow("Recovery code is invalid");
+    const expired = await issueRecoveryCode(ctx, account.id, { db: runner, requestId: "ntf01-expired" });
+    await withTenant(runner, bootstrapOrganizationId, async tx => {
+      const audit = await tx.auditLog.findFirstOrThrow({ where: { requestId: "ntf01-expired", action: "identity.recovery_code.issue" } });
+      const id = (audit.after as { authCredentialRecordId: string }).authCredentialRecordId;
+      await tx.authCredential.update({ where: { id }, data: { expiresAt: new Date(0) } });
+    });
+    await expect(recoverPassword({ ...invalidInput, recoveryCode: expired }, { db: runner, ipAddress: "ntf01-expired" })).rejects.toThrow("Recovery code is invalid");
+    const foreignOrg = await prisma.organization.create({ data: { name: "Recovery tenant isolation" } });
+    const foreignCode = "foreign-tenant-recovery-code";
+    await withTenant(runner, foreignOrg.id, async tx => {
+      const person = await tx.person.create({ data: { organizationId: foreignOrg.id, displayName: "Foreign recovery" } });
+      const foreign = await tx.userAccount.create({ data: { organizationId: foreignOrg.id, personId: person.id, email: invitedEmail } });
+      await tx.authCredential.create({ data: { organizationId: foreignOrg.id, userAccountId: foreign.id, type: "RECOVERY_CODE", label: "Recovery code", secretHash: await hashCredentialSecret(foreignCode), expiresAt: new Date(Date.now() + 3600000) } });
+    });
+    await expect(recoverPassword({ ...invalidInput, recoveryCode: foreignCode }, { db: runner, ipAddress: "ntf01-foreign" })).rejects.toThrow("Recovery code is invalid");
+    for (let attempt = 0; attempt < 5; attempt++) await expect(recoverPassword(invalidInput, { db: runner, ipAddress: "ntf01-rate" })).rejects.toThrow("Recovery code is invalid");
+    await expect(recoverPassword(invalidInput, { db: runner, ipAddress: "ntf01-rate" })).rejects.toThrow("Too many recovery attempts");
     const recoveryCode = await issueRecoveryCode(ctx, account.id, { db: runner });
     const recovered = await Promise.allSettled([1, 2].map(() => recoverPassword({ email: invitedEmail,
       recoveryCode, newPassword: "local recovered identity password" }, { db: runner })));
     expect(recovered.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    await expect(recoverPassword({ ...invalidInput, recoveryCode }, { db: runner, ipAddress: "ntf01-reused" })).rejects.toThrow("Recovery code is invalid");
+    expect(await withTenant(runner, bootstrapOrganizationId, tx => tx.auditLog.count({ where: { resourceId: account.id, action: "identity.account.recover" } }))).toBe(1);
     const credential = await withTenant(runner, bootstrapOrganizationId, (tx) => tx.authCredential.findFirstOrThrow({ where: { userAccountId: account.id, type: "PASSWORD", revokedAt: null } }));
     await revokeCredential(ctx, credential.id, { db: runner });
     await withTenant(runner, bootstrapOrganizationId, async (tx) => {
