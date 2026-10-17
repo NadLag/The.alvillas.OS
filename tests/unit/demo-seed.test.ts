@@ -80,7 +80,7 @@ describe("demo seed", () => {
       reservations: 1,
       tasks: 1,
       ledgerTransactions: 1,
-      localizedPaths: 4
+      localizedPaths: 5
     });
 
     expect(organizationUpsert).toHaveBeenCalledWith({

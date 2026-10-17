@@ -305,7 +305,8 @@ export async function seedDemoData(client: DemoSeedClient): Promise<DemoSeedSumm
         { key: "owners", en: "/en/app/owners", fr: "/fr/app/owners" },
         { key: "properties", en: "/en/app/properties", fr: "/fr/app/properties" },
         { key: "reservations", en: "/en/app/reservations", fr: "/fr/app/reservations" },
-        { key: "operations", en: "/en/app/operations", fr: "/fr/app/operations" }
+        { key: "operations", en: "/en/app/operations", fr: "/fr/app/operations" },
+        { key: "templates", en: "/en/app/templates", fr: "/fr/app/templates" }
       ]
     };
     const existingPathRule = await tx.configRule.findFirst({

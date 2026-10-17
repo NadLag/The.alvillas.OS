@@ -64,6 +64,7 @@ describe("config rule registry", () => {
       "notification.routing.task_assigned",
       "notification.routing.task_completed",
       "operations.laundry_pricing",
+      "ops.checklists",
       "ops.mid_stay_threshold",
       "ops.operating_rules",
       "ops.reservation_task_templates",
@@ -163,6 +164,7 @@ describe("config rule resolver ordering", () => {
     }));
     const update = vi.fn();
     const tx = {
+      $executeRaw: vi.fn(() => Promise.resolve(1)),
       configRule: {
         findFirst: vi.fn(() => Promise.resolve({ version: 2 })),
         create,
@@ -184,12 +186,14 @@ describe("config rule resolver ordering", () => {
     });
 
     expect(created.version).toBe(3);
+    expect(tx.$executeRaw).toHaveBeenCalledOnce();
     expect(create).toHaveBeenCalledOnce();
     expect(update).not.toHaveBeenCalled();
   });
 
   it("uses retired rows as effective-dated tombstones without mutating history", async () => {
     const tx = {
+      $executeRaw: vi.fn(() => Promise.resolve(1)),
       configRule: {
         findMany: vi.fn(() =>
           Promise.resolve([

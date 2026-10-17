@@ -215,6 +215,10 @@ export async function createManualReservation(
       resolvedAt: reservation.createdAt,
       createdBy: ctx.actorId
     });
+    for (const rule of taskConfig.supportingRules ?? []) {
+      await repository.snapshotTaskConfigRule({ reservationId: reservation.id, propertyId: reservation.propertyId,
+        rule, resolvedAt: reservation.createdAt, createdBy: ctx.actorId });
+    }
     await auditReservationCreate(tx, ctx, meta, reservation);
     await publishNotification(tx, ctx.organizationId, { kind: "reservation_created", recipientId: ctx.actorId, targetId: reservation.id }, `notification:reservation:${reservation.id}:created`);
 
