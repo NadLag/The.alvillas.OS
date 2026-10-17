@@ -17,6 +17,8 @@ model Organization {
   regions                   Region[]
   cities                    City[]
   configRules               ConfigRule[]
+  templateVersions          PropertyTemplateVersion[]
+  templateRevisions         PropertyTemplateRevision[]
   reservationSnapshots      ReservationConfigSnapshot[]
   outboxEvents              OutboxEvent[]
   notifications             Notification[]
@@ -509,6 +511,8 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  templateVersions     PropertyTemplateVersion[]
+  templateRevisions    PropertyTemplateRevision[]
   approvalRequests     ApprovalRequest[]
   id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId       String                      @map("organization_id") @db.Uuid
@@ -557,7 +561,55 @@ model Property {
   @@index([organizationId, cityId, name], map: "property_org_city_id_name_idx")
   @@index([organizationId, status], map: "property_org_status_idx")
   @@index([organizationId, archivedAt], map: "property_org_archived_idx")
+  @@unique([organizationId, id], map: "property_org_id_unique")
   @@map("property")
+}
+
+model PropertyTemplateVersion {
+  id             String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  key            String
+  kind           String
+  propertyId     String? @map("property_id") @db.Uuid
+  version        Int
+  name           Json
+  description    Json?
+  values         Json
+  status         String
+  createdBy      String @map("created_by") @db.Uuid
+  reason         String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property Property? @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  revisions PropertyTemplateRevision[]
+  @@unique([organizationId, id], map: "property_template_version_org_id_unique")
+  @@unique([organizationId, key, version], map: "property_template_version_org_key_version_unique")
+  @@index([organizationId, propertyId, kind, createdAt], map: "property_template_version_org_scope_kind_idx")
+  @@map("property_template_version")
+}
+
+model PropertyTemplateRevision {
+  id             String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  propertyId     String @map("property_id") @db.Uuid
+  kind           String
+  revision       Int
+  templateVersionId String @map("template_version_id") @db.Uuid
+  action         String
+  operationId    String @map("operation_id") @db.Uuid
+  command        Json
+  snapshot       Json
+  overrides      Json
+  createdBy      String @map("created_by") @db.Uuid
+  reason         String
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property Property @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  templateVersion PropertyTemplateVersion @relation(fields: [organizationId, templateVersionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([organizationId, operationId], map: "property_template_revision_org_operation_unique")
+  @@unique([organizationId, propertyId, kind, revision], map: "property_template_revision_org_property_kind_revision_unique")
+  @@index([organizationId, propertyId, createdAt], map: "property_template_revision_org_property_created_idx")
+  @@map("property_template_revision")
 }
 
 model ManagementAgreement {

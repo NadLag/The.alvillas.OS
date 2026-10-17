@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { parseConfigRuleValue } from "@/platform/config/rule-registry";
 
@@ -154,6 +154,10 @@ export class ConfigRuleRepository {
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
   ) {}
+
+  async lockVersion(key: string, scopeType: string, scopeId?: string | null): Promise<void> {
+    await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`config:${this.organizationId}:${key}:${scopeType}:${scopeId ?? ""}`}, 0))`);
+  }
 
   async resolve(input: {
     key: string;
@@ -350,6 +354,7 @@ export class ConfigRuleRepository {
     }
 
     const parsedValue = parseConfigRuleValue(input.key, input.value);
+    await this.lockVersion(input.key, input.scopeType, input.scopeId);
     const latest = await this.tx.configRule.findFirst({
       where: {
         organizationId: this.organizationId,

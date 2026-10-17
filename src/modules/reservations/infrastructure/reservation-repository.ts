@@ -15,7 +15,7 @@ import {
 } from "@/modules/reservations/domain/reservation-task";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import type { ResolvedConfigRule } from "@/platform/config/config-rule-repository";
-import { reservationTaskTemplatesConfigKey } from "@/platform/config/rule-registry";
+import { reservationTaskTemplatesConfigKey, checklistCatalogSchema } from "@/platform/config/rule-registry";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
 type ReservationWithProperty = Prisma.ReservationGetPayload<{
@@ -51,6 +51,7 @@ type FieldTaskWithRelations = Prisma.OperationTaskGetPayload<{
 export type ResolvedReservationTaskConfig = {
   config: ReservationTaskConfig;
   rule: ResolvedConfigRule;
+  supportingRules?: ResolvedConfigRule[];
 };
 
 function toStringRecord(value: Prisma.JsonValue): Record<string, string> {
@@ -189,10 +190,21 @@ export class ReservationRepository {
       return null;
     }
 
-    return {
-      config: reservationTaskConfigSchema.parse(rule.value),
-      rule
-    };
+    const config = reservationTaskConfigSchema.parse(rule.value);
+    if (!config.tasks.some(task => task.checklistTemplateKey)) return { config, rule };
+    const checklistRule = await new ConfigRuleRepository(this.tx, this.organizationId).resolve({
+      key: "ops.checklists", asOf: input.asOf,
+      scopes: [{ scopeType: "property", scopeId: input.propertyId }, { scopeType: "organization", scopeId: null }]
+    });
+    if (!checklistRule) return null;
+    const catalog = checklistCatalogSchema.parse(checklistRule.parsedValue);
+    for (const task of config.tasks) {
+      if (!task.checklistTemplateKey) continue;
+      const checklist = catalog.checklists.find(item => item.key === task.checklistTemplateKey);
+      if (!checklist) return null;
+      task.checklist = checklist.items;
+    }
+    return { config, rule, supportingRules: [checklistRule] };
   }
 
   async snapshotTaskConfigRule(input: {

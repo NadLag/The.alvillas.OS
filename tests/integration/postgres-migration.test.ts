@@ -1,3 +1,4 @@
+import { listAuditHistory, exportAuditHistoryCsv } from "@/modules/audit/application/audit-service";
 import type { EmailProvider } from "@/platform/providers";
 import { EmailRequestError } from "@/platform/providers/real";
 import { deliveryPage, deliveryLogs, retryDelivery, recordDeliveryReceipt } from "@/platform/notifications/delivery-service";
@@ -5,6 +6,9 @@ import { deliverEmail } from "@/platform/notifications/email-delivery-service";
 import { recipientKey } from "@/platform/notifications/email-delivery";
 import { DeliveryRepository } from "@/platform/notifications/delivery-repository";
 import { digestEventType } from "@/platform/notifications/digest";
+import { savePropertyTemplate, changePropertyTemplate, propertyTemplateState, templateCatalog, templateVersionHistory, TemplateAccessError, TemplateConflictError, TemplateNotFoundError } from "@/modules/core/application/property-template-service";
+import { ownerInputSchema, propertyInputSchema } from "@/modules/core/domain/owner-property";
+import { type TemplateKind } from "@/modules/core/domain/property-template";
 import { scheduleDigests, deliverDigest, digestSettings, recordDigestReceipt } from "@/platform/notifications/digest-service";
 import { saveDigestPreferences } from "@/platform/notifications/notification-service";
 import { updateAccountEmail } from "@/modules/identity/application/identity-service";
@@ -90,6 +94,7 @@ import type { ConfigActorContext } from "@/modules/config/application/config-acc
 import {
   ConfigAuthorizationError,
   ConfigValidationError,
+  activateConfigRuleVersion,
   createConfigRuleVersion,
   getConfigAdminModel,
   retireConfigRuleVersion
@@ -299,6 +304,193 @@ async function configureAppRole(databaseUrl: string): Promise<string> {
 }
 
 describe("PostgreSQL baseline", () => {
+  async function templateFixture() {
+    const organization = await prisma.organization.create({ data: { name: `Template ${randomUUID()}` } });
+    const permissions = new Set(["config_rule:view", "config_rule:create", "config_rule:configure", "property:view", "property:edit", "property:create", "owner:create", "owner:view", "financial_transaction:view", "reservation:view", "reservation:create", "task:view", "task:create", "task:edit"]);
+    const identity = await withTenant(prisma, organization.id, async tx => {
+      const person = await tx.person.create({ data: { organizationId: organization.id, displayName: "Template administrator" } });
+      const account = await tx.userAccount.create({ data: { organizationId: organization.id, personId: person.id } });
+      return { person, account };
+    });
+    const ctx = { ...actorForOrganization(organization.id, permissions), actorId: identity.account.id, personId: identity.person.id }, deps = { db: prisma as TenantTransactionRunner, requestId: randomUUID() };
+    const owner = await createOwner(ctx, ownerInputSchema.parse({ displayName: "Template owner" }), deps);
+    const property = await createProperty(ctx, propertyInputSchema.parse({ ownerId: owner.id, name: "Villa 405", addressLine1: "Route de Fès", city: "Marrakech", propertyType: "Villa", bedrooms: 4, bathrooms: 3, maxGuests: 8, amenities: ["Wi-Fi"], photoUrls: ["https://example.test/villa.jpg"] }), deps);
+    const second = await createProperty(ctx, propertyInputSchema.parse({ ownerId: owner.id, name: "Sultan's House", addressLine1: "Medina", city: "Marrakech", propertyType: "Riad", bedrooms: 3, bathrooms: 2, maxGuests: 6 }), deps);
+    const save = (kind: TemplateKind, values: unknown, key = kind.toLowerCase(), expectedVersion = 0, propertyId: string | null = null, status = "ACTIVE") => savePropertyTemplate(ctx, { key, kind, values, propertyId, expectedVersion, status, name: { en: `Standard ${kind}`, fr: `Standard ${kind}` }, reason: "Reusable property configuration" }, deps);
+    const apply = (id: string, revision = 0, propertyId = property.id) => changePropertyTemplate(ctx, { action: "APPLY", propertyId, templateVersionId: id, expectedRevision: revision, operationId: randomUUID(), reason: "Apply reviewed property template" }, deps);
+    return { organization, ctx, deps, property, second, save, apply };
+  }
+  it("pins property templates, preserves overrides on upgrade and resets selected fields without changing unrelated property data", async () => {
+    const f = await templateFixture();
+    const v1 = await f.save("PROPERTY", { property: { bedrooms: 5, bathrooms: 4 }, operating: { chefAvailable: true } });
+    const original = await getProperty(f.ctx, f.property.id, f.deps);
+    const applied = await f.apply(v1.id);
+    expect(applied.revision).toBe(1);
+    await withTenant(prisma, f.organization.id, async tx => expect((await tx.auditLog.findFirstOrThrow({ where: { resourceId: applied.id, action: "property_template.apply" } })).before).toMatchObject({ revision: 0, values: { "/property/bedrooms": 4 } }));
+    const override = await changePropertyTemplate(f.ctx, { action: "OVERRIDE", propertyId: f.property.id, kind: "PROPERTY", values: { "/property/bedrooms": 6 }, expectedRevision: 1, operationId: randomUUID(), reason: "Six bedrooms for this property" }, f.deps);
+    expect(override.overrides).toEqual({ "/property/bedrooms": 6 });
+    const v2 = await f.save("PROPERTY", { property: { bedrooms: 7, bathrooms: 5 }, operating: { chefAvailable: false } }, "property", 1);
+    expect((await getProperty(f.ctx, f.property.id, f.deps)).bathrooms).toBe(4);
+    await f.apply(v2.id, 2);
+    const upgraded = await getProperty(f.ctx, f.property.id, f.deps);
+    expect(upgraded).toMatchObject({ bedrooms: 6, bathrooms: 5, name: original.name, photoUrls: original.photoUrls, amenities: original.amenities, owners: original.owners });
+    await withTenant(prisma, f.organization.id, async tx => expect((await tx.property.findFirstOrThrow({ where: { id: f.property.id } })).addressLine1).toBe("Route de Fès"));
+    expect(upgraded.operatingProfile?.chefAvailable).toBe(false);
+    await changePropertyTemplate(f.ctx, { action: "RESET", propertyId: f.property.id, kind: "PROPERTY", paths: ["/property/bedrooms"], expectedRevision: 3, operationId: randomUUID(), reason: "Restore selected inherited bedrooms" }, f.deps);
+    expect(await getProperty(f.ctx, f.property.id, f.deps)).toMatchObject({ bedrooms: 7, bathrooms: 5, name: "Villa 405" });
+    expect((await getProperty(f.ctx, f.second.id, f.deps)).bedrooms).toBe(3);
+    const state = await propertyTemplateState(f.ctx, f.property.id, "PROPERTY", 1, f.deps);
+    expect(state.history).toHaveLength(4); expect(state.history.at(-1)?.snapshot).toMatchObject({ property: { bedrooms: 5, bathrooms: 4 } });
+    expect((await templateVersionHistory(f.ctx, v1.id, 1, null, f.deps)).versions).toHaveLength(2);
+    await withTenant(prisma, f.organization.id, async tx => { expect(await tx.auditLog.count({ where: { action: { startsWith: "property_template." } } })).toBe(6); expect(await tx.financialTransaction.count()).toBe(0); });
+  });
+  it("applies inventory, service, workflow and checklist templates through configuration and preserves historical task instances", async () => {
+    const f = await templateFixture();
+    await withTenant(prisma, f.organization.id, tx => new ConfigRuleRepository(tx, f.organization.id).createVersion({ key: "inventory.minimums", scopeType: "property", scopeId: f.property.id, value: { minimums: [{ item: "soap", quantity: 3 }] }, effectiveFrom: new Date(0), reason: "Retain existing inventory setting" }));
+    const inventory = await f.save("INVENTORY", { rules: { "inventory.minimums": { minimums: [{ item: "towels", quantity: 8, name: { en: "Towels", fr: "Serviettes" }, unit: "piece", category: "LINEN" }] } } });
+    await f.apply(inventory.id);
+    await changePropertyTemplate(f.ctx, { action: "OVERRIDE", kind: "INVENTORY", propertyId: f.property.id, values: { "/rules/inventory.minimums/minimums/@item:towels/quantity": 12 }, expectedRevision: 1, operationId: randomUUID(), reason: "Extra linen for this property" }, f.deps);
+    await changePropertyTemplate(f.ctx, { action: "RESET", kind: "INVENTORY", propertyId: f.property.id, paths: ["/rules/inventory.minimums/minimums/@item:towels/quantity"], expectedRevision: 2, operationId: randomUUID(), reason: "Restore the standard minimum" }, f.deps);
+    const service = await f.save("SERVICE_CATALOG", { rules: { "services.pricing": { services: [{ key: "chef", name: { en: "Chef", fr: "Chef" }, pricing_model: "FIXED", amount: "800.00", currency: "MAD", available: true }] } } });
+    await f.apply(service.id);
+    const checklistValues = (label: string) => ({ rules: { "ops.checklists": { checklists: [{ key: "turnover", name: { en: "Turnover", fr: "Rotation" }, items: [{ key: "linen", label: { en: label, fr: label } }] }] } } });
+    const checklist = await f.save("CHECKLIST", checklistValues("Inspect linen")); await f.apply(checklist.id);
+    const workflow = await f.save("WORKFLOW", { rules: { "ops.reservation_task_templates": { tasks: [{ key: "turnover", type: "CHECKOUT_CLEANING", title: { en: "Turnover", fr: "Rotation" }, due: "CHECK_OUT", checklistTemplateKey: "turnover" }] } } });
+    await f.apply(workflow.id);
+    const reservation = await createManualReservation(f.ctx, { propertyId: f.property.id, guestName: "Template guest", source: "DIRECT", checkIn: "2027-01-01", checkOut: "2027-01-03", adultCount: 2, childCount: 0, idempotencyKey: randomUUID() }, f.deps);
+    const before = await withTenant(prisma, f.organization.id, tx => tx.operationTaskChecklistItem.findMany({ where: { taskId: reservation.tasks[0].id } }));
+    expect(before[0].labelTranslations).toEqual({ en: "Inspect linen", fr: "Inspect linen" });
+    const v2 = await f.save("CHECKLIST", checklistValues("Replace linen"), "checklist", 1); await f.apply(v2.id, 1);
+    const next = await createManualReservation(f.ctx, { propertyId: f.property.id, guestName: "Later template guest", source: "DIRECT", checkIn: "2027-02-01", checkOut: "2027-02-03", adultCount: 2, childCount: 0, idempotencyKey: randomUUID() }, f.deps);
+    await withTenant(prisma, f.organization.id, async tx => {
+      expect(await tx.operationTaskChecklistItem.findMany({ where: { taskId: reservation.tasks[0].id } })).toEqual(before);
+      expect((await tx.operationTaskChecklistItem.findFirstOrThrow({ where: { taskId: next.tasks[0].id } })).labelTranslations).toEqual({ en: "Replace linen", fr: "Replace linen" });
+      const snapshots = await tx.reservationConfigSnapshot.findMany({ where: { reservationId: reservation.reservation.id } });
+      expect(snapshots.map(s => s.key).sort()).toEqual(["ops.checklists", "ops.reservation_task_templates"]);
+      expect(snapshots.find(s => s.key === "ops.checklists")?.version).toBe(1);
+      const rule = await new ConfigRuleRepository(tx, f.organization.id).resolve({ key: "inventory.minimums", scopes: [{ scopeType: "property", scopeId: f.property.id }] });
+      expect(rule?.value).toMatchObject({ minimums: [{ item: "soap", quantity: 3 }, { item: "towels", quantity: 8 }] });
+      const written = await tx.configRule.findMany({ where: { organizationId: f.organization.id, scopeId: f.property.id, createdBy: f.ctx.actorId }, select: { id: true } });
+      expect(written.length).toBeGreaterThan(0);
+      expect(await tx.auditLog.count({ where: { action: "config_rule.version.created", resourceId: { in: written.map(r => r.id) } } })).toBe(written.length);
+    });
+  });
+  it("denies wrong tenant, wrong property scope and financial access independently; database history is immutable", async () => {
+    const f = await templateFixture(), other = await templateFixture();
+    const v = await f.save("PROPERTY", { property: { bedrooms: 5 } }, "scoped", 0, f.property.id);
+    await expect(f.apply(v.id, 0, f.second.id)).rejects.toBeInstanceOf(TemplateAccessError);
+    await expect(other.apply(v.id)).rejects.toBeInstanceOf(TemplateNotFoundError);
+    const scoped = { ...f.ctx, authContext: { ...f.ctx.authContext, scopes: [{ organizationId: f.organization.id, scopeType: "property" as const, scopeId: f.second.id }] } };
+    await expect(propertyTemplateState(scoped, f.property.id, "PROPERTY", 1, f.deps)).rejects.toBeInstanceOf(TemplateAccessError);
+    const denied = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set<string>() } };
+    await expect(templateCatalog(denied, {}, f.deps)).rejects.toBeInstanceOf(TemplateAccessError);
+    const operational = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(p => p !== "financial_transaction:view")) } };
+    await expect(propertyTemplateState(operational, f.property.id, "SERVICE_CATALOG", 1, f.deps)).rejects.toBeInstanceOf(TemplateAccessError);
+    await f.apply(v.id);
+    for (const table of ["property_template_version", "property_template_revision"]) {
+      await expect(withTenant(prisma, f.organization.id, tx => tx.$executeRawUnsafe(`UPDATE ${table} SET reason = 'Rewrite history' WHERE organization_id = '${f.organization.id}'`))).rejects.toThrow(/append-only/u);
+      await expect(withTenant(prisma, f.organization.id, tx => tx.$executeRawUnsafe(`DELETE FROM ${table} WHERE organization_id = '${f.organization.id}'`))).rejects.toThrow(/append-only/u);
+    }
+    await withTenant(prisma, other.organization.id, async tx => { expect(await tx.propertyTemplateVersion.findMany({ where: { id: v.id } })).toEqual([]); expect(await tx.propertyTemplateRevision.count({ where: { propertyId: f.property.id } })).toBe(0); });
+    const archived = await f.save("PROPERTY", { property: { bedrooms: 5 } }, "scoped", 1, f.property.id, "ARCHIVED");
+    await expect(f.apply(v.id, 1)).rejects.toBeInstanceOf(TemplateConflictError);
+    expect((await templateVersionHistory(f.ctx, archived.id, 1, null, f.deps)).versions).toHaveLength(2);
+    await changePropertyTemplate(f.ctx, { action: "RESET", kind: "PROPERTY", propertyId: f.property.id, paths: ["/property/bedrooms"], expectedRevision: 1, operationId: randomUUID(), reason: "Reset a pinned archived family" }, f.deps);
+  });
+  it("serializes template versions and property revisions, rejects stale writes, rolls back invalid overrides and replays idempotently", async () => {
+    const f = await templateFixture();
+    const saves = await Promise.allSettled([f.save("PROPERTY", { property: { bedrooms: 5 } }), f.save("PROPERTY", { property: { bedrooms: 6 } })]);
+    expect(saves.filter(s => s.status === "fulfilled")).toHaveLength(1);
+    const v = saves.find(s => s.status === "fulfilled"); if (!v || v.status !== "fulfilled") throw new Error("Expected a serialized template version");
+    const command = { action: "APPLY", propertyId: f.property.id, templateVersionId: v.value.id, expectedRevision: 0, operationId: randomUUID(), reason: "Idempotent application command" };
+    const first = await changePropertyTemplate(f.ctx, command, f.deps); expect((await changePropertyTemplate(f.ctx, command, f.deps)).id).toBe(first.id);
+    await expect(changePropertyTemplate(f.ctx, { ...command, reason: "Different operation contents" }, f.deps)).rejects.toBeInstanceOf(TemplateConflictError);
+    await expect(changePropertyTemplate(f.ctx, { action: "OVERRIDE", propertyId: f.property.id, kind: "PROPERTY", values: { "/property/bedrooms": -1 }, expectedRevision: 1, operationId: randomUUID(), reason: "Invalid property capacity override" }, f.deps)).rejects.toThrow();
+    const revision = await propertyTemplateState(f.ctx, f.property.id, "PROPERTY", 1, f.deps); expect(revision.binding?.revision).toBe(1);
+    const commands = [7, 8].map(value => changePropertyTemplate(f.ctx, { action: "OVERRIDE", propertyId: f.property.id, kind: "PROPERTY", values: { "/property/bedrooms": value }, expectedRevision: 1, operationId: randomUUID(), reason: "Concurrent capacity adjustment" }, f.deps));
+    const results = await Promise.allSettled(commands); expect(results.filter(s => s.status === "fulfilled")).toHaveLength(1); expect(results.filter(s => s.status === "rejected")).toHaveLength(1);
+    expect((await propertyTemplateState(f.ctx, f.property.id, "PROPERTY", 1, f.deps)).history).toHaveLength(2);
+  });
+  it("paginates a 500-property template library with bounded queries and masks service prices for operational users", async () => {
+    const f = await templateFixture();
+    await withTenant(prisma, f.organization.id, async tx => {
+      await tx.property.createMany({ data: Array.from({ length: 500 }, (_, i) => ({ organizationId: f.organization.id, name: `Library property ${String(i).padStart(3, "0")}`, cityId: f.property.cityId, city: f.property.city, propertyType: "Villa", addressLine1: "Staging library", bedrooms: 4, bathrooms: 3, maxGuests: 8, timezone: "Africa/Casablanca", amenities: [], photoUrls: [] })) });
+      await tx.propertyTemplateVersion.createMany({ data: Array.from({ length: 30 }, (_, i) => ({ organizationId: f.organization.id, key: `standard-${i}`, kind: "PROPERTY", version: 1, name: { en: `Standard ${i}`, fr: `Standard ${i}` }, values: { property: { bedrooms: 4 } }, status: "ACTIVE", createdBy: f.ctx.actorId, reason: "Paginated reusable template library" })) });
+    });
+    const queryDb = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } }, log: [{ emit: "event", level: "query" }] });
+    let count = 0; queryDb.$on("query", () => { count++; });
+    try {
+      const first = await templateCatalog(f.ctx, { kind: "PROPERTY" }, { ...f.deps, db: queryDb });
+      const firstCount = count; count = 0;
+      const second = await templateCatalog(f.ctx, { kind: "PROPERTY", page: 2, propertyId: f.property.id }, { ...f.deps, db: queryDb });
+      expect(first.templates).toHaveLength(24); expect(first.more).toBe(true); expect(second.templates).toHaveLength(6); expect(second.more).toBe(false);
+      expect(first.properties).toHaveLength(40); expect(first.moreProperties).toBe(true); expect(second.properties.some(p => p.id === f.property.id)).toBe(true);
+      expect(firstCount).toBeLessThanOrEqual(8); expect(count).toBeLessThanOrEqual(9);
+    } finally { await queryDb.$disconnect(); }
+    const service = await f.save("SERVICE_CATALOG", { rules: { "services.pricing": { services: [{ key: "chef", name: { en: "Chef", fr: "Chef" }, pricing_model: "FIXED", amount: "800.00", currency: "MAD" }] } } });
+    const command = { action: "APPLY", templateVersionId: service.id, propertyId: f.property.id, expectedRevision: 0, operationId: randomUUID(), reason: "Apply reviewed service prices" };
+    await changePropertyTemplate(f.ctx, command, f.deps);
+    const operational = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(p => p !== "financial_transaction:view")) } };
+    const masked = await templateCatalog(operational, { kind: "SERVICE_CATALOG" }, f.deps);
+    expect(masked.templates[0].values).toBeNull(); expect(masked.templates[0].restricted).toBe(true);
+    await expect(changePropertyTemplate(operational, command, f.deps)).rejects.toBeInstanceOf(TemplateAccessError);
+    const auditPermissions = new Set(['audit_log:view', 'audit_log:export']);
+    const reader = { ...operational, authContext: { ...operational.authContext, permissions: auditPermissions } };
+    const financeReader = { ...reader, authContext: { ...reader.authContext, permissions: new Set([...auditPermissions, 'financial_transaction:view']) } };
+    const rawAudits = await withTenant(prisma, f.organization.id, tx => tx.auditLog.findMany({ where: { action: { startsWith: 'property_template.' } }, orderBy: { id: 'asc' } }));
+    const history = await listAuditHistory(reader, {}, f.deps);
+    const sensitive = history.rows.filter(row => row.resourceType.startsWith('property_template') || row.action === 'config_rule.version.created');
+    expect(sensitive).toHaveLength(3);
+    expect(sensitive.every(row => row.after === maskedValue)).toBe(true);
+    expect(JSON.stringify(history)).not.toContain('800.00');
+    expect(await exportAuditHistoryCsv(reader, {}, f.deps)).not.toContain('800.00');
+    expect(JSON.stringify(await listAuditHistory(financeReader, {}, f.deps))).toContain('800.00');
+    expect(await exportAuditHistoryCsv(financeReader, {}, f.deps)).toContain('800.00');
+    const wrongFinanceScope = { ...reader, authContext: { ...reader.authContext, assignments: [
+      { scope: { organizationId: f.organization.id, scopeType: 'organization' as const }, permissions: auditPermissions },
+      { scope: { organizationId: f.organization.id, scopeType: 'property' as const, scopeId: f.second.id }, permissions: new Set(['financial_transaction:view']) }
+    ] } };
+    expect(JSON.stringify(await listAuditHistory(wrongFinanceScope, {}, f.deps))).not.toContain('800.00');
+    expect(await withTenant(prisma, f.organization.id, tx => tx.auditLog.findMany({ where: { id: { in: rawAudits.map(row => row.id) } }, orderBy: { id: 'asc' } }))).toEqual(rawAudits);
+    const preview = { previewKey: 'services.pricing', previewScopeType: 'property', previewScopeId: f.property.id };
+    expect(JSON.stringify(await getConfigAdminModel(operational, {}, f.deps))).not.toContain('800.00');
+    await expect(getConfigAdminModel(operational, preview, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    const prices = await getConfigAdminModel(f.ctx, preview, f.deps);
+    expect(prices.preview?.resolved?.valueJson).toContain('800.00');
+    const pricingRule = prices.rules.find(rule => rule.key === 'services.pricing')!;
+    const pricingInput = { key: 'services.pricing', scopeType: 'property' as const, scopeId: f.property.id, lifecycle: 'DRAFT' as const,
+      valueJson: pricingRule.valueJson, effectiveFrom: new Date(), reason: 'Review service configuration access' };
+    await expect(createConfigRuleVersion(operational, pricingInput, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    await expect(retireConfigRuleVersion(operational, { ruleId: pricingRule.id, effectiveFrom: new Date(), reason: 'Review price retirement access' }, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    const draft = await createConfigRuleVersion(f.ctx, pricingInput, f.deps);
+    await expect(activateConfigRuleVersion(operational, { ruleId: draft.id, effectiveFrom: new Date(), reason: 'Review price activation access' }, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    const wrongConfigScope = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [
+      { scope: { organizationId: f.organization.id, scopeType: 'organization' as const }, permissions: operational.authContext.permissions },
+      { scope: { organizationId: f.organization.id, scopeType: 'property' as const, scopeId: f.second.id }, permissions: new Set(['financial_transaction:view']) }
+    ] } };
+    expect((await getConfigAdminModel(wrongConfigScope, {}, f.deps)).rules.filter(rule => rule.key === 'services.pricing')).toEqual([]);
+    await expect(getConfigAdminModel(wrongConfigScope, preview, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    const propertyReader = { ...f.ctx, authContext: { ...f.ctx.authContext, scopes: [{ organizationId: f.organization.id, scopeType: 'property' as const, scopeId: f.second.id }] } };
+    await expect(getConfigAdminModel(propertyReader, preview, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    await withTenant(prisma, f.organization.id, async tx => {
+      expect((await tx.configRule.findFirstOrThrow({ where: { id: draft.id } })).lifecycle).toBe('DRAFT');
+      expect((await tx.configRule.findFirstOrThrow({ where: { id: pricingRule.id } })).lifecycle).toBe('ACTIVE');
+    });
+
+
+  });
+  it("validates workflow checklist and mid-stay rule references before changing a property", async () => {
+    const f = await templateFixture();
+    const workflow = await f.save("WORKFLOW", { rules: { "ops.reservation_task_templates": { tasks: [{ key: "turnover", title: { en: "Turnover", fr: "Rotation" }, type: "CHECKOUT_CLEANING", due: "CHECK_OUT", checklistTemplateKey: "missing" }] } } });
+    await expect(f.apply(workflow.id)).rejects.toThrow();
+    expect((await propertyTemplateState(f.ctx, f.property.id, "WORKFLOW", 1, f.deps)).binding).toBeNull();
+    const property = await f.save("PROPERTY", { operating: { midStayCleaningEnabled: true, midStayCleaningRuleKey: "ops.mid_stay_threshold" } });
+    await expect(f.apply(property.id)).rejects.toThrow();
+    expect((await getProperty(f.ctx, f.property.id, f.deps)).operatingProfile?.midStayCleaningEnabled).toBe(false);
+    const valid = await f.save("PROPERTY", { operating: { midStayCleaningEnabled: true, midStayCleaningRuleKey: "ops.mid_stay_threshold" }, rules: { "ops.mid_stay_threshold": { nights: 5 } } }, "property", 1);
+    await f.apply(valid.id);
+    expect((await getProperty(f.ctx, f.property.id, f.deps)).operatingProfile?.midStayCleaningEnabled).toBe(true);
+  });
   async function pushFixture() {
     const organization = await prisma.organization.create({ data: { name: `Push ${randomUUID()}` } });
     const fixture = await withTenant(prisma, organization.id, async (tx) => {

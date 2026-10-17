@@ -175,6 +175,9 @@ test.describe("identity lifecycle", () => {
     await page.getByTestId("assignment-scope-type").selectOption("property");
     await page.getByTestId("assignment-scope-id").fill(fixture.propertyId);
     await page.getByTestId("assignment-submit").click();
+    await expect(page.locator(".role-assignment-form").getByRole("status")).toHaveText(
+      "Scoped assignment created.", { timeout: 15_000 }
+    );
     await expect(page.getByTestId("role-assignment-row").filter({ hasText: editedCustomRoleName })).toContainText(
       fixture.propertyId
     );

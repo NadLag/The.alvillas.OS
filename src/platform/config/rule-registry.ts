@@ -40,11 +40,20 @@ export const reservationTaskTemplateSchema = z.object({
   due: taskDueAnchorSchema,
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
   checklist: z.array(taskChecklistTemplateSchema).max(24).default([])
+    .refine(v => new Set(v.map(i => i.key)).size === v.length, "Checklist item keys must be unique"),
+  checklistTemplateKey: configSlugSchema.optional()
 });
 
 export const reservationTaskConfigSchema = z.object({
   tasks: z.array(reservationTaskTemplateSchema).min(1).max(12)
-});
+}).refine(v => new Set(v.tasks.map(t => t.key)).size === v.tasks.length, "Task keys must be unique");
+
+export const checklistCatalogSchema = z.object({
+  checklists: z.array(z.object({ key: configSlugSchema, name: localizedTextSchema,
+    items: z.array(taskChecklistTemplateSchema).min(1).max(24)
+      .refine(v => new Set(v.map(i => i.key)).size === v.length, "Checklist item keys must be unique")
+  }).strict()).min(1).max(100)
+}).refine(v => new Set(v.checklists.map(c => c.key)).size === v.checklists.length, "Checklist keys must be unique");
 
 export const commissionConfigKey = "finance.commission";
 export const agreementNoticeConfigKey = "agreement.notice";
@@ -199,16 +208,20 @@ const laundryPricingSchema = z
   })
   .passthrough();
 
-const inventoryMinimumsSchema = z
+export const inventoryMinimumsSchema = z
   .object({
     minimums: z.array(
       z
         .object({
           item: configSlugSchema,
-          quantity: z.number().int().min(0)
+          quantity: z.number().int().min(0),
+          name: localizedTextSchema.optional(),
+          unit: z.string().trim().min(1).max(60).optional(),
+          category: z.enum(["CONSUMABLE", "LINEN", "EQUIPMENT"]).optional(),
+          expected_per_stay: z.number().int().min(0).optional()
         })
         .passthrough()
-    )
+    ).max(200).refine(v => new Set(v.map(i => i.item)).size === v.length, "Inventory item keys must be unique")
   })
   .passthrough();
 
@@ -236,7 +249,7 @@ const workflowSchema = z
         .object({
           key: configSlugSchema,
           version: z.number().int().min(1).optional(),
-          trigger: configSlugSchema,
+          trigger: z.string().trim().min(1).max(120).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/u),
           conditions: workflowConditionSchema.optional(),
           actions: z.array(
             z
@@ -248,22 +261,25 @@ const workflowSchema = z
           idempotency_key: z.string().trim().min(1).max(180).optional()
         })
         .passthrough()
-    )
+    ).max(100).refine(v => new Set(v.map(w => w.key)).size === v.length, "Workflow keys must be unique")
   })
   .passthrough();
 
-const servicePricingSchema = z
+export const servicePricingSchema = z
   .object({
     services: z.array(
       z
         .object({
           key: configSlugSchema,
+          name: localizedTextSchema.optional(),
+          description: localizedTextSchema.optional(),
+          available: z.boolean().optional(),
           pricing_model: z.enum(["FIXED", "PER_GUEST", "PER_DAY", "CUSTOM"]),
           amount: moneyAmountSchema.optional(),
           currency: currencySchema.optional()
         })
         .passthrough()
-    )
+    ).max(200).refine(v => new Set(v.map(i => i.key)).size === v.length, "Service keys must be unique")
   })
   .passthrough();
 
@@ -328,6 +344,7 @@ export const configRuleSchemas = {
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
   "ops.workflows": workflowSchema,
+  "ops.checklists": checklistCatalogSchema,
   "services.pricing": servicePricingSchema,
   "finance.tax": taxRuleSchema,
   "ops.operating_rules": operatingRulesSchema,

@@ -460,6 +460,7 @@ export default async function PropertyDetailPage({
       <ShellHeader
         actions={
         <>{canEditOwnership ? <Link className="secondary-button" href={`/${appLocale}/app/properties/${property.id}/approvals/new`}>{t("properties.requestApproval")}</Link> : null}
+          <Link className="secondary-button" href={`/${appLocale}/app/templates?property=${property.id}`}>{t("properties.templates")}</Link>
         <Link className="secondary-button" href={`/${appLocale}/app/properties`}>
           {t("properties.backToProperties")}
         </Link></>

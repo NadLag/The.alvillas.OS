@@ -119,7 +119,7 @@ function assertCollectionAllowed(ctx: ConfigActorContext, action: "view" | "crea
 function assertRuleAllowed(
   ctx: ConfigActorContext,
   action: "view" | "create" | "configure",
-  rule?: Pick<ConfigRuleRecord, "id" | "scopeType" | "scopeId">
+  rule?: Pick<ConfigRuleRecord, "id" | "scopeType" | "scopeId"> & { key?: string }
 ): void {
   const allowed = rule
     ? authorize(ctx.authContext, action, {
@@ -130,9 +130,22 @@ function assertRuleAllowed(
       })
     : authorizeCollection(ctx.authContext, action, "config_rule");
 
-  if (!allowed) {
+  if (!allowed || (rule && !hasRuleFinancialAccess(ctx, rule.key, rule.scopeType, rule.scopeId))) {
     throw new ConfigAuthorizationError();
   }
+}
+
+function hasRuleFinancialAccess(
+  ctx: ConfigActorContext,
+  key: string | undefined,
+  scopeType: string,
+  scopeId: string | null
+): boolean {
+  return key !== "services.pricing" || authorize(ctx.authContext, "view", {
+    type: "financial_transaction",
+    organizationId: ctx.organizationId,
+    propertyId: scopeType === "property" ? scopeId : undefined
+  });
 }
 
 async function auditMeta(deps: ConfigServiceDeps): Promise<AuditMeta> {
@@ -315,8 +328,16 @@ export async function getConfigAdminModel(
         organizationId: ctx.organizationId,
         id: rule.id,
         propertyId: rule.scopeType === "property" ? rule.scopeId : undefined
-      })
+      }) && hasRuleFinancialAccess(ctx, rule.key, rule.scopeType, rule.scopeId)
     );
+    if (input.previewKey) {
+      const scopeType = input.previewScopeType === "property" ? "property" : "organization";
+      const scopeId = scopeType === "property" ? input.previewScopeId ?? null : null;
+      if (scopeType === "property" && !uuidSchema.safeParse(scopeId).success) {
+        throw new ConfigValidationError();
+      }
+      assertRuleAllowed(ctx, "view", { id: input.previewKey, key: input.previewKey, scopeType, scopeId });
+    }
     const preview =
       input.previewKey && schemaForConfigKey(input.previewKey)
         ? await previewRule(repository, visibleRules, properties, input)
@@ -384,6 +405,7 @@ export async function createConfigRuleVersion(
 
     assertRuleAllowed(ctx, input.lifecycle === "DRAFT" ? "create" : "configure", {
       id: key,
+      key,
       scopeType: scope.scopeType,
       scopeId: scope.scopeId
     });
