@@ -94,6 +94,7 @@ import type { ConfigActorContext } from "@/modules/config/application/config-acc
 import {
   ConfigAuthorizationError,
   ConfigValidationError,
+  activateConfigRuleVersion,
   createConfigRuleVersion,
   getConfigAdminModel,
   retireConfigRuleVersion
@@ -451,6 +452,31 @@ describe("PostgreSQL baseline", () => {
     ] } };
     expect(JSON.stringify(await listAuditHistory(wrongFinanceScope, {}, f.deps))).not.toContain('800.00');
     expect(await withTenant(prisma, f.organization.id, tx => tx.auditLog.findMany({ where: { id: { in: rawAudits.map(row => row.id) } }, orderBy: { id: 'asc' } }))).toEqual(rawAudits);
+    const preview = { previewKey: 'services.pricing', previewScopeType: 'property', previewScopeId: f.property.id };
+    expect(JSON.stringify(await getConfigAdminModel(operational, {}, f.deps))).not.toContain('800.00');
+    await expect(getConfigAdminModel(operational, preview, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    const prices = await getConfigAdminModel(f.ctx, preview, f.deps);
+    expect(prices.preview?.resolved?.valueJson).toContain('800.00');
+    const pricingRule = prices.rules.find(rule => rule.key === 'services.pricing')!;
+    const pricingInput = { key: 'services.pricing', scopeType: 'property' as const, scopeId: f.property.id, lifecycle: 'DRAFT' as const,
+      valueJson: pricingRule.valueJson, effectiveFrom: new Date(), reason: 'Review service configuration access' };
+    await expect(createConfigRuleVersion(operational, pricingInput, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    await expect(retireConfigRuleVersion(operational, { ruleId: pricingRule.id, effectiveFrom: new Date(), reason: 'Review price retirement access' }, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    const draft = await createConfigRuleVersion(f.ctx, pricingInput, f.deps);
+    await expect(activateConfigRuleVersion(operational, { ruleId: draft.id, effectiveFrom: new Date(), reason: 'Review price activation access' }, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    const wrongConfigScope = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [
+      { scope: { organizationId: f.organization.id, scopeType: 'organization' as const }, permissions: operational.authContext.permissions },
+      { scope: { organizationId: f.organization.id, scopeType: 'property' as const, scopeId: f.second.id }, permissions: new Set(['financial_transaction:view']) }
+    ] } };
+    expect((await getConfigAdminModel(wrongConfigScope, {}, f.deps)).rules.filter(rule => rule.key === 'services.pricing')).toEqual([]);
+    await expect(getConfigAdminModel(wrongConfigScope, preview, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    const propertyReader = { ...f.ctx, authContext: { ...f.ctx.authContext, scopes: [{ organizationId: f.organization.id, scopeType: 'property' as const, scopeId: f.second.id }] } };
+    await expect(getConfigAdminModel(propertyReader, preview, f.deps)).rejects.toBeInstanceOf(ConfigAuthorizationError);
+    await withTenant(prisma, f.organization.id, async tx => {
+      expect((await tx.configRule.findFirstOrThrow({ where: { id: draft.id } })).lifecycle).toBe('DRAFT');
+      expect((await tx.configRule.findFirstOrThrow({ where: { id: pricingRule.id } })).lifecycle).toBe('ACTIVE');
+    });
+
 
   });
   it("validates workflow checklist and mid-stay rule references before changing a property", async () => {

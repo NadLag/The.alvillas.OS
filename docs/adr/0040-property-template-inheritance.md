@@ -9,3 +9,5 @@ Templates orchestrate the existing property operating-profile service and config
 The admin library has paginated catalogs and histories, guided bilingual editors, an explicit version selector, inheritance diffs, per-field overrides and selected resets. Archived families stay readable and pinned applications remain usable; new applications require an active family and version. Historical values and current configuration are separate views.
 
 Audit reads and CSV exports apply the existing field serializer to service-template and service-pricing payloads. Audit access alone exposes metadata; payload values require financial view permission for the event's property scope. Stored audit history stays intact.
+
+The configuration admin service enforces the same financial permission for service-pricing list, preview, creation, activation and retirement. Previews authorize the requested scope before resolving inherited rules. Template prices cannot bypass their access policy through the existing configuration UI.
