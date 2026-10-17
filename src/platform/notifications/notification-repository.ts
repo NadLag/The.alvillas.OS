@@ -73,7 +73,7 @@ export class NotificationRepository {
       if (!identity && !authorize(ctx, "view", target)) continue;
       if (approval && !authorize(ctx, "approve", target) && !authorize(ctx, "reject", target)) continue;
       for (const channel of ["email", "push"] as const) {
-        if (!routing.channels.includes(channel) || !shouldDeliverNotification(input.kind, channel, this.preferenceValue(candidate.notificationPreference))) continue;
+        if ((!mandatory && !routing.channels.includes(channel)) || !shouldDeliverNotification(input.kind, channel, this.preferenceValue(candidate.notificationPreference))) continue;
         await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } }, update: {},
           create: { organizationId: this.organizationId, type: "notification.channel.requested", payload: { channel, recipientId: candidate.id, kind: input.kind, targetId: input.targetId, sourceEventId: event.id }, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } });
       }

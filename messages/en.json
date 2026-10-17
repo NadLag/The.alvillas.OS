@@ -1091,7 +1091,7 @@
       "securityDescription": "Alerts when a session on your account is revoked.",
       "email": "Email",
       "emailDescription": "Required account-access messages when email is used for your account.",
-      "emailSecurityDescription": "Invitation and recovery instructions.",
+      "emailSecurityDescription": "Invitations, recovery instructions and account security alerts.",
       "offline": "You are offline. Your changes stay on this screen; reconnect to save.",
       "loadError": "Your notification settings could not be loaded. Please try again.",
       "saveError": "Your settings were not saved. Your choices are still here; please try again.",

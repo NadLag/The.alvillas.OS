@@ -97,6 +97,8 @@ test.describe("event notification routing", () => {
         await expect(page.getByTestId("routing-in-app")).toBeVisible();
         await page.getByTestId("routing-event").selectOption("security_session_revoked");
         await expect(page.getByTestId("routing-in-app")).toBeChecked(); await expect(page.getByTestId("routing-in-app")).toBeDisabled();
+        await expect(page.getByTestId("routing-email")).toBeChecked(); await expect(page.getByTestId("routing-email")).toBeDisabled();
+        await expect(page.getByTestId("routing-push")).not.toBeChecked();
         await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);

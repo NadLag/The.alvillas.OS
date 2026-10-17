@@ -5,6 +5,7 @@ import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { encryptSecret, decryptSecret } from "@/platform/auth/secret-encryption";
 import { renderIdentityEmail } from "@/platform/email/identity-templates";
 import { escapeHtml } from "@/platform/encoding/html";
+import { renderEmailDocument } from "@/platform/email/email-layout";
 import type { EmailProvider } from "@/platform/providers";
 import { ResendEmailProvider } from "@/platform/providers/real";
 import { OutboxRetryError } from "@/platform/events/outbox-dispatcher";
@@ -47,8 +48,11 @@ export async function deliverEmail(event: OutboxEvent, deps: { db?: TenantTransa
       if (!context.allowed || !context.candidate?.email || !context.destination) { await stop("SUPPRESSED", "preferences_or_access_changed"); return; }
       const origin = new URL(env.APP_URL ?? "http://localhost:3000");
       if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["localhost", "127.0.0.1"].includes(origin.hostname))) { await stop("FAILED", "provider_not_configured"); return; }
-      const text = `${context.labels.open}: ${new URL(context.destination, origin).href}`;
-      email = { to: context.candidate.email, locale: context.locale, subject: context.labels.kinds[context.input.kind], html: `<p>${escapeHtml(text)}</p>`, text, template: "notification.system" };
+      const subject = context.labels.kinds[context.input.kind];
+      const url = new URL(context.destination, origin).href;
+      const text = `${subject}\n\n${context.labels.open}: ${url}`;
+      const html = renderEmailDocument(context.locale, subject, `<p><a href="${escapeHtml(url)}">${escapeHtml(context.labels.open)}</a></p>`);
+      email = { to: context.candidate.email, locale: context.locale, subject, html, text, template: "notification.system" };
     } else {
       const payload = stored.payload as Record<string, unknown>;
       if (stored.type === "identity.invitation.delivery_requested") {

@@ -27,6 +27,14 @@ describe("localized identity email delivery", () => {
     expect(recovery.template).toBe("identity.recovery");
     expect(recovery.text).toContain("abc12345-12345abc");
     expect(recovery.text).toContain(`${origin}/${locale}/recover`);
+    for (const rendered of [email, recovery]) {
+      expect(rendered.subject).not.toMatch(/\?{2,}/u);
+      expect(rendered.text).not.toMatch(/\?{2,}/u);
+      if (locale === "ar") {
+        expect(rendered.subject).toMatch(/[\u0600-\u06ff]/u);
+        expect(rendered.text).toMatch(/[\u0600-\u06ff]/u);
+      }
+    }
   });
 
   it.each([
