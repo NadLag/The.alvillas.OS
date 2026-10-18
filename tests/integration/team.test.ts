@@ -10,7 +10,12 @@ import {
 } from "@/modules/identity/application/identity-access";
 import {
   ensureStandardIdentitySetup,
-  deactivateAccount
+  deactivateAccount,
+  getInvitationProfile,
+  createInvitation,
+  createPersonProfile,
+  IdentityConflictError,
+  IdentityNotFoundError
 } from "@/modules/identity/application/identity-service";
 import {
   assignTeamRole,
@@ -32,6 +37,8 @@ import {
   type PrivateDocumentStorage
 } from "@/modules/identity/application/team-documents";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { getNotificationPage } from "@/platform/notifications/notification-service";
+import { ownNotificationContext } from "@/platform/notifications/notification";
 import {
   getConfigAdminModel,
   retireConfigRuleVersion,
@@ -171,6 +178,38 @@ describe("team management on real PostgreSQL", () => {
   afterAll(async () => {
     await db?.$disconnect();
     await admin?.$disconnect();
+  });
+  it("invites an explicitly selected active profile without changing its contacts or compensation history", async () => {
+    const f = await fixture();
+    const person = await createPersonProfile(f.ctx, { displayName: "Existing staff profile", email: "existing-staff@example.test", phone: "+212600000003", preferredLocale: "fr" }, deps());
+    const role = await assignTeamRole(f.ctx, { personId: person.id, roleId: f.role.id, scopeType: "property", scopeId: f.property.id, validFrom: "2027-01-01", validTo: null, assignedToMe: true, reason: "Preserve the staff assignment" }, deps());
+    await saveTeamCompensation(f.ctx, { assignmentId: role.id, mode: "PER_MONTH", amount: "500.25", currency: "MAD", effectiveFrom: "2027-01-01", expectedVersion: 0, reason: "Preserve the agreed compensation" }, deps());
+    const before = await withTenant(db, f.org, async tx => ({ person: await tx.person.findFirstOrThrow({ where: { id: person.id } }), rates: await tx.teamCompensation.findMany({ where: { assignmentId: role.id } }) }));
+    const invite = await createInvitation(f.ctx, { personId: person.id, displayName: "Forged replacement name", email: "attacker@example.test", phone: "+212600000999", preferredLocale: "ar", roleKey: "field_staff", scopeType: "property", scopeId: f.property.id, expiresInHours: 24 }, deps());
+    const saved = await withTenant(db, f.org, async tx => ({ invitation: await tx.invitation.findFirstOrThrow({ where: { id: invite.invitationId } }), person: await tx.person.findFirstOrThrow({ where: { id: person.id } }), rates: await tx.teamCompensation.findMany({ where: { assignmentId: role.id } }), people: await tx.person.count(), accounts: await tx.userAccount.count({ where: { personId: person.id } }), delivery: await tx.outboxEvent.findFirstOrThrow({ where: { idempotencyKey: `identity.invitation.delivery:${invite.invitationId}` } }) }));
+    expect(saved.invitation).toMatchObject({ personId: person.id, email: "existing-staff@example.test", phone: "+212600000003" });
+    expect(saved.person).toEqual(before.person);
+    expect(saved.rates).toEqual(before.rates);
+    expect(saved.people).toBe(3);
+    expect(saved.accounts).toBe(0);
+    expect(saved.delivery.payload).toMatchObject({ personId: person.id, displayName: "Existing staff profile", toEmail: "existing-staff@example.test", locale: "fr" });
+  });
+  it("denies foreign, archived and account-backed invitation profiles and role grants outside the actor's scope", async () => {
+    const f = await fixture(), foreign = await fixture();
+    const person = await createPersonProfile(f.ctx, { displayName: "No login staff", phone: "+212600000004", preferredLocale: "en" }, deps());
+    const input = { personId: person.id, displayName: "No login staff", roleKey: "field_staff", scopeType: "property" as const, scopeId: f.property.id, expiresInHours: 24 };
+    await expect(getInvitationProfile(f.ctx, foreign.staff.id, deps())).rejects.toBeInstanceOf(IdentityNotFoundError);
+    await expect(createInvitation(f.ctx, { ...input, personId: foreign.staff.id }, deps())).rejects.toBeInstanceOf(IdentityNotFoundError);
+    await expect(createInvitation(f.ctx, { ...input, personId: f.staff.id }, deps())).rejects.toBeInstanceOf(IdentityConflictError);
+    const noEdit = actor(f.org, f.account.id, f.person.id, new Set(["identity:view", "identity:create", "role:assign", "role:override"]));
+    await expect(createInvitation(noEdit, input, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    const noGrant = actor(f.org, f.account.id, f.person.id, new Set(["identity:view", "identity:create", "identity:edit", "role:assign"]));
+    await expect(createInvitation(noGrant, input, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    const outside: IdentityActorContext = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [{ permissions: new Set(["identity:view", "identity:create", "identity:edit"]), scope: { organizationId: f.org, scopeType: "organization" } }, { permissions: new Set(["role:assign", "role:override"]), scope: { organizationId: f.org, scopeType: "property", scopeId: randomUUID() } }] } };
+    await expect(createInvitation(outside, input, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    await withTenant(db, f.org, tx => tx.person.update({ where: { id: person.id }, data: { archivedAt: new Date() } }));
+    await expect(createInvitation(f.ctx, input, deps())).rejects.toBeInstanceOf(IdentityNotFoundError);
+    expect(await withTenant(db, f.org, tx => tx.invitation.count())).toBe(0);
   });
   it("isolates directory, documents and foreign-key references across tenants with RLS", async () => {
     const f = await fixture(),
@@ -783,7 +822,16 @@ describe("team management on real PostgreSQL", () => {
         })
       )
     ).toBe(1);
+    const inboxActor = {
+      organizationId: f.org,
+      accountId: f.staffAccount.id,
+      authContext: ownNotificationContext(actor(f.org, f.staffAccount.id, f.staff.id, new Set(["staff_document:view"])).authContext, f.staffAccount.id)
+    };
+    const inbox = await getNotificationPage(inboxActor, {}, { db });
+    expect(inbox.items).toHaveLength(1);
+    expect(inbox.items[0]).toMatchObject({kind:"staff_document_expiring",available:true});
     await archiveTeamDocument(f.ctx, { id: document.id, reason: "Superseded by new agreement" }, deps());
+    expect((await getNotificationPage(inboxActor, {}, { db })).items[0].available).toBe(false);
     const requestsBeforeArchive = downloadRequests;
     await expect(
       downloadTeamDocument(f.ctx, document.id, { db, storage, transport })

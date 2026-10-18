@@ -42,7 +42,8 @@ export function ownNotificationContext(ctx: AuthContext, accountId: string): Aut
 export function notificationDestination(
   ctx: AuthContext, input: NotificationInput, target: Resource | null, locale: "en" | "fr" | "ar"
 ): string | null {
-  if (input.recipientId !== ctx.userAccountId || !target || target.id !== input.targetId) return null;
+  const referenceId = input.kind === "staff_document_expiring" ? target?.documentId : target?.id;
+  if (input.recipientId !== ctx.userAccountId || !target || referenceId !== input.targetId) return null;
   if (input.kind === "language_updated" || input.kind === "security_session_revoked") {
     if (target.type !== "identity" || target.id !== ctx.userAccountId || target.organizationId !== ctx.organizationId) return null;
     const self = { organizationId: ctx.organizationId, resourceType: "identity", resourceId: ctx.userAccountId };
@@ -52,7 +53,7 @@ export function notificationDestination(
     return authorize(selfContext, "configure", target) ? `/${locale}/app${input.kind === "security_session_revoked" ? "/security" : ""}` : null;
   }
   if (!authorize(ctx, "view", target)) return null;
-  if (input.kind === "staff_document_expiring") return target.type === "staff_document" ? `/${locale}/app/team/${target.assignedPersonId}` : null;
+  if (input.kind === "staff_document_expiring") return target.type === "staff_document" && target.assignedPersonId && target.id === target.assignedPersonId ? `/${locale}/app/team/${target.assignedPersonId}` : null;
   if (input.kind === "approval_requested" || input.kind === "approval_decided") return target.type === "property" ? `/${locale}/app/approvals/${target.id}` : null;
   if (input.kind === "reservation_created") return target.type === "reservation" ? `/${locale}/app/reservations` : null;
   if (target.type !== "task") return null;

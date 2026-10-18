@@ -134,6 +134,8 @@
     "subtitle": "Invite people, activate accounts, manage stronger authentication, and revoke access from one audited place.",
     "backToWorkspace": "Workspace",
     "createInvitation": "Create invitation",
+    "invitationProfile": "الملف المرتبط بهذا الحساب",
+    "newInvitationProfile": "إنشاء ملف جديد",
     "people": "People",
     "createPerson": "Create person",
     "duplicateContacts": "Duplicate contacts",
@@ -1610,6 +1612,7 @@
     "automationInvalid": "تحقق من مراجع سير العمل والأحداث والشروط والإجراءات في التعريف."
   },
   "Team": {
+    "inviteAccount": "دعوة لإنشاء حساب",
     "eyebrow": "ALVILLAS · الفريق",
     "title": "الفريق",
     "subtitle": "الأشخاص والمهام والعمل القادم.",

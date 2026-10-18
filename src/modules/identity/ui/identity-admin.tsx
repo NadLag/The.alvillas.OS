@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { Fragment, useActionState, useState, useTransition } from "react";
 import {
   assignRoleAction,
   createCustomRoleAction,
@@ -33,6 +33,8 @@ type IdentityAdminProps = {
   locale: string;
   dateLabels: Record<string, string>;
   people: PersonProfileSummary[];
+  invitationProfiles: Pick<PersonProfileSummary, "id" | "displayName" | "email" | "phone" | "preferredLocale" | "accountCount">[];
+  initialPersonId?: string;
   duplicateContacts: DuplicateContactSummary[];
   accounts: IdentityAccountSummary[];
   invitations: Array<InvitationSummary & { expiresAtLabel: string }>;
@@ -42,6 +44,8 @@ type IdentityAdminProps = {
   simulations: AccountPermissionSimulation[];
   labels: {
     createInvitation: string;
+    invitationProfile: string;
+    newInvitationProfile: string;
     people: string;
     createPerson: string;
     duplicateContacts: string;
@@ -798,6 +802,8 @@ export function IdentityAdmin({
   locale,
   dateLabels,
   people,
+  invitationProfiles,
+  initialPersonId,
   duplicateContacts,
   accounts,
   invitations,
@@ -807,6 +813,8 @@ export function IdentityAdmin({
   simulations,
   labels
 }: IdentityAdminProps) {
+  const [invitationPersonId, setInvitationPersonId] = useState(initialPersonId ?? "");
+  const invitationPerson = invitationProfiles.find(person => person.id === invitationPersonId);
   const [state, formAction, pending] = useActionState(
     createInvitationAction.bind(null, locale),
     initialState
@@ -822,25 +830,34 @@ export function IdentityAdmin({
           <h2>{labels.createInvitation}</h2>
         </div>
         <form className="resource-form" action={formAction}>
+          {invitationProfiles.length ? <label className="field">
+            <span>{labels.invitationProfile}</span>
+            <select data-testid="invite-person" name="personId" value={invitationPersonId} onChange={event => setInvitationPersonId(event.target.value)}>
+              <option value="">{labels.newInvitationProfile}</option>
+              {invitationProfiles.map(person => <option key={person.id} value={person.id}>{person.displayName}</option>)}
+            </select>
+          </label> : null}
           <div className="form-grid two">
+            <Fragment key={invitationPersonId}>
             <label className="field">
               <span>{labels.displayName}</span>
-              <input data-testid="invite-display-name" name="displayName" required />
+              <input data-testid="invite-display-name" name="displayName" required defaultValue={invitationPerson?.displayName ?? ""} readOnly={Boolean(invitationPerson)} />
             </label>
             <label className="field">
               <span>{labels.email}</span>
-              <input data-testid="invite-email" name="email" type="email" />
+              <input data-testid="invite-email" name="email" type="email" defaultValue={invitationPerson?.email ?? ""} readOnly={Boolean(invitationPerson)} />
             </label>
             <label className="field">
               <span>{labels.phone}</span>
-              <input data-testid="invite-phone" name="phone" type="tel" />
+              <input data-testid="invite-phone" name="phone" type="tel" defaultValue={invitationPerson?.phone ?? ""} readOnly={Boolean(invitationPerson)} />
             </label>
             <label className="field">
               <span>{labels.preferredLocale}</span>
-              <select data-testid="invite-preferred-locale" name="preferredLocale" defaultValue={locale}>
+              <select data-testid="invite-preferred-locale" name="preferredLocale" defaultValue={invitationPerson?.preferredLocale ?? locale} disabled={Boolean(invitationPerson)}>
                 {profileLocales.map((profileLocale) => <option key={profileLocale} value={profileLocale}>{profileLocale.toUpperCase()}</option>)}
               </select>
             </label>
+            </Fragment>
             <label className="field">
               <span>{labels.role}</span>
               <select data-testid="invite-role" name="roleKey" required>

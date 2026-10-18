@@ -206,7 +206,7 @@ export class NotificationRepository {
     for (const row of rows) if (row.kind === "language_updated" || row.kind === "security_session_revoked") targets.set(row.targetId, { type: "identity", organizationId: this.organizationId, id: row.targetId });
     const documentIds = rows.filter(row => row.kind === "staff_document_expiring").map(row => row.targetId);
     const documents = documentIds.length ? await this.tx.teamDocument.findMany({ where: { organizationId: this.organizationId, id: { in: documentIds }, archivedAt: null, confirmedAt: { not: null }, person: { archivedAt: null } }, select: { id: true, personId: true } }) : [];
-    for (const row of documents) targets.set(row.id, { type: "staff_document", organizationId: this.organizationId, id: row.personId, assignedPersonId: row.personId });
+    for (const row of documents) targets.set(row.id, { type: "staff_document", organizationId: this.organizationId, id: row.personId, documentId: row.id, assignedPersonId: row.personId });
     const reservationIds = rows.filter((row) => row.kind === "reservation_created").map((row) => row.targetId);
     const reservations = reservationIds.length ? await this.tx.reservation.findMany({ where: { organizationId: this.organizationId, id: { in: reservationIds }, archivedAt: null }, select: { id: true, propertyId: true, status: true, property: { select: { regionId: true, cityId: true } } } }) : [];
     for (const row of reservations) targets.set(row.id, { type: "reservation", organizationId: this.organizationId, id: row.id, reservationId: row.id, propertyId: row.propertyId, region: row.property.regionId, city: row.property.cityId, status: row.status });

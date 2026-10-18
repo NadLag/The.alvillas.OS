@@ -857,6 +857,26 @@ export class IdentityRepository {
     });
   }
 
+  async invitationProfile(personId: string) {
+    const person = await this.tx.person.findFirst({
+      where: { id: personId, organizationId: this.organizationId, archivedAt: null },
+      select: { id: true, displayName: true, email: true, phone: true, preferredLocale: true, userAccounts: { select: { id: true } } }
+    });
+    return person ? { id: person.id, displayName: person.displayName, email: person.email, phone: person.phone, preferredLocale: person.preferredLocale, accountCount: person.userAccounts.length } : null;
+  }
+
+  accountEmailExists(email: string) {
+    return this.tx.userAccount.count({ where: { organizationId: this.organizationId, email } }).then(count => count > 0);
+  }
+
+  createInvitationAccount(input: { personId: string; email: string | null; phone: string }) {
+    return this.tx.userAccount.create({ data: { organizationId: this.organizationId, personId: input.personId, email: input.email, phone: input.phone, status: "ACTIVE" } });
+  }
+
+  revokeOtherInvitations(personId: string, acceptedId: string) {
+    return this.tx.invitation.updateMany({ where: { organizationId: this.organizationId, personId, id: { not: acceptedId }, acceptedAt: null, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
+
   async createPerson(input: {
     displayName: string;
     email?: string | null;

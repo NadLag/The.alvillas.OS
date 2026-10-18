@@ -106,6 +106,7 @@ export default async function TeamMemberPage({
       />
       <section className="team-section">
         <h2>{t("profile")}</h2>
+        {data.canInviteAccount ? <Link className="secondary-button" href={`/${locale}/app/identity?personId=${personId}`}>{t("inviteAccount")}</Link> : null}
         <dl className="team-profile">
           <div>
             <dt>{t("fields.email")}</dt>

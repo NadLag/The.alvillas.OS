@@ -134,6 +134,8 @@
     "subtitle": "Invite people, activate accounts, manage stronger authentication, and revoke access from one audited place.",
     "backToWorkspace": "Workspace",
     "createInvitation": "Create invitation",
+    "invitationProfile": "Profile for this login",
+    "newInvitationProfile": "Create a new profile",
     "people": "People",
     "createPerson": "Create person",
     "duplicateContacts": "Duplicate contacts",
@@ -1610,6 +1612,7 @@
     "automationInvalid": "Check the workflow references, event, conditions and actions in this definition."
   },
   "Team": {
+    "inviteAccount": "Invite a login",
     "eyebrow": "ALVILLAS · People",
     "title": "Team",
     "subtitle": "People, assignments and the work ahead.",

@@ -134,6 +134,8 @@
     "subtitle": "Invitez les personnes, activez les comptes, gerez l'authentification forte et revoquez les acces dans un espace audite.",
     "backToWorkspace": "Espace",
     "createInvitation": "Creer une invitation",
+    "invitationProfile": "Profil pour cette connexion",
+    "newInvitationProfile": "Créer un nouveau profil",
     "people": "Personnes",
     "createPerson": "Creer une personne",
     "duplicateContacts": "Contacts en doublon",
@@ -1610,6 +1612,7 @@
     "automationInvalid": "Vérifiez les références, événements, conditions et actions de cette définition."
   },
   "Team": {
+    "inviteAccount": "Inviter à se connecter",
     "eyebrow": "ALVILLAS · Équipe",
     "title": "Équipe",
     "subtitle": "Les personnes, leurs missions et le travail à venir.",
