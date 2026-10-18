@@ -2,6 +2,8 @@
 
 Team Management extends the existing Person, UserAccount and RoleAssignment records. A person can work without an account. Account-backed assignments use that person's active account and the existing permission grant checks. Scoped readers receive only matching assignments; a staff account receives a capability to read its own operational profile. Financial and document access require separate permissions.
 
+The audit serializer applies those same grants to private payloads and reasons. Audit access and general financial access alone do not reveal staff compensation, documents or personal contacts. Leave and offboarding reasons require personal-record access. Assignment audit details require scoped role administration.
+
 Compensation belongs to an assignment. Each change creates a `staff.compensation` config_rule version scoped to that assignment and an immutable, tenant-bound version reference. Effective instants must increase; concurrent changes use a person lock and an expected version. Earlier rates remain queryable. Salary, job, hourly and percentage values retain decimal precision and currency.
 
 Availability uses calendar dates with an exclusive return date. Approval and task assignment share database locks. Approved absences cannot overlap other approved intervals or open work. Task assignment also checks absences, archived staff and account status, including writes through other operational entry points.

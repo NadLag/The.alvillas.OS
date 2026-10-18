@@ -35,6 +35,55 @@ const row = (resourceType: string, after: Prisma.JsonValue): AuditHistoryRow => 
 });
 describe("service template audit privacy", () => {
   it.each([
+    ["team.compensation.create", "staff_compensation:view"],
+    ["team.document.upload", "staff_document:view"],
+    ["team.wallet.link", "wallet:view"],
+    ["identity.person.create", "identity:edit"],
+    ["team.assignment.create", "role:assign"]
+  ])(
+    "protects %s payloads and free-text reasons from audit-only and unrelated financial access",
+    (event, permission) => {
+      const source = {
+        ...row("team_member", { personId: propertyId, amount: "500.25" }),
+        action: event,
+        reason: "Private staff agreement 500.25"
+      };
+      for (const action of ["view", "export"] as const) {
+        const finance = {
+          ...context,
+          authContext: {
+            ...context.authContext,
+            permissions: new Set([...context.authContext.permissions, "financial_transaction:view"])
+          }
+        };
+        for (const actor of [context, finance]) {
+          const result = presentAuditHistoryRow(actor, source, action);
+          expect(result.reason).toBe(maskedValue);
+          expect(result.after).toBe(maskedValue);
+          expect(JSON.stringify(result)).not.toContain("500.25");
+        }
+        const permitted = {
+          ...context,
+          authContext: {
+            ...context.authContext,
+            permissions: new Set([...context.authContext.permissions, permission])
+          }
+        };
+        expect(presentAuditHistoryRow(permitted, source, action)).toEqual(source);
+      }
+    }
+  );
+  it("keeps staff leave reasons private independently of financial permission", () => {
+    const source = {
+      ...row("team_member", { personId: propertyId, kind: "LEAVE" }),
+      action: "team.availability.request",
+      reason: "Sensitive leave reason"
+    };
+    expect(presentAuditHistoryRow(context, source).reason).toBe(maskedValue);
+    const own = { ...context, personId: propertyId };
+    expect(presentAuditHistoryRow(own, source).reason).toBe(source.reason);
+  });
+  it.each([
     row("property_template", {
       kind: "SERVICE_CATALOG",
       values: { rules: { "services.pricing": { services: [{ amount: "800.00" }] } } }

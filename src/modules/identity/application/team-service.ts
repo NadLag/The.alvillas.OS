@@ -33,7 +33,7 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { ensureLedgerAccount } from "@/platform/ledger/accounts";
 
-type Deps = { db?: TenantTransactionRunner; requestId?: string };
+type Deps = { db?: TenantTransactionRunner; requestId?: string; propertyScopeId?: string | null };
 export class TeamConflictError extends Error {}
 export class TeamNotFoundError extends Error {}
 export async function teamActorContextFromSession(session: Session | null, deps: Deps = {}) {
@@ -112,6 +112,7 @@ export async function teamAudit(
     action: `team.${action}`,
     resourceType: "team_member",
     resourceId,
+    propertyScopeId: deps.propertyScopeId,
     after,
     reason,
     requestId: deps.requestId ?? randomUUID(),
@@ -346,15 +347,13 @@ export async function teamMember(ctx: IdentityActorContext, input: unknown, deps
         status: a.status,
         reason: privateProfile ? a.reason : null
       })),
-      tasks: visibleTasks
-        .slice(0, 500)
-        .map((t) => ({
-          id: t.id,
-          property: t.property.name,
-          dueDate: t.dueDate.toISOString().slice(0, 10),
-          state: t.state,
-          title: t.titleTranslations
-        })),
+      tasks: visibleTasks.slice(0, 500).map((t) => ({
+        id: t.id,
+        property: t.property.name,
+        dueDate: t.dueDate.toISOString().slice(0, 10),
+        state: t.state,
+        title: t.titleTranslations
+      })),
       metrics:
         tasks.length > 500
           ? null
@@ -397,16 +396,14 @@ export async function teamMember(ctx: IdentityActorContext, input: unknown, deps
       offboarding: offboarding
         ? { openTasks: offboarding.openTasks, walletClear: offboarding.walletClear }
         : null,
-      walletMovements: walletMovements
-        .slice(0, 25)
-        .map((p) => ({
-          id: p.id,
-          reference: p.transaction.reference,
-          occurredAt: p.transaction.occurredAt.toISOString(),
-          amount: p.amount.toString(),
-          currency: p.currency,
-          side: p.side
-        })),
+      walletMovements: walletMovements.slice(0, 25).map((p) => ({
+        id: p.id,
+        reference: p.transaction.reference,
+        occurredAt: p.transaction.occurredAt.toISOString(),
+        amount: p.amount.toString(),
+        currency: p.currency,
+        side: p.side
+      })),
       walletNext: walletMovements.length > 25,
       walletPage: parsed.walletPage,
       canEdit: authorize(ctx.authContext, "edit", {
@@ -580,9 +577,14 @@ export async function saveTeamCompensation(ctx: IdentityActorContext, input: unk
       ctx,
       "compensation.create",
       row.id,
-      { assignmentId: assignment.id, version: row.version, configRuleId: config.id },
+      {
+        assignmentId: assignment.id,
+        personId: assignment.personId,
+        version: row.version,
+        configRuleId: config.id
+      },
       value.reason,
-      deps
+      { ...deps, propertyScopeId: assignment.scopeType === "property" ? assignment.scopeId : null }
     );
     return { id: row.id };
   });
