@@ -38,6 +38,18 @@ Use the runtime in `.nvmrc` for local verification and deployment builds. The `t
 
 For acceptance, use an existing authorized account with an owner-controlled real inbox, save a future schedule, let cron deliver exactly one digest, and verify its signed delivery receipt, localized body, authorized record links and unchanged history after duplicate replay. Restore the original account preferences after the staging exercise. Keep F-NTF-07 IN-PROGRESS until real delivery is verified. Never use a simulated provider response as staging evidence.
 
+## Team Management
+
+Apply the forward-only Team migration to Preview after a verified backup. The runtime database role needs SELECT and INSERT on `team_compensation`, `team_availability`, `team_document` and `team_wallet`, plus UPDATE on availability and document rows. Revoke UPDATE and DELETE on compensation and wallet links. Forced RLS and database triggers protect tenant references, immutable history, leave conflicts and offboarding. A new `STAFF_WALLET` account represents staff cash custody; organization bank and ownership accounts cannot be linked as staff wallets.
+
+Open Team with the existing administrator to initialize the canonical permission catalog and configurable staff policy. Compensation changes use Team; assignment compensation is excluded from the general configuration editor. Historical versions and financial movements are retained.
+
+Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BUCKET` in Preview using the private ALVILLAS OS bucket. Uploads pass through the server and validate file signatures and configured limits. Authorized downloads issue short-lived signed URLs. Archiving prevents new links; previously issued links expire according to the configured duration. Do not remove stored business documents as cleanup.
+
+`staff.management_policy` controls upload limits, private link duration and expiry thresholds. Configure recipients and channels for `staff_document_expiring` in Notification Settings; recipients require current document access and channel consent. The existing signed Inngest minute dispatcher schedules reminders, with durable per-document/expiry/threshold deduplication. No recipient is inferred from an administrative role.
+
+Acceptance must exercise an actual private upload and download, unauthorized access, an expiry reminder and duplicate replay. Keep F-TEM-07 IN-PROGRESS while storage credentials or real provider acceptance are missing. For other Team workflows use labeled staging records, append reversals for any acceptance movements, offboard temporary accounts and verify every original financial row is unchanged.
+
 ## Production
 
 Production promotion is manual and requires owner approval.

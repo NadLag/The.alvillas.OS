@@ -267,15 +267,24 @@ export class R2StorageProvider implements StorageProvider {
 
   createSignedUploadUrl(input: { key: string; contentType: string }): Promise<{ url: string }> {
     void input.contentType;
+    return this.signedUrl(input.key, "PUT", 900);
+  }
+
+  createSignedDownloadUrl(input: { key: string; expiresInSeconds: number }): Promise<{ url: string }> {
+    if (!Number.isInteger(input.expiresInSeconds) || input.expiresInSeconds < 30 || input.expiresInSeconds > 900) throw new Error("Invalid private document link duration");
+    return this.signedUrl(input.key, "GET", input.expiresInSeconds);
+  }
+
+  private signedUrl(key: string, method: "PUT" | "GET", expiresInSeconds: number): Promise<{ url: string }> {
     const { dateStamp, amzDate } = isoBasic(this.now());
     const host = `${this.accountId}.r2.cloudflarestorage.com`;
     const credentialScope = `${dateStamp}/auto/s3/aws4_request`;
-    const canonicalUri = `/${encodePath(this.bucket)}/${encodePath(input.key)}`;
+    const canonicalUri = `/${encodePath(this.bucket)}/${encodePath(key)}`;
     const query = new URLSearchParams({
       "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
       "X-Amz-Credential": `${this.accessKeyId}/${credentialScope}`,
       "X-Amz-Date": amzDate,
-      "X-Amz-Expires": "900",
+      "X-Amz-Expires": String(expiresInSeconds),
       "X-Amz-SignedHeaders": "host"
     });
     const canonicalQuery = [...query.entries()]
@@ -283,7 +292,7 @@ export class R2StorageProvider implements StorageProvider {
       .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
       .join("&");
     const canonicalRequest = [
-      "PUT",
+      method,
       canonicalUri,
       canonicalQuery,
       `host:${host}`,

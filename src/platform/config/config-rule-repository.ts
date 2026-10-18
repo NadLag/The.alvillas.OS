@@ -4,6 +4,7 @@ import { parseConfigRuleValue } from "@/platform/config/rule-registry";
 
 export type ConfigScopeType =
   | "organization"
+  | "role_assignment"
   | "city"
   | "owner"
   | "property"
@@ -52,6 +53,7 @@ export type ConfigPropertyScopeOption = {
 };
 
 const scopeSpecificity: Record<ConfigScopeType, number> = {
+  role_assignment: 6,
   organization: 1,
   city: 2,
   owner: 3,
@@ -243,13 +245,14 @@ export class ConfigRuleRepository {
     scopeType?: string;
     scopeId?: string | null;
     take?: number;
+    excludeScopeTypes?: string[];
   } = {}): Promise<ConfigRuleRecord[]> {
     const rules = await this.tx.configRule.findMany({
       where: {
         organizationId: this.organizationId,
         archivedAt: null,
         key: input.key,
-        scopeType: input.scopeType,
+        scopeType: input.scopeType ?? (input.excludeScopeTypes ? { notIn: input.excludeScopeTypes } : undefined),
         scopeId: input.scopeId === undefined ? undefined : input.scopeId
       },
       orderBy: [

@@ -1,3 +1,28 @@
+.team-section { padding-block: var(--space-6); border-block-end: 1px solid var(--border); }
+.team-section > h2 { margin-block: 0 var(--space-4); }
+.team-section summary { cursor: pointer; min-block-size: 44px; padding-block: var(--space-3); font-weight: var(--font-weight-semibold); }
+.team-record { padding-block: var(--space-5); border-block-end: 1px solid var(--border); overflow-wrap: anywhere; }
+.team-record h3 { margin-block: 0 var(--space-2); }
+.team-form { margin-block: var(--space-4); max-inline-size: 56rem; }
+.team-form fieldset { border: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); min-inline-size: 0; }
+.team-field { display: flex; flex-direction: column; gap: var(--space-2); min-inline-size: 0; }
+.team-field input, .team-field select { inline-size: 100%; min-inline-size: 0; min-block-size: 48px; }
+.team-check { display: flex; align-items: center; gap: var(--space-3); }
+.team-form button { align-self: end; justify-self: start; min-block-size: 48px; }
+.team-directory, .team-workload { list-style: none; padding: 0; }
+.team-directory > li, .team-workload > li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); min-block-size: 56px; padding-block: var(--space-3); border-block-end: 1px solid var(--border); }
+.team-directory a { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); padding-block: var(--space-2); }
+.team-search { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-block: var(--space-4); }
+.team-search input { min-block-size: 48px; max-inline-size: 100%; }
+.team-profile, .team-metrics { display: flex; flex-wrap: wrap; gap: var(--space-6); }
+.team-profile dd, .team-metrics dd { margin-inline: 0; margin-block: var(--space-2); overflow-wrap: anywhere; }
+.team-metrics dd { font-size: var(--font-size-2xl); font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) {
+  .team-form fieldset { grid-template-columns: minmax(0, 1fr); }
+  .team-form button { inline-size: 100%; }
+  .team-search { align-items: stretch; flex-direction: column; }
+}
+
 :root {
   color-scheme: light;
 

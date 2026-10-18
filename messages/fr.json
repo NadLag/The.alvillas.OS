@@ -85,7 +85,8 @@
     "signedInAs": "Connecte en tant que",
     "sessionScope": "Portee",
     "organizationScope": "Organisation",
-    "templates": "Modèles de propriétés"
+    "templates": "Modèles de propriétés",
+    "team": "Équipe"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -1074,7 +1075,8 @@
       "reservation_created": "Une réservation a été créée.",
       "task_completed": "Une tâche a été terminée.",
       "approval_requested": "Une approbation attend votre décision.",
-      "approval_decided": "Une décision d’approbation a été enregistrée."
+      "approval_decided": "Une décision d’approbation a été enregistrée.",
+      "staff_document_expiring": "Un document du personnel arrive à expiration."
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -1338,7 +1340,8 @@
         "digest": "Récapitulatifs par e-mail",
         "identity_invitation_delivery_requested": "Invitation au compte",
         "identity_recovery_delivery_requested": "Récupération du compte",
-        "other": "Autre notification"
+        "other": "Autre notification",
+        "staff_document_expiring": "Un document du personnel arrive à expiration."
       }
     }
   },
@@ -1605,5 +1608,166 @@
     "automationDefinition": "Définition du processus (JSON)",
     "automationHelp": "Incluez des définitions réutilisables d’événements, de conditions et d’actions. Ces paramètres utilisent la configuration de processus de l’application.",
     "automationInvalid": "Vérifiez les références, événements, conditions et actions de cette définition."
+  },
+  "Team": {
+    "eyebrow": "ALVILLAS · Équipe",
+    "title": "Équipe",
+    "subtitle": "Les personnes, leurs missions et le travail à venir.",
+    "back": "Espace de travail",
+    "directory": "Annuaire de l’équipe",
+    "search": "Rechercher une personne",
+    "create": "Ajouter une personne",
+    "save": "Enregistrer",
+    "saving": "Enregistrement…",
+    "openProfile": "Ouvrir la fiche",
+    "profile": "Fiche du personnel",
+    "editProfile": "Modifier la fiche",
+    "peopleCount": "{count, plural, one {# personne} other {# personnes}}",
+    "empty": "Aucune personne ne correspond à cette recherche.",
+    "pagination": "Pages de l’annuaire",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "active": "Actif",
+    "offboarded": "Départ effectué",
+    "notProvided": "Non renseigné",
+    "assignments": "Rôles et affectations",
+    "compensation": "Historique de rémunération",
+    "assign": "Ajouter une affectation",
+    "assignedToMe": "Limiter l’accès aux tâches attribuées à cette personne",
+    "endAssignment": "Terminer l’affectation",
+    "changeCompensation": "Ajouter une version de rémunération",
+    "noAssignments": "Aucune affectation pour le moment.",
+    "version": "Version {version}",
+    "percentage": "{amount} %",
+    "availability": "Disponibilités et congés",
+    "exclusiveEnd": "La date de fin est le premier jour de retour. Les absences approuvées empêchent l’attribution de tâches.",
+    "requestAvailability": "Demander une disponibilité ou un congé",
+    "noAvailability": "Aucune disponibilité ou absence enregistrée.",
+    "workload": "Charge de travail",
+    "performance": "Performance sur cette période",
+    "narrowDates": "Plus de 500 tâches correspondent. Réduisez la période pour afficher les indicateurs complets.",
+    "noTasks": "Aucune tâche autorisée sur cette période.",
+    "apply": "Appliquer les dates",
+    "documents": "Documents du personnel",
+    "documentPrivacy": "Les contrats et pièces d’identité sont privés. Chaque accès nécessite une autorisation et expire rapidement.",
+    "reminderSettings": "Configurer les rappels d’expiration",
+    "noDocuments": "Aucun document du personnel déposé.",
+    "download": "Ouvrir le document privé",
+    "upload": "Déposer un document",
+    "archive": "Archiver le document",
+    "wallet": "Portefeuille du personnel",
+    "walletDerived": "Les soldes sont calculés à partir des mouvements du grand livre.",
+    "walletLedger": "Voir les mouvements",
+    "noMovements": "Aucun mouvement enregistré.",
+    "noWallet": "Aucun portefeuille associé.",
+    "linkWallet": "Associer un compte comptable",
+    "offboarding": "Départ du personnel",
+    "offboard": "Effectuer le départ",
+    "offboardSafeguards": "Clôturez toutes les tâches et soldez chaque devise du portefeuille. Le départ révoque les accès et conserve tout l’historique.",
+    "offline": "Vous êtes hors ligne. Vos saisies restent ici ; reconnectez-vous pour enregistrer.",
+    "retryHelp": "Vos données sont conservées. Essayez de recharger cette page.",
+    "retry": "Réessayer",
+    "fields": {
+      "displayName": "Nom complet",
+      "email": "Adresse e-mail",
+      "phone": "Téléphone",
+      "preferredLocale": "Langue",
+      "roleId": "Rôle",
+      "scopeType": "Périmètre",
+      "scopeId": "Élément du périmètre",
+      "validFrom": "Début de l’affectation",
+      "validTo": "Fin de l’affectation (facultatif)",
+      "reason": "Motif",
+      "mode": "Base de rémunération",
+      "amount": "Montant ou pourcentage",
+      "currency": "Devise",
+      "effectiveFrom": "Date d’effet",
+      "kind": "Type",
+      "startsOn": "Du",
+      "endsOn": "Retour le",
+      "decision": "Décision",
+      "ledgerAccountId": "Compte comptable",
+      "title": "Titre du document",
+      "expiresOn": "Date d’expiration (facultatif)",
+      "file": "Fichier PDF, JPEG ou PNG",
+      "userAccountId": "Acc?s du compte",
+      "accountName": "Nom du portefeuille"
+    },
+    "scope": {
+      "organization": "Organisation",
+      "property": "Propriété",
+      "region": "Région",
+      "city": "Ville",
+      "job": "Mission",
+      "owner": "Propriétaire",
+      "reservation": "Réservation",
+      "service": "Service",
+      "financial_record": "Écriture financière",
+      "wallet": "Portefeuille",
+      "field_team": "Équipe terrain"
+    },
+    "mode": {
+      "PER_JOB": "Par mission",
+      "PER_MONTH": "Par mois",
+      "PER_HOUR": "Par heure",
+      "PERCENTAGE": "Pourcentage"
+    },
+    "kind": {
+      "AVAILABLE": "Disponible",
+      "UNAVAILABLE": "Indisponible",
+      "LEAVE": "Congé",
+      "CONTRACT": "Contrat",
+      "IDENTITY": "Pièce d’identité",
+      "OTHER": "Autre document"
+    },
+    "status": {
+      "REQUESTED": "Demandé",
+      "APPROVED": "Approuvé",
+      "REJECTED": "Refusé",
+      "CANCELLED": "Annulé"
+    },
+    "taskState": {
+      "PENDING": "En attente",
+      "PLANNED": "Planifié",
+      "READY": "Prêt",
+      "ASSIGNED": "Attribué",
+      "IN_PROGRESS": "En cours",
+      "COMPLETED": "Terminé",
+      "CANCELLED": "Annulé",
+      "BLOCKED": "Bloqué",
+      "OPEN": "Ouvert"
+    },
+    "metrics": {
+      "assigned": "Tâches attribuées",
+      "completed": "Terminées",
+      "open": "Tâches ouvertes",
+      "overdue": "En retard",
+      "onTime": "Termin?es ? temps",
+      "completionRate": "Taux de r?alisation (%)"
+    },
+    "locale": {
+      "en": "Anglais",
+      "fr": "Français",
+      "ar": "Arabe"
+    },
+    "result": {
+      "saved": "Enregistré.",
+      "invalid": "Vérifiez les champs requis, le type de fichier et l’ordre des dates.",
+      "denied": "Vous n’avez pas l’autorisation de modifier cette fiche.",
+      "conflict": "Cette modification est incompatible avec les données actuelles. Vérifiez les dates, disponibilités approuvées, tâches ouvertes et mouvements du portefeuille.",
+      "unavailable": "Ce service est indisponible. Vos saisies sont conservées ; réessayez."
+    },
+    "ended": "Termin?e",
+    "offboardChecks": "T?ches ouvertes : {tasks}",
+    "walletClear": "Portefeuille sold?",
+    "walletNotClear": "Mouvements du portefeuille ? solder",
+    "side": {
+      "DEBIT": "D?bit",
+      "CREDIT": "Cr?dit"
+    },
+    "noCompensation": "Aucune r?mun?ration convenue pour le moment.",
+    "accountNumber": "Compte actif {number}",
+    "noAccount": "Personne uniquement ? sans acc?s au compte",
+    "createWallet": "Cr?er un portefeuille personnel d?di?"
   }
 }

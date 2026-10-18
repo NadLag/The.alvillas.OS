@@ -67,6 +67,7 @@ import {
 } from "@/platform/rate-limit/postgres-rate-limiter";
 import { safeLocale, type AppLocale } from "@/i18n/routing";
 import { PinSecurityRepository } from "@/modules/identity/infrastructure/pin-security-repository";
+import { TeamRepository } from "@/modules/identity/infrastructure/team-repository";
 
 export class IdentityNotFoundError extends Error {
   constructor(message = "Identity resource was not found") {
@@ -311,7 +312,7 @@ function permissionParts(permission: string): { resourceType: string; action: Ac
   };
 }
 
-function assertPermissionGrantAllowed(
+export function assertPermissionGrantAllowed(
   ctx: IdentityActorContext,
   permissionKeys: readonly string[],
   roleId?: string,
@@ -1305,6 +1306,7 @@ export async function deactivateAccount(
     const before = await tx.userAccount.findFirst({
       where: { id: userAccountId, organizationId: ctx.organizationId },
       select: {
+        personId: true,
         status: true,
         suspendedAt: true,
         deactivatedAt: true,
@@ -1314,6 +1316,13 @@ export async function deactivateAccount(
 
     if (!before) {
       throw new IdentityNotFoundError();
+    }
+
+    const team = new TeamRepository(tx, ctx.organizationId);
+    await team.lock(before.personId);
+    const offboarding = await team.offboarding(before.personId);
+    if (offboarding.openTasks || !offboarding.walletClear) {
+      throw new IdentityConflictError("Resolve outstanding staff obligations before deactivation");
     }
 
     const now = new Date();
