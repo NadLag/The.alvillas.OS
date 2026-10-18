@@ -3,8 +3,11 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 const devFallbackSecret = "dev-only-alvillas-os-auth-secret";
 
 function activeKeyMaterial(env: NodeJS.ProcessEnv = process.env): { version: string; key: Buffer } {
-  const configured = env.ENCRYPTION_KEYS?.split(",").map((entry) => entry.trim()).filter(Boolean)[0];
-  const source = configured ?? env.AUTH_SECRET ?? (env.NODE_ENV === "production" ? undefined : devFallbackSecret);
+  const configured = env.ENCRYPTION_KEYS?.split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)[0];
+  const source =
+    configured ?? env.AUTH_SECRET ?? (env.NODE_ENV === "production" ? undefined : devFallbackSecret);
 
   if (!source) {
     throw new Error("ENCRYPTION_KEYS is required for encrypted identity secrets");
@@ -24,7 +27,10 @@ function activeKeyMaterial(env: NodeJS.ProcessEnv = process.env): { version: str
 }
 
 function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env): Buffer {
-  const configured = env.ENCRYPTION_KEYS?.split(",").map((entry) => entry.trim()).filter(Boolean) ?? [];
+  const configured =
+    env.ENCRYPTION_KEYS?.split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean) ?? [];
 
   for (const entry of configured) {
     const [entryVersion, materialCandidate] = entry.includes(":") ? entry.split(":", 2) : ["v1", entry];
@@ -34,7 +40,9 @@ function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env): B
 
       return decoded.length === 32
         ? decoded
-        : createHash("sha256").update(materialCandidate ?? entryVersion).digest();
+        : createHash("sha256")
+            .update(materialCandidate ?? entryVersion)
+            .digest();
     }
   }
 
@@ -80,4 +88,48 @@ export function decryptSecret(encrypted: string, env: NodeJS.ProcessEnv = proces
     decipher.update(Buffer.from(ciphertextText, "base64url")),
     decipher.final()
   ]).toString("utf8");
+}
+
+/** Binary envelope sharing the versioned key ring used for identity secrets. */
+export function encryptBytes(
+  plainText: Uint8Array,
+  context: string,
+  env: NodeJS.ProcessEnv = process.env
+): Buffer {
+  const { version, key } = activeKeyMaterial(env);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(context, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(plainText), cipher.final()]);
+  const header = [
+    "alvillas-binary-v1",
+    version,
+    iv.toString("base64url"),
+    cipher.getAuthTag().toString("base64url")
+  ].join(":");
+  if (Buffer.byteLength(header) > 255) throw new Error("Encryption key version is too long");
+  return Buffer.concat([Buffer.from(header + "\n", "utf8"), ciphertext]);
+}
+
+export function decryptBytes(
+  encrypted: Uint8Array,
+  context: string,
+  env: NodeJS.ProcessEnv = process.env
+): Buffer {
+  const bytes = Buffer.from(encrypted);
+  const boundary = bytes.indexOf(10);
+  if (boundary < 0 || boundary > 255) throw new Error("Invalid binary encryption envelope");
+  const [format, version, ivText, tagText, extra] = bytes
+    .subarray(0, boundary)
+    .toString("utf8")
+    .split(":");
+  if (format !== "alvillas-binary-v1" || !version || !ivText || !tagText || extra !== undefined)
+    throw new Error("Invalid binary encryption envelope");
+  const iv = Buffer.from(ivText, "base64url");
+  const tag = Buffer.from(tagText, "base64url");
+  if (iv.length !== 12 || tag.length !== 16) throw new Error("Invalid binary encryption envelope");
+  const decipher = createDecipheriv("aes-256-gcm", keyForVersion(version, env), iv);
+  decipher.setAAD(Buffer.from(context, "utf8"));
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(bytes.subarray(boundary + 1)), decipher.final()]);
 }

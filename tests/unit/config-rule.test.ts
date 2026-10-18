@@ -61,6 +61,7 @@ describe("config rule registry", () => {
       "notification.routing.language_updated",
       "notification.routing.reservation_created",
       "notification.routing.security_session_revoked",
+      "notification.routing.staff_document_expiring",
       "notification.routing.task_assigned",
       "notification.routing.task_completed",
       "operations.laundry_pricing",
@@ -70,7 +71,8 @@ describe("config rule registry", () => {
       "ops.reservation_task_templates",
       "ops.workflows",
       "services.pricing",
-      "staff.compensation"
+      "staff.compensation",
+      "staff.management_policy"
     ]);
 
     expect(schemaForConfigKey("feature_flag.owner_portal")).toBeTruthy();

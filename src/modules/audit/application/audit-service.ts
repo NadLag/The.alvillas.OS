@@ -81,6 +81,52 @@ export function presentAuditHistoryRow(
   row: AuditHistoryRow,
   action: "view" | "export" = "view"
 ): AuditHistoryRow {
+  const teamResource = row.action.startsWith("team.compensation.")
+    ? "staff_compensation"
+    : row.action.startsWith("team.document.")
+      ? "staff_document"
+      : row.action.startsWith("team.wallet.")
+        ? "wallet"
+        : row.action.startsWith("team.assignment.")
+          ? "role"
+          : row.action.startsWith("team.availability.") ||
+              row.action === "team.member.offboard" ||
+              row.action.startsWith("identity.person.")
+            ? "identity"
+            : null;
+  if (teamResource) {
+    const subject =
+      row.after &&
+      typeof row.after === "object" &&
+      !Array.isArray(row.after) &&
+      typeof row.after.personId === "string"
+        ? row.after.personId
+        : row.resourceId;
+    const resource = { organizationId: ctx.organizationId, propertyId: row.propertyScopeId };
+    const allowed =
+      (teamResource === "identity" && subject === ctx.personId) ||
+      authorize(
+        ctx.authContext,
+        teamResource === "identity" ? "edit" : teamResource === "role" ? "assign" : "view",
+        {
+          ...resource,
+          type: teamResource,
+          id: subject ?? undefined,
+          walletId: teamResource === "wallet" ? row.resourceId : undefined
+        }
+      );
+    return present(
+      { ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["sensitive"] : []) },
+      action,
+      { ...resource, type: auditLogResource, data: row },
+      {
+        ...(teamResource === "identity" && !row.action.startsWith("identity.person.")
+          ? {}
+          : { before: { dataClass: "sensitive" as const }, after: { dataClass: "sensitive" as const } }),
+        reason: { dataClass: "sensitive" }
+      }
+    ) as AuditHistoryRow;
+  }
   if (
     !["property_template", "property_template_revision", "config_rule"].includes(row.resourceType) ||
     (!containsServicePricing(row.before) && !containsServicePricing(row.after))

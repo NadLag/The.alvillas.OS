@@ -249,6 +249,17 @@ function actorForOrganization(
   };
 }
 
+async function activeReservationActor(organizationId: string, permissions?: Set<string>): Promise<ReservationActorContext> {
+  const identity = await withTenant(prisma, organizationId, async tx => {
+    const person = await tx.person.create({ data: { organizationId, displayName: "Reservation integration operator" } });
+    const account = await tx.userAccount.create({ data: { organizationId, personId: person.id, status: "ACTIVE" } });
+    return { person, account };
+  });
+  const ctx = actorForOrganization(organizationId, permissions);
+  return { ...ctx, actorId: identity.account.id, personId: identity.person.id,
+    authContext: { ...ctx.authContext, userAccountId: identity.account.id, personId: identity.person.id } };
+}
+
 function sessionForOwnerPortal(input: {
   organizationId: string;
   userAccountId: string;
@@ -830,7 +841,7 @@ describe("PostgreSQL baseline", () => {
         if (scenario === "role") await tx.role.updateMany({ where: { organizationId: f.organization.id, key: "digest-operator" }, data: { archivedAt: new Date() } });
         if (scenario === "read") await tx.notification.updateMany({ where: { recipientId: f.account.id, readAt: null }, data: { readAt: new Date() } });
         if (scenario === "address") await tx.userAccount.update({ where: { id: f.account.id }, data: { email: "changed@example.test" } });
-        if (scenario === "inactive") await tx.userAccount.update({ where: { id: f.account.id }, data: { status: "DEACTIVATED" } });
+        if (scenario === "inactive") await tx.userAccount.update({ where: { id: f.account.id }, data: { status: "SUSPENDED", suspendedAt: new Date() } });
       });
       if (scenario === "role") {
         const revokedContext = await authContextForAccount(f.organization.id, f.account.id, { db: prisma });
@@ -5292,7 +5303,7 @@ describe("PostgreSQL baseline", () => {
       }
     );
 
-    const ctx = actorForOrganization(orgA.id);
+    const ctx = await activeReservationActor(orgA.id);
     const firstInput = {
       propertyId: property.id,
       guestName: "S3 Guest One",
@@ -5352,7 +5363,7 @@ describe("PostgreSQL baseline", () => {
       db: prisma as unknown as TenantTransactionRunner
     });
     expect(tasks).toHaveLength(4);
-    expect(tasks.every((task) => task.assignedToUserAccountId === integrationActorId)).toBe(true);
+    expect(tasks.every((task) => task.assignedToUserAccountId === ctx.actorId)).toBe(true);
 
     const fieldTasks = await listAssignedFieldTasks(ctx, {
       db: prisma as unknown as TenantTransactionRunner
@@ -5376,7 +5387,7 @@ describe("PostgreSQL baseline", () => {
     );
 
     expect(completed.state).toBe("COMPLETED");
-    expect(completed.completedByUserAccountId).toBe(integrationActorId);
+    expect(completed.completedByUserAccountId).toBe(ctx.actorId);
     expect(completed.completionIdempotencyKey).toBe("018f0a0b-0000-7000-9000-000000000801");
     expect(completed.checklistItems.every((item) => item.completedAt)).toBe(true);
 
@@ -6882,7 +6893,7 @@ describe("PostgreSQL baseline", () => {
         };
       }
     );
-    const ctx = actorForOrganization(orgA.id, financePermissions);
+    const ctx = await activeReservationActor(orgA.id, financePermissions);
     const reservation = await createManualReservation(
       ctx,
       {
@@ -7227,7 +7238,7 @@ describe("PostgreSQL baseline", () => {
         return { owner, property, bank };
       }
     );
-    const ctx = actorForOrganization(orgA.id, financePermissions);
+    const ctx = await activeReservationActor(orgA.id, financePermissions);
     const reservation = await createManualReservation(
       ctx,
       {

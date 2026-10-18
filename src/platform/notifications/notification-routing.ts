@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const routedNotificationKinds = ["language_updated", "task_assigned", "reservation_created", "task_completed", "security_session_revoked", "approval_requested", "approval_decided"] as const;
+export const routedNotificationKinds = ["language_updated", "task_assigned", "reservation_created", "task_completed", "security_session_revoked", "approval_requested", "approval_decided", "staff_document_expiring"] as const;
 export const routedNotificationKindSchema = z.enum(routedNotificationKinds);
 export type RoutedNotificationKind = z.infer<typeof routedNotificationKindSchema>;
 export const notificationRoutingSchema = z.object({

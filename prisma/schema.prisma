@@ -8,6 +8,10 @@ datasource db {
 }
 
 model Organization {
+  teamCompensations TeamCompensation[]
+  teamAvailabilities TeamAvailability[]
+  teamDocuments TeamDocument[]
+  teamWallets TeamWallet[]
   id                        String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   name                      String
   baseCurrency              String                       @default("MAD") @map("base_currency") @db.Char(3)
@@ -134,7 +138,88 @@ model OrganizationProfile {
   @@map("organization_profile")
 }
 
+model TeamCompensation {
+  currencyRef Currency @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_currency_fkey")
+  configRule ConfigRule @relation(fields: [configRuleId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_config_fkey")
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  assignmentId String @map("assignment_id") @db.Uuid
+  configRuleId String @map("config_rule_id") @db.Uuid
+  version Int
+  mode String
+  amount Decimal @db.Decimal(18, 2)
+  currency String @db.Char(3)
+  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
+  reason String
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  assignment RoleAssignment @relation(fields: [organizationId, assignmentId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([organizationId, assignmentId, version], map: "team_compensation_org_assignment_version_unique")
+  @@index([organizationId, assignmentId, effectiveFrom], map: "team_compensation_org_assignment_effective_idx")
+  @@map("team_compensation")
+}
+
+model TeamAvailability {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  personId String @map("person_id") @db.Uuid
+  kind String
+  startsOn DateTime @map("starts_on") @db.Date
+  endsOn DateTime @map("ends_on") @db.Date
+  status String
+  reason String
+  decidedBy String? @map("decided_by") @db.Uuid
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person Person @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([organizationId, personId, startsOn, endsOn], map: "team_availability_org_person_dates_idx")
+  @@index([organizationId, personId, status, startsOn, endsOn], map: "team_availability_org_person_status_dates_idx")
+  @@map("team_availability")
+}
+
+model TeamDocument {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  personId String @map("person_id") @db.Uuid
+  title String
+  kind String
+  storageKey String @unique @map("storage_key")
+  contentType String @map("content_type")
+  size Int
+  expiresOn DateTime? @map("expires_on") @db.Date
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person Person @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([organizationId, personId, archivedAt, createdAt], map: "team_document_org_person_created_idx")
+  @@index([organizationId, expiresOn], map: "team_document_org_expiry_idx")
+  @@map("team_document")
+}
+
+model TeamWallet {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  personId String @unique @map("person_id") @db.Uuid
+  ledgerAccountId String @unique @map("ledger_account_id") @db.Uuid
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person Person @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  ledgerAccount LedgerAccount @relation(fields: [organizationId, ledgerAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([organizationId, personId], map: "team_wallet_org_person_idx")
+  @@unique([organizationId, personId], map: "team_wallet_org_person_unique")
+  @@unique([organizationId, ledgerAccountId], map: "team_wallet_org_account_unique")
+  @@map("team_wallet")
+}
+
 model Person {
+  teamAvailabilities TeamAvailability[]
+  teamDocuments TeamDocument[]
+  teamWallet TeamWallet?
   id              String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId  String                       @map("organization_id") @db.Uuid
   displayName     String                       @map("display_name")
@@ -154,6 +239,7 @@ model Person {
   roleAssignments RoleAssignment[]
 
   @@unique([organizationId, email], map: "person_org_email_unique")
+  @@unique([organizationId, id], map: "person_org_id_unique")
   @@index([organizationId, phone], map: "person_org_phone_idx")
   @@index([organizationId, displayName], map: "person_org_display_name_idx")
   @@map("person")
@@ -387,6 +473,7 @@ model RolePermission {
 }
 
 model RoleAssignment {
+  teamCompensations TeamCompensation[]
   id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId  String       @map("organization_id") @db.Uuid
   personId        String       @map("person_id") @db.Uuid
@@ -408,6 +495,7 @@ model RoleAssignment {
   role            Role         @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([organizationId, personId, archivedAt], map: "role_assignment_org_person_idx")
+  @@unique([organizationId, id], map: "role_assignment_org_id_unique")
   @@index([organizationId, userAccountId, archivedAt], map: "role_assignment_org_account_idx")
   @@index([organizationId, roleId, scopeType, scopeId], map: "role_assignment_org_role_scope_idx")
   @@map("role_assignment")
@@ -841,6 +929,7 @@ model OperationTask {
   @@index([organizationId, propertyId, dueDate], map: "operation_task_org_property_due_idx")
   @@index([organizationId, reservationId], map: "operation_task_org_reservation_idx")
   @@index([organizationId, assignedToUserAccountId, state, dueDate], map: "operation_task_org_assignee_state_due_idx")
+  @@index([organizationId, assignedToPersonId, state, dueDate], map: "operation_task_org_person_state_due_idx")
   @@index([organizationId, completedAt], map: "operation_task_org_completed_at_idx")
   @@map("operation_task")
 }
@@ -893,6 +982,7 @@ model SyncOp {
 }
 
 model LedgerAccount {
+  teamWallet TeamWallet?
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   code           String
@@ -906,6 +996,7 @@ model LedgerAccount {
   postings       Posting[]
 
   @@unique([organizationId, code], map: "ledger_account_org_code_unique")
+  @@unique([organizationId, id], map: "ledger_account_org_id_unique")
   @@map("ledger_account")
 }
 
@@ -982,6 +1073,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  teamCompensations TeamCompensation[]
   code               String              @id @db.Char(3)
   name               String
   minorUnit          Int                 @default(2) @map("minor_unit")
@@ -1014,6 +1106,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  teamCompensations TeamCompensation[]
   id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId       String                      @map("organization_id") @db.Uuid
   key                  String

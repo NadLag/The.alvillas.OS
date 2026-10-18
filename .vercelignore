@@ -1,5 +1,6 @@
 .git
 .vercel
+.tmp
 .next
 node_modules
 test-results

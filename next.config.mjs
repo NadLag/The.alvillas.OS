@@ -7,6 +7,7 @@ const nextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   poweredByHeader: false,
   reactStrictMode: true,
+  experimental: { serverActions: { bodySizeLimit: "4mb" } },
   logging: { serverFunctions: false },
   async headers() {
     return [{ source: "/sw.js", headers: [

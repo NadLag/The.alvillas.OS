@@ -85,7 +85,8 @@
     "signedInAs": "Signed in as",
     "sessionScope": "Scope",
     "organizationScope": "Organization",
-    "templates": "قوالب العقارات"
+    "templates": "قوالب العقارات",
+    "team": "الفريق"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -1074,7 +1075,8 @@
       "reservation_created": "تم إنشاء حجز.",
       "task_completed": "تم إكمال مهمة.",
       "approval_requested": "طلب موافقة بانتظار قرارك.",
-      "approval_decided": "تم تسجيل قرار الموافقة."
+      "approval_decided": "تم تسجيل قرار الموافقة.",
+      "staff_document_expiring": "وثيقة موظف تقترب من انتهاء الصلاحية."
     },
     "settings": {
       "eyebrow": "حسابك",
@@ -1338,7 +1340,8 @@
         "digest": "ملخصات البريد الإلكتروني",
         "identity_invitation_delivery_requested": "دعوة إلى الحساب",
         "identity_recovery_delivery_requested": "استعادة الحساب",
-        "other": "إشعار آخر"
+        "other": "إشعار آخر",
+        "staff_document_expiring": "وثيقة موظف تقترب من انتهاء الصلاحية."
       }
     }
   },
@@ -1605,5 +1608,167 @@
     "automationDefinition": "تعريف سير العمل (JSON)",
     "automationHelp": "أضف تعريفات قابلة لإعادة الاستخدام للأحداث والشروط والإجراءات. تستخدم هذه الإعدادات تهيئة سير العمل نفسها في التطبيق.",
     "automationInvalid": "تحقق من مراجع سير العمل والأحداث والشروط والإجراءات في التعريف."
+  },
+  "Team": {
+    "eyebrow": "ALVILLAS · الفريق",
+    "title": "الفريق",
+    "subtitle": "الأشخاص والمهام والعمل القادم.",
+    "back": "مساحة العمل",
+    "directory": "دليل الفريق",
+    "search": "البحث عن شخص",
+    "create": "إضافة شخص",
+    "save": "حفظ",
+    "saving": "جارٍ الحفظ…",
+    "openProfile": "فتح الملف",
+    "profile": "ملف الموظف",
+    "editProfile": "تعديل الملف",
+    "peopleCount": "عدد الأشخاص: {count}",
+    "empty": "لا يوجد أشخاص يطابقون البحث.",
+    "pagination": "صفحات الدليل",
+    "previous": "السابق",
+    "next": "التالي",
+    "active": "نشط",
+    "offboarded": "تم إنهاء العمل",
+    "notProvided": "غير محدد",
+    "assignments": "الأدوار والتعيينات",
+    "compensation": "سجل التعويضات",
+    "assign": "إضافة تعيين",
+    "assignedToMe": "قصر الوصول على المهام المعينة لهذا الشخص",
+    "endAssignment": "إنهاء التعيين",
+    "changeCompensation": "إضافة نسخة تعويض",
+    "noAssignments": "لا توجد تعيينات بعد.",
+    "version": "النسخة {version}",
+    "percentage": "{amount}٪",
+    "availability": "التوفر والإجازات",
+    "exclusiveEnd": "تاريخ النهاية هو أول يوم للعودة. الغياب المعتمد يمنع تعيين المهام.",
+    "requestAvailability": "طلب توفر أو إجازة",
+    "noAvailability": "لا توجد فترات توفر أو إجازات مسجلة.",
+    "workload": "عبء العمل",
+    "performance": "الأداء خلال هذه الفترة",
+    "narrowDates": "أكثر من 500 مهمة. اختر فترة أقصر لعرض المؤشرات الكاملة.",
+    "noTasks": "لا توجد مهام مصرح بها في هذه الفترة.",
+    "apply": "تطبيق التواريخ",
+    "documents": "وثائق الموظف",
+    "documentPrivacy": "العقود ووثائق الهوية مشفرة. يتطلب كل تنزيل إذناً حالياً. تمنع الأرشفة أي وصول لاحق.",
+    "documentLimit": "الحجم الأقصى للملف: {megabytes, number} ميغابايت.",
+    "reminderSettings": "إعداد تذكيرات انتهاء الصلاحية",
+    "noDocuments": "لم يتم رفع وثائق بعد.",
+    "download": "فتح الوثيقة الخاصة",
+    "upload": "رفع وثيقة",
+    "archive": "أرشفة الوثيقة",
+    "wallet": "محفظة الموظف",
+    "walletDerived": "يتم احتساب الأرصدة من حركات دفتر الحسابات.",
+    "walletLedger": "عرض الحركات",
+    "noMovements": "لا توجد حركات مسجلة.",
+    "noWallet": "لا توجد محفظة مرتبطة.",
+    "linkWallet": "ربط حساب مالي",
+    "offboarding": "إنهاء العمل",
+    "offboard": "إنهاء عمل الشخص",
+    "offboardSafeguards": "أغلق جميع المهام وصفّر رصيد كل عملة أولاً. يتم إلغاء الوصول مع الاحتفاظ بالسجل.",
+    "offline": "أنت غير متصل. تبقى البيانات هنا؛ اتصل لحفظها.",
+    "retryHelp": "بياناتك محفوظة. حاول تحميل الصفحة مجدداً.",
+    "retry": "إعادة المحاولة",
+    "fields": {
+      "displayName": "الاسم الكامل",
+      "email": "البريد الإلكتروني",
+      "phone": "الهاتف",
+      "preferredLocale": "اللغة",
+      "roleId": "الدور",
+      "scopeType": "النطاق",
+      "scopeId": "سجل النطاق",
+      "validFrom": "بداية التعيين",
+      "validTo": "نهاية التعيين (اختياري)",
+      "reason": "السبب",
+      "mode": "أساس التعويض",
+      "amount": "المبلغ أو النسبة",
+      "currency": "العملة",
+      "effectiveFrom": "ساري من",
+      "kind": "النوع",
+      "startsOn": "من",
+      "endsOn": "العودة في",
+      "decision": "القرار",
+      "ledgerAccountId": "الحساب المالي",
+      "title": "عنوان الوثيقة",
+      "expiresOn": "انتهاء الصلاحية (اختياري)",
+      "file": "ملف PDF أو JPEG أو PNG",
+      "userAccountId": "???? ??????",
+      "accountName": "??? ???????"
+    },
+    "scope": {
+      "organization": "المنظمة",
+      "property": "العقار",
+      "region": "المنطقة",
+      "city": "المدينة",
+      "job": "المهمة",
+      "owner": "المالك",
+      "reservation": "الحجز",
+      "service": "الخدمة",
+      "financial_record": "السجل المالي",
+      "wallet": "المحفظة",
+      "field_team": "فريق الميدان"
+    },
+    "mode": {
+      "PER_JOB": "لكل مهمة",
+      "PER_MONTH": "شهرياً",
+      "PER_HOUR": "لكل ساعة",
+      "PERCENTAGE": "نسبة مئوية"
+    },
+    "kind": {
+      "AVAILABLE": "متاح",
+      "UNAVAILABLE": "غير متاح",
+      "LEAVE": "إجازة",
+      "CONTRACT": "عقد",
+      "IDENTITY": "وثيقة هوية",
+      "OTHER": "وثيقة أخرى"
+    },
+    "status": {
+      "REQUESTED": "مطلوب",
+      "APPROVED": "معتمد",
+      "REJECTED": "مرفوض",
+      "CANCELLED": "ملغى"
+    },
+    "taskState": {
+      "PENDING": "قيد الانتظار",
+      "PLANNED": "مخطط",
+      "READY": "جاهز",
+      "ASSIGNED": "معين",
+      "IN_PROGRESS": "قيد التنفيذ",
+      "COMPLETED": "مكتمل",
+      "CANCELLED": "ملغى",
+      "BLOCKED": "محظور",
+      "OPEN": "مفتوح"
+    },
+    "metrics": {
+      "assigned": "المهام المعينة",
+      "completed": "المكتملة",
+      "open": "المهام المفتوحة",
+      "overdue": "المتأخرة",
+      "onTime": "???????? ?? ?????",
+      "completionRate": "???? ??????? (?)"
+    },
+    "locale": {
+      "en": "الإنجليزية",
+      "fr": "الفرنسية",
+      "ar": "العربية"
+    },
+    "result": {
+      "saved": "تم الحفظ.",
+      "invalid": "تحقق من الحقول المطلوبة ونوع الملف وترتيب التواريخ.",
+      "denied": "ليس لديك إذن لتعديل هذا السجل.",
+      "conflict": "يتعارض التغيير مع السجلات الحالية. راجع التواريخ والغياب المعتمد والمهام المفتوحة وحركات المحفظة.",
+      "unavailable": "الخدمة غير متاحة. بياناتك محفوظة؛ حاول مجدداً."
+    },
+    "ended": "?????",
+    "offboardChecks": "?????? ????????: {tasks}",
+    "walletClear": "??????? ??????",
+    "walletNotClear": "???? ????? ????? ??? ??????",
+    "side": {
+      "DEBIT": "????",
+      "CREDIT": "????"
+    },
+    "noCompensation": "?? ??? ??????? ??? ????? ???.",
+    "accountNumber": "?????? ????? {number}",
+    "noAccount": "????? ??? ? ??? ???? ??????",
+    "createWallet": "????? ????? ???? ??????"
   }
 }

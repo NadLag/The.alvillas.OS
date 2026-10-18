@@ -1,5 +1,6 @@
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
+import { teamPolicyKey, teamPolicySchema } from "@/modules/identity/domain/team";
 import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
 import { localizedTextSchema } from "@/i18n/content";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
@@ -320,12 +321,14 @@ export const featureFlagConfigSchema = z
   .passthrough();
 
 export const configRuleSchemas = {
+  [teamPolicyKey]: teamPolicySchema,
   [pushPolicyKey]: pushPolicySchema,
   [digestPolicyKey]: digestPolicySchema,
   [emailPolicyKey]: emailPolicySchema,
   "notification.routing.approval_requested": notificationRoutingSchema,
   "notification.routing.approval_decided": notificationRoutingSchema,
   "notification.routing.language_updated": notificationRoutingSchema,
+  "notification.routing.staff_document_expiring": notificationRoutingSchema,
   "notification.routing.task_assigned": notificationRoutingSchema,
   "notification.routing.task_completed": notificationRoutingSchema,
   "notification.routing.reservation_created": notificationRoutingSchema,

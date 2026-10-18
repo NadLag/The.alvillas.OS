@@ -19,6 +19,9 @@ export const permissionActions = [
 export const permissionResources = [
   "organization",
   "identity",
+  "team_member",
+  "staff_compensation",
+  "staff_document",
   "role",
   "permission",
   "field_policy",
@@ -335,6 +338,8 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
+  { resource: "staff_compensation", field: "amount", dataClass: "financial", requiredPermission: permissionKey("staff_compensation", "view"), mask: "placeholder" },
+  { resource: "wallet", field: "balances", dataClass: "financial", requiredPermission: permissionKey("wallet", "view"), mask: "placeholder" },
   {
     resource: "reservation",
     field: "totalAmount",

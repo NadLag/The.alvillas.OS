@@ -141,6 +141,12 @@ function hasRuleFinancialAccess(
   scopeType: string,
   scopeId: string | null
 ): boolean {
+  // Assignment compensation is changed only through the immutable Team workflow.
+  if (scopeType === "role_assignment") return false;
+  if (key === "staff.compensation") return authorize(ctx.authContext, "view", {
+    type: "staff_compensation", organizationId: ctx.organizationId,
+    propertyId: scopeType === "property" ? scopeId : undefined
+  });
   return key !== "services.pricing" || authorize(ctx.authContext, "view", {
     type: "financial_transaction",
     organizationId: ctx.organizationId,
@@ -319,7 +325,7 @@ export async function getConfigAdminModel(
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
     const [rules, properties] = await Promise.all([
-      repository.list({ take: 200 }),
+      repository.list({ take: 200, excludeScopeTypes: ["role_assignment"] }),
       repository.listPropertyScopeOptions()
     ]);
     const visibleRules = rules.filter((rule) =>

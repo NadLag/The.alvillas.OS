@@ -85,7 +85,8 @@
     "signedInAs": "Signed in as",
     "sessionScope": "Scope",
     "organizationScope": "Organization",
-    "templates": "Property templates"
+    "templates": "Property templates",
+    "team": "Team"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -1074,7 +1075,8 @@
       "reservation_created": "A reservation was created.",
       "task_completed": "A task was completed.",
       "approval_requested": "An approval needs your decision.",
-      "approval_decided": "An approval decision was recorded."
+      "approval_decided": "An approval decision was recorded.",
+      "staff_document_expiring": "A staff document is expiring."
     },
     "settings": {
       "eyebrow": "Your account",
@@ -1338,7 +1340,8 @@
         "digest": "Email digests",
         "identity_invitation_delivery_requested": "Account invitation",
         "identity_recovery_delivery_requested": "Account recovery",
-        "other": "Other notification"
+        "other": "Other notification",
+        "staff_document_expiring": "A staff document is expiring."
       }
     }
   },
@@ -1605,5 +1608,167 @@
     "automationDefinition": "Workflow definition (JSON)",
     "automationHelp": "Include reusable event, condition and action definitions. These settings use the same workflow configuration as the rest of the application.",
     "automationInvalid": "Check the workflow references, event, conditions and actions in this definition."
+  },
+  "Team": {
+    "eyebrow": "ALVILLAS · People",
+    "title": "Team",
+    "subtitle": "People, assignments and the work ahead.",
+    "back": "Workspace",
+    "directory": "Team directory",
+    "search": "Search people",
+    "create": "Add person",
+    "save": "Save",
+    "saving": "Saving…",
+    "openProfile": "Open profile",
+    "profile": "Staff profile",
+    "editProfile": "Edit profile",
+    "peopleCount": "{count, plural, one {# person} other {# people}}",
+    "empty": "No people match this search.",
+    "pagination": "Directory pages",
+    "previous": "Previous",
+    "next": "Next",
+    "active": "Active",
+    "offboarded": "Offboarded",
+    "notProvided": "Not provided",
+    "assignments": "Roles and assignments",
+    "compensation": "Compensation history",
+    "assign": "Add assignment",
+    "assignedToMe": "Restrict access to work assigned to this person",
+    "endAssignment": "End assignment",
+    "changeCompensation": "Add compensation version",
+    "noAssignments": "No role assignments yet.",
+    "version": "Version {version}",
+    "percentage": "{amount}%",
+    "availability": "Availability and leave",
+    "exclusiveEnd": "The end date is the first day back. Approved absences prevent task assignment.",
+    "requestAvailability": "Request availability or leave",
+    "noAvailability": "No availability or leave recorded.",
+    "workload": "Workload",
+    "performance": "Performance in this period",
+    "narrowDates": "More than 500 tasks match. Choose a shorter period to see complete metrics.",
+    "noTasks": "No authorized tasks in this period.",
+    "apply": "Apply dates",
+    "documents": "Staff documents",
+    "documentPrivacy": "Contracts and identity documents are encrypted. Every download requires current permission. Archiving blocks further access.",
+    "documentLimit": "Maximum file size: {megabytes, number} MB.",
+    "reminderSettings": "Configure expiry reminders",
+    "noDocuments": "No staff documents uploaded.",
+    "download": "Open private document",
+    "upload": "Upload document",
+    "archive": "Archive document",
+    "wallet": "Staff wallet",
+    "walletDerived": "Balances are calculated from ledger movements.",
+    "walletLedger": "View wallet movements",
+    "noMovements": "No movements recorded.",
+    "noWallet": "No wallet linked.",
+    "linkWallet": "Link ledger account",
+    "offboarding": "Offboarding",
+    "offboard": "Offboard person",
+    "offboardSafeguards": "Resolve every open task and every nonzero wallet balance first. Offboarding revokes account access and retains all history.",
+    "offline": "You are offline. Your entries remain here; reconnect to save.",
+    "retryHelp": "Your records have not been lost. Try loading this page again.",
+    "retry": "Try again",
+    "fields": {
+      "displayName": "Full name",
+      "email": "Email",
+      "phone": "Phone",
+      "preferredLocale": "Language",
+      "roleId": "Role",
+      "scopeType": "Scope",
+      "scopeId": "Scope record",
+      "validFrom": "Assignment starts",
+      "validTo": "Assignment ends (optional)",
+      "reason": "Reason",
+      "mode": "Compensation basis",
+      "amount": "Amount or percentage",
+      "currency": "Currency",
+      "effectiveFrom": "Effective from",
+      "kind": "Type",
+      "startsOn": "From",
+      "endsOn": "Back on",
+      "decision": "Decision",
+      "ledgerAccountId": "Ledger account",
+      "title": "Document title",
+      "expiresOn": "Expiry date (optional)",
+      "file": "PDF, JPEG or PNG file",
+      "userAccountId": "Account access",
+      "accountName": "Wallet name"
+    },
+    "scope": {
+      "organization": "Organization",
+      "property": "Property",
+      "region": "Region",
+      "city": "City",
+      "job": "Job",
+      "owner": "Owner",
+      "reservation": "Reservation",
+      "service": "Service",
+      "financial_record": "Financial record",
+      "wallet": "Wallet",
+      "field_team": "Field team"
+    },
+    "mode": {
+      "PER_JOB": "Per job",
+      "PER_MONTH": "Per month",
+      "PER_HOUR": "Per hour",
+      "PERCENTAGE": "Percentage"
+    },
+    "kind": {
+      "AVAILABLE": "Available",
+      "UNAVAILABLE": "Unavailable",
+      "LEAVE": "Leave",
+      "CONTRACT": "Contract",
+      "IDENTITY": "Identity document",
+      "OTHER": "Other document"
+    },
+    "status": {
+      "REQUESTED": "Requested",
+      "APPROVED": "Approved",
+      "REJECTED": "Rejected",
+      "CANCELLED": "Cancelled"
+    },
+    "taskState": {
+      "PENDING": "Pending",
+      "PLANNED": "Planned",
+      "READY": "Ready",
+      "ASSIGNED": "Assigned",
+      "IN_PROGRESS": "In progress",
+      "COMPLETED": "Completed",
+      "CANCELLED": "Cancelled",
+      "BLOCKED": "Blocked",
+      "OPEN": "Open"
+    },
+    "metrics": {
+      "assigned": "Assigned tasks",
+      "completed": "Completed",
+      "open": "Open tasks",
+      "overdue": "Overdue",
+      "onTime": "Completed on time",
+      "completionRate": "Completion rate (%)"
+    },
+    "locale": {
+      "en": "English",
+      "fr": "French",
+      "ar": "Arabic"
+    },
+    "result": {
+      "saved": "Saved.",
+      "invalid": "Check the required fields, file type and date order.",
+      "denied": "You do not have permission to change this record.",
+      "conflict": "This change conflicts with current records. Review assignment dates, approved availability, open tasks and wallet movements, then try again.",
+      "unavailable": "This service is unavailable. Your entries are preserved; please try again."
+    },
+    "ended": "Ended",
+    "offboardChecks": "Open tasks: {tasks}",
+    "walletClear": "Wallet settled",
+    "walletNotClear": "Wallet has outstanding movements",
+    "side": {
+      "DEBIT": "Debit",
+      "CREDIT": "Credit"
+    },
+    "noCompensation": "No compensation agreed yet.",
+    "accountNumber": "Active account {number}",
+    "noAccount": "Person only ? no account access",
+    "createWallet": "Create a dedicated staff wallet"
   }
 }
