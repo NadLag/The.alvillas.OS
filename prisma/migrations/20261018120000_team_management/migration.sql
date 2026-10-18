@@ -286,4 +286,3 @@ FROM organization WHERE NOT EXISTS(SELECT 1 FROM config_rule c WHERE c.organizat
 
 ALTER TABLE notification DROP CONSTRAINT notification_kind_check;
 ALTER TABLE notification ADD CONSTRAINT notification_kind_check CHECK(kind IN ('language_updated','task_assigned','task_completed','reservation_created','security_session_revoked','approval_requested','approval_decided','staff_document_expiring'));
-
