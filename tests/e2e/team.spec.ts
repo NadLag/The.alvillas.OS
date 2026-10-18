@@ -77,8 +77,24 @@ test.describe("Team Management", () => {
       await expect(page.getByRole("link", { name: "Invite a login", exact: true })).toHaveCount(0);
       const offboard = page.getByTestId("team-offboard-form");
       await offboard.getByLabel("Reason", { exact: true }).fill("Completed isolated staff invitation verification");
+      const offboardResponse = page.waitForResponse(response =>
+        response.request().method() === "POST" &&
+        Boolean(response.request().postData()?.includes("offboard")) &&
+        new URL(response.url()).pathname === `/en/app/team/${personId}`
+      );
       await offboard.getByRole("button", { name: "Offboard person", exact: true }).click();
-      await expect(offboard.getByRole("status")).toHaveText("Saved.");
+      const response = await offboardResponse;
+      expect(response.status()).toBe(200);
+      expect(await response.finished()).toBeNull();
+      expect((await response.text()).includes('"status":"saved"')).toBe(true);
+      // Successful offboarding removes the form during revalidation.
+      await expect(page.getByText("Offboarded", { exact: true })).toBeVisible();
+      await expect(offboard).toHaveCount(0);
+      await withTenant(db, bootstrapOrganizationId, async tx => {
+        expect((await tx.person.findFirstOrThrow({ where: { id: personId } })).archivedAt).not.toBeNull();
+        expect((await tx.userAccount.findFirstOrThrow({ where: { personId } })).status).toBe("DEACTIVATED");
+        expect(await tx.roleAssignment.count({ where: { personId, archivedAt: null } })).toBe(0);
+      });
       await staff.goto(`/en/app/team/${personId}`);
       await expect(staff).toHaveURL(/\/en\/login/u);
     } finally {

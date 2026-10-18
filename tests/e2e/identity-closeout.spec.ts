@@ -212,11 +212,17 @@ test.describe("identity closeout acceptance", () => {
     const personName = `Profile without account ${suffix}`;
     await page.getByTestId("person-display-name").fill(personName);
     await page.getByTestId("person-phone").fill(phone);
+    // Notification polling also posts here; identify this form submission.
     const created = page.waitForResponse((response) =>
-      response.request().method() === "POST" && new URL(response.url()).pathname === "/en/app/identity"
+      response.request().method() === "POST" &&
+      Boolean(response.request().postData()?.includes(phone.slice(1))) &&
+      new URL(response.url()).pathname === "/en/app/identity"
     );
     await page.getByTestId("person-create-submit").click();
-    expect((await created).ok()).toBe(true);
+    const creationResponse = await created;
+    expect(creationResponse.status()).toBe(200);
+    expect(await creationResponse.finished()).toBeNull();
+    expect((await creationResponse.text()).includes('"messageKey":"personCreated"')).toBe(true);
     await expect(page.getByTestId("person-create-form").getByRole("status")).toHaveText("Person profile created.");
     const person = page.getByTestId("person-profile-row").filter({ hasText: personName });
     await expect(person).toBeVisible();
