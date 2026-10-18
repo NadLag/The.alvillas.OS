@@ -675,8 +675,11 @@ describe("team management on real PostgreSQL", () => {
       await withTenant(db, f.org, (tx) => tx.posting.count({ where: { organizationId: f.org } }))
     ).toBe(8);
   });
-  it("protects uploaded documents, expiry reminders and signed access without exposing storage keys", async () => {
+  it("protects encrypted documents, expiry reminders and revocable access without exposing storage keys", async () => {
     const f = await fixture();
+    let stored = new Uint8Array();
+    let storedType = "";
+    let downloadRequests = 0;
     const storage: PrivateDocumentStorage = {
       createSignedUploadUrl: () => Promise.resolve({ url: "https://private.example.test/upload" }),
       createSignedDownloadUrl: (input) =>
@@ -684,7 +687,15 @@ describe("team management on real PostgreSQL", () => {
           url: `https://private.example.test/download?expires=${input.expiresInSeconds}`
         })
     };
-    const transport = (() => Promise.resolve(new Response(null, { status: 200 }))) as typeof fetch;
+    const transport = ((_url, init) => {
+      if (init?.method === "PUT") {
+        stored = new Uint8Array(init.body as Uint8Array);
+        storedType = new Headers(init.headers).get("Content-Type")!;
+        return Promise.resolve(new Response(null, { status: 200 }));
+      }
+      downloadRequests++;
+      return Promise.resolve(new Response(new Uint8Array(stored), { status: 200 }));
+    }) as typeof fetch;
     const bytes = Buffer.from("%PDF-1.7\nprivate staff document");
     const document = await uploadTeamDocument(
       f.ctx,
@@ -700,6 +711,8 @@ describe("team management on real PostgreSQL", () => {
       bytes,
       { db, storage, transport }
     );
+    expect(storedType).toBe("application/octet-stream");
+    expect(Buffer.from(stored).includes(bytes)).toBe(false);
     const detail = await teamMember(
       f.ctx,
       { personId: f.staff.id, from: "2027-02-01", until: "2027-03-01" },
@@ -708,12 +721,20 @@ describe("team management on real PostgreSQL", () => {
     expect(detail.documents.map((d) => d.id)).toEqual([document.id]);
     expect(JSON.stringify(detail)).not.toContain("/staff/");
     const limited = actor(f.org, f.staffAccount.id, f.staff.id, new Set(["team_member:view"]));
-    await expect(downloadTeamDocument(limited, document.id, { db, storage })).rejects.toBeInstanceOf(
-      IdentityAuthorizationError
-    );
-    expect((await downloadTeamDocument(f.ctx, document.id, { db, storage })).url).toContain(
-      "expires=120"
-    );
+    await expect(
+      downloadTeamDocument(limited, document.id, { db, storage, transport })
+    ).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    const other = await fixture();
+    await expect(
+      downloadTeamDocument(other.ctx, document.id, { db, storage, transport })
+    ).rejects.toBeInstanceOf(TeamNotFoundError);
+    expect(downloadRequests).toBe(0);
+    const downloaded = await downloadTeamDocument(f.ctx, document.id, { db, storage, transport });
+    expect(downloaded.bytes).toEqual(bytes);
+    expect(downloaded.contentType).toBe("application/pdf");
+    stored[stored.length - 1] ^= 1;
+    await expect(downloadTeamDocument(f.ctx, document.id, { db, storage, transport })).rejects.toThrow();
+    stored[stored.length - 1] ^= 1;
     await withTenant(db, f.org, async (tx) => {
       const permission = await tx.permission.findFirstOrThrow({
         where: { organizationId: f.org, key: "staff_document:view" }
@@ -763,8 +784,17 @@ describe("team management on real PostgreSQL", () => {
       )
     ).toBe(1);
     await archiveTeamDocument(f.ctx, { id: document.id, reason: "Superseded by new agreement" }, deps());
-    await expect(downloadTeamDocument(f.ctx, document.id, { db, storage })).rejects.toBeInstanceOf(
-      TeamNotFoundError
-    );
+    const requestsBeforeArchive = downloadRequests;
+    await expect(
+      downloadTeamDocument(f.ctx, document.id, { db, storage, transport })
+    ).rejects.toBeInstanceOf(TeamNotFoundError);
+    expect(downloadRequests).toBe(requestsBeforeArchive);
+    expect(
+      await withTenant(db, f.org, (tx) =>
+        tx.auditLog.count({
+          where: { organizationId: f.org, resourceId: document.id, action: "team.document.download" }
+        })
+      )
+    ).toBe(1);
   });
 });

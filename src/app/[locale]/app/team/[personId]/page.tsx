@@ -298,10 +298,10 @@ export default async function TeamMemberPage({
         ) : (
           <p>{maskedValue}</p>
         )}
-        {data.canUpload && !data.profile.archived ? (
+        {data.canUpload && data.documentMaxBytes && !data.profile.archived ? (
           <details>
             <summary>{t("upload")}</summary>
-            <TeamDocumentForm personId={personId} />
+            <TeamDocumentForm personId={personId} maxBytes={data.documentMaxBytes} />
           </details>
         ) : null}
       </section>

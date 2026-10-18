@@ -52,12 +52,14 @@ function TeamForm({
   operation,
   children,
   submit = "save",
-  primary = false
+  primary = false,
+  maxFileBytes
 }: {
   operation: TeamOperation;
   children: ReactNode;
   submit?: string;
   primary?: boolean;
+  maxFileBytes?: number;
 }) {
   const locale = useLocale();
   const t = useTranslations("Team");
@@ -80,6 +82,11 @@ function TeamForm({
         event.preventDefault();
         const data = new FormData(event.currentTarget);
         try {
+          const file = data.get("file");
+          if (maxFileBytes && file instanceof File && file.size > maxFileBytes) {
+            setState({ status: "invalid" });
+            return;
+          }
           parseTeamForm(operation, data);
         } catch {
           setState({ status: "invalid" });
@@ -331,11 +338,11 @@ export function TeamOffboardForm({ personId }: { personId: string }) {
     </TeamForm>
   );
 }
-export function TeamDocumentForm({ personId }: { personId: string }) {
+export function TeamDocumentForm({ personId, maxBytes }: { personId: string; maxBytes: number }) {
   const t = useTranslations("Team");
   const id = useId();
   return (
-    <TeamForm operation="document" submit="upload">
+    <TeamForm operation="document" submit="upload" maxFileBytes={maxBytes}>
       <Hidden name="personId" value={personId} />
       <Field name="title" />
       <Field name="kind">
@@ -346,6 +353,7 @@ export function TeamDocumentForm({ personId }: { personId: string }) {
         ))}
       </Field>
       <Field name="expiresOn" type="date" required={false} />
+      <p>{t("documentLimit", { megabytes: maxBytes / 1000000 })}</p>
       <label className="team-field" htmlFor={id}>
         <span>{t("fields.file")}</span>
         <input id={id} type="file" name="file" accept="application/pdf,image/jpeg,image/png" required />

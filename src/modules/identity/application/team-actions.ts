@@ -71,7 +71,7 @@ export async function teamMutationAction(
         break;
       case "document": {
         const file = data.get("file");
-        if (!(file instanceof File) || file.size > 20000000) return { status: "invalid" };
+        if (!(file instanceof File) || file.size > 4000000) return { status: "invalid" };
         result = await uploadTeamDocument(ctx, input, new Uint8Array(await file.arrayBuffer()), deps);
         break;
       }

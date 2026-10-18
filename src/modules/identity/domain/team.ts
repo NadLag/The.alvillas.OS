@@ -183,14 +183,14 @@ export const documentSchema = z
     kind: z.enum(["CONTRACT", "IDENTITY", "OTHER"]),
     expiresOn: dateOnly.nullable(),
     contentType: z.enum(["application/pdf", "image/jpeg", "image/png"]),
-    size: z.number().int().positive(),
+    size: z.number().int().positive().max(4000000),
     reason: z.string().trim().min(6).max(500)
   })
   .strict();
 export const teamPolicyKey = "staff.management_policy";
 export const teamPolicySchema = z
   .object({
-    document_max_bytes: z.number().int().min(1024).max(20000000),
+    document_max_bytes: z.number().int().min(1024).max(4000000),
     document_reminder_days: z.array(z.number().int().min(0).max(365)).min(1).max(10),
     document_link_seconds: z.number().int().min(30).max(900)
   })

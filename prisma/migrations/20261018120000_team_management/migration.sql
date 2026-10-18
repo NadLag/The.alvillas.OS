@@ -281,7 +281,7 @@ CREATE TRIGGER team_document_update_check BEFORE UPDATE ON team_document FOR EAC
 
 -- Business schedules and upload limits are editable, versioned configuration.
 INSERT INTO config_rule(organization_id,key,scope_type,value,effective_from,version,reason)
-SELECT id,'staff.management_policy','organization','{"document_max_bytes":10000000,"document_reminder_days":[30,7,0],"document_link_seconds":120}'::jsonb,'2026-01-01'::timestamptz,1,'Initial configurable staff document policy'
+SELECT id,'staff.management_policy','organization','{"document_max_bytes":3000000,"document_reminder_days":[30,7,0],"document_link_seconds":120}'::jsonb,'2026-01-01'::timestamptz,1,'Initial configurable staff document policy'
 FROM organization WHERE NOT EXISTS(SELECT 1 FROM config_rule c WHERE c.organization_id=organization.id AND c.key='staff.management_policy');
 
 ALTER TABLE notification DROP CONSTRAINT notification_kind_check;

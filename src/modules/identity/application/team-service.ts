@@ -21,7 +21,9 @@ import {
   teamAssignmentSchema,
   teamPageSchema,
   performance,
-  walletLinkSchema
+  walletLinkSchema,
+  teamPolicyKey,
+  teamPolicySchema
 } from "../domain/team";
 import { TeamRepository } from "../infrastructure/team-repository";
 import { IdentityRepository } from "../infrastructure/identity-repository";
@@ -273,6 +275,17 @@ export async function teamMember(ctx: IdentityActorContext, input: unknown, deps
       ? await repository.walletMovements(wallet.ledgerAccountId, parsed.walletPage)
       : [];
     const offboarding = canWallet ? await repository.offboarding(person.id) : null;
+    const canUpload = authorize(
+      ctx.authContext,
+      "create",
+      repository.resource(person, "staff_document")
+    );
+    const documentPolicy = canUpload
+      ? await new ConfigRuleRepository(tx, ctx.organizationId).resolve({
+          key: teamPolicyKey,
+          scopes: [{ scopeType: "organization", scopeId: null }]
+        })
+      : null;
     await teamAudit(
       repository,
       ctx,
@@ -418,7 +431,10 @@ export async function teamMember(ctx: IdentityActorContext, input: unknown, deps
         organizationId: ctx.organizationId
       }),
       canDocuments,
-      canUpload: authorize(ctx.authContext, "create", repository.resource(person, "staff_document")),
+      canUpload,
+      documentMaxBytes: documentPolicy
+        ? teamPolicySchema.parse(documentPolicy.parsedValue).document_max_bytes
+        : null,
       canArchiveDocument: authorize(
         ctx.authContext,
         "edit",

@@ -1,5 +1,5 @@
 {
-  "document_max_bytes": 10000000,
+  "document_max_bytes": 3000000,
   "document_reminder_days": [30, 7, 0],
   "document_link_seconds": 120
 }
