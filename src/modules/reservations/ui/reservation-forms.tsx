@@ -14,6 +14,7 @@ import {
   createManualReservationAction
 } from "@/modules/reservations/application/reservation-actions";
 import { localizedChecklistLabel } from "@/modules/reservations/domain/reservation-task";
+import { operationAction,type OperationFormState } from '../application/operation-actions';
 
 type FormLabels = {
   saving: string;
@@ -241,6 +242,9 @@ export function FieldTaskCompletionForm({
   checklistItems: ChecklistItemOption[];
   labels: FieldTaskLabels;
 }) {
+  const progressText=useTranslations('Operations.manage');
+  const [progress,progressAction,progressPending]=useActionState(operationAction.bind(null,locale,'progress'),{status:'idle'} as OperationFormState);
+  const [checked,setChecked]=useState(()=>new Set(checklistItems.filter(i=>i.completed).map(i=>i.id)));
   const [state, formAction, pending] = useActionState(
     completeFieldTaskAction.bind(null, locale),
     initialFieldTaskFormState
@@ -320,6 +324,7 @@ export function FieldTaskCompletionForm({
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    if((event.nativeEvent as SubmitEvent).submitter?.getAttribute('data-progress')==='true'){if(!navigator.onLine)event.preventDefault();return;}
     if (navigator.onLine) {
       return;
     }
@@ -355,8 +360,8 @@ export function FieldTaskCompletionForm({
           <label className="field-checklist-item" key={item.id}>
             <input
               data-testid="field-checklist-item"
-              defaultChecked={item.completed}
-              disabled={item.completed}
+              checked={checked.has(item.id)}
+              onChange={event=>setChecked(before=>{const next=new Set(before);if(event.target.checked)next.add(item.id);else next.delete(item.id);return next;})}
               name="checklistItemIds"
               type="checkbox"
               value={item.id}
@@ -386,11 +391,13 @@ export function FieldTaskCompletionForm({
       <button
         className="primary-button field-complete-button"
         data-testid="field-task-complete"
-        disabled={pending || queued}
+        disabled={pending || queued || progressPending || checked.size!==checklistItems.length}
         type="submit"
       >
         {pending || queueStatus === "syncing" ? labels.completing : labels.complete}
       </button>
+      <button className="secondary-button field-complete-button" type="submit" data-progress="true" formAction={progressAction} disabled={pending||queued||progressPending}>{progressText('saveProgress')}</button>
+      {progress.status==='saved'?<p role="status">{progressText('saved')}</p>:progress.status==='error'?<p role="alert">{progressText(`errors.${progress.message??'generic'}`)}</p>:null}
     </form>
   );
 }

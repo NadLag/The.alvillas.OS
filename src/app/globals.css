@@ -2388,9 +2388,25 @@ textarea:disabled {
 .operation-detail-grid .panel { min-inline-size: 0; overflow-wrap: anywhere; }
 .operation-detail-grid fieldset { border: 0; padding: 0; min-inline-size: 0; }
 .operation-detail-grid dd { margin-inline-start: 0; overflow-wrap: anywhere; }
-.operation-form { min-inline-size:0; }
+.operation-form { min-inline-size:0; grid-template-columns:minmax(0,1fr); }
+.operation-form > * { min-inline-size:0; }
+.operations-page .workspace-main { min-inline-size:0; }
+.operations-page .resource-row { flex-wrap:wrap; overflow-wrap:anywhere; }
+.operations-page .resource-row > * { min-inline-size:0; }
+.operation-form .field-checklist-item { flex-wrap:wrap; min-inline-size:0; overflow-wrap:anywhere; }
+.operation-form > .operation-filters { align-items:start; }
 .operation-new-page .workspace-main { min-inline-size:0; }
 .operation-form label:not(.field-checklist-item) { display:grid;gap:var(--space-2);align-content:start;min-inline-size:0; }
 .operation-form :is(input:not([type="checkbox"]):not([type="hidden"]),select,textarea) { inline-size:100%;min-inline-size:0;min-block-size:48px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-raised);color:var(--foreground);padding:var(--space-3) var(--space-4); }
 .operation-form textarea { min-block-size:6rem;resize:vertical; }
 .operation-form button { min-block-size:48px; }
+.operations-tabs { display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;margin-block:1rem; }
+.operations-tabs [aria-current="page"] { font-weight:700;text-decoration:underline; }
+.operation-filters { display:flex;flex-wrap:wrap;gap:1rem;align-items:end;margin-block:1rem; }
+.operation-filters label { display:grid;gap:.375rem;min-inline-size:0;max-inline-size:100%; }
+.operation-filters input,.operation-filters select { max-inline-size:100%;min-block-size:44px; }
+.operation-calendar { display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:.5rem; }
+.operation-calendar-day { min-inline-size:0;min-block-size:8rem;border:1px solid var(--border);border-radius:.75rem;padding:.5rem;overflow-wrap:anywhere; }
+.operation-calendar-day h2 { font-size:.875rem; }.operation-calendar-day .resource-row { display:block; }.operation-calendar-day small { display:block; }
+.operation-timeline { padding-inline-start:1.5rem; }.operation-timeline li { padding-block:1rem; }
+@media(max-width:600px){.operation-calendar{grid-template-columns:repeat(2,minmax(0,1fr));}.operation-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}.operation-filters label{inline-size:100%;}.operation-filters input,.operation-filters select{inline-size:100%;}}

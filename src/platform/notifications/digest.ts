@@ -21,7 +21,7 @@ export const digestPolicySchema = z.object({
 // Persisted in config_rule, then resolved on every schedule and delivery.
 export const initialDigestPolicy: z.infer<typeof digestPolicySchema> = { maxItems: 100, maxAttempts: 5, backoffSeconds: 60, maxBackoffSeconds: 3600,
   retryWindowHours: 23, defaultTime: "09:00", defaultWeekday: 1, defaultQuietHours: { start: "22:00", end: "07:00" } };
-export const operationalDigestKinds = ["task_assigned", "task_completed", "reservation_created", "approval_requested", "approval_decided"] as const;
+export const operationalDigestKinds = ["task_assigned", "task_completed", "task_overdue", "reservation_created", "approval_requested", "approval_decided"] as const;
 
 function localClock(timezone: string) {
   const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });

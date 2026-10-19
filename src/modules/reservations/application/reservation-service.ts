@@ -1,6 +1,8 @@
 import { initializeReservationHistory } from "./reservation-history";
 import { OperationRepository } from "../infrastructure/operation-repository";
 import { completeChecklist } from "../domain/operation-task";
+import { assignTaskInTransaction } from "./operation-scheduling";
+import { taskResource } from "./operation-service";
 import { headers } from "next/headers";
 import { publishNotification } from "@/platform/notifications/notification-service";
 import {
@@ -264,6 +266,12 @@ export async function createManualReservationInTransaction(ctx: ReservationActor
       });
       tasks.push(result.task);
       if (result.created) {
+        const operations = new OperationRepository(tx, ctx.organizationId), full = (await operations.task(result.task.id))!;
+        if (authorize(ctx.authContext, "assign", taskResource(full))) {
+          const policy = await operations.policy(full.propertyId);
+          await assignTaskInTransaction(operations, ctx, full, null, policy.types[full.type]?.start_minute??policy.shift_start_minute, meta, "Configured reservation task assignment");
+          tasks[tasks.length - 1] = (await repository.tasksForReservation(reservation.id)).find(t => t.id === full.id)!;
+        }
         await auditTaskCreate(tx, ctx, meta, result.task, reservation.propertyId);
         if (result.task.assignedToUserAccountId) await publishNotification(tx, ctx.organizationId, {
           kind: "task_assigned", recipientId: result.task.assignedToUserAccountId, targetId: result.task.id

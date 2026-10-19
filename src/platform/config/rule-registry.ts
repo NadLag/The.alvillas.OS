@@ -1,5 +1,6 @@
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
+import { operationPolicySchema, recurringTasksSchema } from "./operation-policy";
 import { teamPolicyKey, teamPolicySchema } from "@/modules/identity/domain/team";
 import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
 import { localizedTextSchema } from "@/i18n/content";
@@ -338,6 +339,7 @@ export const configRuleSchemas = {
   "notification.routing.staff_document_expiring": notificationRoutingSchema,
   "notification.routing.task_assigned": notificationRoutingSchema,
   "notification.routing.task_completed": notificationRoutingSchema,
+  "notification.routing.task_overdue": notificationRoutingSchema,
   "notification.routing.reservation_created": notificationRoutingSchema,
   "notification.routing.security_session_revoked": notificationRoutingSchema,
   [pinLockoutConfigKey]: pinLockoutPolicySchema,
@@ -354,6 +356,8 @@ export const configRuleSchemas = {
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
   "ops.workflows": workflowSchema,
+  "ops.task_policy": operationPolicySchema,
+  "ops.recurring_tasks": recurringTasksSchema,
   "ops.checklists": checklistCatalogSchema,
   "services.pricing": servicePricingSchema,
   "finance.tax": taxRuleSchema,

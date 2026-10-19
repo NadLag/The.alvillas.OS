@@ -249,6 +249,11 @@ export class ConfigRuleRepository {
       AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gt: asOf } }] }, { OR: [{ scopeType: "organization", scopeId: null }, { scopeType: "property", scopeId: { in: propertyIds } }] }] } });
     return new Map(propertyIds.map(id => [id, resolveConfigCandidates(rules.filter(rule => rule.scopeType === "organization" || rule.scopeId === id))]));
   }
+  async resolveScopeGroups(key:string,groups:Map<string,ConfigScopeCandidate[]>,asOf:Date){
+    const candidates=[...new Map([...groups.values()].flat().map(s=>[`${s.scopeType}:${s.scopeId}`,s])).values()];
+    const rules=await this.tx.configRule.findMany({where:{organizationId:this.organizationId,key,archivedAt:null,lifecycle:{in:['ACTIVE','RETIRED']},effectiveFrom:{lte:asOf},AND:[{OR:[{effectiveTo:null},{effectiveTo:{gt:asOf}}]},{OR:candidates}]}});
+    return new Map([...groups].map(([id,scopes])=>[id,resolveConfigCandidates(rules.filter(r=>scopes.some(s=>s.scopeType===r.scopeType&&s.scopeId===r.scopeId)))]));
+  }
 
   async list(input: {
     key?: string;

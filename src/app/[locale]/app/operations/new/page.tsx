@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
 export default async function NewTask({ params, searchParams }: { params: Promise<{ locale: string }>; searchParams: Promise<{ propertyId?: string }> }) {
   const locale = safeLocale((await params).locale); setRequestLocale(locale);
   const ctx = await reservationActorContextFromSession(await auth()); if (!ctx) redirect(`/${locale}/login`);
-  const [t, options] = await Promise.all([getTranslations("Operations.manage"), operationCreationOptions(ctx, (await searchParams).propertyId)]);
+  const [t, options] = await Promise.all([getTranslations({locale,namespace:"Operations.manage"}), operationCreationOptions(ctx, (await searchParams).propertyId)]);
   return <ManagerShell className="resource-page operation-new-page" testId="operation-new-page">
     <ShellHeader title={t("newTask")} subtitle={t("newHelp")} eyebrow={t("eyebrow")} actions={<Link className="secondary-button" href={`/${locale}/app/operations`}>{t("back")}</Link>} />
     <section className="workspace-main">

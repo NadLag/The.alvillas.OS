@@ -195,7 +195,7 @@ export class NotificationRepository {
   }
 
   async targets(rows: Pick<Notification, "kind" | "targetId">[]): Promise<Map<string, Resource>> {
-    const ids = rows.filter((row) => row.kind === "task_assigned" || row.kind === "task_completed").map((row) => row.targetId);
+    const ids = rows.filter((row) => row.kind === "task_assigned" || (row.kind === "task_completed" || row.kind === "task_overdue")).map((row) => row.targetId);
     const tasks = ids.length ? await this.tx.operationTask.findMany({ where: { organizationId: this.organizationId, id: { in: ids }, archivedAt: null },
       select: { id: true, propertyId: true, state: true, assignedToUserAccountId: true, property: { select: { regionId: true, cityId: true } } } }) : [];
     const targets = new Map<string, Resource>(tasks.map((task) => [task.id, {

@@ -41,12 +41,12 @@ export default async function LocaleLayout({
 
   const appLocale = locale as AppLocale;
   setRequestLocale(appLocale);
-  const messages = await getMessages();
+  const messages = await getMessages({locale:appLocale});
 
   return (
     <html lang={appLocale} dir={localeDirection(appLocale)}>
       <body>
-        <NextIntlClientProvider messages={messages}>
+        <NextIntlClientProvider locale={appLocale} messages={messages}>
           <main className="shell">{children}</main>
         </NextIntlClientProvider>
       </body>

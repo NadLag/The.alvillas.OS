@@ -294,7 +294,7 @@ export function authorizeCollection(ctx: AuthContext, action: Action, resourceTy
   );
 }
 
-export function authorize(ctx: AuthContext, action: Action, resource: Resource): boolean {
+export function authorize(ctx: AuthContext, action: Action, resource: Resource, effectiveAt = new Date()): boolean {
   if (ctx.organizationId !== resource.organizationId) {
     return false;
   }
@@ -309,6 +309,6 @@ export function authorize(ctx: AuthContext, action: Action, resource: Resource):
     (assignment) =>
       assignment.permissions.has(key) &&
       scopeMatchesResource(assignment.scope, resource) &&
-      conditionsMatch(ctx, assignment, resource)
+      conditionsMatch(ctx, assignment, resource, effectiveAt)
   );
 }
