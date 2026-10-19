@@ -21,6 +21,7 @@ import {
   type OperationDeps,
 } from "./operation-service";
 import {
+  operationStartMinute,
   assignOperationTask,
   rescheduleOperationTask,
 } from "./operation-scheduling";
@@ -351,6 +352,11 @@ export async function bulkOperationTasks(
         },
       };
       const key = crypto.randomUUID();
+      const minute =
+        value.action === "ASSIGN" || value.action === "RESCHEDULE"
+          ? (value.startMinute ??
+            operationStartMinute(task, await repo.policy(task.propertyId)))
+          : undefined;
       if (value.action === "ASSIGN")
         await assignOperationTask(
           ctx,
@@ -358,7 +364,7 @@ export async function bulkOperationTasks(
             taskId: task.id,
             expectedVersion: task.version,
             personId: value.personId,
-            startMinute: value.startMinute,
+            startMinute: minute,
             reason: value.reason,
             idempotencyKey: key,
           },
@@ -371,7 +377,7 @@ export async function bulkOperationTasks(
             taskId: task.id,
             expectedVersion: task.version,
             dueDate: value.dueDate,
-            startMinute: value.startMinute,
+            startMinute: minute,
             reason: value.reason,
             idempotencyKey: key,
           },

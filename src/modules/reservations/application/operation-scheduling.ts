@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { OperationPolicy } from "@/platform/config/operation-policy";
 import { OperationRepository } from "../infrastructure/operation-repository";
 import {
   assignmentCommandSchema,
@@ -32,6 +33,14 @@ import { prisma } from "@/platform/db/client";
 import { withTenant } from "@/platform/db/tenant";
 import { publishNotification } from "@/platform/notifications/notification-service";
 
+export function operationStartMinute(
+  task: OperationTask,
+  policy: OperationPolicy,
+) {
+  return task.scheduledStart
+    ? propertyMinute(task.scheduledStart, task.property.timezone)
+    : (policy.types[task.type]?.start_minute ?? policy.shift_start_minute);
+}
 export async function taskCandidates(
   repo: OperationRepository,
   task: OperationTask,
@@ -217,9 +226,7 @@ export async function operationAssignmentOptions(
     if (!task) throw new ReservationNotFoundError();
     operationAllowed(ctx, "assign", taskResource(task));
     const policy = await repo.policy(task.propertyId);
-    const minute = task.scheduledStart
-      ? propertyMinute(task.scheduledStart, task.property.timezone)
-      : policy.shift_start_minute;
+    const minute = operationStartMinute(task, policy);
     const options = await taskCandidates(
       repo,
       task,
@@ -435,9 +442,7 @@ export async function swapOperationTasks(
       [b, a],
     ]) {
       const policy = await repo.policy(task.propertyId);
-      const minute = task.scheduledStart
-        ? propertyMinute(task.scheduledStart, task.property.timezone)
-        : policy.shift_start_minute;
+      const minute = operationStartMinute(task, policy);
       const options = await taskCandidates(
         repo,
         task,

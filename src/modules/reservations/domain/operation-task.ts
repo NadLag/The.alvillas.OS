@@ -154,7 +154,7 @@ export const bulkTaskSchema = z
     personId: z.uuid().nullable(),
     dueDate: stayDateSchema.optional(),
     priority: z.enum(taskPriorities).optional(),
-    startMinute: z.number().int().min(0).max(1439),
+    startMinute: z.number().int().min(0).max(1439).optional(),
     reason: taskReasonSchema,
     idempotencyKey: z.uuid(),
   })
@@ -377,7 +377,7 @@ export function parseOperationForm(
         personId: text("personId") || null,
         dueDate: text("dueDate") || undefined,
         priority: text("priority") || undefined,
-        startMinute: text("startTime") ? startMinute() : 0,
+        startMinute: text("startTime") ? startMinute() : undefined,
       });
     case "save_view": {
       let value: unknown;

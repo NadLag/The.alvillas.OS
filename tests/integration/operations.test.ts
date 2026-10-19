@@ -1218,6 +1218,59 @@ describe("operations on real PostgreSQL", () => {
       0,
     );
   });
+  it("uses configured task times for bulk assignment and preserves them when rescheduling without a time override", async () => {
+    const f = await fixture();
+    await crew(f);
+    const task = await createOperationTask(
+      f.ctx,
+      input(f, { type: "CHECKOUT_CLEANING" }),
+      deps(),
+    );
+    const command = {
+      items: [{ taskId: task.id, expectedVersion: task.version }],
+      action: "ASSIGN",
+      personId: null,
+      reason: "Bulk assign with the configured checkout schedule",
+      idempotencyKey: randomUUID(),
+    };
+    await bulkOperationTasks(f.ctx, command, deps());
+    const assigned = (
+      await operationTaskDetail(f.ctx, task.id, undefined, deps())
+    ).task;
+    const minute = (time: Date) =>
+      Number(
+        new Intl.DateTimeFormat("en-US", {
+          timeZone: assigned.property.timezone,
+          hour: "2-digit",
+          hourCycle: "h23",
+        }).format(time),
+      ) *
+        60 +
+      Number(
+        new Intl.DateTimeFormat("en-US", {
+          timeZone: assigned.property.timezone,
+          minute: "2-digit",
+        }).format(time),
+      );
+    expect(minute(assigned.scheduledStart!)).toBe(720);
+    expect(assigned.assignedToPersonId).toBe(f.worker.id);
+    await bulkOperationTasks(
+      f.ctx,
+      {
+        ...command,
+        items: [{ taskId: task.id, expectedVersion: assigned.version }],
+        action: "RESCHEDULE",
+        dueDate: "2027-04-11",
+        reason: "Move the date while preserving the configured slot",
+        idempotencyKey: randomUUID(),
+      },
+      deps(),
+    );
+    const moved = (await operationTaskDetail(f.ctx, task.id, undefined, deps()))
+      .task;
+    expect(minute(moved.scheduledStart!)).toBe(720);
+    expect(moved.dueDate.toISOString().slice(0, 10)).toBe("2027-04-11");
+  });
   it("persists assigned checklist progress, verifies private photo bytes and preserves issue and evidence history", async () => {
     const f = await fixture(),
       task = await assigned(f);
