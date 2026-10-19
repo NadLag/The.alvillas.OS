@@ -12,6 +12,7 @@ import { dateToUtc } from "../domain/reservation-task";
 import { localDate } from "../domain/reservation";
 import type { ReservationActorContext } from "./reservation-access";
 import {
+  operationScope,
   operationAllowed,
   operationAudit,
   operationHash,
@@ -226,9 +227,15 @@ export async function operationAssignmentOptions(
       minute,
     );
     z.string().max(120).parse(search);
+    const properties = await repo.properties();
+    const [assignScope, viewScope] = await Promise.all([
+      operationScope(ctx, "assign", repo, properties),
+      operationScope(ctx, "view", repo, properties),
+    ]);
     const swapTasks = (
       await repo.page(
         {
+          AND: [{ OR: assignScope.groups }, { OR: viewScope.groups }],
           state: "ASSIGNED",
           assignedToPersonId: { not: null },
           id: { not: task.id },

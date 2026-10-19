@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { headers } from "next/headers";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { OperationRepository } from "../infrastructure/operation-repository";
 import {
+  taskStates,
   canTransitionTask,
   completeChecklist,
   createTaskSchema,
@@ -64,6 +66,68 @@ export function operationAllowed(
       : authorizeCollection(ctx.authContext, action, "task"))
   )
     throw new ReservationAuthorizationError();
+}
+export async function operationScope(
+  ctx: ReservationActorContext,
+  action: Action,
+  repo: OperationRepository,
+  properties: Awaited<ReturnType<OperationRepository["properties"]>>,
+) {
+  const groups: Prisma.OperationTaskWhereInput[] = [];
+  const visible = new Set<string>();
+  const grants = ctx.authContext.assignments?.length
+    ? ctx.authContext.assignments
+    : ctx.authContext.scopes.map((scope) => ({
+        scope,
+        permissions: ctx.authContext.permissions,
+      }));
+  const ids = grants
+    .filter((g) => (g.scope.scopeType ?? g.scope.resourceType) === "job")
+    .map((g) => g.scope.scopeId ?? g.scope.resourceId)
+    .filter((id): id is string => Boolean(id));
+  for (const grant of grants) {
+    const own = "conditions" in grant && grant.conditions?.assignedToMe;
+    const auth = {
+      ...ctx.authContext,
+      permissions: grant.permissions,
+      assignments: [grant],
+    };
+    for (const p of properties) {
+      const states = taskStates.filter((state) =>
+        authorize(auth, action, {
+          type: "task",
+          organizationId: ctx.organizationId,
+          propertyId: p.id,
+          city: p.cityId ?? p.city,
+          region: p.regionId ?? p.region,
+          status: state,
+          assignedPersonId: ctx.personId,
+          assignedUserAccountId: ctx.actorId,
+        }),
+      );
+      if (states.length) {
+        visible.add(p.id);
+        groups.push({
+          propertyId: p.id,
+          state: { in: states },
+          ...(own
+            ? {
+                OR: [
+                  { assignedToPersonId: ctx.personId },
+                  { assignedToUserAccountId: ctx.actorId },
+                ],
+              }
+            : {}),
+        });
+      }
+    }
+  }
+  for (const task of await repo.scoped(ids))
+    if (authorize(ctx.authContext, action, taskResource(task))) {
+      groups.push({ id: task.id });
+      visible.add(task.propertyId);
+    }
+  return { groups, visible };
 }
 export async function operationMeta(deps: OperationDeps) {
   if (deps.requestId)

@@ -12,6 +12,7 @@ import { dateToUtc } from "../domain/reservation-task";
 import { operationPolicySchema } from "@/platform/config/operation-policy";
 import { localDate } from "../domain/reservation";
 import {
+  operationScope,
   operationAllowed,
   operationAudit,
   operationHash,
@@ -87,60 +88,12 @@ export async function operationManagement(
         now,
         properties.find((p) => p.id === query.propertyId)?.timezone,
       );
-    const groups: Prisma.OperationTaskWhereInput[] = [];
-    const visible = new Set<string>();
-    const grants = ctx.authContext.assignments?.length
-      ? ctx.authContext.assignments
-      : ctx.authContext.scopes.map((scope) => ({
-          scope,
-          permissions: ctx.authContext.permissions,
-        }));
-    const ids = grants
-      .filter((g) => (g.scope.scopeType ?? g.scope.resourceType) === "job")
-      .map((g) => g.scope.scopeId ?? g.scope.resourceId)
-      .filter((id): id is string => Boolean(id));
-    for (const grant of grants) {
-      const own = "conditions" in grant && grant.conditions?.assignedToMe;
-      const auth = {
-        ...ctx.authContext,
-        permissions: grant.permissions,
-        assignments: [grant],
-      };
-      for (const p of properties) {
-        const states = taskStates.filter((state) =>
-          authorize(auth, "view", {
-            type: "task",
-            organizationId: ctx.organizationId,
-            propertyId: p.id,
-            city: p.cityId ?? p.city,
-            region: p.regionId ?? p.region,
-            status: state,
-            assignedPersonId: ctx.personId,
-            assignedUserAccountId: ctx.actorId,
-          }),
-        );
-        if (states.length) {
-          visible.add(p.id);
-          groups.push({
-            propertyId: p.id,
-            state: { in: states },
-            ...(own
-              ? {
-                  OR: [
-                    { assignedToPersonId: ctx.personId },
-                    { assignedToUserAccountId: ctx.actorId },
-                  ],
-                }
-              : {}),
-          });
-        }
-      }
-    }
-    for (const task of await repo.scoped(ids))
-      if (authorize(ctx.authContext, "view", taskResource(task))) {
-        groups.push({ id: task.id });
-        visible.add(task.propertyId);
-      }
+    const { groups, visible } = await operationScope(
+      ctx,
+      "view",
+      repo,
+      properties,
+    );
     const where: Prisma.OperationTaskWhereInput = {
       AND: [
         { OR: groups },

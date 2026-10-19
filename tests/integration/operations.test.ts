@@ -23,6 +23,7 @@ import { taskTypeSchema } from "@/platform/config/rule-registry";
 import defaultPolicy from "@/platform/config/defaults/operations.json";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
 import {
+  operationAssignmentOptions,
   assignOperationTask,
   rescheduleOperationTask,
   swapOperationTasks,
@@ -733,6 +734,74 @@ describe("operations on real PostgreSQL", () => {
         }),
       ),
     ).toBe(2);
+  });
+  it("scopes swap choices before limiting rows so unrelated properties cannot hide authorized work", async () => {
+    const f = await fixture(),
+      c = await crew(f);
+    const a = await createOperationTask(f.ctx, input(f), deps()),
+      b = await createOperationTask(f.ctx, input(f), deps());
+    for (const [task, personId] of [
+      [a, f.worker.id],
+      [b, c.fallback.id],
+    ] as const)
+      await assignOperationTask(
+        f.ctx,
+        {
+          taskId: task.id,
+          expectedVersion: task.version,
+          personId,
+          startMinute: 540,
+          reason: "Schedule scoped swap options",
+          idempotencyKey: randomUUID(),
+        },
+        deps(),
+      );
+    await withTenant(db, f.org, async (tx) => {
+      const outside = await tx.property.create({
+        data: {
+          organizationId: f.org,
+          name: "Outside assigned scope",
+          addressLine1: "Test",
+          city: "Marrakech",
+          propertyType: "VILLA",
+          bedrooms: 2,
+          bathrooms: 2,
+          maxGuests: 4,
+          amenities: [],
+          photoUrls: [],
+        },
+      });
+      await tx.operationTask.createMany({
+        data: Array.from({ length: 205 }, () => ({
+          organizationId: f.org,
+          propertyId: outside.id,
+          type: "INSPECTION",
+          state: "ASSIGNED",
+          assignedToPersonId: f.worker.id,
+          dueDate: new Date("2020-01-01"),
+          titleTranslations: {
+            en: "Outside inspection",
+            fr: "Inspection externe",
+          },
+          idempotencyKey: randomUUID(),
+        })),
+      });
+    });
+    const ctx = {
+      ...f.ctx,
+      authContext: {
+        ...f.ctx.authContext,
+        scopes: [
+          {
+            organizationId: f.org,
+            scopeType: "property" as const,
+            scopeId: f.property.id,
+          },
+        ],
+      },
+    };
+    const options = await operationAssignmentOptions(ctx, a.id, deps());
+    expect(options.swapTasks.map((t) => t.id)).toEqual([b.id]);
   });
   it("generates recurring occurrences idempotently and derives readiness and overdue events in property time", async () => {
     const f = await fixture();
