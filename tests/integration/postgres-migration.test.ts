@@ -1,3 +1,4 @@
+import { provisionIntegrationRole } from "./support/database-role";
 import { connectReservationFeed, syncReservationFeed, importReservationCsv, changeReservation, getReservationDetail, getReservationWorkspace, reviewMissingFeedEntry, createCalendarBlock, releaseCalendarBlock, mergeReservationGuests, scheduleReservationSyncs } from "@/modules/reservations/application/reservation-management-service";
 import type { FeedTransport } from "@/modules/reservations/infrastructure/ical-transport";
 import { listAuditHistory, exportAuditHistoryCsv } from "@/modules/audit/application/audit-service";
@@ -297,24 +298,7 @@ async function configureAppRole(databaseUrl: string): Promise<string> {
     datasources: { db: { url: databaseUrl } }
   });
 
-  await adminPrisma.$executeRawUnsafe(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'alvillas_app_test') THEN
-        CREATE ROLE alvillas_app_test LOGIN;
-      END IF;
-    END
-    $$;
-  `);
-  await adminPrisma.$executeRawUnsafe(
-    "ALTER ROLE alvillas_app_test WITH LOGIN PASSWORD 'alvillas_app_test'"
-  );
-  await adminPrisma.$executeRawUnsafe("GRANT USAGE ON SCHEMA public TO alvillas_app_test");
-  await adminPrisma.$executeRawUnsafe(
-    "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO alvillas_app_test"
-  );
-  await adminPrisma.$executeRawUnsafe("REVOKE UPDATE, DELETE ON audit_log FROM alvillas_app_test");
-  await adminPrisma.$executeRawUnsafe("REVOKE UPDATE, DELETE ON notification_delivery_log, notification_email_suppression FROM alvillas_app_test");
+  await provisionIntegrationRole(adminPrisma, "alvillas_app_test");
 
   return appRoleUrl(databaseUrl);
 }

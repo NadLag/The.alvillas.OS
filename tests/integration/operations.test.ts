@@ -1,3 +1,4 @@
+import { provisionIntegrationRole } from "./support/database-role";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
@@ -43,9 +44,7 @@ describe("operations on real PostgreSQL", () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw new Error("Local TEST_DATABASE_URL is required for Operations integration");
     execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"], { env: { ...process.env, DATABASE_URL: url }, stdio: "pipe" });
     admin = new PrismaClient({ datasourceUrl: url });
-    await admin.$executeRawUnsafe("DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='alvillas_ops_tests') THEN CREATE ROLE alvillas_ops_tests LOGIN PASSWORD 'alvillas_ops_tests'; END IF; END $$");
-    await admin.$executeRawUnsafe("GRANT USAGE ON SCHEMA public TO alvillas_ops_tests");
-    await admin.$executeRawUnsafe("GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO alvillas_ops_tests");
+    await provisionIntegrationRole(admin, "alvillas_ops_tests");
     const app = new URL(url); app.username = "alvillas_ops_tests"; app.password = "alvillas_ops_tests";
     db = new PrismaClient({ datasourceUrl: app.toString() });
   });
