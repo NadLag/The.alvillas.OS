@@ -2,6 +2,10 @@
 
 Team Management extends the existing Person, UserAccount and RoleAssignment records. A person can work without an account. Account-backed assignments use that person's active account and the existing permission grant checks. Scoped readers receive only matching assignments; a staff account receives a capability to read its own operational profile. Financial and document access require separate permissions.
 
+An expiry notification carries the document reference separately from the person used for document authorization. Destination resolution validates both references before returning the staff profile link. Archival removes the target from reminder navigation.
+
+Inviting a login for an existing staff member requires explicit profile selection and identity view, create and edit grants on that person. The invitation uses the saved contacts and locale, preserves the person reference, and checks scoped role administration and permission grant ceilings. Contact matching never implicitly selects or rewrites a profile. Activation locks the person, requires an active profile without an account and unchanged contacts, creates a new account and revokes other pending invitations. Existing account credentials cannot be replaced by accepting an invitation.
+
 The audit serializer applies those same grants to private payloads and reasons. Audit access and general financial access alone do not reveal staff compensation, documents or personal contacts. Leave and offboarding reasons require personal-record access. Assignment audit details require scoped role administration.
 
 Compensation belongs to an assignment. Each change creates a `staff.compensation` config_rule version scoped to that assignment and an immutable, tenant-bound version reference. Effective instants must increase; concurrent changes use a person lock and an expected version. Earlier rates remain queryable. Salary, job, hourly and percentage values retain decimal precision and currency.

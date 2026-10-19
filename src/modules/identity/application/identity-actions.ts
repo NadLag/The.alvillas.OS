@@ -331,6 +331,7 @@ export async function createInvitationAction(
   }
 
   const parsed = parseInvitationInput({
+    personId: formValue(formData, "personId"),
     displayName: formValue(formData, "displayName"),
     email: formValue(formData, "email"),
     phone: formValue(formData, "phone"),

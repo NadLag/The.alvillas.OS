@@ -2,14 +2,104 @@ import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { randomUUID } from "node:crypto";
+import type { Session } from "next-auth";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { withTenant } from "@/platform/db/tenant";
 import { hashPassword } from "@/platform/auth/password";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { scheduleTeamDocumentReminders } from "@/modules/identity/application/team-documents";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa } from "./support/auth";
 
 test.describe("Team Management", () => {
   test.use({ actionTimeout: 15000 });
   test.skip(!process.env.DATABASE_URL, "Real PostgreSQL is required");
+  test("invites a login for an existing staff profile and preserves its identity and scoped assignment", async ({ page, browser }, info) => {
+    test.setTimeout(120000);
+    const email = e2eEmail("team-invite-admin", info.project.name), password = "Team invitation verification 2026";
+    const name = `Existing staff ${info.project.name} ${randomUUID().slice(0, 8)}`;
+    const staffEmail = e2eEmail(`team-invite-${Date.now()}`, info.project.name);
+    const phone = `+2126${Date.now().toString().slice(-8)}`;
+    await ensureE2EAdmin(email, password);
+    await page.goto("/en/login");
+    await page.getByTestId("login-email").fill(email);
+    await page.getByTestId("login-password").fill(password);
+    await page.getByTestId("login-submit").click();
+    await completeE2EAdminMfa(page, email);
+    await expect(page).toHaveURL(/\/en\/app$/u);
+    await page.goto("/en/app/team");
+    await page.locator("summary").filter({ hasText: /^Add person$/u }).click();
+    const profile = page.getByTestId("team-profile-form");
+    await profile.getByLabel("Full name").fill(name);
+    await profile.getByLabel("Email", { exact: true }).fill(staffEmail);
+    await profile.getByLabel("Phone", { exact: true }).fill(phone);
+    await profile.getByRole("button", { name: "Add person", exact: true }).click();
+    await expect(profile.getByRole("status")).toHaveText("Saved.");
+    await profile.getByRole("link", { name: "Open profile" }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(name);
+    const personId = new URL(page.url()).pathname.split("/").pop()!;
+    const db = new PrismaClient();
+    const staffContext = await browser.newContext(info.project.use);
+    try {
+      const property = await withTenant(db, bootstrapOrganizationId, tx => tx.property.create({ data: { organizationId: bootstrapOrganizationId, name: `${name} villa`, addressLine1: "Test address", city: "Marrakech", propertyType: "VILLA", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } }));
+      await page.getByRole("link", { name: "Invite a login", exact: true }).click();
+      await expect(page.getByTestId("invite-person")).toHaveValue(personId);
+      for (const [testId, value] of [["invite-display-name", name], ["invite-email", staffEmail], ["invite-phone", phone]]) {
+        await expect(page.getByTestId(testId)).toHaveValue(value);
+        await expect(page.getByTestId(testId)).toHaveJSProperty("readOnly", true);
+      }
+      await page.getByTestId("invite-role").selectOption("field_staff");
+      await page.getByTestId("invite-scope-type").selectOption("property");
+      await page.getByTestId("invite-scope-id").fill(property.id);
+      await page.getByTestId("invite-submit").click();
+      const code = (await page.getByTestId("invitation-code").innerText()).split(":").pop()!.trim();
+      const staff = await staffContext.newPage();
+      await staff.goto(`/en/activate/${code}`);
+      await staff.getByTestId("activation-phone").fill(phone);
+      await staff.getByTestId("activation-pin").fill("654321");
+      await staff.getByTestId("activation-submit").click();
+      await expect(staff).toHaveURL(/\/en\/login/u);
+      await staff.getByRole("radio", { name: "Phone + PIN", exact: true }).check();
+      await staff.getByTestId("login-phone").fill(phone);
+      await staff.getByTestId("login-pin").fill("654321");
+      await staff.getByTestId("login-submit").click();
+      await expect(staff).toHaveURL(/\/en\/app$/u);
+      const session = await (await staff.request.get("/api/auth/session")).json() as Session;
+      expect(session.user.personId).toBe(personId);
+      await staff.goto(`/en/app/team/${personId}`);
+      await expect(staff.getByRole("heading", { level: 1 })).toHaveText(name);
+      await withTenant(db, bootstrapOrganizationId, async tx => {
+        expect(await tx.person.count({ where: { email: staffEmail } })).toBe(1);
+        const account = await tx.userAccount.findFirstOrThrow({ where: { personId } });
+        expect(account).toMatchObject({ email: staffEmail, phone, status: "ACTIVE" });
+        expect(await tx.roleAssignment.findFirstOrThrow({ where: { personId, userAccountId: account.id } })).toMatchObject({ scopeType: "property", scopeId: property.id });
+      });
+      await page.goto(`/en/app/team/${personId}`);
+      await expect(page.getByRole("link", { name: "Invite a login", exact: true })).toHaveCount(0);
+      const offboard = page.getByTestId("team-offboard-form");
+      await offboard.getByLabel("Reason", { exact: true }).fill("Completed isolated staff invitation verification");
+      const offboardResponse = page.waitForResponse(response =>
+        response.request().method() === "POST" &&
+        Boolean(response.request().postData()?.includes("offboard")) &&
+        new URL(response.url()).pathname === `/en/app/team/${personId}`
+      );
+      await offboard.getByRole("button", { name: "Offboard person", exact: true }).click();
+      const response = await offboardResponse;
+      expect(response.status()).toBe(200);
+      // Successful offboarding removes the form during revalidation.
+      await expect(page.getByText("Offboarded", { exact: true })).toBeVisible();
+      await expect(offboard).toHaveCount(0);
+      await withTenant(db, bootstrapOrganizationId, async tx => {
+        expect((await tx.person.findFirstOrThrow({ where: { id: personId } })).archivedAt).not.toBeNull();
+        expect((await tx.userAccount.findFirstOrThrow({ where: { personId } })).status).toBe("DEACTIVATED");
+        expect(await tx.roleAssignment.count({ where: { personId, archivedAt: null } })).toBe(0);
+      });
+      await staff.goto(`/en/app/team/${personId}`);
+      await expect(staff).toHaveURL(/\/en\/login/u);
+    } finally {
+      await staffContext.close();
+      await db.$disconnect();
+    }
+  });
   test("admin manages staff, scoped roles, compensation history, leave, workload and guarded offboarding; staff data stays private in EN FR RTL", async ({
     page,
     browser
@@ -44,6 +134,7 @@ test.describe("Team Management", () => {
     try {
       const hash = await hashPassword(password);
       const fixture = await withTenant(db, bootstrapOrganizationId, async (tx) => {
+        const administrator = await tx.userAccount.findFirstOrThrow({ where: { organizationId: bootstrapOrganizationId, email } });
         const account = await tx.userAccount.create({
           data: {
             organizationId: bootstrapOrganizationId,
@@ -120,13 +211,26 @@ test.describe("Team Management", () => {
             storageKey: `${bootstrapOrganizationId}/staff/${personId}/${randomUUID()}`,
             contentType: "application/pdf",
             size: 100,
+            expiresOn: new Date("2027-02-28"),
             confirmedAt: new Date(),
-            createdBy: account.id
+            createdBy: administrator.id
           }
+        });
+        await new ConfigRuleRepository(tx, bootstrapOrganizationId).createVersion({
+          key: "notification.routing.staff_document_expiring", scopeType: "organization", effectiveFrom: new Date(),
+          value: { roles: [], people: [administrator.personId], assigned: false, channels: ["in_app"] },
+          reason: "Route the staff expiry reminder to its authorized administrator"
         });
         return { account, property, role, gardener, wallet, offset, task, document };
       });
+      await scheduleTeamDocumentReminders(bootstrapOrganizationId, { db, now: new Date("2027-02-21T12:00:00Z") });
       await page.reload();
+      await page.getByTestId("notification-bell").click();
+      const reminder = page.getByTestId("notification-item").filter({ hasText: "A staff document is expiring." });
+      await expect(reminder).toHaveCount(1);
+      await reminder.getByRole("button", { name: "Open record", exact: true }).click();
+      await expect(page.getByTestId("notification-panel")).toBeHidden();
+      await expect(page).toHaveURL(new RegExp(`/en/app/team/${personId}$`));
       await page.getByText("Add assignment", { exact: true }).click();
       const assignment = page.getByTestId("team-assignment-form");
       expect(

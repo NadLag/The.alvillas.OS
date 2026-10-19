@@ -68,6 +68,7 @@ import {
 import { safeLocale, type AppLocale } from "@/i18n/routing";
 import { PinSecurityRepository } from "@/modules/identity/infrastructure/pin-security-repository";
 import { TeamRepository } from "@/modules/identity/infrastructure/team-repository";
+import { present, catalogFieldPolicy } from "@/platform/authz/present";
 
 export class IdentityNotFoundError extends Error {
   constructor(message = "Identity resource was not found") {
@@ -960,38 +961,60 @@ export async function assignRoleToAccount(
   });
 }
 
+export async function getInvitationProfile(ctx: IdentityActorContext, personId: string, deps: IdentityServiceDeps = {}) {
+  updatePersonProfileInputSchema.shape.personId.parse(personId);
+  for (const action of ["view", "create", "edit"] as const) assertIdentityAllowed(ctx, action, personId);
+  return withTenant(db(deps), ctx.organizationId, async tx => {
+    const person = await new IdentityRepository(tx, ctx.organizationId).invitationProfile(personId);
+    if (!person) throw new IdentityNotFoundError();
+    if (person.accountCount) throw new IdentityConflictError("Use the existing account for this person");
+    return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { type: "identity", organizationId: ctx.organizationId, id: person.id, data: person }, catalogFieldPolicy<typeof person>("identity")) as typeof person;
+  });
+}
+
+function invitationConflict(error: unknown): never {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new IdentityConflictError("Contact already exists; choose the existing profile or account");
+  throw error;
+}
+
 export async function createInvitation(
   ctx: IdentityActorContext,
   input: InvitationInput,
   deps: IdentityServiceDeps = {}
 ): Promise<CreatedInvitation> {
+  const value = invitationInputSchema.parse(input);
   assertIdentityAllowed(ctx, identityActionForMutation("invite"));
   const meta = auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new IdentityRepository(tx, ctx.organizationId);
     await ensureStandardIdentitySetup(ctx.organizationId, { db: { $transaction: (callback) => callback(tx) } });
-    const role = await repository.findRoleByKey(input.roleKey);
+    const role = await repository.findRoleByKey(value.roleKey);
 
     if (!role) {
       throw new IdentityNotFoundError("Role was not found");
     }
 
+    const assignmentResource = scopedRoleAssignmentResource(ctx.organizationId, { roleId: role.id, scopeType: value.scopeType, scopeId: value.scopeId });
+    assertAuthorizationAllowed(ctx, "assign", assignmentResource);
+    const roleSummary = await repository.findRoleSummaryById(role.id);
+    if (!roleSummary) throw new IdentityNotFoundError();
+    assertPermissionGrantAllowed(ctx, roleSummary.permissionKeys, role.id, assignmentResource);
+
     const code = newInviteCode();
-    const person = await repository.createPerson({
-      displayName: input.displayName,
-      email: input.email,
-      phone: input.phone,
-      preferredLocale: input.preferredLocale
-    });
-    const expiresAt = new Date(Date.now() + input.expiresInHours * 60 * 60 * 1000);
+    if (value.personId) await new TeamRepository(tx, ctx.organizationId).lock(value.personId);
+    const person = value.personId
+      ? await getInvitationProfile(ctx, value.personId, { ...deps, db: { $transaction: callback => callback(tx) } })
+      : await repository.createStandalonePerson({ displayName: value.displayName, email: value.email, phone: value.phone, preferredLocale: value.preferredLocale ?? "en" });
+    if (person.email && await repository.accountEmailExists(person.email)) throw new IdentityConflictError("Use the existing account for this email");
+    const expiresAt = new Date(Date.now() + value.expiresInHours * 60 * 60 * 1000);
     const invitation = await repository.createInvitation({
       personId: person.id,
       roleId: role.id,
-      scopeType: input.scopeType,
-      scopeId: input.scopeId,
-      email: input.email,
-      phone: input.phone,
+      scopeType: value.scopeType,
+      scopeId: value.scopeId,
+      email: person.email ?? undefined,
+      phone: person.phone ?? undefined,
       codeHash: hashCode(code),
       expiresAt,
       actorId: ctx.actorId
@@ -1006,13 +1029,13 @@ export async function createInvitation(
       payload: {
         invitationId: invitation.id,
         personId: person.id,
-        displayName: input.displayName,
-        channel: input.email ? "email" : input.phone ? "manual_phone" : "manual",
-        toEmail: input.email ?? null,
-        toPhone: input.phone ?? null,
-        roleKey: input.roleKey,
-        scopeType: input.scopeType,
-        scopeId: input.scopeId ?? null,
+        displayName: person.displayName,
+        channel: person.email ? "email" : person.phone ? "manual_phone" : "manual",
+        toEmail: person.email,
+        toPhone: person.phone,
+        roleKey: value.roleKey,
+        scopeType: value.scopeType,
+        scopeId: value.scopeId ?? null,
         activationCode: code,
         activationUrl,
         locale: recipientLocale,
@@ -1029,9 +1052,9 @@ export async function createInvitation(
       ipAddress: meta.ipAddress,
       after: {
         personId: person.id,
-        roleKey: input.roleKey,
-        scopeType: input.scopeType,
-        scopeId: input.scopeId ?? null,
+        roleKey: value.roleKey,
+        scopeType: value.scopeType,
+        scopeId: value.scopeId ?? null,
         expiresAt
       },
       reason: "Identity invitation created",
@@ -1044,7 +1067,7 @@ export async function createInvitation(
       code,
       expiresAt
     };
-  });
+  }).catch(invitationConflict);
 }
 
 export async function activateInvitation(
@@ -1086,29 +1109,11 @@ export async function activateInvitation(
       throw new IdentityConflictError("Invitation phone verification failed");
     }
 
-    const account = await tx.userAccount.upsert({
-      where: {
-        organizationId_email: {
-          organizationId,
-          email: invitation.email ?? `${invitation.id}@activation.local`
-        }
-      },
-      update: {
-        personId: invitation.personId,
-        email: invitation.email,
-        phone: parsed.phone,
-        status: "ACTIVE",
-        suspendedAt: null,
-        deactivatedAt: null
-      },
-      create: {
-        organizationId,
-        personId: invitation.personId,
-        email: invitation.email,
-        phone: parsed.phone,
-        status: "ACTIVE"
-      }
-    });
+    await new TeamRepository(tx, organizationId).lock(invitation.personId);
+    const repository = new IdentityRepository(tx, organizationId);
+    const person = await repository.invitationProfile(invitation.personId);
+    if (!person || person.accountCount || person.email !== invitation.email || person.phone !== invitation.phone) throw new IdentityConflictError("Invitation profile changed or already has an account");
+    const account = await repository.createInvitationAccount({ personId: person.id, email: invitation.email, phone: parsed.phone });
 
     await tx.authCredential.create({
       data: {
@@ -1137,7 +1142,6 @@ export async function activateInvitation(
       });
     }
 
-    const repository = new IdentityRepository(tx, organizationId);
     await repository.assignRole({
       personId: invitation.personId,
       userAccountId: account.id,
@@ -1154,6 +1158,7 @@ export async function activateInvitation(
         userAccountId: account.id
       }
     });
+    await repository.revokeOtherInvitations(person.id, invitation.id);
 
     await writeAuditEvent(tx, {
       organizationId,
@@ -1173,7 +1178,7 @@ export async function activateInvitation(
     });
 
     return { userAccountId: account.id };
-  });
+  }).catch(invitationConflict);
 }
 
 export async function suspendAccount(

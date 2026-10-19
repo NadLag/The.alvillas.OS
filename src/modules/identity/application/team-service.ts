@@ -424,6 +424,7 @@ export async function teamMember(ctx: IdentityActorContext, input: unknown, deps
         organizationId: ctx.organizationId,
         id: person.id
       }),
+      canInviteAccount: !person.archivedAt && !person.userAccounts.length && (["view", "create", "edit"] as const).every(action => authorize(ctx.authContext, action, { type: "identity", organizationId: ctx.organizationId, id: person.id })),
       canApprove: authorize(ctx.authContext, "approve", repository.resource(person)),
       canRequest: own || authorize(ctx.authContext, "edit", repository.resource(person)),
       canAssign: authorize(ctx.authContext, "assign", {

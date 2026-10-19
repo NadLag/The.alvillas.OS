@@ -1,9 +1,12 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
-import { listIdentityDashboard } from "@/modules/identity/application/identity-service";
+import { getInvitationProfile, listIdentityDashboard, IdentityConflictError, IdentityNotFoundError } from "@/modules/identity/application/identity-service";
+import { IdentityAuthorizationError } from "@/modules/identity/application/identity-access";
+import { invitationInputSchema } from "@/modules/identity/domain/identity";
+import { authorize } from "@/platform/authz/authorize";
 import { IdentityAdmin } from "@/modules/identity/ui/identity-admin";
 import { SecurityPanel } from "@/modules/identity/ui/security-panel";
 import { auth } from "@/platform/auth/session";
@@ -17,9 +20,11 @@ function safeLocale(locale: string): AppLocale {
 }
 
 export default async function IdentityPage({
-  params
+  params,
+  searchParams
 }: Readonly<{
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ personId?: string }>;
 }>) {
   const { locale } = await params;
   const appLocale = safeLocale(locale);
@@ -31,6 +36,13 @@ export default async function IdentityPage({
 
   if (!ctx) {
     redirect(`/${appLocale}/login`);
+  }
+  const requestedPersonId = (await searchParams).personId;
+  if (requestedPersonId && !invitationInputSchema.shape.personId.safeParse(requestedPersonId).success) notFound();
+  let selectedProfile: Awaited<ReturnType<typeof getInvitationProfile>> | null = null;
+  if (requestedPersonId) {
+    try { selectedProfile = await getInvitationProfile(ctx, requestedPersonId); }
+    catch (error) { if (error instanceof IdentityConflictError || error instanceof IdentityNotFoundError || error instanceof IdentityAuthorizationError) notFound(); throw error; }
   }
 
   const [t, dashboard] = await Promise.all([
@@ -46,6 +58,9 @@ export default async function IdentityPage({
     ])
   ].filter((value): value is Date => value !== null);
   const dateLabels = Object.fromEntries(dates.map((date) => [date.toISOString(), formatDate(appLocale, date)]));
+  const invitationProfiles = dashboard.people.filter(person => !person.accountCount && (["view", "create", "edit"] as const).every(action => authorize(ctx.authContext, action, { type: "identity", organizationId: ctx.organizationId, id: person.id })));
+  const choices = invitationProfiles.map(person => ({ id: person.id, displayName: person.displayName, email: person.email, phone: person.phone, preferredLocale: person.preferredLocale, accountCount: person.accountCount }));
+  if (selectedProfile && !choices.some(person => person.id === selectedProfile.id)) choices.unshift(selectedProfile);
 
   return (
     <AdminShell className="resource-page" testId="identity-page">
@@ -89,11 +104,15 @@ export default async function IdentityPage({
           expiresAtLabel: formatDateTime(appLocale, invitation.expiresAt)
         }))}
         people={dashboard.people}
+        invitationProfiles={choices}
+        initialPersonId={selectedProfile?.id}
         permissions={dashboard.permissions}
         roles={dashboard.roles}
         simulations={dashboard.simulations}
         labels={{
           createInvitation: t("createInvitation"),
+          invitationProfile: t("invitationProfile"),
+          newInvitationProfile: t("newInvitationProfile"),
           people: t("people"),
           createPerson: t("createPerson"),
           duplicateContacts: t("duplicateContacts"),

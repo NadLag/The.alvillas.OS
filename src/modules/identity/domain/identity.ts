@@ -49,6 +49,7 @@ export const scopeTypes = [
 export const scopeTypeSchema = z.enum(scopeTypes);
 
 export const invitationInputSchema = z.object({
+  personId: z.string().uuid().optional().or(z.literal("").transform(() => undefined)),
   displayName: z.string().trim().min(2).max(120),
   email: z
     .string()

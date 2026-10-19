@@ -78,6 +78,7 @@ export type Resource = {
   reservationId?: string | null;
   jobId?: string | null;
   taskId?: string | null;
+  documentId?: string | null;
   serviceId?: string | null;
   financialRecordId?: string | null;
   walletId?: string | null;

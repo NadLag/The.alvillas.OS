@@ -36,6 +36,30 @@ describe("personal notification permissions and safe destinations", () => {
     expect(notificationDestination(ctx, { kind: "language_updated", recipientId: account, targetId: task }, { type: "identity", organizationId: org, id: task }, "en")).toBeNull();
     expect(authorize(ctx, "configure", { type: "identity", organizationId: org })).toBe(false);
   });
+  it("binds a staff reminder to its document while authorizing the staff profile scope", () => {
+    const person = "018f0a0b-0000-7000-9000-000000000004";
+    const document = "018f0a0b-0000-7000-9000-000000000005";
+    const scope = { organizationId: org, resourceType: "staff_document", resourceId: person };
+    const ctx = ownNotificationContext({ organizationId: org, personId: person, permissions: new Set(["staff_document:view"]), scopes: [scope] }, account);
+    const reminder = { kind: "staff_document_expiring" as const, recipientId: account, targetId: document };
+    const target = { type: "staff_document", organizationId: org, id: person, documentId: document, assignedPersonId: person };
+    expect(notificationDestination(ctx, reminder, target, "fr")).toBe(`/fr/app/team/${person}`);
+    for (const denied of [
+      { ...target, documentId: task },
+      { ...target, id: task },
+      { ...target, assignedPersonId: task },
+      { ...target, assignedPersonId: undefined },
+      { ...target, organizationId: task },
+      { ...target, type: "task" }
+    ]) expect(notificationDestination(ctx, reminder, denied, "en")).toBeNull();
+    expect(notificationDestination(ctx, { ...reminder, recipientId: task }, target, "en")).toBeNull();
+    expect(notificationDestination(context(), reminder, target, "en")).toBeNull();
+  });
+  it("never turns a mismatched document subject into a link under an organization grant", () => {
+    const ctx = ownNotificationContext({ organizationId: org, permissions: new Set(["staff_document:view"]), scopes: [{ organizationId: org }] }, account);
+    const reminder = { kind: "staff_document_expiring" as const, recipientId: account, targetId: task };
+    expect(notificationDestination(ctx, reminder, { type: "staff_document", organizationId: org, id: account, documentId: task, assignedPersonId: org }, "en")).toBeNull();
+  });
   it("rejects arbitrary URLs, message payloads and unbounded pagination input", () => {
     expect(notificationInputSchema.safeParse({ ...input, href: "https://example.test" }).success).toBe(false);
     expect(notificationInputSchema.safeParse({ ...input, kind: "financial_update" }).success).toBe(false);

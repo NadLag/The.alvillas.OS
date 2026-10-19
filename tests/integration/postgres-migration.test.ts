@@ -1,4 +1,5 @@
 import { listAuditHistory, exportAuditHistoryCsv } from "@/modules/audit/application/audit-service";
+import { offboardTeamMember } from "@/modules/identity/application/team-service";
 import type { EmailProvider } from "@/platform/providers";
 import { EmailRequestError } from "@/platform/providers/real";
 import { deliveryPage, deliveryLogs, retryDelivery, recordDeliveryReceipt } from "@/platform/notifications/delivery-service";
@@ -1759,8 +1760,10 @@ describe("PostgreSQL baseline", () => {
     const passwordReset = await issueRecoveryCode(ctx, admin.id, { db: runner });
     expect(await authenticatePassword({ email, password: "local integration bootstrap password", recoveryCode: passwordReset, deviceId: "integration-enrollment-device", headers: new Headers() })).toBeNull();
     const invitedEmail = `idn-invitation-${randomUUID()}@example.test`;
-    const invitation = await createInvitation(ctx, { displayName: "Identity integration invite", email: invitedEmail,
-      phone: "+212699000002", roleKey: "field_staff", scopeType: "organization", expiresInHours: 1 }, { db: runner });
+    const invitedPerson = await createPersonProfile(ctx, { displayName: "Identity integration invite", email: invitedEmail, phone: "+212699000002", preferredLocale: "fr" }, { db: runner });
+    const invitationInput = { personId: invitedPerson.id, displayName: "Untrusted submitted name", email: "must-not-replace@example.test", phone: "+212699000099", preferredLocale: "ar" as const, roleKey: "field_staff", scopeType: "organization" as const, expiresInHours: 1 };
+    const invitation = await createInvitation(ctx, invitationInput, { db: runner });
+    const supersededInvitation = await createInvitation(ctx, invitationInput, { db: runner });
     // A wrong phone is rejected but the limiter transaction still commits.
     await expect(activateInvitation({ code: invitation.code, phone: "+212699000099", pin: "654321" }, { db: runner })).rejects.toThrow(/phone verification/u);
     const results = await Promise.allSettled([1, 2].map(() => activateInvitation({ code: invitation.code,
@@ -1768,6 +1771,31 @@ describe("PostgreSQL baseline", () => {
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
     const account = await withTenant(runner, bootstrapOrganizationId, (tx) => tx.userAccount.findFirstOrThrow({ where: { email: invitedEmail } }));
+    expect(account.personId).toBe(invitedPerson.id);
+    await expect(activateInvitation({ code: supersededInvitation.code, phone: "+212699000002", pin: "111111" }, { db: runner })).rejects.toThrow(IdentityConflictError);
+    await expect(createInvitation(ctx, invitationInput, { db: runner })).rejects.toThrow(IdentityConflictError);
+    await withTenant(runner, bootstrapOrganizationId, async tx => {
+      expect(await tx.person.count({ where: { email: invitedEmail } })).toBe(1);
+      expect(await tx.userAccount.count({ where: { personId: invitedPerson.id } })).toBe(1);
+      expect(await tx.authCredential.count({ where: { userAccountId: account.id, type: "PIN", revokedAt: null } })).toBe(1);
+      expect(await tx.person.findFirstOrThrow({ where: { id: invitedPerson.id } })).toMatchObject({ displayName: "Identity integration invite", phone: "+212699000002", preferredLocale: "fr" });
+    });
+    const pendingPerson = await createPersonProfile(ctx, { displayName: "Pending invitation offboarding", phone: "+212699000003", preferredLocale: "en" }, { db: runner });
+    const pendingInput = { personId: pendingPerson.id, displayName: "Pending invitation offboarding", roleKey: "field_staff", scopeType: "organization" as const, expiresInHours: 1 };
+    const pending = await createInvitation(ctx, pendingInput, { db: runner });
+    await offboardTeamMember(ctx, { personId: pendingPerson.id, reason: "Withdraw the pending staff login before activation" }, { db: runner });
+    await expect(activateInvitation({ code: pending.code, phone: "+212699000003", pin: "654321" }, { db: runner })).rejects.toThrow(IdentityConflictError);
+    expect(await withTenant(runner, bootstrapOrganizationId, tx => tx.userAccount.count({ where: { personId: pendingPerson.id } }))).toBe(0);
+    const concurrentPerson = await createPersonProfile(ctx, { displayName: "Concurrent invitations", phone: "+212699000004", preferredLocale: "en" }, { db: runner });
+    const competing = await Promise.all([1, 2].map(() => createInvitation(ctx, { ...pendingInput, personId: concurrentPerson.id, displayName: "Concurrent invitations" }, { db: runner })));
+    const acceptances = await Promise.allSettled(competing.map(invite => activateInvitation({ code: invite.code, phone: "+212699000004", pin: "654321" }, { db: runner })));
+    expect(acceptances.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    expect(await withTenant(runner, bootstrapOrganizationId, tx => tx.userAccount.count({ where: { personId: concurrentPerson.id } }))).toBe(1);
+    const stalePerson = await createPersonProfile(ctx, { displayName: "Changed contact invitation", phone: "+212699000005", preferredLocale: "en" }, { db: runner });
+    const stale = await createInvitation(ctx, { ...pendingInput, personId: stalePerson.id, displayName: "Changed contact invitation" }, { db: runner });
+    await updatePersonProfile(ctx, { personId: stalePerson.id, displayName: "Changed contact invitation", phone: "+212699000006", preferredLocale: "en" }, { db: runner });
+    await expect(activateInvitation({ code: stale.code, phone: "+212699000005", pin: "654321" }, { db: runner })).rejects.toThrow(IdentityConflictError);
+    expect(await withTenant(runner, bootstrapOrganizationId, tx => tx.userAccount.count({ where: { personId: stalePerson.id } }))).toBe(0);
     const invalidInput = { email: invitedEmail, recoveryCode: "invalid-recovery-code", newPassword: "rejected recovery password" };
     await expect(recoverPassword(invalidInput, { db: runner, ipAddress: "ntf01-invalid" })).rejects.toThrow("Recovery code is invalid");
     const expired = await issueRecoveryCode(ctx, account.id, { db: runner, requestId: "ntf01-expired" });
@@ -4154,7 +4182,10 @@ describe("PostgreSQL baseline", () => {
       permissionKey("identity", "create"),
       permissionKey("identity", "edit"),
       permissionKey("identity", "assign"),
-      permissionKey("identity", "override")
+      permissionKey("identity", "override"),
+      permissionKey("role", "assign"),
+      permissionKey("task", "view"),
+      permissionKey("task", "edit")
     ]);
     const ctx = {
       organizationId: orgA.id,
