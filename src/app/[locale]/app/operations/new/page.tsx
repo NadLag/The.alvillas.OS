@@ -16,10 +16,10 @@ export default async function NewTask({ params, searchParams }: { params: Promis
   const locale = safeLocale((await params).locale); setRequestLocale(locale);
   const ctx = await reservationActorContextFromSession(await auth()); if (!ctx) redirect(`/${locale}/login`);
   const [t, options] = await Promise.all([getTranslations("Operations.manage"), operationCreationOptions(ctx, (await searchParams).propertyId)]);
-  return <ManagerShell className="resource-page" testId="operation-new-page">
+  return <ManagerShell className="resource-page operation-new-page" testId="operation-new-page">
     <ShellHeader title={t("newTask")} subtitle={t("newHelp")} eyebrow={t("eyebrow")} actions={<Link className="secondary-button" href={`/${locale}/app/operations`}>{t("back")}</Link>} />
     <section className="workspace-main">
-      <form className="resource-form" method="get"><label>{t("property")}<select name="propertyId" defaultValue={options.propertyId ?? ""}>{options.properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><button className="secondary-button" type="submit">{t("chooseProperty")}</button></form>
+      <form className="resource-form operation-form" method="get"><label>{t("property")}<select name="propertyId" defaultValue={options.propertyId ?? ""}>{options.properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><button className="secondary-button" type="submit">{t("chooseProperty")}</button></form>
       {options.propertyId && options.checklists.length ? <OperationForm idempotencyKey={randomUUID()} locale={locale} operation="create" submit={t("newTask")} key={options.propertyId}>
         <input type="hidden" name="propertyId" value={options.propertyId} />
         <label>{t("type")}<select name="type">{taskTypeSchema.options.map(type => <option key={type} value={type}>{t(`types.${type}`)}</option>)}</select></label>

@@ -2389,6 +2389,7 @@ textarea:disabled {
 .operation-detail-grid fieldset { border: 0; padding: 0; min-inline-size: 0; }
 .operation-detail-grid dd { margin-inline-start: 0; overflow-wrap: anywhere; }
 .operation-form { min-inline-size:0; }
+.operation-new-page .workspace-main { min-inline-size:0; }
 .operation-form label:not(.field-checklist-item) { display:grid;gap:var(--space-2);align-content:start;min-inline-size:0; }
 .operation-form :is(input:not([type="checkbox"]):not([type="hidden"]),select,textarea) { inline-size:100%;min-inline-size:0;min-block-size:48px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--surface-raised);color:var(--foreground);padding:var(--space-3) var(--space-4); }
 .operation-form textarea { min-block-size:6rem;resize:vertical; }
