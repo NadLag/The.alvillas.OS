@@ -559,11 +559,37 @@ describe("operations on real PostgreSQL", () => {
         deps(),
       ),
     ).rejects.toBeInstanceOf(ReservationConflictError);
-    const moved = await rescheduleOperationTask(
+    await expect(
+      rescheduleOperationTask(
+        f.ctx,
+        {
+          taskId: first.id,
+          expectedVersion: first.version,
+          dueDate: "2027-04-10",
+          startMinute: 1410,
+          reason: "Avoid overnight work extending into approved leave",
+          idempotencyKey: randomUUID(),
+        },
+        deps(),
+      ),
+    ).rejects.toBeInstanceOf(ReservationConflictError);
+    const boundary = await rescheduleOperationTask(
       f.ctx,
       {
         taskId: first.id,
         expectedVersion: first.version,
+        dueDate: "2027-04-10",
+        startMinute: 1380,
+        reason: "Finish at the exclusive start of approved leave",
+        idempotencyKey: randomUUID(),
+      },
+      deps(),
+    );
+    const moved = await rescheduleOperationTask(
+      f.ctx,
+      {
+        taskId: first.id,
+        expectedVersion: boundary.version,
         dueDate: "2027-04-12",
         startMinute: 600,
         reason: "Move to an available day",
@@ -734,6 +760,16 @@ describe("operations on real PostgreSQL", () => {
         }),
       ),
     ).toBe(2);
+    expect(
+      await withTenant(db, f.org, (tx) =>
+        tx.outboxEvent.count({
+          where: {
+            organizationId: f.org,
+            payload: { path: ["kind"], equals: "task_assigned" },
+          },
+        }),
+      ),
+    ).toBe(4);
   });
   it("scopes swap choices before limiting rows so unrelated properties cannot hide authorized work", async () => {
     const f = await fixture(),

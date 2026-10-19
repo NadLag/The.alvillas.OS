@@ -92,7 +92,11 @@ export async function taskCandidates(
     from = new Date(dateUtc.getTime() - 86400000),
     until = new Date(dateUtc.getTime() + 86400000);
   const [availability, tasks] = await Promise.all([
-    repo.availability([...grouped.keys()], dateUtc, dateUtc),
+    repo.availability(
+      [...grouped.keys()],
+      dateUtc,
+      dateToUtc(localDate(new Date(end.getTime() - 1), task.property.timezone)),
+    ),
     repo.workloads(from, until, excluded),
   ]);
   const people = [...grouped]
@@ -462,15 +466,27 @@ export async function swapOperationTasks(
         scheduledStart: options.start,
         scheduledEnd: options.end,
       });
+      const swapped = (await repo.task(task.id))!;
       await operationAudit(
         repo,
         ctx,
         meta,
         "task.assignment.swapped",
-        (await repo.task(task.id))!,
+        swapped,
         task,
         value.reason,
       );
+      if (candidate.userAccountId)
+        await publishNotification(
+          repo.tx,
+          ctx.organizationId,
+          {
+            kind: "task_assigned",
+            recipientId: candidate.userAccountId,
+            targetId: task.id,
+          },
+          `task:${task.id}:assigned:${swapped.version}`,
+        );
     }
     await repo.record(a.id, value.idempotencyKey, hash, ctx.actorId);
     return [(await repo.task(a.id))!, (await repo.task(b.id))!];
