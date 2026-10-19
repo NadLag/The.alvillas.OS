@@ -119,7 +119,7 @@ test.describe("identity lifecycle", () => {
     await createRoleForm.getByTestId("custom-role-submit").click();
     const createdRoleResponse = await roleCreation;
     expect(createdRoleResponse.ok()).toBe(true);
-    await createdRoleResponse.finished();
+    await expect(createRoleForm.getByRole("status")).toHaveText("Custom role created.", { timeout: 30000 });
     await expect(page.getByTestId("role-catalog-row").filter({ hasText: customRoleName })).toContainText("Custom role");
     const roleRow = page.getByTestId("role-catalog-row").filter({ hasText: customRoleName });
     await roleRow.getByText("Edit role").click();
