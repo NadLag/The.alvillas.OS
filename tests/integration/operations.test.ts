@@ -1321,6 +1321,36 @@ describe("operations on real PostgreSQL", () => {
       (await operationTaskDetail(f.ctx, tasks[2].id, undefined, deps())).task
         .priority,
     ).toBe("HIGH");
+    for (const [index, startMinute] of [
+      [0, 900],
+      [1, 540],
+    ] as const) {
+      const current = (
+        await operationTaskDetail(f.ctx, tasks[index].id, undefined, deps())
+      ).task;
+      await rescheduleOperationTask(
+        f.ctx,
+        {
+          taskId: current.id,
+          expectedVersion: current.version,
+          dueDate: "2027-04-10",
+          startMinute,
+          reason: "Verify scheduled chronological display order",
+          idempotencyKey: randomUUID(),
+        },
+        deps(),
+      );
+    }
+    const timeline = await operationManagement(
+      f.ctx,
+      { view: "TIMELINE", date: "2027-04-10", propertyId: f.property.id },
+      deps(),
+    );
+    expect(timeline.tasks.slice(0, 2).map((t) => t.id)).toEqual([
+      tasks[1].id,
+      tasks[0].id,
+    ]);
+    expect(timeline.tasks[2].scheduledStart).toBeNull();
     for (const view of ["TIMELINE", "LIST", "DAY", "WEEK", "MONTH"])
       expect(
         (

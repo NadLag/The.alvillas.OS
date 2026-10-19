@@ -257,7 +257,11 @@ export class OperationRepository {
         },
         checklistItems: { orderBy: { sortOrder: "asc" } },
       },
-      orderBy: [{ dueDate: "asc" }, { id: "asc" }],
+      orderBy: [
+        { dueDate: "asc" },
+        { scheduledStart: { sort: "asc", nulls: "last" } },
+        { id: "asc" },
+      ],
       skip,
       take,
     });
