@@ -779,6 +779,10 @@ export class CoreRepository {
           }
         });
 
+    if (input.syncEndpointUrl) await this.tx.reservationFeed.updateMany({
+      where: { organizationId: this.organizationId, bookingChannelId: channel.id },
+      data: { etag: null, lastModified: null, lastSuccessAt: null, lastAttemptAt: null, lastError: null, consecutiveFailures: 0, nextSyncAt: new Date(), leaseToken: null, leasedUntil: null }
+    });
     return bookingChannelToSummary(channel);
   }
 

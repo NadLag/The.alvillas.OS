@@ -7739,6 +7739,10 @@ describe("PostgreSQL baseline", () => {
     expect(await sync()).toMatchObject({ imported: 0, modified: 0 });
     expect(seenConditionals[1]).toMatchObject({ etag: '"v1"' });
     status = 304; expect(await sync()).toMatchObject({ status: "NOT_MODIFIED", suspected: 0 });
+    await upsertPropertyBookingChannel(f.ctx, { propertyId: f.property.id, sourceKey: "AIRBNB", displayName: "Rotated calendar", status: "ACTIVE", syncMode: "ICAL", importEnabled: true, exportEnabled: false, syncEndpointUrl: "https://www.airbnb.com/calendar/ical/rotated.ics?private=do-not-log" }, f.deps);
+    const rotated = await withTenant(prisma, f.organization.id, tx => tx.reservationFeed.findUniqueOrThrow({ where: { id: feed.id } }));
+    expect(rotated.lastSuccessAt).toBeNull(); expect(rotated.etag).toBeNull(); expect(rotated.lastModified).toBeNull();
+    status = 200; expect(await sync()).toMatchObject({ imported: 0, modified: 0 }); expect(seenConditionals.at(-1)).toEqual({ etag: null, lastModified: null });
     status = 200; content = f.ical([f.event.replace("20290414", "20290416")]);
     expect(await sync()).toMatchObject({ modified: 1 });
     const modified = await withTenant(prisma, f.organization.id, async tx => ({ reservation: await tx.reservation.findUniqueOrThrow({ where: { id: first.reservation.id } }), tasks: await tx.operationTask.findMany({ where: { reservationId: first.reservation.id }, orderBy: { dueDate: "asc" } }), revisions: await tx.reservationRevision.findMany({ where: { reservationId: first.reservation.id }, orderBy: { version: "asc" } }) }));
@@ -7865,6 +7869,25 @@ describe("PostgreSQL baseline", () => {
     expect(current.original).toEqual(originalPostings); expect(current.reversals).toHaveLength(2); expect(current.revision.version).toBe(3);
     const sums = new Map<string, Decimal>();
     for (const posting of [...originalPostings, ...current.reversals.flatMap(row => row.postings)]) sums.set(posting.ledgerAccountId, (sums.get(posting.ledgerAccountId) ?? new Decimal(0)).add(new Decimal(posting.amount).mul(posting.side === "DEBIT" ? 1 : -1)));
+    expect([...sums.values()].every(amount => amount.eq(0))).toBe(true);
+  });
+
+  it("F-RES OTA refunds reverse expected payout, fees, receipt and variance with scoped reconciliation permission", async () => {
+    const f = await reservationManagementFixture(), sourceId = `OTA-REFUND-${randomUUID()}`;
+    const created = await f.manual({ source: "AIRBNB", externalId: sourceId, quote: { amount: "5500.00", currency: "MAD" } });
+    const bank = await withTenant(prisma, f.organization.id, tx => tx.ledgerAccount.create({ data: { organizationId: f.organization.id, code: "OTA_REFUND_BANK", name: "OTA refund acceptance bank", accountType: "ASSET_LOCATION", normalSide: "DEBIT" } }));
+    await importAirbnbSettlementCsv(f.ctx, { receivedAccountId: bank.id, idempotencyKey: randomUUID(), csv: `source_reservation_id,source_payout_id,source_transaction_id,currency,gross_amount,platform_fee,expected_payout,actual_receipt,reason,action\n${sourceId},PO-REFUND,TX-REFUND,MAD,5500.00,300.00,5200.00,5150.00,Bank fee,Review payout` }, f.deps);
+    const original = await withTenant(prisma, f.organization.id, tx => tx.financialTransaction.findMany({ include: { postings: { orderBy: { id: "asc" } } }, orderBy: { id: "asc" } }));
+    expect(original).toHaveLength(2);
+    await changeReservation(f.ctx, { reservationId: created.reservation.id, operation: "TRANSITION", status: "CANCELLED", expectedVersion: 1, reason: "Cancelled OTA stay", idempotencyKey: randomUUID() }, f.deps);
+    const refund = { reservationId: created.reservation.id, operation: "REFUND", expectedVersion: 2, reason: "Full OTA settlement refund recorded", idempotencyKey: randomUUID() };
+    const denied = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => key !== "financial_transaction:reconcile")) } };
+    await expect(changeReservation(denied, refund, f.deps)).rejects.toThrow();
+    await changeReservation(f.ctx, refund, f.deps); await changeReservation(f.ctx, refund, f.deps);
+    const transactions = await withTenant(prisma, f.organization.id, tx => tx.financialTransaction.findMany({ include: { postings: { orderBy: { id: "asc" } } }, orderBy: { id: "asc" } }));
+    expect(transactions.filter(row => !row.reversesTransactionId)).toEqual(original); expect(transactions.filter(row => row.reversesTransactionId)).toHaveLength(2);
+    const sums = new Map<string, Decimal>();
+    for (const posting of transactions.flatMap(row => row.postings)) sums.set(`${posting.ledgerAccountId}:${posting.currency}`, (sums.get(`${posting.ledgerAccountId}:${posting.currency}`) ?? new Decimal(0)).add(posting.amount.mul(posting.side === "DEBIT" ? 1 : -1)));
     expect([...sums.values()].every(amount => amount.eq(0))).toBe(true);
   });
 

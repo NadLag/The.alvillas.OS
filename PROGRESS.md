@@ -116,7 +116,7 @@ F-RES-07 | IN-PROGRESS | Direct/agency entry, optional Money quote, guest author
 F-RES-08 | IN-PROGRESS | Source identity, date fallback, heuristic duplicate review and idempotent import; evidence: PostgreSQL scheduled-feed persistence and CSV normalization tests. Awaiting CI/staging.
 F-RES-09 | IN-PROGRESS | Serialized overlap handling and scoped Command Center exceptions; evidence: PostgreSQL concurrent overlap detection and calendar scope tests. Awaiting CI/staging.
 F-RES-10 | IN-PROGRESS | Validated lifecycle transitions and explicit draft confirmation; evidence: reservation-adapters.test.ts lifecycle cases and PostgreSQL lifecycle task generation. Awaiting CI/staging.
-F-RES-11 | IN-PROGRESS | Versioned changes, cancellation, no-show, early checkout and existing ledger reversals; evidence: PostgreSQL cancellation/refund and early-checkout tests. Awaiting CI/staging.
+F-RES-11 | IN-PROGRESS | Versioned changes, cancellation, no-show, early checkout and complete manual/OTA ledger reversals; evidence: PostgreSQL OTA refunds test covers payout, fees, receipt, variance, authorization and original history; reservation-management.spec.ts passes payout replay and refund on desktop/mobile. Awaiting CI/staging.
 F-RES-12 | IN-PROGRESS | Guest entity, explicit authorized merge and scoped repeat history; evidence: PostgreSQL no-show/early-checkout/guest-merging test. Awaiting CI/staging.
 F-RES-13 | IN-PROGRESS | Property/portfolio calendars and owner/maintenance blocks; evidence: PostgreSQL calendar scopes/500 properties and reservation-management.spec.ts desktop/mobile RTL. Awaiting CI/staging.
 F-RES-14 | IN-PROGRESS | Turnovers derived across calendar pages; evidence: PostgreSQL concurrent overlap/turnover scenario. Awaiting CI/staging.

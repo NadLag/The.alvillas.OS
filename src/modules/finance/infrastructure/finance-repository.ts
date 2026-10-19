@@ -539,7 +539,7 @@ export class FinanceRepository {
     });
   }
 
-  async findPostingTransactionsForReservation(reservationId: string): Promise<PostingTransaction[]> {
+  async findPostingTransactionsForReservation(reservationId: string, includeSettlements = false): Promise<PostingTransaction[]> {
     const rows = await this.tx.$queryRaw<TransactionIdRow[]>(Prisma.sql`
       SELECT DISTINCT ft.id
       FROM financial_transaction ft
@@ -548,7 +548,7 @@ export class FinanceRepository {
        AND p.organization_id = ft.organization_id
       WHERE ft.organization_id = ${this.organizationId}::uuid
         AND ft.reverses_transaction_id IS NULL
-        AND p.bucket IN ('OWNER_REVENUE', 'COMMISSION')
+        AND (p.bucket IN ('OWNER_REVENUE', 'COMMISSION') OR (${includeSettlements} AND p.dimensions ? 'airbnb_settlement_id'))
         AND p.dimensions @> jsonb_build_object('reservation_id', ${reservationId})
       ORDER BY ft.id ASC
     `);

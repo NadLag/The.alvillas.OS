@@ -767,7 +767,8 @@ export async function reverseReservationAccommodationRevenue(
       throw new ReservationRevenueNotFoundError("Reservation does not exist in this tenant");
     }
 
-    const originals = await repository.findPostingTransactionsForReservation(input.reservationId);
+    const originals = await repository.findPostingTransactionsForReservation(input.reservationId, true);
+    if (originals.some(transaction => transaction.postings.some(posting => jsonObject(posting.dimensions).airbnb_settlement_id)) && !authorize(ctx.authContext, "reconcile", { type: "financial_transaction", organizationId: ctx.organizationId, propertyId: reservation.propertyId, reservationId: reservation.id, dataClass: "financial" })) throw new ReservationRevenueAuthorizationError();
     if (originals.length === 0) {
       throw new ReservationRevenueNotFoundError("Reservation revenue has not been posted");
     }

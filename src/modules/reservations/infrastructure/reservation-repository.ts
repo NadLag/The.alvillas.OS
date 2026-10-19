@@ -686,7 +686,7 @@ export class ReservationRepository {
     return reservationSyncPolicySchema.parse(rule.parsedValue);
   }
   createFeed(input: { propertyId: string; source: string; name: string; bookingChannelId: string; idempotencyKey: string }, actorId: string) {
-    return this.tx.reservationFeed.upsert({ where: { organizationId_bookingChannelId: { organizationId: this.organizationId, bookingChannelId: input.bookingChannelId } }, update: {}, create: { organizationId: this.organizationId, ...input, createdBy: actorId } });
+    return this.tx.reservationFeed.upsert({ where: { organizationId_bookingChannelId: { organizationId: this.organizationId, bookingChannelId: input.bookingChannelId } }, update: { name: input.name, enabled: true, nextSyncAt: new Date() }, create: { organizationId: this.organizationId, ...input, createdBy: actorId } });
   }
   feed(id: string) { return this.tx.reservationFeed.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null }, include: { channel: { select: { syncEndpointEncrypted: true, status: true, importEnabled: true, syncMode: true } } } }); }
 
