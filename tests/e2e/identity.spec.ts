@@ -115,7 +115,11 @@ test.describe("identity lifecycle", () => {
     await createRoleForm.getByTestId("custom-role-description").fill("E2E property scoped role");
     await createRoleForm.locator('input[name="permissionKeys"][value="property:view"]').check();
     await createRoleForm.locator('input[name="permissionKeys"][value="task:view"]').check();
+    const roleCreation = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === "/en/app/identity" && Boolean(response.request().headers()["next-action"]));
     await createRoleForm.getByTestId("custom-role-submit").click();
+    const createdRoleResponse = await roleCreation;
+    expect(createdRoleResponse.ok()).toBe(true);
+    await createdRoleResponse.finished();
     await expect(page.getByTestId("role-catalog-row").filter({ hasText: customRoleName })).toContainText("Custom role");
     const roleRow = page.getByTestId("role-catalog-row").filter({ hasText: customRoleName });
     await roleRow.getByText("Edit role").click();
