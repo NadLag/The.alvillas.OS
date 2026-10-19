@@ -53,7 +53,7 @@ export async function operationSeriesOptions(
       city: p.cityId ?? p.city,
       region: p.regionId ?? p.region,
     });
-    const rule = await repo.recurring(p.id);
+    const rule = await repo.recurring(p.id, deps.now);
     return {
       version: rule?.version ?? 0,
       series: rule ? recurringTasksSchema.parse(rule.parsedValue).series : [],
@@ -82,7 +82,7 @@ export async function saveOperationSeries(
       region: p.regionId ?? p.region,
     };
     operationAllowed(ctx, "create", resource);
-    const rule = await repo.recurring(p.id);
+    const rule = await repo.recurring(p.id, deps.now);
     if ((rule?.version ?? 0) !== value.expectedVersion)
       throw new ReservationConflictError();
     const before = rule
@@ -182,7 +182,7 @@ export async function generateRecurringOperations(
       last.getTime() > todayMs + policy.recurrence_horizon_days * 86400000
     )
       throw new ReservationConflictError("recurrence_range_outside_policy");
-    const rule = await repo.recurring(property.id);
+    const rule = await repo.recurring(property.id, deps.now);
     if (!rule) return { created: 0, existing: 0, more: false };
     const series = recurringTasksSchema.parse(rule.parsedValue).series,
       existingKeys = new Set(
@@ -405,7 +405,7 @@ export async function scheduleOperationTasks(
   let generated = 0;
   for (const p of properties) {
     const configured = await withTenant(db, organizationId, (tx) =>
-      new OperationRepository(tx, organizationId).recurring(p.id),
+      new OperationRepository(tx, organizationId).recurring(p.id, now),
     );
     if (
       configured &&

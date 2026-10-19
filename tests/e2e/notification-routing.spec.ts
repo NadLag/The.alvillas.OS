@@ -3,6 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { setPropertyCity } from "./support/property-form";
+import { preferOperationPerformer } from "./support/operation-policy";
 
 test.describe("event notification routing", () => {
   test.skip(!process.env.DATABASE_URL, "DATABASE_URL is required for routing E2E");
@@ -33,6 +34,7 @@ test.describe("event notification routing", () => {
       await page.getByTestId("property-bedrooms").fill("2"); await page.getByTestId("property-bathrooms").fill("2");
       await page.getByTestId("property-max-guests").fill("4"); await page.getByTestId("property-submit").click();
       await expect(page.getByRole("heading", { name: propertyName })).toBeVisible();
+      await preferOperationPerformer(email, propertyName);
       const property = await client.property.findFirstOrThrow({ where: { organizationId: account.organizationId, name: propertyName } });
       const adminRole = await client.role.create({ data: { organizationId: account.organizationId, key: `routing-${suffix}`, name: `Routing team ${suffix}` } });
       const permissions = await client.permission.findMany({ where: { organizationId: account.organizationId, key: { in: ["task:view", "reservation:view"] } } });

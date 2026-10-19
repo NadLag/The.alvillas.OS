@@ -156,14 +156,15 @@ export class OperationRepository {
       },
     });
   }
-  async recurring(propertyId: string) {
+  async recurring(propertyId: string, asOf = new Date()) {
     const scopes = await new ReservationConfigScopeRepository(
       this.tx,
       this.organizationId,
-    ).scopes({ propertyId, asOf: new Date() });
+    ).scopes({ propertyId, asOf });
     return new ConfigRuleRepository(this.tx, this.organizationId).resolve({
       key: "ops.recurring_tasks",
       scopes,
+      asOf,
     });
   }
   async policies(propertyIds: string[], asOf: Date) {

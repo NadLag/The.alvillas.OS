@@ -29,6 +29,8 @@ import {
 } from "@/modules/reservations/application/operation-scheduling";
 import {
   generateRecurringOperations,
+  saveOperationSeries,
+  operationSeriesOptions,
   operationReadiness,
   scheduleOperationTasks,
 } from "@/modules/reservations/application/operation-automation";
@@ -875,6 +877,122 @@ describe("operations on real PostgreSQL", () => {
     expect((await operationReadiness(f.ctx, options))[0].generationFailed).toBe(
       false,
     );
+  });
+  it("edits and pauses effective recurring series without cancelling begun work or accepting stale configuration", async () => {
+    const f = await fixture();
+    await crew(f);
+    const options = { ...deps(), now: new Date("2027-04-10T12:00:00Z") };
+    const definition = {
+      key: "pause-verification",
+      type: "CLEANING",
+      title: { en: "Daily cleaning", fr: "Nettoyage quotidien" },
+      checklist_template_key: "inspection",
+      starts_on: "2027-04-10",
+      ends_on: "2027-04-12",
+      every_days: 1,
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      start_minute: 540,
+      priority: "NORMAL",
+      enabled: true,
+    };
+    const command = {
+      propertyId: f.property.id,
+      expectedVersion: 0,
+      definition,
+      cancelFuture: false,
+      reason: "Configure effective recurring cleaning",
+    };
+    await expect(
+      saveOperationSeries(f.workerCtx, command, options),
+    ).rejects.toBeInstanceOf(ReservationAuthorizationError);
+    const rule = await saveOperationSeries(f.ctx, command, options);
+    expect(
+      (await operationSeriesOptions(f.ctx, f.property.id, options)).version,
+    ).toBe(rule.version);
+    expect(
+      (
+        await generateRecurringOperations(
+          f.ctx,
+          {
+            propertyId: f.property.id,
+            from: "2027-04-10",
+            until: "2027-04-12",
+          },
+          options,
+        )
+      ).created,
+    ).toBe(3);
+    const tasks = await withTenant(db, f.org, (tx) =>
+      tx.operationTask.findMany({
+        where: { organizationId: f.org, seriesKey: definition.key },
+        orderBy: { dueDate: "asc" },
+      }),
+    );
+    await transitionOperationTask(
+      f.ctx,
+      {
+        taskId: tasks[1].id,
+        expectedVersion: tasks[1].version,
+        state: "IN_PROGRESS",
+        reason: "Worker has already begun this checklist",
+        idempotencyKey: randomUUID(),
+      },
+      options,
+    );
+    const paused = await saveOperationSeries(
+      f.ctx,
+      {
+        ...command,
+        expectedVersion: rule.version,
+        definition: { ...definition, enabled: false },
+        cancelFuture: true,
+        reason: "Pause future cleaning while preserving begun work",
+      },
+      options,
+    );
+    expect(paused.version).toBe(rule.version + 1);
+    const states = await withTenant(db, f.org, (tx) =>
+      tx.operationTask.findMany({
+        where: { organizationId: f.org, seriesKey: definition.key },
+        orderBy: { dueDate: "asc" },
+        select: { state: true },
+      }),
+    );
+    expect(states.map((t) => t.state)).toEqual([
+      "CANCELLED",
+      "IN_PROGRESS",
+      "CANCELLED",
+    ]);
+    await expect(
+      saveOperationSeries(
+        f.ctx,
+        { ...command, expectedVersion: rule.version },
+        options,
+      ),
+    ).rejects.toBeInstanceOf(ReservationConflictError);
+    expect(
+      (
+        await generateRecurringOperations(
+          f.ctx,
+          {
+            propertyId: f.property.id,
+            from: "2027-04-10",
+            until: "2027-04-12",
+          },
+          options,
+        )
+      ).created,
+    ).toBe(0);
+    expect(
+      await withTenant(db, f.org, (tx) =>
+        tx.auditLog.count({
+          where: {
+            organizationId: f.org,
+            action: "task.recurrence.configured",
+          },
+        }),
+      ),
+    ).toBe(2);
   });
   it("paginates and monitors 500 properties without per-property SQL queries", async () => {
     const f = await fixture();
