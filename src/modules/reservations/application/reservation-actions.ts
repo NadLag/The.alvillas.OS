@@ -107,7 +107,7 @@ export async function createManualReservationAction(
 
   revalidatePath(`/${appLocale}/app/reservations`);
   revalidatePath(`/${appLocale}/app/operations`);
-  redirect(`/${appLocale}/app/operations`);
+  redirect(`/${appLocale}/app/operations?propertyId=${parsed.data.propertyId}`);
 }
 
 export async function completeFieldTaskAction(

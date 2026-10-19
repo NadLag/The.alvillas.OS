@@ -2408,5 +2408,6 @@ textarea:disabled {
 .operation-calendar { display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:.5rem; }
 .operation-calendar-day { min-inline-size:0;min-block-size:8rem;border:1px solid var(--border);border-radius:.75rem;padding:.5rem;overflow-wrap:anywhere; }
 .operation-calendar-day h2 { font-size:.875rem; }.operation-calendar-day .resource-row { display:block; }.operation-calendar-day small { display:block; }
+.operation-calendar-day .secondary-button { max-inline-size:100%;white-space:normal;overflow-wrap:anywhere; }
 .operation-timeline { padding-inline-start:1.5rem; }.operation-timeline li { padding-block:1rem; }
 @media(max-width:600px){.operation-calendar{grid-template-columns:repeat(2,minmax(0,1fr));}.operation-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}.operation-filters label{inline-size:100%;}.operation-filters input,.operation-filters select{inline-size:100%;}}

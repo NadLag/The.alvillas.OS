@@ -22,6 +22,7 @@ import {
 } from "@/modules/reservations/domain/operation-task";
 import { taskTypeSchema } from "@/platform/config/rule-registry";
 import { OperationForm } from "@/modules/reservations/ui/operation-form";
+import { whatsappComposerPath } from "@/platform/notifications/whatsapp-path";
 export const dynamic = "force-dynamic";
 export default async function OperationsPage({
   params,
@@ -37,11 +38,12 @@ export default async function OperationsPage({
   const input = Object.fromEntries(
     Object.entries(await searchParams).filter(([, v]) => typeof v === "string"),
   );
-  const [t, f, m, readiness] = await Promise.all([
+  const [t, f, m, readiness, whatsapp] = await Promise.all([
       getTranslations({ locale, namespace: "Operations" }),
       getFormatter({ locale }),
       operationManagement(ctx, input),
       operationReadiness(ctx),
+      getTranslations({locale,namespace:"Whatsapp"}),
     ]),
     q = m.query,
     base = `/${locale}/app/operations`;
@@ -105,6 +107,7 @@ export default async function OperationsPage({
           {t(`manage.states.${task.risk === "CLEAR" ? task.state : task.risk}`)}
         </span>
         <span>{t(`manage.priorities.${task.priority}`)}</span>
+        <Link className="secondary-button" data-testid="task-whatsapp" href={whatsappComposerPath(locale,{type:"task",id:task.id})}>{whatsapp("title")}</Link>
         <span>
           {t("manage.progress", {
             done: task.checklistItems.filter((i) => i.completedAt).length,
