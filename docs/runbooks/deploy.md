@@ -8,7 +8,11 @@ ALVILLAS OS uses its own Vercel project and database. Never deploy this reposito
 
 The staging project is `the-alvillas-os`.
 
-`main` deploys to the staging URL. Preview deployments are for pull requests only; branch pushes without a pull request are skipped by the Vercel ignored-build command in `vercel.json`.
+`main` deploys through the GitHub `deploy-staging` job to `https://the-alvillas-os-staging.vercel.app`. It creates a Vercel Preview deployment; Production is separate. Pull requests also receive previews. Branch pushes without a pull request are skipped by the Vercel ignored-build command in `vercel.json`.
+
+The GitHub `staging` environment requires variables `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` and `STAGING_DATABASE_IDENTITY`, and secrets `VERCEL_TOKEN` and `STAGING_MIGRATION_DATABASE_URL`. Configure secrets privately; never paste them into chat, logs or Git. The migration secret is the dedicated private preview migration credential, never the application's restricted runtime role. `STAGING_DATABASE_IDENTITY` is the SHA-256 of the preview hostname (without `-pooler`) followed by the URL pathname. Independently compare that identity with the private runtime connection before configuring it. A database move requires updating both entries deliberately.
+
+The migration guard requires this repository's merged main ref, the independent project/team and the approved preview database identity. Builds run remotely so unreadable Vercel Preview Secrets stay in Vercel. The migration credential is never added to application runtime variables. Missing configuration fails deployment visibly. Deployments run serially and recheck current main before migrations and alias assignment. Health, readiness and exact SHA/preview/main metadata must pass on both the new deployment and the permanent alias.
 
 Before a staging deployment is accepted:
 
@@ -17,6 +21,8 @@ Before a staging deployment is accepted:
 3. Run `prisma migrate deploy` against that database.
 4. Run first-admin bootstrap only for a new database; preserve existing account credentials.
 5. Verify `/api/health`, login, tenant isolation, RLS, structured logging, and staging Playwright smoke tests.
+
+For Operations acceptance, refresh the owner's real administrator session interactively and save Playwright state outside Git with a user-only ACL. Do not log passwords, cookies, tokens or MFA codes. Set `STAGING_EXPECTED_SHA`, `STAGING_STORAGE_STATE_FILE`, `STAGING_OPERATIONS_FIXTURE_FILE` and `STAGING_EVIDENCE_FILE` to the verified merged commit and private local files, then run `scripts/staging-operations-verify.ts` or `scripts/staging-operations-management-verify.ts` with `tsx`. The prepared fixture must belong to the independent preview database and an authorized tenant. Exercise actual private R2 photo upload/download, denied unauthenticated download, field checklist completion, separate proxy performer/validator identities, recurrence replay and pause, bulk actions, saved views and EN/FR/RTL desktop/mobile accessibility. Retain business history and evidence; do not delete completed acceptance tasks or uploaded evidence as cleanup.
 
 ### Inngest background execution
 
