@@ -119,7 +119,8 @@ export async function pushSyncOps(
             note: op.payload.note
           },
           tx,
-          metaForOp(deps, op)
+          metaForOp(deps, op),
+          "OFFLINE_SYNC"
         );
         const serverVersion = completed.completedAt?.toISOString() ?? null;
         const applied = appliedResult(op, serverVersion);

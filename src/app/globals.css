@@ -2383,3 +2383,8 @@ textarea:disabled {
   .reservation-calendar th:first-child { min-inline-size: 145px; max-inline-size: 145px; }
   .reservation-management-form button { min-block-size: 48px; }
 }
+/* Operational detail panels keep readable columns at field widths. */
+.operation-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr)); gap: 1.5rem; }
+.operation-detail-grid .panel { min-inline-size: 0; overflow-wrap: anywhere; }
+.operation-detail-grid fieldset { border: 0; padding: 0; min-inline-size: 0; }
+.operation-detail-grid dd { margin-inline-start: 0; overflow-wrap: anywhere; }

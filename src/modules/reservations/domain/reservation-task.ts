@@ -105,6 +105,9 @@ export type OperationTaskSummary = {
   completionIdempotencyKey: string | null;
   completedAt: Date | null;
   createdAt: Date;
+  city?: string;
+  region?: string | null;
+  assignedToPersonId?: string | null;
 };
 
 export type OperationTaskChecklistItemSummary = {
