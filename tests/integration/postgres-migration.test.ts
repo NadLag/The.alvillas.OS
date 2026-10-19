@@ -238,6 +238,7 @@ function actorForOrganization(
     permissionKey("reservation", "create"),
     permissionKey("task", "view"),
     permissionKey("task", "create"),
+    permissionKey("task", "assign"),
     permissionKey("task", "edit")
   ])
 ): ReservationActorContext {
@@ -260,6 +261,17 @@ async function activeReservationActor(organizationId: string, permissions?: Set<
     const person = await tx.person.create({ data: { organizationId, displayName: "Reservation integration operator" } });
     const account = await tx.userAccount.create({ data: { organizationId, personId: person.id, status: "ACTIVE" } });
     return { person, account };
+  });
+  await ensureStandardIdentitySetup(organizationId, { db: prisma });
+  await withTenant(prisma, organizationId, async tx => {
+    const role=await tx.role.create({data:{organizationId,key:"reservation-integration-operator",name:"Reservation integration operator"}});
+    for(const key of actorForOrganization(organizationId,permissions).authContext.permissions){
+      const permission=await tx.permission.findFirstOrThrow({where:{organizationId,key}});
+      await tx.rolePermission.create({data:{organizationId,roleId:role.id,permissionId:permission.id}});
+    }
+    await tx.roleAssignment.create({data:{organizationId,personId:identity.person.id,userAccountId:identity.account.id,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});
+    const fieldRole=await tx.role.findFirstOrThrow({where:{organizationId,key:"field_staff"}});
+    await tx.roleAssignment.create({data:{organizationId,personId:identity.person.id,userAccountId:identity.account.id,roleId:fieldRole.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});
   });
   const ctx = actorForOrganization(organizationId, permissions);
   return { ...ctx, actorId: identity.account.id, personId: identity.person.id,
@@ -7903,7 +7915,7 @@ describe("PostgreSQL baseline", () => {
     await withTenant(prisma, f.organization.id, async tx => {
       const role = await tx.role.create({ data: { organizationId: f.organization.id, key: "reservation-sync-operator", name: "Reservation sync operator" } });
       for (const key of f.ctx.authContext.permissions) {
-        const [resource, action] = key.split(":"); const permission = await tx.permission.create({ data: { organizationId: f.organization.id, resource, action, key } });
+        const [resource, action] = key.split(":"); const permission = await tx.permission.upsert({ where: { organizationId_key: { organizationId: f.organization.id, key } }, update: {}, create: { organizationId: f.organization.id, resource, action, key } });
         await tx.rolePermission.create({ data: { organizationId: f.organization.id, roleId: role.id, permissionId: permission.id } });
       }
       await tx.roleAssignment.create({ data: { organizationId: f.organization.id, roleId: role.id, personId: f.ctx.personId, userAccountId: f.ctx.actorId, scopeType: "property", scopeId: f.property.id } });

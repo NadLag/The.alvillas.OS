@@ -11,6 +11,7 @@ import { outboxDispatchEvent } from "./outbox";
 
 import { scheduleDigests } from "@/platform/notifications/digest-service";
 import { scheduleTeamDocumentReminders } from "@/modules/identity/application/team-documents";
+import { scheduleOperationTasks,operationSchedulerProperties } from "@/modules/reservations/application/operation-automation";
 
 export { outboxDispatchEvent };
 export const outboxDispatchInput = z.object({ organizationId: z.string().uuid(), outboxEventId: z.string().uuid() }).strict();
@@ -46,6 +47,8 @@ export const dispatchOutbox = inngest.createFunction({ id: "dispatch-outbox", na
   const total: DispatchOutboxResult & { organizations: number } = { organizations: organizations.length, dispatched: 0, failed: 0, skipped: 0 };
   for (const { id } of organizations) {
     await step.run(`sync-reservation-feeds-${id}`, () => scheduleReservationSyncs(id));
+    const operationProperties=await step.run(`operations-properties-${id}`,()=>operationSchedulerProperties(id));
+    for(const propertyId of operationProperties)await step.run(`schedule-operations-${id}-${propertyId}`,()=>scheduleOperationTasks(id,{propertyId}));
     await step.run(`schedule-staff-documents-${id}`, () => scheduleTeamDocumentReminders(id));
     await step.run(`schedule-digests-${id}`, () => scheduleDigests(id));
     const result = await step.run(`dispatch-${id}`, () => dispatchOrganization(id));

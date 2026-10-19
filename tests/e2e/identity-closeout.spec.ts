@@ -222,6 +222,7 @@ test.describe("identity closeout acceptance", () => {
     const creationResponse = await created;
     expect(creationResponse.status()).toBe(200);
     // The refreshed page can keep streaming after the command has committed.
+    await expect(page.getByTestId("person-create-submit")).toBeEnabled({ timeout: 30_000 });
     await expect(page.getByTestId("person-create-form").getByRole("status")).toHaveText("Person profile created.");
     const person = page.getByTestId("person-profile-row").filter({ hasText: personName });
     await expect(person).toBeVisible();

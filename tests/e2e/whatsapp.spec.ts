@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { PrismaClient } from "@prisma/client";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
+import { preferOperationPerformer } from "./support/operation-policy";
 
 test.describe("manual WhatsApp notification", () => {
   test.skip(!process.env.DATABASE_URL, "DATABASE_URL is required for actual authenticated WhatsApp journeys");
@@ -19,6 +20,7 @@ test.describe("manual WhatsApp notification", () => {
       // Keep the existing revenue controls present: the WhatsApp action must stay
       // reachable beside financial controls as well as on an empty database.
       await client.ledgerAccount.create({ data: { organizationId: account.organizationId, code: `WA_${Date.now()}_${testInfo.workerIndex}`, name: `WA bank ${suffix}`, accountType: "ASSET_LOCATION", normalSide: "DEBIT" } });
+      await preferOperationPerformer(email,property.name);
       await page.goto("/en/login"); await waitForE2EAdminLoginWindow(page, email);
       await page.getByTestId("login-email").fill(email); await page.getByTestId("login-password").fill(password); await page.getByTestId("login-submit").click();
       await completeE2EAdminMfa(page, email); await expect(page).toHaveURL(/\/en\/app$/u);
@@ -30,7 +32,7 @@ test.describe("manual WhatsApp notification", () => {
       await page.getByTestId("reservation-guest-phone").fill("+212 612345678"); await page.getByTestId("reservation-guest-locale").selectOption("fr");
       await page.getByTestId("reservation-guest-phone").blur();
       await expect(page.getByTestId("reservation-guest-phone").locator("..").getByRole("alert")).toHaveCount(0);
-      await page.getByTestId("reservation-submit").click(); await expect(page).toHaveURL(/\/en\/app\/operations$/u, { timeout: 30000 });
+      await page.getByTestId("reservation-submit").click(); await expect(page).toHaveURL(new RegExp(`/en/app/operations\\?propertyId=${property.id}$`,'u'), { timeout: 30000 });
       const reservation = await client.reservation.findFirstOrThrow({ where: { propertyId: property.id } });
       expect(reservation.guestPhone).toBe("+212612345678");
       await page.goto("/en/app/reservations");
@@ -73,7 +75,7 @@ test.describe("manual WhatsApp notification", () => {
       await page.reload(); await expect(page.getByTestId("whatsapp-locale")).toHaveValue("en"); await page.getByTestId("whatsapp-prepare").click();
       await expect(page.getByTestId("whatsapp-preview")).toContainText("+447911123456");
       await page.getByText("Update guest contact", { exact: true }).click(); expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-      await page.goto("/en/app/operations");
+      await page.goto(`/en/app/operations?propertyId=${property.id}`);
       expect(await page.evaluate((width) => document.documentElement.scrollWidth <= width, page.viewportSize()!.width)).toBe(true);
       await page.getByTestId("operation-task-row").filter({ hasText: property.name }).first().getByTestId("task-whatsapp").click();
       // The default property task routing includes the assigned account.

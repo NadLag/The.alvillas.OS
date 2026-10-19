@@ -68,6 +68,9 @@ model Organization {
   operationTasks                                 OperationTask[]
   operationTaskEvents                            OperationTaskEvent[]
   operationTaskMutations                         OperationTaskMutation[]
+  operationSavedViews                            OperationSavedView[]
+  operationEvidence                              OperationTaskEvidence[]
+  operationIssues                                OperationIssue[]
   taskChecklistItems                             OperationTaskChecklistItem[]
   syncOps                                        SyncOp[]
   airbnbSettlements                              AirbnbSettlement[]
@@ -288,6 +291,7 @@ model UserAccount {
   assignedTasks          OperationTask[]              @relation("OperationTaskAssignedAccount")
   completedTasks         OperationTask[]              @relation("OperationTaskCompletedAccount")
   completedChecks        OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
+  operationViews         OperationSavedView[]
   syncOps                SyncOp[]                     @relation("SyncOpActorAccount")
   ownerPortalAccesses    OwnerPortalAccess[]
   notifications          Notification[]
@@ -945,6 +949,11 @@ model OperationTask {
   completionSource         String?                      @map("completion_source")
   checklistTemplateKey     String?                      @map("checklist_template_key")
   checklistConfigRuleId    String?                      @map("checklist_config_rule_id") @db.Uuid
+  requiredRoleKey          String?                      @map("required_role_key")
+  scheduledStart          DateTime?                    @map("scheduled_start") @db.Timestamptz(6)
+  scheduledEnd            DateTime?                    @map("scheduled_end") @db.Timestamptz(6)
+  seriesKey               String?                      @map("series_key")
+  seriesConfigRuleId      String?                      @map("series_config_rule_id") @db.Uuid
   type                     String
   state                    String                       @default("PLANNED")
   priority                 String                       @default("NORMAL")
@@ -966,6 +975,8 @@ model OperationTask {
   checklistItems           OperationTaskChecklistItem[]
   events                   OperationTaskEvent[]
   mutations                OperationTaskMutation[]
+  evidence                 OperationTaskEvidence[]
+  issues                   OperationIssue[]
 
   @@unique([organizationId, idempotencyKey], map: "operation_task_org_idempotency_unique")
   @@unique([organizationId, id], map: "operation_task_org_id_unique")
@@ -976,6 +987,8 @@ model OperationTask {
   @@index([organizationId, assignedToUserAccountId, state, dueDate], map: "operation_task_org_assignee_state_due_idx")
   @@index([organizationId, assignedToPersonId, state, dueDate], map: "operation_task_org_person_state_due_idx")
   @@index([organizationId, completedAt], map: "operation_task_org_completed_at_idx")
+  @@index([organizationId, assignedToPersonId, scheduledStart, scheduledEnd], map: "operation_task_person_schedule_idx")
+  @@index([organizationId, seriesKey, dueDate], map: "operation_task_series_date_idx")
   @@map("operation_task")
 }
 
@@ -1005,6 +1018,7 @@ model OperationTaskMutation {
   taskId         String   @map("task_id") @db.Uuid
   key            String   @db.Uuid
   payloadHash    String   @map("payload_hash")
+  resultResourceId String? @map("result_resource_id") @db.Uuid
   createdBy      String   @map("created_by") @db.Uuid
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operation_task_mutation_org_fk")
@@ -1013,6 +1027,59 @@ model OperationTaskMutation {
   @@unique([organizationId, key], map: "operation_task_mutation_key_unique")
   @@index([organizationId, taskId], map: "operation_task_mutation_task_idx")
   @@map("operation_task_mutation")
+}
+
+model OperationSavedView {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  userAccountId String @map("user_account_id") @db.Uuid
+  name String
+  filters Json
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  userAccount UserAccount @relation(fields:[organizationId,userAccountId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,userAccountId,name],map:"operation_saved_view_name_unique")
+  @@index([organizationId,userAccountId,archivedAt],map:"operation_saved_view_user_idx")
+  @@map("operation_saved_view")
+}
+
+model OperationTaskEvidence {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ taskId String @map("task_id") @db.Uuid
+ note String
+ storageKey String? @unique @map("storage_key")
+ contentType String? @map("content_type")
+ size Int?
+ sha256 String?
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ task OperationTask @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ @@index([organizationId,taskId,createdAt],map:"operation_evidence_task_idx")
+ @@map("operation_task_evidence")
+}
+
+model OperationIssue {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ taskId String @map("task_id") @db.Uuid
+ propertyId String @map("property_id") @db.Uuid
+ title String
+ description String
+ severity String
+ state String @default("OPEN")
+ idempotencyKey String @map("idempotency_key") @db.Uuid
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ task OperationTask @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ @@unique([organizationId,idempotencyKey],map:"operation_issue_key_unique")
+ @@index([organizationId,propertyId,state],map:"operation_issue_property_state_idx")
+ @@map("operation_issue")
 }
 
 model OperationTaskChecklistItem {

@@ -10,6 +10,7 @@ export const notificationInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("task_assigned"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("reservation_created"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("task_completed"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("task_overdue"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("security_session_revoked"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict()
 ]);
 export type NotificationInput = z.infer<typeof notificationInputSchema>;

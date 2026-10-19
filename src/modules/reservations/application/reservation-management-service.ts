@@ -1,4 +1,8 @@
+import { propertyMinute } from "../domain/operation-task";
 import type { Prisma } from "@prisma/client";
+import { OperationRepository } from "../infrastructure/operation-repository";
+import { assignTaskInTransaction,taskCandidates } from "./operation-scheduling";
+import { taskResource } from "./operation-service";
 import { connectPropertyReservationChannel, recordPropertyReservationSync } from "@/platform/reservations/property-channel";
 import { decryptSecret } from "@/platform/auth/secret-encryption";
 import { createHash, randomUUID } from "node:crypto";
@@ -129,9 +133,25 @@ async function appendChange(tx: TenantTransaction, ctx: ReservationActorContext,
     if (before.status === "IMPORTED" && status === "CONFIRMED") {
       if (!authorize(ctx.authContext, "create", { type: "task", organizationId: ctx.organizationId, propertyId: before.propertyId })) throw new ReservationAuthorizationError();
       const generated = await repository.generateConfirmationTasks(before.id, ctx.actorId, ctx.personId);
+      for (const created of generated) {
+        const operations = new OperationRepository(tx, ctx.organizationId), full = (await operations.task(created.id))!;
+        if (authorize(ctx.authContext, "assign", taskResource(full))) {
+          const policy = await operations.policy(full.propertyId);
+          await assignTaskInTransaction(operations, ctx, full, null, policy.types[full.type]?.start_minute??policy.shift_start_minute, metadata, "Configured reservation task assignment");
+        }
+      }
       for (const task of generated) await audit(tx, ctx, metadata, "task.create", before.propertyId, task.id, null, task, "Confirmed imported reservation");
     }
+    await new OperationRepository(tx, ctx.organizationId).lock('crew-schedule');
     const taskChanges = await repository.reconcileTasks(before.id, ctx.actorId, input.reason);
+    for(const change of taskChanges){
+      const operations=new OperationRepository(tx,ctx.organizationId),task=await operations.task(change.id);if(!task||['COMPLETED','CANCELLED','SKIPPED'].includes(task.state))continue;
+      const resource=taskResource(task);if(!authorize(ctx.authContext,'edit',resource))throw new ReservationAuthorizationError();
+      await operations.lock('crew-schedule');const policy=await operations.policy(task.propertyId),minute=task.scheduledStart?propertyMinute(task.scheduledStart,task.property.timezone):policy.types[task.type]?.start_minute??policy.shift_start_minute;
+      const candidates=await taskCandidates(operations,task,task.dueDate.toISOString().slice(0,10),minute),same=task.assignedToPersonId?candidates.people.find(p=>p.personId===task.assignedToPersonId&&!p.conflict):null;
+      if(authorize(ctx.authContext,'assign',resource))await assignTaskInTransaction(operations,ctx,task,same?.personId??null,minute,metadata,input.reason);
+      else {await operations.context(ctx.actorId,metadata.requestId,input.reason);await operations.update(task.id,{scheduledStart:candidates.start,scheduledEnd:candidates.end,...(task.assignedToPersonId&&!same?{state:'BLOCKED'}:{})});}
+    }
     for (const change of taskChanges) await audit(tx, ctx, metadata, "task.reservation_adjusted", before.propertyId, change.id, change.before, change.after, change.reason);
     if (["CANCELLED", "NO_SHOW"].includes(status) || input.quote || input.operation === "EARLY_CHECKOUT") await repository.exception(before.propertyId, before.id, "FINANCIAL_REVIEW", `financial-change:${before.id}:${after.version}`, { operation: input.operation, version: after.version, sourceOnly: fromFeed }, ctx.actorId);
   }

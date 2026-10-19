@@ -3,6 +3,13 @@ import type { ConfigScopeCandidate } from "./config-rule-repository";
 
 export class ReservationConfigScopeRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
+  async propertyScopes(propertyIds:string[],asOf:Date){
+    const [properties,agreements]=await Promise.all([
+      this.tx.property.findMany({where:{organizationId:this.organizationId,id:{in:propertyIds}},select:{id:true,cityId:true}}),
+      this.tx.managementAgreement.findMany({where:{organizationId:this.organizationId,propertyId:{in:propertyIds},archivedAt:null,status:{not:'DRAFT'},effectiveFrom:{lte:asOf},OR:[{effectiveTo:null},{effectiveTo:{gt:asOf}}]},orderBy:[{effectiveFrom:'desc'},{id:'desc'}],select:{id:true,propertyId:true}})
+    ]);
+    return new Map(properties.map(p=>[p.id,[{scopeType:'organization',scopeId:null},...(p.cityId?[{scopeType:'city',scopeId:p.cityId}]:[]),{scopeType:'property',scopeId:p.id},...agreements.filter(a=>a.propertyId===p.id).slice(0,1).map(a=>({scopeType:'agreement',scopeId:a.id}))]]));
+  }
   async scopes(input: { propertyId: string; ownerId?: string; source?: string; asOf: Date }): Promise<ConfigScopeCandidate[]> {
     const [property, agreement, channel] = await Promise.all([
       this.tx.property.findFirst({ where: { organizationId: this.organizationId, id: input.propertyId }, select: { cityId: true } }),

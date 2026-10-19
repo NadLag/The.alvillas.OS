@@ -3,6 +3,7 @@ import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWind
 import { setPropertyCity } from "./support/property-form";
 import { ensureReservationRevenuePostingSetup } from "./support/reservation-revenue";
 import { formatCurrencyAmount } from "@/i18n/format";
+import { preferOperationPerformer } from "./support/operation-policy";
 
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
@@ -51,6 +52,7 @@ test.describe("manual reservation to operations tasks journey", () => {
     await page.getByTestId("property-max-guests").fill("8");
     await page.getByTestId("property-submit").click();
     await expect(page.getByRole("heading", { name: propertyName })).toBeVisible();
+    await preferOperationPerformer(loginEmail, propertyName);
 
     await page.goto("/en/app/reservations");
     await expect(page.getByTestId("reservations-page")).toBeVisible();

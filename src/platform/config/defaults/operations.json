@@ -1,0 +1,159 @@
+{
+  "shift_start_minute": 540,
+  "risk_window_minutes": 120,
+  "recurrence_horizon_days": 14,
+  "recurrence_lookback_days": 7,
+  "evidence_max_bytes": 3000000,
+  "evidence_link_seconds": 120,
+  "readiness_types": [
+    "ARRIVAL_PREPARATION",
+    "CHECKOUT_CLEANING",
+    "CLEANING",
+    "INSPECTION"
+  ],
+  "types": {
+    "ARRIVAL_PREPARATION": {
+      "role_keys": [
+        "housekeeper",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60,
+      "start_minute": 900
+    },
+    "CHECKOUT_CLEANING": {
+      "role_keys": [
+        "housekeeper",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60,
+      "start_minute": 720
+    },
+    "CLEANING_MIDSTAY": {
+      "role_keys": [
+        "housekeeper",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "CLEANING": {
+      "role_keys": [
+        "housekeeper",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "INSPECTION": {
+      "role_keys": [
+        "qa_inspector",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "POOL": {
+      "role_keys": [
+        "pool_technician",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "GARDEN": {
+      "role_keys": [
+        "gardener",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "MAINTENANCE": {
+      "role_keys": [
+        "maintenance",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "LAUNDRY": {
+      "role_keys": [
+        "housekeeper",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "INVENTORY": {
+      "role_keys": [
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "CHEF": {
+      "role_keys": [
+        "chef",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "TRANSFER": {
+      "role_keys": [
+        "driver",
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    },
+    "CUSTOM": {
+      "role_keys": [
+        "field_staff",
+        "admin"
+      ],
+      "preferred_people": [],
+      "fallback_people": [],
+      "max_daily_tasks": 8,
+      "duration_minutes": 60
+    }
+  }
+}

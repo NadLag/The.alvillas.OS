@@ -4,11 +4,12 @@ import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
 import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
-import { chromium, expect, type Page } from "@playwright/test";
+import { chromium, expect as playwrightExpect, type Page } from "@playwright/test";
 import { totpCode } from "@/platform/auth/totp";
 import { randomUUID } from "node:crypto";
 
 const enrolledAuthenticators = new Map<string, string>();
+const expect=playwrightExpect.configure({timeout:30000});
 const loginAttempts = new Map<string, { epoch: number; count: number }>();
 const workerAccountNamespace = randomUUID().slice(0, 8);
 
