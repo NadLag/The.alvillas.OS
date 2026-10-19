@@ -1,4 +1,5 @@
 import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
+import { OperationRepository } from "./operation-repository";
 import { createHash } from "node:crypto";
 import { normalizedReservationSchema, reservationSyncPolicyKey, reservationSyncPolicySchema, type NormalizedReservation } from "../domain/reservation";
 import { Money } from "@/platform/money/money";
@@ -110,6 +111,9 @@ function taskToSummary(task: TaskWithRelations): OperationTaskSummary {
     id: task.id,
     propertyId: task.propertyId,
     propertyName: task.property.name,
+    city: task.property.cityId ?? task.property.city,
+    region: task.property.regionId ?? task.property.region,
+    assignedToPersonId: task.assignedToPersonId,
     reservationReference: task.reservation?.reference ?? null,
     guestName: task.reservation?.guestName ?? null,
     type: task.type as OperationTaskSummary["type"],
@@ -382,6 +386,7 @@ export class ReservationRepository {
     template: ReservationTaskTemplate,
     actor: { userAccountId: string; personId: string }
   ): Promise<{ task: OperationTaskSummary; created: boolean }> {
+    await new OperationRepository(this.tx, this.organizationId).context(actor.userAccountId, crypto.randomUUID(), "Reservation workflow generation");
     const idempotencyKey = `${reservation.id}:${template.key}`;
     const existing = await this.tx.operationTask.findUnique({
       where: {
@@ -408,10 +413,11 @@ export class ReservationRepository {
         type: template.type,
         assignedToUserAccountId: actor.userAccountId,
         assignedToPersonId: actor.personId,
-        state: "PLANNED",
+        state: "ASSIGNED",
         priority: template.priority,
         dueDate: template.due === "CHECK_IN" ? reservation.checkIn : reservation.checkOut,
         titleTranslations: taskTitleJson(template),
+        checklistTemplateKey: template.checklistTemplateKey,
         idempotencyKey,
         createdBy: actor.userAccountId,
         checklistItems: {
@@ -521,7 +527,8 @@ export class ReservationRepository {
     task: FieldTaskSummary,
     checklistItemIds: string[],
     actor: { userAccountId: string; personId: string },
-    idempotencyKey: string
+    idempotencyKey: string,
+    completionSource: "SELF" | "OFFLINE_SYNC" = "SELF"
   ): Promise<FieldTaskSummary> {
     const completedAt = new Date();
     const allowedIds = new Set(task.checklistItems.map((item) => item.id));
@@ -556,6 +563,7 @@ export class ReservationRepository {
         completedByUserAccountId: actor.userAccountId,
         completedByPersonId: actor.personId,
         completionIdempotencyKey: idempotencyKey
+        ,completionSource
       }
     });
 
@@ -642,6 +650,7 @@ export class ReservationRepository {
       checkIn: dateToUtc(entry.checkIn), checkOut: dateToUtc(entry.checkOut), status: { notIn: ["CANCELLED", "NO_SHOW"] } }, take: 30 });
   }
   async reconcileTasks(reservationId: string, actorId: string, reason: string) {
+    await new OperationRepository(this.tx, this.organizationId).context(actorId, crypto.randomUUID(), reason);
     const changes: Array<{ id: string; before: { state: string; dueDate: Date }; after: { state: string; dueDate: Date }; reason: string }> = [];
     const reservation = await this.reservation(reservationId);
     if (!reservation) throw new Error("reservation_missing");

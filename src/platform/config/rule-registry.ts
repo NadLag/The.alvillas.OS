@@ -25,6 +25,11 @@ export const taskTypeSchema = z.enum([
   "POOL",
   "GARDEN",
   "MAINTENANCE",
+  "CLEANING",
+  "LAUNDRY",
+  "INVENTORY",
+  "CHEF",
+  "TRANSFER",
   "CUSTOM"
 ]);
 

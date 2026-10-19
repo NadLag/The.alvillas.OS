@@ -41,6 +41,7 @@ export async function enrollE2EAccountSecurity(email: string, password: string):
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
+    page.setDefaultTimeout(30000);
     await page.goto("http://localhost:3000/en/login");
     await page.getByTestId("login-email").fill(normalizedEmail);
     await page.getByTestId("login-password").fill(password);

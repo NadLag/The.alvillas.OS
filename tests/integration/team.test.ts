@@ -1,3 +1,4 @@
+import { provisionIntegrationRole } from "./support/database-role";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
@@ -162,13 +163,7 @@ describe("team management on real PostgreSQL", () => {
       stdio: "pipe"
     });
     admin = new PrismaClient({ datasourceUrl: url });
-    await admin.$executeRawUnsafe(
-      "DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='alvillas_team_tests') THEN CREATE ROLE alvillas_team_tests LOGIN PASSWORD 'alvillas_team_tests'; END IF; END $$"
-    );
-    await admin.$executeRawUnsafe("GRANT USAGE ON SCHEMA public TO alvillas_team_tests");
-    await admin.$executeRawUnsafe(
-      "GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO alvillas_team_tests"
-    );
+    await provisionIntegrationRole(admin, "alvillas_team_tests");
     const app = new URL(url);
     app.username = "alvillas_team_tests";
     app.password = "alvillas_team_tests";

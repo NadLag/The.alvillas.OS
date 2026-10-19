@@ -1,4 +1,6 @@
 import { initializeReservationHistory } from "./reservation-history";
+import { OperationRepository } from "../infrastructure/operation-repository";
+import { completeChecklist } from "../domain/operation-task";
 import { headers } from "next/headers";
 import { publishNotification } from "@/platform/notifications/notification-service";
 import {
@@ -62,20 +64,10 @@ export type ReservationAuditMeta = {
 function assertAllowed(
   ctx: ReservationActorContext,
   action: "view" | "create" | "edit",
-  resource: "reservation" | "task" | "guest",
-  id?: string
+  resource: "reservation" | "task" | "guest"
 ): void {
   if (ctx.organizationId !== ctx.authContext.organizationId) throw new ReservationAuthorizationError();
-  const allowed = id
-    ? authorize(ctx.authContext, action, {
-        type: resource,
-        organizationId: ctx.organizationId,
-        id,
-        reservationId: resource === "reservation" ? id : undefined,
-        taskId: resource === "task" ? id : undefined,
-        jobId: resource === "task" ? id : undefined
-      })
-    : authorizeCollection(ctx.authContext, action, resource);
+  const allowed = authorizeCollection(ctx.authContext, action, resource);
 
   if (!allowed) {
     throw new ReservationAuthorizationError();
@@ -346,6 +338,8 @@ export async function listOperationTasks(
         taskId: task.id,
         jobId: task.id,
         propertyId: task.propertyId,
+        city: task.city,
+        region: task.region,
         status: task.state,
         assignedUserAccountId: task.assignedToUserAccountId
       })
@@ -360,7 +354,10 @@ export async function listAssignedFieldTasks(
   assertAllowed(ctx, "view", "task");
 
   return withTenant(db(deps), ctx.organizationId, async (tx) =>
-    new ReservationRepository(tx, ctx.organizationId).listFieldTasks(ctx.actorId)
+    (await new ReservationRepository(tx, ctx.organizationId).listFieldTasks(ctx.actorId)).filter(task => authorize(ctx.authContext, "view", {
+      type: "task", organizationId: ctx.organizationId, id: task.id, taskId: task.id, jobId: task.id, propertyId: task.propertyId,
+      city: task.city, region: task.region, status: task.state, assignedUserAccountId: task.assignedToUserAccountId, assignedPersonId: task.assignedToPersonId
+    }))
   );
 }
 
@@ -369,7 +366,7 @@ export async function getAssignedFieldTask(
   taskId: string,
   deps: ReservationServiceDeps = {}
 ): Promise<FieldTaskSummary> {
-  assertAllowed(ctx, "view", "task", taskId);
+  assertAllowed(ctx, "view", "task");
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const task = await new ReservationRepository(tx, ctx.organizationId).findAssignedFieldTask(
@@ -381,6 +378,8 @@ export async function getAssignedFieldTask(
       throw new ReservationNotFoundError("Task is not assigned to this worker");
     }
 
+    if (!authorize(ctx.authContext, "view", { type: "task", organizationId: ctx.organizationId, id: task.id, taskId: task.id, jobId: task.id, propertyId: task.propertyId, city: task.city, region: task.region, status: task.state, assignedUserAccountId: task.assignedToUserAccountId, assignedPersonId: task.assignedToPersonId })) throw new ReservationNotFoundError();
+
     return task;
   });
 }
@@ -390,7 +389,7 @@ export async function completeAssignedFieldTask(
   input: CompleteTaskInput,
   deps: ReservationServiceDeps = {}
 ): Promise<FieldTaskSummary> {
-  assertAllowed(ctx, "edit", "task", input.taskId);
+  assertAllowed(ctx, "edit", "task");
   const meta = await auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) =>
@@ -402,16 +401,24 @@ export async function completeAssignedFieldTaskInTransaction(
   ctx: ReservationActorContext,
   input: CompleteTaskInput,
   tx: TenantTransaction,
-  meta: ReservationAuditMeta
+  meta: ReservationAuditMeta,
+  completionSource: "SELF" | "OFFLINE_SYNC" = "SELF"
 ): Promise<FieldTaskSummary> {
-  assertAllowed(ctx, "edit", "task", input.taskId);
+  assertAllowed(ctx, "edit", "task");
 
+  const operations = new OperationRepository(tx, ctx.organizationId);
+  await operations.lock(input.taskId);
+  const parsed = completeTaskInputSchema.parse(input);
+  await operations.lock(parsed.idempotencyKey);
   const repository = new ReservationRepository(tx, ctx.organizationId);
   const before = await repository.findAssignedFieldTask(input.taskId, ctx.actorId);
 
   if (!before) {
     throw new ReservationNotFoundError("Task is not assigned to this worker");
   }
+
+  const fullTask = (await operations.task(before.id))!;
+  if (!authorize(ctx.authContext, "edit", { type: "task", organizationId: ctx.organizationId, id: before.id, taskId: before.id, jobId: before.id, propertyId: before.propertyId, city: fullTask.property.cityId ?? fullTask.property.city, region: fullTask.property.regionId ?? fullTask.property.region, status: before.state, assignedUserAccountId: before.assignedToUserAccountId, assignedPersonId: fullTask.assignedToPersonId })) throw new ReservationAuthorizationError();
 
   if (before.state === "COMPLETED") {
     if (before.completedByUserAccountId === ctx.actorId) {
@@ -421,15 +428,18 @@ export async function completeAssignedFieldTaskInTransaction(
     throw new ReservationConflictError("Task was already completed by another worker");
   }
 
+  if (!["PLANNED", "ASSIGNED", "IN_PROGRESS"].includes(before.state)) throw new ReservationConflictError();
+
   const checklistItemIds = new Set(input.checklistItemIds);
-  const hasAllChecklistItems =
-    checklistItemIds.size === before.checklistItems.length &&
-    before.checklistItems.every((item) => checklistItemIds.has(item.id));
+  const hasAllChecklistItems = completeChecklist(before.checklistItems, input.checklistItemIds);
 
   if (!hasAllChecklistItems) {
     throw new ReservationConflictError("All checklist items must be completed before finishing");
   }
 
+  await operations.context(ctx.actorId, meta.requestId, input.note ?? "Assigned worker completion");
+  if (before.state === "PLANNED") await operations.update(before.id, { state: "ASSIGNED" });
+  if (before.state !== "IN_PROGRESS") await operations.update(before.id, { state: "IN_PROGRESS" });
   const completed = await repository.completeFieldTask(
     before,
     [...checklistItemIds],
@@ -437,7 +447,8 @@ export async function completeAssignedFieldTaskInTransaction(
       userAccountId: ctx.actorId,
       personId: ctx.personId
     },
-    input.idempotencyKey
+    input.idempotencyKey,
+    completionSource
   );
 
   await writeAuditEvent(tx, {

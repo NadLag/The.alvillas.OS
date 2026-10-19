@@ -6,6 +6,7 @@ import { reservationActorContextFromSession } from "@/modules/reservations/appli
 import { listOperationTasks } from "@/modules/reservations/application/reservation-service";
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
 import { auth } from "@/platform/auth/session";
+import { authorizeCollection } from "@/platform/authz/authorize";
 import { routing, type AppLocale } from "@/i18n/routing";
 import { whatsappComposerPath } from "@/platform/notifications/whatsapp-path";
 
@@ -39,6 +40,7 @@ export default async function OperationsPage({
       <ShellHeader
         actions={
           <>
+          {authorizeCollection(ctx.authContext, "create", "task") ? <Link className="primary-button" href={`/${appLocale}/app/operations/new`}>{t("manage.newTask")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/reservations`}>
             {t("newReservation")}
           </Link>
@@ -65,7 +67,7 @@ export default async function OperationsPage({
               <div className="resource-row task-row" data-testid="operation-task-row" key={task.id}>
                 <span>
                   <strong data-testid="operation-task-title">
-                    {localizedTaskTitle(task.title, appLocale)}
+                    <Link href={`/${appLocale}/app/operations/${task.id}`}>{localizedTaskTitle(task.title, appLocale)}</Link>
                   </strong>
                   <small>
                     {t("rowMeta", {
