@@ -221,11 +221,19 @@ test.describe("identity closeout acceptance", () => {
     await page.getByTestId("person-create-submit").click();
     const creationResponse = await created;
     expect(creationResponse.status()).toBe(200);
-    expect(await creationResponse.finished()).toBeNull();
-    expect((await creationResponse.text()).includes('"messageKey":"personCreated"')).toBe(true);
+    // The refreshed page can keep streaming after the command has committed.
     await expect(page.getByTestId("person-create-form").getByRole("status")).toHaveText("Person profile created.");
     const person = page.getByTestId("person-profile-row").filter({ hasText: personName });
     await expect(person).toBeVisible();
+    const profileDb = new PrismaClient();
+    try {
+      const createdProfiles = await withTenant(profileDb, bootstrapOrganizationId, tx => tx.person.findMany({
+        where: { organizationId: bootstrapOrganizationId, displayName: personName, phone },
+        select: { email: true, phone: true, preferredLocale: true, userAccounts: { select: { id: true } } }
+      }));
+      expect(createdProfiles).toHaveLength(1);
+      expect(createdProfiles[0]).toEqual({ email: null, phone, preferredLocale: "en", userAccounts: [] });
+    } finally { await profileDb.$disconnect(); }
     await person.locator("summary").click();
     await person.getByTestId("edit-person-display-name").fill(`${personName} edited`);
     await person.getByTestId("person-edit-submit").click();

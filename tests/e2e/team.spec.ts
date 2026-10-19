@@ -85,8 +85,6 @@ test.describe("Team Management", () => {
       await offboard.getByRole("button", { name: "Offboard person", exact: true }).click();
       const response = await offboardResponse;
       expect(response.status()).toBe(200);
-      expect(await response.finished()).toBeNull();
-      expect((await response.text()).includes('"status":"saved"')).toBe(true);
       // Successful offboarding removes the form during revalidation.
       await expect(page.getByText("Offboarded", { exact: true })).toBeVisible();
       await expect(offboard).toHaveCount(0);
