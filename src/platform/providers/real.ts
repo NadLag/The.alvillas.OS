@@ -1,3 +1,4 @@
+import { ICalAdapter } from "@/modules/reservations/domain/adapters";
 import { createHash, createHmac } from "node:crypto";
 import { escapeHtml } from "@/platform/encoding/html";
 import type {
@@ -320,8 +321,8 @@ export class R2StorageProvider implements StorageProvider {
   }
 }
 
-export class IcalReservationAdapter implements ReservationAdapter {
-  constructor(private readonly transport: HttpTransport = fetch) {}
+export class IcalReservationAdapter extends ICalAdapter implements ReservationAdapter {
+  constructor(private readonly transport: HttpTransport = fetch) { super(); }
 
   async sync(input: { organizationId: string; sourceId: string }): Promise<{ imported: number }> {
     void input.organizationId;

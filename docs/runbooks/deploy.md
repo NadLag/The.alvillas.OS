@@ -50,6 +50,14 @@ Configure `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and `R2_BU
 
 Acceptance must exercise an actual private upload and download, unauthorized access, an expiry reminder and duplicate replay. Keep F-TEM-07 IN-PROGRESS while storage credentials or real provider acceptance are missing. For other Team workflows use labeled staging records, append reversals for any acceptance movements, offboard temporary accounts and verify every original financial row is unchanged.
 
+## Reservations
+
+Apply the additive Reservations migration to Preview after a verified backup. Grant the runtime role SELECT and INSERT on `guest`, `reservation_feed`, `reservation_feed_entry`, `feed_sync_run`, `reservation_revision`, `reservation_financial_snapshot`, `calendar_block`, `reservation_import_batch` and `reservation_exception`. Grant UPDATE only on guest, feed, feed-entry, block and exception tables. Revoke UPDATE and DELETE on revision, financial-snapshot, sync-run and import-batch history. Verify forced RLS and the runtime role's non-bypass attributes.
+
+Reservation calendar feeds reuse each property's encrypted booking channel. The existing signed minute dispatcher schedules due feeds; no additional provider account is required. `reservation.sync_policy` controls intervals, missing-UID review thresholds and stale-health thresholds at organization or property scope. Review failed syncs and suspected cancellations in the calendar or Command Center. Failed and conditional requests never count as missing entries. Pause the feed when retiring an integration; retain its import and sync history.
+
+For acceptance, use labeled properties, import reservation CSV twice, modify dates and confirm preserved revisions, check overlapping dates and same-day turnovers, then cancel with a reason. Verify separate financial and guest permissions. Use an actual HTTPS calendar feed for transport verification and leave amounts and guest identity unknown. Keep any acceptance feed paused afterward. Existing payout imports remain in Reservations and use the finance reconciliation service; financial corrections append reversals.
+
 ## Production
 
 Production promotion is manual and requires owner approval.

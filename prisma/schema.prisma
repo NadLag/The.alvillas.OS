@@ -8,68 +8,77 @@ datasource db {
 }
 
 model Organization {
-  teamCompensations TeamCompensation[]
-  teamAvailabilities TeamAvailability[]
-  teamDocuments TeamDocument[]
-  teamWallets TeamWallet[]
-  id                        String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  name                      String
-  baseCurrency              String                       @default("MAD") @map("base_currency") @db.Char(3)
-  createdAt                 DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                 DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  profile                   OrganizationProfile?
-  regions                   Region[]
-  cities                    City[]
-  configRules               ConfigRule[]
-  templateVersions          PropertyTemplateVersion[]
-  templateRevisions         PropertyTemplateRevision[]
-  reservationSnapshots      ReservationConfigSnapshot[]
-  outboxEvents              OutboxEvent[]
-  notifications             Notification[]
-  notificationPreferences   NotificationPreference[]
-  pushSubscriptions         PushSubscription[]
-  notificationDeliveries    NotificationDelivery[]
-  notificationDeliveryLogs NotificationDeliveryLog[]
-  notificationEmailSuppressions NotificationEmailSuppression[]
-  approvalRequests          ApprovalRequest[]
-  approvalRecipients        ApprovalRecipient[]
-  auditLogs                 AuditLog[]
-  referenceSequences        ReferenceSequence[]
-  exchangeRates             ExchangeRate[]
-  ledgerAccounts            LedgerAccount[]
-  transactions              FinancialTransaction[]
-  postings                  Posting[]
-  commissionSnapshots       CommissionSnapshot[]
-  rateLimitBuckets          RateLimitBucket[]
-  persons                   Person[]
-  userAccounts              UserAccount[]
-  authCredentials           AuthCredential[]
-  authSessions              AuthSession[]
-  authDevices               AuthDevice[]
-  authChallenges            AuthChallenge[]
-  invitations               Invitation[]
-  roles                     Role[]
-  permissions               Permission[]
-  fieldPolicies             FieldPolicy[]
-  roleAssignments           RoleAssignment[]
-  rolePermissions           RolePermission[]
-  owners                    Owner[]
-  ownerRepresentatives      OwnerRepresentative[]
-  ownerPayoutMethods        OwnerPayoutMethod[]
-  ownerPortalAccesses       OwnerPortalAccess[]
-  properties                Property[]
-  propertyProfiles          PropertyOnboardingProfile[]
-  propertyOperatingProfiles PropertyOperatingProfile[]
-  bookingChannels           BookingChannel[]
-  managementAgreements      ManagementAgreement[]
-  propertyOwners            PropertyOwner[]
-  reservations              Reservation[]
-  reservationConflicts      ReservationConflict[]
-  operationTasks            OperationTask[]
-  taskChecklistItems        OperationTaskChecklistItem[]
-  syncOps                   SyncOp[]
-  airbnbSettlements         AirbnbSettlement[]
-  variances                 Variance[]
+  teamCompensations                              TeamCompensation[]
+  teamAvailabilities                             TeamAvailability[]
+  teamDocuments                                  TeamDocument[]
+  teamWallets                                    TeamWallet[]
+  id                                             String                         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  name                                           String
+  baseCurrency                                   String                         @default("MAD") @map("base_currency") @db.Char(3)
+  createdAt                                      DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                                      DateTime                       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  profile                                        OrganizationProfile?
+  regions                                        Region[]
+  cities                                         City[]
+  configRules                                    ConfigRule[]
+  templateVersions                               PropertyTemplateVersion[]
+  templateRevisions                              PropertyTemplateRevision[]
+  reservationSnapshots                           ReservationConfigSnapshot[]
+  outboxEvents                                   OutboxEvent[]
+  notifications                                  Notification[]
+  notificationPreferences                        NotificationPreference[]
+  pushSubscriptions                              PushSubscription[]
+  notificationDeliveries                         NotificationDelivery[]
+  notificationDeliveryLogs                       NotificationDeliveryLog[]
+  notificationEmailSuppressions                  NotificationEmailSuppression[]
+  approvalRequests                               ApprovalRequest[]
+  approvalRecipients                             ApprovalRecipient[]
+  auditLogs                                      AuditLog[]
+  referenceSequences                             ReferenceSequence[]
+  exchangeRates                                  ExchangeRate[]
+  ledgerAccounts                                 LedgerAccount[]
+  transactions                                   FinancialTransaction[]
+  postings                                       Posting[]
+  commissionSnapshots                            CommissionSnapshot[]
+  rateLimitBuckets                               RateLimitBucket[]
+  persons                                        Person[]
+  userAccounts                                   UserAccount[]
+  authCredentials                                AuthCredential[]
+  authSessions                                   AuthSession[]
+  authDevices                                    AuthDevice[]
+  authChallenges                                 AuthChallenge[]
+  invitations                                    Invitation[]
+  roles                                          Role[]
+  permissions                                    Permission[]
+  fieldPolicies                                  FieldPolicy[]
+  roleAssignments                                RoleAssignment[]
+  rolePermissions                                RolePermission[]
+  owners                                         Owner[]
+  ownerRepresentatives                           OwnerRepresentative[]
+  ownerPayoutMethods                             OwnerPayoutMethod[]
+  ownerPortalAccesses                            OwnerPortalAccess[]
+  properties                                     Property[]
+  propertyProfiles                               PropertyOnboardingProfile[]
+  propertyOperatingProfiles                      PropertyOperatingProfile[]
+  bookingChannels                                BookingChannel[]
+  managementAgreements                           ManagementAgreement[]
+  propertyOwners                                 PropertyOwner[]
+  reservations                                   Reservation[]
+  reservationConflicts                           ReservationConflict[]
+  operationTasks                                 OperationTask[]
+  taskChecklistItems                             OperationTaskChecklistItem[]
+  syncOps                                        SyncOp[]
+  airbnbSettlements                              AirbnbSettlement[]
+  variances                                      Variance[]
+  reservationGuestRecordRecords                  GuestRecord[]                  @relation("ReservationGuestRecordOrganization")
+  reservationReservationFeedRecords              ReservationFeed[]              @relation("ReservationReservationFeedOrganization")
+  reservationReservationFeedEntryRecords         ReservationFeedEntry[]         @relation("ReservationReservationFeedEntryOrganization")
+  reservationFeedSyncRunRecords                  FeedSyncRun[]                  @relation("ReservationFeedSyncRunOrganization")
+  reservationReservationRevisionRecords          ReservationRevision[]          @relation("ReservationReservationRevisionOrganization")
+  reservationReservationFinancialSnapshotRecords ReservationFinancialSnapshot[] @relation("ReservationReservationFinancialSnapshotOrganization")
+  reservationCalendarBlockRecords                CalendarBlock[]                @relation("ReservationCalendarBlockOrganization")
+  reservationReservationImportBatchRecords       ReservationImportBatch[]       @relation("ReservationReservationImportBatchOrganization")
+  reservationReservationExceptionRecords         ReservationException[]         @relation("ReservationReservationExceptionOrganization")
 
   @@map("organization")
 }
@@ -139,104 +148,108 @@ model OrganizationProfile {
 }
 
 model TeamCompensation {
-  currencyRef Currency @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_currency_fkey")
-  configRule ConfigRule @relation(fields: [configRuleId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_config_fkey")
-  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  assignmentId String @map("assignment_id") @db.Uuid
-  configRuleId String @map("config_rule_id") @db.Uuid
-  version Int
-  mode String
-  amount Decimal @db.Decimal(18, 2)
-  currency String @db.Char(3)
-  effectiveFrom DateTime @map("effective_from") @db.Timestamptz(6)
-  reason String
-  createdBy String @map("created_by") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  assignment RoleAssignment @relation(fields: [organizationId, assignmentId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  currencyRef    Currency       @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_currency_fkey")
+  configRule     ConfigRule     @relation(fields: [configRuleId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_config_fkey")
+  id             String         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String         @map("organization_id") @db.Uuid
+  assignmentId   String         @map("assignment_id") @db.Uuid
+  configRuleId   String         @map("config_rule_id") @db.Uuid
+  version        Int
+  mode           String
+  amount         Decimal        @db.Decimal(18, 2)
+  currency       String         @db.Char(3)
+  effectiveFrom  DateTime       @map("effective_from") @db.Timestamptz(6)
+  reason         String
+  createdBy      String         @map("created_by") @db.Uuid
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  assignment     RoleAssignment @relation(fields: [organizationId, assignmentId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
   @@unique([organizationId, assignmentId, version], map: "team_compensation_org_assignment_version_unique")
   @@index([organizationId, assignmentId, effectiveFrom], map: "team_compensation_org_assignment_effective_idx")
   @@map("team_compensation")
 }
 
 model TeamAvailability {
-  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  personId String @map("person_id") @db.Uuid
-  kind String
-  startsOn DateTime @map("starts_on") @db.Date
-  endsOn DateTime @map("ends_on") @db.Date
-  status String
-  reason String
-  decidedBy String? @map("decided_by") @db.Uuid
-  createdBy String @map("created_by") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  person Person @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  personId       String       @map("person_id") @db.Uuid
+  kind           String
+  startsOn       DateTime     @map("starts_on") @db.Date
+  endsOn         DateTime     @map("ends_on") @db.Date
+  status         String
+  reason         String
+  decidedBy      String?      @map("decided_by") @db.Uuid
+  createdBy      String       @map("created_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person         Person       @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
   @@index([organizationId, personId, startsOn, endsOn], map: "team_availability_org_person_dates_idx")
   @@index([organizationId, personId, status, startsOn, endsOn], map: "team_availability_org_person_status_dates_idx")
   @@map("team_availability")
 }
 
 model TeamDocument {
-  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  personId String @map("person_id") @db.Uuid
-  title String
-  kind String
-  storageKey String @unique @map("storage_key")
-  contentType String @map("content_type")
-  size Int
-  expiresOn DateTime? @map("expires_on") @db.Date
-  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
-  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
-  createdBy String @map("created_by") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  person Person @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  personId       String       @map("person_id") @db.Uuid
+  title          String
+  kind           String
+  storageKey     String       @unique @map("storage_key")
+  contentType    String       @map("content_type")
+  size           Int
+  expiresOn      DateTime?    @map("expires_on") @db.Date
+  confirmedAt    DateTime?    @map("confirmed_at") @db.Timestamptz(6)
+  archivedAt     DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdBy      String       @map("created_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person         Person       @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
   @@index([organizationId, personId, archivedAt, createdAt], map: "team_document_org_person_created_idx")
   @@index([organizationId, expiresOn], map: "team_document_org_expiry_idx")
   @@map("team_document")
 }
 
 model TeamWallet {
-  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  personId String @unique @map("person_id") @db.Uuid
-  ledgerAccountId String @unique @map("ledger_account_id") @db.Uuid
-  createdBy String @map("created_by") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  person Person @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  ledgerAccount LedgerAccount @relation(fields: [organizationId, ledgerAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  @@index([organizationId, personId], map: "team_wallet_org_person_idx")
+  id              String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  personId        String        @unique @map("person_id") @db.Uuid
+  ledgerAccountId String        @unique @map("ledger_account_id") @db.Uuid
+  createdBy       String        @map("created_by") @db.Uuid
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization    Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person          Person        @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  ledgerAccount   LedgerAccount @relation(fields: [organizationId, ledgerAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
   @@unique([organizationId, personId], map: "team_wallet_org_person_unique")
   @@unique([organizationId, ledgerAccountId], map: "team_wallet_org_account_unique")
+  @@index([organizationId, personId], map: "team_wallet_org_person_idx")
   @@map("team_wallet")
 }
 
 model Person {
   teamAvailabilities TeamAvailability[]
-  teamDocuments TeamDocument[]
-  teamWallet TeamWallet?
-  id              String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId  String                       @map("organization_id") @db.Uuid
-  displayName     String                       @map("display_name")
-  email           String?
-  phone           String?
-  preferredLocale String                       @default("en") @map("preferred_locale") @db.Char(2)
-  archivedAt      DateTime?                    @map("archived_at") @db.Timestamptz(6)
-  createdAt       DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization    Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  userAccounts    UserAccount[]
-  assignedTasks   OperationTask[]              @relation("OperationTaskAssignedPerson")
-  completedTasks  OperationTask[]              @relation("OperationTaskCompletedPerson")
-  completedChecks OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedPerson")
-  syncOps         SyncOp[]                     @relation("SyncOpActorPerson")
-  invitations     Invitation[]
-  roleAssignments RoleAssignment[]
+  teamDocuments      TeamDocument[]
+  teamWallet         TeamWallet?
+  id                 String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String                       @map("organization_id") @db.Uuid
+  displayName        String                       @map("display_name")
+  email              String?
+  phone              String?
+  preferredLocale    String                       @default("en") @map("preferred_locale") @db.Char(2)
+  archivedAt         DateTime?                    @map("archived_at") @db.Timestamptz(6)
+  createdAt          DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccounts       UserAccount[]
+  assignedTasks      OperationTask[]              @relation("OperationTaskAssignedPerson")
+  completedTasks     OperationTask[]              @relation("OperationTaskCompletedPerson")
+  completedChecks    OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedPerson")
+  syncOps            SyncOp[]                     @relation("SyncOpActorPerson")
+  invitations        Invitation[]
+  roleAssignments    RoleAssignment[]
 
   @@unique([organizationId, email], map: "person_org_email_unique")
   @@unique([organizationId, id], map: "person_org_id_unique")
@@ -318,20 +331,20 @@ model AuthCredential {
 
 model AuthSession {
   pushSubscriptions PushSubscription[]
-  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  userAccountId  String       @map("user_account_id") @db.Uuid
-  deviceId       String       @map("device_id")
-  sessionVersion Int          @map("session_version")
-  userAgent      String?      @map("user_agent")
-  ipAddress      String?      @map("ip_address")
-  expiresAt      DateTime     @map("expires_at") @db.Timestamptz(6)
-  revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz(6)
-  lastSeenAt     DateTime     @default(now()) @map("last_seen_at") @db.Timestamptz(6)
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  userAccount    UserAccount  @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                String             @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId    String             @map("organization_id") @db.Uuid
+  userAccountId     String             @map("user_account_id") @db.Uuid
+  deviceId          String             @map("device_id")
+  sessionVersion    Int                @map("session_version")
+  userAgent         String?            @map("user_agent")
+  ipAddress         String?            @map("ip_address")
+  expiresAt         DateTime           @map("expires_at") @db.Timestamptz(6)
+  revokedAt         DateTime?          @map("revoked_at") @db.Timestamptz(6)
+  lastSeenAt        DateTime           @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount       UserAccount        @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organizationId, userAccountId, id], map: "auth_session_tenant_account_id_unique")
   @@index([organizationId, userAccountId, revokedAt, expiresAt], map: "auth_session_org_user_active_idx")
@@ -474,28 +487,28 @@ model RolePermission {
 
 model RoleAssignment {
   teamCompensations TeamCompensation[]
-  id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId  String       @map("organization_id") @db.Uuid
-  personId        String       @map("person_id") @db.Uuid
-  userAccountId   String?      @map("user_account_id") @db.Uuid
-  roleId          String       @map("role_id") @db.Uuid
-  scopeType       String       @map("scope_type")
-  scopeId         String?      @map("scope_id") @db.Uuid
-  conditions      Json?
-  validFrom       DateTime     @default(now()) @map("valid_from") @db.Timestamptz(6)
-  validTo         DateTime?    @map("valid_to") @db.Timestamptz(6)
-  compensationRef String?      @map("compensation_ref")
-  archivedAt      DateTime?    @map("archived_at") @db.Timestamptz(6)
-  createdBy       String?      @map("created_by") @db.Uuid
-  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  person          Person       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  userAccount     UserAccount? @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  role            Role         @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                String             @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId    String             @map("organization_id") @db.Uuid
+  personId          String             @map("person_id") @db.Uuid
+  userAccountId     String?            @map("user_account_id") @db.Uuid
+  roleId            String             @map("role_id") @db.Uuid
+  scopeType         String             @map("scope_type")
+  scopeId           String?            @map("scope_id") @db.Uuid
+  conditions        Json?
+  validFrom         DateTime           @default(now()) @map("valid_from") @db.Timestamptz(6)
+  validTo           DateTime?          @map("valid_to") @db.Timestamptz(6)
+  compensationRef   String?            @map("compensation_ref")
+  archivedAt        DateTime?          @map("archived_at") @db.Timestamptz(6)
+  createdBy         String?            @map("created_by") @db.Uuid
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person            Person             @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount       UserAccount?       @relation(fields: [userAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  role              Role               @relation(fields: [roleId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
-  @@index([organizationId, personId, archivedAt], map: "role_assignment_org_person_idx")
   @@unique([organizationId, id], map: "role_assignment_org_id_unique")
+  @@index([organizationId, personId, archivedAt], map: "role_assignment_org_person_idx")
   @@index([organizationId, userAccountId, archivedAt], map: "role_assignment_org_account_idx")
   @@index([organizationId, roleId, scopeType, scopeId], map: "role_assignment_org_role_scope_idx")
   @@map("role_assignment")
@@ -644,32 +657,38 @@ model Property {
   bookingChannels      BookingChannel[]
   managementAgreements ManagementAgreement[]
 
+  reverseReservationFeedpropertyIdLink        ReservationFeed[]        @relation("ReservationFeedpropertyIdLink")
+  reverseCalendarBlockpropertyIdLink          CalendarBlock[]          @relation("CalendarBlockpropertyIdLink")
+  reverseReservationImportBatchpropertyIdLink ReservationImportBatch[] @relation("ReservationImportBatchpropertyIdLink")
+  reverseReservationExceptionpropertyIdLink   ReservationException[]   @relation("ReservationExceptionpropertyIdLink")
+
+  @@unique([organizationId, id], map: "property_org_id_unique")
   @@index([organizationId, city, name], map: "property_org_city_name_idx")
   @@index([organizationId, regionId, name], map: "property_org_region_name_idx")
   @@index([organizationId, cityId, name], map: "property_org_city_id_name_idx")
   @@index([organizationId, status], map: "property_org_status_idx")
   @@index([organizationId, archivedAt], map: "property_org_archived_idx")
-  @@unique([organizationId, id], map: "property_org_id_unique")
   @@map("property")
 }
 
 model PropertyTemplateVersion {
-  id             String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
+  id             String                     @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                     @map("organization_id") @db.Uuid
   key            String
   kind           String
-  propertyId     String? @map("property_id") @db.Uuid
+  propertyId     String?                    @map("property_id") @db.Uuid
   version        Int
   name           Json
   description    Json?
   values         Json
   status         String
-  createdBy      String @map("created_by") @db.Uuid
+  createdBy      String                     @map("created_by") @db.Uuid
   reason         String
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  property Property? @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  revisions PropertyTemplateRevision[]
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property       Property?                  @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  revisions      PropertyTemplateRevision[]
+
   @@unique([organizationId, id], map: "property_template_version_org_id_unique")
   @@unique([organizationId, key, version], map: "property_template_version_org_key_version_unique")
   @@index([organizationId, propertyId, kind, createdAt], map: "property_template_version_org_scope_kind_idx")
@@ -677,23 +696,24 @@ model PropertyTemplateVersion {
 }
 
 model PropertyTemplateRevision {
-  id             String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  propertyId     String @map("property_id") @db.Uuid
-  kind           String
-  revision       Int
-  templateVersionId String @map("template_version_id") @db.Uuid
-  action         String
-  operationId    String @map("operation_id") @db.Uuid
-  command        Json
-  snapshot       Json
-  overrides      Json
-  createdBy      String @map("created_by") @db.Uuid
-  reason         String
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  property Property @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  templateVersion PropertyTemplateVersion @relation(fields: [organizationId, templateVersionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  id                String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId    String                  @map("organization_id") @db.Uuid
+  propertyId        String                  @map("property_id") @db.Uuid
+  kind              String
+  revision          Int
+  templateVersionId String                  @map("template_version_id") @db.Uuid
+  action            String
+  operationId       String                  @map("operation_id") @db.Uuid
+  command           Json
+  snapshot          Json
+  overrides         Json
+  createdBy         String                  @map("created_by") @db.Uuid
+  reason            String
+  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization      Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property          Property                @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  templateVersion   PropertyTemplateVersion @relation(fields: [organizationId, templateVersionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
   @@unique([organizationId, operationId], map: "property_template_revision_org_operation_unique")
   @@unique([organizationId, propertyId, kind, revision], map: "property_template_revision_org_property_kind_revision_unique")
   @@index([organizationId, propertyId, createdAt], map: "property_template_revision_org_property_created_idx")
@@ -801,72 +821,84 @@ model PropertyOwner {
 }
 
 model BookingChannel {
-  id                    String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId        String       @map("organization_id") @db.Uuid
-  propertyId            String       @map("property_id") @db.Uuid
-  sourceKey             String       @map("source_key")
-  displayName           String       @map("display_name")
-  externalListingId     String?      @map("external_listing_id")
-  listingUrl            String?      @map("listing_url")
-  syncMode              String       @default("MANUAL") @map("sync_mode")
-  importEnabled         Boolean      @default(false) @map("import_enabled")
-  exportEnabled         Boolean      @default(false) @map("export_enabled")
-  syncEndpointEncrypted String?      @map("sync_endpoint_encrypted")
-  maskedSyncEndpoint    String?      @map("masked_sync_endpoint")
-  status                String       @default("ACTIVE")
-  settings              Json         @default("{}")
-  lastSyncAt            DateTime?    @map("last_sync_at") @db.Timestamptz(6)
-  lastSyncStatus        String?      @map("last_sync_status")
-  lastSyncMessage       String?      @map("last_sync_message")
-  archivedAt            DateTime?    @map("archived_at") @db.Timestamptz(6)
-  createdBy             String?      @map("created_by") @db.Uuid
-  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  property              Property     @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                    String            @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId        String            @map("organization_id") @db.Uuid
+  propertyId            String            @map("property_id") @db.Uuid
+  sourceKey             String            @map("source_key")
+  displayName           String            @map("display_name")
+  externalListingId     String?           @map("external_listing_id")
+  listingUrl            String?           @map("listing_url")
+  syncMode              String            @default("MANUAL") @map("sync_mode")
+  importEnabled         Boolean           @default(false) @map("import_enabled")
+  exportEnabled         Boolean           @default(false) @map("export_enabled")
+  syncEndpointEncrypted String?           @map("sync_endpoint_encrypted")
+  maskedSyncEndpoint    String?           @map("masked_sync_endpoint")
+  status                String            @default("ACTIVE")
+  settings              Json              @default("{}")
+  lastSyncAt            DateTime?         @map("last_sync_at") @db.Timestamptz(6)
+  lastSyncStatus        String?           @map("last_sync_status")
+  lastSyncMessage       String?           @map("last_sync_message")
+  archivedAt            DateTime?         @map("archived_at") @db.Timestamptz(6)
+  createdBy             String?           @map("created_by") @db.Uuid
+  createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property              Property          @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reservationFeeds      ReservationFeed[] @relation("ReservationFeedChannel")
 
   @@unique([organizationId, propertyId, sourceKey], map: "booking_channel_org_property_source_unique")
+  @@unique([organizationId, id], map: "booking_channel_org_id_unique")
   @@index([organizationId, propertyId, archivedAt, sourceKey], map: "booking_channel_org_property_archived_idx")
   @@index([organizationId, status, syncMode], map: "booking_channel_org_status_sync_idx")
   @@map("booking_channel")
 }
 
 model Reservation {
-  id                  String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId      String                      @map("organization_id") @db.Uuid
-  propertyId          String                      @map("property_id") @db.Uuid
-  reference           String
-  source              String
-  externalId          String?                     @map("external_id")
-  status              String                      @default("CONFIRMED")
-  guestName           String                      @map("guest_name")
-  guestEmail          String?                     @map("guest_email")
-  guestPhone          String?                     @map("guest_phone")
-  guestPreferredLocale String                     @default("fr") @map("guest_preferred_locale") @db.Char(2)
-  checkIn             DateTime                    @map("check_in") @db.Date
-  checkOut            DateTime                    @map("check_out") @db.Date
-  nights              Int
-  adultCount          Int                         @default(1) @map("adult_count")
-  childCount          Int                         @default(0) @map("child_count")
-  notes               String?
-  idempotencyKey      String                      @map("idempotency_key")
-  archivedAt          DateTime?                   @map("archived_at") @db.Timestamptz(6)
-  createdBy           String?                     @map("created_by") @db.Uuid
-  createdAt           DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization        Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  property            Property                    @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  operationTasks      OperationTask[]
-  conflicts           ReservationConflict[]       @relation("ReservationConflictReservation")
-  conflictingWith     ReservationConflict[]       @relation("ReservationConflictOther")
-  commissionSnapshots CommissionSnapshot[]
-  configSnapshots     ReservationConfigSnapshot[]
-  airbnbSettlements   AirbnbSettlement[]
-  variances           Variance[]
+  id                                                   String                         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId                                       String                         @map("organization_id") @db.Uuid
+  propertyId                                           String                         @map("property_id") @db.Uuid
+  guestId                                              String?                        @map("guest_id") @db.Uuid
+  version                                              Int                            @default(1)
+  confirmedAt                                          DateTime?                      @map("confirmed_at") @db.Timestamptz(6)
+  cancellationSuspectedAt                              DateTime?                      @map("cancellation_suspected_at") @db.Timestamptz(6)
+  reference                                            String
+  source                                               String
+  externalId                                           String?                        @map("external_id")
+  status                                               String                         @default("CONFIRMED")
+  guestName                                            String                         @map("guest_name")
+  guestEmail                                           String?                        @map("guest_email")
+  guestPhone                                           String?                        @map("guest_phone")
+  guestPreferredLocale                                 String                         @default("fr") @map("guest_preferred_locale") @db.Char(2)
+  checkIn                                              DateTime                       @map("check_in") @db.Date
+  checkOut                                             DateTime                       @map("check_out") @db.Date
+  nights                                               Int
+  adultCount                                           Int                            @default(1) @map("adult_count")
+  childCount                                           Int                            @default(0) @map("child_count")
+  notes                                                String?
+  idempotencyKey                                       String                         @map("idempotency_key")
+  archivedAt                                           DateTime?                      @map("archived_at") @db.Timestamptz(6)
+  createdBy                                            String?                        @map("created_by") @db.Uuid
+  createdAt                                            DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                                            DateTime                       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization                                         Organization                   @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property                                             Property                       @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  operationTasks                                       OperationTask[]
+  conflicts                                            ReservationConflict[]          @relation("ReservationConflictReservation")
+  conflictingWith                                      ReservationConflict[]          @relation("ReservationConflictOther")
+  commissionSnapshots                                  CommissionSnapshot[]
+  configSnapshots                                      ReservationConfigSnapshot[]
+  airbnbSettlements                                    AirbnbSettlement[]
+  variances                                            Variance[]
+  linkedguestId                                        GuestRecord?                   @relation("ReservationguestIdLink", fields: [organizationId, guestId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_guest_id_tenant_fk")
+  reverseReservationFeedEntryreservationIdLink         ReservationFeedEntry[]         @relation("ReservationFeedEntryreservationIdLink")
+  reverseReservationRevisionreservationIdLink          ReservationRevision[]          @relation("ReservationRevisionreservationIdLink")
+  reverseReservationFinancialSnapshotreservationIdLink ReservationFinancialSnapshot[] @relation("ReservationFinancialSnapshotreservationIdLink")
+  reverseReservationExceptionreservationIdLink         ReservationException[]         @relation("ReservationExceptionreservationIdLink")
 
   @@unique([organizationId, reference], map: "reservation_org_reference_unique")
   @@unique([organizationId, idempotencyKey], map: "reservation_org_idempotency_unique")
   @@unique([organizationId, propertyId, source, externalId], map: "reservation_org_property_source_external_unique")
+  @@unique([organizationId, id], map: "reservation_org_id_unique")
   @@index([organizationId, propertyId, checkIn, checkOut], map: "reservation_org_property_dates_idx")
   @@index([organizationId, source, externalId], map: "reservation_org_source_external_idx")
   @@map("reservation")
@@ -982,7 +1014,7 @@ model SyncOp {
 }
 
 model LedgerAccount {
-  teamWallet TeamWallet?
+  teamWallet     TeamWallet?
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   code           String
@@ -1073,7 +1105,7 @@ model ReferenceSequence {
 }
 
 model Currency {
-  teamCompensations TeamCompensation[]
+  teamCompensations  TeamCompensation[]
   code               String              @id @db.Char(3)
   name               String
   minorUnit          Int                 @default(2) @map("minor_unit")
@@ -1106,7 +1138,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
-  teamCompensations TeamCompensation[]
+  teamCompensations    TeamCompensation[]
   id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId       String                      @map("organization_id") @db.Uuid
   key                  String
@@ -1243,20 +1275,20 @@ model Variance {
 
 model OutboxEvent {
   notificationDeliveries NotificationDelivery[]
-  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  type           String
-  payload        Json
-  status         String       @default("PENDING")
-  idempotencyKey String       @map("idempotency_key")
-  occurredAt     DateTime     @default(now()) @map("occurred_at") @db.Timestamptz(6)
-  processedAt    DateTime?    @map("processed_at") @db.Timestamptz(6)
-  attemptCount   Int          @default(0) @map("attempt_count")
-  nextAttemptAt  DateTime?    @map("next_attempt_at") @db.Timestamptz(6)
-  lastError      String?      @map("last_error")
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  id                     String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId         String                 @map("organization_id") @db.Uuid
+  type                   String
+  payload                Json
+  status                 String                 @default("PENDING")
+  idempotencyKey         String                 @map("idempotency_key")
+  occurredAt             DateTime               @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  processedAt            DateTime?              @map("processed_at") @db.Timestamptz(6)
+  attemptCount           Int                    @default(0) @map("attempt_count")
+  nextAttemptAt          DateTime?              @map("next_attempt_at") @db.Timestamptz(6)
+  lastError              String?                @map("last_error")
+  createdAt              DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organizationId, id], map: "outbox_event_org_id_unique")
   @@unique([organizationId, idempotencyKey], map: "outbox_event_org_idempotency_key")
@@ -1266,21 +1298,21 @@ model OutboxEvent {
 }
 
 model PushSubscription {
-  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  userAccountId  String       @map("user_account_id") @db.Uuid
-  sessionId      String       @map("session_id") @db.Uuid
-  endpointHash   String       @map("endpoint_hash")
+  id             String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                 @map("organization_id") @db.Uuid
+  userAccountId  String                 @map("user_account_id") @db.Uuid
+  sessionId      String                 @map("session_id") @db.Uuid
+  endpointHash   String                 @map("endpoint_hash")
   encrypted      String
-  vapidPublicKey String       @map("vapid_public_key")
-  expiresAt      DateTime?    @map("expires_at") @db.Timestamptz(6)
-  revokedAt      DateTime?    @map("revoked_at") @db.Timestamptz(6)
-  revokedReason  String?      @map("revoked_reason")
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  userAccount    UserAccount @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  session        AuthSession @relation(fields: [organizationId, userAccountId, sessionId], references: [organizationId, userAccountId, id], onDelete: Restrict, onUpdate: NoAction)
+  vapidPublicKey String                 @map("vapid_public_key")
+  expiresAt      DateTime?              @map("expires_at") @db.Timestamptz(6)
+  revokedAt      DateTime?              @map("revoked_at") @db.Timestamptz(6)
+  revokedReason  String?                @map("revoked_reason")
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount    UserAccount            @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  session        AuthSession            @relation(fields: [organizationId, userAccountId, sessionId], references: [organizationId, userAccountId, id], onDelete: Restrict, onUpdate: NoAction)
   deliveries     NotificationDelivery[]
 
   @@unique([organizationId, userAccountId, id], map: "push_subscription_tenant_account_id_unique")
@@ -1478,4 +1510,214 @@ model NotificationEmailSuppression {
 
   @@unique([organizationId, recipientKey], map: "notification_email_suppression_recipient_unique")
   @@map("notification_email_suppression")
+}
+
+model GuestRecord {
+  id                                 String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId                     String        @map("organization_id") @db.Uuid
+  displayName                        String?       @map("display_name")
+  email                              String?
+  phone                              String?
+  mergedIntoId                       String?       @map("merged_into_id") @db.Uuid
+  archivedAt                         DateTime?     @map("archived_at") @db.Timestamptz(6)
+  createdBy                          String?       @map("created_by") @db.Uuid
+  createdAt                          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                          DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenantOrganization                 Organization  @relation("ReservationGuestRecordOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "guest_organization_fk")
+  reverseReservationguestIdLink      Reservation[] @relation("ReservationguestIdLink")
+  linkedmergedIntoId                 GuestRecord?  @relation("GuestRecordmergedIntoIdLink", fields: [organizationId, mergedIntoId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "guest_merged_into_id_tenant_fk")
+  reverseGuestRecordmergedIntoIdLink GuestRecord[] @relation("GuestRecordmergedIntoIdLink")
+
+  @@unique([organizationId, id], map: "guest_org_id_unique")
+  @@index([organizationId, email], map: "guest_org_email_idx")
+  @@index([organizationId, phone], map: "guest_org_phone_idx")
+  @@map("guest")
+}
+
+model ReservationFeed {
+  id                                    String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId                        String                 @map("organization_id") @db.Uuid
+  propertyId                            String                 @map("property_id") @db.Uuid
+  source                                String
+  name                                  String
+  bookingChannelId                      String                 @map("booking_channel_id") @db.Uuid
+  etag                                  String?
+  lastModified                          String?                @map("last_modified")
+  enabled                               Boolean                @default(true)
+  nextSyncAt                            DateTime               @default(now()) @map("next_sync_at") @db.Timestamptz(6)
+  lastSuccessAt                         DateTime?              @map("last_success_at") @db.Timestamptz(6)
+  lastAttemptAt                         DateTime?              @map("last_attempt_at") @db.Timestamptz(6)
+  consecutiveFailures                   Int                    @default(0) @map("consecutive_failures")
+  lastError                             String?                @map("last_error")
+  leaseToken                            String?                @map("lease_token") @db.Uuid
+  leasedUntil                           DateTime?              @map("leased_until") @db.Timestamptz(6)
+  idempotencyKey                        String                 @map("idempotency_key")
+  archivedAt                            DateTime?              @map("archived_at") @db.Timestamptz(6)
+  createdBy                             String?                @map("created_by") @db.Uuid
+  createdAt                             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                             DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenantOrganization                    Organization           @relation("ReservationReservationFeedOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_feed_organization_fk")
+  linkedpropertyId                      Property               @relation("ReservationFeedpropertyIdLink", fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_feed_property_id_tenant_fk")
+  reverseReservationFeedEntryfeedIdLink ReservationFeedEntry[] @relation("ReservationFeedEntryfeedIdLink")
+  reverseFeedSyncRunfeedIdLink          FeedSyncRun[]          @relation("FeedSyncRunfeedIdLink")
+  channel                               BookingChannel         @relation("ReservationFeedChannel", fields: [organizationId, bookingChannelId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_feed_channel_tenant_fk")
+
+  @@unique([organizationId, idempotencyKey], map: "reservation_feed_org_idempotency_unique")
+  @@unique([organizationId, bookingChannelId], map: "reservation_feed_org_channel_unique")
+  @@unique([organizationId, id], map: "reservation_feed_org_id_unique")
+  @@index([organizationId, enabled, nextSyncAt], map: "reservation_feed_org_due_idx")
+  @@map("reservation_feed")
+}
+
+model ReservationFeedEntry {
+  id                  String          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String          @map("organization_id") @db.Uuid
+  feedId              String          @map("feed_id") @db.Uuid
+  externalKey         String          @map("external_key")
+  reservationId       String?         @map("reservation_id") @db.Uuid
+  blockId             String?         @map("block_id") @db.Uuid
+  missingRuns         Int             @default(0) @map("missing_runs")
+  lastSeenAt          DateTime        @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  sequence            Int?
+  contentHash         String          @map("content_hash")
+  suppressed          Boolean         @default(false)
+  createdBy           String?         @map("created_by") @db.Uuid
+  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenantOrganization  Organization    @relation("ReservationReservationFeedEntryOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_feed_entry_organization_fk")
+  linkedfeedId        ReservationFeed @relation("ReservationFeedEntryfeedIdLink", fields: [organizationId, feedId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_feed_entry_feed_id_tenant_fk")
+  linkedreservationId Reservation?    @relation("ReservationFeedEntryreservationIdLink", fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_feed_entry_reservation_id_tenant_fk")
+  linkedblockId       CalendarBlock?  @relation("ReservationFeedEntryblockIdLink", fields: [organizationId, blockId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_feed_entry_block_id_tenant_fk")
+
+  @@unique([organizationId, feedId, externalKey], map: "reservation_feed_entry_identity_unique")
+  @@index([organizationId, reservationId], map: "reservation_feed_entry_org_reservation_idx")
+  @@map("reservation_feed_entry")
+}
+
+model FeedSyncRun {
+  id                 String          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String          @map("organization_id") @db.Uuid
+  feedId             String          @map("feed_id") @db.Uuid
+  status             String
+  imported           Int             @default(0)
+  modified           Int             @default(0)
+  suspected          Int             @default(0)
+  errorCode          String?         @map("error_code")
+  createdBy          String?         @map("created_by") @db.Uuid
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime        @default(now()) @map("updated_at") @db.Timestamptz(6)
+  tenantOrganization Organization    @relation("ReservationFeedSyncRunOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "feed_sync_run_organization_fk")
+  linkedfeedId       ReservationFeed @relation("FeedSyncRunfeedIdLink", fields: [organizationId, feedId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "feed_sync_run_feed_id_tenant_fk")
+
+  @@index([organizationId, feedId, createdAt], map: "feed_sync_run_org_feed_created_idx")
+  @@map("feed_sync_run")
+}
+
+model ReservationRevision {
+  id                  String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String       @map("organization_id") @db.Uuid
+  reservationId       String       @map("reservation_id") @db.Uuid
+  version             Int
+  operation           String
+  before              Json
+  after               Json
+  reason              String
+  idempotencyKey      String       @map("idempotency_key")
+  createdBy           String?      @map("created_by") @db.Uuid
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  tenantOrganization  Organization @relation("ReservationReservationRevisionOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_revision_organization_fk")
+  linkedreservationId Reservation  @relation("ReservationRevisionreservationIdLink", fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_revision_reservation_id_tenant_fk")
+
+  @@unique([organizationId, reservationId, version], map: "reservation_revision_org_reservation_version_unique")
+  @@unique([organizationId, idempotencyKey], map: "reservation_revision_org_idempotency_unique")
+  @@map("reservation_revision")
+}
+
+model ReservationFinancialSnapshot {
+  id                  String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String       @map("organization_id") @db.Uuid
+  reservationId       String       @map("reservation_id") @db.Uuid
+  version             Int
+  amount              Decimal?     @db.Decimal(18, 2)
+  currency            String?      @db.Char(3)
+  rules               Json
+  createdBy           String?      @map("created_by") @db.Uuid
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  tenantOrganization  Organization @relation("ReservationReservationFinancialSnapshotOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_financial_snapshot_organization_fk")
+  linkedreservationId Reservation  @relation("ReservationFinancialSnapshotreservationIdLink", fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_financial_snapshot_reservation_id_tenant_fk")
+
+  @@unique([organizationId, reservationId, version], map: "reservation_financial_snapshot_org_version_unique")
+  @@map("reservation_financial_snapshot")
+}
+
+model CalendarBlock {
+  id                                     String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId                         String                 @map("organization_id") @db.Uuid
+  propertyId                             String                 @map("property_id") @db.Uuid
+  kind                                   String
+  source                                 String
+  externalId                             String?                @map("external_id")
+  checkIn                                DateTime               @map("check_in") @db.Date
+  checkOut                               DateTime               @map("check_out") @db.Date
+  reason                                 String?
+  status                                 String                 @default("ACTIVE")
+  idempotencyKey                         String                 @map("idempotency_key")
+  archivedAt                             DateTime?              @map("archived_at") @db.Timestamptz(6)
+  createdBy                              String?                @map("created_by") @db.Uuid
+  createdAt                              DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                              DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenantOrganization                     Organization           @relation("ReservationCalendarBlockOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "calendar_block_organization_fk")
+  reverseReservationFeedEntryblockIdLink ReservationFeedEntry[] @relation("ReservationFeedEntryblockIdLink")
+  linkedpropertyId                       Property               @relation("CalendarBlockpropertyIdLink", fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "calendar_block_property_id_tenant_fk")
+
+  @@unique([organizationId, idempotencyKey], map: "calendar_block_org_idempotency_unique")
+  @@unique([organizationId, id], map: "calendar_block_org_id_unique")
+  @@index([organizationId, propertyId, checkIn, checkOut], map: "calendar_block_org_property_dates_idx")
+  @@map("calendar_block")
+}
+
+model ReservationImportBatch {
+  id                 String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String       @map("organization_id") @db.Uuid
+  propertyId         String       @map("property_id") @db.Uuid
+  source             String
+  contentHash        String       @map("content_hash")
+  imported           Int
+  modified           Int
+  duplicates         Int
+  idempotencyKey     String       @map("idempotency_key")
+  createdBy          String?      @map("created_by") @db.Uuid
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenantOrganization Organization @relation("ReservationReservationImportBatchOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_import_batch_organization_fk")
+  linkedpropertyId   Property     @relation("ReservationImportBatchpropertyIdLink", fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_import_batch_property_id_tenant_fk")
+
+  @@unique([organizationId, propertyId, source, contentHash], map: "reservation_import_batch_content_unique")
+  @@unique([organizationId, idempotencyKey], map: "reservation_import_batch_idempotency_unique")
+  @@map("reservation_import_batch")
+}
+
+model ReservationException {
+  id                  String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String       @map("organization_id") @db.Uuid
+  propertyId          String       @map("property_id") @db.Uuid
+  reservationId       String?      @map("reservation_id") @db.Uuid
+  kind                String
+  status              String       @default("OPEN")
+  details             Json
+  key                 String
+  resolution          String?
+  resolvedBy          String?      @map("resolved_by") @db.Uuid
+  createdBy           String?      @map("created_by") @db.Uuid
+  createdAt           DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  tenantOrganization  Organization @relation("ReservationReservationExceptionOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_exception_organization_fk")
+  linkedpropertyId    Property     @relation("ReservationExceptionpropertyIdLink", fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_exception_property_id_tenant_fk")
+  linkedreservationId Reservation? @relation("ReservationExceptionreservationIdLink", fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_exception_reservation_id_tenant_fk")
+
+  @@unique([organizationId, key], map: "reservation_exception_org_key_unique")
+  @@index([organizationId, propertyId, status, createdAt], map: "reservation_exception_org_status_idx")
+  @@map("reservation_exception")
 }

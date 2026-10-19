@@ -1,3 +1,4 @@
+import { parseCsv as parseCsvRecords } from "@/platform/imports/csv";
 import Decimal from "decimal.js";
 import { z } from "zod";
 import {
@@ -131,57 +132,8 @@ function normalizeHeader(value: string): string {
 }
 
 function parseCsv(csv: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < csv.length; index += 1) {
-    const char = csv[index];
-    const next = csv[index + 1];
-
-    if (char === "\"") {
-      if (inQuotes && next === "\"") {
-        field += "\"";
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (char === "," && !inQuotes) {
-      row.push(field);
-      field = "";
-      continue;
-    }
-
-    if ((char === "\n" || char === "\r") && !inQuotes) {
-      if (char === "\r" && next === "\n") {
-        index += 1;
-      }
-      row.push(field);
-      if (row.some((value) => value.trim() !== "")) {
-        rows.push(row);
-      }
-      row = [];
-      field = "";
-      continue;
-    }
-
-    field += char;
-  }
-
-  row.push(field);
-  if (row.some((value) => value.trim() !== "")) {
-    rows.push(row);
-  }
-
-  if (inQuotes) {
-    throw new AirbnbSettlementCsvError("CSV contains an unclosed quoted field");
-  }
-
-  return rows;
+  try { return parseCsvRecords(csv); }
+  catch (error) { throw new AirbnbSettlementCsvError(error instanceof Error ? error.message : "invalid_csv"); }
 }
 
 function csvRecords(csv: string): CsvRecord[] {

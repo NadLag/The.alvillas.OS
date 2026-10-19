@@ -60,6 +60,7 @@ export class FakeStorageProvider implements StorageProvider {
 }
 
 export class FakeReservationAdapter implements ReservationAdapter {
+  normalize() { return []; }
   constructor(nodeEnv?: string) {
     assertFakeProviderAllowed(nodeEnv);
   }

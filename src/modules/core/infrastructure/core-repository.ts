@@ -715,6 +715,10 @@ export class CoreRepository {
     return channel ? bookingChannelToSummary(channel) : null;
   }
 
+  recordBookingChannelSync(channelId: string, at: Date, status: string) {
+    return this.tx.bookingChannel.update({ where: { id: channelId, organizationId: this.organizationId }, data: { lastSyncAt: at, lastSyncStatus: status } });
+  }
+
   async upsertBookingChannel(
     input: BookingChannelInput,
     actorId: string

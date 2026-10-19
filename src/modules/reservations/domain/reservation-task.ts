@@ -9,6 +9,8 @@ import {
 import { localizedText } from "@/i18n/content";
 import { safeLocale } from "@/i18n/routing";
 import { optionalGuestPhoneSchema } from "@/platform/notifications/whatsapp";
+import { reservationSourceSchema, stayDateSchema, quoteSchema } from "./reservation";
+export { reservationSourceSchema } from "./reservation";
 
 const requiredText = (max: number) => z.string().trim().min(1).max(max);
 const optionalText = (max: number) =>
@@ -27,14 +29,6 @@ const optionalEmail = z.preprocess(
     .optional()
 );
 
-export const reservationSourceSchema = z.enum([
-  "MANUAL",
-  "DIRECT",
-  "AGENCY",
-  "AIRBNB",
-  "BOOKING",
-  "VRBO"
-]);
 
 export {
   reservationTaskConfigSchema,
@@ -47,9 +41,7 @@ export {
 export type ReservationTaskTemplate = z.infer<typeof reservationTaskTemplateSchema>;
 export type ReservationTaskConfig = z.infer<typeof reservationTaskConfigSchema>;
 
-const dateStringSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/u, "Use YYYY-MM-DD");
+const dateStringSchema = stayDateSchema;
 
 export const manualReservationInputSchema = z
   .object({
@@ -65,6 +57,7 @@ export const manualReservationInputSchema = z
     adultCount: z.coerce.number().int().min(0).default(1),
     childCount: z.coerce.number().int().min(0).default(0),
     notes: optionalText(1000),
+    quote: quoteSchema.optional(),
     idempotencyKey: z.string().uuid()
   })
   .superRefine((input, ctx) => {
@@ -84,6 +77,8 @@ export type ReservationSummary = {
   reference: string;
   propertyId: string;
   propertyName: string;
+  city?: string;
+  region?: string | null;
   guestName: string;
   source: z.infer<typeof reservationSourceSchema>;
   status: string;

@@ -21,7 +21,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type AuthContext } from "@/platform/authz/authorize";
 import { configRuleSnapshotMetadata } from "@/platform/config/config-rule-repository";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
 
 export class ReservationRevenueAuthorizationError extends Error {
@@ -236,6 +236,7 @@ async function snapshotForOwner(input: {
     id: string;
     propertyId: string;
     createdAt: Date;
+    source?: string;
   };
   ownerId: string;
   ownerName: string;
@@ -264,7 +265,7 @@ async function snapshotForOwner(input: {
   const rule = await input.repository.resolveCommissionRule({
     propertyId: input.reservation.propertyId,
     ownerId: input.ownerId,
-    asOf: input.reservation.createdAt
+    source: input.reservation.source, asOf: input.reservation.createdAt
   });
 
   if (!rule) {
@@ -272,9 +273,6 @@ async function snapshotForOwner(input: {
   }
 
   const parsed = parseCommissionRuleValue(rule.value);
-  if (parsed.basis !== "GROSS_ACCOMMODATION") {
-    throw new ReservationRevenueConfigError("Commission basis requires a dedicated posting workflow");
-  }
 
   const snapshot = await input.repository.createCommissionSnapshot({
     reservationId: input.reservation.id,
@@ -295,6 +293,21 @@ async function snapshotForOwner(input: {
     commissionBasis: snapshot.commissionBasis,
     accrualEvent: snapshot.accrualEvent
   };
+}
+
+/** Confirmation and posting share the same immutable owner/rule snapshot writer. */
+export async function captureReservationCommissionSnapshots(tx: TenantTransaction, organizationId: string, reservationId: string, actorId: string) {
+  const repository = new FinanceRepository(tx, organizationId);
+  const reservation = await repository.findReservation(reservationId);
+  if (!reservation) throw new ReservationRevenueNotFoundError();
+  const snapshots = [];
+  for (const owner of reservation.owners) {
+    const rule = await repository.resolveCommissionRule({ propertyId: reservation.propertyId, ownerId: owner.ownerId, source: reservation.source, asOf: reservation.createdAt });
+    if (!rule) { snapshots.push({ ...owner, configurationMissing: true }); continue; }
+    const snapshot = await snapshotForOwner({ repository, reservation, ...owner, actorId });
+    snapshots.push({ ...owner, ...snapshot, configurationMissing: false });
+  }
+  return snapshots;
 }
 
 function snapshotValue(
@@ -362,6 +375,7 @@ async function buildSnapshotAllocations(input: {
     })
   );
 
+  if (snapshots.some(snapshot => snapshot.commissionBasis !== "GROSS_ACCOMMODATION")) throw new ReservationRevenueConfigError("Commission basis requires a dedicated posting workflow");
   return withCommissionAllocations(grossAllocations, (ownerId) => {
     const snapshot = snapshotByOwner.get(ownerId);
     if (!snapshot) {

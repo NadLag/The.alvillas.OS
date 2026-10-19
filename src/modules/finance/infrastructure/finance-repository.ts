@@ -1,4 +1,6 @@
+import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import type {
   FinancePostingDraft,
   PropertyOwnerShare
@@ -9,6 +11,8 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 
 type ReservationWithFinanceContext = Prisma.ReservationGetPayload<{
   include: {
+    commissionSnapshots: true;
+    reverseReservationFinancialSnapshotreservationIdLink: true;
     property: {
       include: {
         propertyOwners: {
@@ -78,6 +82,15 @@ type SettlementVarianceRow = {
 };
 
 function ownerSharesFromReservation(reservation: ReservationWithFinanceContext): PropertyOwnerShare[] {
+  for (const snapshot of reservation.reverseReservationFinancialSnapshotreservationIdLink) {
+    const envelope = z.object({ owners: z.array(z.object({ ownerId: z.uuid(), ownerName: z.string(), shareBps: z.number().int() })) }).safeParse(snapshot.rules);
+    if (envelope.success) return envelope.data.owners;
+  }
+  if (reservation.commissionSnapshots.length) return reservation.commissionSnapshots.map(snapshot => {
+    const value = snapshot.snapshotValue;
+    const ownerName = value && typeof value === "object" && !Array.isArray(value) && typeof value.owner_name === "string" ? value.owner_name : snapshot.ownerId;
+    return { ownerId: snapshot.ownerId, ownerName, shareBps: snapshot.shareBps };
+  });
   return reservation.property.propertyOwners.map((propertyOwner) => ({
     ownerId: propertyOwner.ownerId,
     ownerName: propertyOwner.owner.displayName,
@@ -125,6 +138,8 @@ export class FinanceRepository {
         archivedAt: null
       },
       include: {
+        commissionSnapshots: { where: { organizationId: this.organizationId }, orderBy: { ownerId: "asc" } },
+        reverseReservationFinancialSnapshotreservationIdLink: { where: { organizationId: this.organizationId, rules: { path: ["owners"], array_contains: [] } }, orderBy: { version: "asc" }, take: 1 },
         property: {
           include: {
             propertyOwners: {
@@ -154,7 +169,7 @@ export class FinanceRepository {
       source: reservation.source,
       propertyId: reservation.propertyId,
       propertyName: reservation.property.name,
-      createdAt: reservation.createdAt,
+      createdAt: reservation.confirmedAt ?? reservation.createdAt,
       owners: ownerSharesFromReservation(reservation)
     };
   }
@@ -273,16 +288,13 @@ export class FinanceRepository {
   async resolveCommissionRule(input: {
     propertyId: string;
     ownerId: string;
+    source?: string;
     asOf: Date;
   }): Promise<CommissionRuleRow | null> {
     const rule = await new ConfigRuleRepository(this.tx, this.organizationId).resolve({
       key: commissionConfigKey,
       asOf: input.asOf,
-      scopes: [
-        { scopeType: "property", scopeId: input.propertyId },
-        { scopeType: "owner", scopeId: input.ownerId },
-        { scopeType: "organization", scopeId: null }
-      ]
+      scopes: await new ReservationConfigScopeRepository(this.tx, this.organizationId).scopes(input)
     });
 
     return rule

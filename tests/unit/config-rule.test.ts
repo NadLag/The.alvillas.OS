@@ -70,6 +70,7 @@ describe("config rule registry", () => {
       "ops.operating_rules",
       "ops.reservation_task_templates",
       "ops.workflows",
+      "reservation.sync_policy",
       "services.pricing",
       "staff.compensation",
       "staff.management_policy"

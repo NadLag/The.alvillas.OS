@@ -1,3 +1,4 @@
+import { scheduleReservationSyncs } from "@/modules/reservations/application/reservation-management-service";
 import { Inngest, NonRetriableError } from "inngest";
 import { z } from "zod";
 import { prisma } from "@/platform/db/client";
@@ -44,6 +45,7 @@ export const dispatchOutbox = inngest.createFunction({ id: "dispatch-outbox", na
     : [{ id: await step.run("validate-dispatch-reference", () => dispatchRequestOrganization(event.data)) }];
   const total: DispatchOutboxResult & { organizations: number } = { organizations: organizations.length, dispatched: 0, failed: 0, skipped: 0 };
   for (const { id } of organizations) {
+    await step.run(`sync-reservation-feeds-${id}`, () => scheduleReservationSyncs(id));
     await step.run(`schedule-staff-documents-${id}`, () => scheduleTeamDocumentReminders(id));
     await step.run(`schedule-digests-${id}`, () => scheduleDigests(id));
     const result = await step.run(`dispatch-${id}`, () => dispatchOrganization(id));

@@ -91,6 +91,7 @@ export async function createManualReservationAction(
     adultCount: formValue(formData, "adultCount") ?? "1",
     childCount: formValue(formData, "childCount") ?? "0",
     notes: formValue(formData, "notes"),
+    ...(formData.get("amount") ? { quote: { amount: formData.get("amount"), currency: formData.get("currency") } } : {}),
     idempotencyKey: formValue(formData, "idempotencyKey")
   });
 

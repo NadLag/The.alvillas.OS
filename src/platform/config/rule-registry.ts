@@ -7,6 +7,7 @@ import { notificationRoutingSchema } from "@/platform/notifications/notification
 import { pushPolicyKey, pushPolicySchema } from "@/platform/notifications/web-push";
 
 import { digestPolicyKey, digestPolicySchema } from "@/platform/notifications/digest";
+import { reservationSyncPolicyKey, reservationSyncPolicySchema } from "@/modules/reservations/domain/reservation";
 
 const moneyAmountSchema = z
   .string()
@@ -321,6 +322,7 @@ export const featureFlagConfigSchema = z
   .passthrough();
 
 export const configRuleSchemas = {
+  [reservationSyncPolicyKey]: reservationSyncPolicySchema,
   [teamPolicyKey]: teamPolicySchema,
   [pushPolicyKey]: pushPolicySchema,
   [digestPolicyKey]: digestPolicySchema,

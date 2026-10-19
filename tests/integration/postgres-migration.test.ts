@@ -1,3 +1,5 @@
+import { connectReservationFeed, syncReservationFeed, importReservationCsv, changeReservation, getReservationDetail, getReservationWorkspace, reviewMissingFeedEntry, createCalendarBlock, releaseCalendarBlock, mergeReservationGuests, scheduleReservationSyncs } from "@/modules/reservations/application/reservation-management-service";
+import type { FeedTransport } from "@/modules/reservations/infrastructure/ical-transport";
 import { listAuditHistory, exportAuditHistoryCsv } from "@/modules/audit/application/audit-service";
 import { offboardTeamMember } from "@/modules/identity/application/team-service";
 import type { EmailProvider } from "@/platform/providers";
@@ -230,6 +232,8 @@ function actorForOrganization(
   organizationId: string,
   permissions = new Set([
     permissionKey("reservation", "view"),
+    permissionKey("guest", "create"),
+    permissionKey("guest", "view"),
     permissionKey("reservation", "create"),
     permissionKey("task", "view"),
     permissionKey("task", "create"),
@@ -318,7 +322,7 @@ async function configureAppRole(databaseUrl: string): Promise<string> {
 describe("PostgreSQL baseline", () => {
   async function templateFixture() {
     const organization = await prisma.organization.create({ data: { name: `Template ${randomUUID()}` } });
-    const permissions = new Set(["config_rule:view", "config_rule:create", "config_rule:configure", "property:view", "property:edit", "property:create", "owner:create", "owner:view", "financial_transaction:view", "reservation:view", "reservation:create", "task:view", "task:create", "task:edit"]);
+    const permissions = new Set(["config_rule:view", "config_rule:create", "config_rule:configure", "property:view", "property:edit", "property:create", "owner:create", "owner:view", "financial_transaction:view", "reservation:view", "reservation:create", "guest:create", "guest:view", "task:view", "task:create", "task:edit"]);
     const identity = await withTenant(prisma, organization.id, async tx => {
       const person = await tx.person.create({ data: { organizationId: organization.id, displayName: "Template administrator" } });
       const account = await tx.userAccount.create({ data: { organizationId: organization.id, personId: person.id } });
@@ -5647,6 +5651,8 @@ describe("PostgreSQL baseline", () => {
         permissions: new Set([
           permissionKey("reservation", "view"),
           permissionKey("reservation", "create"),
+          permissionKey("guest", "create"),
+          permissionKey("guest", "view"),
           permissionKey("task", "view"),
           permissionKey("task", "create")
         ]),
@@ -6753,6 +6759,8 @@ describe("PostgreSQL baseline", () => {
     const financePermissions = new Set([
       permissionKey("reservation", "view"),
       permissionKey("reservation", "create"),
+          permissionKey("guest", "create"),
+          permissionKey("guest", "view"),
       permissionKey("task", "view"),
       permissionKey("task", "create"),
       permissionKey("financial_transaction", "view"),
@@ -7181,6 +7189,8 @@ describe("PostgreSQL baseline", () => {
     const financePermissions = new Set([
       permissionKey("reservation", "view"),
       permissionKey("reservation", "create"),
+          permissionKey("guest", "create"),
+          permissionKey("guest", "view"),
       permissionKey("task", "view"),
       permissionKey("task", "create"),
       permissionKey("financial_transaction", "view"),
@@ -7693,5 +7703,264 @@ describe("PostgreSQL baseline", () => {
     ).rejects.toThrow(/not balanced/u);
 
     expect(transaction.reference).toBe("TX-0001");
+  });
+  async function reservationManagementFixture() {
+    const organization = await prisma.organization.create({ data: { name: `Reservation acceptance ${randomUUID()}` } });
+    const ctx = await activeReservationActor(organization.id, new Set(["property:view", "property:edit", "reservation:view", "reservation:create", "reservation:edit", "reservation:configure", "task:view", "task:create", "task:edit", "guest:view", "guest:create", "guest:edit", "financial_transaction:view", "financial_transaction:create", "financial_transaction:void", "financial_transaction:reconcile"]));
+    const setup = await withTenant(prisma, organization.id, async tx => {
+      const owner = await tx.owner.create({ data: { organizationId: organization.id, displayName: "Reservation financial owner" } });
+      const property = await tx.property.create({ data: { organizationId: organization.id, name: "Reservation acceptance villa", addressLine1: "Marrakech", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [],
+        propertyOwners: { create: { organizationId: organization.id, ownerId: owner.id, shareBps: 10000, isPrimary: true } } } });
+      const otherProperty = await tx.property.create({ data: { organizationId: organization.id, name: "Private second villa", addressLine1: "Marrakech", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
+      for (const [key, value] of [
+        ["ops.reservation_task_templates", { tasks: [{ key: "arrival", type: "ARRIVAL_PREPARATION", due: "CHECK_IN", title: { en: "Arrival", fr: "Arrivée" }, checklist: [{ key: "ready", label: { en: "Ready", fr: "Prêt" } }] }, { key: "checkout", type: "CHECKOUT_CLEANING", due: "CHECK_OUT", title: { en: "Checkout", fr: "Départ" }, checklist: [{ key: "clean", label: { en: "Clean", fr: "Propre" } }] }] }],
+        ["reservation.sync_policy", { interval_minutes: 15, missing_uid_runs: 2, stale_after_minutes: 60 }],
+        ["finance.commission", { rate_bps: 2000, basis: "GROSS_ACCOMMODATION", accrual_event: "ON_CHECKOUT" }]
+      ] as const) await tx.configRule.create({ data: { organizationId: organization.id, key, scopeType: "organization", value: value as never, effectiveFrom: new Date("2020-01-01"), version: 1, reason: "Reservation acceptance configuration" } });
+      return { property, otherProperty, owner };
+    });
+    const deps = { db: prisma, requestId: `reservation-acceptance:${randomUUID()}` };
+    const manual = (overrides: Record<string, unknown> = {}) => createManualReservation(ctx, { propertyId: setup.property.id, source: "DIRECT", guestName: "Repeat Guest", guestEmail: "repeat@example.test", checkIn: "2029-04-10", checkOut: "2029-04-14", adultCount: 2, childCount: 0, idempotencyKey: randomUUID(), ...overrides } as never, deps);
+    const feed = () => connectReservationFeed(ctx, { propertyId: setup.property.id, source: "AIRBNB", name: "Acceptance calendar", url: "https://www.airbnb.com/calendar/ical/acceptance.ics?private=never-log", idempotencyKey: randomUUID() }, deps);
+    const ical = (events: string[]) => ["BEGIN:VCALENDAR", "VERSION:2.0", ...events.map(event => `BEGIN:VEVENT\r\n${event}\r\nEND:VEVENT`), "END:VCALENDAR"].join("\r\n");
+    const event = "UID:stable-ota\r\nDTSTART;VALUE=DATE:20290410\r\nDTEND;VALUE=DATE:20290414\r\nSUMMARY:Reserved";
+    return { organization, ctx, ...setup, deps, manual, feed, ical, event };
+  }
+
+  it("F-RES scheduled-feed persistence: idempotent resync, conditional 304, missing UIDs, changed dates and reviewed cancellations", async () => {
+    const f = await reservationManagementFixture(), feed = await f.feed();
+    let content = f.ical([f.event, "DTSTART;VALUE=DATE:20290420\r\nDTEND;VALUE=DATE:20290422\r\nSUMMARY:Not available"]), status = 200;
+    const seenConditionals: unknown[] = [];
+    const transport: FeedTransport = (_url, conditional) => { seenConditionals.push(conditional); return Promise.resolve({ status, content, etag: '"v1"', lastModified: "Mon, 01 Oct 2026 10:00:00 GMT" }); };
+    const sync = () => syncReservationFeed(f.ctx, feed.id, { ...f.deps, transport, now: new Date("2026-10-18T12:00:00Z") });
+    expect(await sync()).toMatchObject({ status: "SUCCESS", imported: 2 });
+    const first = await withTenant(prisma, f.organization.id, async tx => ({ reservation: await tx.reservation.findFirstOrThrow({ where: { externalId: "stable-ota" } }), blocks: await tx.calendarBlock.count(), guests: await tx.guestRecord.count(), tasks: await tx.operationTask.findMany({ orderBy: { dueDate: "asc" } }), snapshots: await tx.reservationFinancialSnapshot.findMany(), revisions: await tx.reservationRevision.count() }));
+    expect(first.reservation.guestName).toBe(""); expect(first.reservation.guestEmail).toBeNull(); expect(first.blocks).toBe(1); expect(first.guests).toBe(1); expect(first.tasks).toHaveLength(2); expect(first.snapshots[0].amount).toBeNull();
+    expect(await sync()).toMatchObject({ imported: 0, modified: 0 });
+    expect(seenConditionals[1]).toMatchObject({ etag: '"v1"' });
+    status = 304; expect(await sync()).toMatchObject({ status: "NOT_MODIFIED", suspected: 0 });
+    status = 200; content = f.ical([f.event.replace("20290414", "20290416")]);
+    expect(await sync()).toMatchObject({ modified: 1 });
+    const modified = await withTenant(prisma, f.organization.id, async tx => ({ reservation: await tx.reservation.findUniqueOrThrow({ where: { id: first.reservation.id } }), tasks: await tx.operationTask.findMany({ where: { reservationId: first.reservation.id }, orderBy: { dueDate: "asc" } }), revisions: await tx.reservationRevision.findMany({ where: { reservationId: first.reservation.id }, orderBy: { version: "asc" } }) }));
+    expect(modified.reservation.version).toBe(2); expect(modified.tasks).toHaveLength(2); expect(modified.tasks[1].dueDate.toISOString().slice(0, 10)).toBe("2029-04-16"); expect(JSON.stringify(modified.revisions[0].after)).toContain("2029-04-14");
+    content = f.ical([]); await sync(); await sync();
+    const suspected = await withTenant(prisma, f.organization.id, async tx => ({ r: await tx.reservation.findUniqueOrThrow({ where: { id: first.reservation.id } }), issues: await tx.reservationException.findMany({ where: { kind: "MISSING_FEED_ENTRY", status: "OPEN" } }), missing: await tx.reservationFeedEntry.findMany({ orderBy: { externalKey: "asc" } }) }));
+    expect(suspected.r.status).toBe("CONFIRMED"); expect(suspected.r.cancellationSuspectedAt).not.toBeNull(); expect(suspected.issues).toHaveLength(2);
+    content = f.ical([f.event.replace("20290414", "20290416")]); await sync();
+    expect((await withTenant(prisma, f.organization.id, tx => tx.reservation.findUniqueOrThrow({ where: { id: first.reservation.id } }))).cancellationSuspectedAt).toBeNull();
+    content = f.ical([]); await sync(); await sync();
+    const issue = await withTenant(prisma, f.organization.id, tx => tx.reservationException.findFirstOrThrow({ where: { reservationId: first.reservation.id, kind: "MISSING_FEED_ENTRY", status: "OPEN" } }));
+    await reviewMissingFeedEntry(f.ctx, { exceptionId: issue.id, decision: "CANCEL", reason: "Host confirmed OTA cancellation" }, f.deps);
+    const cancelled = await withTenant(prisma, f.organization.id, async tx => ({ r: await tx.reservation.findUniqueOrThrow({ where: { id: first.reservation.id } }), tasks: await tx.operationTask.findMany({ where: { reservationId: first.reservation.id } }), snapshots: await tx.reservationFinancialSnapshot.findMany({ where: { reservationId: first.reservation.id }, orderBy: { version: "asc" } }) }));
+    expect(cancelled.r.status).toBe("CANCELLED"); expect(cancelled.tasks.every(t => t.state === "CANCELLED")).toBe(true); expect(cancelled.snapshots[0]).toEqual(first.snapshots[0]);
+    await expect(withTenant(prisma, f.organization.id, tx => tx.reservationFinancialSnapshot.update({ where: { id: first.snapshots[0].id }, data: { amount: "5000" } }))).rejects.toThrow();
+    await expect(withTenant(prisma, f.organization.id, tx => tx.reservationRevision.delete({ where: { id: modified.revisions[0].id } }))).rejects.toThrow();
+  });
+
+  it("F-RES sync failures and explicit cancellations never fabricate or delete reservations", async () => {
+    const f = await reservationManagementFixture(), feed = await f.feed();
+    const success: FeedTransport = () => Promise.resolve({ status: 200, content: f.ical([f.event]), etag: null, lastModified: null });
+    await syncReservationFeed(f.ctx, feed.id, { ...f.deps, transport: success });
+    for (const response of [{ status: 503, content: "private upstream diagnostic" }, { status: 200, content: "truncated calendar" }]) {
+      expect(await syncReservationFeed(f.ctx, feed.id, { ...f.deps, transport: () => Promise.resolve({ ...response, etag: null, lastModified: null }) })).toMatchObject({ status: "FAILED", imported: 0 });
+    }
+    const failed = await withTenant(prisma, f.organization.id, async tx => ({ feed: await tx.reservationFeed.findUniqueOrThrow({ where: { id: feed.id } }), run: await tx.feedSyncRun.findMany(), r: await tx.reservation.findFirstOrThrow(), missing: await tx.reservationFeedEntry.findFirstOrThrow(), exceptions: await tx.reservationException.findMany() }));
+    expect(failed.feed.consecutiveFailures).toBe(2); expect(failed.r.status).toBe("CONFIRMED"); expect(failed.missing.missingRuns).toBe(0); expect(JSON.stringify(failed.run)).not.toContain("private upstream diagnostic"); expect(JSON.stringify(failed.exceptions)).not.toContain("never-log");
+    expect(await syncReservationFeed(f.ctx, feed.id, { ...f.deps, transport: () => Promise.resolve({ status: 200, content: f.ical([`${f.event}\r\nSTATUS:CANCELLED`]), etag: null, lastModified: null }) })).toMatchObject({ status: "SUCCESS", modified: 1 });
+    expect((await withTenant(prisma, f.organization.id, tx => tx.reservation.findFirstOrThrow())).status).toBe("CANCELLED");
+  });
+
+  it("F-RES CSV normalization deduplicates source identities, retains batches, and isolates tenants and property scopes", async () => {
+    const f = await reservationManagementFixture();
+    const csv = "Confirmation code,Start date,End date,Guest,Guest email,Currency,Gross earnings\nHM-CSV,2029-04-10,2029-04-14,CSV Guest,csv@example.test,MAD,5000.25";
+    const input = { propertyId: f.property.id, source: "AIRBNB", csv, idempotencyKey: randomUUID() };
+    expect(await importReservationCsv(f.ctx, input, f.deps)).toMatchObject({ imported: 1, modified: 0 });
+    expect(await importReservationCsv(f.ctx, { ...input, idempotencyKey: randomUUID() }, f.deps)).toMatchObject({ imported: 0, duplicates: 1 });
+    const changed = csv.replace("2029-04-14", "2029-04-16");
+    expect(await importReservationCsv(f.ctx, { ...input, csv: changed, idempotencyKey: randomUUID() }, f.deps)).toMatchObject({ imported: 0, modified: 1 });
+    const r = await withTenant(prisma, f.organization.id, tx => tx.reservation.findFirstOrThrow({ where: { externalId: "HM-CSV" } }));
+    expect(await withTenant(prisma, f.organization.id, tx => tx.reservation.count())).toBe(1);
+    await expect(importReservationCsv(f.ctx, { ...input, csv: "check_in,check_out\n2029-04-31,2029-05-01", idempotencyKey: randomUUID() }, f.deps)).rejects.toThrow();
+    await expect(importReservationCsv(f.ctx, { ...input, csv: changed }, f.deps)).rejects.toThrow();
+    const otherTenant = await prisma.organization.create({ data: { name: "Foreign reservation tenant" } }), foreign = await activeReservationActor(otherTenant.id, f.ctx.authContext.permissions as Set<string>);
+    await expect(getReservationDetail(foreign, r.id, f.deps)).rejects.toThrow();
+    await expect(importReservationCsv(foreign, input, f.deps)).rejects.toThrow();
+    const wrongScope = { ...f.ctx, authContext: { ...f.ctx.authContext, scopes: [{ organizationId: f.organization.id, scopeType: "property" as const, scopeId: f.otherProperty.id }] } };
+    await expect(getReservationDetail(wrongScope, r.id, f.deps)).rejects.toThrow();
+    expect((await getReservationWorkspace(wrongScope, { start: "2029-04-01", end: "2029-05-01" }, f.deps)).reservations).toEqual([]);
+    await expect(importReservationCsv(wrongScope, { ...input, idempotencyKey: randomUUID() }, f.deps)).rejects.toThrow();
+    const noMoney = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set(["reservation:view", "reservation:create", "reservation:edit", "task:create", "guest:create", "guest:edit"]) } };
+    const redacted = await getReservationDetail(noMoney, r.id, f.deps);
+    expect(JSON.stringify(redacted)).not.toContain("5000.25"); expect(redacted.reservation.guestName).toBe("••••••"); expect(redacted.reservation.guestEmail).toBeUndefined();
+    await expect(importReservationCsv(noMoney, { ...input, csv: csv.replace("HM-CSV", "HM-OTHER"), idempotencyKey: randomUUID() }, f.deps)).rejects.toThrow();
+    await expect(withTenant(prisma, otherTenant.id, tx => tx.reservationFinancialSnapshot.create({ data: { organizationId: otherTenant.id, reservationId: r.id, version: 99, rules: {} } }))).rejects.toThrow();
+  });
+
+  it("F-RES concurrent overlap detection, immutable confirmation rules, price revisions, turnovers and lifecycle task generation", async () => {
+    const f = await reservationManagementFixture();
+    const [a, b] = await Promise.all([f.manual({ quote: { amount: "8000.00", currency: "MAD" } }), f.manual({ guestName: "Other Guest", guestEmail: "other@example.test", checkIn: "2029-04-12", checkOut: "2029-04-15" })]);
+    const query = { start: "2029-04-01", end: "2029-05-01" };
+    expect((await getReservationWorkspace(f.ctx, query, f.deps)).exceptions.some(e => e.kind === "DOUBLE_BOOKING")).toBe(true);
+    const original = await withTenant(prisma, f.organization.id, tx => tx.reservationFinancialSnapshot.findFirstOrThrow({ where: { reservationId: a.reservation.id } }));
+    await withTenant(prisma, f.organization.id, tx => tx.configRule.create({ data: { organizationId: f.organization.id, key: "finance.commission", scopeType: "organization", value: { rate_bps: 3000, basis: "GROSS_ACCOMMODATION", accrual_event: "ON_CHECKOUT" }, effectiveFrom: new Date(), version: 2, reason: "Future commission change" } }));
+    const amended = await changeReservation(f.ctx, { reservationId: a.reservation.id, expectedVersion: 1, operation: "MODIFY", quote: { amount: "9000.01", currency: "MAD" }, reason: "Guest adds accommodation", idempotencyKey: randomUUID() }, f.deps);
+    const snapshots = await withTenant(prisma, f.organization.id, tx => tx.reservationFinancialSnapshot.findMany({ where: { reservationId: a.reservation.id }, orderBy: { version: "asc" } }));
+    expect(snapshots[0]).toEqual(original); expect(snapshots[1].amount?.toString()).toBe("9000.01"); expect(snapshots[1].rules).toEqual(original.rules);
+    expect((await withTenant(prisma, f.organization.id, tx => tx.commissionSnapshot.findFirstOrThrow({ where: { reservationId: a.reservation.id } }))).commissionRateBps).toBe(2000);
+    await expect(changeReservation(f.ctx, { reservationId: a.reservation.id, expectedVersion: 1, operation: "TRANSITION", status: "CANCELLED", reason: "Stale browser should not write", idempotencyKey: randomUUID() }, f.deps)).rejects.toThrow();
+    await changeReservation(f.ctx, { reservationId: b.reservation.id, expectedVersion: 1, operation: "TRANSITION", status: "CANCELLED", reason: "Guest cancels duplicate dates", idempotencyKey: randomUUID() }, f.deps);
+    expect((await getReservationWorkspace(f.ctx, query, f.deps)).exceptions.some(e => e.kind === "DOUBLE_BOOKING")).toBe(false);
+    const repeat = await f.manual({ checkIn: "2029-04-14", checkOut: "2029-04-18" });
+    expect((await getReservationWorkspace(f.ctx, query, f.deps)).turnovers).toContainEqual(expect.objectContaining({ departureId: a.reservation.id, arrivalId: repeat.reservation.id }));
+    expect((await getReservationDetail(f.ctx, a.reservation.id, f.deps)).stays).toHaveLength(2);
+    const draft = await importReservationCsv(f.ctx, { propertyId: f.property.id, source: "BOOKING", idempotencyKey: randomUUID(), csv: "external_id,check_in,check_out,status\nDRAFT,2029-05-10,2029-05-15,imported" }, f.deps);
+    expect(draft.imported).toBe(1);
+    const pending = await withTenant(prisma, f.organization.id, tx => tx.reservation.findFirstOrThrow({ where: { externalId: "DRAFT" } }));
+    expect(pending.status).toBe("IMPORTED"); expect(await withTenant(prisma, f.organization.id, tx => tx.operationTask.count({ where: { reservationId: pending.id } }))).toBe(0);
+    await changeReservation(f.ctx, { reservationId: pending.id, expectedVersion: 1, operation: "TRANSITION", status: "CONFIRMED", reason: "Booking verified with channel", idempotencyKey: randomUUID() }, f.deps);
+    expect(await withTenant(prisma, f.organization.id, tx => tx.operationTask.count({ where: { reservationId: pending.id } }))).toBe(2);
+    await expect(changeReservation(f.ctx, { reservationId: a.reservation.id, expectedVersion: amended.version, operation: "TRANSITION", status: "CLOSED", reason: "Cannot skip stay workflow", idempotencyKey: randomUUID() }, f.deps)).rejects.toThrow();
+  });
+
+  it("F-RES owner and maintenance blocks participate in conflicts without auto-resolving reservations", async () => {
+    const f = await reservationManagementFixture(); const stay = await f.manual();
+    const block = await createCalendarBlock(f.ctx, { propertyId: f.property.id, kind: "MAINTENANCE", checkIn: "2029-04-11", checkOut: "2029-04-12", reason: "Planned pool repair", idempotencyKey: randomUUID() }, f.deps);
+    expect((await getReservationWorkspace(f.ctx, { start: "2029-04-01", end: "2029-05-01" }, f.deps)).exceptions.some(e => e.kind === "BLOCK_OVERLAP")).toBe(true);
+    expect((await getReservationDetail(f.ctx, stay.reservation.id, f.deps)).reservation.status).toBe("CONFIRMED");
+    await releaseCalendarBlock(f.ctx, { blockId: block.id, reason: "Repair moved outside the stay" }, f.deps);
+    expect((await getReservationWorkspace(f.ctx, { start: "2029-04-01", end: "2029-05-01" }, f.deps)).exceptions.some(e => e.kind === "BLOCK_OVERLAP")).toBe(false);
+    const csv = "external_id,check_in,check_out,status\nOTA-BLOCK,2029-04-20,2029-04-22,blocked";
+    const imported = { propertyId: f.property.id, source: "VRBO", csv, idempotencyKey: randomUUID() };
+    expect(await importReservationCsv(f.ctx, imported, f.deps)).toMatchObject({ imported: 1 });
+    expect(await importReservationCsv(f.ctx, { ...imported, csv: csv.replace("2029-04-22", "2029-04-24"), idempotencyKey: randomUUID() }, f.deps)).toMatchObject({ imported: 0, modified: 1 });
+    expect(await importReservationCsv(f.ctx, { ...imported, csv: csv.replace("blocked", "blocked cancelled"), idempotencyKey: randomUUID() }, f.deps)).toMatchObject({ imported: 0, modified: 1 });
+    expect(await withTenant(prisma, f.organization.id, tx => tx.calendarBlock.count({ where: { externalId: "OTA-BLOCK" } }))).toBe(1);
+  });
+
+  it("F-RES financial snapshot resolution honors owner, agreement and booking-source rules at confirmation", async () => {
+    const f = await reservationManagementFixture(); await f.feed();
+    await withTenant(prisma, f.organization.id, async tx => {
+      const agreement = await tx.managementAgreement.create({ data: { organizationId: f.organization.id, propertyId: f.property.id, reference: "AGR-RES", status: "ACTIVE", effectiveFrom: new Date("2020-01-01") } });
+      const channel = await tx.bookingChannel.findFirstOrThrow({ where: { propertyId: f.property.id, sourceKey: "AIRBNB" } });
+      for (const [scopeType, scopeId, rate] of [["owner", f.owner.id, 2500], ["agreement", agreement.id, 3000], ["booking_source_property", channel.id, 4500]] as const) await tx.configRule.create({ data: { organizationId: f.organization.id, key: "finance.commission", scopeType, scopeId, value: { rate_bps: rate, basis: "GROSS_ACCOMMODATION", accrual_event: "ON_CHECKOUT" }, effectiveFrom: new Date("2020-01-01"), version: 1, reason: "Reservation financial specificity" } });
+    });
+    const ota = await f.manual({ source: "AIRBNB", externalId: "HM-SPECIFIC", quote: { amount: "10000.00", currency: "MAD" } });
+    const direct = await f.manual({ checkIn: "2029-05-10", checkOut: "2029-05-14" });
+    const rates = await withTenant(prisma, f.organization.id, tx => tx.commissionSnapshot.findMany({ where: { reservationId: { in: [ota.reservation.id, direct.reservation.id] } } }));
+    expect(rates.find(row => row.reservationId === ota.reservation.id)?.commissionRateBps).toBe(4500);
+    expect(rates.find(row => row.reservationId === direct.reservation.id)?.commissionRateBps).toBe(3000);
+    expect(JSON.stringify((await getReservationDetail(f.ctx, ota.reservation.id, f.deps)).reservation.financialSnapshots)).toContain("booking_source_property");
+  });
+
+  it("F-RES cancellation and refund append compensating postings without rewriting financial history", async () => {
+    const f = await reservationManagementFixture(), created = await f.manual({ quote: { amount: "8000.00", currency: "MAD" } });
+    const bank = await withTenant(prisma, f.organization.id, tx => tx.ledgerAccount.create({ data: { organizationId: f.organization.id, code: "RESERVATION_BANK", name: "Reservation refund bank", accountType: "ASSET_LOCATION", normalSide: "DEBIT" } }));
+    const posted = await recordReservationAccommodationRevenue(f.ctx, { reservationId: created.reservation.id, receivedAccountId: bank.id, amount: "8000.00", currency: "MAD", idempotencyKey: randomUUID() }, f.deps);
+    const originalPostings = await withTenant(prisma, f.organization.id, tx => tx.posting.findMany({ where: { transactionId: { in: [posted.revenueTransactionId, posted.commissionTransactionId!] } }, orderBy: { id: "asc" } }));
+    await changeReservation(f.ctx, { reservationId: created.reservation.id, operation: "TRANSITION", status: "CANCELLED", expectedVersion: 1, reason: "Guest cancels paid booking", idempotencyKey: randomUUID() }, f.deps);
+    const key = randomUUID();
+    const refund = { reservationId: created.reservation.id, operation: "REFUND", expectedVersion: 2, reason: "Full accommodation refund approved", idempotencyKey: key };
+    await changeReservation(f.ctx, refund, f.deps); await changeReservation(f.ctx, refund, f.deps);
+    const current = await withTenant(prisma, f.organization.id, async tx => ({ original: await tx.posting.findMany({ where: { transactionId: { in: [posted.revenueTransactionId, posted.commissionTransactionId!] } }, orderBy: { id: "asc" } }), reversals: await tx.financialTransaction.findMany({ where: { reversesTransactionId: { in: [posted.revenueTransactionId, posted.commissionTransactionId!] } }, include: { postings: true } }), revision: await tx.reservation.findUniqueOrThrow({ where: { id: created.reservation.id } }) }));
+    expect(current.original).toEqual(originalPostings); expect(current.reversals).toHaveLength(2); expect(current.revision.version).toBe(3);
+    const sums = new Map<string, Decimal>();
+    for (const posting of [...originalPostings, ...current.reversals.flatMap(row => row.postings)]) sums.set(posting.ledgerAccountId, (sums.get(posting.ledgerAccountId) ?? new Decimal(0)).add(new Decimal(posting.amount).mul(posting.side === "DEBIT" ? 1 : -1)));
+    expect([...sums.values()].every(amount => amount.eq(0))).toBe(true);
+  });
+
+  it("F-RES no-show, early checkout and explicit guest merging preserve performed work and repeat-guest history", async () => {
+    const f = await reservationManagementFixture(), stay = await f.manual({ checkIn: "2026-10-10", checkOut: "2026-10-30" });
+    for (const [index, state] of ["GUEST_PREPARATION", "CHECKED_IN", "STAYING"].entries()) await changeReservation(f.ctx, { reservationId: stay.reservation.id, operation: "TRANSITION", status: state, expectedVersion: index + 1, reason: "Recorded actual stay lifecycle", idempotencyKey: randomUUID() }, f.deps);
+    const task = await withTenant(prisma, f.organization.id, async tx => {
+      const arrival = await tx.operationTask.findFirstOrThrow({ where: { reservationId: stay.reservation.id, type: "ARRIVAL_PREPARATION" } });
+      return tx.operationTask.update({ where: { id: arrival.id }, data: { state: "COMPLETED", completedAt: new Date(), completedByUserAccountId: f.ctx.actorId, completedByPersonId: f.ctx.personId } });
+    });
+    await changeReservation(f.ctx, { reservationId: stay.reservation.id, operation: "EARLY_CHECKOUT", checkOut: "2026-10-18", expectedVersion: 4, reason: "Guest leaves earlier than planned", idempotencyKey: randomUUID() }, f.deps);
+    const after = await withTenant(prisma, f.organization.id, async tx => ({ arrival: await tx.operationTask.findUniqueOrThrow({ where: { id: task.id } }), checkout: await tx.operationTask.findFirstOrThrow({ where: { reservationId: stay.reservation.id, type: "CHECKOUT_CLEANING" } }) }));
+    expect(after.arrival).toEqual(task); expect(after.checkout.dueDate.toISOString().slice(0, 10)).toBe("2026-10-18");
+    const noShow = await f.manual({ guestName: "Duplicate Guest", guestEmail: "duplicate@example.test", checkIn: "2029-06-10", checkOut: "2029-06-14" });
+    await changeReservation(f.ctx, { reservationId: noShow.reservation.id, operation: "TRANSITION", status: "NO_SHOW", expectedVersion: 1, reason: "Guest did not arrive", idempotencyKey: randomUUID() }, f.deps);
+    expect((await withTenant(prisma, f.organization.id, tx => tx.operationTask.findMany({ where: { reservationId: noShow.reservation.id } }))).every(row => row.state === "CANCELLED")).toBe(true);
+    const [from, to] = await Promise.all([getReservationDetail(f.ctx, noShow.reservation.id, f.deps), getReservationDetail(f.ctx, stay.reservation.id, f.deps)]);
+    const scoped = { ...f.ctx, authContext: { ...f.ctx.authContext, scopes: [{ organizationId: f.organization.id, scopeType: "property" as const, scopeId: f.property.id }] } };
+    const merge = { fromId: from.reservation.guestId, toId: to.reservation.guestId, reason: "Verified the same guest using contact records" };
+    await expect(mergeReservationGuests(scoped, merge, f.deps)).rejects.toThrow();
+    await mergeReservationGuests(f.ctx, merge, f.deps);
+    expect((await getReservationDetail(f.ctx, stay.reservation.id, f.deps)).stays).toHaveLength(2);
+    expect((await withTenant(prisma, f.organization.id, tx => tx.guestRecord.findUniqueOrThrow({ where: { id: String(merge.fromId) } }))).mergedIntoId).toBe(merge.toId);
+    expect(await withTenant(prisma, f.organization.id, tx => tx.auditLog.count({ where: { action: "guest.merged" } }))).toBe(1);
+  });
+
+  it("F-RES scheduled synchronization reuses canonical feeds, enforces current permissions and reports revocation", async () => {
+    const f = await reservationManagementFixture(), feed = await f.feed();
+    await withTenant(prisma, f.organization.id, async tx => {
+      const role = await tx.role.create({ data: { organizationId: f.organization.id, key: "reservation-sync-operator", name: "Reservation sync operator" } });
+      for (const key of f.ctx.authContext.permissions) {
+        const [resource, action] = key.split(":"); const permission = await tx.permission.create({ data: { organizationId: f.organization.id, resource, action, key } });
+        await tx.rolePermission.create({ data: { organizationId: f.organization.id, roleId: role.id, permissionId: permission.id } });
+      }
+      await tx.roleAssignment.create({ data: { organizationId: f.organization.id, roleId: role.id, personId: f.ctx.personId, userAccountId: f.ctx.actorId, scopeType: "property", scopeId: f.property.id } });
+    });
+    const now = new Date();
+    const scheduled = await scheduleReservationSyncs(f.organization.id, { ...f.deps, now, transport: () => Promise.resolve({ status: 200, content: f.ical([f.event]), etag: null, lastModified: null }) });
+    expect(scheduled).toMatchObject({ attempted: 1, failed: 0 });
+    expect(await withTenant(prisma, f.organization.id, tx => tx.reservation.count())).toBe(1);
+    expect((await withTenant(prisma, f.organization.id, tx => tx.bookingChannel.findFirstOrThrow({ where: { propertyId: f.property.id } }))).syncEndpointEncrypted).not.toContain("never-log");
+    await withTenant(prisma, f.organization.id, tx => tx.roleAssignment.updateMany({ where: { userAccountId: f.ctx.actorId }, data: { validTo: new Date() } }));
+    await scheduleReservationSyncs(f.organization.id, { ...f.deps, now: new Date(now.getTime() + 16 * 60000), transport: () => Promise.reject(new Error("revoked scheduled actor must not fetch")) });
+    const denied = await withTenant(prisma, f.organization.id, tx => tx.reservationFeed.findUniqueOrThrow({ where: { id: feed.id } }));
+    expect(denied.lastError).toBe("feed_scheduling_not_authorized");
+    expect(await withTenant(prisma, f.organization.id, tx => tx.reservationException.count({ where: { kind: "FEED_SYNC_FAILED", status: "OPEN" } }))).toBe(1);
+  });
+
+  it("F-RES calendar counts, blocks and exceptions honor status and reservation scopes across 500 properties without N+1 queries", async () => {
+    const f = await reservationManagementFixture(), first = await f.manual(), second = await f.manual({ checkIn: "2029-04-20", checkOut: "2029-04-24" });
+    await changeReservation(f.ctx, { reservationId: second.reservation.id, expectedVersion: 1, operation: "TRANSITION", status: "CANCELLED", reason: "Cancellation for scoped calendar", idempotencyKey: randomUUID() }, f.deps);
+    await createCalendarBlock(f.ctx, { propertyId: f.property.id, kind: "OWNER", checkIn: "2029-04-11", checkOut: "2029-04-12", reason: "Owner use", idempotencyKey: randomUUID() }, f.deps);
+    const query = { start: "2029-04-01", end: "2029-05-01" };
+    const conditional = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [{ scope: { organizationId: f.organization.id }, permissions: new Set(["reservation:view"]), conditions: { statuses: ["CANCELLED"] } }] } };
+    const limited = await getReservationWorkspace(conditional, query, f.deps);
+    expect(limited.total).toBe(1); expect(limited.reservations.map(row => row.id)).toEqual([second.reservation.id]);
+    const scoped = { ...f.ctx, authContext: { ...f.ctx.authContext, scopes: [{ organizationId: f.organization.id, scopeType: "reservation" as const, scopeId: first.reservation.id }] } };
+    const single = await getReservationWorkspace(scoped, query, f.deps);
+    expect(single.total).toBe(1); expect(single.reservations[0].id).toBe(first.reservation.id); expect(single.blocks).toEqual([]); expect(single.feeds).toEqual([]);
+    const measured = new PrismaClient({ datasources: { db: { url: notificationTestDatabaseUrl } }, log: [{ emit: "event", level: "query" }] });
+    let queries = 0; measured.$on("query", () => { queries++; });
+    try {
+      await getReservationWorkspace(f.ctx, query, { ...f.deps, db: measured }); const baseline = queries;
+      const extra = Array.from({ length: 500 }, (_, index) => ({ id: randomUUID(), organizationId: f.organization.id, name: `Portfolio ${index}`, addressLine1: "Test portfolio", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] }));
+      await withTenant(prisma, f.organization.id, async tx => {
+        await tx.property.createMany({ data: extra });
+        const channels = [f.otherProperty.id, ...extra.map(property => property.id)].map(propertyId => ({ id: randomUUID(), organizationId: f.organization.id, propertyId, sourceKey: "VRBO", displayName: "Portfolio feed", syncMode: "ICAL" }));
+        await tx.bookingChannel.createMany({ data: channels });
+        await tx.reservationFeed.createMany({ data: channels.map(channel => ({ organizationId: f.organization.id, propertyId: channel.propertyId, bookingChannelId: channel.id, source: "VRBO", name: "Portfolio feed", enabled: false, idempotencyKey: randomUUID() })) });
+        await tx.calendarBlock.createMany({ data: extra.map(property => ({ organizationId: f.organization.id, propertyId: property.id, kind: "OWNER", source: "MANUAL", checkIn: new Date("2029-04-20"), checkOut: new Date("2029-04-22"), idempotencyKey: randomUUID() })) });
+      });
+      queries = 0;
+      const portfolio = await getReservationWorkspace(f.ctx, query, { ...f.deps, db: measured });
+      expect(portfolio.properties).toHaveLength(502); expect(portfolio.total).toBe(2); expect(queries).toBeLessThanOrEqual(baseline + 1); expect(queries).toBeLessThan(25);
+      expect(portfolio.blockTotal).toBe(501); expect(portfolio.blocks).toHaveLength(50); expect(portfolio.feedTotal).toBe(501); expect(portfolio.feeds).toHaveLength(50);
+      const last = await getReservationWorkspace(f.ctx, { ...query, page: 11, feedPage: 11 }, f.deps);
+      expect(last.blocks).toHaveLength(1); expect(last.feeds).toHaveLength(1); expect(last.reservations).toEqual([]);
+    } finally { await measured.$disconnect(); }
+  });
+
+  it.each([true, false])("F-RES revenue preserves the confirmed owner after ownership changes (initial commission configured: %s)", async configured => {
+    const f = await reservationManagementFixture();
+    if (!configured) await withTenant(prisma, f.organization.id, tx => tx.configRule.create({ data: { organizationId: f.organization.id, key: "finance.commission", scopeType: "organization", lifecycle: "RETIRED", value: { rate_bps: 2000, basis: "GROSS_ACCOMMODATION", accrual_event: "ON_CHECKOUT" }, effectiveFrom: new Date("2020-01-01"), version: 2, reason: "Missing configuration at confirmation" } }));
+    const stay = await f.manual({ quote: { amount: "8000.00", currency: "MAD" } });
+    const original = await withTenant(prisma, f.organization.id, tx => tx.reservationFinancialSnapshot.findFirstOrThrow({ where: { reservationId: stay.reservation.id } }));
+    if (!configured) await withTenant(prisma, f.organization.id, tx => tx.configRule.create({ data: { organizationId: f.organization.id, key: "finance.commission", scopeType: "organization", lifecycle: "ACTIVE", value: { rate_bps: 2000, basis: "GROSS_ACCOMMODATION", accrual_event: "ON_CHECKOUT" }, effectiveFrom: new Date("2020-01-01"), version: 3, reason: "Explicit audited historical financial configuration correction" } }));
+    const bank = await withTenant(prisma, f.organization.id, async tx => {
+      const next = await tx.owner.create({ data: { organizationId: f.organization.id, displayName: "Subsequent owner" } });
+      await tx.propertyOwner.updateMany({ where: { organizationId: f.organization.id, propertyId: f.property.id }, data: { archivedAt: new Date() } });
+      await tx.propertyOwner.create({ data: { organizationId: f.organization.id, propertyId: f.property.id, ownerId: next.id, shareBps: 10000, isPrimary: true } });
+      return tx.ledgerAccount.create({ data: { organizationId: f.organization.id, code: "FROZEN_OWNER_BANK", name: "Frozen owner receipt", accountType: "ASSET_LOCATION", normalSide: "DEBIT" } });
+    });
+    const receipt = await recordReservationAccommodationRevenue(f.ctx, { reservationId: stay.reservation.id, receivedAccountId: bank.id, amount: "8000.00", currency: "MAD", idempotencyKey: randomUUID() }, f.deps);
+    const postings = await withTenant(prisma, f.organization.id, tx => tx.posting.findMany({ where: { transactionId: receipt.revenueTransactionId } }));
+    expect(postings.filter(row => row.dimensions && typeof row.dimensions === "object" && !Array.isArray(row.dimensions) && row.dimensions.owner_id).every(row => JSON.stringify(row.dimensions).includes(f.owner.id))).toBe(true);
+    expect(postings.some(row => JSON.stringify(row.dimensions).includes(f.owner.id))).toBe(true);
+    expect(await withTenant(prisma, f.organization.id, tx => tx.reservationFinancialSnapshot.findUniqueOrThrow({ where: { id: original.id } }))).toEqual(original);
   });
 });
