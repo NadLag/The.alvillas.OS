@@ -431,6 +431,88 @@ describe("operations on real PostgreSQL", () => {
     );
     expect(history.events.map((e) => e.version)).toEqual([4, 3, 2, 1]);
   });
+  it("proxy-validates a staff profile without a login and rejects unvalidated person-only checklist writes", async () => {
+    const f = await fixture();
+    const person = await withTenant(db, f.org, (tx) =>
+      tx.person.create({
+        data: { organizationId: f.org, displayName: "Staff without a login" },
+      }),
+    );
+    const created = await createOperationTask(f.ctx, input(f), deps());
+    await withTenant(db, f.org, (tx) =>
+      tx.operationTask.update({
+        where: { id: created.id },
+        data: {
+          state: "ASSIGNED",
+          assignedToPersonId: person.id,
+          assignedToUserAccountId: null,
+        },
+      }),
+    );
+    const task = (
+      await operationTaskDetail(f.ctx, created.id, undefined, deps())
+    ).task;
+    await expect(
+      withTenant(db, f.org, (tx) =>
+        tx.operationTaskChecklistItem.updateMany({
+          where: { organizationId: f.org, taskId: task.id },
+          data: {
+            completedAt: new Date(),
+            completedByPersonId: person.id,
+            completedByUserAccountId: null,
+          },
+        }),
+      ),
+    ).rejects.toThrow(/audited proxy validation/i);
+    const command = {
+      taskId: task.id,
+      expectedVersion: task.version,
+      performedByPersonId: person.id,
+      checklistItemIds: task.checklistItems.map((i) => i.id),
+      reason: "Supervisor validates the staff profile without app access",
+      idempotencyKey: randomUUID(),
+    };
+    const completed = await proxyCompleteOperationTask(f.ctx, command, deps());
+    expect(completed).toMatchObject({
+      state: "COMPLETED",
+      completedByPersonId: person.id,
+      completedByUserAccountId: null,
+      validatedByPersonId: f.person.id,
+      validatedByUserAccountId: f.account.id,
+      completionSource: "PROXY",
+    });
+    expect(
+      completed.checklistItems.every(
+        (i) =>
+          i.completedByPersonId === person.id &&
+          i.completedByUserAccountId === null,
+      ),
+    ).toBe(true);
+    await proxyCompleteOperationTask(f.ctx, command, deps());
+    expect(
+      await withTenant(db, f.org, (tx) =>
+        tx.auditLog.count({
+          where: {
+            organizationId: f.org,
+            resourceId: task.id,
+            action: "task.proxy_validation.created",
+          },
+        }),
+      ),
+    ).toBe(1);
+    await expect(
+      withTenant(db, f.org, (tx) =>
+        tx.operationTask.update({
+          where: { id: task.id },
+          data: { validatedByPersonId: person.id },
+        }),
+      ),
+    ).rejects.toThrow(/audited proxy validation/i);
+    expect(
+      (await operationTaskDetail(f.ctx, task.id, undefined, deps())).task
+        .validatedByPersonId,
+    ).toBe(f.person.id);
+  });
   it("serializes worker completion, blocks cancelled work and records SELF rather than the validator", async () => {
     const f = await fixture(),
       task = await assigned(f);
