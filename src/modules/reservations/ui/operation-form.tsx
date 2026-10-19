@@ -15,7 +15,7 @@ export function OperationForm({ locale, operation, children, taskId, version, su
   const [state, action, pending] = useActionState<OperationFormState, FormData>(operationAction.bind(null, locale, operation), { status: "idle" });
   const online = useSyncExternalStore(subscribeOnline, onlineSnapshot, serverOnlineSnapshot);
   const [clientError, setClientError] = useState(false);
-  return <form action={action} className="resource-form" data-testid={`operation-${operation}-form`} onSubmit={event => {
+  return <form action={action} className="resource-form operation-form" data-testid={`operation-${operation}-form`} onSubmit={event => {
     try { parseOperationForm(operation, new FormData(event.currentTarget)); setClientError(false); }
     catch { event.preventDefault(); setClientError(true); }
   }}>
