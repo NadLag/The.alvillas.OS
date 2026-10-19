@@ -76,6 +76,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging
+    concurrency:
+      group: staging-deployment
+      cancel-in-progress: false
     permissions:
       contents: read
     env:
@@ -83,6 +86,7 @@ jobs:
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
       VERCEL_CLI_VERSION: "63.1.2"
       STAGING_ALIAS: "the-alvillas-os-staging.vercel.app"
+      STAGING_DATABASE_IDENTITY: ${{ vars.STAGING_DATABASE_IDENTITY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -95,7 +99,7 @@ jobs:
         id: staging_credentials
         run: |
           missing=""
-          for name in VERCEL_ORG_ID VERCEL_PROJECT_ID VERCEL_TOKEN; do
+          for name in VERCEL_ORG_ID VERCEL_PROJECT_ID VERCEL_TOKEN STAGING_MIGRATION_DATABASE_URL STAGING_DATABASE_IDENTITY; do
             value="${!name:-}"
             if [ -z "$value" ]; then
               missing="${missing}${missing:+, }${name}"
@@ -105,19 +109,25 @@ jobs:
           if [ -n "$missing" ]; then
             echo "ready=false" >> "$GITHUB_OUTPUT"
             {
-              echo "### Staging deployment skipped"
+              echo "### Staging deployment blocked"
               echo
               echo "Missing GitHub staging credential(s): \`$missing\`."
               echo
-              echo "Configure \`VERCEL_ORG_ID\` and \`VERCEL_PROJECT_ID\` as staging environment variables, and \`VERCEL_TOKEN\` as a staging environment secret."
+              echo "Configure the named credentials in the GitHub staging environment."
             } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            exit 1
           fi
 
           echo "ready=true" >> "$GITHUB_OUTPUT"
           echo "Staging credential presence ok." >> "$GITHUB_STEP_SUMMARY"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          STAGING_MIGRATION_DATABASE_URL: ${{ secrets.STAGING_MIGRATION_DATABASE_URL }}
+      - name: Require current merged main
+        if: steps.staging_credentials.outputs.ready == 'true'
+        run: test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$GITHUB_SHA"
+        env:
+          GH_TOKEN: ${{ github.token }}
       - if: steps.staging_credentials.outputs.ready == 'true'
         run: npm ci
       - name: Validate staging credentials
@@ -134,31 +144,21 @@ jobs:
         run: npm install -g "vercel@${VERCEL_CLI_VERSION:?set VERCEL_CLI_VERSION}"
       - name: Pull staging environment
         if: steps.staging_credentials.outputs.ready == 'true'
-        run: vercel pull --yes --environment=preview
+        run: vercel pull --yes --environment=preview --scope "$VERCEL_ORG_ID"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      - name: Apply staging migrations
+      - name: Apply verified preview migrations
         if: steps.staging_credentials.outputs.ready == 'true'
-        run: vercel env run --environment=preview -- npm run prisma:migrate:deploy
+        run: npx tsx scripts/staging-migrate.ts
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      - name: Bootstrap first staging admin
-        if: steps.staging_credentials.outputs.ready == 'true'
-        run: vercel env run --environment=preview -- npm run bootstrap:first-admin
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      - name: Build staging
-        if: steps.staging_credentials.outputs.ready == 'true'
-        run: vercel build
-        env:
-          VERCEL_GIT_COMMIT_SHA: ${{ github.sha }}
-          VERCEL_GIT_COMMIT_REF: main
+          STAGING_MIGRATION_DATABASE_URL: ${{ secrets.STAGING_MIGRATION_DATABASE_URL }}
+          STAGING_DATABASE_IDENTITY: ${{ vars.STAGING_DATABASE_IDENTITY }}
       - name: Deploy staging
         if: steps.staging_credentials.outputs.ready == 'true'
         id: deploy
         run: |
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          deployment_output="$(vercel deploy --prebuilt --target=preview --meta githubCommitSha="$GITHUB_SHA" --meta githubCommitRef=main --env "VERCEL_GIT_COMMIT_SHA=$GITHUB_SHA" --env VERCEL_GIT_COMMIT_REF=main)"
+          deployment_output="$(vercel deploy --yes --target=preview --scope "$VERCEL_ORG_ID" --build-env "VERCEL_GIT_COMMIT_SHA=$GITHUB_SHA" --build-env VERCEL_GIT_COMMIT_REF=main --meta githubCommitSha="$GITHUB_SHA" --meta githubCommitRef=main --env "VERCEL_GIT_COMMIT_SHA=$GITHUB_SHA" --env VERCEL_GIT_COMMIT_REF=main)"
           deployment_url="$(DEPLOYMENT_OUTPUT="$deployment_output" node --input-type=module -e '
             const output = process.env.DEPLOYMENT_OUTPUT ?? "";
             const urls = [...output.matchAll(/https:\/\/[a-z0-9.-]+\.vercel\.app/g)].map((match) => match[0]);
@@ -179,9 +179,9 @@ jobs:
       - name: Smoke staging deployment
         if: steps.staging_credentials.outputs.ready == 'true'
         run: |
-          vercel curl /api/health --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/health.json
-          vercel curl /api/readiness --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/readiness.json
-          vercel curl /api/version --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/version.json
+          vercel curl --scope "$VERCEL_ORG_ID" /api/health --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/health.json
+          vercel curl --scope "$VERCEL_ORG_ID" /api/readiness --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/readiness.json
+          vercel curl --scope "$VERCEL_ORG_ID" /api/version --deployment "$DEPLOYMENT_URL" -- --fail --show-error --silent > /tmp/version.json
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const health = JSON.parse(readFileSync("/tmp/health.json", "utf8"));
@@ -191,6 +191,7 @@ jobs:
             if (!["ready", "not_ready"].includes(readiness.status)) throw new Error("Unexpected readiness status");
             if (version.service !== "alvillas-os" || !version.version) throw new Error("Unexpected version payload");
             if (version.version !== process.env.GITHUB_SHA) throw new Error(`Unexpected version SHA ${version.version}`);
+            if (version.environment !== "preview") throw new Error("Unexpected deployment environment");
             if (version.commitRef !== "main") throw new Error(`Unexpected commit ref ${version.commitRef}`);
             console.log(JSON.stringify({
               deployment: process.env.DEPLOYMENT_URL,
@@ -207,15 +208,23 @@ jobs:
         if: steps.staging_credentials.outputs.ready == 'true'
         run: |
           test -n "${STAGING_ALIAS:?STAGING_ALIAS is required}"
-          vercel alias set "$DEPLOYMENT_URL" "$STAGING_ALIAS"
-          vercel curl /api/version --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-version.json
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$GITHUB_SHA"
+          vercel alias set "$DEPLOYMENT_URL" "$STAGING_ALIAS" --scope "$VERCEL_ORG_ID"
+          vercel curl --scope "$VERCEL_ORG_ID" /api/health --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-health.json
+          vercel curl --scope "$VERCEL_ORG_ID" /api/readiness --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-readiness.json
+          vercel curl --scope "$VERCEL_ORG_ID" /api/version --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-version.json
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
+            const health = JSON.parse(readFileSync("/tmp/staging-health.json", "utf8"));
+            const readiness = JSON.parse(readFileSync("/tmp/staging-readiness.json", "utf8"));
             const version = JSON.parse(readFileSync("/tmp/staging-version.json", "utf8"));
-            if (version.service !== "alvillas-os") throw new Error("Unexpected stable staging service");
+            if (health.service !== "alvillas-os" || readiness.status !== "ready") throw new Error("Stable staging health or readiness failed");
+            if (version.service !== "alvillas-os" || version.environment !== "preview" || version.commitRef !== "main") throw new Error("Unexpected stable staging service or environment");
             if (version.version !== process.env.GITHUB_SHA) throw new Error(`Stable staging alias points at ${version.version}`);
             console.log(JSON.stringify({
               stagingUrl: `https://${process.env.STAGING_ALIAS}`,
+              health: health.status,
+              readiness: readiness.status,
               version: version.version,
               commitRef: version.commitRef
             }));
@@ -223,3 +232,4 @@ jobs:
         env:
           DEPLOYMENT_URL: ${{ steps.deploy.outputs.url }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
