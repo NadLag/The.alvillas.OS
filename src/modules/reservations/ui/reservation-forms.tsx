@@ -429,9 +429,12 @@ export function ManualReservationForm({
   idempotencyKey: string;
 }) {
   const whatsapp = useTranslations("Whatsapp");
+  const management = useTranslations("ReservationManagement");
   const schema = useMemo(
     () =>
       z.object({
+        amount: z.string().regex(/^(?:|(?:0|[1-9]\d*)(?:\.\d{1,2})?)$/u, labels.validation).optional(),
+        currency: z.string().regex(/^(?:|[A-Z]{3})$/u, labels.validation).optional(),
         adultCount: z.coerce.number().min(0, labels.validation),
         checkIn: z.string().trim().min(1, labels.validation),
         checkOut: z.string().trim().min(1, labels.validation),
@@ -570,6 +573,7 @@ export function ManualReservationForm({
         <span>{labels.notes}</span>
         <textarea rows={3} {...form.register("notes")} />
       </label>
+      <div className="form-grid two"><label className="field"><span>{management("amountOptional")}</span><input inputMode="decimal" {...form.register("amount")} /></label><label className="field"><span>{management("currency")}</span><input minLength={3} maxLength={3} {...form.register("currency")} /></label></div>
       {message ? (
         <p className="form-error" data-testid="reservation-form-error" role="alert">
           {message}

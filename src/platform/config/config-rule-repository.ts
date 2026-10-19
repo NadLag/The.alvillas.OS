@@ -151,6 +151,32 @@ export function sortConfigRulesForResolution<T extends Pick<ConfigRuleRecord, "s
   });
 }
 
+export function resolveConfigCandidates(rules: Array<Omit<ConfigRuleRecord, "lifecycle"> & { lifecycle: string }>): ResolvedConfigRule | null {
+    const retiredScopes = new Set<string>();
+
+    for (const rule of sortConfigRulesForResolution(rules)) {
+      const scopeKey = `${rule.scopeType}:${rule.scopeId ?? "null"}`;
+      const lifecycle = normalizeLifecycle(rule.lifecycle);
+
+      if (retiredScopes.has(scopeKey)) {
+        continue;
+      }
+
+      if (lifecycle === "RETIRED") {
+        retiredScopes.add(scopeKey);
+        continue;
+      }
+
+      return {
+        ...rule,
+        lifecycle,
+        parsedValue: parseConfigRuleValue(rule.key, rule.value)
+      };
+    }
+
+    return null;
+}
+
 export class ConfigRuleRepository {
   constructor(
     private readonly tx: TenantTransaction,
@@ -215,29 +241,13 @@ export class ConfigRuleRepository {
         createdAt: true
       }
     });
-    const retiredScopes = new Set<string>();
+    return resolveConfigCandidates(rules);
+  }
 
-    for (const rule of sortConfigRulesForResolution(rules)) {
-      const scopeKey = `${rule.scopeType}:${rule.scopeId ?? "null"}`;
-      const lifecycle = normalizeLifecycle(rule.lifecycle);
-
-      if (retiredScopes.has(scopeKey)) {
-        continue;
-      }
-
-      if (lifecycle === "RETIRED") {
-        retiredScopes.add(scopeKey);
-        continue;
-      }
-
-      return {
-        ...rule,
-        lifecycle,
-        parsedValue: parseConfigRuleValue(rule.key, rule.value)
-      };
-    }
-
-    return null;
+  async resolveForProperties(key: string, propertyIds: string[], asOf: Date) {
+    const rules = await this.tx.configRule.findMany({ where: { organizationId: this.organizationId, key, archivedAt: null, lifecycle: { in: ["ACTIVE", "RETIRED"] }, effectiveFrom: { lte: asOf },
+      AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gt: asOf } }] }, { OR: [{ scopeType: "organization", scopeId: null }, { scopeType: "property", scopeId: { in: propertyIds } }] }] } });
+    return new Map(propertyIds.map(id => [id, resolveConfigCandidates(rules.filter(rule => rule.scopeType === "organization" || rule.scopeId === id))]));
   }
 
   async list(input: {

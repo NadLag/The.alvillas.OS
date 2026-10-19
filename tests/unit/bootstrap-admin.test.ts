@@ -201,8 +201,9 @@ describe("first-admin bootstrap", () => {
         archivedAt: null
       }
     });
-    expect(configRule.create).toHaveBeenCalledOnce();
-    expect(configRule.create.mock.calls[0]?.[0].data).toMatchObject({
+    expect(configRule.create).toHaveBeenCalledTimes(2);
+    expect(configRule.create.mock.calls[0]?.[0].data).toMatchObject({ key: "reservation.sync_policy", value: { interval_minutes: 15, missing_uid_runs: 2, stale_after_minutes: 60 } });
+    expect(configRule.create.mock.calls[1]?.[0].data).toMatchObject({
       organizationId: bootstrapOrganizationId,
       key: "ops.reservation_task_templates",
       createdBy: "018f0a0b-0000-7000-9000-000000000003"

@@ -16,7 +16,7 @@ import {
 } from "@/modules/reservations/application/reservation-service";
 import { ManualReservationForm } from "@/modules/reservations/ui/reservation-forms";
 import { auth } from "@/platform/auth/session";
-import { permissionKey } from "@/platform/authz/authorize";
+import { permissionKey, authorizeCollection } from "@/platform/authz/authorize";
 import { routing, type AppLocale } from "@/i18n/routing";
 import { whatsappComposerPath } from "@/platform/notifications/whatsapp-path";
 
@@ -42,6 +42,7 @@ export default async function ReservationsPage({
     redirect(`/${appLocale}/login`);
   }
 
+  const canCreate = ["reservation", "task", "guest"].every(resource => authorizeCollection(ctx.authContext, "create", resource));
   const canPostRevenue =
     ctx.authContext.permissions.has(permissionKey("financial_transaction", "create")) &&
     ctx.authContext.permissions.has(permissionKey("financial_transaction", "view"));
@@ -57,12 +58,13 @@ export default async function ReservationsPage({
   ] = await Promise.all([
     getTranslations("Reservations"),
     listReservations(ctx),
-    listReservationPropertyOptions(ctx),
+    canCreate ? listReservationPropertyOptions(ctx) : Promise.resolve([]),
     canPostRevenue ? listRevenuePostingAccounts(ctx) : Promise.resolve([]),
     canPostRevenue ? listReservationsWithActiveRevenue(ctx) : Promise.resolve([]),
     canReconcileSettlements ? listAirbnbSettlementVariances(ctx) : Promise.resolve([])
   ]);
   const postedRevenueReservations = new Set(postedRevenueReservationIds);
+  const management = await getTranslations("ReservationManagement");
   const whatsapp = await getTranslations("Whatsapp");
   const settlementVarianceViews = settlementVariances.map((variance) => ({
     id: variance.id,
@@ -82,9 +84,9 @@ export default async function ReservationsPage({
     <ManagerShell className="resource-page" testId="reservations-page">
       <ShellHeader
         actions={
-        <Link className="secondary-button" href={`/${appLocale}/app`}>
+        <><Link className="primary-button" href={`/${appLocale}/app/reservations/calendar`}>{management("calendar")}</Link><Link className="secondary-button" href={`/${appLocale}/app`}>
           {t("backToWorkspace")}
-        </Link>
+        </Link></>
         }
         eyebrow={t("eyebrow")}
         subtitle={t("subtitle")}
@@ -105,11 +107,11 @@ export default async function ReservationsPage({
                 <div className="resource-row reservation-row" data-testid="reservation-row" key={reservation.id}>
                   <div className="reservation-row-main">
                     <span>
-                      <strong>{reservation.reference}</strong>
+                      <Link href={`/${appLocale}/app/reservations/${reservation.id}`}><strong>{reservation.reference}</strong></Link>
                       <small>
                         {t("rowMeta", {
                           property: reservation.propertyName,
-                          guest: reservation.guestName
+                          guest: reservation.guestName || management("unknownGuest")
                         })}
                       </small>
                     </span>
@@ -187,7 +189,7 @@ export default async function ReservationsPage({
 
         <aside className="workspace-side" aria-label={t("createLabel")}>
           <p className="panel-label">{t("createLabel")}</p>
-          <ManualReservationForm
+          {canCreate ? <ManualReservationForm
             locale={appLocale}
             properties={properties}
             idempotencyKey={crypto.randomUUID()}
@@ -220,7 +222,7 @@ export default async function ReservationsPage({
               config: t("forms.config"),
               generic: t("forms.generic")
             }}
-          />
+          /> : <p>{management("readOnly")}</p>}
         </aside>
       </div>
     </ManagerShell>

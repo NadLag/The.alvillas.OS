@@ -136,6 +136,9 @@ export async function bootstrapFirstAdmin(
       });
     }
 
+    const syncPolicy = await tx.configRule.findFirst({ where: { organizationId: organization.id, key: "reservation.sync_policy" } });
+    if (!syncPolicy) await tx.configRule.create({ data: { organizationId: organization.id, key: "reservation.sync_policy", scopeType: "organization", value: { interval_minutes: 15, missing_uid_runs: 2, stale_after_minutes: 60 }, effectiveFrom: new Date(), version: 1, reason: "Editable reservation sync defaults", createdBy: account.id } });
+
     const existingReservationTaskConfig = await tx.configRule.findFirst({
       where: {
         organizationId: organization.id,

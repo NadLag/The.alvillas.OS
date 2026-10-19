@@ -2349,3 +2349,37 @@ textarea:disabled {
   .template-actions button, .template-actions a, .template-tabs a { min-block-size: 48px; }
   .template-diff-row dl { grid-template-columns: minmax(0, 1fr); }
 }
+/* Reservation calendars keep the date grid inside its own scroll region. */
+.reservation-management-page { grid-template-columns: minmax(0, 1fr); min-inline-size: 0; }
+.reservation-management-page > *, .reservation-management-layout > * { min-inline-size: 0; }
+.reservation-calendar-panel { margin-block-end: 24px; min-inline-size: 0; }
+.reservation-filters { display: flex; flex-wrap: wrap; gap: 16px; align-items: end; }
+.reservation-filters .field { flex: 1 1 150px; }
+.reservation-calendar-scroll { overflow: auto; max-inline-size: 100%; max-block-size: 720px; border: 1px solid var(--border); border-radius: 12px; }
+.reservation-calendar { border-collapse: separate; border-spacing: 0; inline-size: 100%; font-variant-numeric: tabular-nums; }
+.reservation-calendar caption { text-align: start; padding: 16px; }
+.reservation-calendar th, .reservation-calendar td { border-block-end: 1px solid var(--border); padding: 8px 2px; min-inline-size: 30px; text-align: center; block-size: 56px; }
+.reservation-calendar thead th { position: sticky; inset-block-start: 0; background: var(--surface); z-index: 2; }
+.reservation-calendar th:first-child { position: sticky; inset-inline-start: 0; min-inline-size: 180px; max-inline-size: 240px; padding-inline: 12px; text-align: start; background: var(--surface); z-index: 1; }
+.reservation-calendar thead th:first-child { z-index: 3; }
+.reservation-calendar th span, .reservation-calendar th small, .reservation-calendar th strong { display: block; overflow-wrap: anywhere; }
+.reservation-day { display: block; block-size: 18px; background: #0b6b5f; border-radius: 3px; }
+.reservation-day-block { background: #6d7371; }
+.reservation-day-imported { background: #9f3f1b; }
+.reservation-management-form { margin-block: 16px; }
+.reservation-management-form fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; display: grid; gap: 12px; }
+.reservation-management-form textarea { inline-size: 100%; resize: vertical; }
+.reservation-management-form input, .reservation-management-form select { min-inline-size: 0; max-inline-size: 100%; }
+.reservation-management-layout .workspace-side details, .reservation-detail-page details { padding-block: 16px; }
+.reservation-management-layout summary, .workspace-side summary { cursor: pointer; min-block-size: 44px; padding-block: 10px; font-weight: 600; }
+.reservation-exception, .reservation-feed, .reservation-snapshot { padding-block: 20px; border-block-end: 1px solid var(--border); }
+.reservation-inline-forms { display: flex; flex-wrap: wrap; gap: 12px; }
+.reservation-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 20px; }
+.reservation-summary dd { margin-inline-start: 0; overflow-wrap: anywhere; }
+.reservation-history { padding-inline-start: 24px; }
+.reservation-history li { padding-block: 12px; }
+@media (max-width: 600px) {
+  .reservation-filters { display: grid; grid-template-columns: 1fr; }
+  .reservation-calendar th:first-child { min-inline-size: 145px; max-inline-size: 145px; }
+  .reservation-management-form button { min-block-size: 48px; }
+}

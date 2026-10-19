@@ -98,6 +98,14 @@ describe("reservation service authorization and validation", () => {
     ).rejects.toBeInstanceOf(ReservationAuthorizationError);
   });
 
+  it("denies guest creation even when reservation and task creation are allowed", async () => {
+    const organizationId = "018f0a0b-0000-7000-9000-000000000001";
+    const ctx = actor({ organizationId, permissions: new Set(["reservation:create", "task:create"]), scopes: [{ organizationId }] });
+    const parsed = parseManualReservationInput({ propertyId: "018f0a0b-0000-7000-9000-000000000101", guestName: "Protected Guest", source: "DIRECT", checkIn: "2029-04-10", checkOut: "2029-04-12", adultCount: 2, childCount: 0, idempotencyKey: "018f0a0b-0000-7000-9000-000000000201" });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) await expect(createManualReservation(ctx, parsed.data, { db: deniedDb })).rejects.toBeInstanceOf(ReservationAuthorizationError);
+  });
+
   it("validates that check-out is after check-in", () => {
     const parsed = parseManualReservationInput({
       propertyId: "018f0a0b-0000-7000-9000-000000000101",

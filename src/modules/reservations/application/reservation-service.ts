@@ -1,3 +1,4 @@
+import { initializeReservationHistory } from "./reservation-history";
 import { headers } from "next/headers";
 import { publishNotification } from "@/platform/notifications/notification-service";
 import {
@@ -13,6 +14,7 @@ import {
 import { ReservationRepository } from "@/modules/reservations/infrastructure/reservation-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, authorizeCollection } from "@/platform/authz/authorize";
+import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { nextReferenceNumber } from "@/platform/references/reference-number";
@@ -60,9 +62,10 @@ export type ReservationAuditMeta = {
 function assertAllowed(
   ctx: ReservationActorContext,
   action: "view" | "create" | "edit",
-  resource: "reservation" | "task",
+  resource: "reservation" | "task" | "guest",
   id?: string
 ): void {
+  if (ctx.organizationId !== ctx.authContext.organizationId) throw new ReservationAuthorizationError();
   const allowed = id
     ? authorize(ctx.authContext, action, {
         type: resource,
@@ -157,13 +160,26 @@ export async function createManualReservation(
 ): Promise<ManualReservationResult> {
   assertAllowed(ctx, "create", "reservation");
   assertAllowed(ctx, "create", "task");
+  assertAllowed(ctx, "create", "guest");
   const meta = await auditMeta(deps);
 
-  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+  const parsed = manualReservationInputSchema.parse(input);
+  return withTenant(db(deps), ctx.organizationId, tx => createManualReservationInTransaction(ctx, parsed, tx, meta));
+}
+
+export async function createManualReservationInTransaction(ctx: ReservationActorContext, input: ManualReservationInput, tx: TenantTransaction, meta: ReservationAuditMeta, status = "CONFIRMED"): Promise<ManualReservationResult> {
+  assertAllowed(ctx, "create", "reservation");
+  assertAllowed(ctx, "create", "task");
+  assertAllowed(ctx, "create", "guest");
+
     const repository = new ReservationRepository(tx, ctx.organizationId);
+    await repository.lockProperty(input.propertyId);
     const existing = await repository.findReservationByIdempotency(input.idempotencyKey);
 
     if (existing) {
+      if (existing.propertyId !== input.propertyId) throw new ReservationConflictError();
+      for (const type of ["reservation", "guest", "task"]) if (!authorize(ctx.authContext, "create", { type, organizationId: ctx.organizationId, propertyId: existing.propertyId, reservationId: existing.id, id: existing.id, city: existing.city, region: existing.region })) throw new ReservationAuthorizationError();
+      if (existing.source !== input.source || existing.guestName !== input.guestName || existing.checkIn.toISOString().slice(0, 10) !== input.checkIn || existing.checkOut.toISOString().slice(0, 10) !== input.checkOut) throw new ReservationConflictError("Idempotency key reused for a different booking");
       return {
         reservation: existing,
         tasks: await repository.tasksForReservation(existing.id),
@@ -178,7 +194,7 @@ export async function createManualReservation(
       throw new ReservationNotFoundError("Property does not exist in this tenant");
     }
 
-    if (input.guestPhone && !authorize(ctx.authContext, "create", { type: "guest", organizationId: ctx.organizationId, propertyId: property.id })) {
+    if (!authorize(ctx.authContext, "create", { type: "guest", organizationId: ctx.organizationId, propertyId: property.id, city: property.cityId ?? property.city, region: property.regionId ?? property.region })) {
       throw new ReservationAuthorizationError();
     }
 
@@ -186,19 +202,23 @@ export async function createManualReservation(
       !authorize(ctx.authContext, "create", {
         type: "reservation",
         organizationId: ctx.organizationId,
-        propertyId: property.id
+        propertyId: property.id, city: property.cityId ?? property.city, region: property.regionId ?? property.region
       }) ||
       !authorize(ctx.authContext, "create", {
         type: "task",
         organizationId: ctx.organizationId,
-        propertyId: property.id
+        propertyId: property.id, city: property.cityId ?? property.city, region: property.regionId ?? property.region
       })
     ) {
       throw new ReservationAuthorizationError();
     }
 
+    if (input.externalId && await repository.sourceMatch(input.propertyId, { source: input.source, externalId: input.externalId } as never)) throw new ReservationConflictError("Duplicate source identity");
+    if (input.quote && !authorize(ctx.authContext, "create", { type: "financial_transaction", organizationId: ctx.organizationId, propertyId: input.propertyId, city: property.cityId ?? property.city, region: property.regionId ?? property.region, dataClass: "financial" })) throw new ReservationAuthorizationError();
     const reference = await nextReferenceNumber(tx, ctx.organizationId, "RES", 4);
-    const reservation = await repository.createReservation(input, reference, ctx.actorId);
+    const reservation = await repository.createReservation(input, reference, ctx.actorId, status);
+    await initializeReservationHistory(tx, ctx, reservation, { guestName: input.guestName || null, guestEmail: input.guestEmail ?? null, guestPhone: input.guestPhone ?? null }, meta, input.quote ?? null);
+    if (status === "IMPORTED") return { reservation, tasks: [], conflictCount: 0, idempotent: false };
     const taskConfig = await repository.resolveTaskConfig({
       propertyId: reservation.propertyId,
       asOf: reservation.createdAt
@@ -259,6 +279,7 @@ export async function createManualReservation(
       }
     }
 
+    await repository.refreshConflicts(reservation.propertyId, ctx.actorId);
     return {
       reservation: {
         ...reservation,
@@ -268,7 +289,6 @@ export async function createManualReservation(
       conflictCount: overlaps.length,
       idempotent: false
     };
-  });
 }
 
 export async function listReservations(
@@ -277,18 +297,20 @@ export async function listReservations(
 ): Promise<ReservationSummary[]> {
   assertAllowed(ctx, "view", "reservation");
 
-  return withTenant(db(deps), ctx.organizationId, async (tx) =>
-    (await new ReservationRepository(tx, ctx.organizationId).listReservations()).filter((reservation) =>
+  return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    const repository = new ReservationRepository(tx, ctx.organizationId);
+    const properties = (await repository.listPropertyOptions()).filter(property => authorize(ctx.authContext, "view", { type: "reservation", organizationId: ctx.organizationId, propertyId: property.id, city: property.cityId ?? property.city, region: property.regionId ?? property.region }));
+    return (await repository.listReservations(properties.map(property => property.id))).filter((reservation) =>
       authorize(ctx.authContext, "view", {
         type: "reservation",
         organizationId: ctx.organizationId,
         id: reservation.id,
         reservationId: reservation.id,
         propertyId: reservation.propertyId,
-        status: reservation.status
+        status: reservation.status, city: reservation.city, region: reservation.region
       })
-    )
-  );
+    ).map(reservation => present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { type: "reservation", organizationId: ctx.organizationId, propertyId: reservation.propertyId, reservationId: reservation.id, id: reservation.id, status: reservation.status, city: reservation.city, region: reservation.region, data: reservation }, { guestName: { dataClass: "guest", requiredPermission: authorize(ctx.authContext, "view", { type: "guest", organizationId: ctx.organizationId, propertyId: reservation.propertyId }) ? "guest:view" : undefined } }) as ReservationSummary);
+  });
 }
 
 export async function listReservationPropertyOptions(

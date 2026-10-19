@@ -476,7 +476,7 @@ export default async function PropertyDetailPage({
         data-testid="property-workspace-tabs"
       >
         {workspaceTabs.map((tab) => (
-          <a className="property-workspace-tab" href={`#property-workspace-${tab.key}`} key={tab.key}>
+          <a className="property-workspace-tab" href={tab.key === "calendar" ? `/${appLocale}/app/reservations/calendar?property=${property.id}` : `#property-workspace-${tab.key}`} key={tab.key}>
             <span>{tab.label}</span>
             {"count" in tab && typeof tab.count === "number" ? <strong>{tab.count}</strong> : null}
           </a>

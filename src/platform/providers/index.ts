@@ -1,3 +1,4 @@
+import type { NormalizedReservationAdapter } from "./reservation-types";
 import type { AppLocale } from "@/i18n/routing";
 import type { BrowserPushSubscription } from "@/platform/notifications/web-push";
 
@@ -26,7 +27,7 @@ export interface StorageProvider {
   createSignedUploadUrl(input: { key: string; contentType: string }): Promise<{ url: string }>;
 }
 
-export interface ReservationAdapter {
+export interface ReservationAdapter extends NormalizedReservationAdapter {
   sync(input: { organizationId: string; sourceId: string }): Promise<{ imported: number }>;
 }
 

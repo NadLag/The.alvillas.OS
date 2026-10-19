@@ -1,3 +1,5 @@
+import { ReservationCommandExceptions } from "@/modules/reservations/ui/command-exceptions";
+import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -43,6 +45,7 @@ export default async function AppPage({
     })
   ]);
 
+  const reservationContext = await reservationActorContextFromSession(session);
   return (
     <AdminShell className="app-shell" testId="app-shell">
       <ShellHeader
@@ -108,6 +111,7 @@ export default async function AppPage({
           <p className="panel-label">{t("todayLabel")}</p>
           <h2>{t("welcome", { name: session.user?.name ?? session.user?.email ?? t("fallbackName") })}</h2>
           <p>{t("summary")}</p>
+          {reservationContext ? <ReservationCommandExceptions ctx={reservationContext} locale={appLocale} /> : null}
         </section>
         <aside className="workspace-side" aria-label={t("sessionLabel")}>
           <form
