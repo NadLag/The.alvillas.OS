@@ -14,6 +14,7 @@ import {
 import { withTenant } from "@/platform/db/tenant";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { preferOperationPerformer } from "./support/operation-policy";
 
 const password = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 test.use({ actionTimeout: 30000, navigationTimeout: 30000 });
@@ -153,8 +154,13 @@ for (const locale of ["en", "fr", "ar"] as const)
         .fill("Reschedule before the next guest arrival");
       await reschedule.locator('button[type="submit"]').click();
       await expect(reschedule.getByRole("status")).toBeVisible();
-      const scheduled=await withTenant(db,org,tx=>tx.operationTask.findUniqueOrThrow({where:{id:taskId}}));
-      expect(scheduled).toMatchObject({state:'ASSIGNED',assignedToPersonId:fixture.worker.id});
+      const scheduled = await withTenant(db, org, (tx) =>
+        tx.operationTask.findUniqueOrThrow({ where: { id: taskId } }),
+      );
+      expect(scheduled).toMatchObject({
+        state: "ASSIGNED",
+        assignedToPersonId: fixture.worker.id,
+      });
       const proxy = page.getByTestId("operation-proxy-form");
       console.info(
         JSON.stringify({
@@ -252,7 +258,8 @@ for (const locale of ["en", "fr", "ar"] as const)
       ).toBeVisible();
       const today = new Intl.DateTimeFormat("en-CA", {
         timeZone: "Africa/Casablanca",
-      }).format(new Date());
+      }).format(new Date(Date.now() + 86400000));
+      await preferOperationPerformer(email, fixture.property.name);
       await page.goto(
         `/${locale}/app/operations/recurring?propertyId=${fixture.property.id}`,
       );
@@ -334,6 +341,50 @@ for (const locale of ["en", "fr", "ar"] as const)
         }),
       );
       expect(generated.priority).toBe("URGENT");
+      expect(generated.assignedToUserAccountId).toBe(account.id);
+      await page.goto(`/${locale}/app/field/${generated.id}`);
+      const field = page.getByTestId("field-task-complete-form");
+      await expect(page.getByTestId("field-task-complete")).toBeDisabled();
+      for (const item of await field.locator('[name="checklistItemIds"]').all())
+        await item.check();
+      await field.locator('[data-progress="true"]').click();
+      await expect(field.getByRole("status")).toHaveText(catalog.manage.saved);
+      const fieldEvidence = page.getByTestId("operation-evidence-form");
+      await fieldEvidence
+        .locator('[name="reason"]')
+        .fill(`Field checklist evidence ${suffix}`);
+      await fieldEvidence.locator('button[type="submit"]').click();
+      await expect(
+        page
+          .getByTestId("task-evidence-panel")
+          .getByText(`Field checklist evidence ${suffix}`, { exact: true }),
+      ).toBeVisible();
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+      ).toBe(true);
+      const fieldCatalog = { en: enMessages, fr: frMessages, ar: arMessages }[
+        locale
+      ].Field;
+      await expect(page.getByTestId("field-task-complete")).toHaveText(
+        fieldCatalog.complete,
+      );
+      await page.getByTestId("field-task-complete").click();
+      await expect(page).toHaveURL(new RegExp(`/${locale}/app/field$`, "u"));
+      const selfCompleted = await withTenant(db, org, (tx) =>
+        tx.operationTask.findUniqueOrThrow({ where: { id: generated.id } }),
+      );
+      expect(selfCompleted).toMatchObject({
+        state: "COMPLETED",
+        completionSource: "SELF",
+        completedByPersonId: account.personId,
+        validatedByPersonId: null,
+      });
+      await page.goto(
+        `/${locale}/app/operations?propertyId=${fixture.property.id}&view=LIST`,
+      );
       await testInfo.attach(`operations-${locale}`, {
         body: await page.screenshot({
           fullPage: true,
