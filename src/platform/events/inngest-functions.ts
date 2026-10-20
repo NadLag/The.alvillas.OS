@@ -70,7 +70,7 @@ export async function consumeAutomationReference(input: unknown, eventType: stri
 }
 const triggerGroups = Array.from({length:Math.ceil(automationEvents.length/10)},(_,index)=>automationEvents.slice(index*10,index*10+10));
 export const consumeAutomations = triggerGroups.map((triggers,index)=>inngest.createFunction({ id:`automation-events-${index+1}`,name:`ALVILLAS OS automation events ${index+1}`,
-  triggers:triggers.map(event=>({event})),retries:3,concurrency:{limit:10}
+  triggers:triggers.map(event=>({event})),retries:3,concurrency:{limit:5}
 },async({event,step})=>{
   const runs=await step.run("resolve-durable-source",()=>consumeAutomationReference(event.data,event.name));
   const {organizationId}=outboxDispatchInput.parse(event.data);
