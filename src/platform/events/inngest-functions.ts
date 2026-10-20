@@ -8,6 +8,8 @@ import { createInngestOutboxHandlers } from "./inngest";
 import { dispatchOutboxBatch, type DispatchOutboxResult } from "./outbox-dispatcher";
 import { OutboxRepository, type OutboxDatabase } from "./outbox-repository";
 import { outboxDispatchEvent } from "./outbox";
+import { automationEvents } from "@/platform/automation/events";
+import { automationTick, enqueueAutomationEvent, executeAutomationRun } from "@/platform/automation/service";
 
 import { scheduleDigests } from "@/platform/notifications/digest-service";
 import { scheduleTeamDocumentReminders } from "@/modules/identity/application/team-documents";
@@ -51,10 +53,28 @@ export const dispatchOutbox = inngest.createFunction({ id: "dispatch-outbox", na
     for(const propertyId of operationProperties)await step.run(`schedule-operations-${id}-${propertyId}`,()=>scheduleOperationTasks(id,{propertyId}));
     await step.run(`schedule-staff-documents-${id}`, () => scheduleTeamDocumentReminders(id));
     await step.run(`schedule-digests-${id}`, () => scheduleDigests(id));
+    await step.run(`automation-recovery-${id}`, () => automationTick(id));
     const result = await step.run(`dispatch-${id}`, () => dispatchOrganization(id));
     total.dispatched += result.dispatched; total.failed += result.failed; total.skipped += result.skipped;
   }
   return total;
 });
 
-export const inngestFunctions = [dispatchOutbox];
+export async function consumeAutomationReference(input: unknown, eventType: string, db: OutboxDatabase = prisma) {
+  const parsed = outboxDispatchInput.safeParse(input);
+  if (!parsed.success) throw new NonRetriableError("automation_reference_invalid");
+  const { organizationId, outboxEventId } = parsed.data;
+  const event = await withTenant(db, organizationId, tx => new OutboxRepository(tx,organizationId).event(outboxEventId));
+  if (!event || event.type !== eventType || !(automationEvents as readonly string[]).includes(eventType)) throw new NonRetriableError("automation_reference_denied");
+  return enqueueAutomationEvent(organizationId,outboxEventId,{db});
+}
+const triggerGroups = Array.from({length:Math.ceil(automationEvents.length/10)},(_,index)=>automationEvents.slice(index*10,index*10+10));
+export const consumeAutomations = triggerGroups.map((triggers,index)=>inngest.createFunction({ id:`automation-events-${index+1}`,name:`ALVILLAS OS automation events ${index+1}`,
+  triggers:triggers.map(event=>({event})),retries:3,concurrency:{limit:10}
+},async({event,step})=>{
+  const runs=await step.run("resolve-durable-source",()=>consumeAutomationReference(event.data,event.name));
+  const {organizationId}=outboxDispatchInput.parse(event.data);
+  for(const id of runs)await step.run(`execute-${id}`,()=>executeAutomationRun(organizationId,id));
+  return {runs:runs.length};
+}));
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations];

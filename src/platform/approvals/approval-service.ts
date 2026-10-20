@@ -39,6 +39,7 @@ export async function requestApproval(actor: NotificationActor, raw: unknown, de
     // Fail closed: an unconfigured request must never strand work without an approver.
     if (!recipients.length) throw new ApprovalConflictError();
     const row = await repository.create(input, actor.accountId, routing, recipients);
+    await repository.event("ApprovalRequested",row.id,property.id);
     await writeAuditEvent(tx, { organizationId: actor.organizationId, actorId: actor.accountId, action: "approval.requested", resourceType: "approval", resourceId: row.id,
       propertyScopeId: property.id, before: null, after: { state: row.state, recipientIds: recipients }, reason: input.details, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: row.createdAt });
     await notifications.publish({ kind: "approval_requested", recipientId: actor.accountId, targetId: row.id }, `approval:${row.id}:requested`);
@@ -70,6 +71,7 @@ export async function decideApproval(actor: NotificationActor, raw: unknown, dep
     }
     const now = new Date();
     await repository.decide(row.id, input.decision, actor.accountId, input.reason, now);
+    await repository.event("ApprovalDecided",row.id,row.propertyId);
     await repository.resolveNotifications(row.id, input.decision, now);
     await writeAuditEvent(tx, { organizationId: actor.organizationId, actorId: actor.accountId, action: input.decision === "APPROVED" ? "approval.approved" : "approval.rejected", resourceType: "approval", resourceId: row.id,
       propertyScopeId: row.propertyId, before: { state: row.state }, after: { state: input.decision }, reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now });

@@ -22,7 +22,7 @@ export async function initializeReservationHistory(tx: TenantTransaction, ctx: R
   const record = await repository.guest(guest, ctx.actorId);
   await repository.attachGuest(reservation.id, record.id);
   await repository.appendRevision({ reservationId: reservation.id, version: 1, operation: reservation.status === "IMPORTED" ? "IMPORT" : "CONFIRM", before: {}, after: { ...reservation, guestId: record.id }, reason: "Reservation created and confirmed", idempotencyKey: `created:${reservation.id}`, actorId: ctx.actorId });
-  await repository.queueChange(reservation.id, 1, "CONFIRMED");
+  await repository.queueChange(reservation.id, 1, reservation.status==="IMPORTED"?"IMPORTED":"CONFIRMED");
   if (reservation.status === "IMPORTED") {
     if (quote) await repository.financialSnapshot(reservation.id, 1, quote, { pendingConfirmation: true }, ctx.actorId);
     return;

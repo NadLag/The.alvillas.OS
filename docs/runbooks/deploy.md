@@ -4,6 +4,8 @@
 
 ALVILLAS OS uses its own Vercel project and database. Never deploy this repository to the legacy `alvillas.com` project.
 
+CI builds the application before browser acceptance and runs `next start` with `PLAYWRIGHT_PRODUCTION=1` and `NODE_ENV=production`. The test job generates isolated authentication, encryption and signing keys; real password, passkey and MFA flows remain required. The complete desktop/mobile suite runs against PostgreSQL with zero retries. Local browser development keeps `next dev` as its default; use the production flag after a build to reproduce the CI runtime with private local test credentials.
+
 ## Staging
 
 The staging project is `the-alvillas-os`.
@@ -28,7 +30,9 @@ For Operations acceptance, refresh the owner's real administrator session intera
 
 Use the existing `ALVILLAS OS` organization and its custom `ALVILLAS OS Staging` environment (`staging`). Store `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY` as Vercel **Preview Secrets**, and `INNGEST_ENV=staging` as Preview Config. These credentials must not target Production or Development.
 
-The official SDK serves `/api/inngest`. Sync the permanent staging endpoint after deployment and confirm exactly one function: `dispatch-outbox` within app `alvillas-os` (runtime slug `alvillas-os-dispatch-outbox`), with a cron and `alvillas/outbox.dispatch.requested` trigger. A signed GET verifies discovery; unsigned, tampered and expired requests must be rejected. Preview always uses cloud signature verification.
+The official SDK serves `/api/inngest`. Sync the permanent staging endpoint after deployment and confirm six functions within app `alvillas-os`: `dispatch-outbox` (runtime slug `alvillas-os-dispatch-outbox`) with its cron and `alvillas/outbox.dispatch.requested` trigger, plus `automation-events-1` through `automation-events-5`. The consumers partition the automation event catalogue into groups of at most ten triggers. A signed GET verifies discovery; unsigned, tampered and expired requests must be rejected. Preview always uses cloud signature verification.
+
+For Automation acceptance, set `STAGING_EXPECTED_SHA`, `STAGING_STORAGE_STATE_FILE` and `STAGING_EVIDENCE_FILE` to the merged commit and private local paths, then run `scripts/staging-automation-verify.ts` with `tsx`. It creates labeled acceptance records through authenticated screens, installs editable standard drafts, activates an inspection rule, creates a native reservation, and waits for cloud execution. It never invokes a worker directly. Verify one task and one attempt, dry run, pause/resume, and EN/FR/RTL desktop/mobile keyboard and accessibility. Retain acceptance history. A restricted runtime role requires SELECT/INSERT on the three automation tables and UPDATE on `automation_run`; attempts remain append-only and RLS remains forced.
 
 On 2026-10-15 the owner approved a Deployment Protection Exception confined to `the-alvillas-os-staging.vercel.app`. Use the plain permanent `/api/inngest` URL for synchronization; ALVILLAS authentication and SDK signatures remain mandatory. Production and other previews retain their protection. Alias share links redirect to establish a browser cookie and do not authenticate Inngest's cloud HTTP callbacks. Check JSON content and the expected application response, since a followed Vercel login redirect can return HTTP 200. Do not configure a share token as `VERCEL_AUTOMATION_BYPASS_SECRET`, or broaden the exception. Confirm consecutive cron runs after deployment: timer events have no `event.id`, so a function-wide event-ID admission limit would block future ticks.
 

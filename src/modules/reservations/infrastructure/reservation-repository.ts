@@ -1,4 +1,5 @@
 import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
+import { reservationAutomationDates } from "@/platform/automation/task-plans";
 import { OperationRepository } from "./operation-repository";
 import { createHash } from "node:crypto";
 import { normalizedReservationSchema, reservationSyncPolicyKey, reservationSyncPolicySchema, type NormalizedReservation } from "../domain/reservation";
@@ -413,7 +414,7 @@ export class ReservationRepository {
         type: template.type,
         state: "PLANNED",
         priority: template.priority,
-        dueDate: template.due === "CHECK_IN" ? reservation.checkIn : reservation.checkOut,
+        dueDate: new Date((template.due === "CHECK_IN" ? reservation.checkIn : reservation.checkOut).getTime() + (template.dueOffsetDays ?? 0) * 86400000),
         titleTranslations: taskTitleJson(template),
         checklistTemplateKey: template.checklistTemplateKey,
         idempotencyKey,
@@ -658,13 +659,14 @@ export class ReservationRepository {
     const envelope = frozen?.snapshotValue;
     const frozenValue = envelope && typeof envelope === "object" && !Array.isArray(envelope) ? envelope.value : null;
     const config = frozenValue ? reservationTaskConfigSchema.parse(frozenValue) : (await this.resolveTaskConfig({ propertyId: reservation.propertyId, asOf: reservation.confirmedAt ?? reservation.createdAt }))?.config;
-    if (!config) throw new Error("reservation_task_configuration_missing");
+    const automationDates=await reservationAutomationDates(this.tx,this.organizationId,reservation);
     const cancelled = ["CANCELLED", "NO_SHOW"].includes(reservation.status);
+    if(!config&&!automationDates.size&&!cancelled)throw new Error("reservation_task_configuration_missing");
     for (const task of tasks) {
       if (["COMPLETED", "SKIPPED", "CANCELLED"].includes(task.state)) continue;
-      const template = config.tasks.find(item => task.idempotencyKey === `${reservationId}:${item.key}`);
-      if (!template) continue;
-      const dueDate = template.due === "CHECK_IN" ? reservation.checkIn : reservation.checkOut;
+      const template = config?.tasks.find(item => task.idempotencyKey === `${reservationId}:${item.key}`);
+      const dueDate = template?new Date((template.due === "CHECK_IN" ? reservation.checkIn : reservation.checkOut).getTime() + (template.dueOffsetDays ?? 0) * 86400000):automationDates.get(task.id)??(cancelled?task.dueDate:null);
+      if (!dueDate) continue;
       if (task.state === "IN_PROGRESS" && !cancelled && task.dueDate.getTime() !== dueDate.getTime()) {
         await this.exception(reservation.propertyId, reservationId, "TASK_REVIEW", `task-change:${task.id}`, { taskId: task.id, dueDate }, actorId); continue;
       }
@@ -799,7 +801,10 @@ export class ReservationRepository {
   hasFinancialExceptions(reservationId: string) { return this.tx.reservationException.count({ where: { organizationId: this.organizationId, reservationId, status: "OPEN", kind: { startsWith: "FINANCIAL" } } }); }
   resolveExceptionKey(key: string, actorId: string, resolution: string) { return this.tx.reservationException.updateMany({ where: { organizationId: this.organizationId, key, status: "OPEN" }, data: { status: "RESOLVED", resolvedBy: actorId, resolution } }); }
   feedCreator(id: string) { return this.tx.userAccount.findFirst({ where: { organizationId: this.organizationId, id }, select: { personId: true, status: true } }); }
-  queueChange(reservationId: string, version: number, operation: string) { return this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `reservation:${reservationId}:${version}` } }, update: {}, create: { organizationId: this.organizationId, type: "reservation.changed", payload: { reservationId, version, operation }, idempotencyKey: `reservation:${reservationId}:${version}` } }); }
+  async queueChange(reservationId: string, version: number, operation: string) {
+    const row=await this.tx.reservation.findFirstOrThrow({where:{organizationId:this.organizationId,id:reservationId},select:{propertyId:true,status:true,checkIn:true,checkOut:true}});
+    return this.tx.outboxEvent.upsert({where:{organizationId_idempotencyKey:{organizationId:this.organizationId,idempotencyKey:`reservation:${reservationId}:${version}`}},update:{},create:{organizationId:this.organizationId,type:"reservation.changed",payload:{reservationId,propertyId:row.propertyId,version,operation,state:row.status,checkIn:row.checkIn.toISOString().slice(0,10),checkOut:row.checkOut.toISOString().slice(0,10)},idempotencyKey:`reservation:${reservationId}:${version}`}});
+  }
   feedEntry(id: string) { return this.tx.reservationFeedEntry.findFirst({ where: { organizationId: this.organizationId, id } }); }
   suppressFeedEntry(id: string) { return this.tx.reservationFeedEntry.update({ where: { organizationId: this.organizationId, id }, data: { suppressed: true } }); }
   async releaseMissingForReservation(reservationId: string, actorId: string, reason: string) {
