@@ -1,5 +1,6 @@
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
+import { automationRuleSchema } from "@/platform/automation/rule";
 import { operationPolicySchema, recurringTasksSchema } from "./operation-policy";
 import { teamPolicyKey, teamPolicySchema } from "@/modules/identity/domain/team";
 import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
@@ -46,6 +47,7 @@ export const reservationTaskTemplateSchema = z.object({
   type: taskTypeSchema,
   title: localizedTextSchema,
   due: taskDueAnchorSchema,
+  dueOffsetDays: z.number().int().min(-366).max(366).optional(),
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
   checklist: z.array(taskChecklistTemplateSchema).max(24).default([])
     .refine(v => new Set(v.map(i => i.key)).size === v.length, "Checklist item keys must be unique"),
@@ -53,7 +55,7 @@ export const reservationTaskTemplateSchema = z.object({
 });
 
 export const reservationTaskConfigSchema = z.object({
-  tasks: z.array(reservationTaskTemplateSchema).min(1).max(12)
+  tasks: z.array(reservationTaskTemplateSchema).min(1).max(100)
 }).refine(v => new Set(v.tasks.map(t => t.key)).size === v.tasks.length, "Task keys must be unique");
 
 export const checklistCatalogSchema = z.object({
@@ -367,7 +369,7 @@ export const configRuleSchemas = {
   "feature_flag": featureFlagConfigSchema
 } as const satisfies Record<string, z.ZodType>;
 
-export type ConfigRuleKey = keyof typeof configRuleSchemas | `feature_flag.${string}`;
+export type ConfigRuleKey = keyof typeof configRuleSchemas | `feature_flag.${string}` | `automation.rule.${string}`;
 export type CommissionRuleValue = z.infer<typeof commissionRuleValueSchema>;
 export type AgreementNoticeConfig = z.infer<typeof agreementNoticeConfigSchema>;
 export type AgreementResponsibilitiesConfig = z.infer<typeof agreementResponsibilitiesConfigSchema>;
@@ -378,6 +380,7 @@ export type FeatureFlagConfig = z.infer<typeof featureFlagConfigSchema>;
 export type PayoutScheduleConfig = z.infer<typeof payoutScheduleConfigSchema>;
 
 export function schemaForConfigKey(key: string): z.ZodType | null {
+  if (/^automation\.rule\.[a-z][a-z0-9_.-]{0,99}$/u.test(key)) return automationRuleSchema;
   if (key.startsWith("feature_flag.")) {
     return featureFlagConfigSchema;
   }

@@ -1,0 +1,496 @@
+{
+  "configuration": {
+    "ops.reservation_task_templates": {
+      "tasks": [
+        {
+          "key": "pre-arrival",
+          "type": "CUSTOM",
+          "title": {
+            "en": "Review pre-arrival details",
+            "fr": "Vérifier les détails avant arrivée",
+            "ar": "مراجعة تفاصيل ما قبل الوصول"
+          },
+          "due": "CHECK_IN",
+          "dueOffsetDays": -2,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Review pre-arrival details",
+                "fr": "Vérifier les détails avant arrivée",
+                "ar": "مراجعة تفاصيل ما قبل الوصول"
+              }
+            }
+          ]
+        },
+        {
+          "key": "arrival-cleaning",
+          "type": "CLEANING",
+          "title": {
+            "en": "Prepare the villa",
+            "fr": "Préparer la villa",
+            "ar": "تجهيز الفيلا"
+          },
+          "due": "CHECK_IN",
+          "dueOffsetDays": -1,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Prepare the villa",
+                "fr": "Préparer la villa",
+                "ar": "تجهيز الفيلا"
+              }
+            }
+          ]
+        },
+        {
+          "key": "arrival-inspection",
+          "type": "INSPECTION",
+          "title": {
+            "en": "Inspect arrival readiness",
+            "fr": "Contrôler la préparation",
+            "ar": "فحص الجاهزية للوصول"
+          },
+          "due": "CHECK_IN",
+          "dueOffsetDays": -1,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Inspect arrival readiness",
+                "fr": "Contrôler la préparation",
+                "ar": "فحص الجاهزية للوصول"
+              }
+            }
+          ]
+        },
+        {
+          "key": "inventory-preparation",
+          "type": "INVENTORY",
+          "title": {
+            "en": "Prepare stay inventory",
+            "fr": "Préparer le stock du séjour",
+            "ar": "تجهيز مخزون الإقامة"
+          },
+          "due": "CHECK_IN",
+          "dueOffsetDays": -1,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Prepare stay inventory",
+                "fr": "Préparer le stock du séjour",
+                "ar": "تجهيز مخزون الإقامة"
+              }
+            }
+          ]
+        },
+        {
+          "key": "guest-hub",
+          "type": "CUSTOM",
+          "title": {
+            "en": "Prepare Guest Hub handoff",
+            "fr": "Préparer l’accueil Guest Hub",
+            "ar": "تجهيز بوابة الضيف"
+          },
+          "due": "CHECK_IN",
+          "dueOffsetDays": -1,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Prepare Guest Hub handoff",
+                "fr": "Préparer l’accueil Guest Hub",
+                "ar": "تجهيز بوابة الضيف"
+              }
+            }
+          ]
+        },
+        {
+          "key": "arrival",
+          "type": "ARRIVAL_PREPARATION",
+          "title": {
+            "en": "Welcome arriving guests",
+            "fr": "Accueillir les voyageurs",
+            "ar": "استقبال الضيوف"
+          },
+          "due": "CHECK_IN",
+          "dueOffsetDays": 0,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Welcome arriving guests",
+                "fr": "Accueillir les voyageurs",
+                "ar": "استقبال الضيوف"
+              }
+            }
+          ]
+        },
+        {
+          "key": "checkout",
+          "type": "CUSTOM",
+          "title": {
+            "en": "Coordinate checkout",
+            "fr": "Organiser le départ",
+            "ar": "تنسيق المغادرة"
+          },
+          "due": "CHECK_OUT",
+          "dueOffsetDays": 0,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Coordinate checkout",
+                "fr": "Organiser le départ",
+                "ar": "تنسيق المغادرة"
+              }
+            }
+          ]
+        },
+        {
+          "key": "checkout-cleaning",
+          "type": "CHECKOUT_CLEANING",
+          "title": {
+            "en": "Clean after checkout",
+            "fr": "Nettoyer après le départ",
+            "ar": "التنظيف بعد المغادرة"
+          },
+          "due": "CHECK_OUT",
+          "dueOffsetDays": 0,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Clean after checkout",
+                "fr": "Nettoyer après le départ",
+                "ar": "التنظيف بعد المغادرة"
+              }
+            }
+          ]
+        },
+        {
+          "key": "checkout-inspection",
+          "type": "INSPECTION",
+          "title": {
+            "en": "Inspect the departing stay",
+            "fr": "Contrôler après le départ",
+            "ar": "الفحص بعد المغادرة"
+          },
+          "due": "CHECK_OUT",
+          "dueOffsetDays": 0,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Inspect the departing stay",
+                "fr": "Contrôler après le départ",
+                "ar": "الفحص بعد المغادرة"
+              }
+            }
+          ]
+        },
+        {
+          "key": "laundry",
+          "type": "LAUNDRY",
+          "title": {
+            "en": "Send and reconcile linen",
+            "fr": "Envoyer et rapprocher le linge",
+            "ar": "إرسال ومطابقة البياضات"
+          },
+          "due": "CHECK_OUT",
+          "dueOffsetDays": 0,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Send and reconcile linen",
+                "fr": "Envoyer et rapprocher le linge",
+                "ar": "إرسال ومطابقة البياضات"
+              }
+            }
+          ]
+        },
+        {
+          "key": "inventory-reconciliation",
+          "type": "INVENTORY",
+          "title": {
+            "en": "Reconcile inventory movements",
+            "fr": "Rapprocher les mouvements de stock",
+            "ar": "مطابقة حركات المخزون"
+          },
+          "due": "CHECK_OUT",
+          "dueOffsetDays": 0,
+          "priority": "NORMAL",
+          "checklist": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Reconcile inventory movements",
+                "fr": "Rapprocher les mouvements de stock",
+                "ar": "مطابقة حركات المخزون"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "ops.checklists": {
+      "checklists": [
+        {
+          "key": "automation-cleaning",
+          "name": {
+            "en": "Schedule mid-stay cleaning",
+            "fr": "Planifier le ménage de mi-séjour",
+            "ar": "جدولة تنظيف منتصف الإقامة"
+          },
+          "items": [
+            {
+              "key": "verified",
+              "label": {
+                "en": "Schedule mid-stay cleaning",
+                "fr": "Planifier le ménage de mi-séjour",
+                "ar": "جدولة تنظيف منتصف الإقامة"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "ops.mid_stay_threshold": {
+      "nights": 4
+    }
+  },
+  "rules": [
+    {
+      "key": "stay-workflow",
+      "rule": {
+        "name": {
+          "en": "Generate the stay workflow",
+          "fr": "Générer le parcours du séjour",
+          "ar": "إنشاء سير عمل الإقامة"
+        },
+        "event": "ReservationConfirmed",
+        "enabled": true,
+        "conditions": {
+          "all": []
+        },
+        "actions": [
+          {
+            "key": "workflow",
+            "type": "generate_workflow"
+          }
+        ],
+        "retry": {
+          "max_attempts": 5,
+          "delay_seconds": 60
+        }
+      }
+    },
+    {
+      "key": "midstay-cleaning",
+      "rule": {
+        "name": {
+          "en": "Schedule mid-stay cleaning",
+          "fr": "Planifier le ménage de mi-séjour",
+          "ar": "جدولة تنظيف منتصف الإقامة"
+        },
+        "event": "ReservationConfirmed",
+        "enabled": true,
+        "conditions": {
+          "path": "reservation.nights",
+          "op": ">=",
+          "value": {
+            "config": "ops.mid_stay_threshold",
+            "path": "nights"
+          }
+        },
+        "actions": [
+          {
+            "key": "midstay",
+            "type": "create_task",
+            "task_type": "CLEANING_MIDSTAY",
+            "title": {
+              "en": "Schedule mid-stay cleaning",
+              "fr": "Planifier le ménage de mi-séjour",
+              "ar": "جدولة تنظيف منتصف الإقامة"
+            },
+            "due": {
+              "offset_days": "floor(nights/2)",
+              "from": "reservation.check_in"
+            },
+            "priority": "NORMAL",
+            "checklist_template": "automation-cleaning"
+          }
+        ],
+        "retry": {
+          "max_attempts": 5,
+          "delay_seconds": 60
+        }
+      }
+    },
+    {
+      "key": "reorder",
+      "rule": {
+        "name": {
+          "en": "Suggest stock replenishment",
+          "fr": "Proposer le réapprovisionnement",
+          "ar": "اقتراح تجديد المخزون"
+        },
+        "event": "InventoryBelowMinimum",
+        "enabled": true,
+        "conditions": {
+          "all": []
+        },
+        "actions": [
+          {
+            "key": "suggest",
+            "type": "reorder_suggestion",
+            "title": {
+              "en": "Suggest stock replenishment",
+              "fr": "Proposer le réapprovisionnement",
+              "ar": "اقتراح تجديد المخزون"
+            }
+          }
+        ],
+        "retry": {
+          "max_attempts": 5,
+          "delay_seconds": 60
+        }
+      }
+    },
+    {
+      "key": "approval",
+      "rule": {
+        "name": {
+          "en": "Request threshold approval",
+          "fr": "Demander la validation du seuil",
+          "ar": "طلب الموافقة على الحد"
+        },
+        "event": "ExpenseOverThreshold",
+        "enabled": true,
+        "conditions": {
+          "all": []
+        },
+        "actions": [
+          {
+            "key": "request",
+            "type": "create_approval_request",
+            "title": {
+              "en": "Request threshold approval",
+              "fr": "Demander la validation du seuil",
+              "ar": "طلب الموافقة على الحد"
+            },
+            "details": {
+              "en": "Request threshold approval",
+              "fr": "Demander la validation du seuil",
+              "ar": "طلب الموافقة على الحد"
+            }
+          }
+        ],
+        "retry": {
+          "max_attempts": 5,
+          "delay_seconds": 60
+        }
+      }
+    },
+    {
+      "key": "overdue-notice",
+      "rule": {
+        "name": {
+          "en": "Notify overdue task assignees",
+          "fr": "Notifier les tâches en retard",
+          "ar": "إشعار المكلفين بالمهام المتأخرة"
+        },
+        "event": "TaskOverdue",
+        "enabled": true,
+        "conditions": {
+          "path": "task.assigned_to",
+          "op": "exists"
+        },
+        "actions": [
+          {
+            "key": "notify",
+            "type": "notify",
+            "kind": "task_overdue",
+            "recipient": "task.assigned_to",
+            "target": "task.id"
+          }
+        ],
+        "retry": {
+          "max_attempts": 5,
+          "delay_seconds": 60
+        }
+      }
+    },
+    {
+      "key": "financial-snapshot",
+      "rule": {
+        "name": {
+          "en": "Capture confirmation rules",
+          "fr": "Figer les règles à la confirmation",
+          "ar": "حفظ قواعد التأكيد"
+        },
+        "event": "ReservationConfirmed",
+        "enabled": true,
+        "conditions": {
+          "all": []
+        },
+        "actions": [
+          {
+            "key": "snapshot",
+            "type": "snapshot"
+          }
+        ],
+        "retry": {
+          "max_attempts": 5,
+          "delay_seconds": 60
+        }
+      }
+    },
+    {
+      "key": "stocktake-variance",
+      "rule": {
+        "name": {
+          "en": "Open a stocktake variance",
+          "fr": "Ouvrir un écart d’inventaire",
+          "ar": "فتح فرق الجرد"
+        },
+        "event": "StocktakeVariance",
+        "enabled": true,
+        "conditions": {
+          "all": []
+        },
+        "actions": [
+          {
+            "key": "variance",
+            "type": "create_variance",
+            "expected": "variance.expected",
+            "actual": "variance.actual",
+            "currency": "variance.currency",
+            "reason": {
+              "en": "Open a stocktake variance",
+              "fr": "Ouvrir un écart d’inventaire",
+              "ar": "فتح فرق الجرد"
+            }
+          }
+        ],
+        "retry": {
+          "max_attempts": 5,
+          "delay_seconds": 60
+        }
+      }
+    }
+  ]
+}

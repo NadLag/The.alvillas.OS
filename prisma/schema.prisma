@@ -7,7 +7,73 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model AutomationRun {
+  id             String              @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String              @map("organization_id") @db.Uuid
+  configRuleId   String              @map("config_rule_id") @db.Uuid
+  ruleKey        String              @map("rule_key")
+  eventId        String              @map("event_id") @db.Uuid
+  eventKey       String              @map("event_key")
+  propertyId     String              @map("property_id") @db.Uuid
+  actorId        String              @map("actor_id") @db.Uuid
+  status         String              @default("PENDING")
+  attemptCount   Int                 @default(0) @map("attempt_count")
+  nextAttemptAt  DateTime?           @map("next_attempt_at") @db.Timestamptz(6)
+  errorCode      String?             @map("error_code")
+  inputs         Json
+  outputs        Json                @default("[]")
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt    DateTime?           @map("completed_at") @db.Timestamptz(6)
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rule           ConfigRule          @relation(fields: [configRuleId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  attempts       AutomationAttempt[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, ruleKey, eventKey, propertyId])
+  @@index([organizationId, status, nextAttemptAt])
+  @@index([organizationId, propertyId, createdAt, id])
+  @@map("automation_run")
+}
+
+model AutomationAttempt {
+  id             String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  runId          String        @map("run_id") @db.Uuid
+  number         Int
+  status         String
+  errorCode      String?       @map("error_code")
+  outputs        Json
+  requestId      String        @map("request_id")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  run            AutomationRun @relation(fields: [organizationId, runId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, runId, number])
+  @@map("automation_attempt")
+}
+
+model AutomationSuggestion {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  propertyId     String       @map("property_id") @db.Uuid
+  outcomeKey     String       @map("outcome_key")
+  itemKey        String       @map("item_key")
+  title          Json
+  quantity       Decimal      @db.Decimal(18, 2)
+  status         String       @default("OPEN")
+  createdBy      String       @map("created_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, outcomeKey])
+  @@index([organizationId, propertyId, status, createdAt], map: "automation_suggestion_org_property_status_created_idx")
+  @@map("automation_suggestion")
+}
+
 model Organization {
+  automationRuns AutomationRun[]
+  automationAttempts AutomationAttempt[]
+  automationSuggestions AutomationSuggestion[]
   teamCompensations                              TeamCompensation[]
   teamAvailabilities                             TeamAvailability[]
   teamDocuments                                  TeamDocument[]
@@ -1254,6 +1320,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  automationRuns AutomationRun[]
   teamCompensations    TeamCompensation[]
   id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId       String                      @map("organization_id") @db.Uuid

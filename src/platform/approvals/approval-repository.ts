@@ -24,6 +24,10 @@ export class ApprovalRepository {
   decide(id: string, state: "APPROVED" | "REJECTED", decidedBy: string, decisionReason: string, decidedAt: Date) {
     return this.tx.approvalRequest.update({ where: { id, organizationId: this.organizationId }, data: { state, decidedBy, decisionReason, decidedAt } });
   }
+  event(type: "ApprovalRequested" | "ApprovalDecided", approvalId: string, propertyId: string) {
+    const key=`approval:${approvalId}:${type}`;
+    return this.tx.outboxEvent.upsert({where:{organizationId_idempotencyKey:{organizationId:this.organizationId,idempotencyKey:key}},update:{},create:{organizationId:this.organizationId,type,payload:{approvalId,propertyId},idempotencyKey:key}});
+  }
   async resolveNotifications(id: string, resolution: string, resolvedAt: Date) {
     await this.tx.notification.updateMany({ where: { organizationId: this.organizationId, targetId: id, kind: "approval_requested", resolvedAt: null }, data: { resolution, resolvedAt } });
     await this.tx.notification.updateMany({ where: { organizationId: this.organizationId, targetId: id, kind: "approval_requested", readAt: null }, data: { readAt: resolvedAt } });

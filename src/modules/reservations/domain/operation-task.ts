@@ -36,6 +36,7 @@ export const taskReasonSchema = z.string().trim().min(6).max(1000);
 export const createTaskSchema = z
   .object({
     propertyId: z.string().uuid(),
+    reservationId: z.string().uuid().optional(),
     type: taskTypeSchema,
     title: localizedTextSchema,
     dueDate: stayDateSchema,

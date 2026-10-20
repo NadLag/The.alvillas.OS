@@ -163,6 +163,9 @@ export async function operationAudit(
     ...meta,
     occurredAt: new Date(),
   });
+  const event = action === "task.create" ? "TaskCreated" : ["task.assigned","task.assignment.swapped"].includes(action) ? "TaskAssigned" :
+    task.state === "COMPLETED" ? (action.includes("proxy") ? "ProxyValidated" : "TaskCompleted") : null;
+  if (event) await repo.event(event,task.id,task.propertyId,`task:${task.id}:${task.version}:${event}`);
 }
 export async function operationTaskDetail(
   ctx: ReservationActorContext,
@@ -293,6 +296,7 @@ export async function createOperationTask(
     const repo = new OperationRepository(tx, ctx.organizationId);
     const property = await repo.property(value.propertyId);
     if (!property) throw new ReservationNotFoundError();
+    if(value.reservationId){const reservation=await repo.reservation(value.reservationId,value.propertyId);if(!reservation||!authorize(ctx.authContext,"view",{type:"reservation",organizationId:ctx.organizationId,propertyId:property.id,city:property.cityId??property.city,region:property.regionId??property.region}))throw new ReservationAuthorizationError();}
     operationAllowed(ctx, "create", {
       type: "task",
       organizationId: ctx.organizationId,

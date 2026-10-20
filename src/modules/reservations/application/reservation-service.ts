@@ -481,5 +481,6 @@ export async function completeAssignedFieldTaskInTransaction(
   });
 
   await publishNotification(tx, ctx.organizationId, { kind: "task_completed", recipientId: ctx.actorId, targetId: completed.id }, `notification:task:${completed.id}:completed`);
+  await operations.event("TaskCompleted",completed.id,completed.propertyId,`task:${completed.id}:completed:${input.idempotencyKey}`);
   return completed;
 }

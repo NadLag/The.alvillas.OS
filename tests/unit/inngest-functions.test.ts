@@ -1,8 +1,9 @@
+import { automationEvents } from "@/platform/automation/events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { NonRetriableError } from "inngest";
 import { createHmac } from "node:crypto";
-import { dispatchOutbox, dispatchRequestOrganization, inngestFunctions, outboxDispatchEvent } from "@/platform/events/inngest-functions";
+import { consumeAutomations, dispatchOutbox, dispatchRequestOrganization, inngestFunctions, outboxDispatchEvent } from "@/platform/events/inngest-functions";
 import type { OutboxDatabase } from "@/platform/events/outbox-repository";
 
 const organizationId = "018f0a0b-0000-7000-9000-000000000001";
@@ -15,8 +16,10 @@ function database(found: object | null) {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Inngest signed outbox dispatcher", () => {
-  it("registers one function for scheduled recovery and durable dispatch requests", () => {
-    expect(inngestFunctions).toHaveLength(1);
+  it("registers the dispatcher and durable automation consumer", () => {
+    expect(inngestFunctions).toHaveLength(6);
+    for(const consumer of consumeAutomations) expect(consumer.opts.triggers!.length).toBeLessThanOrEqual(10);
+    expect(consumeAutomations.flatMap(consumer=>consumer.opts.triggers!.map(trigger=>"event" in trigger?trigger.event:undefined))).toEqual([...automationEvents]);
     expect(dispatchOutbox.opts.triggers).toEqual([{ cron: "* * * * *" }, { event: outboxDispatchEvent }]);
     expect(dispatchOutbox.opts.concurrency).toEqual({ limit: 1 });
   });
@@ -33,7 +36,7 @@ describe("Inngest signed outbox dispatcher", () => {
     } }), {});
     expect(response.status).toBe(200);
     const registration = await response.json() as { functions: Array<{ idempotency?: string; rateLimit?: unknown; steps: { step: { retries: { attempts: number } } } }> };
-    expect(registration.functions).toHaveLength(1);
+    expect(registration.functions).toHaveLength(6);
     expect(registration.functions[0].idempotency).toBeUndefined();
     expect(registration.functions[0].rateLimit).toBeUndefined();
     expect(registration.functions[0].steps.step.retries.attempts).toBe(3);
@@ -64,7 +67,7 @@ describe("Inngest signed outbox dispatcher", () => {
     expect((await GET(new NextRequest("http://localhost:3000/api/inngest"), {})).status).toBe(401);
     const discovery = await GET(new NextRequest("http://localhost:3000/api/inngest", { headers: signature("") }), {});
     expect(discovery.status).toBe(200);
-    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(1);
+    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(6);
     expect(JSON.stringify(body)).not.toContain(process.env.INNGEST_SIGNING_KEY!);
     const execution = await POST(new NextRequest("http://localhost:3000/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { method: "POST", body: "{}" }), {});
     expect(execution.status).toBe(401);

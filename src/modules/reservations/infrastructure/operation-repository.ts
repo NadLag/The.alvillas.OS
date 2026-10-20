@@ -57,6 +57,7 @@ export class OperationRepository {
       },
     });
   }
+  reservation(id:string,propertyId:string){return this.tx.reservation.findFirst({where:{organizationId:this.organizationId,id,propertyId,archivedAt:null,status:{notIn:["CANCELLED","NO_SHOW","CLOSED"]}},select:{id:true}});}
   properties() {
     return this.tx.property.findMany({
       where: { organizationId: this.organizationId, archivedAt: null },
@@ -524,6 +525,7 @@ export class OperationRepository {
       data: {
         organizationId: this.organizationId,
         propertyId: input.propertyId,
+        reservationId: input.reservationId,
         type: input.type,
         titleTranslations: input.title,
         dueDate: dateToUtc(input.dueDate),
