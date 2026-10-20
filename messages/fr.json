@@ -2114,6 +2114,9 @@
     "blockCount": "{count} blocages de disponibilité"
   },
   "Automation": {
+    "allProperties": "Toutes les propriétés",
+    "filter": "Filtrer",
+    "olderVersions": "Versions précédentes des règles",
     "eyebrow": "Exploitation",
     "title": "Automatisations",
     "subtitle": "Configurez le travail récurrent. Consultez chaque décision et résultat.",

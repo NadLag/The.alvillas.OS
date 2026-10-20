@@ -2114,6 +2114,9 @@
     "blockCount": "{count} حجب توافر"
   },
   "Automation": {
+    "allProperties": "جميع العقارات",
+    "filter": "تصفية",
+    "olderVersions": "إصدارات القواعد السابقة",
     "eyebrow": "العمليات",
     "title": "الأتمتة",
     "subtitle": "إعداد العمل المتكرر ومراجعة كل قرار ونتيجة.",

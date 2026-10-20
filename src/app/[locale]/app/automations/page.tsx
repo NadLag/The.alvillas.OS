@@ -18,7 +18,13 @@ export default async function AutomationsPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ before?: string; beforeId?: string }>;
+  searchParams: Promise<{
+    before?: string;
+    beforeId?: string;
+    propertyId?: string;
+    versionsBefore?: string;
+    versionsBeforeId?: string;
+  }>;
 }) {
   const { locale } = await params,
     appLocale = routing.locales.includes(locale as AppLocale)
@@ -32,7 +38,10 @@ export default async function AutomationsPage({
       namespace: "Automation",
     }),
     query = await searchParams,
-    before = query.before ? new Date(query.before) : undefined;
+    before = query.before ? new Date(query.before) : undefined,
+    versionsBefore = query.versionsBefore
+      ? new Date(query.versionsBefore)
+      : undefined;
   let model;
   try {
     model = await automationAdmin(
@@ -42,6 +51,18 @@ export default async function AutomationsPage({
         z.uuid().safeParse(query.beforeId).success
         ? { createdAt: before, id: query.beforeId! }
         : undefined,
+      {},
+      {
+        propertyId: z.uuid().safeParse(query.propertyId).success
+          ? query.propertyId
+          : undefined,
+        versionsBefore:
+          versionsBefore &&
+          Number.isFinite(versionsBefore.getTime()) &&
+          z.uuid().safeParse(query.versionsBeforeId).success
+            ? { createdAt: versionsBefore, id: query.versionsBeforeId! }
+            : undefined,
+      },
     );
   } catch (error) {
     if (!(error instanceof AutomationAccessError)) throw error;

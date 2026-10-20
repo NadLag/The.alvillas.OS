@@ -397,7 +397,7 @@ export class AutomationRepository {
       include: { attempts: { orderBy: { number: "asc" } } },
     });
   }
-  versions(propertyIds: string[]) {
+  versions(propertyIds: string[], before?: { createdAt: Date; id: string }) {
     return this.tx.configRule.findMany({
       where: {
         organizationId: this.organizationId,
@@ -406,6 +406,18 @@ export class AutomationRepository {
           { scopeType: "organization", scopeId: null },
           { scopeType: "property", scopeId: { in: propertyIds } },
         ],
+        ...(before
+          ? {
+              AND: [
+                {
+                  OR: [
+                    { createdAt: { lt: before.createdAt } },
+                    { createdAt: before.createdAt, id: { lt: before.id } },
+                  ],
+                },
+              ],
+            }
+          : {}),
       },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 100,

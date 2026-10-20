@@ -75,7 +75,9 @@ test.describe("persistent personal notification center", () => {
     // Real preference events create enough history to scroll on both viewports.
     for (const locale of ["en", "fr", "en", "fr", "en"]) {
       await page.getByTestId("preferred-locale-select").selectOption(locale);
+      const saved = page.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname.endsWith("/app"));
       await page.getByTestId("preferred-locale-submit").click();
+      expect((await saved).status()).toBeLessThan(400);
       await expect(page).toHaveURL(new RegExp(`/${locale}/app$`, "u"));
     }
     await expect(page.getByTestId("notification-count")).toHaveText("5");

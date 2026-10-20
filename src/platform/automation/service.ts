@@ -930,6 +930,10 @@ export async function automationAdmin(
   actor: AutomationActor,
   before?: { createdAt: Date; id: string },
   deps: Deps = {},
+  selection: {
+    propertyId?: string;
+    versionsBefore?: { createdAt: Date; id: string };
+  } = {},
 ) {
   if (
     actor.authContext.organizationId !== actor.organizationId ||
@@ -945,10 +949,17 @@ export async function automationAdmin(
         authorize(actor.authContext, "configure", resource(actor, p)),
     );
     if (!properties.length) allowed(actor, "view", resource(actor));
-    const ids = properties.map((p) => p.id),
+    if (
+      selection.propertyId &&
+      !properties.some((p) => p.id === selection.propertyId)
+    )
+      throw new AutomationAccessError();
+    const ids = selection.propertyId
+        ? [selection.propertyId]
+        : properties.map((p) => p.id),
       [runs, versions, sources, suggestions] = await Promise.all([
         repo.history(ids, before),
-        repo.versions(ids),
+        repo.versions(ids, selection.versionsBefore),
         repo.sources(ids),
         repo.suggestions(ids),
       ]);
@@ -988,6 +999,7 @@ export async function automationAdmin(
     return {
       effectiveDefault: (deps.now ?? new Date()).toISOString().slice(0, 16),
       properties,
+      selectedPropertyId: selection.propertyId ?? "",
       versions: versions.filter(
         (v) =>
           v.scopeType !== "organization" ||

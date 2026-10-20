@@ -472,6 +472,20 @@ export function AutomationAdmin({
     <div className="automation-workspace">
       <section className="workspace-main">
         <h2>{t("rules")}</h2>
+        <form method="get" className="automation-command">
+          <label>
+            {t("property")}
+            <select name="propertyId" defaultValue={model.selectedPropertyId}>
+              <option value="">{t("allProperties")}</option>
+              {model.properties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="secondary-button">{t("filter")}</button>
+        </form>
         <p className="muted-copy">{t("safety")}</p>
         {!latest.size ? (
           <p>{t("empty")}</p>
@@ -498,6 +512,11 @@ export function AutomationAdmin({
                   </div>
                   <p>
                     {v.key} · {rule.event}
+                  </p>
+                  <p>
+                    {v.scopeType === "property"
+                      ? model.properties.find((p) => p.id === v.scopeId)?.name
+                      : t("allProperties")}
                   </p>
                   <button
                     className="quiet-button"
@@ -550,6 +569,14 @@ export function AutomationAdmin({
             })}
           </ul>
         )}
+        {model.versions.length === 100 ? (
+          <a
+            className="secondary-button"
+            href={`?propertyId=${model.selectedPropertyId}&versionsBefore=${encodeURIComponent(model.versions.at(-1)!.createdAt.toISOString())}&versionsBeforeId=${model.versions.at(-1)!.id}`}
+          >
+            {t("olderVersions")}
+          </a>
+        ) : null}
         <details>
           <summary>{t("library")}</summary>
           <p>{t("libraryHelp")}</p>
@@ -634,7 +661,7 @@ export function AutomationAdmin({
         {model.runs.length === 50 ? (
           <a
             className="secondary-button"
-            href={`?before=${encodeURIComponent(model.runs.at(-1)?.createdAt ?? "")}&beforeId=${model.runs.at(-1)?.id ?? ""}`}
+            href={`?propertyId=${model.selectedPropertyId}&before=${encodeURIComponent(model.runs.at(-1)?.createdAt ?? "")}&beforeId=${model.runs.at(-1)?.id ?? ""}`}
           >
             {t("older")}
           </a>

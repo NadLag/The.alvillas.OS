@@ -812,6 +812,18 @@ describe("automation engine on real PostgreSQL", () => {
       await executeAutomationRun(operational.org, financialRun, deps()),
     ).toBe("FAILED");
     const model = await automationAdmin(operational.actor, undefined, deps());
+    await expect(
+      automationAdmin(operational.actor, undefined, deps(), {
+        propertyId: f.property.id,
+      }),
+    ).rejects.toThrow("automation_forbidden");
+    const selectedModel = await automationAdmin(operational.actor, undefined, deps(), {
+      propertyId: operational.property.id,
+    });
+    expect(selectedModel.selectedPropertyId).toBe(operational.property.id);
+    expect(selectedModel.runs.map((run) => run.id)).toEqual(
+      model.runs.map((run) => run.id),
+    );
     expect(model.runs[0].inputs).toBe("••••••");
     expect(
       await withTenant(db, operational.org, (tx) => tx.variance.count()),

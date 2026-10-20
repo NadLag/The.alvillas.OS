@@ -2114,6 +2114,9 @@
     "blockCount": "{count} availability blocks"
   },
   "Automation": {
+    "allProperties": "All properties",
+    "filter": "Filter",
+    "olderVersions": "Older rule versions",
     "eyebrow": "Operations",
     "title": "Automations",
     "subtitle": "Configure routine work. Review each decision and outcome.",
