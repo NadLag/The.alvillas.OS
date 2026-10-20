@@ -212,6 +212,51 @@ describe("automation engine on real PostgreSQL", () => {
     await db?.$disconnect();
     await admin?.$disconnect();
   });
+  it("authorizes financial inputs before a false predicate can reveal its result", async () => {
+    const f = await fixture(
+      permissionCatalog
+        .map((p) => p.key)
+        .filter((key) => !key.startsWith("financial_transaction:")),
+    );
+    const source = await save(
+      f,
+      rule({
+        event: "ExpenseSubmitted",
+        retry: { max_attempts: 1, delay_seconds: 1 },
+        conditions: { path: "variance.actual", op: "<", value: "0.00" },
+      }),
+    );
+    await withTenant(db, f.org, (tx) =>
+      tx.outboxEvent.update({
+        where: { id: f.event.id },
+        data: {
+          type: "ExpenseSubmitted",
+          payload: {
+            propertyId: f.property.id,
+            variance: { expected: "100.00", actual: "100.00", currency: "MAD" },
+          },
+        },
+      }),
+    );
+    await expect(
+      previewAutomation(
+        f.actor,
+        { ruleId: source.id, eventId: f.event.id },
+        deps(),
+      ),
+    ).rejects.toThrow("automation_forbidden");
+    const [run] = await runs(f);
+    expect(await executeAutomationRun(f.org, run, deps())).toBe("FAILED");
+    await withTenant(db, f.org, async (tx) => {
+      expect(await tx.operationTask.count()).toBe(0);
+      expect(
+        await tx.automationRun.count({ where: { status: "SKIPPED" } }),
+      ).toBe(0);
+      expect((await tx.automationAttempt.findFirstOrThrow()).errorCode).toBe(
+        "automation_forbidden",
+      );
+    });
+  });
   it("records invalid idempotency input without starving other rules on the event", async () => {
     const f = await fixture();
     await save(

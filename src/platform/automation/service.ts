@@ -177,11 +177,7 @@ async function actionPlan(
 ) {
   const p = ctx.property;
   allowed(actor, "configure", resource(actor, p));
-  if (/^(Expense|Payout|Payment|BankLine|PeriodClosed)/u.test(ctx.event.type))
-    allowed(actor, "view", {
-      ...resource(actor, p, "financial_transaction"),
-      dataClass: "financial",
-    });
+  authorizeEvaluation(actor, ctx);
   if (action.type === "create_task" || action.type === "generate_workflow") {
     allowed(actor, "create", resource(actor, p, "task"));
     if (action.type === "generate_workflow") {
@@ -448,6 +444,25 @@ async function perform(
   return { key: action.key, ...plan, producedIds };
 }
 
+function authorizeEvaluation(actor: AutomationActor, ctx: Context) {
+  // Predicate results are observable. Protect financial inputs before deciding
+  // whether a rule matches, including a condition which evaluates to false.
+  if (
+    /^(Expense|Payout|Payment|BankLine|PeriodClosed|Variance)/u.test(
+      ctx.event.type,
+    ) ||
+    Object.hasOwn(ctx.evaluation.fields, "variance") ||
+    Object.keys(ctx.evaluation.configs).some((key) =>
+      key.startsWith("finance."),
+    )
+  ) {
+    allowed(actor, "view", {
+      ...resource(actor, ctx.property, "financial_transaction"),
+      dataClass: "financial",
+    });
+  }
+}
+
 export const saveAutomationSchema = z
   .object({
     key: z.string().regex(/^[a-z][a-z0-9_.-]{0,99}$/u),
@@ -583,12 +598,7 @@ export async function previewAutomation(
     allowed(actor, "view", resource(actor, ctx.property));
     allowed(actor, "configure", resource(actor, ctx.property));
     const { rule, metadata } = await repo.resolve(source.value, ctx);
-    for (const key of Object.keys(ctx.evaluation.configs))
-      if (key.startsWith("finance."))
-        allowed(actor, "view", {
-          ...resource(actor, ctx.property, "financial_transaction"),
-          dataClass: "financial",
-        });
+    authorizeEvaluation(actor, ctx);
     const matched =
         matches(rule, ctx) && evaluate(rule.conditions, ctx.evaluation),
       plans = [];
@@ -742,12 +752,7 @@ export async function executeAutomationRun(
         configVersions: metadata,
         ruleVersion: source.version,
       };
-      for (const key of Object.keys(ctx.evaluation.configs))
-        if (key.startsWith("finance."))
-          allowed(actor, "view", {
-            ...resource(actor, ctx.property, "financial_transaction"),
-            dataClass: "financial",
-          });
+      authorizeEvaluation(actor, ctx);
       const matched = evaluate(rule.conditions, ctx.evaluation),
         outputs = [];
       if (matched) {

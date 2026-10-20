@@ -22,6 +22,8 @@ any action fails; run/attempt/audit records then commit the safe failure code.
 Attempts are append-only. Replaying a successful run cannot create new outcomes.
 Automation cannot approve requests or execute payments; the action catalog accepts
 neither. Financial actions independently authorize financial access and use Money.
+Financial inputs are authorized before condition evaluation so false predicates
+cannot disclose protected values through an execution status.
 
 Property-local daily schedules are persisted as outbox occurrences, deduplicated
 by local date, including the repeated DST hour. Missed polling within a local day
