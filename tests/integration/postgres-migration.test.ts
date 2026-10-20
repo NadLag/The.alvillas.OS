@@ -1092,7 +1092,9 @@ describe("PostgreSQL baseline", () => {
       const role = await tx.role.create({ data: { organizationId: f.organization.id, key: "push-worker", name: "Worker" } });
       const permission = await tx.permission.create({ data: { organizationId: f.organization.id, key: "task:view", resource: "task", action: "view" } });
       await tx.rolePermission.create({ data: { organizationId: f.organization.id, roleId: role.id, permissionId: permission.id } });
-      const assignment = await tx.roleAssignment.create({ data: { organizationId: f.organization.id, personId: f.person.id, userAccountId: f.account.id, roleId: role.id, scopeType: "property", scopeId: property.id } });
+      // This test revokes an existing grant; avoid coupling that precondition to
+      // sub-millisecond differences between the application and database clocks.
+      const assignment = await tx.roleAssignment.create({ data: { organizationId: f.organization.id, personId: f.person.id, userAccountId: f.account.id, roleId: role.id, scopeType: "property", scopeId: property.id, validFrom: new Date(0) } });
       const task = await tx.operationTask.create({ data: { organizationId: f.organization.id, propertyId: property.id, type: "CLEANING", state: "PLANNED", assignedToUserAccountId: f.account.id, dueDate: new Date(), titleTranslations: { en: "Test", fr: "Test" }, idempotencyKey: randomUUID() } });
       await new ConfigRuleRepository(tx, f.organization.id).createVersion({ key: "notification.routing.task_assigned", scopeType: "organization", effectiveFrom: new Date(0), value: { roles: [], people: [], assigned: true, channels: ["push"] }, reason: "Task browser routing" });
       await publishNotification(tx, f.organization.id, { kind: "task_assigned", recipientId: f.account.id, targetId: task.id }, "task-push");
