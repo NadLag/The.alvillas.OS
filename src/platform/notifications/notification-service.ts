@@ -68,6 +68,9 @@ export async function saveDigestPreferences(actor: NotificationActor, settings: 
 export async function publishNotification(tx: TenantTransaction, organizationId: string, input: NotificationInput, key: string) {
   await new NotificationRepository(tx, organizationId).publish(input, key);
 }
+export async function publishNotifications(tx: TenantTransaction, organizationId: string, entries: Array<{ input: NotificationInput; key: string }>) {
+  await new NotificationRepository(tx, organizationId).publishMany(entries);
+}
 export async function deliverNotificationEvent(event: OutboxEvent, deps: Deps = {}) {
   return withTenant(deps.db ?? prisma, event.organizationId, (tx) => new NotificationRepository(tx, event.organizationId).deliver(event));
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { writeAuditEvent, writeAuditEvents } from "@/platform/audit/audit-writer";
 import type { AuditEvent } from "@/platform/audit/audit-event";
 
 const baseEvent: AuditEvent = {
@@ -19,6 +19,22 @@ const baseEvent: AuditEvent = {
 };
 
 describe("writeAuditEvent", () => {
+  it("redacts batch appends and validates every reason before writing any row", async () => {
+    const createMany = vi.fn<Parameters<typeof writeAuditEvents>[0]["auditLog"]["createMany"]>().mockResolvedValue({ count: 2 });
+    await writeAuditEvents({ auditLog: { createMany } }, [
+      { ...baseEvent, after: { email: "private@example.test", status: "confirmed" } },
+      { ...baseEvent, action: "wallet.adjustment.create", reason: " Reviewed correction " }
+    ]);
+    const rows = createMany.mock.calls[0][0].data;
+    expect(rows[0].after).toEqual({ email: "[REDACTED]", status: "confirmed" });
+    expect(rows[1].reason).toBe("Reviewed correction");
+    createMany.mockClear();
+    await expect(writeAuditEvents({ auditLog: { createMany } }, [baseEvent,
+      { ...baseEvent, action: "wallet.adjustment.create", reason: " " }
+    ])).rejects.toThrow("Audit reason is required");
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
   it("writes a complete service-layer audit row", async () => {
     const create = vi.fn().mockResolvedValue({});
 

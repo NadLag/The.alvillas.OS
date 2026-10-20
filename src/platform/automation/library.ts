@@ -71,21 +71,18 @@ export async function installAutomationLibrary(
       if (key === "ops.reservation_task_templates" && existing) {
         const current = reservationTaskConfigSchema.parse(value),
           standard = reservationTaskConfigSchema.parse(initial);
-        next = {
-          tasks: [
-            ...current.tasks,
-            ...standard.tasks.filter(
-              (t) =>
-                !current.tasks.some(
-                  (v) =>
-                    v.key === t.key ||
-                    (v.type === t.type &&
-                      v.due === t.due &&
-                      (v.dueOffsetDays ?? 0) === (t.dueOffsetDays ?? 0)),
-                ),
-            ),
-          ],
-        };
+        const tasks = [...current.tasks];
+        for (const template of standard.tasks) {
+          if (current.tasks.some(existing =>
+            (existing.key === template.key && existing.type === template.type) ||
+            (existing.type === template.type && existing.due === template.due &&
+              (existing.dueOffsetDays ?? 0) === (template.dueOffsetDays ?? 0)))) continue;
+          let key = template.key;
+          for (let suffix = 1; tasks.some(task => task.key === key); suffix++)
+            key = `standard.${template.key}${suffix === 1 ? "" : `.${suffix}`}`;
+          tasks.push({ ...template, key });
+        }
+        next = { tasks };
       }
       if (existing && JSON.stringify(next) === JSON.stringify(value)) continue;
       await createConfigRuleVersion(

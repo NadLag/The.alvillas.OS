@@ -137,28 +137,36 @@ function toAuditJson(
   return redactAuditPayload(JSON.parse(serialized) as Prisma.JsonValue) as Prisma.InputJsonValue;
 }
 
-export async function writeAuditEvent(client: AuditClient, event: AuditEvent): Promise<void> {
+function auditEventData(event: AuditEvent): Parameters<AuditClient["auditLog"]["create"]>[0]["data"] {
   const reason = normalizeAuditReason(event.reason);
 
   if (isReasonRequiredAuditAction(event.action) && reason === null) {
     throw new TypeError("Audit reason is required for reason-required actions");
   }
 
-  await client.auditLog.create({
-    data: {
-      organizationId: event.organizationId,
-      actorId: event.actorId,
-      action: event.action,
-      resourceType: event.resourceType,
-      resourceId: event.resourceId,
-      ipAddress: event.ipAddress ?? null,
-      deviceId: event.deviceId ?? null,
-      propertyScopeId: event.propertyScopeId ?? null,
-      before: toAuditJson(event.before),
-      after: toAuditJson(event.after),
-      reason,
-      requestId: event.requestId,
-      occurredAt: event.occurredAt
-    }
-  });
+  return {
+    organizationId: event.organizationId,
+    actorId: event.actorId,
+    action: event.action,
+    resourceType: event.resourceType,
+    resourceId: event.resourceId,
+    ipAddress: event.ipAddress ?? null,
+    deviceId: event.deviceId ?? null,
+    propertyScopeId: event.propertyScopeId ?? null,
+    before: toAuditJson(event.before),
+    after: toAuditJson(event.after),
+    reason,
+    requestId: event.requestId,
+    occurredAt: event.occurredAt
+  };
+}
+
+export async function writeAuditEvent(client: AuditClient, event: AuditEvent): Promise<void> {
+  await client.auditLog.create({ data: auditEventData(event) });
+}
+
+export async function writeAuditEvents(client: { auditLog: { createMany(args: { data: Array<ReturnType<typeof auditEventData>> }): Promise<unknown> } }, events: AuditEvent[]): Promise<void> {
+  // Database row triggers still enforce append-only history for every row.
+  const data = events.map(auditEventData);
+  if (data.length) await client.auditLog.createMany({ data });
 }

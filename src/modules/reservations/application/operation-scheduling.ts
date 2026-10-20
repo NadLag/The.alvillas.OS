@@ -31,7 +31,10 @@ import { contextForRoleAssignments } from "@/platform/authz/account-context";
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
 import { withTenant } from "@/platform/db/tenant";
-import { publishNotification } from "@/platform/notifications/notification-service";
+import { publishNotification, publishNotifications } from "@/platform/notifications/notification-service";
+import type { NotificationInput } from "@/platform/notifications/notification";
+import { writeAuditEvents } from "@/platform/audit/audit-writer";
+import type { AuditEvent } from "@/platform/audit/audit-event";
 
 export function operationStartMinute(
   task: OperationTask,
@@ -41,20 +44,44 @@ export function operationStartMinute(
     ? propertyMinute(task.scheduledStart, task.property.timezone)
     : (policy.types[task.type]?.start_minute ?? policy.shift_start_minute);
 }
+// A batch belongs to one repository/transaction and holds the same crew lock
+// used by individual assignments. Cached workloads include every batch update.
+export async function prepareAssignmentBatch(repo: OperationRepository, propertyId: string) {
+  await repo.lock("crew-schedule");
+  return { repo, propertyId, policy: await repo.policy(propertyId), roles: await repo.team(),
+    workloads: new Map<string, { from: Date; until: Date; tasks: Awaited<ReturnType<OperationRepository["workloads"]>> }>(),
+    availability: new Map<string, Awaited<ReturnType<OperationRepository["availability"]>>>(),
+    audits: [] as AuditEvent[],
+    notifications: [] as Array<{ input: NotificationInput; key: string }> };
+}
+type AssignmentBatch = Awaited<ReturnType<typeof prepareAssignmentBatch>>;
+
+export async function finishAssignmentBatch(batch: AssignmentBatch) {
+  await writeAuditEvents(batch.repo.tx, batch.audits);
+  await publishNotifications(batch.repo.tx, batch.repo.organizationId, batch.notifications);
+}
+
+function assertAssignmentBatch(repo: OperationRepository, task: OperationTask, batch: AssignmentBatch) {
+  if (batch.repo !== repo || batch.propertyId !== task.propertyId)
+    throw new ReservationConflictError("operation_assignment_batch_scope_mismatch");
+}
+
 export async function taskCandidates(
   repo: OperationRepository,
   task: OperationTask,
   date: string,
   minute: number,
   excluded: string[] = [task.id],
+  batch?: AssignmentBatch,
 ) {
-  const policy = await repo.policy(task.propertyId),
+  if (batch) assertAssignmentBatch(repo, task, batch);
+  const policy = batch?.policy ?? await repo.policy(task.propertyId),
     settings = policy.types[task.type];
   if (!settings)
     throw new ReservationConflictError("operation_type_policy_missing");
   const start = propertyInstant(date, minute, task.property.timezone),
     end = new Date(start.getTime() + settings.duration_minutes * 60000);
-  const roles = await repo.team(),
+  const roles = batch?.roles ?? await repo.team(),
     grouped = new Map<string, typeof roles>();
   for (const row of roles) {
     if (
@@ -91,14 +118,17 @@ export async function taskCandidates(
   const dateUtc = dateToUtc(date),
     from = new Date(dateUtc.getTime() - 86400000),
     until = new Date(dateUtc.getTime() + 86400000);
-  const [availability, tasks] = await Promise.all([
-    repo.availability(
-      [...grouped.keys()],
-      dateUtc,
-      dateToUtc(localDate(new Date(end.getTime() - 1), task.property.timezone)),
-    ),
-    repo.workloads(from, until, excluded),
-  ]);
+  const availableUntil = dateToUtc(localDate(new Date(end.getTime() - 1), task.property.timezone));
+  const availabilityKey = JSON.stringify([[...grouped.keys()].sort(), dateUtc, availableUntil]);
+  const [availability, workload] = grouped.size ? await Promise.all([
+    batch?.availability.get(availabilityKey) ?? repo.availability([...grouped.keys()], dateUtc, availableUntil),
+    batch?.workloads.get(date)?.tasks ?? repo.workloads(from, until, batch ? [] : excluded),
+  ]) : [[], []];
+  if (batch && grouped.size) {
+    batch.availability.set(availabilityKey, availability);
+    batch.workloads.set(date, { from, until, tasks: workload });
+  }
+  const tasks = batch ? workload.filter(task => !excluded.includes(task.id)) : workload;
   const people = [...grouped]
     .map(([personId, rows]) => {
       rows.sort(
@@ -173,17 +203,21 @@ export async function assignTaskInTransaction(
   meta: Awaited<ReturnType<typeof operationMeta>>,
   reason: string,
   automatic = false,
+  batch?: AssignmentBatch,
 ) {
   if (!automatic) operationAllowed(ctx, "assign", taskResource(task));
   if (terminalTaskStates.includes(task.state) || task.state === "IN_PROGRESS")
     throw new ReservationConflictError();
   // All assignments and swaps serialize per tenant, preventing write skew across properties.
-  await repo.lock("crew-schedule");
+  if (batch) assertAssignmentBatch(repo, task, batch);
+  else await repo.lock("crew-schedule");
   const options = await taskCandidates(
     repo,
     task,
     task.dueDate.toISOString().slice(0, 10),
     minute,
+    [task.id],
+    batch,
   );
   const candidate = personId
     ? options.people.find((p) => p.personId === personId)
@@ -191,7 +225,7 @@ export async function assignTaskInTransaction(
   if (personId && (!candidate || candidate.conflict))
     throw new ReservationConflictError("operation_assignment_conflict");
   await repo.context(ctx.actorId, meta.requestId, reason);
-  await repo.update(task.id, {
+  const updated = await repo.update(task.id, {
     assignedToPersonId: candidate?.personId ?? null,
     assignedToUserAccountId: candidate?.userAccountId ?? null,
     requiredRoleKey:
@@ -201,19 +235,26 @@ export async function assignTaskInTransaction(
     state:
       task.state === "BLOCKED" ? "BLOCKED" : candidate ? "ASSIGNED" : "PLANNED",
   });
-  const after = (await repo.task(task.id))!;
-  await operationAudit(repo, ctx, meta, "task.assigned", after, task, reason);
-  if (candidate?.userAccountId)
-    await publishNotification(
+  const after = { ...task, ...updated };
+  if (batch) for (const day of batch.workloads.values()) {
+    const index = day.tasks.findIndex(row => row.id === after.id);
+    const row = { id: after.id, assignedToPersonId: after.assignedToPersonId, dueDate: after.dueDate,
+      scheduledStart: after.scheduledStart, scheduledEnd: after.scheduledEnd, property: { timezone: after.property.timezone } };
+    if (index >= 0) day.tasks[index] = row;
+    else if (after.dueDate >= day.from && after.dueDate <= day.until) day.tasks.push(row);
+  }
+  await operationAudit(repo, ctx, meta, "task.assigned", after, task, reason, batch?.audits);
+  if (candidate?.userAccountId) {
+    const input = { kind: "task_assigned" as const, recipientId: candidate.userAccountId, targetId: task.id };
+    const key = `task:${task.id}:assigned:${after.version}`;
+    if (batch) batch.notifications.push({ input, key });
+    else await publishNotification(
       repo.tx,
       ctx.organizationId,
-      {
-        kind: "task_assigned",
-        recipientId: candidate.userAccountId,
-        targetId: task.id,
-      },
-      `task:${task.id}:assigned:${after.version}`,
+      input,
+      key,
     );
+  }
   return after;
 }
 export async function operationAssignmentOptions(
