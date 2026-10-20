@@ -139,6 +139,11 @@ jobs:
           echo "staging credential presence ok"
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      - name: Verify Vercel user, team and project access
+        if: steps.staging_credentials.outputs.ready == 'true'
+        run: npx tsx scripts/staging-vercel-access.ts
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       - name: Install Vercel CLI
         if: steps.staging_credentials.outputs.ready == 'true'
         run: npm install -g "vercel@${VERCEL_CLI_VERSION:?set VERCEL_CLI_VERSION}"
