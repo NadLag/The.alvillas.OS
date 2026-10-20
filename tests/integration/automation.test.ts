@@ -23,6 +23,7 @@ import { consumeAutomationReference } from "@/platform/events/inngest-functions"
 import { decideApproval } from "@/platform/approvals/approval-service";
 import { installAutomationLibrary } from "@/platform/automation/library";
 import { ReservationRepository } from "@/modules/reservations/infrastructure/reservation-repository";
+import { deliverNotificationEvent } from "@/platform/notifications/notification-service";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -1198,6 +1199,151 @@ describe("automation engine on real PostgreSQL", () => {
         tx.outboxEvent.count({ where: { type: "ApprovalRequested" } }),
       ),
     ).toBe(1);
+  });
+  it("delivers notification actions once and rechecks the recipient's current property access", async () => {
+    const f = await fixture();
+    await withTenant(db, f.org, (tx) =>
+      new ConfigRuleRepository(tx, f.org).createVersion({
+        key: "notification.routing.task_overdue",
+        scopeType: "organization",
+        effectiveFrom: start,
+        value: { roles: [], people: [], assigned: true, channels: ["in_app"] },
+        reason:
+          "Only configured assigned recipients receive this automation notification",
+      }),
+    );
+    const { recipient, assignment, task } = await withTenant(
+      db,
+      f.org,
+      async (tx) => {
+        const person = await tx.person.create({
+          data: {
+            organizationId: f.org,
+            displayName: "Notification recipient",
+          },
+        });
+        const recipient = await tx.userAccount.create({
+          data: { organizationId: f.org, personId: person.id },
+        });
+        const assignment = await tx.roleAssignment.create({
+          data: {
+            organizationId: f.org,
+            personId: person.id,
+            userAccountId: recipient.id,
+            roleId: f.role.id,
+            scopeType: "property",
+            scopeId: f.property.id,
+            validFrom: start,
+          },
+        });
+        const task = await tx.operationTask.create({
+          data: {
+            organizationId: f.org,
+            propertyId: f.property.id,
+            type: "INSPECTION",
+            titleTranslations: {
+              en: "Scoped inspection",
+              fr: "Inspection autorisée",
+            },
+            dueDate: new Date("2026-01-01"),
+            assignedToUserAccountId: recipient.id,
+            idempotencyKey: randomUUID(),
+          },
+        });
+        return { recipient, assignment, task };
+      },
+    );
+    await save(
+      f,
+      rule({
+        event: "TaskOverdue",
+        actions: [
+          {
+            key: "notice",
+            type: "notify",
+            kind: "task_overdue",
+            recipient: "task.assigned_to",
+            target: "task.id",
+          },
+        ],
+      }),
+    );
+    const emit = () =>
+      withTenant(db, f.org, (tx) =>
+        tx.outboxEvent.create({
+          data: {
+            organizationId: f.org,
+            type: "TaskOverdue",
+            payload: { propertyId: f.property.id, taskId: task.id },
+            idempotencyKey: randomUUID(),
+          },
+        }),
+      );
+    const source = await emit();
+    const [run] = await enqueueAutomationEvent(f.org, source.id, deps());
+    expect(await executeAutomationRun(f.org, run, deps())).toBe("SUCCEEDED");
+    expect(await enqueueAutomationEvent(f.org, source.id, deps())).toEqual([
+      run,
+    ]);
+    await Promise.all([
+      executeAutomationRun(f.org, run, deps()),
+      executeAutomationRun(f.org, run, deps()),
+    ]);
+    const notificationEvent = await withTenant(db, f.org, (tx) =>
+      tx.outboxEvent.findFirstOrThrow({
+        where: {
+          type: "notification.requested",
+          idempotencyKey: `${run}:notice`,
+        },
+      }),
+    );
+    await Promise.all([
+      deliverNotificationEvent(notificationEvent, deps()),
+      deliverNotificationEvent(notificationEvent, deps()),
+    ]);
+    expect(
+      await withTenant(db, f.org, (tx) =>
+        tx.notification.findMany({
+          where: { targetId: task.id, kind: "task_overdue" },
+          select: { recipientId: true },
+        }),
+      ),
+    ).toEqual([{ recipientId: recipient.id }]);
+    await withTenant(db, f.org, (tx) =>
+      tx.roleAssignment.update({
+        where: { id: assignment.id },
+        data: { archivedAt: new Date() },
+      }),
+    );
+    const laterSource = await emit();
+    const [laterRun] = await enqueueAutomationEvent(
+      f.org,
+      laterSource.id,
+      deps(),
+    );
+    expect(await executeAutomationRun(f.org, laterRun, deps())).toBe(
+      "SUCCEEDED",
+    );
+    expect(
+      await withTenant(db, f.org, (tx) =>
+        tx.notification.count({
+          where: {
+            recipientId: recipient.id,
+            targetId: task.id,
+            kind: "task_overdue",
+          },
+        }),
+      ),
+    ).toBe(1);
+    const retained = await withTenant(db, f.org, (tx) =>
+      tx.outboxEvent.findFirstOrThrow({
+        where: {
+          type: "notification.requested",
+          idempotencyKey: `${laterRun}:notice`,
+        },
+      }),
+    );
+    expect(retained.status).toBe("DISPATCHED");
   });
   it("creates a scoped reorder suggestion from configured minimums exactly once", async () => {
     const f = await fixture();
