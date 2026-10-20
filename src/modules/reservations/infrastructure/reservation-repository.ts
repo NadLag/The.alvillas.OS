@@ -387,27 +387,25 @@ export class ReservationRepository {
     template: ReservationTaskTemplate,
     actor: { userAccountId: string; personId: string }
   ): Promise<{ task: OperationTaskSummary; created: boolean }> {
+    return (await this.ensureTasks(reservation, [template], actor))[0];
+  }
+
+  async ensureTasks(
+    reservation: ReservationSummary,
+    templates: ReservationTaskTemplate[],
+    actor: { userAccountId: string; personId: string }
+  ): Promise<Array<{ task: OperationTaskSummary; created: boolean }>> {
+    if (!templates.length) return [];
     await new OperationRepository(this.tx, this.organizationId).context(actor.userAccountId, crypto.randomUUID(), "Reservation workflow generation");
-    const idempotencyKey = `${reservation.id}:${template.key}`;
-    const existing = await this.tx.operationTask.findUnique({
-      where: {
-        organizationId_idempotencyKey: {
-          organizationId: this.organizationId,
-          idempotencyKey
-        }
-      },
-      include: {
-        property: true,
-        reservation: true
-      }
+    const keys = templates.map(template => `${reservation.id}:${template.key}`);
+    const existing = await this.tx.operationTask.findMany({
+      where: { organizationId: this.organizationId, idempotencyKey: { in: keys } },
+      select: { idempotencyKey: true }
     });
-
-    if (existing) {
-      return { task: taskToSummary(existing), created: false };
-    }
-
-    const task = await this.tx.operationTask.create({
-      data: {
+    const existingKeys = new Set(existing.map(task => task.idempotencyKey));
+    const created = await this.tx.operationTask.createManyAndReturn({
+      skipDuplicates: true,
+      data: templates.filter(template => !existingKeys.has(`${reservation.id}:${template.key}`)).map(template => ({
         organizationId: this.organizationId,
         propertyId: reservation.propertyId,
         reservationId: reservation.id,
@@ -417,24 +415,27 @@ export class ReservationRepository {
         dueDate: new Date((template.due === "CHECK_IN" ? reservation.checkIn : reservation.checkOut).getTime() + (template.dueOffsetDays ?? 0) * 86400000),
         titleTranslations: taskTitleJson(template),
         checklistTemplateKey: template.checklistTemplateKey,
-        idempotencyKey,
-        createdBy: actor.userAccountId,
-        checklistItems: {
-          create: template.checklist.map((item, index) => ({
-            organizationId: this.organizationId,
-            key: item.key,
-            labelTranslations: checklistLabelJson(item),
-            sortOrder: index
-          }))
-        }
-      },
-      include: {
-        property: true,
-        reservation: true
-      }
+        idempotencyKey: `${reservation.id}:${template.key}`,
+        createdBy: actor.userAccountId
+      }))
     });
-
-    return { task: taskToSummary(task), created: true };
+    const byKey = new Map(templates.map(template => [`${reservation.id}:${template.key}`, template]));
+    const checklist = created.flatMap(task => byKey.get(task.idempotencyKey)!.checklist.map((item, index) => ({
+      organizationId: this.organizationId, taskId: task.id, key: item.key,
+      labelTranslations: checklistLabelJson(item), sortOrder: index
+    })));
+    if (checklist.length) await this.tx.operationTaskChecklistItem.createMany({ data: checklist });
+    const tasks = await this.tx.operationTask.findMany({
+      where: { organizationId: this.organizationId, idempotencyKey: { in: keys } },
+      include: { property: true, reservation: true }
+    });
+    const results = new Map(tasks.map(task => [task.idempotencyKey, taskToSummary(task)]));
+    const createdIds = new Set(created.map(task => task.id));
+    return keys.map(key => {
+      const task = results.get(key);
+      if (!task) throw new Error("reservation_workflow_task_missing");
+      return { task, created: createdIds.has(task.id) };
+    });
   }
 
   async listTasks(): Promise<OperationTaskSummary[]> {
@@ -685,9 +686,8 @@ export class ReservationRepository {
     if (!config) throw new Error("reservation_task_configuration_missing");
     for (const rule of [config.rule, ...(config.supportingRules ?? [])]) await this.snapshotTaskConfigRule({ reservationId, propertyId: reservation.propertyId, rule, resolvedAt: reservation.confirmedAt ?? reservation.createdAt, createdBy: actorId });
     const summary: ReservationSummary = { ...reservation, propertyName: reservation.property.name, source: reservation.source as ReservationSummary["source"], conflictCount: 0 };
-    const created = [];
-    for (const template of config.config.tasks) { const result = await this.ensureTask(summary, template, { userAccountId: actorId, personId }); if (result.created) created.push(result.task); }
-    return created;
+      return (await this.ensureTasks(summary, config.config.tasks, { userAccountId: actorId, personId }))
+        .filter(result => result.created).map(result => result.task);
   }
   async feedPolicy(propertyId: string, asOf: Date) {
     const rule = await new ConfigRuleRepository(this.tx, this.organizationId).resolve({ key: reservationSyncPolicyKey, asOf, scopes: [{ scopeType: "property", scopeId: propertyId }, { scopeType: "organization", scopeId: null }] });

@@ -23,7 +23,11 @@ import { consumeAutomationReference } from "@/platform/events/inngest-functions"
 import { decideApproval } from "@/platform/approvals/approval-service";
 import { installAutomationLibrary } from "@/platform/automation/library";
 import { ReservationRepository } from "@/modules/reservations/infrastructure/reservation-repository";
-import { deliverNotificationEvent } from "@/platform/notifications/notification-service";
+import { deliverNotificationEvent, publishNotifications } from "@/platform/notifications/notification-service";
+import { createManualReservation } from "@/modules/reservations/application/reservation-service";
+import operationDefaults from "@/platform/config/defaults/operations.json";
+import { OperationRepository } from "@/modules/reservations/infrastructure/operation-repository";
+import { propertyInstant } from "@/modules/reservations/domain/operation-task";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -753,6 +757,80 @@ describe("automation engine on real PostgreSQL", () => {
       ]),
     );
     expect(tasks[0].dueDate.toISOString().slice(0, 10)).toBe("2027-03-25");
+  });
+  it("creates the eleven-stage native stay with bounded queries, current crew capacity, atomic notifications and safe replay", async () => {
+    const f = await fixture();
+    await installAutomationLibrary(f.actor, { propertyId: f.property.id, reason: "Configure native workflow query budget" }, deps());
+    const occupied = await withTenant(db, f.org, async tx => {
+      const policy = structuredClone(operationDefaults);
+      for (const settings of Object.values(policy.types)) settings.role_keys = [f.role.key];
+      policy.types.CLEANING.role_keys = ["unavailable_crew"];
+      await new ConfigRuleRepository(tx, f.org).createVersion({
+        key: "ops.task_policy", scopeType: "property", scopeId: f.property.id,
+        effectiveFrom: start, value: policy, reason: "Use the authorized integration crew for every configured stage"
+      });
+      await new OperationRepository(tx, f.org).context(f.account.id, randomUUID(), "Existing crew capacity before native stay creation");
+      const scheduledStart = propertyInstant("2027-06-11", policy.shift_start_minute, f.property.timezone);
+      return tx.operationTask.create({ data: { organizationId: f.org, propertyId: f.property.id,
+        type: "INSPECTION", state: "ASSIGNED", dueDate: new Date("2027-06-11"),
+        scheduledStart, scheduledEnd: new Date(scheduledStart.getTime() + 60 * 60000),
+        assignedToPersonId: f.person.id, assignedToUserAccountId: f.account.id,
+        titleTranslations: { en: "Existing crew commitment", fr: "Engagement existant" },
+        idempotencyKey: randomUUID(), createdBy: f.account.id } });
+    });
+    const connection = new URL(url!);
+    connection.username = "alvillas_ops_tests";
+    connection.password = "alvillas_ops_tests";
+    const measured = new PrismaClient({ datasourceUrl: connection.toString(), log: [{ emit: "event", level: "query" }] });
+    let queryCount = 0;
+    measured.$on("query", () => queryCount++);
+    const input = { propertyId: f.property.id, guestName: "Native workflow query budget", guestEmail: "workflow@example.test",
+      guestPreferredLocale: "en" as const, source: "MANUAL" as const, checkIn: "2027-06-12", checkOut: "2027-06-19",
+      adultCount: 2, childCount: 0, idempotencyKey: randomUUID() };
+    try {
+      const result = await createManualReservation(f.actor, input, { ...deps(), db: measured });
+      expect(result.tasks).toHaveLength(11);
+      expect(queryCount).toBeLessThanOrEqual(180);
+      const proof = await withTenant(db, f.org, async tx => ({
+        tasks: await tx.operationTask.findMany({ where: { reservationId: result.reservation.id }, include: { checklistItems: true } }),
+        notices: await tx.notification.findMany({ where: { kind: "task_assigned", targetId: { in: result.tasks.map(task => task.id) } } }),
+        audit: await tx.auditLog.findMany({ where: { action: "task.create", resourceId: { in: result.tasks.map(task => task.id) } } })
+      }));
+      expect(proof.tasks.every(task => task.checklistItems.length > 0)).toBe(true);
+      expect(proof.audit).toHaveLength(11);
+      const assigned = proof.tasks.filter(task => task.assignedToPersonId);
+      expect(assigned.length).toBeGreaterThan(0);
+      expect(proof.notices).toHaveLength(assigned.length);
+      expect(proof.tasks.find(task => task.idempotencyKey === `${result.reservation.id}:arrival-inspection`)?.assignedToPersonId).toBeNull();
+      for (const task of assigned) expect(task.scheduledStart! < occupied.scheduledEnd! && occupied.scheduledStart! < task.scheduledEnd!).toBe(false);
+      for (const first of assigned) for (const second of assigned) {
+        if (first.id === second.id || first.assignedToPersonId !== second.assignedToPersonId) continue;
+        expect(first.scheduledStart! < second.scheduledEnd! && second.scheduledStart! < first.scheduledEnd!).toBe(false);
+      }
+      const replay = await createManualReservation(f.actor, input, deps());
+      expect(replay.idempotent).toBe(true);
+      expect(new Set(replay.tasks.map(task => task.id))).toEqual(new Set(result.tasks.map(task => task.id)));
+      expect(await withTenant(db, f.org, tx => tx.notification.count({ where: { kind: "task_assigned", targetId: { in: result.tasks.map(task => task.id) } } }))).toBe(proof.notices.length);
+      const notices = assigned.map(task => ({ input: { kind: "task_assigned" as const, targetId: task.id, recipientId: f.account.id }, key: `batch-replay:${task.id}` }));
+      await Promise.all(Array.from({ length: 4 }, (_, i) => withTenant(db, f.org, tx => publishNotifications(tx, f.org, i % 2 ? [...notices].reverse() : notices))));
+      const noticeKeys = notices.map(notice => notice.key);
+      const beforeRevocation = await withTenant(db, f.org, async tx => {
+        const events = await tx.outboxEvent.findMany({ where: { idempotencyKey: { in: noticeKeys } } });
+        expect(events).toHaveLength(notices.length);
+        expect(events.every(event => event.status === "DISPATCHED")).toBe(true);
+        return tx.notification.count({ where: { eventId: { in: events.map(event => event.id) } } });
+      });
+      expect(beforeRevocation).toBe(notices.length);
+      await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.assignment.id }, data: { archivedAt: new Date() } }));
+      const revoked = notices.map(notice => ({ ...notice, key: `revoked:${notice.key}` }));
+      await withTenant(db, f.org, tx => publishNotifications(tx, f.org, revoked));
+      await withTenant(db, f.org, async tx => {
+        const events = await tx.outboxEvent.findMany({ where: { idempotencyKey: { in: revoked.map(notice => notice.key) } } });
+        expect(events).toHaveLength(revoked.length);
+        expect(events.every(event => event.status === "DISPATCHED")).toBe(true);
+        expect(await tx.notification.count({ where: { eventId: { in: events.map(event => event.id) } } })).toBe(0);
+      });
+    } finally { await measured.$disconnect(); }
   });
   it("serializes duplicate events and concurrent workers, preserving one task and one immutable attempt", async () => {
     const f = await fixture();

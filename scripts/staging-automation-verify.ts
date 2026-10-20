@@ -26,7 +26,13 @@ const context = await browser.newContext({
 });
 context.setDefaultTimeout(30000);
 const page = await context.newPage();
-const run = `aut-${randomUUID().slice(0, 8)}`;
+const resumePropertyId = process.env.STAGING_RESUME_PROPERTY_ID;
+const resumeRun = process.env.STAGING_RESUME_RUN;
+if (resumePropertyId || resumeRun) {
+  z.uuid().parse(resumePropertyId);
+  z.string().regex(/^aut-[a-f0-9]{8}$/u).parse(resumeRun);
+}
+const run = resumeRun ?? `aut-${randomUUID().slice(0, 8)}`;
 const propertyName = `Automation acceptance ${run}`;
 const checks: Array<Record<string, unknown>> = [];
 let step = "version";
@@ -38,31 +44,33 @@ try {
     user: z.object({ id: z.uuid(), securitySetupRequired: z.literal(false) }),
   }).parse(await (await context.request.get("/api/auth/session")).json());
   step = "native-owner-property";
-  await page.goto("/en/app/owners");
-  await page.getByTestId("owner-display-name").fill(propertyName);
-  await page.getByTestId("owner-email").fill(`${run}@example.test`);
-  await page.getByTestId("owner-preferred-locale").selectOption("en");
-  await page.getByTestId("owner-submit").click();
-  await expect(
-    page.getByRole("heading", { name: propertyName, exact: true }),
-  ).toBeVisible();
-  await page.goto("/en/app/properties");
-  await page
-    .getByTestId("property-owner")
-    .selectOption({ label: propertyName });
-  await page.getByTestId("property-name").fill(propertyName);
-  await page.getByTestId("property-type").fill("Villa");
-  await page
-    .getByTestId("property-address")
-    .fill("Automation staging acceptance");
-  const city = await setPropertyCity(page, "Marrakech");
-  await page.getByTestId("property-bedrooms").fill("2");
-  await page.getByTestId("property-bathrooms").fill("2");
-  await page.getByTestId("property-max-guests").fill("4");
-  await page.getByTestId("property-submit").click();
-  await expect(
-    page.getByRole("heading", { name: propertyName, exact: true }),
-  ).toBeVisible();
+  if (!resumePropertyId) {
+    await page.goto("/en/app/owners");
+    await page.getByTestId("owner-display-name").fill(propertyName);
+    await page.getByTestId("owner-email").fill(`${run}@example.test`);
+    await page.getByTestId("owner-preferred-locale").selectOption("en");
+    await page.getByTestId("owner-submit").click();
+    await expect(
+      page.getByRole("heading", { name: propertyName, exact: true }),
+    ).toBeVisible();
+    await page.goto("/en/app/properties");
+    await page
+      .getByTestId("property-owner")
+      .selectOption({ label: propertyName });
+    await page.getByTestId("property-name").fill(propertyName);
+    await page.getByTestId("property-type").fill("Villa");
+    await page
+      .getByTestId("property-address")
+      .fill("Automation staging acceptance");
+    await setPropertyCity(page, "Marrakech");
+    await page.getByTestId("property-bedrooms").fill("2");
+    await page.getByTestId("property-bathrooms").fill("2");
+    await page.getByTestId("property-max-guests").fill("4");
+    await page.getByTestId("property-submit").click();
+    await expect(
+      page.getByRole("heading", { name: propertyName, exact: true }),
+    ).toBeVisible();
+  }
   await page.goto("/en/app/automations");
   const t = messages.en;
   const form = page.getByTestId("automation-create-form");
@@ -72,11 +80,12 @@ try {
     .getAttribute("value");
   if (!propertyId)
     throw new Error("Created property is missing from the authorized scope");
+  if (resumePropertyId) expect(propertyId).toBe(resumePropertyId);
   step = "editable-standard-library";
   const library = page
     .locator("details")
     .filter({
-      has: page.getByRole("button", { name: t.install, exact: true }),
+      has: page.locator("summary").filter({ hasText: t.library }),
     });
   await library.locator("summary").click();
   await library.locator('[name="propertyId"]').selectOption(propertyId);
@@ -86,48 +95,53 @@ try {
   await library.getByRole("button", { name: t.install, exact: true }).click();
   await expect(library.getByRole("status")).toBeVisible();
   step = "create-rule";
-  await form.locator('[name="key"]').fill(run);
-  await form.locator('[name="propertyId"]').selectOption(propertyId);
-  await form.getByLabel(t.nameEn).fill(`Arrival inspection ${run}`);
-  await form.getByLabel(t.nameFr).fill(`Inspection arrivee ${run}`);
-  await form.getByLabel(t.conditions, { exact: true }).fill('{"all":[]}');
-  await form.getByLabel(t.actions, { exact: true }).fill(
-    JSON.stringify([
-      {
-        key: "arrival-inspection",
-        type: "create_task",
-        task_type: "INSPECTION",
-        title: {
-          en: `Automation inspection ${run}`,
-          fr: `Inspection automatique ${run}`,
-        },
-        due: { from: "reservation.check_in", offset_days: -1 },
-        priority: "HIGH",
-        checklist_template: "automation-cleaning",
-      },
-    ]),
-  );
-  await form
-    .locator('[name="reason"]')
-    .fill("Authenticated staging inspection acceptance");
-  await form.getByRole("button", { name: t.save, exact: true }).click();
-  await expect(form.getByRole("status")).toBeVisible();
   const rule = () =>
     page
       .getByTestId("automation-rule")
       .filter({ hasText: `automation.rule.${run}` });
-  await rule()
-    .locator('form:has(input[value="state"]) input[name="reason"]')
-    .fill("Activate reviewed staging inspection");
-  await rule().getByRole("button", { name: t.activate, exact: true }).click();
-  await expect(
-    rule().getByRole("button", { name: t.pause, exact: true }),
-  ).toBeVisible();
+  if ((await rule().count()) === 0) {
+    await form.locator('[name="key"]').fill(run);
+    await form.locator('[name="propertyId"]').selectOption(propertyId);
+    await form.getByLabel(t.nameEn).fill(`Arrival inspection ${run}`);
+    await form.getByLabel(t.nameFr).fill(`Inspection arrivee ${run}`);
+    await form.getByLabel(t.conditions, { exact: true }).fill('{"all":[]}');
+    await form.getByLabel(t.actions, { exact: true }).fill(
+      JSON.stringify([
+        {
+          key: "arrival-inspection",
+          type: "create_task",
+          task_type: "INSPECTION",
+          title: {
+            en: `Automation inspection ${run}`,
+            fr: `Inspection automatique ${run}`,
+          },
+          due: { from: "reservation.check_in", offset_days: -1 },
+          priority: "HIGH",
+          checklist_template: "automation-cleaning",
+        },
+      ]),
+    );
+    await form
+      .locator('[name="reason"]')
+      .fill("Authenticated staging inspection acceptance");
+    await form.getByRole("button", { name: t.save, exact: true }).click();
+    await expect(form.getByRole("status")).toBeVisible();
+  }
+  if (
+    (await rule().getByRole("button", { name: t.pause, exact: true }).count()) === 0
+  ) {
+    await rule()
+      .locator('form:has(input[value="state"]) input[name="reason"]')
+      .fill("Activate reviewed staging inspection");
+    const resume = rule().getByRole("button", { name: t.resume, exact: true });
+    await (await resume.count() ? resume : rule().getByRole("button", { name: t.activate, exact: true })).click();
+    await expect(
+      rule().getByRole("button", { name: t.pause, exact: true }),
+    ).toBeVisible();
+  }
   step = "native-reservation-event-cloud-execution";
   await page.goto("/en/app/reservations");
-  await page
-    .getByTestId("reservation-property")
-    .selectOption({ label: `${propertyName} - ${city}` });
+  await page.getByTestId("reservation-property").selectOption(propertyId);
   await page
     .getByTestId("reservation-guest-name")
     .fill(`Automation guest ${run}`);

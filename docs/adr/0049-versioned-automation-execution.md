@@ -40,3 +40,13 @@ configuration. The minute polling cadence is infrastructure.
 An outbox trigger propagates an automation's rule ancestry to business events;
 re-entering a rule or exceeding the bounded chain fails closed. Internal
 notification/identity delivery envelopes retain their existing strict schemas.
+
+Native stay creation batches the configured stages, checklist inserts and audit
+appends within its existing tenant transaction. Crew planning holds the existing
+tenant schedule lock; transaction-local policy, crew and availability reads are
+shared, and cached workloads receive each assignment before the next decision.
+Notification publication locks and re-reads durable source rows, shares recipient
+reads only within that command, and writes the inbox atomically with the stay.
+Later delivery attempts reload current recipient permissions. This avoids network
+round trips per stage without extending transaction timeouts or relaxing audit,
+capacity, idempotency or permission checks.

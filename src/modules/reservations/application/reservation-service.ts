@@ -1,7 +1,7 @@
 import { initializeReservationHistory } from "./reservation-history";
 import { OperationRepository } from "../infrastructure/operation-repository";
 import { completeChecklist } from "../domain/operation-task";
-import { assignTaskInTransaction } from "./operation-scheduling";
+import { assignTaskInTransaction, prepareAssignmentBatch, finishAssignmentBatch } from "./operation-scheduling";
 import { taskResource } from "./operation-service";
 import { headers } from "next/headers";
 import { publishNotification } from "@/platform/notifications/notification-service";
@@ -16,7 +16,8 @@ import {
   type ReservationSummary
 } from "@/modules/reservations/domain/reservation-task";
 import { ReservationRepository } from "@/modules/reservations/infrastructure/reservation-repository";
-import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { writeAuditEvent, writeAuditEvents } from "@/platform/audit/audit-writer";
+import type { AuditEvent } from "@/platform/audit/audit-event";
 import { authorize, authorizeCollection } from "@/platform/authz/authorize";
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
@@ -125,14 +126,13 @@ async function auditReservationCreate(
   });
 }
 
-async function auditTaskCreate(
-  tx: Parameters<typeof writeAuditEvent>[0],
+function taskCreateAuditEvent(
   ctx: ReservationActorContext,
   meta: ReservationAuditMeta,
   task: OperationTaskSummary,
   propertyId: string
-): Promise<void> {
-  await writeAuditEvent(tx, {
+): AuditEvent {
+  return {
     organizationId: ctx.organizationId,
     actorId: ctx.actorId,
     action: "task.create",
@@ -144,7 +144,7 @@ async function auditTaskCreate(
     reason: "S3 reservation workflow generation",
     requestId: meta.requestId,
     occurredAt: new Date()
-  });
+  };
 }
 
 export async function createManualReservation(
@@ -258,27 +258,36 @@ export async function createManualReservationInTransaction(ctx: ReservationActor
       });
     }
 
+    const results = await repository.ensureTasks(reservation, taskConfig.config.tasks, {
+      userAccountId: ctx.actorId, personId: ctx.personId
+    });
+    const operations = new OperationRepository(tx, ctx.organizationId);
+    const fullTasks = new Map((await operations.scoped(results.filter(result => result.created).map(result => result.task.id)))
+      .map(task => [task.id, task]));
+    let batch: Awaited<ReturnType<typeof prepareAssignmentBatch>> | undefined;
+    const taskAudits: AuditEvent[] = [];
     const tasks: OperationTaskSummary[] = [];
-    for (const template of taskConfig.config.tasks) {
-      const result = await repository.ensureTask(reservation, template, {
-        userAccountId: ctx.actorId,
-        personId: ctx.personId
-      });
+    for (const result of results) {
       tasks.push(result.task);
       if (result.created) {
-        const operations = new OperationRepository(tx, ctx.organizationId), full = (await operations.task(result.task.id))!;
+        const full = fullTasks.get(result.task.id)!;
         if (authorize(ctx.authContext, "assign", taskResource(full))) {
-          const policy = await operations.policy(full.propertyId);
-          await assignTaskInTransaction(operations, ctx, full, null, policy.types[full.type]?.start_minute??policy.shift_start_minute, meta, "Configured reservation task assignment");
-          tasks[tasks.length - 1] = (await repository.tasksForReservation(reservation.id)).find(t => t.id === full.id)!;
+          batch ??= await prepareAssignmentBatch(operations, full.propertyId);
+          const policy = batch.policy;
+          const after = await assignTaskInTransaction(operations, ctx, full, null, policy.types[full.type]?.start_minute??policy.shift_start_minute, meta, "Configured reservation task assignment", false, batch);
+          tasks[tasks.length - 1] = { ...result.task,
+            state: after.state, assignedToPersonId: after.assignedToPersonId,
+            assignedToUserAccountId: after.assignedToUserAccountId };
         }
-        await auditTaskCreate(tx, ctx, meta, result.task, reservation.propertyId);
+        taskAudits.push(taskCreateAuditEvent(ctx, meta, result.task, reservation.propertyId));
         if (result.task.assignedToUserAccountId) await publishNotification(tx, ctx.organizationId, {
           kind: "task_assigned", recipientId: result.task.assignedToUserAccountId, targetId: result.task.id
         }, `notification:task:${result.task.id}:assigned`);
       }
     }
 
+    if (batch) await finishAssignmentBatch(batch);
+    await writeAuditEvents(tx, taskAudits);
     await repository.refreshConflicts(reservation.propertyId, ctx.actorId);
     return {
       reservation: {

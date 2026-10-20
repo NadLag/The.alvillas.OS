@@ -13,6 +13,14 @@ import { contextForRoleAssignments } from "@/platform/authz/account-context";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { initialNotificationRouting, notificationRoutingKey, notificationRoutingSchema, type NotificationRouting, type RoutedNotificationKind } from "./notification-routing";
 
+type DeliveryBatch = {
+  targets: Map<string, Resource>;
+  routing: Map<string, NotificationRouting>;
+  candidates: Map<string, Awaited<ReturnType<NotificationRepository["candidates"]>>>;
+  inbox: Prisma.NotificationCreateManyInput[];
+  finished: string[];
+};
+
 export class NotificationRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
 
@@ -48,18 +56,29 @@ export class NotificationRepository {
     await this.tx.$queryRaw(Prisma.sql`SELECT id FROM outbox_event WHERE organization_id = ${this.organizationId}::uuid AND id = ${event.id}::uuid FOR UPDATE`);
     const stored = await this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id: event.id, type: notificationEventType } });
     if (!stored || stored.status === "DISPATCHED") return;
-    event = stored;
+    await this.deliverLocked(stored);
+  }
+
+  private async deliverLocked(event: OutboxEvent, batch?: DeliveryBatch): Promise<void> {
     const input = notificationInputSchema.parse(event.payload);
-    const target = (await this.targets([{ kind: input.kind, targetId: input.targetId }])).get(input.targetId);
-    if (!target) return this.finish(event.id);
-    if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id);
+    const target = batch ? batch.targets.get(`${input.kind}:${input.targetId}`) :
+      (await this.targets([{ kind: input.kind, targetId: input.targetId }])).get(input.targetId);
+    if (!target) return this.finish(event.id, batch);
+    if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id, batch);
     const identity = target.type === "identity";
     if (identity && input.targetId !== input.recipientId) throw new Error("Invalid notification subject");
     const approval = input.kind === "approval_requested" ? await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: input.targetId }, include: { recipients: true } }) : null;
-    const routing = approval ? notificationRoutingSchema.parse(approval.routingSnapshot) : await this.routing(input.kind, target.propertyId ?? null, event.occurredAt);
+    const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
+    const routing = approval ? notificationRoutingSchema.parse(approval.routingSnapshot) :
+      batch?.routing.get(routingKey) ?? await this.routing(input.kind, target.propertyId ?? null, event.occurredAt);
+    if (batch && !approval) batch.routing.set(routingKey, routing);
     const mandatory = input.kind === "security_session_revoked";
     const assignedId = identity ? input.targetId : target.assignedUserAccountId;
-    const candidates = await this.candidates(routing, (mandatory || routing.assigned) ? assignedId : null, approval?.recipients.map((row) => row.userAccountId));
+    const recipientIds = approval?.recipients.map((row) => row.userAccountId);
+    const selectedId = (mandatory || routing.assigned) ? assignedId : null;
+    const candidateKey = JSON.stringify([routing, selectedId, recipientIds]);
+    const candidates = batch?.candidates.get(candidateKey) ?? await this.candidates(routing, selectedId, recipientIds);
+    if (batch) batch.candidates.set(candidateKey, candidates);
     const data = [];
     for (const candidate of candidates) {
       // Account notices never reveal one person's security/account activity to another.
@@ -81,11 +100,13 @@ export class NotificationRepository {
       data.push({ organizationId: this.organizationId, recipientId: candidate.id,
         eventId: event.id, kind: input.kind, targetId: input.targetId, createdAt: event.occurredAt });
     }
-    if (data.length) await this.tx.notification.createMany({ data, skipDuplicates: true });
-    await this.finish(event.id);
+    if (batch) batch.inbox.push(...data);
+    else if (data.length) await this.tx.notification.createMany({ data, skipDuplicates: true });
+    await this.finish(event.id, batch);
   }
 
-  finish(id: string) {
+  finish(id: string, batch?: DeliveryBatch) {
+    if (batch) { batch.finished.push(id); return Promise.resolve(); }
     return this.tx.outboxEvent.update({ where: { id, organizationId: this.organizationId }, data: { status: "DISPATCHED", processedAt: new Date(), nextAttemptAt: null, lastError: null } }).then(() => undefined);
   }
 
@@ -174,6 +195,36 @@ export class NotificationRepository {
     // Local durable delivery is atomic with the business change. Outbox replay is safe
     // and does not depend on an external email/job provider being configured.
     await this.deliver(event);
+  }
+
+  async publishMany(entries: Array<{ input: NotificationInput; key: string }>): Promise<void> {
+    if (!entries.length) return;
+    const parsed = entries.map(entry => ({ input: notificationInputSchema.parse(entry.input), key: entry.key }));
+    parsed.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+    await this.tx.outboxEvent.createMany({ skipDuplicates: true, data: parsed.map(entry => ({
+      organizationId: this.organizationId, type: notificationEventType, payload: entry.input, idempotencyKey: entry.key
+    })) });
+    const keys = [...new Set(parsed.map(entry => entry.key))];
+    // One lock/read covers the whole command; replay still reads durable status.
+    await this.tx.$queryRaw(Prisma.sql`SELECT id FROM outbox_event
+      WHERE organization_id = ${this.organizationId}::uuid AND idempotency_key IN (${Prisma.join(keys)})
+      ORDER BY id FOR UPDATE`);
+    const events = await this.tx.outboxEvent.findMany({ where: { organizationId: this.organizationId, idempotencyKey: { in: keys } } });
+    if (events.length !== keys.length || events.some(event => event.type !== notificationEventType)) throw new Error("Invalid notification event");
+    const pending = events.filter(event => event.status !== "DISPATCHED");
+    const inputs = pending.map(event => notificationInputSchema.parse(event.payload));
+    const targets = new Map<string, Resource>();
+    for (const kind of new Set(inputs.map(input => input.kind))) {
+      for (const [id, target] of await this.targets(inputs.filter(input => input.kind === kind)))
+        targets.set(`${kind}:${id}`, target);
+    }
+    const batch: DeliveryBatch = { targets, routing: new Map(), candidates: new Map(), inbox: [], finished: [] };
+    for (const event of pending) await this.deliverLocked(event, batch);
+    if (batch.inbox.length) await this.tx.notification.createMany({ data: batch.inbox, skipDuplicates: true });
+    if (batch.finished.length) await this.tx.outboxEvent.updateMany({
+      where: { organizationId: this.organizationId, id: { in: batch.finished } },
+      data: { status: "DISPATCHED", processedAt: new Date(), nextAttemptAt: null, lastError: null }
+    });
   }
 
   page(recipientId: string, cursor?: NotificationCursor | null) {
