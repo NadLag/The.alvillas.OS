@@ -9,6 +9,9 @@ configuration is preserved.
 Inngest receives only organization/outbox references and authenticates requests.
 The event catalog is partitioned across consumers with at most ten triggers each,
 matching the [Inngest SDK v4 trigger limit](https://www.inngest.com/docs/reference/typescript/v4/functions/create).
+Each consumer requests concurrency five to fit the existing staging account's
+verified execution limit; the dispatcher retains concurrency one. This is an
+infrastructure limit and does not change configurable business rules or retries.
 Consumers load the durable source under RLS, resolve effective scoped rules, and
 freeze referenced configuration versions and evaluation inputs. A unique
 organization/rule/outcome/property key and PostgreSQL advisory locks serialize

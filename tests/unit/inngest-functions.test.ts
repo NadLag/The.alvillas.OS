@@ -24,7 +24,7 @@ describe("Inngest signed outbox dispatcher", () => {
     expect(dispatchOutbox.opts.concurrency).toEqual({ limit: 1 });
   });
 
-  it("syncs recurring recovery without an event-id admission limit because timer events have no id", async () => {
+  it("registers recurring recovery and automation consumers within staging concurrency limits", async () => {
     vi.stubEnv("INNGEST_SIGNING_KEY", `signkey-test-${"1".repeat(64)}`);
     const { PUT } = await import("@/app/api/inngest/route");
     const url = "http://localhost:3000/api/inngest";
@@ -35,8 +35,18 @@ describe("Inngest signed outbox dispatcher", () => {
       "content-type": "application/json", "x-inngest-sync-kind": "in_band", "x-inngest-signature": `t=${seconds}&s=${digest}`
     } }), {});
     expect(response.status).toBe(200);
-    const registration = await response.json() as { functions: Array<{ idempotency?: string; rateLimit?: unknown; steps: { step: { retries: { attempts: number } } } }> };
+    const registration = await response.json() as { functions: Array<{ idempotency?: string; rateLimit?: unknown; concurrency?: { limit: number } | Array<{ limit: number }>; steps: { step: { retries: { attempts: number } } } }> };
     expect(registration.functions).toHaveLength(6);
+    // Cloud validates each emitted function against the existing staging plan.
+    // Rejecting one consumer prevents synchronization of the whole application.
+    for (const fn of registration.functions) {
+      const limits = Array.isArray(fn.concurrency) ? fn.concurrency : [fn.concurrency];
+      expect(limits.length).toBeGreaterThan(0);
+      for (const limit of limits) {
+        expect(limit?.limit).toBeGreaterThan(0);
+        expect(limit?.limit).toBeLessThanOrEqual(5);
+      }
+    }
     expect(registration.functions[0].idempotency).toBeUndefined();
     expect(registration.functions[0].rateLimit).toBeUndefined();
     expect(registration.functions[0].steps.step.retries.attempts).toBe(3);

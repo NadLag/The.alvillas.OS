@@ -1306,7 +1306,7 @@ describe("PostgreSQL baseline", () => {
       const role = await tx.role.create({ data: { organizationId: org.id, key: "notification-worker", name: "Assigned worker" } });
       const permission = await tx.permission.create({ data: { organizationId: org.id, key: "task:view", resource: "task", action: "view" } });
       await tx.rolePermission.create({ data: { organizationId: org.id, roleId: role.id, permissionId: permission.id } });
-      await tx.roleAssignment.create({ data: { organizationId: org.id, personId: person.id, userAccountId: account.id, roleId: role.id, scopeType: "property", scopeId: property.id, conditions: { assignedToMe: true } } });
+      await tx.roleAssignment.create({ data: { organizationId: org.id, personId: person.id, userAccountId: account.id, roleId: role.id, scopeType: "property", scopeId: property.id, conditions: { assignedToMe: true }, validFrom: new Date(0) } });
       const task = await tx.operationTask.create({ data: { organizationId: org.id, propertyId: property.id, assignedToUserAccountId: account.id,
         type: "ARRIVAL_PREPARATION", dueDate: new Date("2026-10-16"), titleTranslations: { en: "Private record title" }, idempotencyKey: randomUUID() } });
       await publishNotification(tx, org.id, { kind: "task_assigned", recipientId: account.id, targetId: task.id }, `notification:task:${task.id}`);
@@ -1725,6 +1725,8 @@ describe("PostgreSQL baseline", () => {
     const admin = await withTenant(runner, bootstrapOrganizationId, (tx) => tx.userAccount.findFirstOrThrow({ where: { email } }));
     const credentialBefore = await withTenant(runner, bootstrapOrganizationId, async (tx) => {
       await tx.person.update({ where: { id: admin.personId }, data: { displayName: "Owner-managed profile" } });
+      // This case exercises MFA, not grant activation at the DB/app clock boundary.
+      await tx.roleAssignment.updateMany({ where: { userAccountId: admin.id }, data: { validFrom: new Date(0) } });
       return tx.authCredential.findFirstOrThrow({ where: { userAccountId: admin.id, type: "PASSWORD" } });
     });
     const firstFactor = await authenticatePassword({ email, password: "local integration bootstrap password", deviceId: "integration-enrollment-device", headers: new Headers() });
