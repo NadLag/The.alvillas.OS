@@ -212,6 +212,62 @@ describe("automation engine on real PostgreSQL", () => {
     await db?.$disconnect();
     await admin?.$disconnect();
   });
+  it("keeps financial idempotency values out of operational metadata and history", async () => {
+    const f = await fixture();
+    const amount = "913572.68";
+    await save(
+      f,
+      rule({
+        event: "ExpenseSubmitted",
+        idempotency_key: "{{variance.actual}}",
+      }),
+    );
+    await withTenant(db, f.org, (tx) =>
+      tx.outboxEvent.update({
+        where: { id: f.event.id },
+        data: {
+          type: "ExpenseSubmitted",
+          payload: {
+            propertyId: f.property.id,
+            reservationId: f.reservation.id,
+            variance: { expected: amount, actual: amount, currency: "MAD" },
+          },
+        },
+      }),
+    );
+    const [run] = await runs(f);
+    expect(await executeAutomationRun(f.org, run, deps())).toBe("SUCCEEDED");
+    const records = await withTenant(db, f.org, async (tx) => {
+      expect(
+        (await tx.automationRun.findUniqueOrThrow({ where: { id: run } }))
+          .eventKey,
+      ).toBe(amount);
+      const taskEvents = await tx.operationTaskEvent.findMany();
+      expect(taskEvents.length).toBeGreaterThan(0);
+      const audit = await tx.auditLog.findMany({
+        where: { action: "automation.action.executed" },
+      });
+      expect(audit).toHaveLength(1);
+      const permission = await tx.permission.findFirstOrThrow({
+        where: { key: "financial_transaction:view" },
+      });
+      await tx.rolePermission.deleteMany({
+        where: { roleId: f.role.id, permissionId: permission.id },
+      });
+      return { taskEvents, audit };
+    });
+    expect(JSON.stringify(records.taskEvents)).not.toContain(amount);
+    expect(JSON.stringify(records.audit)).not.toContain(amount);
+    const authContext = await authContextForAccount(f.org, f.account.id, {
+      db,
+    });
+    const model = await automationAdmin(
+      { ...f.actor, authContext: { ...authContext, personId: f.person.id } },
+      undefined,
+      deps(),
+    );
+    expect(model.runs[0].eventKey).toBe("••••••");
+  });
   it("authorizes financial inputs before a false predicate can reveal its result", async () => {
     const f = await fixture(
       permissionCatalog
@@ -1201,6 +1257,32 @@ describe("automation engine on real PostgreSQL", () => {
         )
       ).quantity.toFixed(2),
     ).toBe("5.00");
+    expect(
+      (await automationAdmin(f.actor, undefined, deps())).suggestions,
+    ).toHaveLength(1);
+    await withTenant(db, f.org, async (tx) => {
+      const permission = await tx.permission.findFirstOrThrow({
+        where: { key: "issue:view" },
+      });
+      await tx.rolePermission.deleteMany({
+        where: { roleId: f.role.id, permissionId: permission.id },
+      });
+    });
+    const authContext = await authContextForAccount(f.org, f.account.id, {
+      db,
+    });
+    expect(
+      (
+        await automationAdmin(
+          {
+            ...f.actor,
+            authContext: { ...authContext, personId: f.person.id },
+          },
+          undefined,
+          deps(),
+        )
+      ).suggestions,
+    ).toHaveLength(0);
   });
   it("deduplicates repeated DST slots and recovers scheduled jobs with property timezone", async () => {
     const f = await fixture();

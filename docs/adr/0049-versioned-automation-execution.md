@@ -24,6 +24,9 @@ Automation cannot approve requests or execute payments; the action catalog accep
 neither. Financial actions independently authorize financial access and use Money.
 Financial inputs are authorized before condition evaluation so false predicates
 cannot disclose protected values through an execution status.
+Child outcomes and operational audit metadata use opaque execution IDs rather
+than raw business idempotency values. History protects the business key with the
+same financial field permissions as frozen inputs and outputs.
 
 Property-local daily schedules are persisted as outbox occurrences, deduplicated
 by local date, including the repeated DST hour. Missed polling within a local day

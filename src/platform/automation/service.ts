@@ -765,7 +765,7 @@ export async function executeAutomationRun(
               actor,
               action,
               ctx,
-              `${source.key}:${run.propertyId}:${run.eventKey}:${action.key}`,
+              `${run.id}:${action.key}`,
               requestId,
             ),
           );
@@ -1029,6 +1029,7 @@ export async function automationAdmin(
         {
           inputs: { dataClass: "financial" },
           outputs: { dataClass: "financial" },
+          eventKey: { dataClass: "financial" },
         },
       );
     });
@@ -1046,11 +1047,22 @@ export async function automationAdmin(
         ...s,
         occurredAt: s.occurredAt.toISOString(),
       })),
-      suggestions: suggestions.map((s) => ({
-        ...s,
-        quantity: s.quantity.toFixed(2),
-        createdAt: s.createdAt.toISOString(),
-      })),
+      suggestions: suggestions
+        .filter((s) => {
+          const property = properties.find((p) => p.id === s.propertyId);
+          return (
+            property &&
+            authorize(actor.authContext, "view", {
+              ...resource(actor, property, "issue"),
+              id: s.id,
+            })
+          );
+        })
+        .map((s) => ({
+          ...s,
+          quantity: s.quantity.toFixed(2),
+          createdAt: s.createdAt.toISOString(),
+        })),
     };
   });
 }
