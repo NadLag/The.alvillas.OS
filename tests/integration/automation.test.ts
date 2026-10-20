@@ -28,6 +28,7 @@ import { createManualReservation } from "@/modules/reservations/application/rese
 import operationDefaults from "@/platform/config/defaults/operations.json";
 import { OperationRepository } from "@/modules/reservations/infrastructure/operation-repository";
 import { propertyInstant } from "@/modules/reservations/domain/operation-task";
+import automationDefaults from "@/platform/config/defaults/automations.json";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -665,6 +666,13 @@ describe("automation engine on real PostgreSQL", () => {
   });
   it("installs the complete editable library once and generates every configured stay stage without duplicates", async () => {
     const f = await fixture();
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({
+      key: "ops.reservation_task_templates", scopeType: "organization", effectiveFrom: start,
+      value: { tasks: [automationDefaults.configuration["ops.reservation_task_templates"].tasks.find(task => task.key === "arrival")!,
+        { ...automationDefaults.configuration["ops.reservation_task_templates"].tasks.find(task => task.key === "checkout-cleaning")!,
+          key: "checkout", title: { en: "Keep the configured checkout cleaning", fr: "Conserver le nettoyage configuré" } }] },
+      reason: "Preserve existing task meanings when standard stage keys collide"
+    }));
     expect(
       await installAutomationLibrary(
         f.actor,
@@ -746,6 +754,9 @@ describe("automation engine on real PostgreSQL", () => {
     );
     expect(tasks).toHaveLength(11);
     expect(new Set(tasks.map((t) => t.idempotencyKey)).size).toBe(11);
+    expect(tasks.find(task => task.idempotencyKey.endsWith(":checkout"))).toMatchObject({ type: "CHECKOUT_CLEANING",
+      titleTranslations: { en: "Keep the configured checkout cleaning" } });
+    expect(tasks.find(task => task.idempotencyKey.endsWith(":standard.checkout"))).toMatchObject({ type: "CUSTOM" });
     expect(tasks.map((t) => t.type)).toEqual(
       expect.arrayContaining([
         "ARRIVAL_PREPARATION",

@@ -50,3 +50,8 @@ reads only within that command, and writes the inbox atomically with the stay.
 Later delivery attempts reload current recipient permissions. This avoids network
 round trips per stage without extending transaction timeouts or relaxing audit,
 capacity, idempotency or permission checks.
+
+Library installation preserves a customized stage with the same key and task
+type, or an equivalent existing type/date anchor. If a different task type uses
+a standard stage's key, the missing standard stage receives a stable namespaced
+key. This preserves custom definitions without silently omitting a stay stage.
