@@ -24,6 +24,7 @@ export type AutomationFormState = {
     | "installed"
     | "invalid"
     | "failed"
+    | "stale"
     | "unauthorized";
   preview?: Awaited<ReturnType<typeof previewAutomation>>;
 };
@@ -109,9 +110,12 @@ export async function automationAction(
     return {
       status: "error",
       message:
-        error instanceof z.ZodError || error instanceof SyntaxError
-          ? "invalid"
-          : "failed",
+        error instanceof Error &&
+        error.message === "automation_version_conflict"
+          ? "stale"
+          : error instanceof z.ZodError || error instanceof SyntaxError
+            ? "invalid"
+            : "failed",
     };
   }
 }

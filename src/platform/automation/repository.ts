@@ -72,6 +72,25 @@ export class AutomationRepository {
   rule(id: string) {
     return new ConfigRuleRepository(this.tx, this.organizationId).findById(id);
   }
+  latestVersion(
+    key: string,
+    scopeType: string,
+    scopeId: string | null,
+    draft: boolean,
+  ) {
+    return this.tx.configRule.findFirst({
+      where: {
+        organizationId: this.organizationId,
+        key,
+        scopeType,
+        scopeId,
+        archivedAt: null,
+        lifecycle: draft ? "DRAFT" : { not: "DRAFT" },
+      },
+      orderBy: { version: "desc" },
+      select: { id: true },
+    });
+  }
   account(id: string) {
     return this.tx.userAccount.findFirst({
       where: { organizationId: this.organizationId, id, status: "ACTIVE" },

@@ -2187,6 +2187,7 @@
       "updated": "Rule state updated.",
       "previewed": "Test completed. No actions were executed.",
       "replayed": "Replay queued using the original version.",
+      "stale": "This rule changed. Reload before changing its state.",
       "installed": "Standard rules installed as drafts.",
       "invalid": "Review the rule format, fields, dates and action keys.",
       "failed": "Check your access, property scope and required configuration.",

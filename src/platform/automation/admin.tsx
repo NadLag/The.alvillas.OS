@@ -465,7 +465,12 @@ export function AutomationAdmin({
     [editing, setEditing] = useState<Model["versions"][number]>();
   const latest = new Map<string, Model["versions"][number]>();
   for (const v of model.versions) {
-    const key = v.key + ":" + v.scopeId;
+    const key =
+      v.key +
+      ":" +
+      v.scopeId +
+      ":" +
+      (v.lifecycle === "DRAFT" ? "draft" : "published");
     if (!latest.has(key)) latest.set(key, v);
   }
   return (

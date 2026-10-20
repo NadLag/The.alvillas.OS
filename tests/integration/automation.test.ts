@@ -243,6 +243,66 @@ describe("automation engine on real PostgreSQL", () => {
       ).toBe(1);
     });
   });
+  it("blocks matching cycles while skipping nonmatching rules in the same ancestry", async () => {
+    const f = await fixture();
+    await save(f);
+    const [initial] = await runs(f);
+    expect(await executeAutomationRun(f.org, initial, deps())).toBe(
+      "SUCCEEDED",
+    );
+    const task = await withTenant(db, f.org, (tx) =>
+      tx.operationTask.findFirstOrThrow(),
+    );
+    for (const key of ["cycle", "irrelevant"])
+      await save(
+        f,
+        rule({
+          event: "TaskCreated",
+          retry: { max_attempts: 1, delay_seconds: 1 },
+          conditions:
+            key === "cycle"
+              ? { all: [] }
+              : { path: "task.type", op: "=", value: "LAUNDRY" },
+        }),
+        key,
+      );
+    const event = await withTenant(db, f.org, (tx) =>
+      tx.outboxEvent.create({
+        data: {
+          organizationId: f.org,
+          type: "TaskCreated",
+          payload: {
+            propertyId: f.property.id,
+            taskId: task.id,
+            automationPath: [
+              "automation.rule.cycle",
+              "automation.rule.irrelevant",
+            ],
+          },
+          idempotencyKey: randomUUID(),
+        },
+      }),
+    );
+    const ids = await enqueueAutomationEvent(f.org, event.id, deps());
+    expect(
+      (
+        await Promise.all(
+          ids.map((id) => executeAutomationRun(f.org, id, deps())),
+        )
+      ).sort(),
+    ).toEqual(["FAILED", "SKIPPED"]);
+    await withTenant(db, f.org, async (tx) => {
+      expect(await tx.operationTask.count()).toBe(1);
+      expect(
+        await tx.automationRun.count({
+          where: { status: "FAILED", errorCode: "automation_cycle_detected" },
+        }),
+      ).toBe(1);
+      expect(
+        await tx.automationRun.count({ where: { status: "SKIPPED" } }),
+      ).toBe(1);
+    });
+  });
   it("applies a paused property override to an already queued organization rule", async () => {
     const f = await fixture();
     await saveAutomationRule(
@@ -657,6 +717,17 @@ describe("automation engine on real PostgreSQL", () => {
         orderBy: { version: "desc" },
       }),
     );
+    await expect(
+      changeAutomationState(
+        f.actor,
+        {
+          ruleId: source.id,
+          enabled: true,
+          reason: "Stale controls must not overwrite a newer version",
+        },
+        deps(),
+      ),
+    ).rejects.toThrow("automation_version_conflict");
     await changeAutomationState(
       f.actor,
       {

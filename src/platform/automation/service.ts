@@ -506,6 +506,28 @@ export async function changeAutomationState(
       source = await repo.rule(input.ruleId);
     if (!source?.key.startsWith("automation.rule."))
       throw new AutomationAccessError();
+    if (!["organization", "property"].includes(source.scopeType))
+      throw new AutomationAccessError();
+    const property =
+      source.scopeType === "property" && source.scopeId
+        ? await repo.property(source.scopeId)
+        : undefined;
+    if (source.scopeType === "property" && !property)
+      throw new AutomationAccessError();
+    allowed(actor, "configure", resource(actor, property ?? undefined));
+    const config = new ConfigRuleRepository(tx, actor.organizationId);
+    await config.lockVersion(source.key, source.scopeType, source.scopeId);
+    if (
+      (
+        await repo.latestVersion(
+          source.key,
+          source.scopeType,
+          source.scopeId,
+          source.lifecycle === "DRAFT",
+        )
+      )?.id !== source.id
+    )
+      throw new Error("automation_version_conflict");
     const rule = automationRuleSchema.parse(source.value);
     if (input.enabled)
       await repo.resume(
@@ -720,8 +742,6 @@ export async function executeAutomationRun(
         configVersions: metadata,
         ruleVersion: source.version,
       };
-      outcomeKey(rule, ctx);
-      await repo.causation(ctx.event.payload, source.key);
       for (const key of Object.keys(ctx.evaluation.configs))
         if (key.startsWith("finance."))
           allowed(actor, "view", {
@@ -730,7 +750,9 @@ export async function executeAutomationRun(
           });
       const matched = evaluate(rule.conditions, ctx.evaluation),
         outputs = [];
-      if (matched)
+      if (matched) {
+        outcomeKey(rule, ctx);
+        await repo.causation(ctx.event.payload, source.key);
         for (const action of rule.actions)
           outputs.push(
             await perform(
@@ -742,6 +764,7 @@ export async function executeAutomationRun(
               requestId,
             ),
           );
+      }
       const status = matched ? "SUCCEEDED" : "SKIPPED";
       await repo.update(run.id, {
         status,

@@ -60,7 +60,11 @@ test.describe("F-RES-01-16 complete reservation management", () => {
     const payoutAfter = await reservationPayoutEvidence(fixture.propertyId, transactionId); expect(payoutAfter).toMatchObject({ settlements: 1, originals: 2, reversals: 2, zeroBalances: true }); expect(payoutAfter.fingerprint).toBe(payoutBefore.fingerprint);
     await page.goto(`/en/app/reservations/calendar?property=${fixture.propertyId}&start=2029-04-01&end=2029-05-01`);
     const connect = page.getByTestId("connect-reservation-feed"); await connect.locator('select[name="propertyId"]').selectOption(fixture.propertyId); await connect.locator('input[name="name"]').fill(`Feed ${suffix}`); await connect.locator('input[name="url"]').fill("https://ical-reservation-acceptance.invalid/calendar.ics"); await connect.getByRole("button").click(); await expect(connect.getByRole("status")).toBeVisible();
-    const feed = page.getByTestId("reservation-feed").filter({ hasText: `Feed ${suffix}` }); await feed.getByTestId("sync-reservation-feed").getByRole("button").click(); await expect(feed.getByTestId("sync-reservation-feed").getByRole("alert")).toBeVisible();
+    const feed = page.getByTestId("reservation-feed").filter({ hasText: `Feed ${suffix}` });
+    const syncCompleted = page.waitForResponse(response => response.request().method() === "POST" && Boolean(response.request().headers()["next-action"]) && new URL(response.url()).pathname.endsWith("/reservations/calendar"));
+    await feed.getByTestId("sync-reservation-feed").getByRole("button").click();
+    expect((await syncCompleted).status()).toBeLessThan(400);
+    await expect(feed.getByTestId("sync-reservation-feed").getByRole("alert")).toBeVisible();
     await expect(page.getByTestId("reservation-exception").filter({ hasText: "Calendar sync failed" })).toBeVisible();
     await feed.getByTestId("toggle-reservation-feed").getByRole("button").click(); await expect(feed).toContainText("Sync paused");
     await page.goto("/en/app"); await expect(page.getByTestId("reservation-command-exceptions")).toBeVisible();

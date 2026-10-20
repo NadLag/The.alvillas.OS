@@ -2187,6 +2187,7 @@
       "updated": "État de la règle mis à jour.",
       "previewed": "Test terminé. Aucune action exécutée.",
       "replayed": "Relance programmée avec la version d’origine.",
+      "stale": "Cette règle a changé. Rechargez la page avant de modifier son état.",
       "installed": "Règles standard installées en brouillon.",
       "invalid": "Vérifiez le format, les champs, les dates et les clés des actions.",
       "failed": "Vérifiez vos autorisations, la propriété et la configuration requise.",
