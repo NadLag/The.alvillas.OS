@@ -596,6 +596,17 @@ describe("automation engine on real PostgreSQL", () => {
       },
       deps(),
     );
+    await expect(
+      changeAutomationState(
+        f.actor,
+        {
+          ruleId: source.id,
+          enabled: true,
+          reason: "An already published draft must remain historical",
+        },
+        deps(),
+      ),
+    ).rejects.toThrow("automation_version_conflict");
     const event = await withTenant(db, f.org, async (tx) => {
       const reservation = await tx.reservation.create({
         data: {

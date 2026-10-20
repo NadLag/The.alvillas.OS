@@ -85,7 +85,7 @@ export class AutomationRepository {
         scopeType,
         scopeId,
         archivedAt: null,
-        lifecycle: draft ? "DRAFT" : { not: "DRAFT" },
+        ...(draft ? {} : { lifecycle: { not: "DRAFT" } }),
       },
       orderBy: { version: "desc" },
       select: { id: true },

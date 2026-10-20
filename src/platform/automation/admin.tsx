@@ -473,6 +473,11 @@ export function AutomationAdmin({
       (v.lifecycle === "DRAFT" ? "draft" : "published");
     if (!latest.has(key)) latest.set(key, v);
   }
+  const visibleVersions = [...latest.values()].filter(
+    (v) =>
+      v.lifecycle !== "DRAFT" ||
+      v.version > (latest.get(`${v.key}:${v.scopeId}:published`)?.version ?? 0),
+  );
   return (
     <div className="automation-workspace">
       <section className="workspace-main">
@@ -496,7 +501,7 @@ export function AutomationAdmin({
           <p>{t("empty")}</p>
         ) : (
           <ul className="automation-rules">
-            {[...latest.values()].map((v) => {
+            {visibleVersions.map((v) => {
               const rule = automationRuleSchema.parse(v.value);
               return (
                 <li key={v.id} data-testid="automation-rule">
