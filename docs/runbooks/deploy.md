@@ -4,6 +4,8 @@
 
 ALVILLAS OS uses its own Vercel project and database. Never deploy this repository to the legacy `alvillas.com` project.
 
+CI builds the application before browser acceptance and runs `next start` with `PLAYWRIGHT_PRODUCTION=1` and `NODE_ENV=production`. The test job generates isolated authentication, encryption and signing keys; real password, passkey and MFA flows remain required. The complete desktop/mobile suite runs against PostgreSQL with zero retries. Local browser development keeps `next dev` as its default; use the production flag after a build to reproduce the CI runtime with private local test credentials.
+
 ## Staging
 
 The staging project is `the-alvillas-os`.
