@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { assertStagingTarget } from "./staging-target";
 
 export function stagingDatabaseIdentity(value: string): string {
   let url: URL;
@@ -12,12 +13,7 @@ export function stagingDatabaseIdentity(value: string): string {
 }
 
 export function assertStagingMigrationTarget(env: NodeJS.ProcessEnv): string {
-  if (env.GITHUB_REPOSITORY !== "NadLag/The.alvillas.OS" || env.GITHUB_REF !== "refs/heads/main" ||
-      !/^[a-f0-9]{40}$/u.test(env.GITHUB_SHA ?? "") ||
-      env.VERCEL_PROJECT_ID !== "prj_GJBdVD7r7fBkG7vH9rn2K2eLwobC" ||
-      env.VERCEL_ORG_ID !== "team_tVCdcmsKYxqXHGybrNlB0CGS") {
-    throw new Error("Migrations require the independent project's merged staging workflow");
-  }
+  assertStagingTarget(env);
   const databaseUrl = env.STAGING_MIGRATION_DATABASE_URL;
   const identity = env.STAGING_DATABASE_IDENTITY;
   if (!databaseUrl || !identity || !/^[a-f0-9]{64}$/u.test(identity) || stagingDatabaseIdentity(databaseUrl) !== identity) {
