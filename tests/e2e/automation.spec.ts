@@ -115,21 +115,19 @@ for (const locale of ["en", "fr", "ar"] as const)
       await form.getByLabel(t.nameEn).fill(`Inspection ${key}`);
       await form.getByLabel(t.nameFr).fill(`Contrôle ${key}`);
       await form.getByLabel(t.conditions, { exact: true }).fill('{"all":[]}');
-      await form
-        .getByLabel(t.actions, { exact: true })
-        .fill(
-          JSON.stringify([
-            {
-              key: "inspection",
-              type: "create_task",
-              task_type: "INSPECTION",
-              title: { en: `Inspection ${key}`, fr: `Contrôle ${key}` },
-              due: { from: "reservation.check_in", offset_days: -1 },
-              priority: "HIGH",
-              checklist_template: "inspection",
-            },
-          ]),
-        );
+      await form.getByLabel(t.actions, { exact: true }).fill(
+        JSON.stringify([
+          {
+            key: "inspection",
+            type: "create_task",
+            task_type: "INSPECTION",
+            title: { en: `Inspection ${key}`, fr: `Contrôle ${key}` },
+            due: { from: "reservation.check_in", offset_days: -1 },
+            priority: "HIGH",
+            checklist_template: "inspection",
+          },
+        ]),
+      );
       await form
         .locator('[name="reason"]')
         .fill("Configure arrival inspection");
@@ -138,6 +136,12 @@ for (const locale of ["en", "fr", "ar"] as const)
       let row = page
         .getByTestId("automation-rule")
         .filter({ hasText: `automation.rule.${key}` });
+      await expect(
+        row.getByRole("heading", {
+          name: locale === "fr" ? `Contrôle ${key}` : `Inspection ${key}`,
+          exact: true,
+        }),
+      ).toBeVisible();
       await row
         .locator('form:has(input[value="state"]) input[name="reason"]')
         .fill("Activate reviewed inspection rule");

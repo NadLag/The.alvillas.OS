@@ -194,7 +194,12 @@ function Editor({
             <input
               value={rule.name.en}
               onChange={(e) =>
-                setRule({ ...rule, name: { ...rule.name, en: e.target.value } })
+                setRule({
+                  ...rule,
+                  name: version
+                    ? { ...rule.name, en: e.target.value }
+                    : { en: e.target.value, fr: rule.name.fr },
+                })
               }
               required
               disabled={pending}
@@ -205,7 +210,12 @@ function Editor({
             <input
               value={rule.name.fr}
               onChange={(e) =>
-                setRule({ ...rule, name: { ...rule.name, fr: e.target.value } })
+                setRule({
+                  ...rule,
+                  name: version
+                    ? { ...rule.name, fr: e.target.value }
+                    : { en: rule.name.en, fr: e.target.value },
+                })
               }
               required
               disabled={pending}
