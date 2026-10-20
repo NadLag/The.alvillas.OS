@@ -611,7 +611,14 @@ export async function enqueueAutomationEvent(
       )
         continue;
       if (!matches(rule, ctx)) continue;
-      const eventKey = outcomeKey(rule, ctx);
+      // Keep one invalid rule from rolling back admission of every other rule.
+      // Execution validates the original template and records a failed attempt.
+      let eventKey: string;
+      try {
+        eventKey = outcomeKey(rule, ctx);
+      } catch {
+        eventKey = `invalid-key:${ctx.event.id}`;
+      }
       await repo.lock(`${key}:${eventKey}:${ctx.property.id}`);
       const existing = await repo.byKey(key, eventKey, ctx.property.id);
       let frozen: unknown = {
@@ -713,6 +720,7 @@ export async function executeAutomationRun(
         configVersions: metadata,
         ruleVersion: source.version,
       };
+      outcomeKey(rule, ctx);
       await repo.causation(ctx.event.payload, source.key);
       for (const key of Object.keys(ctx.evaluation.configs))
         if (key.startsWith("finance."))

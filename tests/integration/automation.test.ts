@@ -212,6 +212,37 @@ describe("automation engine on real PostgreSQL", () => {
     await db?.$disconnect();
     await admin?.$disconnect();
   });
+  it("records invalid idempotency input without starving other rules on the event", async () => {
+    const f = await fixture();
+    await save(
+      f,
+      rule({
+        idempotency_key: "{{task.id}}",
+        retry: { max_attempts: 1, delay_seconds: 1 },
+      }),
+      "broken-key",
+    );
+    await save(f);
+    const ids = await runs(f);
+    expect(ids).toHaveLength(2);
+    expect(
+      (
+        await Promise.all(
+          ids.map((id) => executeAutomationRun(f.org, id, deps())),
+        )
+      ).sort(),
+    ).toEqual(["FAILED", "SUCCEEDED"]);
+    expect((await runs(f)).sort()).toEqual([...ids].sort());
+    await withTenant(db, f.org, async (tx) => {
+      expect(await tx.operationTask.count()).toBe(1);
+      expect(await tx.automationAttempt.count()).toBe(2);
+      expect(
+        await tx.automationRun.count({
+          where: { status: "FAILED", errorCode: "automation_input_missing" },
+        }),
+      ).toBe(1);
+    });
+  });
   it("applies a paused property override to an already queued organization rule", async () => {
     const f = await fixture();
     await saveAutomationRule(
@@ -817,9 +848,14 @@ describe("automation engine on real PostgreSQL", () => {
         propertyId: f.property.id,
       }),
     ).rejects.toThrow("automation_forbidden");
-    const selectedModel = await automationAdmin(operational.actor, undefined, deps(), {
-      propertyId: operational.property.id,
-    });
+    const selectedModel = await automationAdmin(
+      operational.actor,
+      undefined,
+      deps(),
+      {
+        propertyId: operational.property.id,
+      },
+    );
     expect(selectedModel.selectedPropertyId).toBe(operational.property.id);
     expect(selectedModel.runs.map((run) => run.id)).toEqual(
       model.runs.map((run) => run.id),
