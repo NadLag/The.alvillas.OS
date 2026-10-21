@@ -11,6 +11,7 @@ const standardAutomationLibrary = defaults.rules;
 import type { AutomationRule } from "./rule";
 import { localizedText } from "@/i18n/content";
 import type { AppLocale } from "@/i18n/routing";
+import { formatDateTime } from "@/i18n/format";
 
 type Model = Awaited<ReturnType<typeof automationAdmin>>;
 const initial: AutomationFormState = { status: "idle" };
@@ -572,8 +573,9 @@ export function AutomationAdmin({
                         {model.sources.map((s) => (
                           <option key={s.id} value={s.id}>
                             {s.type} ·{" "}
-                            {new Date(s.occurredAt).toLocaleString(
-                              activeLocale,
+                            {formatDateTime(
+                              activeLocale as AppLocale,
+                              new Date(s.occurredAt),
                             )}
                           </option>
                         ))}
@@ -642,7 +644,10 @@ export function AutomationAdmin({
                 </div>
                 <p>
                   {run.createdAt
-                    ? new Date(run.createdAt).toLocaleString(activeLocale)
+                    ? formatDateTime(
+                        activeLocale as AppLocale,
+                        new Date(run.createdAt),
+                      )
                     : ""}{" "}
                   · {t("attemptCount", { count: run.attemptCount ?? 0 })}
                 </p>

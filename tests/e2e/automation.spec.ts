@@ -18,7 +18,11 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { execFileSync } from "node:child_process";
 
 const password = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
-test.use({ actionTimeout: 30000, navigationTimeout: 30000 });
+test.use({
+  actionTimeout: 30000,
+  navigationTimeout: 30000,
+  timezoneId: "Pacific/Auckland",
+});
 for (const locale of ["en", "fr", "ar"] as const)
   test(`Automation create, activate, preview, event, history and pause/resume in ${locale}`, async ({
     page,
@@ -28,6 +32,10 @@ for (const locale of ["en", "fr", "ar"] as const)
       "DATABASE_URL is required for automation browser acceptance",
     );
     test.setTimeout(180000);
+    const hydrationErrors: string[] = [];
+    page.on("pageerror", (error) => {
+      if (/hydrat|#418/iu.test(error.message)) hydrationErrors.push(error.message);
+    });
     const t = { en, fr, ar }[locale].Automation,
       email = e2eEmail(`aut-${locale}`, info.project.name),
       key = `browser-${randomUUID().slice(0, 8)}`;
@@ -247,6 +255,7 @@ for (const locale of ["en", "fr", "ar"] as const)
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       ).toBe(true);
+      expect(hydrationErrors).toEqual([]);
     } finally {
       await db.$disconnect();
     }
