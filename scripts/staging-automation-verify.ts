@@ -23,14 +23,21 @@ const context = await browser.newContext({
   baseURL: origin,
   storageState,
   viewport: { width: 1440, height: 1000 },
+  timezoneId: "America/Denver",
 });
 context.setDefaultTimeout(30000);
 const page = await context.newPage();
+const hydrationErrors: string[] = [];
+page.on("pageerror", (error) => {
+  if (/hydrat|#418/iu.test(error.message)) hydrationErrors.push(error.message);
+});
 const resumePropertyId = process.env.STAGING_RESUME_PROPERTY_ID;
 const resumeRun = process.env.STAGING_RESUME_RUN;
-if (resumePropertyId || resumeRun) {
+const resumeReservationId = process.env.STAGING_RESUME_RESERVATION_ID;
+if (resumePropertyId || resumeRun || resumeReservationId) {
   z.uuid().parse(resumePropertyId);
   z.string().regex(/^aut-[a-f0-9]{8}$/u).parse(resumeRun);
+  if (resumeReservationId) z.uuid().parse(resumeReservationId);
 }
 const run = resumeRun ?? `aut-${randomUUID().slice(0, 8)}`;
 const propertyName = `Automation acceptance ${run}`;
@@ -82,6 +89,19 @@ try {
     throw new Error("Created property is missing from the authorized scope");
   if (resumePropertyId) expect(propertyId).toBe(resumePropertyId);
   step = "editable-standard-library";
+  // A fresh staging navigation can expose server-rendered controls before the
+  // client editor is ready. Observe its conditional UI before opening details.
+  const waitForEditor = async () => {
+    const scheduled = form.getByLabel(t.scheduled, { exact: true });
+    await expect(async () => {
+      await scheduled.uncheck();
+      await scheduled.check();
+      await expect(form.getByLabel(t.hour, { exact: true })).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 30000, intervals: [250, 500] });
+    await scheduled.uncheck();
+    await expect(form.getByLabel(t.hour, { exact: true })).toHaveCount(0);
+  };
+  await waitForEditor();
   const library = page
     .locator("details")
     .filter({
@@ -141,23 +161,38 @@ try {
   }
   step = "native-reservation-event-cloud-execution";
   await page.goto("/en/app/reservations");
-  await page.getByTestId("reservation-property").selectOption(propertyId);
-  await page
-    .getByTestId("reservation-guest-name")
-    .fill(`Automation guest ${run}`);
-  await page
-    .getByTestId("reservation-guest-email")
-    .fill(`guest-${run}@example.test`);
-  await page.getByTestId("reservation-check-in").fill("2027-04-10");
-  await page.getByTestId("reservation-check-out").fill("2027-04-17");
-  await page.getByTestId("reservation-adults").fill("2");
-  await page.getByTestId("reservation-children").fill("0");
-  await page.getByTestId("reservation-submit").click();
-  await expect(page).toHaveURL(/\/en\/app\/operations/u);
+  if (resumeReservationId) {
+    const existing = page.getByTestId("reservation-row")
+      .filter({ hasText: `Automation guest ${run}` })
+      .filter({ hasText: propertyName });
+    await expect(existing).toHaveCount(1);
+    const href = `/en/app/reservations/${resumeReservationId}`;
+    await expect(existing.locator("a").first()).toHaveAttribute("href", href);
+    await page.goto(href);
+    await expect(page.getByTestId("reservation-status")).toContainText(
+      en.ReservationManagement.states.CONFIRMED,
+    );
+  } else {
+    await page.getByTestId("reservation-property").selectOption(propertyId);
+    await page
+      .getByTestId("reservation-guest-name")
+      .fill(`Automation guest ${run}`);
+    await page
+      .getByTestId("reservation-guest-email")
+      .fill(`guest-${run}@example.test`);
+    await page.getByTestId("reservation-check-in").fill("2027-04-10");
+    await page.getByTestId("reservation-check-out").fill("2027-04-17");
+    await page.getByTestId("reservation-adults").fill("2");
+    await page.getByTestId("reservation-children").fill("0");
+    await page.getByTestId("reservation-submit").click();
+    // The server transaction retains its own 30-second bound. This includes the
+    // action queue and destination render as well as that transaction.
+    await expect(page).toHaveURL(/\/en\/app\/operations/u, { timeout: 90000 });
+  }
   // Admission and execution must come from the deployed Inngest consumers and cron.
   // This script never calls a worker, writes database rows or sends synthetic events.
   await expect(async () => {
-    await page.goto("/en/app/automations");
+    await page.goto(`/en/app/automations?propertyId=${propertyId}`);
     await expect(
       page
         .getByTestId("automation-run")
@@ -180,11 +215,13 @@ try {
   expect(executionData.attempts).toHaveLength(1);
   const sourceId = executionData.inputs.fields.event.id;
   step = "dry-run-pause-resume";
+  await waitForEditor();
   if (typeof sourceId === "string")
     await rule().locator('[name="eventId"]').selectOption(sourceId);
   await rule().getByRole("button", { name: t.preview, exact: true }).click();
   await expect(rule().getByTestId("automation-preview")).toContainText(
     t.matched,
+    { timeout: 60000 },
   );
   for (const [button, next] of [
     [t.pause, t.resume],
@@ -250,6 +287,7 @@ try {
         overflow: false,
       });
     }
+  expect(hydrationErrors).toEqual([]);
   await writeFile(
     evidenceFile,
     JSON.stringify({ sha, origin, run, checks }, null, 2),
