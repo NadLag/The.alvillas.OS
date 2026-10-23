@@ -64,7 +64,12 @@
     "react-hook-form": "^7.90.0",
     "svix": "2.8.0",
     "web-push": "^3.6.7",
-    "zod": "^4.6.5"
+    "zod": "4.6.7"
+  },
+  "overrides": {
+    "inngest": {
+      "zod": "$zod"
+    }
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
