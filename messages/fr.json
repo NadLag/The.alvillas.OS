@@ -1157,7 +1157,8 @@
       "notFound": "Cette tache assignee est introuvable.",
       "conflict": "Completez chaque element de la checklist avant de terminer.",
       "generic": "La tache n'a pas pu etre terminee. Reessayez."
-    }
+    },
+    "offlineStorageError": "Cet appareil n’a pas pu enregistrer votre travail. Gardez cette page ouverte, libérez de l’espace et réessayez."
   },
   "OwnerPortal": {
     "switch": {

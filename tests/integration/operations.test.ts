@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
-import { withTenant } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { permissionCatalog } from "@/platform/authz/catalog";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
@@ -19,6 +19,8 @@ import {
   ReservationNotFoundError,
 } from "@/modules/reservations/application/reservation-service";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { pushSyncOps } from "@/modules/reservations/application/sync-service";
+import type { SyncPushInput } from "@/modules/reservations/domain/sync-protocol";
 import { taskTypeSchema } from "@/platform/config/rule-registry";
 import defaultPolicy from "@/platform/config/defaults/operations.json";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
@@ -166,6 +168,11 @@ async function assigned(f: Awaited<ReturnType<typeof fixture>>) {
   );
   return (await operationTaskDetail(f.ctx, task.id, undefined, deps())).task;
 }
+
+function queued(task: Awaited<ReturnType<typeof assigned>>): SyncPushInput {
+  return { organization_id: task.organizationId, actor_user_id: task.assignedToUserAccountId!, device_id: randomUUID(), op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.complete",
+    client_created_at: "2001-01-01T00:00:00.000Z", payload: { taskId: task.id, checklistItemIds: task.checklistItems.map(item => item.id), note: "Offline field evidence" } }] };
+}
 async function crew(f: Awaited<ReturnType<typeof fixture>>) {
   await ensureStandardIdentitySetup(f.org, { db });
   return withTenant(db, f.org, async (tx) => {
@@ -243,6 +250,99 @@ describe("operations on real PostgreSQL", () => {
   afterAll(async () => {
     await db?.$disconnect();
     await admin?.$disconnect();
+  });
+  it("serializes concurrent device retries and records one completion with explicit duplicate-completion acknowledgement", async () => {
+    const f = await fixture(), task = await assigned(f), batch = queued(task);
+    const results = await Promise.all(Array.from({ length: 6 }, () => pushSyncOps(f.workerCtx, batch, deps())));
+    expect(results.flatMap(result => result.results).map(result => result.status).sort()).toEqual(["APPLIED", ...Array.from({ length: 5 }, () => "DUPLICATE")]);
+    const second = { ...batch, ops: [{ ...batch.ops[0], client_op_id: randomUUID() }] };
+    expect((await pushSyncOps(f.workerCtx, second, deps())).results[0]).toMatchObject({ status: "DUPLICATE", error_code: "DUPLICATE_COMPLETION" });
+    expect((await pushSyncOps(f.workerCtx, second, deps())).results[0]).toMatchObject({ status: "DUPLICATE", error_code: "DUPLICATE_COMPLETION" });
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.auditLog.count({ where: { resourceId: task.id, action: "task.complete" } })).toBe(1);
+      expect(await tx.syncOp.count()).toBe(2);
+      const saved = await tx.operationTask.findUniqueOrThrow({ where: { id: task.id } });
+      expect(saved.completionIdempotencyKey).toBe(batch.ops[0].client_op_id);
+      expect(saved.completedAt!.getTime()).toBeGreaterThan(Date.parse("2026-01-01"));
+      const op = await tx.syncOp.findFirstOrThrow({ where: { clientOpId: batch.ops[0].client_op_id } });
+      expect(op.clientCreatedAt?.toISOString()).toBe(batch.ops[0].client_created_at);
+      expect(op.createdAt.getTime()).toBeGreaterThan(op.clientCreatedAt!.getTime());
+    });
+  });
+
+  it("preserves rejected reassignment evidence on replay and rejects changed payloads and other actors", async () => {
+    const f = await fixture(), task = await assigned(f), batch = queued(task);
+    await withTenant(db, f.org, tx => tx.operationTask.update({ where: { id: task.id }, data: { assignedToUserAccountId: f.account.id, assignedToPersonId: f.person.id } }));
+    const rejected = (await pushSyncOps(f.workerCtx, batch, deps())).results[0];
+    expect(rejected).toMatchObject({ status: "REJECTED", error_code: "REJECTED_NOT_ASSIGNED" });
+    await withTenant(db, f.org, tx => tx.operationTask.update({ where: { id: task.id }, data: { assignedToUserAccountId: f.workerAccount.id, assignedToPersonId: f.worker.id } }));
+    expect((await pushSyncOps(f.workerCtx, batch, deps())).results[0]).toEqual(rejected);
+    const changed = structuredClone(batch); changed.ops[0].payload.note = "Replaced evidence";
+    expect((await pushSyncOps(f.workerCtx, changed, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_IDEMPOTENCY_KEY_REUSED" });
+    expect((await pushSyncOps(f.ctx, { ...batch, actor_user_id: f.ctx.actorId }, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_OP_OWNER", server_version: null });
+    await withTenant(db, f.org, async tx => {
+      const op = await tx.syncOp.findFirstOrThrow();
+      expect(op.payload).toMatchObject({ note: "Offline field evidence" });
+      expect(op.actorUserAccountId).toBe(f.workerAccount.id);
+      expect(await tx.auditLog.count({ where: { action: "task.complete", resourceId: task.id } })).toBe(0);
+    });
+  });
+
+  it("accepts the first valid completion across devices and publishes one completion event", async () => {
+    const f = await fixture(), task = await assigned(f);
+    const results = await Promise.all(Array.from({ length: 4 }, () => pushSyncOps(f.workerCtx, queued(task), deps())));
+    expect(results.flatMap(result => result.results).map(result => result.status).sort()).toEqual(["APPLIED", "DUPLICATE", "DUPLICATE", "DUPLICATE"]);
+    expect(results.flatMap(result => result.results).filter(result => result.error_code === "DUPLICATE_COMPLETION")).toHaveLength(3);
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.auditLog.count({ where: { resourceId: task.id, action: "task.complete" } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted", payload: { path: ["taskId"], equals: task.id } } })).toBe(1);
+    });
+  });
+
+  it("keeps conflict results across retries and applies each concurrent batch in device order", async () => {
+    const f = await fixture(), task = await assigned(f), batch = queued(task);
+    const invalid = { ...batch.ops[0], client_op_id: randomUUID(), payload: { ...batch.ops[0].payload, checklistItemIds: [randomUUID()] } };
+    batch.ops.unshift(invalid);
+    const [first, retry] = await Promise.all([pushSyncOps(f.workerCtx, batch, deps()), pushSyncOps(f.workerCtx, batch, deps())]);
+    expect(first.results[0]).toMatchObject({ status: "CONFLICT", error_code: "TASK_COMPLETION_CONFLICT" });
+    expect(retry.results[0]).toEqual(first.results[0]);
+    expect([first.results[1].status, retry.results[1].status].sort()).toEqual(["APPLIED", "DUPLICATE"]);
+    expect((await pushSyncOps(f.workerCtx, batch, deps())).results[0]).toEqual(first.results[0]);
+  });
+
+  it("isolates tenant operation keys and refuses a stale browser's session ownership hints", async () => {
+    const f = await fixture(), other = await fixture(), task = await assigned(f), foreignTask = await assigned(other), batch = queued(task);
+    await pushSyncOps(f.workerCtx, batch, deps());
+    expect((await pushSyncOps(other.workerCtx, { ...batch, actor_user_id: f.workerAccount.id, organization_id: f.org }, deps())).results[0])
+      .toMatchObject({ status: "REJECTED", error_code: "REJECTED_SESSION_CHANGED" });
+    const foreign = { ...structuredClone(batch), organization_id: other.org, actor_user_id: other.workerAccount.id }; foreign.ops[0].payload = { ...foreign.ops[0].payload, taskId: foreignTask.id, checklistItemIds: foreignTask.checklistItems.map(item => item.id) };
+    expect((await pushSyncOps(other.workerCtx, foreign, deps())).results[0].status).toBe("APPLIED");
+    await withTenant(db, other.org, async tx => {
+      expect(await tx.syncOp.count()).toBe(1);
+      expect(await tx.syncOp.count({ where: { organizationId: f.org } })).toBe(0);
+    });
+  });
+
+  it("persists permission denials per operation without treating a retry as successful", async () => {
+    const f = await fixture(), task = await assigned(f), batch = queued(task);
+    const denied = actor(f.org, f.workerAccount.id, f.worker.id, new Set(["task:view"]));
+    expect((await pushSyncOps(denied, batch, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_FORBIDDEN" });
+    expect((await pushSyncOps(f.workerCtx, batch, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_FORBIDDEN" });
+    expect((await operationTaskDetail(f.ctx, task.id, undefined, deps())).task.state).toBe("ASSIGNED");
+  });
+
+  it("rolls back a failed database transaction and safely retries the same queued completion", async () => {
+    const f = await fixture(), task = await assigned(f), batch = queued(task);
+    const failing: TenantTransactionRunner = { $transaction: <T,>(work: (tx: TenantTransaction) => Promise<T>) => db.$transaction(async tx => {
+      await work(tx);
+      throw new Error("Connection failed before commit");
+    }) };
+    await expect(pushSyncOps(f.workerCtx, batch, { ...deps(), db: failing })).rejects.toThrow("Connection failed before commit");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.syncOp.count()).toBe(0);
+      expect(await tx.auditLog.count({ where: { action: "task.complete", resourceId: task.id } })).toBe(0);
+    });
+    expect((await pushSyncOps(f.workerCtx, batch, deps())).results[0].status).toBe("APPLIED");
   });
   it("creates every task type idempotently, freezes checklists and maintains append-only version history", async () => {
     const f = await fixture(),

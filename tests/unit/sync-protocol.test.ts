@@ -5,6 +5,8 @@ describe("sync push protocol", () => {
   it("accepts field task completion ops with client idempotency", () => {
     const parsed = parseSyncPushInput({
       device_id: "field-device-0001",
+      organization_id: "018f0a0b-0000-7000-9000-000000000001",
+      actor_user_id: "018f0a0b-0000-7000-9000-000000000002",
       op_schema_version: 1,
       ops: [
         {
@@ -26,10 +28,21 @@ describe("sync push protocol", () => {
   it("rejects empty operation batches", () => {
     const parsed = parseSyncPushInput({
       device_id: "field-device-0001",
+      organization_id: "018f0a0b-0000-7000-9000-000000000001",
+      actor_user_id: "018f0a0b-0000-7000-9000-000000000002",
       op_schema_version: 1,
       ops: []
     });
 
     expect(parsed.success).toBe(false);
+  });
+
+  it.each(["organization_id", "actor_user_id"])("requires %s before an offline operation can reach the current session", key => {
+    const input: Record<string, unknown> = { device_id: "legacy-device-0001", op_schema_version: 1,
+      organization_id: "018f0a0b-0000-7000-9000-000000000001", actor_user_id: "018f0a0b-0000-7000-9000-000000000002",
+      ops: [{ client_op_id: "018f0a0b-0000-7000-9000-000000000901", type: "field_task.complete",
+        payload: { taskId: "018f0a0b-0000-7000-9000-000000000902", checklistItemIds: ["018f0a0b-0000-7000-9000-000000000903"] } }] };
+    delete input[key];
+    expect(parseSyncPushInput(input).success).toBe(false);
   });
 });

@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { auth } from "../../../../auth";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { LocaleSwitch } from "@/i18n/locale-switch";
+import { LogoutForm } from "@/platform/offline/logout-form";
 import { routing, safeLocale } from "@/i18n/routing";
 import {
   logoutAction,
@@ -99,11 +100,7 @@ export default async function AppPage({
             {dsnT("nav")}
           </Link>
           <LocaleSwitch compact currentLocale={appLocale} label={t("language")} path="/app" />
-          <form action={logoutAction.bind(null, appLocale)}>
-            <button className="secondary-button" data-testid="logout-button" type="submit">
-              {t("logout")}
-            </button>
-          </form>
+          <LogoutForm action={logoutAction.bind(null, appLocale)} label={t("logout")} />
         </nav>
         }
         eyebrow={t("eyebrow")}

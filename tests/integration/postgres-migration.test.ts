@@ -5429,6 +5429,8 @@ describe("PostgreSQL baseline", () => {
     const syncTask = fieldTasks[1];
     const syncPush = {
       device_id: "integration-device-field-01",
+      organization_id: ctx.organizationId,
+      actor_user_id: ctx.actorId,
       op_schema_version: 1 as const,
       ops: [
         {
