@@ -222,9 +222,20 @@ jobs:
           test -n "${STAGING_ALIAS:?STAGING_ALIAS is required}"
           test "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" = "$GITHUB_SHA"
           vercel alias set "$DEPLOYMENT_URL" "$STAGING_ALIAS" --scope "$VERCEL_ORG_ID"
+          # Alias propagation can briefly serve the previous deployment. Keep the
+          # exact-commit assertion and wait only for that verified Preview SHA.
+          for attempt in {1..12}; do
+            vercel curl --scope "$VERCEL_ORG_ID" "/api/version?verify=${GITHUB_SHA}-${attempt}" --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent -H 'Cache-Control: no-cache' > /tmp/staging-version.json
+            if node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              const version = JSON.parse(readFileSync("/tmp/staging-version.json", "utf8"));
+              process.exit(version.service === "alvillas-os" && version.environment === "preview" && version.commitRef === "main" && version.version === process.env.GITHUB_SHA ? 0 : 1);
+            '; then break; fi
+            if [ "$attempt" = 12 ]; then echo "Stable staging alias did not converge to the verified commit"; exit 1; fi
+            sleep 5
+          done
           vercel curl --scope "$VERCEL_ORG_ID" /api/health --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-health.json
           vercel curl --scope "$VERCEL_ORG_ID" /api/readiness --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-readiness.json
-          vercel curl --scope "$VERCEL_ORG_ID" /api/version --deployment "https://${STAGING_ALIAS}" -- --fail --show-error --silent > /tmp/staging-version.json
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const health = JSON.parse(readFileSync("/tmp/staging-health.json", "utf8"));

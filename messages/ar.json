@@ -1157,7 +1157,8 @@
       "notFound": "This assigned task was not found.",
       "conflict": "Complete every checklist item before finishing.",
       "generic": "The task could not be completed. Try again."
-    }
+    },
+    "offlineStorageError": "تعذّر حفظ عملك على هذا الجهاز. أبقِ هذه الصفحة مفتوحة، وأفرغ مساحة على الجهاز، ثم أعد المحاولة."
   },
   "OwnerPortal": {
     "switch": {

@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type { SyncOpStatus } from "@/modules/reservations/domain/sync-protocol";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
@@ -18,6 +18,9 @@ export type SyncOpRecord = {
   status: SyncOpStatus | "PENDING";
   result: JsonObject | null;
   errorCode: string | null;
+  actorUserAccountId: string | null;
+  type: string;
+  payload: Prisma.JsonValue;
 };
 
 export class SyncRepository {
@@ -25,6 +28,16 @@ export class SyncRepository {
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
   ) {}
+
+  async lockDevice(deviceId: string): Promise<void> {
+    await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`sync:${this.organizationId}:${deviceId}`}, 0))`);
+  }
+
+  async lockActor(personId: string): Promise<void> {
+    // Task lifecycle triggers lock the performer row. Take that lock before an
+    // INSERT's foreign-key KEY SHARE lock can obstruct a concurrent completion.
+    await this.tx.$queryRaw(Prisma.sql`SELECT id FROM person WHERE organization_id = ${this.organizationId}::uuid AND id = ${personId}::uuid FOR UPDATE`);
+  }
 
   async findByClientOp(deviceId: string, clientOpId: string): Promise<SyncOpRecord | null> {
     const op = await this.tx.syncOp.findUnique({
@@ -46,7 +59,10 @@ export class SyncRepository {
       clientOpId: op.clientOpId,
       status: op.status as SyncOpRecord["status"],
       result: toJsonObject(op.result),
-      errorCode: op.errorCode
+      errorCode: op.errorCode,
+      actorUserAccountId: op.actorUserAccountId,
+      type: op.type,
+      payload: op.payload
     };
   }
 

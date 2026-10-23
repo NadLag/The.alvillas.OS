@@ -1157,7 +1157,8 @@
       "notFound": "This assigned task was not found.",
       "conflict": "Complete every checklist item before finishing.",
       "generic": "The task could not be completed. Try again."
-    }
+    },
+    "offlineStorageError": "This device could not save your work. Keep this page open, free device storage, and try again."
   },
   "OwnerPortal": {
     "switch": {

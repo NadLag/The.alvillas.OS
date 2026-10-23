@@ -90,11 +90,13 @@ export default async function FieldTaskPage({
           offlineSyncing: t("offlineSyncing"),
           offlineSynced: t("offlineSynced"),
           offlineConflict: t("offlineConflict"),
-          offlineRejected: t("offlineRejected")
+          offlineRejected: t("offlineRejected"),
+          offlineStorageError: t("offlineStorageError")
         }}
         locale={appLocale}
         idempotencyKey={randomUUID()}
         userId={ctx.actorId}
+        organizationId={ctx.organizationId}
         taskId={task.id}
       />
       <Link className="secondary-button whatsapp-entry" data-testid="task-whatsapp" href={whatsappComposerPath(appLocale, { type: "task", id: task.id })}>{whatsapp("title")}</Link>

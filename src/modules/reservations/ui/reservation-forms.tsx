@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
 import { optionalGuestPhoneSchema } from "@/platform/notifications/whatsapp";
@@ -90,148 +90,15 @@ type FieldTaskLabels = FormLabels & {
   offlineSynced: string;
   offlineConflict: string;
   offlineRejected: string;
+  offlineStorageError: string;
 };
-
-type QueuedFieldTaskCompletion = {
-  schemaVersion: 1;
-  localId: string;
-  userId: string;
-  deviceId: string;
-  clientOpId: string;
-  taskId: string;
-  checklistItemIds: string[];
-  note?: string;
-  clientCreatedAt: string;
-  operation: "field_task.complete";
-  syncStatus: "pending" | "syncing" | "conflict" | "rejected";
-};
-
-type SyncResult = {
-  results?: Array<{
-    client_op_id: string;
-    status: "APPLIED" | "DUPLICATE" | "CONFLICT" | "REJECTED";
-  }>;
-};
-
-const fieldQueueKey = "alvillas.fieldTaskQueue.v1";
-const fieldDeviceKey = "alvillas.fieldDeviceId.v1";
-
-function readFieldQueue(): QueuedFieldTaskCompletion[] {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(fieldQueueKey) ?? "[]") as unknown;
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed.filter(
-      (item): item is QueuedFieldTaskCompletion =>
-        item !== null &&
-        typeof item === "object" &&
-        (item as QueuedFieldTaskCompletion).schemaVersion === 1 &&
-        (item as QueuedFieldTaskCompletion).operation === "field_task.complete" &&
-        typeof (item as QueuedFieldTaskCompletion).clientOpId === "string"
-    );
-  } catch {
-    return [];
-  }
-}
-
-function writeFieldQueue(queue: QueuedFieldTaskCompletion[]): void {
-  window.localStorage.setItem(fieldQueueKey, JSON.stringify(queue));
-}
-
-function getFieldDeviceId(): string {
-  const existing = window.localStorage.getItem(fieldDeviceKey);
-
-  if (existing) {
-    return existing;
-  }
-
-  const next = crypto.randomUUID();
-  window.localStorage.setItem(fieldDeviceKey, next);
-  return next;
-}
-
-async function syncFieldQueue(currentTaskId: string): Promise<"idle" | "synced" | "conflict" | "rejected"> {
-  const queue = readFieldQueue();
-  const pending = queue.find(
-    (item) =>
-      item.taskId === currentTaskId &&
-      (item.syncStatus === "pending" || item.syncStatus === "syncing")
-  );
-
-  if (!pending || !navigator.onLine) {
-    return "idle";
-  }
-
-  writeFieldQueue(
-    queue.map((item) =>
-      item.clientOpId === pending.clientOpId ? { ...item, syncStatus: "syncing" } : item
-    )
-  );
-
-  const response = await fetch("/api/sync/push", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      device_id: pending.deviceId,
-      op_schema_version: 1,
-      ops: [
-        {
-          client_op_id: pending.clientOpId,
-          type: pending.operation,
-          payload: {
-            taskId: pending.taskId,
-            checklistItemIds: pending.checklistItemIds,
-            note: pending.note
-          },
-          client_created_at: pending.clientCreatedAt
-        }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    writeFieldQueue(
-      readFieldQueue().map((item) =>
-        item.clientOpId === pending.clientOpId ? { ...item, syncStatus: "pending" } : item
-      )
-    );
-    return "idle";
-  }
-
-  const result = (await response.json()) as SyncResult;
-  const opResult = result.results?.find((item) => item.client_op_id === pending.clientOpId);
-
-  if (opResult?.status === "APPLIED" || opResult?.status === "DUPLICATE") {
-    writeFieldQueue(readFieldQueue().filter((item) => item.clientOpId !== pending.clientOpId));
-    return "synced";
-  }
-
-  if (opResult?.status === "CONFLICT") {
-    writeFieldQueue(
-      readFieldQueue().map((item) =>
-        item.clientOpId === pending.clientOpId ? { ...item, syncStatus: "conflict" } : item
-      )
-    );
-    return "conflict";
-  }
-
-  writeFieldQueue(
-    readFieldQueue().map((item) =>
-      item.clientOpId === pending.clientOpId ? { ...item, syncStatus: "rejected" } : item
-    )
-  );
-  return "rejected";
-}
 
 export function FieldTaskCompletionForm({
   locale,
   taskId,
   idempotencyKey,
   userId,
+  organizationId,
   checklistItems,
   labels
 }: {
@@ -239,6 +106,7 @@ export function FieldTaskCompletionForm({
   taskId: string;
   idempotencyKey: string;
   userId: string;
+  organizationId: string;
   checklistItems: ChecklistItemOption[];
   labels: FieldTaskLabels;
 }) {
@@ -250,87 +118,82 @@ export function FieldTaskCompletionForm({
     initialFieldTaskFormState
   );
   const [queueStatus, setQueueStatus] = useState<
-    "idle" | "queued" | "syncing" | "synced" | "conflict" | "rejected"
+    "idle" | "queued" | "syncing" | "synced" | "conflict" | "rejected" | "storageError"
   >("idle");
+  const syncing = useRef(false);
+  const [note, setNote] = useState("");
   const message = messageForState(state, labels);
   const queued = queueStatus === "queued" || queueStatus === "syncing";
 
   useEffect(() => {
     let cancelled = false;
-
+    const scope = { organizationId, userId };
+    const ready = (async () => {
+      const { fieldQueue } = await import("@/platform/offline/field-queue");
+      const queue = fieldQueue();
+      await queue.activate(scope);
+      await queue.migrateLegacy(scope, localStorage);
+      const current = (await queue.entries(scope)).find(item => item.operation.payload.taskId === taskId);
+      if (current && !cancelled) {
+        setQueueStatus(current.syncStatus === "pending" ? "queued" : current.syncStatus);
+        setChecked(new Set(current.operation.payload.checklistItemIds));
+        setNote(current.operation.payload.note ?? "");
+      }
+      return queue;
+    })();
     async function sync(): Promise<void> {
-      if (!navigator.onLine) {
-        return;
-      }
-
-      const result = await syncFieldQueue(taskId);
-      if (cancelled || result === "idle") {
-        return;
-      }
-
-      setQueueStatus(result);
-      if (result === "synced") {
-        window.location.assign(`/${locale}/app/field`);
-      }
+      if (syncing.current) return;
+      syncing.current = true;
+      try {
+        const queue = await ready;
+        if (cancelled || !navigator.onLine) return;
+        const hadCurrent = (await queue.entries(scope)).some(item => item.operation.payload.taskId === taskId && item.syncStatus === "pending");
+        if (hadCurrent) setQueueStatus("syncing");
+        const { syncFieldQueue } = await import("@/platform/offline/field-queue");
+        const result = await syncFieldQueue(queue, scope);
+        if (cancelled || result === "idle") return;
+        setQueueStatus(result);
+        if (result === "synced" && hadCurrent) window.location.assign(`/${locale}/app/field`);
+      } catch {
+        if (!cancelled) setQueueStatus("storageError");
+      } finally { syncing.current = false; }
     }
-
-    const handleSync = () => {
-      setQueueStatus((current) => (current === "queued" ? "syncing" : current));
-      void sync();
-    };
-
+    const handleSync = () => { void sync(); };
     void sync();
+    const retry = window.setInterval(handleSync, 30_000);
     window.addEventListener("online", handleSync);
     window.addEventListener("focus", handleSync);
-
     return () => {
       cancelled = true;
+      window.clearInterval(retry);
       window.removeEventListener("online", handleSync);
       window.removeEventListener("focus", handleSync);
     };
-  }, [locale, taskId]);
+  }, [locale, organizationId, userId, taskId]);
 
-  function queueCompletion(formData: FormData): void {
+  async function queueCompletion(formData: FormData): Promise<void> {
     const checklistItemIds = formData.getAll("checklistItemIds").map(String);
     const noteValue = formData.get("note");
     const note = typeof noteValue === "string" ? noteValue.trim() : "";
-
-    if (checklistItemIds.length !== checklistItems.length) {
-      setQueueStatus("conflict");
-      return;
-    }
-
-    const deviceId = getFieldDeviceId();
-    const queue = readFieldQueue();
-    const item: QueuedFieldTaskCompletion = {
-      schemaVersion: 1,
-      localId: crypto.randomUUID(),
-      userId,
-      deviceId,
-      clientOpId: idempotencyKey,
-      taskId,
-      checklistItemIds,
-      note: note || undefined,
-      clientCreatedAt: new Date().toISOString(),
-      operation: "field_task.complete",
-      syncStatus: "pending"
-    };
-
-    writeFieldQueue([
-      ...queue.filter((queuedItem) => queuedItem.clientOpId !== idempotencyKey),
-      item
-    ]);
-    setQueueStatus("queued");
+    if (checklistItemIds.length !== checklistItems.length) { setQueueStatus("conflict"); return; }
+    try {
+      const { fieldQueue } = await import("@/platform/offline/field-queue");
+      await fieldQueue().enqueue({ organizationId, userId }, { client_op_id: idempotencyKey,
+        type: "field_task.complete", client_created_at: new Date().toISOString(),
+        payload: { taskId, checklistItemIds, note: note || undefined } });
+      setQueueStatus("queued");
+      if (navigator.onLine) window.dispatchEvent(new Event("online"));
+    } catch { setQueueStatus("storageError"); }
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
-    if((event.nativeEvent as SubmitEvent).submitter?.getAttribute('data-progress')==='true'){if(!navigator.onLine)event.preventDefault();return;}
-    if (navigator.onLine) {
+    if ((event.nativeEvent as SubmitEvent).submitter?.getAttribute("data-progress") === "true") {
+      if (!navigator.onLine) event.preventDefault();
       return;
     }
-
+    if (navigator.onLine) return;
     event.preventDefault();
-    queueCompletion(new FormData(event.currentTarget));
+    void queueCompletion(new FormData(event.currentTarget));
   }
 
   const queueMessage =
@@ -344,7 +207,7 @@ export function FieldTaskCompletionForm({
             ? labels.offlineConflict
             : queueStatus === "rejected"
               ? labels.offlineRejected
-              : null;
+              : queueStatus === "storageError" ? labels.offlineStorageError : null;
 
   return (
     <form
@@ -372,7 +235,7 @@ export function FieldTaskCompletionForm({
       </div>
       <label className="field">
         <span>{labels.note}</span>
-        <textarea name="note" rows={3} />
+        <textarea name="note" rows={3} value={note} onChange={event => setNote(event.target.value)} />
       </label>
       {message ? (
         <p className="form-error" data-testid="field-task-form-error" role="alert">
@@ -381,9 +244,9 @@ export function FieldTaskCompletionForm({
       ) : null}
       {queueMessage ? (
         <p
-          className={queueStatus === "conflict" || queueStatus === "rejected" ? "form-error" : "form-status"}
+          className={queueStatus === "conflict" || queueStatus === "rejected" || queueStatus === "storageError" ? "form-error" : "form-status"}
           data-testid="field-task-sync-status"
-          role={queueStatus === "conflict" || queueStatus === "rejected" ? "alert" : "status"}
+          role={queueStatus === "conflict" || queueStatus === "rejected" || queueStatus === "storageError" ? "alert" : "status"}
         >
           {queueMessage}
         </p>
