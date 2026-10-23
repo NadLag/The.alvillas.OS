@@ -13,7 +13,7 @@ installNotificationWorker(self);
 self.addEventListener("message", event => {
   const data: unknown = event.data;
   if (data && typeof data === "object" && "type" in data && data.type === "ALVILLAS_SKIP_WAITING") {
-    event.waitUntil(self.skipWaiting());
+    event.waitUntil(self.skipWaiting().then(() => { event.ports[0]?.postMessage({ type: "ALVILLAS_UPDATE_READY" }); }));
   }
 });
 self.addEventListener("activate", event => {

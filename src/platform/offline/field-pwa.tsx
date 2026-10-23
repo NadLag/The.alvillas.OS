@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { FieldQueueScope } from "./field-queue-store";
+import { refreshFieldApp } from "./field-update";
 
 type InstallEvent = Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 
@@ -60,8 +61,7 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
     const installAvailable = (event: Event) => { event.preventDefault(); setInstall(event as InstallEvent); };
     const installationFinished = () => { setInstalled(true); setInstall(null); setNotice(null); };
     const controllerChanged = () => {
-      if (updateRequested.current) window.location.reload();
-      else if (hadController) setUpdate(true);
+      if (hadController) setUpdate(true);
       hadController = true;
     };
     const workerMessage = () => { void sync(); };
@@ -106,10 +106,15 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
     catch { setNotice("installHelp"); }
   }
   function updateApp() {
+    if (!navigator.onLine) return;
     if (document.querySelector('[data-field-dirty="true"]')) { setNotice("saveBeforeUpdate"); return; }
+    if (updateRequested.current) return;
     updateRequested.current = true;
-    if (registration.current?.waiting) registration.current.waiting.postMessage({ type: "ALVILLAS_SKIP_WAITING" });
-    else window.location.reload();
+    refreshFieldApp(registration.current, () => {
+      if (!navigator.onLine) { updateRequested.current = false; setOffline(true); return; }
+      if (document.querySelector('[data-field-dirty="true"]')) { updateRequested.current = false; setNotice("saveBeforeUpdate"); return; }
+      window.location.reload();
+    });
   }
 
   return <aside className="field-pwa-tools" aria-label={t("tools")} data-testid="field-pwa">

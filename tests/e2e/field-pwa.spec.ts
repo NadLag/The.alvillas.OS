@@ -29,6 +29,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const check = page.getByTestId("field-checklist-item"); await check.focus(); await page.keyboard.press("Space");
     const note = page.getByTestId("field-task-complete-form").getByRole("textbox"); await note.fill("Queued work survives a service worker update");
+    await page.evaluate(() => navigator.serviceWorker.addEventListener("controllerchange", event => event.stopImmediatePropagation(), { capture: true }));
     await page.evaluate(async suffix => {
       await navigator.serviceWorker.register(`/sw.js?acceptance=${suffix}`, { scope: "/", updateViaCache: "none" });
     }, randomUUID());
