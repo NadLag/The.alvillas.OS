@@ -6,7 +6,7 @@ import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./auth";
 
-export async function openFieldFixture(page: Page, info: TestInfo, locale: string) {
+export async function openFieldFixture(page: Page, info: TestInfo, locale: string, options: { checklistItems?: number } = {}) {
   const password = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
   const email = e2eEmail(`pwa-${locale}-${randomUUID().slice(0, 8)}`, info.project.name);
   await ensureE2EAdmin(email, password);
@@ -18,7 +18,8 @@ export async function openFieldFixture(page: Page, info: TestInfo, locale: strin
         addressLine1: "Test", city: "Marrakech", propertyType: "VILLA", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
       await new ConfigRuleRepository(tx, organizationId).createVersion({ key: "ops.checklists", scopeType: "property", scopeId: property.id,
         effectiveFrom: new Date("2020-01-01"), reason: "PWA acceptance checklist", value: { checklists: [{ key: "inspection", name: { en: "Inspection", fr: "Inspection" },
-          items: [{ key: "ready", label: { en: "Verify readiness", fr: "Vérifier la préparation", ar: "التحقق من الجاهزية" } }] }] } });
+          items: Array.from({ length: options.checklistItems ?? 1 }, (_, index) => ({ key: index ? `ready-${index}` : "ready",
+            label: { en: `Verify readiness ${index + 1}`, fr: `Vérifier la préparation ${index + 1}`, ar: `التحقق من الجاهزية ${index + 1}` } })) }] } });
       return { account, property };
     });
     await page.goto("/en/login"); await waitForE2EAdminLoginWindow(page, email);

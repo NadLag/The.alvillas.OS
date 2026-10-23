@@ -906,6 +906,23 @@ textarea:disabled {
 
 .field-pwa-tools p { margin: 0; }
 
+.field-language, .field-checklist-progress {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.field-language .locale-switch a {
+  min-block-size: var(--target-field-large);
+  min-inline-size: var(--target-field-large);
+}
+
+.field-checklist-progress p, .field-language p { margin: 0; }
+
+.field-checklist-progress progress {
+  inline-size: 100%;
+  accent-color: var(--accent);
+}
+
 .form-success {
   color: var(--accent-active);
   font-weight: var(--font-weight-bold);

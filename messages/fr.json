@@ -1158,7 +1158,12 @@
       "conflict": "Completez chaque element de la checklist avant de terminer.",
       "generic": "La tache n'a pas pu etre terminee. Reessayez."
     },
-    "offlineStorageError": "Cet appareil n’a pas pu enregistrer votre travail. Gardez cette page ouverte, libérez de l’espace et réessayez."
+    "offlineStorageError": "Cet appareil n’a pas pu enregistrer votre travail. Gardez cette page ouverte, libérez de l’espace et réessayez.",
+    "language": "Langue",
+    "saveBeforeLanguage": "Enregistrez votre liste de contrôle avant de changer de langue.",
+    "noteBeforeLanguage": "Terminez cette tâche pour enregistrer votre note, ou effacez-la avant de changer de langue.",
+    "offlineLanguage": "Une connexion est nécessaire pour changer de langue. Votre liste de contrôle reste ici.",
+    "offlineProgress": "Votre liste de contrôle reste sur cette page hors connexion. Terminez la tâche pour l’enregistrer sur cet appareil."
   },
   "OwnerPortal": {
     "switch": {
