@@ -1158,7 +1158,12 @@
       "conflict": "Complete every checklist item before finishing.",
       "generic": "The task could not be completed. Try again."
     },
-    "offlineStorageError": "تعذّر حفظ عملك على هذا الجهاز. أبقِ هذه الصفحة مفتوحة، وأفرغ مساحة على الجهاز، ثم أعد المحاولة."
+    "offlineStorageError": "تعذّر حفظ عملك على هذا الجهاز. أبقِ هذه الصفحة مفتوحة، وأفرغ مساحة على الجهاز، ثم أعد المحاولة.",
+    "language": "اللغة",
+    "saveBeforeLanguage": "احفظ قائمة التحقق قبل تغيير اللغة.",
+    "noteBeforeLanguage": "أكمل هذه المهمة لحفظ ملاحظة الإكمال، أو امسح الملاحظة قبل تغيير اللغة.",
+    "offlineLanguage": "أعد الاتصال لتغيير اللغة. تبقى قائمة التحقق هنا.",
+    "offlineProgress": "تبقى قائمة التحقق في هذه الصفحة دون اتصال. أكمل المهمة لحفظها على هذا الجهاز."
   },
   "OwnerPortal": {
     "switch": {

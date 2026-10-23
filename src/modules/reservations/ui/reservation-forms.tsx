@@ -111,6 +111,7 @@ export function FieldTaskCompletionForm({
   labels: FieldTaskLabels;
 }) {
   const progressText=useTranslations('Operations.manage');
+  const fieldText = useTranslations("Field");
   const [progress,progressAction,progressPending]=useActionState(operationAction.bind(null,locale,'progress'),{status:'idle'} as OperationFormState);
   const [checked,setChecked]=useState(()=>new Set(checklistItems.filter(i=>i.completed).map(i=>i.id)));
   const [state, formAction, pending] = useActionState(
@@ -122,8 +123,11 @@ export function FieldTaskCompletionForm({
   >("idle");
   const syncing = useRef(false);
   const [note, setNote] = useState("");
+  const [offline, setOffline] = useState(false);
   const message = messageForState(state, labels);
   const queued = queueStatus === "queued" || queueStatus === "syncing";
+  const checkedCount = checklistItems.filter(item => checked.has(item.id)).length;
+  const counterId = `field-checklist-progress-${taskId}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -157,7 +161,7 @@ export function FieldTaskCompletionForm({
         if (!cancelled) setQueueStatus("storageError");
       } finally { syncing.current = false; }
     }
-    const handleSync = () => { void sync(); };
+    const handleSync = () => { if (!cancelled) { setOffline(!navigator.onLine); void sync(); } };
     const acknowledged = (value: unknown) => {
       if (!value || typeof value !== "object" || !("organizationId" in value) || value.organizationId !== organizationId ||
         !("userId" in value) || value.userId !== userId || !("taskId" in value) || value.taskId !== taskId || cancelled) return;
@@ -169,14 +173,16 @@ export function FieldTaskCompletionForm({
     };
     window.addEventListener("alvillas-field-acknowledged", acknowledgedHere);
     navigator.serviceWorker?.addEventListener("message", acknowledgedByWorker);
-    void sync();
+    queueMicrotask(handleSync);
     const retry = window.setInterval(handleSync, 30_000);
     window.addEventListener("online", handleSync);
+    window.addEventListener("offline", handleSync);
     window.addEventListener("focus", handleSync);
     return () => {
       cancelled = true;
       window.clearInterval(retry);
       window.removeEventListener("online", handleSync);
+      window.removeEventListener("offline", handleSync);
       window.removeEventListener("focus", handleSync);
       window.removeEventListener("alvillas-field-acknowledged", acknowledgedHere);
       navigator.serviceWorker?.removeEventListener("message", acknowledgedByWorker);
@@ -226,11 +232,16 @@ export function FieldTaskCompletionForm({
       className="field-checklist"
       action={formAction}
       data-testid="field-task-complete-form"
+      onReset={event => event.preventDefault()}
       data-field-dirty={!queued && (note.trim().length > 0 || checklistItems.some(item => item.completed !== checked.has(item.id))) ? "true" : undefined}
       onSubmit={handleSubmit}
     >
       <input name="taskId" type="hidden" value={taskId} />
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
+      <div className="field-checklist-progress">
+        <p id={counterId} aria-live="polite" data-testid="field-checklist-progress">{progressText("progress", { done: checkedCount, total: checklistItems.length })}</p>
+        {checklistItems.length ? <progress aria-labelledby={counterId} max={checklistItems.length} value={checkedCount} /> : null}
+      </div>
       <div className="field-checklist-items">
         {checklistItems.map((item) => (
           <label className="field-checklist-item" key={item.id}>
@@ -268,12 +279,13 @@ export function FieldTaskCompletionForm({
       <button
         className="primary-button field-complete-button"
         data-testid="field-task-complete"
-        disabled={pending || queued || progressPending || checked.size!==checklistItems.length}
+        disabled={pending || queued || progressPending || checkedCount!==checklistItems.length}
         type="submit"
       >
         {pending || queueStatus === "syncing" ? labels.completing : labels.complete}
       </button>
-      <button className="secondary-button field-complete-button" type="submit" data-progress="true" formAction={progressAction} disabled={pending||queued||progressPending}>{progressText('saveProgress')}</button>
+      <button className="secondary-button field-complete-button" type="submit" data-progress="true" formAction={progressAction} disabled={pending||queued||progressPending||offline}>{progressText('saveProgress')}</button>
+      {offline && !queued ? <p>{fieldText("offlineProgress")}</p> : null}
       {progress.status==='saved'?<p role="status">{progressText('saved')}</p>:progress.status==='error'?<p role="alert">{progressText(`errors.${progress.message??'generic'}`)}</p>:null}
     </form>
   );

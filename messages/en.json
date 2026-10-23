@@ -1158,7 +1158,12 @@
       "conflict": "Complete every checklist item before finishing.",
       "generic": "The task could not be completed. Try again."
     },
-    "offlineStorageError": "This device could not save your work. Keep this page open, free device storage, and try again."
+    "offlineStorageError": "This device could not save your work. Keep this page open, free device storage, and try again.",
+    "language": "Language",
+    "saveBeforeLanguage": "Save your checklist before changing language.",
+    "noteBeforeLanguage": "Finish this job to save your completion note, or clear the note before changing language.",
+    "offlineLanguage": "Reconnect to change language. Your checklist stays here.",
+    "offlineProgress": "Your checklist stays on this page while offline. Finish the job to save it on this device."
   },
   "OwnerPortal": {
     "switch": {

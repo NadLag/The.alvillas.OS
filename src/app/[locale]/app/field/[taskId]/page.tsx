@@ -1,5 +1,6 @@
 import { OperationEvidencePanel } from "@/modules/reservations/ui/operation-evidence-panel";
 import { FieldPwa } from "@/platform/offline/field-pwa";
+import { FieldLanguage } from "@/platform/offline/field-language";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -69,6 +70,7 @@ export default async function FieldTaskPage({
         titleTestId="field-task-title"
       />
 
+      <FieldLanguage locale={appLocale} path={`/app/field/${task.id}`} />
       <FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} />
       <FieldTaskCompletionForm
         checklistItems={task.checklistItems.map((item) => ({
