@@ -4,6 +4,13 @@ import type { AppLocale } from "@/i18n/routing";
 
 const defaultTimeZone = "Africa/Casablanca";
 
+/** Canonical calendar date for a configured IANA zone; independent of display locale. */
+export function calendarDateAt(value: Date, timeZone: string): string {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })
+    .formatToParts(value).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 type DecimalInput = string | Decimal;
 
 function decimalToSafeNumber(value: DecimalInput): number {

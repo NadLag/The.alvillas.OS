@@ -60,7 +60,7 @@ export type ResolvedReservationTaskConfig = {
   supportingRules?: ResolvedConfigRule[];
 };
 
-function toStringRecord(value: Prisma.JsonValue): Record<string, string> {
+export function toStringRecord(value: Prisma.JsonValue): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return {};
   }

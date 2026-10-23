@@ -61,9 +61,10 @@ export function present<TResource extends Record<string, unknown>>(
   ctx: PresentationContext,
   action: Action,
   resource: PresentableResource<TResource>,
-  policy: FieldPolicy<TResource>
+  policy: FieldPolicy<TResource>,
+  effectiveAt?: Date
 ): Partial<TResource> {
-  if (!authorize(ctx, action, resource)) {
+  if (!authorize(ctx, action, resource, effectiveAt)) {
     throw new Error("Not authorized to present resource");
   }
 
