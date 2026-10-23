@@ -2,6 +2,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { EmptyState, FieldShell, ShellHeader } from "@/design-system/shells";
+import { FieldPwa } from "@/platform/offline/field-pwa";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import { listAssignedFieldTasks } from "@/modules/reservations/application/reservation-service";
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
@@ -45,6 +46,7 @@ export default async function FieldTasksPage({
         title={t("title")}
       />
 
+      <FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} />
       {tasks.length === 0 ? (
         <EmptyState testId="field-tasks-empty" tone="motif">{t("empty")}</EmptyState>
       ) : (

@@ -2202,5 +2202,20 @@
       "FAILED": "À vérifier",
       "PAUSED": "En pause"
     }
+  },
+  "FieldPwa": {
+    "tools": "Commandes de l’application",
+    "install": "Installer l’application",
+    "installed": "Application installée",
+    "update": "Mettre à jour",
+    "online": "En ligne",
+    "offline": "Hors ligne",
+    "pending": "En attente de synchronisation : {count}",
+    "failures": "À vérifier : {count}",
+    "installHelp": "Ouvrez le menu du navigateur et choisissez Installer l’application ou Ajouter à l’écran d’accueil.",
+    "iosHelp": "Touchez Partager, puis Sur l’écran d’accueil.",
+    "saveBeforeUpdate": "Terminez ou enregistrez vos modifications avant de mettre à jour l’application.",
+    "unavailable": "Gardez cette page ouverte. Cet appareil n’a pas pu terminer la préparation de l’application.",
+    "syncNow": "Synchroniser"
   }
 }

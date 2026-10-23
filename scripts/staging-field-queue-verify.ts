@@ -38,25 +38,29 @@ try {
   await context.setOffline(true); await page.getByTestId("field-task-complete").click();
   await expect(page.getByTestId("field-task-sync-status")).toHaveText(en.Field.offlineQueued);
   const queued = await storedFieldData(page); expect(queued).toHaveLength(1);
-  await page.route("**/api/sync/push", route => route.abort());
+  await page.context().route("**/api/sync/push", route => route.abort());
   await context.setOffline(false); await page.reload();
   await expect(note).toHaveValue("Authenticated Field queue staging acceptance: retained offline work");
   expect(await storedFieldData(page)).toEqual(queued);
-  await page.unroute("**/api/sync/push");
+  await expect(page.getByTestId("field-sync-now")).toBeEnabled();
+  await page.context().unroute("**/api/sync/push");
   let committed = false;
   let firstResult: unknown;
-  await page.route("**/api/sync/push", async route => {
+  await page.context().route("**/api/sync/push", async route => {
     const response = await route.fetch(); expect(response.ok()).toBe(true);
-    firstResult = await response.json();
-    expect(firstResult).toMatchObject({ results: [{ status: "APPLIED" }] });
-    await writeFile(evidenceFile, JSON.stringify({ sha, origin, taskId, checks, firstResult, committed: true, completed: false }, null, 2));
-    committed = true; await route.abort();
+    const result = z.object({ results: z.array(z.object({ status: z.enum(["APPLIED", "DUPLICATE"]), client_op_id: z.uuid() })) }).parse(await response.json());
+    if (result.results[0]?.status === "APPLIED") {
+      firstResult = result;
+      await writeFile(evidenceFile, JSON.stringify({ sha, origin, taskId, checks, firstResult, committed: true, completed: false }, null, 2));
+      committed = true;
+    }
+    await route.abort();
   });
-  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+  await page.getByTestId("field-sync-now").click();
   await expect.poll(() => committed).toBe(true);
   await expect(page.getByTestId("field-task-sync-status")).toHaveText(en.Field.offlineQueued);
   expect(await storedFieldData(page)).toEqual(queued);
-  await page.unroute("**/api/sync/push");
+  await page.context().unroute("**/api/sync/push");
   const ack = page.waitForResponse(response => response.url().endsWith("/api/sync/push") && response.status() === 200);
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   expect(await (await ack).json()).toMatchObject({ results: [{ status: "DUPLICATE" }] });

@@ -153,12 +153,22 @@ export function FieldTaskCompletionForm({
         const result = await syncFieldQueue(queue, scope);
         if (cancelled || result === "idle") return;
         setQueueStatus(result);
-        if (result === "synced" && hadCurrent) window.location.assign(`/${locale}/app/field`);
       } catch {
         if (!cancelled) setQueueStatus("storageError");
       } finally { syncing.current = false; }
     }
     const handleSync = () => { void sync(); };
+    const acknowledged = (value: unknown) => {
+      if (!value || typeof value !== "object" || !("organizationId" in value) || value.organizationId !== organizationId ||
+        !("userId" in value) || value.userId !== userId || !("taskId" in value) || value.taskId !== taskId || cancelled) return;
+      window.location.assign(`/${locale}/app/field`);
+    };
+    const acknowledgedHere = (event: Event) => acknowledged((event as CustomEvent<unknown>).detail);
+    const acknowledgedByWorker = (event: MessageEvent<unknown>) => {
+      if (event.data && typeof event.data === "object" && "type" in event.data && event.data.type === "alvillas-field-acknowledged" && "detail" in event.data) acknowledged(event.data.detail);
+    };
+    window.addEventListener("alvillas-field-acknowledged", acknowledgedHere);
+    navigator.serviceWorker?.addEventListener("message", acknowledgedByWorker);
     void sync();
     const retry = window.setInterval(handleSync, 30_000);
     window.addEventListener("online", handleSync);
@@ -168,6 +178,8 @@ export function FieldTaskCompletionForm({
       window.clearInterval(retry);
       window.removeEventListener("online", handleSync);
       window.removeEventListener("focus", handleSync);
+      window.removeEventListener("alvillas-field-acknowledged", acknowledgedHere);
+      navigator.serviceWorker?.removeEventListener("message", acknowledgedByWorker);
     };
   }, [locale, organizationId, userId, taskId]);
 
@@ -214,6 +226,7 @@ export function FieldTaskCompletionForm({
       className="field-checklist"
       action={formAction}
       data-testid="field-task-complete-form"
+      data-field-dirty={!queued && (note.trim().length > 0 || checklistItems.some(item => item.completed !== checked.has(item.id))) ? "true" : undefined}
       onSubmit={handleSubmit}
     >
       <input name="taskId" type="hidden" value={taskId} />
@@ -224,6 +237,7 @@ export function FieldTaskCompletionForm({
             <input
               data-testid="field-checklist-item"
               checked={checked.has(item.id)}
+              disabled={queued || pending}
               onChange={event=>setChecked(before=>{const next=new Set(before);if(event.target.checked)next.add(item.id);else next.delete(item.id);return next;})}
               name="checklistItemIds"
               type="checkbox"
@@ -235,7 +249,7 @@ export function FieldTaskCompletionForm({
       </div>
       <label className="field">
         <span>{labels.note}</span>
-        <textarea name="note" rows={3} value={note} onChange={event => setNote(event.target.value)} />
+        <textarea name="note" rows={3} disabled={queued || pending} value={note} onChange={event => setNote(event.target.value)} />
       </label>
       {message ? (
         <p className="form-error" data-testid="field-task-form-error" role="alert">

@@ -68,6 +68,30 @@ describe("durable field operation queue", () => {
     expect(await queue.entries(scope)).toHaveLength(1);
   });
 
+  it("coalesces foreground retries and notifies the active task after its durable acknowledgement", async () => {
+    const queue = await setup(), op = operation(); await queue.enqueue(scope, op);
+    let release: ((response: Response) => void) | undefined;
+    const send = vi.fn<typeof fetch>().mockImplementation(() => new Promise<Response>(resolve => { release = resolve; }));
+    const acknowledged = vi.fn().mockResolvedValue(undefined);
+    const first = syncFieldQueue(queue, scope, send, acknowledged), second = syncFieldQueue(queue, scope, send);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    release!(response(op.client_op_id));
+    expect(await Promise.all([first, second])).toEqual(["synced", "synced"]);
+    expect(acknowledged).toHaveBeenCalledExactlyOnceWith({ ...scope, taskId: op.payload.taskId, clientOpId: op.client_op_id });
+    expect(await queue.entries(scope)).toEqual([]);
+  });
+
+  it("does not notify an old account when ownership changes before an acknowledgement is stored", async () => {
+    const queue = await setup(), op = operation(); await queue.enqueue(scope, op);
+    const other = { organizationId: randomUUID(), userId: randomUUID() }, acknowledged = vi.fn().mockResolvedValue(undefined);
+    const send = vi.fn<typeof fetch>().mockImplementation(async () => {
+      await queue.activate(other); await queue.enqueue(other, operation());
+      return response(op.client_op_id);
+    });
+    expect(await syncFieldQueue(queue, scope, send, acknowledged)).toBe("rejected");
+    expect(acknowledged).not.toHaveBeenCalled(); expect(await queue.entries(other)).toHaveLength(1);
+  });
+
   it("does not send another user's operations and rejects stale tabs after an account switch", async () => {
     const queue = await setup(); await queue.enqueue(scope, operation());
     const other = { organizationId: randomUUID(), userId: randomUUID() }, send = vi.fn();
