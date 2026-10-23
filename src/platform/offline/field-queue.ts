@@ -130,7 +130,7 @@ export async function syncFieldQueue(queue: FieldQueue, scope: FieldQueueScope, 
 }
 
 function parseAcknowledgement(payload: unknown, id: string): SyncPushOpResult | null {
-  if (!payload || typeof payload !== "object" || !("results" in payload) || !Array.isArray(payload.results)) return null;
+  if (!payload || typeof payload !== "object" || !("op_schema_version" in payload) || payload.op_schema_version !== 1 || !("results" in payload) || !Array.isArray(payload.results)) return null;
   const item = payload.results.find((r: unknown) => r && typeof r === "object" && "client_op_id" in r && r.client_op_id === id) as Partial<SyncPushOpResult> | undefined;
   if (!item || !["APPLIED", "DUPLICATE", "CONFLICT", "REJECTED"].includes(item.status ?? "") ||
     (item.server_version !== null && typeof item.server_version !== "string") ||

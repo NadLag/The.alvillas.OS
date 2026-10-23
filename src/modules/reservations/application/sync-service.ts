@@ -100,8 +100,7 @@ export async function pushSyncOps(
   deps: SyncServiceDeps = {}
 ): Promise<SyncPushResult> {
   // A shared browser may have changed sessions while an offline tab remained open.
-  if ((input.organization_id && input.organization_id !== ctx.organizationId) ||
-      (input.actor_user_id && input.actor_user_id !== ctx.actorId)) {
+  if (input.organization_id !== ctx.organizationId || input.actor_user_id !== ctx.actorId) {
     return { op_schema_version: 1, results: input.ops.map(op => rejectedResult(op, "REJECTED_SESSION_CHANGED")) };
   }
   return withTenant(db(deps), ctx.organizationId, async (tx) => {

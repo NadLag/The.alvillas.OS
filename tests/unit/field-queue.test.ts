@@ -14,7 +14,7 @@ async function setup() {
   await queue.activate(scope);
   return queue;
 }
-const response = (id: string, status = "APPLIED", extra = {}) => Response.json({ results: [{ client_op_id: id, status, server_version: "1", ...extra }] });
+const response = (id: string, status = "APPLIED", extra = {}) => Response.json({ op_schema_version: 1, results: [{ client_op_id: id, status, server_version: "1", ...extra }] });
 function input(options?: RequestInit) {
   if (typeof options?.body !== "string") throw new Error("Expected JSON body");
   return syncPushInputSchema.parse(JSON.parse(options.body) as unknown);
@@ -55,9 +55,16 @@ describe("durable field operation queue", () => {
     expect(send).toHaveBeenCalledTimes(1); expect((await queue.entries(scope))[0].operation.payload.note).toBe("Work retained");
   });
 
-  it.each([Response.json({ results: [] }), Response.json({ results: [{ status: "APPLIED" }] }), new Response("bad gateway", { status: 503 })])("keeps work after malformed or unsuccessful acknowledgements", async result => {
+  it.each([Response.json({ op_schema_version: 1, results: [] }), Response.json({ op_schema_version: 1, results: [{ status: "APPLIED" }] }), new Response("bad gateway", { status: 503 })])("keeps work after malformed or unsuccessful acknowledgements", async result => {
     const queue = await setup(); await queue.enqueue(scope, operation());
     expect(await syncFieldQueue(queue, scope, vi.fn().mockResolvedValue(result))).toBe("queued");
+    expect(await queue.entries(scope)).toHaveLength(1);
+  });
+
+  it("retains work when the server acknowledges an unsupported protocol version", async () => {
+    const queue = await setup(), op = operation(); await queue.enqueue(scope, op);
+    const send = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ op_schema_version: 2, results: [{ client_op_id: op.client_op_id, status: "APPLIED", server_version: "1" }] }));
+    expect(await syncFieldQueue(queue, scope, send)).toBe("queued");
     expect(await queue.entries(scope)).toHaveLength(1);
   });
 

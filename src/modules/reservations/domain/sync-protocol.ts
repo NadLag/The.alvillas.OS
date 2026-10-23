@@ -24,8 +24,8 @@ export const syncPushOpSchema = z.object({
 
 export const syncPushInputSchema = z.object({
   device_id: z.string().trim().min(8).max(160),
-  organization_id: z.string().uuid().optional(),
-  actor_user_id: z.string().uuid().optional(),
+  organization_id: z.string().uuid(),
+  actor_user_id: z.string().uuid(),
   op_schema_version: z.literal(1),
   ops: z.array(syncPushOpSchema).min(1).max(50)
 });

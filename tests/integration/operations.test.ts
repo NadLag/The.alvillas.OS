@@ -170,7 +170,7 @@ async function assigned(f: Awaited<ReturnType<typeof fixture>>) {
 }
 
 function queued(task: Awaited<ReturnType<typeof assigned>>): SyncPushInput {
-  return { device_id: randomUUID(), op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.complete",
+  return { organization_id: task.organizationId, actor_user_id: task.assignedToUserAccountId!, device_id: randomUUID(), op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.complete",
     client_created_at: "2001-01-01T00:00:00.000Z", payload: { taskId: task.id, checklistItemIds: task.checklistItems.map(item => item.id), note: "Offline field evidence" } }] };
 }
 async function crew(f: Awaited<ReturnType<typeof fixture>>) {
@@ -279,7 +279,7 @@ describe("operations on real PostgreSQL", () => {
     expect((await pushSyncOps(f.workerCtx, batch, deps())).results[0]).toEqual(rejected);
     const changed = structuredClone(batch); changed.ops[0].payload.note = "Replaced evidence";
     expect((await pushSyncOps(f.workerCtx, changed, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_IDEMPOTENCY_KEY_REUSED" });
-    expect((await pushSyncOps(f.ctx, batch, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_OP_OWNER", server_version: null });
+    expect((await pushSyncOps(f.ctx, { ...batch, actor_user_id: f.ctx.actorId }, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_OP_OWNER", server_version: null });
     await withTenant(db, f.org, async tx => {
       const op = await tx.syncOp.findFirstOrThrow();
       expect(op.payload).toMatchObject({ note: "Offline field evidence" });
@@ -315,7 +315,7 @@ describe("operations on real PostgreSQL", () => {
     await pushSyncOps(f.workerCtx, batch, deps());
     expect((await pushSyncOps(other.workerCtx, { ...batch, actor_user_id: f.workerAccount.id, organization_id: f.org }, deps())).results[0])
       .toMatchObject({ status: "REJECTED", error_code: "REJECTED_SESSION_CHANGED" });
-    const foreign = structuredClone(batch); foreign.ops[0].payload = { ...foreign.ops[0].payload, taskId: foreignTask.id, checklistItemIds: foreignTask.checklistItems.map(item => item.id) };
+    const foreign = { ...structuredClone(batch), organization_id: other.org, actor_user_id: other.workerAccount.id }; foreign.ops[0].payload = { ...foreign.ops[0].payload, taskId: foreignTask.id, checklistItemIds: foreignTask.checklistItems.map(item => item.id) };
     expect((await pushSyncOps(other.workerCtx, foreign, deps())).results[0].status).toBe("APPLIED");
     await withTenant(db, other.org, async tx => {
       expect(await tx.syncOp.count()).toBe(1);
