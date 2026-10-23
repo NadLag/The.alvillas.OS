@@ -897,6 +897,15 @@ textarea:disabled {
   gap: var(--space-4);
 }
 
+.field-pwa-tools {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin-block: var(--space-4);
+}
+
+.field-pwa-tools p { margin: 0; }
+
 .form-success {
   color: var(--accent-active);
   font-weight: var(--font-weight-bold);

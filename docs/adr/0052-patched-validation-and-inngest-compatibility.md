@@ -1,0 +1,7 @@
+# 0052 — Patched collection validation and Inngest compatibility
+
+ALVILLAS OS pins Zod 4.6.7 after the [collection validation advisory](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) was updated on 23 October 2026. The [upstream fix](https://github.com/colinhacks/zod/commit/a0ebf97) checks upper collection bounds before visiting elements. Public application schemas use this v4 implementation. Regression tests exercise the real sync parser with oversized operation batches and checklist arrays and verify that their elements are never inspected.
+
+Inngest 4.24.0 imports `zod/v3` and declares compatibility with the v4 package. Its dependency is overridden to the same pinned package, which includes that compatibility export. The SDK version and legacy API remain unchanged. This removes a second package installation without rewriting SDK validation or signature handling. The compatibility export remains a legacy parser; the collection-bound regression assertions apply to the application's v4 schemas.
+
+The installed SDK verifies request signatures before its execution and in-band synchronization schemas run. Signed discovery and unsigned/tampered denial remain required browser and authenticated staging checks. CI rejects high or critical dependency advisories. Full unit, PostgreSQL, production build and browser checks validate this dependency change before release; an audit result alone is insufficient evidence.

@@ -8,6 +8,11 @@
     "npm": ">=10.0.0"
   },
   "scripts": {
+    "postinstall": "prisma generate && npm run worker:build",
+    "worker:build": "tsx scripts/build-field-worker.ts",
+    "predev": "npm run worker:build",
+    "prebuild": "npm run worker:build",
+    "pretypecheck": "npm run worker:build",
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
@@ -59,7 +64,12 @@
     "react-hook-form": "^7.90.0",
     "svix": "2.8.0",
     "web-push": "^3.6.7",
-    "zod": "^4.6.5"
+    "zod": "4.6.7"
+  },
+  "overrides": {
+    "inngest": {
+      "zod": "$zod"
+    }
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
@@ -69,6 +79,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@types/web-push": "^3.6.4",
+    "esbuild": "0.28.2",
     "eslint": "^10.12.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "fake-indexeddb": "6.2.6",

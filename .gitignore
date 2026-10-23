@@ -11,3 +11,4 @@ test-results
 !.env.example
 *.log
 tsconfig.tsbuildinfo
+src/platform/offline/worker-code.generated.json

@@ -2202,5 +2202,20 @@
       "FAILED": "Needs attention",
       "PAUSED": "Paused"
     }
+  },
+  "FieldPwa": {
+    "tools": "App controls",
+    "install": "Install app",
+    "installed": "App installed",
+    "update": "Update app",
+    "online": "Online",
+    "offline": "Offline",
+    "pending": "Waiting to sync: {count}",
+    "failures": "Needs review: {count}",
+    "installHelp": "Open your browser menu and choose Install app or Add to Home Screen.",
+    "iosHelp": "Tap Share, then Add to Home Screen.",
+    "saveBeforeUpdate": "Finish or save your current changes before updating the app.",
+    "unavailable": "Keep this page open. This device could not finish preparing the app.",
+    "syncNow": "Sync now"
   }
 }

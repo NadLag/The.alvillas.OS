@@ -57,22 +57,23 @@ for (const locale of ["en", "fr", "ar"] as const) {
       await page.context().setOffline(true); await page.getByTestId("field-task-complete").click();
       await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.offlineQueued);
       const original = await stored(page); expect(original).toHaveLength(1);
-      await page.route("**/api/sync/push", route => route.abort());
+      await page.context().route("**/api/sync/push", route => route.abort());
       await page.context().setOffline(false); await page.reload();
       await expect(note).toHaveValue("Field evidence retained across reload");
       await expect(check).toBeChecked(); expect(await stored(page)).toEqual(original);
-      await page.unroute("**/api/sync/push");
+      await expect(page.getByTestId("field-sync-now")).toBeEnabled();
+      await page.context().unroute("**/api/sync/push");
       let lostAcknowledgement = false;
-      await page.route("**/api/sync/push", async route => {
+      await page.context().route("**/api/sync/push", async route => {
         const response = await route.fetch(); expect(response.ok()).toBe(true);
         lostAcknowledgement = true; await route.abort();
       });
-      await page.evaluate(() => window.dispatchEvent(new Event("online")));
+      await page.getByTestId("field-sync-now").click();
       await expect.poll(() => lostAcknowledgement).toBe(true);
       await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.offlineQueued);
       await expect.poll(() => withTenant(db, org, tx => tx.auditLog.count({ where: { action: "task.complete", resourceId: task.id } }))).toBe(1);
       expect(await stored(page)).toEqual(original);
-      await page.unroute("**/api/sync/push"); await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+      await page.context().unroute("**/api/sync/push"); await page.evaluate(() => window.dispatchEvent(new Event("focus")));
       await expect(page).toHaveURL(new RegExp(`/${locale}/app/field$`, "u"));
       expect(await stored(page)).toEqual([]);
       expect(await withTenant(db, org, tx => tx.auditLog.count({ where: { action: "task.complete", resourceId: task.id } }))).toBe(1);

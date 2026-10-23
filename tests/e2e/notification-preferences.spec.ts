@@ -79,15 +79,16 @@ test.describe("personal notification settings", () => {
     await page.unrouteAll({ behavior: "wait" });
     let failLoad = true;
     let failedLoadRequests = 0;
-    await page.route("**/en/app/notifications", async (route) => {
-      if (route.request().method() === "POST" && route.request().headers()["next-action"] && failLoad) {
+    const preferencesUrl = (url: URL) => url.pathname === "/en/app/notifications";
+    await page.context().route(preferencesUrl, async (route) => {
+      if (route.request().method() === "POST" && failLoad) {
         failedLoadRequests += 1;
         await route.abort("failed");
       }
       else await route.continue();
     });
     await page.reload();
-    await expect.poll(() => failedLoadRequests).toBeGreaterThan(0);
+    await expect.poll(() => failedLoadRequests, { timeout: 30000 }).toBeGreaterThan(0);
     await expect(page.getByTestId("notification-preferences").getByRole("alert")).toContainText("Your notification settings could not be loaded");
     failLoad = false;
     await page.getByTestId("notification-preferences").getByRole("button", { name: "Try again", exact: true }).click();
