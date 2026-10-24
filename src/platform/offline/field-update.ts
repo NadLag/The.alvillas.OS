@@ -1,12 +1,14 @@
 export function refreshFieldApp(registration: ServiceWorkerRegistration | null, reload: () => void, unavailable: () => void): void {
   const waiting = registration?.waiting;
-  const worker = waiting ?? registration?.active;
-  if (!worker) { reload(); return; }
+  const initialWorker = waiting ?? registration?.active;
+  if (!initialWorker) { reload(); return; }
+  let worker: ServiceWorker = initialWorker;
   const container = navigator.serviceWorker;
   if (!waiting && worker.state === "activated" && container.controller === worker) { reload(); return; }
   const channel = new MessageChannel();
   let refreshed = false;
   let poll: number | undefined;
+  let requestedAt = Date.now();
   const ready = () => worker.state === "activated" && container.controller === worker;
   const finish = (activated: boolean) => {
     if (refreshed) return;
@@ -24,8 +26,25 @@ export function refreshFieldApp(registration: ServiceWorkerRegistration | null, 
   };
   const inspect = () => {
     if (refreshed) return;
+    // Another registration/update can replace the waiting slot while this
+    // document stays open. Only the current replacement may authorize reload.
+    const replacement = registration?.waiting;
+    if (replacement && replacement !== worker) {
+      worker.removeEventListener("statechange", changed);
+      worker = replacement;
+      worker.addEventListener("statechange", changed);
+      requestedAt = Number.NEGATIVE_INFINITY;
+    }
     if (ready()) { finish(true); return; }
     if (worker.state === "redundant") { finish(false); return; }
+    // A stopped worker can miss the initial wake-up. skipWaiting is idempotent;
+    // resend within the existing deadline without reusing a transferred port.
+    if (registration?.waiting === worker && worker.state === "installed" && Date.now() - requestedAt >= 250) {
+      requestedAt = Date.now();
+      try { worker.postMessage({ type: "ALVILLAS_SKIP_WAITING" }); }
+      catch { finish(false); return; }
+      if (ready()) { finish(true); return; }
+    }
     poll = window.setTimeout(inspect, 50);
   };
   // The waiting slot clears while the replacement is still activating. Neither

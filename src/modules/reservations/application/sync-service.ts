@@ -14,6 +14,7 @@ import type {
 } from "@/modules/reservations/domain/sync-protocol";
 import { syncPushInputSchema } from "@/modules/reservations/domain/sync-protocol";
 import { OperationRepository } from "@/modules/reservations/infrastructure/operation-repository";
+import { proxyCompleteOperationTaskInTransaction } from "./operation-service";
 import {
   SyncRepository,
   type SyncOpRecord
@@ -74,11 +75,12 @@ function conflictResult(op: SyncPushOp, message: string): SyncPushOpResult {
     status: "CONFLICT",
     server_version: null,
     conflict: {
-      expected: op.base_version ?? null,
+      expected: op.type === "field_task.proxy_validate" ? String(op.payload.expectedVersion) : op.base_version ?? null,
       current: message,
       incoming: op.type
     },
-    error_code: op.type === "field_task.complete" ? "TASK_COMPLETION_CONFLICT" : "TASK_EVIDENCE_CONFLICT"
+    error_code: op.type === "field_task.proxy_validate" ? "TASK_PROXY_VALIDATION_CONFLICT" :
+      op.type === "field_task.complete" ? "TASK_COMPLETION_CONFLICT" : "TASK_EVIDENCE_CONFLICT"
   };
 }
 
@@ -111,8 +113,10 @@ export async function pushSyncOps(
     // A concurrent retry cannot observe a PENDING row or interleave this device's ops.
     await repository.lockDevice(input.device_id);
     const operations = new OperationRepository(tx, ctx.organizationId);
+    await operations.lock("crew-schedule");
     for (const taskId of [...new Set(input.ops.map(op => op.payload.taskId))].sort()) await operations.lock(taskId);
-    await repository.lockActor(ctx.personId);
+    const people = [ctx.personId, ...input.ops.flatMap(op => op.type === "field_task.proxy_validate" ? [op.payload.performedByPersonId] : [])];
+    for (const personId of [...new Set(people)].sort()) await repository.lockActor(personId);
     for (const op of input.ops) {
       const existing = await repository.findByClientOp(input.device_id, op.client_op_id);
 
@@ -145,7 +149,9 @@ export async function pushSyncOps(
           await repository.finish(input.device_id, op.client_op_id, result.status, result, null);
           results.push(result); continue;
         }
-        const completed = await completeAssignedFieldTaskInTransaction(
+        const completed = op.type === "field_task.proxy_validate"
+          ? await proxyCompleteOperationTaskInTransaction(ctx, { ...op.payload, idempotencyKey: op.client_op_id }, tx, metaForOp(deps, op))
+          : await completeAssignedFieldTaskInTransaction(
           ctx,
           {
             taskId: op.payload.taskId,
@@ -158,7 +164,7 @@ export async function pushSyncOps(
           "OFFLINE_SYNC"
         );
         const serverVersion = completed.completedAt?.toISOString() ?? null;
-        const duplicateCompletion = completed.completionIdempotencyKey !== op.client_op_id;
+        const duplicateCompletion = op.type === "field_task.complete" && completed.completionIdempotencyKey !== op.client_op_id;
         const applied: SyncPushOpResult = duplicateCompletion
           ? { ...appliedResult(op, serverVersion), status: "DUPLICATE", error_code: "DUPLICATE_COMPLETION" }
           : appliedResult(op, serverVersion);

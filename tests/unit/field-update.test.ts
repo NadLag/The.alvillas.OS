@@ -78,4 +78,27 @@ describe("explicit field worker refresh", () => {
     expect(reload).toHaveBeenCalledTimes(1); expect(unavailable).not.toHaveBeenCalled(); expect(waiting.postMessage).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
+  it("retries an undelivered activation request without reusing its transferred port", () => {
+    const waiting = waitingWorker(), reload = vi.fn(), unavailable = vi.fn();
+    waiting.postMessage.mockImplementationOnce(() => undefined).mockImplementation(() => {
+      controller = waiting.worker; waiting.state("activated");
+    });
+    refreshFieldApp(registration(waiting.worker), reload, unavailable);
+    expect(waiting.postMessage).toHaveBeenCalledTimes(1); expect(reload).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(250);
+    expect(waiting.postMessage).toHaveBeenCalledTimes(2);
+    expect(waiting.postMessage.mock.calls[1]).toEqual([{ type: "ALVILLAS_SKIP_WAITING" }]);
+    expect(reload).toHaveBeenCalledTimes(1); expect(unavailable).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+  });
+  it("follows a replacement waiting worker and requires that worker to control the document", () => {
+    const first = waitingWorker(), replacement = waitingWorker(), reload = vi.fn(), unavailable = vi.fn();
+    let current = first.worker;
+    const changing = { get waiting() { return current; } } as ServiceWorkerRegistration;
+    refreshFieldApp(changing, reload, unavailable);
+    replacement.postMessage.mockImplementation(() => { replacement.state("activated"); controller = replacement.worker; });
+    current = replacement.worker; controller = first.worker;
+    vi.advanceTimersByTime(50);
+    expect(replacement.postMessage).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1); expect(unavailable).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0);
+  });
 });
