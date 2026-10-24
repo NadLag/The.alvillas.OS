@@ -154,6 +154,8 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
       if (!navigator.onLine) { updateRequested.current = false; setOffline(true); return; }
       if (document.querySelector('[data-field-dirty="true"]')) { updateRequested.current = false; setNotice("saveBeforeUpdate"); return; }
       window.location.reload();
+    }, () => {
+      updateRequested.current = false; setNotice("unavailable");
     });
   }
 
