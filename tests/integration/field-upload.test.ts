@@ -14,6 +14,8 @@ import { syncPushInputSchema } from "@/modules/reservations/domain/sync-protocol
 import { ReservationAuthorizationError, ReservationConflictError, ReservationNotFoundError } from "@/modules/reservations/application/reservation-service";
 import { FieldUploadRepository } from "@/modules/reservations/infrastructure/field-upload-repository";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
+import { cleanupFieldUploadParts } from "@/modules/reservations/application/field-upload-cleanup";
+import { temporaryPartLeaseMilliseconds, type TemporaryUploadPart } from "@/platform/storage/upload-protocol";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -192,34 +194,6 @@ describe("field photo uploads on real PostgreSQL", () => {
     expect(objects.get(`${f.org}/tasks/${f.task.id}/uploads/${f.upload.uploadId}`)).toEqual(new Uint8Array(f.bytes));
     expect(signed).toHaveBeenCalledTimes(4);
   });
-  it.skipIf(!url)("uses native evidence persistence and the original sync operation for lost acknowledgements and concurrent retries", async () => {
-    const f = await photoFixture();
-    const transport = photoTransport((url, options) => options?.method === "PUT" ? new Response(null, { status: 200 }) :
-      new Response(new Uint8Array(f.chunks[Number(url.pathname.split("part-").at(-1))]), { status: 200 }));
-    await completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport });
-    const input = syncPushInputSchema.parse({ ...f.request, op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.evidence.attach",
-      payload: { taskId: f.task.id, uploadId: f.upload.uploadId } }] });
-    const results = await Promise.all([pushSyncOps(f.ctx, input, deps()), pushSyncOps(f.ctx, input, deps())]);
-    expect(results.map(result => result.results[0].status).sort()).toEqual(["APPLIED", "DUPLICATE"]);
-    expect((await pushSyncOps(f.ctx, input, deps())).results[0].status).toBe("DUPLICATE");
-    const changed = structuredClone(input);
-    if (changed.ops[0].type !== "field_task.evidence.attach") throw Error("Expected photo operation fixture");
-    changed.ops[0].payload.uploadId = randomUUID();
-    expect((await pushSyncOps(f.ctx, changed, deps())).results[0].error_code).toBe("REJECTED_IDEMPOTENCY_KEY_REUSED");
-    expect((await pushSyncOps(f.ctx, { ...input, device_id: randomUUID() }, deps())).results[0].status).toBe("REJECTED");
-    const secondKey = structuredClone(input); secondKey.ops[0].client_op_id = randomUUID();
-    expect((await pushSyncOps(f.ctx, secondKey, deps())).results[0].status).toBe("DUPLICATE");
-    await withTenant(db, f.org, async tx => {
-      const evidence = await tx.operationTaskEvidence.findMany({ where: { taskId: f.task.id } });
-      expect(evidence).toHaveLength(1); expect(evidence[0]).toMatchObject({ createdBy: f.account.id, sha256: f.manifest.sha256,
-        size: f.manifest.size, contentType: "image/png", note: f.manifest.note, storageKey: `${f.org}/tasks/${f.task.id}/uploads/${f.upload.uploadId}` });
-      expect((await tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }))).toMatchObject({ status: "ATTACHED", evidenceId: evidence[0].id });
-      expect(await tx.auditLog.count({ where: { resourceId: f.task.id, action: "task.evidence.attached" } })).toBe(1);
-      expect(await tx.syncOp.count({ where: { status: "APPLIED" } })).toBe(1);
-      expect((await tx.operationTask.findUniqueOrThrow({ where: { id: f.task.id } })).state).toBe("ASSIGNED");
-      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted" } })).toBe(0);
-    });
-  });
   it.skipIf(!url)("keeps prior private evidence immutable when a new assignee reuses a client photo nonce", async () => {
     const f = await photoFixture(), objects = new Map<string, Uint8Array>();
     const parts = new Map<string, readonly Uint8Array[]>([[f.upload.uploadId, f.chunks]]);
@@ -267,6 +241,34 @@ describe("field photo uploads on real PostgreSQL", () => {
       expect(await tx.auditLog.count({ where: { resourceId: f.task.id, action: "task.evidence.attached" } })).toBe(2);
     });
   });
+  it.skipIf(!url)("uses native evidence persistence and the original sync operation for lost acknowledgements and concurrent retries", async () => {
+    const f = await photoFixture();
+    const transport = photoTransport((url, options) => options?.method === "PUT" ? new Response(null, { status: 200 }) :
+      new Response(new Uint8Array(f.chunks[Number(url.pathname.split("part-").at(-1))]), { status: 200 }));
+    await completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport });
+    const input = syncPushInputSchema.parse({ ...f.request, op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.evidence.attach",
+      payload: { taskId: f.task.id, uploadId: f.upload.uploadId } }] });
+    const results = await Promise.all([pushSyncOps(f.ctx, input, deps()), pushSyncOps(f.ctx, input, deps())]);
+    expect(results.map(result => result.results[0].status).sort()).toEqual(["APPLIED", "DUPLICATE"]);
+    expect((await pushSyncOps(f.ctx, input, deps())).results[0].status).toBe("DUPLICATE");
+    const changed = structuredClone(input);
+    if (changed.ops[0].type !== "field_task.evidence.attach") throw Error("Expected photo operation fixture");
+    changed.ops[0].payload.uploadId = randomUUID();
+    expect((await pushSyncOps(f.ctx, changed, deps())).results[0].error_code).toBe("REJECTED_IDEMPOTENCY_KEY_REUSED");
+    expect((await pushSyncOps(f.ctx, { ...input, device_id: randomUUID() }, deps())).results[0].status).toBe("REJECTED");
+    const secondKey = structuredClone(input); secondKey.ops[0].client_op_id = randomUUID();
+    expect((await pushSyncOps(f.ctx, secondKey, deps())).results[0].status).toBe("DUPLICATE");
+    await withTenant(db, f.org, async tx => {
+      const evidence = await tx.operationTaskEvidence.findMany({ where: { taskId: f.task.id } });
+      expect(evidence).toHaveLength(1); expect(evidence[0]).toMatchObject({ createdBy: f.account.id, sha256: f.manifest.sha256,
+        size: f.manifest.size, contentType: "image/png", note: f.manifest.note, storageKey: `${f.org}/tasks/${f.task.id}/uploads/${f.upload.uploadId}` });
+      expect((await tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }))).toMatchObject({ status: "ATTACHED", evidenceId: evidence[0].id });
+      expect(await tx.auditLog.count({ where: { resourceId: f.task.id, action: "task.evidence.attached" } })).toBe(1);
+      expect(await tx.syncOp.count({ where: { status: "APPLIED" } })).toBe(1);
+      expect((await tx.operationTask.findUniqueOrThrow({ where: { id: f.task.id } })).state).toBe("ASSIGNED");
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted" } })).toBe(0);
+    });
+  });
   it.skipIf(!url)("rechecks current upload ownership and permissions when applying queued evidence", async () => {
     const f = await photoFixture(), other = await fixture();
     const batch = () => syncPushInputSchema.parse({ organization_id: f.org, actor_user_id: f.account.id, device_id: f.input.device_id, op_schema_version: 1,
@@ -280,5 +282,114 @@ describe("field photo uploads on real PostgreSQL", () => {
     await withTenant(db, f.org, tx => tx.operationTask.update({ where: { id: f.task.id }, data: { assignedToUserAccountId: null, assignedToPersonId: null, state: "PLANNED" } }));
     expect((await pushSyncOps(f.ctx, batch(), deps())).results[0].error_code).toBe("REJECTED_NOT_ASSIGNED");
     expect(await withTenant(db, f.org, tx => tx.operationTaskEvidence.count({ where: { taskId: f.task.id } }))).toBe(0);
+  });
+  it.skipIf(!url)("waits for fixed signed PUT leases and forbids shortening or extending a closed upload", async () => {
+    const f = await photoFixture(), signedAt = new Date("2026-01-15T10:20:30Z");
+    for (const [key, value] of Object.entries({ R2_ACCOUNT_ID: "local-account", R2_BUCKET: "local-bucket", R2_ACCESS_KEY_ID: "local-access", R2_SECRET_ACCESS_KEY: "local-secret" })) vi.stubEnv(key, value);
+    try {
+      const signed = await signFieldUploadPart(f.ctx, { ...f.request, index: 0 }, { ...deps(), now: signedAt });
+      expect(new URL(signed.url).searchParams.get("X-Amz-Date")).toBe("20260115T102030Z");
+      expect(new URL(signed.url).searchParams.get("X-Amz-Expires")).toBe("900");
+    } finally { vi.unstubAllEnvs(); }
+    await Promise.all([signFieldUploadPart(f.ctx, { ...f.request, index: 1 }, { ...deps(), storage: f.storage, now: new Date(signedAt.getTime() + 2) }),
+      signFieldUploadPart(f.ctx, { ...f.request, index: 0 }, { ...deps(), storage: f.storage, now: new Date(signedAt.getTime() + 1) })]);
+    const expiresAt = new Date(signedAt.getTime() + 2 + temporaryPartLeaseMilliseconds);
+    expect((await withTenant(db, f.org, tx => tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }))).partUploadExpiresAt).toEqual(expiresAt);
+    await expect(withTenant(db, f.org, tx => tx.operationEvidenceUpload.update({ where: { id: f.upload.uploadId }, data: { partUploadExpiresAt: signedAt } }))).rejects.toThrow(/lease/u);
+    const transport = photoTransport((url, options) => options?.method === "PUT" ? new Response(null, { status: 200 }) :
+      new Response(new Uint8Array(f.chunks[Number(url.pathname.split("part-").at(-1))]), { status: 200 }));
+    await completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport });
+    const remove = vi.fn<(part: TemporaryUploadPart) => Promise<void>>().mockResolvedValue(undefined), cleanup = { ...deps(), storage: { deleteTemporaryUploadPart: remove } };
+    expect(await cleanupFieldUploadParts(f.org, { ...cleanup, now: new Date(expiresAt.getTime() - 1) })).toEqual({ cleaned: 0 });
+    expect(remove).not.toHaveBeenCalled();
+    await expect(withTenant(db, f.org, tx => new FieldUploadRepository(tx, f.org).cleaned(f.upload.uploadId, signedAt))).rejects.toThrow(/lease/u);
+    await expect(withTenant(db, f.org, tx => tx.operationEvidenceUpload.update({ where: { id: f.upload.uploadId }, data: { partUploadExpiresAt: new Date(expiresAt.getTime() + 1) } }))).rejects.toThrow(/lease/u);
+    await expect(signFieldUploadPart(f.ctx, { ...f.request, index: 0 }, { ...deps(), storage: f.storage })).rejects.toBeInstanceOf(ReservationConflictError);
+    expect(await cleanupFieldUploadParts(f.org, { ...cleanup, now: expiresAt })).toEqual({ cleaned: 1 });
+    expect(remove.mock.calls.map(call => call[0])).toEqual(f.chunks.map((_, index) => ({ organizationId: f.org, uploadId: f.upload.uploadId, index })));
+  });
+  it.skipIf(!url)("recovers a lost DELETE acknowledgement and concurrent cleanup without deleting permanent evidence or duplicating attachment", async () => {
+    const f = await photoFixture(), other = await photoFixture(), signedAt = new Date("2026-01-15T10:20:30Z"), objects = new Map<string, Uint8Array>();
+    for (let index = 0; index < f.chunks.length; index++) {
+      await signFieldUploadPart(f.ctx, { ...f.request, index }, { ...deps(), now: signedAt, storage: f.storage });
+      objects.set(`${f.org}/uploads/${f.upload.uploadId}/part-${index}`, new Uint8Array(f.chunks[index]));
+    }
+    const transport = photoTransport((url, options) => {
+      const key = url.pathname.slice(1);
+      if (options?.method === "PUT") { objects.set(key, new Uint8Array(options.body as Uint8Array)); return new Response(null, { status: 200 }); }
+      const bytes = objects.get(key); return bytes ? new Response(new Uint8Array(bytes), { status: 200 }) : new Response(null, { status: 404 });
+    });
+    await completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport });
+    let loseAck = true;
+    const remove = vi.fn(({ organizationId, uploadId, index }: TemporaryUploadPart) => Promise.resolve().then(() => {
+      expect(organizationId).toBe(f.org); expect(uploadId).toBe(f.upload.uploadId);
+      objects.delete(`${organizationId}/uploads/${uploadId}/part-${index}`);
+      if (loseAck) { loseAck = false; throw Error("private-storage-diagnostic"); }
+    }));
+    const cleanup = { ...deps(), storage: { deleteTemporaryUploadPart: remove } };
+    expect(await cleanupFieldUploadParts(other.org, cleanup)).toEqual({ cleaned: 0 }); expect(remove).not.toHaveBeenCalled();
+    await expect(cleanupFieldUploadParts(f.org, cleanup)).rejects.toThrow(/^Temporary upload cleanup unavailable$/u);
+    expect((await withTenant(db, f.org, tx => tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }))).cleanedAt).toBeNull();
+    const results = await Promise.all([cleanupFieldUploadParts(f.org, cleanup), cleanupFieldUploadParts(f.org, cleanup)]);
+    expect(results.reduce((sum, result) => sum + result.cleaned, 0)).toBe(1);
+    expect(objects.size).toBe(1); expect(objects.get(`${f.org}/tasks/${f.task.id}/uploads/${f.upload.uploadId}`)).toEqual(new Uint8Array(f.bytes));
+    expect(await cleanupFieldUploadParts(f.org, cleanup)).toEqual({ cleaned: 0 });
+    expect(await completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport })).toEqual({ uploadId: f.upload.uploadId, status: "READY" });
+    const batch = syncPushInputSchema.parse({ ...f.request, op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.evidence.attach", payload: { taskId: f.task.id, uploadId: f.upload.uploadId } }] });
+    expect((await pushSyncOps(f.ctx, batch, deps())).results[0].status).toBe("APPLIED");
+    expect((await pushSyncOps(f.ctx, batch, deps())).results[0].status).toBe("DUPLICATE");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.operationTaskEvidence.count({ where: { taskId: f.task.id } })).toBe(1);
+      expect(await tx.auditLog.count({ where: { resourceId: f.task.id, action: "task.evidence.attached" } })).toBe(1);
+      expect(await tx.syncOp.count({ where: { status: "APPLIED" } })).toBe(1);
+      expect(await tx.operationEvidenceUpload.count({ where: { id: other.upload.uploadId } })).toBe(0);
+    });
+  });
+  it.skipIf(!url)("preserves open work and gives pre-lease closed uploads the complete legacy signature window", async () => {
+    const f = await photoFixture(), remove = vi.fn().mockResolvedValue(undefined), cleanup = { ...deps(), storage: { deleteTemporaryUploadPart: remove } };
+    expect(await cleanupFieldUploadParts(f.org, { ...cleanup, now: new Date("2099-01-01") })).toEqual({ cleaned: 0 });
+    await withTenant(db, f.org, tx => new FieldUploadRepository(tx, f.org).cancel(f.upload.uploadId));
+    const cancelled = await withTenant(db, f.org, tx => tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }));
+    expect(cancelled.partUploadExpiresAt).toBeNull();
+    const boundary = cancelled.updatedAt.getTime() + temporaryPartLeaseMilliseconds;
+    expect(await cleanupFieldUploadParts(f.org, { ...cleanup, now: new Date(boundary - 1) })).toEqual({ cleaned: 0 }); expect(remove).not.toHaveBeenCalled();
+    expect(await cleanupFieldUploadParts(f.org, { ...cleanup, now: new Date(boundary + 1) })).toEqual({ cleaned: 1 });
+    const retained = await withTenant(db, f.org, tx => tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }));
+    expect(retained.status).toBe("CANCELLED"); expect(retained.manifestHash).toBe(cancelled.manifestHash); expect(retained.cleanedAt).not.toBeNull();
+  });
+  it.skipIf(!url)("rotates a failed bounded cleanup behind other eligible uploads and recovers it later", async () => {
+    const f = await photoFixture(), signedAt = new Date("2026-01-15T10:20:30Z");
+    const second = await startFieldUpload(f.ctx, { ...f.input, manifest: { ...f.manifest, localId: randomUUID() } }, deps());
+    const secondRequest = { ...f.request, uploadId: second.uploadId };
+    const transport = photoTransport((url, options) => options?.method === "PUT" ? new Response(null, { status: 200 }) :
+      new Response(new Uint8Array(f.chunks[Number(url.pathname.split("part-").at(-1))]), { status: 200 }));
+    for (const request of [f.request, secondRequest]) {
+      await signFieldUploadPart(f.ctx, { ...request, index: 0 }, { ...deps(), storage: f.storage, now: signedAt });
+      await completeFieldUpload(f.ctx, request, { ...deps(), storage: f.storage, transport });
+    }
+    let unavailable = true;
+    const remove = vi.fn(({ uploadId }: TemporaryUploadPart) => Promise.resolve().then(() => { if (unavailable && uploadId === f.upload.uploadId) throw Error("private transport detail"); }));
+    const cleanup = { ...deps(), storage: { deleteTemporaryUploadPart: remove } };
+    await expect(cleanupFieldUploadParts(f.org, { ...cleanup, limit: 1 })).rejects.toThrow(/^Temporary upload cleanup unavailable$/u);
+    expect(await cleanupFieldUploadParts(f.org, { ...cleanup, limit: 1 })).toEqual({ cleaned: 1 });
+    await withTenant(db, f.org, async tx => {
+      expect((await tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } })).cleanedAt).toBeNull();
+      expect((await tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: second.uploadId } })).cleanedAt).not.toBeNull();
+    });
+    unavailable = false; expect(await cleanupFieldUploadParts(f.org, cleanup)).toEqual({ cleaned: 1 });
+  });
+  it.skipIf(!url)("defers work beyond the transport budget without deleting open data or losing the pending cleanup", async () => {
+    const f = await photoFixture(), signedAt = new Date("2026-01-15T10:20:30Z");
+    await signFieldUploadPart(f.ctx, { ...f.request, index: 0 }, { ...deps(), storage: f.storage, now: signedAt });
+    const transport = photoTransport((url, options) => options?.method === "PUT" ? new Response(null, { status: 200 }) :
+      new Response(new Uint8Array(f.chunks[Number(url.pathname.split("part-").at(-1))]), { status: 200 }));
+    await completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport });
+    const remove = vi.fn<(part: TemporaryUploadPart) => Promise<void>>().mockResolvedValue(undefined);
+    let clock = -30000;
+    const cleanup = { ...deps(), storage: { deleteTemporaryUploadPart: remove } };
+    expect(await cleanupFieldUploadParts(f.org, { ...cleanup, clock: () => clock += 30000 })).toEqual({ cleaned: 0 });
+    expect(remove).not.toHaveBeenCalled();
+    expect((await withTenant(db, f.org, tx => tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }))).cleanedAt).toBeNull();
+    expect(await cleanupFieldUploadParts(f.org, cleanup)).toEqual({ cleaned: 1 });
   });
 });

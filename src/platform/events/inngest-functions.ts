@@ -1,4 +1,5 @@
 import { scheduleReservationSyncs } from "@/modules/reservations/application/reservation-management-service";
+import { cleanupFieldUploadParts } from "@/modules/reservations/application/field-upload-cleanup";
 import { Inngest, NonRetriableError } from "inngest";
 import { z } from "zod";
 import { prisma } from "@/platform/db/client";
@@ -77,4 +78,16 @@ export const consumeAutomations = triggerGroups.map((triggers,index)=>inngest.cr
   for(const id of runs)await step.run(`execute-${id}`,()=>executeAutomationRun(organizationId,id));
   return {runs:runs.length};
 }));
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations];
+export const cleanupUploadParts = inngest.createFunction({ id: "cleanup-field-upload-parts", name: "ALVILLAS OS temporary upload cleanup",
+  triggers: [{ cron: "* * * * *" }], concurrency: { limit: 1 }, retries: 3
+}, async ({ step }) => {
+  const organizations = await step.run("list-organizations", () => OutboxRepository.organizations(prisma));
+  let cleaned = 0, failed = false;
+  for (const { id } of organizations) {
+    try { cleaned += (await step.run(`cleanup-${id}`, () => cleanupFieldUploadParts(id))).cleaned; }
+    catch { failed = true; }
+  }
+  if (failed) throw new Error("Temporary upload cleanup unavailable");
+  return { organizations: organizations.length, cleaned };
+});
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts];

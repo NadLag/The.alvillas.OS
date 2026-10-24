@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { NonRetriableError } from "inngest";
 import { createHmac } from "node:crypto";
-import { consumeAutomations, dispatchOutbox, dispatchRequestOrganization, inngestFunctions, outboxDispatchEvent } from "@/platform/events/inngest-functions";
+import { cleanupUploadParts, consumeAutomations, dispatchOutbox, dispatchRequestOrganization, inngestFunctions, outboxDispatchEvent } from "@/platform/events/inngest-functions";
 import type { OutboxDatabase } from "@/platform/events/outbox-repository";
 
 const organizationId = "018f0a0b-0000-7000-9000-000000000001";
@@ -17,11 +17,14 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("Inngest signed outbox dispatcher", () => {
   it("registers the dispatcher and durable automation consumer", () => {
-    expect(inngestFunctions).toHaveLength(6);
+    expect(inngestFunctions).toHaveLength(7);
     for(const consumer of consumeAutomations) expect(consumer.opts.triggers!.length).toBeLessThanOrEqual(10);
     expect(consumeAutomations.flatMap(consumer=>consumer.opts.triggers!.map(trigger=>"event" in trigger?trigger.event:undefined))).toEqual([...automationEvents]);
     expect(dispatchOutbox.opts.triggers).toEqual([{ cron: "* * * * *" }, { event: outboxDispatchEvent }]);
     expect(dispatchOutbox.opts.concurrency).toEqual({ limit: 1 });
+    expect(cleanupUploadParts.opts.triggers).toEqual([{ cron: "* * * * *" }]);
+    expect(cleanupUploadParts.opts.concurrency).toEqual({ limit: 1 });
+    expect(cleanupUploadParts.opts.retries).toBe(3);
   });
 
   it("registers recurring recovery and automation consumers within staging concurrency limits", async () => {
@@ -36,7 +39,7 @@ describe("Inngest signed outbox dispatcher", () => {
     } }), {});
     expect(response.status).toBe(200);
     const registration = await response.json() as { functions: Array<{ idempotency?: string; rateLimit?: unknown; concurrency?: { limit: number } | Array<{ limit: number }>; steps: { step: { retries: { attempts: number } } } }> };
-    expect(registration.functions).toHaveLength(6);
+    expect(registration.functions).toHaveLength(7);
     // Cloud validates each emitted function against the existing staging plan.
     // Rejecting one consumer prevents synchronization of the whole application.
     for (const fn of registration.functions) {
@@ -77,7 +80,7 @@ describe("Inngest signed outbox dispatcher", () => {
     expect((await GET(new NextRequest("http://localhost:3000/api/inngest"), {})).status).toBe(401);
     const discovery = await GET(new NextRequest("http://localhost:3000/api/inngest", { headers: signature("") }), {});
     expect(discovery.status).toBe(200);
-    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(6);
+    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(7);
     expect(JSON.stringify(body)).not.toContain(process.env.INNGEST_SIGNING_KEY!);
     const execution = await POST(new NextRequest("http://localhost:3000/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { method: "POST", body: "{}" }), {});
     expect(execution.status).toBe(401);

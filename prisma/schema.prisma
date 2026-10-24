@@ -1146,6 +1146,7 @@ model OperationEvidenceUpload {
  readyAt DateTime? @map("ready_at") @db.Timestamptz(6)
  attachedAt DateTime? @map("attached_at") @db.Timestamptz(6)
  cleanedAt DateTime? @map("cleaned_at") @db.Timestamptz(6)
+ partUploadExpiresAt DateTime? @map("part_upload_expires_at") @db.Timestamptz(6)
  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
@@ -1155,6 +1156,7 @@ model OperationEvidenceUpload {
  @@unique([organizationId,id],map:"operation_evidence_upload_org_id_unique")
  @@unique([organizationId,actorId,localId],map:"operation_evidence_upload_actor_key_unique")
  @@index([organizationId,status,createdAt],map:"operation_evidence_upload_org_status_created_idx")
+ @@index([organizationId,status,cleanedAt,partUploadExpiresAt,createdAt],map:"operation_evidence_upload_cleanup_idx")
  @@map("operation_evidence_upload")
 }
 
