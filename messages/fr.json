@@ -46,7 +46,10 @@
     "mfaInvalid": "Le deuxieme facteur n'a pas pu etre verifie.",
     "rateLimited": "Trop de tentatives. Attendez une minute puis reessayez.",
     "generic": "Connexion impossible. Reessayez.",
-    "passkey": "Se connecter avec une clé d’accès"
+    "passkey": "Se connecter avec une clé d’accès",
+    "pinKeypad": "Clavier du code PIN",
+    "pinClear": "Effacer",
+    "pinDelete": "Effacer le dernier chiffre"
   },
   "AppShell": {
     "actions": "Actions de l'espace",

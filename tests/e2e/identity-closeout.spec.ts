@@ -116,6 +116,8 @@ test.describe("identity closeout acceptance", () => {
     await expect(page).toHaveURL(/\/en\/app\/security/u);
     await page.goto(`${origin}/en/app/identity`);
     await expect(page).toHaveURL(/\/en\/app\/security/u);
+    await page.goto(`${origin}/en/app/field`); await expect(page).toHaveURL(/\/en\/app\/security/u);
+    await page.goto(`${origin}/en/app/field/018f0a0b-0000-7000-9000-000000000901`); await expect(page).toHaveURL(/\/en\/app\/security/u);
     const client = await page.context().newCDPSession(page);
     await client.send("WebAuthn.enable");
     await client.send("WebAuthn.addVirtualAuthenticator", { options: {

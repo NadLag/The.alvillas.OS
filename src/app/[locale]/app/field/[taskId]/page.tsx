@@ -33,10 +33,11 @@ export default async function FieldTaskPage({
   setRequestLocale(appLocale);
 
   const session = await auth();
+  if (session?.user?.id && session.user.securitySetupRequired) redirect(`/${appLocale}/app/security`);
   const ctx = await reservationActorContextFromSession(session);
 
   if (!ctx) {
-    redirect(`/${appLocale}/login`);
+    redirect(`/${appLocale}/login?surface=field`);
   }
 
   const t = await getTranslations({locale,namespace:"Field"});

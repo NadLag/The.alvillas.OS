@@ -13,29 +13,33 @@ export function generateStaticParams() {
 }
 
 export default async function LoginPage({
-  params
+  params,
+  searchParams
 }: Readonly<{
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ surface?: string | string[] }>;
 }>) {
   const { locale } = await params;
   const appLocale = safeLocale(locale);
   setRequestLocale(appLocale);
+  const surface = (await searchParams).surface === "field" ? "field" : undefined;
 
   const session = await auth();
 
   if (session?.user?.id) {
-    redirect(`/${safeLocale(session.user.preferredLocale)}/app`);
+    if (session.user.securitySetupRequired) redirect(`/${safeLocale(session.user.preferredLocale)}/app/security`);
+    redirect(`/${safeLocale(session.user.preferredLocale)}/app${surface === "field" ? "/field" : ""}`);
   }
 
   const t = await getTranslations("Login");
 
   return (
-    <section className="auth-page">
+    <section className={`auth-page${surface === "field" ? " field-auth-page" : ""}`}>
       <div className="auth-topbar">
         <Link className="secondary-button" href={`/${appLocale}`}>
           {t("publicSite")}
         </Link>
-        <LocaleSwitch currentLocale={appLocale} label={t("language")} path="/login" />
+        <LocaleSwitch currentLocale={appLocale} label={t("language")} path={`/login${surface === "field" ? "?surface=field" : ""}`} />
       </div>
       <div className="auth-panel">
         <div className="auth-panel-header">
@@ -45,6 +49,8 @@ export default async function LoginPage({
         </div>
         <LoginForm
           locale={appLocale}
+          key={surface ?? "workspace"}
+          surface={surface}
           labels={{
             email: t("email"),
             phone: t("phone"),
@@ -69,7 +75,10 @@ export default async function LoginPage({
             mfaInvalid: t("mfaInvalid"),
             rateLimited: t("rateLimited"),
             generic: t("generic"),
-            passkey: t("passkey")
+            passkey: t("passkey"),
+            pinKeypad: t("pinKeypad"),
+            pinClear: t("pinClear"),
+            pinDelete: t("pinDelete")
           }}
         />
       </div>

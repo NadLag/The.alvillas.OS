@@ -5,11 +5,14 @@ import { useActionState, useState, useTransition } from "react";
 import { startAuthentication } from "@simplewebauthn/browser";
 import type { LoginFormState } from "@/modules/identity/application/session-actions";
 import { beginPasskeyLoginAction, finishPasskeyLoginAction, loginAction } from "@/modules/identity/application/session-actions";
+import { PinKeypad } from "@/design-system/pin-keypad";
+import { normalizePinInput } from "../domain/pin-input";
 
 type LoginMethod = "password" | "pin";
 
 type LoginFormProps = {
   locale: string;
+  surface?: "field";
   labels: {
     email: string;
     phone: string;
@@ -35,6 +38,9 @@ type LoginFormProps = {
     rateLimited: string;
     generic: string;
     passkey: string;
+    pinKeypad: string;
+    pinClear: string;
+    pinDelete: string;
   };
 };
 
@@ -63,8 +69,9 @@ function loginMessage(
   return null;
 }
 
-export function LoginForm({ locale, labels }: LoginFormProps) {
-  const [method, setMethod] = useState<LoginMethod>("password");
+export function LoginForm({ locale, labels, surface }: LoginFormProps) {
+  const [method, setMethod] = useState<LoginMethod>(surface === "field" ? "pin" : "password");
+  const [pin, setPin] = useState("");
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [passkeyState, setPasskeyState] = useState<LoginFormState | null>(null);
   const [email, setEmail] = useState("");
@@ -72,6 +79,7 @@ export function LoginForm({ locale, labels }: LoginFormProps) {
   const [state, formAction, pending] = useActionState(
     async (previous: LoginFormState, formData: FormData) => {
       const result = await loginAction(locale, previous, formData);
+      if (formData.get("method") === "pin" && result.status === "error") setPin("");
       setPasskeyState(null);
       return result;
     },
@@ -87,7 +95,7 @@ export function LoginForm({ locale, labels }: LoginFormProps) {
       try {
         const { challengeId, options } = await beginPasskeyLoginAction(email);
         const response = await startAuthentication(options);
-        setPasskeyState(await finishPasskeyLoginAction(locale, email, challengeId, response));
+        setPasskeyState(await finishPasskeyLoginAction(locale, email, challengeId, response, surface));
       } catch {
         setPasskeyState({ status: "error", messageKey: "generic" });
       }
@@ -108,6 +116,7 @@ export function LoginForm({ locale, labels }: LoginFormProps) {
       action={formAction}
       onReset={(event) => event.preventDefault()}
     >
+      {surface ? <input name="surface" type="hidden" value={surface} /> : null}
       {mfaRequired ? (
         <div className="auth-mfa-step" data-testid="login-mfa-step">
           <input name="method" type="hidden" value="mfa" />
@@ -159,8 +168,9 @@ export function LoginForm({ locale, labels }: LoginFormProps) {
               <label>
                 <input
                   checked={method === "password"}
+                  disabled={busy}
                   name="method"
-                  onChange={() => setMethod("password")}
+                  onChange={() => { setMethod("password"); setPin(""); }}
                   type="radio"
                   value="password"
                 />
@@ -169,8 +179,9 @@ export function LoginForm({ locale, labels }: LoginFormProps) {
               <label>
                 <input
                   checked={method === "pin"}
+                  disabled={busy}
                   name="method"
-                  onChange={() => setMethod("pin")}
+                  onChange={() => { setMethod("pin"); setPin(""); }}
                   type="radio"
                   value="pin"
                 />
@@ -213,6 +224,7 @@ export function LoginForm({ locale, labels }: LoginFormProps) {
                   autoComplete="tel"
                   autoFocus
                   data-testid="login-phone"
+                  disabled={busy}
                   name="phone"
                   required
                   type="tel"
@@ -221,15 +233,20 @@ export function LoginForm({ locale, labels }: LoginFormProps) {
               <label className="field">
                 <span>{labels.pin}</span>
                 <input
-                  autoComplete="one-time-code"
+                  autoComplete="current-password"
                   data-testid="login-pin"
+                  disabled={busy}
                   inputMode="numeric"
                   name="pin"
                   pattern="[0-9]*"
                   required
                   type="password"
+                  value={pin}
+                  onChange={event => setPin(normalizePinInput(event.target.value))}
                 />
               </label>
+              <PinKeypad disabled={busy} onDigit={digit => setPin(value => value + digit)} onDelete={() => setPin(value => value.slice(0, -1))}
+                onClear={() => setPin("")} labels={{ keypad: labels.pinKeypad, clear: labels.pinClear, delete: labels.pinDelete }} />
             </div>
           )}
         </>

@@ -920,6 +920,10 @@ textarea:disabled {
 .field-checklist-progress p, .field-language p { margin: 0; }
 .field-work-views button { transition: box-shadow var(--motion-duration-base) var(--motion-ease-standard); }
 .field-work-views button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-foreground); }
+.pin-keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
+.pin-keypad button { justify-content: center; min-block-size: 64px; padding-inline: var(--space-3); font-size: var(--font-size-xl); }
+.pin-keypad .pin-keypad-action { font-size: var(--font-size-md); }
+.field-auth-page { font-size: var(--font-size-lg); }
 
 .field-checklist-progress progress {
   inline-size: 100%;

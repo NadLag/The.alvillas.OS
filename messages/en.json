@@ -46,7 +46,10 @@
     "mfaInvalid": "The second factor could not be verified.",
     "rateLimited": "Too many attempts. Wait a minute and try again.",
     "generic": "Sign in failed. Try again.",
-    "passkey": "Sign in with a passkey"
+    "passkey": "Sign in with a passkey",
+    "pinKeypad": "PIN keypad",
+    "pinClear": "Clear",
+    "pinDelete": "Delete last digit"
   },
   "AppShell": {
     "actions": "Workspace actions",

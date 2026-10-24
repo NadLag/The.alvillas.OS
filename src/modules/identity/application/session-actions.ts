@@ -182,7 +182,7 @@ export async function loginAction(
     `/${await preferredLocaleForLogin({
       email: parsed.data.email,
       phone: parsed.data.phone
-    }, appLocale)}/app`
+    }, appLocale)}/app${formData.get("surface") === "field" ? "/field" : ""}`
   );
 }
 
@@ -205,7 +205,7 @@ export async function beginPasskeyLoginAction(email: string) {
 }
 
 export async function finishPasskeyLoginAction(
-  locale: string, email: string, challengeId: string, response: AuthenticationResponseJSON
+  locale: string, email: string, challengeId: string, response: AuthenticationResponseJSON, surface?: "field"
 ): Promise<LoginFormState> {
   const parsed = z.object({ email: z.string().trim().email(), challengeId: z.string().uuid() }).safeParse({ email, challengeId });
   if (!parsed.success) return { status: "error", messageKey: "invalid" };
@@ -228,7 +228,7 @@ export async function finishPasskeyLoginAction(
   } catch {
     return { status: "error", messageKey: "invalid" };
   }
-  redirect(`/${await preferredLocaleForLogin({ email: normalized }, safeLocale(locale))}/app`);
+  redirect(`/${await preferredLocaleForLogin({ email: normalized }, safeLocale(locale))}/app${surface === "field" ? "/field" : ""}`);
 }
 
 export async function updatePreferredLocaleAction(locale: string, formData: FormData): Promise<void> {
