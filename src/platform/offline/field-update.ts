@@ -1,27 +1,43 @@
 export function refreshFieldApp(registration: ServiceWorkerRegistration | null, reload: () => void, unavailable: () => void): void {
   const waiting = registration?.waiting;
-  if (!waiting) { reload(); return; }
+  const worker = waiting ?? registration?.active;
+  if (!worker) { reload(); return; }
+  const container = navigator.serviceWorker;
+  if (!waiting && worker.state === "activated" && container.controller === worker) { reload(); return; }
   const channel = new MessageChannel();
   let refreshed = false;
+  let poll: number | undefined;
+  const ready = () => worker.state === "activated" && container.controller === worker;
   const finish = (activated: boolean) => {
     if (refreshed) return;
     refreshed = true;
-    window.clearTimeout(timeout); channel.port1.close(); waiting.removeEventListener("statechange", changed);
+    window.clearTimeout(timeout); window.clearTimeout(poll); channel.port1.close(); worker.removeEventListener("statechange", changed);
+    container.removeEventListener("controllerchange", changed);
     if (activated) reload(); else unavailable();
   };
   const changed = () => {
-    if (waiting.state === "activated") finish(true);
-    else if (waiting.state === "redundant") finish(false);
+    if (refreshed) return;
+    if (worker.state === "redundant") { finish(false); return; }
+    window.clearTimeout(poll);
+    // Check on a new task after browser lifecycle notifications have settled.
+    poll = window.setTimeout(inspect, 0);
   };
-  // skipWaiting's acknowledgement can precede activation. Navigating while the
-  // replacement is activating can strand a native browser's document load.
-  // Polling also recovers a missed message/state event without blind reloads.
-  const timeout = window.setTimeout(() => finish(waiting.state === "activated"), 3000);
-  waiting.addEventListener("statechange", changed);
+  const inspect = () => {
+    if (refreshed) return;
+    if (ready()) { finish(true); return; }
+    if (worker.state === "redundant") { finish(false); return; }
+    poll = window.setTimeout(inspect, 50);
+  };
+  // The waiting slot clears while the replacement is still activating. Neither
+  // that empty slot nor an acknowledgement proves this document is controlled.
+  const timeout = window.setTimeout(() => finish(ready()), 3000);
+  worker.addEventListener("statechange", changed);
+  container.addEventListener("controllerchange", changed);
   channel.port1.onmessage = event => {
     const value: unknown = event.data;
     if (value && typeof value === "object" && "type" in value && value.type === "ALVILLAS_UPDATE_READY") changed();
   };
-  try { waiting.postMessage({ type: "ALVILLAS_SKIP_WAITING" }, [channel.port2]); }
+  poll = window.setTimeout(inspect, 0);
+  try { waiting?.postMessage({ type: "ALVILLAS_SKIP_WAITING" }, [channel.port2]); }
   catch { finish(false); }
 }
