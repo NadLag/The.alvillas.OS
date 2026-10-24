@@ -13,7 +13,10 @@ export async function fieldUploadRequest(request: NextRequest, action: Handler, 
 } = { contentType: "application/json", read: request => readBoundedJsonRequest(request, 65536) }) {
   const ctx = await reservationActorContextFromSession(await auth());
   if (!ctx) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers });
-  if (request.headers.get("origin") !== new URL(request.url).origin || request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== options.contentType)
+  // Match the existing private notification endpoint: Next can normalize the
+  // internal URL hostname, while Host retains the browser's requested authority.
+  const url = new URL(request.url), expectedOrigin = `${url.protocol}//${request.headers.get("host") ?? url.host}`;
+  if (request.headers.get("origin") !== expectedOrigin || request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== options.contentType)
     return NextResponse.json({ error: "forbidden" }, { status: 403, headers });
   let value: unknown;
   try { value = await options.read(request); }

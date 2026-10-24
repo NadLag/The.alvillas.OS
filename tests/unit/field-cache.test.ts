@@ -1,11 +1,14 @@
 import "fake-indexeddb/auto";
 import Dexie from "dexie";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { FieldQueue } from "@/platform/offline/field-queue";
+import { FieldQueue, syncFieldQueue } from "@/platform/offline/field-queue";
+import { fieldUploadChunkBytes, type FieldUploadManifest } from "@/modules/reservations/domain/field-upload";
 import { fieldIdentity, type FieldQueueScope } from "@/platform/offline/field-queue-store";
 import { refreshFieldCache } from "@/platform/offline/field-pull";
 import { resolveFieldScope } from "@/platform/offline/field-session";
+import { prepareQueuedPhoto } from "@/platform/offline/field-photo-sync";
+import { syncPushInputSchema } from "@/modules/reservations/domain/sync-protocol";
 import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
 
 const stores: FieldQueue[] = [], scope: FieldQueueScope = { organizationId: randomUUID(), userId: randomUUID() };
@@ -25,8 +28,150 @@ async function draft(queue: FieldQueue, owner: FieldQueueScope, taskId: string, 
   return queue.saveDraft(owner, taskId, ids, note, (await queue.readCache(owner)).state!.incarnation);
 }
 const requestUrl = (input: Parameters<typeof fetch>[0]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, "https://example.test");
+function photo(task: FieldWorkSnapshot) {
+  const bytes = Buffer.alloc(fieldUploadChunkBytes + 19, 0x5a);
+  Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDQAAAABJRU5ErkJggg==", "base64").copy(bytes);
+  const manifest: FieldUploadManifest = { protocolVersion: 1, localId: randomUUID(), taskId: task.id, contentType: "image/png", note: "Captured photo retained",
+    size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), parts: [bytes.subarray(0, fieldUploadChunkBytes), bytes.subarray(fieldUploadChunkBytes)]
+      .map(part => ({ size: part.length, sha256: createHash("sha256").update(part).digest("hex") })) };
+  return { manifest, bytes, blob: new Blob([bytes], { type: "image/png" }) };
+}
+function photoSend(handler: (url: URL, options?: RequestInit) => Response | Promise<Response>) {
+  return vi.fn<typeof fetch>((input, options) => Promise.resolve().then(() => handler(requestUrl(input), options)));
+}
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(stores.splice(0).map(store => store.delete())); });
 describe("field work cache", () => {
+  it("atomically persists photo bytes and the original ordered operation across reopening", async () => {
+    const queue = await setup(), task = job(), capture = photo(task);
+    await publish(queue, scope, 0, [task], [], "cursor", stamp);
+    const incarnation = (await queue.readCache(scope)).state!.incarnation;
+    const entries = await Promise.all([queue.storePhoto(scope, capture.manifest, capture.blob, incarnation), queue.storePhoto(scope, capture.manifest, capture.blob, incarnation)]);
+    expect(entries[0].sequence).toBe(entries[1].sequence);
+    queue.close(); const reopened = new FieldQueue(queue.name); stores.splice(stores.indexOf(queue), 1, reopened);
+    const saved = await reopened.photos.get(`${fieldIdentity(scope)}:${capture.manifest.localId}`);
+    expect(saved).toMatchObject({ manifest: capture.manifest, incarnation, uploadedParts: [], ready: false });
+    expect(Buffer.from(await saved!.blob.arrayBuffer())).toEqual(capture.bytes);
+    expect(await reopened.entries(scope)).toEqual([entries[0]]);
+    const send = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 503 }));
+    expect(await syncFieldQueue(reopened, scope, send)).toBe("queued"); expect(send.mock.calls.map(call => call[0])).toEqual(["/api/field/uploads"]);
+    await expect(reopened.storePhoto(scope, { ...capture.manifest, note: "Replaced original photo" }, capture.blob, incarnation)).rejects.toThrow("FIELD_PHOTO_KEY_REUSED");
+  });
+  it("binds a server upload once, retains partial progress and acknowledges evidence without completing the task", async () => {
+    const queue = await setup(), task = job(), capture = photo(task), uploadId = randomUUID();
+    await publish(queue, scope, 0, [task], [], "cursor", stamp); await draft(queue, scope, task.id, [], "Checklist remains unfinished");
+    const incarnation = (await queue.readCache(scope)).state!.incarnation;
+    const original = await queue.storePhoto(scope, capture.manifest, capture.blob, incarnation);
+    await queue.updatePhoto(scope, capture.manifest.localId, incarnation, { uploadId, uploadedPart: 0 });
+    await expect(queue.updatePhoto(scope, capture.manifest.localId, incarnation, { uploadId: randomUUID() })).rejects.toThrow("FIELD_PHOTO_KEY_REUSED");
+    const entry = (await queue.entries(scope))[0]; expect(entry.sequence).toBe(original.sequence); expect(entry.deviceId).toBe(original.deviceId);
+    expect(entry.operation).toMatchObject({ type: "field_task.evidence.attach", client_op_id: capture.manifest.localId, payload: { uploadId, taskId: task.id } });
+    const send = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValue(Response.json({ op_schema_version: 1, results: [{ client_op_id: capture.manifest.localId, status: "APPLIED", server_version: null }] }));
+    expect(await syncFieldQueue(queue, scope, send)).toBe("queued"); expect(send.mock.calls.map(call => call[0])).toEqual(["/api/field/uploads"]);
+    expect((await queue.photos.toArray())[0].uploadedParts).toEqual([0]);
+    await queue.updatePhoto(scope, capture.manifest.localId, incarnation, { uploadedPart: 1, ready: true });
+    send.mockClear();
+    const acknowledged = vi.fn<() => Promise<void>>().mockResolvedValue();
+    expect(await syncFieldQueue(queue, scope, send, acknowledged)).toBe("synced");
+    expect(send).toHaveBeenCalledTimes(1); expect(acknowledged).not.toHaveBeenCalled();
+    expect(await queue.photos.count()).toBe(0); expect(await queue.entries(scope)).toEqual([]);
+    expect(await queue.cachedJobs(scope)).toEqual([task]); expect((await queue.readDraft(scope, task.id))?.note).toBe("Checklist remains unfinished");
+  });
+  it("rolls back photo bytes and ordering together after quota failure", async () => {
+    const queue = await setup(), task = job(), capture = photo(task);
+    await publish(queue, scope, 0, [task], [], "cursor", stamp); const incarnation = (await queue.readCache(scope)).state!.incarnation;
+    vi.spyOn(queue.photos, "add").mockRejectedValueOnce(new DOMException("Quota exhausted", "QuotaExceededError"));
+    await expect(queue.storePhoto(scope, capture.manifest, capture.blob, incarnation)).rejects.toThrow("Quota exhausted");
+    expect(await queue.photos.count()).toBe(0); expect(await queue.entries(scope)).toEqual([]);
+    await queue.storePhoto(scope, capture.manifest, capture.blob, incarnation);
+    expect(await queue.photos.count()).toBe(1); expect(await queue.entries(scope)).toHaveLength(1);
+  });
+  it("rejects late photo callbacks after logout and a fresh sign-in by the same account", async () => {
+    const queue = await setup(), task = job(), capture = photo(task);
+    await publish(queue, scope, 0, [task], [], "cursor", stamp); const before = (await queue.readCache(scope)).state!.incarnation;
+    await queue.storePhoto(scope, capture.manifest, capture.blob, before); await queue.wipe(scope); await queue.activate(scope);
+    await publish(queue, scope, 0, [task], [], "new-cursor", stamp); const after = (await queue.readCache(scope)).state!.incarnation;
+    await queue.storePhoto(scope, capture.manifest, capture.blob, after);
+    expect(await queue.updatePhoto(scope, capture.manifest.localId, before, { uploadId: randomUUID(), uploadedPart: 0, ready: true })).toBe(false);
+    expect((await queue.photos.toArray())[0]).toMatchObject({ incarnation: after, ready: false, uploadedParts: [] });
+    expect((await queue.entries(scope))[0].operation.type).toBe("field_photo.prepare");
+  });
+  it("wipes private photo bytes on account or tenant changes and blocks stale capture callbacks", async () => {
+    const queue = await setup(), task = job(), capture = photo(task), other = { organizationId: randomUUID(), userId: randomUUID() };
+    await publish(queue, scope, 0, [task], [], "cursor", stamp); const incarnation = (await queue.readCache(scope)).state!.incarnation;
+    await queue.storePhoto(scope, capture.manifest, capture.blob, incarnation); await queue.activate(other);
+    expect(await queue.photos.count()).toBe(0); expect(await queue.operations.count()).toBe(0);
+    expect(await queue.updatePhoto(scope, capture.manifest.localId, incarnation, { uploadedPart: 0 })).toBe(false);
+    await expect(queue.storePhoto(scope, capture.manifest, capture.blob, incarnation)).rejects.toThrow("FIELD_SESSION_CHANGED");
+  });
+  it("resumes only unacknowledged photo chunks with backoff and retries the original business operation after a lost acknowledgement", async () => {
+    const queue = await setup(), task = job(), capture = photo(task), uploadId = randomUUID();
+    await publish(queue, scope, 0, [task], [], "cursor", stamp); const incarnation = (await queue.readCache(scope)).state!.incarnation;
+    const original = await queue.storePhoto(scope, capture.manifest, capture.blob, incarnation), partCalls = [0, 0], wire: unknown[] = [];
+    let clock = 1000, losePart = true, loseBusiness = true, completionCount = 0;
+    const send = photoSend(async (url, options) => {
+      if (url.pathname === "/api/field/uploads") return Response.json({ uploadId, status: "OPEN" });
+      if (url.pathname === "/api/field/uploads/part") {
+        const index = Number(url.searchParams.get("index")); partCalls[index]++;
+        expect(options?.body).toBeInstanceOf(Blob);
+        const from = index ? fieldUploadChunkBytes : 0;
+        expect(Buffer.from(await (options!.body as Blob).arrayBuffer())).toEqual(capture.bytes.subarray(from, from + capture.manifest.parts[index].size));
+        if (index === 1 && losePart) { losePart = false; throw Error("Lost part acknowledgement"); }
+        return Response.json({ stored: true });
+      }
+      if (url.pathname === "/api/field/uploads/complete") return Response.json({ uploadId, status: "READY" });
+      if (url.pathname !== "/api/sync/push" || typeof options?.body !== "string") throw Error("Unexpected photo request");
+      const payload = syncPushInputSchema.parse(JSON.parse(options.body) as unknown); wire.push(payload);
+      expect(payload.ops[0]).toMatchObject({ client_op_id: original.operation.client_op_id, type: "field_task.evidence.attach", payload: { uploadId, taskId: task.id } });
+      if (loseBusiness) { loseBusiness = false; completionCount++; throw Error("Lost business acknowledgement"); }
+      return Response.json({ op_schema_version: 1, results: [{ client_op_id: original.operation.client_op_id, status: "DUPLICATE", server_version: null }] });
+    });
+    expect(await prepareQueuedPhoto(queue, scope, original, send, () => clock)).toBe("queued");
+    expect((await queue.photos.toArray())[0]).toMatchObject({ uploadedParts: [0], attempts: 1, retryAt: 2000 });
+    const requests = send.mock.calls.length; clock = 1500;
+    expect(await prepareQueuedPhoto(queue, scope, original, send, () => clock)).toBe("queued"); expect(send).toHaveBeenCalledTimes(requests);
+    clock = 2000; const prepared = await prepareQueuedPhoto(queue, scope, original, send, () => clock);
+    expect(prepared).toMatchObject({ deviceId: original.deviceId, sequence: original.sequence, operation: { client_op_id: original.operation.client_op_id } });
+    expect(partCalls).toEqual([1, 2]); expect(await syncFieldQueue(queue, scope, send)).toBe("queued");
+    expect((await queue.photos.toArray())[0].ready).toBe(true); expect(await syncFieldQueue(queue, scope, send)).toBe("synced");
+    expect(wire).toHaveLength(2); expect(wire[0]).toEqual(wire[1]); expect(completionCount).toBe(1);
+    expect(await queue.photos.count()).toBe(0); expect(await queue.entries(scope)).toEqual([]); expect(await queue.cachedJobs(scope)).toEqual([task]);
+  });
+  it("recovers a lost upload-completion acknowledgement without retransmitting acknowledged chunks", async () => {
+    const queue = await setup(), task = job(), capture = photo(task), uploadId = randomUUID();
+    await publish(queue, scope, 0, [task], [], "cursor", stamp); const incarnation = (await queue.readCache(scope)).state!.incarnation;
+    const entry = await queue.storePhoto(scope, capture.manifest, capture.blob, incarnation); let ready = false, parts = 0, completed = 0;
+    const send = photoSend(url => {
+      if (url.pathname === "/api/field/uploads") return Response.json({ uploadId, status: ready ? "READY" : "OPEN" });
+      if (url.pathname === "/api/field/uploads/part") { parts++; return Response.json({ stored: true }); }
+      ready = true; completed++; throw Error("Lost completion acknowledgement");
+    });
+    expect(await prepareQueuedPhoto(queue, scope, entry, send, () => 1000)).toBe("queued");
+    expect(await prepareQueuedPhoto(queue, scope, entry, send, () => 2000)).toMatchObject({ operation: { type: "field_task.evidence.attach" } });
+    expect(parts).toBe(2); expect(completed).toBe(1); expect((await queue.photos.toArray())[0]).toMatchObject({ ready: true, attempts: 0, retryAt: 0 });
+  });
+  it("preserves captured evidence and original keys for review when upload authorization is rejected", async () => {
+    const queue = await setup(), task = job(), capture = photo(task);
+    await publish(queue, scope, 0, [task], [], "cursor", stamp); const incarnation = (await queue.readCache(scope)).state!.incarnation;
+    const entry = await queue.storePhoto(scope, capture.manifest, capture.blob, incarnation), send = photoSend(() => new Response(null, { status: 403 }));
+    expect(await prepareQueuedPhoto(queue, scope, entry, send)).toBe("rejected");
+    expect((await queue.entries(scope))[0]).toMatchObject({ deviceId: entry.deviceId, syncStatus: "rejected", operation: { client_op_id: entry.operation.client_op_id }, result: { error_code: "REJECTED_FORBIDDEN" } });
+    expect(Buffer.from(await (await queue.photos.toArray())[0].blob.arrayBuffer())).toEqual(capture.bytes);
+    send.mockClear(); expect(await syncFieldQueue(queue, scope, send)).toBe("rejected"); expect(send).not.toHaveBeenCalled();
+  });
+  it("does not wipe fresh photo work when an old session's upload response arrives late", async () => {
+    const queue = await setup(), task = job(), capture = photo(task);
+    await publish(queue, scope, 0, [task], [], "cursor", stamp); const before = (await queue.readCache(scope)).state!.incarnation;
+    const entry = await queue.storePhoto(scope, capture.manifest, capture.blob, before);
+    let respond!: (value: Response) => void, began!: () => void;
+    const started = new Promise<void>(resolve => { began = resolve; });
+    const send = vi.fn<typeof fetch>(() => { began(); return new Promise(resolve => { respond = resolve; }); });
+    const pending = prepareQueuedPhoto(queue, scope, entry, send); await started;
+    await queue.wipe(scope); await queue.activate(scope); await publish(queue, scope, 0, [task], [], "new-cursor", stamp);
+    const after = (await queue.readCache(scope)).state!.incarnation; await queue.storePhoto(scope, capture.manifest, capture.blob, after);
+    respond(new Response(null, { status: 401 })); expect(await pending).toBe("rejected");
+    expect((await queue.photos.toArray())[0].incarnation).toBe(after); expect(await queue.entries(scope)).toHaveLength(1);
+  });
   it("acknowledges photo evidence without removing a cached job or its unfinished checklist draft", async () => {
     const queue = await setup(), task = job();
     await publish(queue, scope, 0, [task], [], "cursor", stamp);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
 import { optionalGuestPhoneSchema } from "@/platform/notifications/whatsapp";
@@ -105,7 +105,8 @@ export function FieldTaskCompletionForm({
   checklistItems,
   labels,
   mode = "connected",
-  readOnly = false
+  readOnly = false,
+  beforeComplete
 }: {
   locale: string;
   taskId: string;
@@ -116,9 +117,12 @@ export function FieldTaskCompletionForm({
   labels: FieldTaskLabels;
   mode?: "connected" | "cached";
   readOnly?: boolean;
+  beforeComplete?: ReactNode;
 }) {
   const progressText=useTranslations('Operations.manage');
   const fieldText = useTranslations("Field");
+  const photoText = useTranslations("FieldPhoto");
+  const [photoBlocked, setPhotoBlocked] = useState(false);
   const [progress,progressAction,progressPending]=useActionState(operationAction.bind(null,locale,'progress'),{status:'idle'} as OperationFormState);
   const [checked,setChecked]=useState(()=>new Set(checklistItems.filter(i=>i.completed).map(i=>i.id)));
   const [state, formAction, pending] = useActionState(
@@ -237,7 +241,8 @@ export function FieldTaskCompletionForm({
       if (!navigator.onLine) event.preventDefault();
       return;
     }
-    if (navigator.onLine && mode === "connected") return;
+    if (document.querySelector('[data-field-photo-dirty="true"]')) { event.preventDefault(); setPhotoBlocked(true); return; }
+    setPhotoBlocked(false);
     event.preventDefault();
     void queueCompletion(new FormData(event.currentTarget));
   }
@@ -266,6 +271,7 @@ export function FieldTaskCompletionForm({
     >
       <input name="taskId" type="hidden" value={taskId} />
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
+      {photoBlocked ? <p role="status" data-testid="field-photo-completion-blocked">{photoText("unsaved")}</p> : null}
       <div className="field-checklist-progress">
         <p id={counterId} aria-live="polite" data-testid="field-checklist-progress">{progressText("progress", { done: checkedCount, total: checklistItems.length })}</p>
         {checklistItems.length ? <progress aria-labelledby={counterId} max={checklistItems.length} value={checkedCount} /> : null}
@@ -304,6 +310,7 @@ export function FieldTaskCompletionForm({
           {queueMessage}
         </p>
       ) : null}
+      {beforeComplete}
       <button
         className="primary-button field-complete-button"
         data-testid="field-task-complete"

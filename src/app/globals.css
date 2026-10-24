@@ -2471,3 +2471,12 @@ textarea:disabled {
 .automation-checkbox input { inline-size: 1.25rem; min-block-size: 1.25rem; }
 .automation-workspace summary { cursor: pointer; padding-block: var(--space-3); min-block-size: var(--target-min); }
 @media (max-width: 800px) { .automation-workspace, .automation-fields { grid-template-columns: minmax(0,1fr); } }
+.field-photo { min-inline-size: 0; margin-block: var(--space-5); }
+.field-photo-form, .field-photo-queue { display: grid; gap: var(--space-3); min-inline-size: 0; }
+.field-photo-form :is(input,textarea) { inline-size: 100%; min-inline-size: 0; min-block-size: 48px; font-size: 17px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); background: var(--surface-raised); color: var(--foreground); }
+.field-photo-form textarea { min-block-size: 96px; resize: vertical; }
+.field-photo-form input::file-selector-button { min-block-size: 48px; font: inherit; }
+.field-photo .form-actions { flex-wrap: wrap; }
+.field-photo .form-actions button { min-block-size: 64px; }
+.field-photo-queue article { min-inline-size: 0; overflow-wrap: anywhere; padding-block: var(--space-3); border-block-end: 1px solid var(--border); }
+.field-photo progress { inline-size: 100%; }

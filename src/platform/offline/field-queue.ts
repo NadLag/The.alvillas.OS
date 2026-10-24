@@ -1,12 +1,17 @@
 import { syncPushOpSchema, type SyncPushOp } from "@/modules/reservations/domain/sync-protocol";
 import { FieldQueueStore, type FieldQueueScope, type FieldQueueEntry } from "./field-queue-store";
 import { requestFieldBackgroundSync } from "./background-sync";
+import { fieldUploadManifestSchema } from "@/modules/reservations/domain/field-upload";
 export type { FieldQueueScope, FieldQueueEntry, QueueOutcome } from "./field-queue-store";
 export { syncFieldQueue } from "./field-sync";
 
 const legacyQueueKey = "alvillas.fieldTaskQueue.v1";
 const legacyDeviceKey = "alvillas.fieldDeviceId.v1";
 export class FieldQueue extends FieldQueueStore {
+  async enqueuePhoto(scope: FieldQueueScope, manifest: unknown, blob: Blob, incarnation: string): Promise<FieldQueueEntry> {
+    const stored = await this.storePhoto(scope, fieldUploadManifestSchema.parse(manifest), blob, incarnation);
+    void requestFieldBackgroundSync(); return stored;
+  }
   async enqueue(scope: FieldQueueScope, operation: SyncPushOp, deviceId?: string): Promise<FieldQueueEntry> {
     const stored = await this.store(scope, syncPushOpSchema.parse(operation), deviceId);
     void requestFieldBackgroundSync();

@@ -1,5 +1,6 @@
 import type { SyncPushOpResult } from "@/modules/reservations/domain/sync-protocol";
 import { fieldIdentity, type FieldQueueStore, type FieldQueueScope, type QueueOutcome } from "./field-queue-store";
+import { prepareQueuedPhoto } from "./field-photo-sync";
 
 const active = new WeakMap<FieldQueueStore, Map<string, Promise<QueueOutcome>>>();
 export type FieldAcknowledgement = FieldQueueScope & { taskId: string; clientOpId: string };
@@ -18,8 +19,15 @@ export function syncFieldQueue(queue: FieldQueueStore, scope: FieldQueueScope, s
 async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeof fetch, acknowledge?: Acknowledge): Promise<QueueOutcome> {
   const entries = await queue.entries(scope);
   let outcome: QueueOutcome = "idle";
-  for (const entry of entries) {
+  for (let entry of entries) {
     if (entry.syncStatus !== "pending") { outcome = entry.syncStatus; continue; }
+    if (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach") {
+      const prepared = await prepareQueuedPhoto(queue, scope, entry, send);
+      if (prepared === "queued" || prepared === "rejected") return prepared;
+      if (!prepared) continue;
+      entry = prepared;
+      if (entry.operation.type === "field_photo.prepare") return "queued";
+    }
     if ((await queue.metadata.get("identity"))?.value !== fieldIdentity(scope)) return "rejected";
     let response: Response;
     try {
