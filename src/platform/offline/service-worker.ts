@@ -42,7 +42,11 @@ self.addEventListener("install", event => { event.waitUntil(prepareOfflineShells
 self.addEventListener("message", event => {
   const data: unknown = event.data;
   if (data && typeof data === "object" && "type" in data && data.type === "ALVILLAS_SKIP_WAITING") {
-    event.waitUntil(self.skipWaiting().then(() => { event.ports[0]?.postMessage({ type: "ALVILLAS_UPDATE_READY" }); }));
+    // The request persists in the browser independently of this message event.
+    // Its promise can remain pending until activation; do not hold this event
+    // open across that lifecycle transition. The page still requires actual
+    // controller adoption before it reloads.
+    void self.skipWaiting().then(() => { event.ports[0]?.postMessage({ type: "ALVILLAS_UPDATE_READY" }); }).catch(() => undefined);
   }
 });
 self.addEventListener("activate", event => {
