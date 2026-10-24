@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { assignmentCandidates, conditionsMatch, scopeId, scopeType, type AuthContext, type Scope } from "@/platform/authz/authorize";
+import { assignmentCandidates, conditionsMatch, permissionKey, scopeId, scopeType, type AuthContext, type Scope } from "@/platform/authz/authorize";
 
 const uuid = (value: string) => z.uuid().safeParse(value).success;
 function scopeWhere(scope: Scope): Prisma.OperationTaskWhereInput | null {
@@ -18,11 +18,12 @@ function scopeWhere(scope: Scope): Prisma.OperationTaskWhereInput | null {
 }
 
 /** SQL adapter for the same assignment scopes and conditions used by authorize(). */
-export function fieldTaskReadWhere(ctx: AuthContext, at: Date): Prisma.OperationTaskWhereInput {
-  if (!ctx.permissions.has("task:view")) return { OR: [] };
+export function fieldTaskReadWhere(ctx: AuthContext, at: Date, action: "view" | "validate" = "view"): Prisma.OperationTaskWhereInput {
+  const capability = permissionKey("task", action);
+  if (!ctx.permissions.has(capability)) return { OR: [] };
   const grants: Prisma.OperationTaskWhereInput[] = [];
   for (const assignment of assignmentCandidates(ctx)) {
-    if (assignment.scope.organizationId !== ctx.organizationId || !assignment.permissions.has("task:view")) continue;
+    if (assignment.scope.organizationId !== ctx.organizationId || !assignment.permissions.has(capability)) continue;
     if (!conditionsMatch(ctx, assignment, { type: "task", organizationId: ctx.organizationId,
       assignedUserAccountId: ctx.userAccountId, assignedPersonId: ctx.personId, status: assignment.conditions?.statuses?.[0] }, at)) continue;
     const where = scopeWhere(assignment.scope);

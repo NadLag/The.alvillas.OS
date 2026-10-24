@@ -181,4 +181,124 @@ describe("field pull on real PostgreSQL", () => {
     expect((await pull(f, { cursor: first.cursor, only_known: true, known_tasks: known(first.tasks) }, now)).tombstones).toEqual([job.id]);
     expect(await update(f, tx => tx.auditLog.count())).toBe(0); expect(await update(f, tx => tx.syncOp.count())).toBe(0);
   });
+
+  it("supervised pull retains reviewed versions and person-only performers while excluding own and closed work", async () => {
+    const f = await fixture(); f.ctx.authContext.permissions = new Set(["task:view", "task:validate", "task:edit"]);
+    const person = await update(f, tx => tx.person.create({ data: { organizationId: f.org, displayName: "Person-only performer" } }));
+    const colleague = await task(f, { assignedToPersonId: person.id, assignedToUserAccountId: null });
+    const own = await task(f), blocked = await task(f, { assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id, state: "BLOCKED" });
+    const completed = await task(f, { assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id, state: "COMPLETED" });
+    const result = fieldPullResultSchema.parse(await pull(f, { mode: "supervised" }));
+    expect(result.tasks.map(row => row.id)).toEqual([colleague.id]);
+    expect(result.tasks[0]).toMatchObject({ canEdit: false, proxyValidation: { performedByPersonId: person.id, expectedVersion: colleague.version } });
+    expect(result.tasks[0]).not.toHaveProperty("proxyValidation.performerName");
+    for (const id of [own.id, blocked.id, completed.id]) expect(result.tasks.map(row => row.id)).not.toContain(id);
+    expect((await pull(f, { mode: "assigned" })).tasks.map(row => row.id)).toEqual([own.id]);
+  });
+
+  it("supervised pull intersects view and validate grants before pagination across denied properties", async () => {
+    const f = await fixture(); f.ctx.authContext.permissions = new Set(["task:view", "task:validate"]);
+    const denied = await update(f, tx => tx.property.create({ data: propertyData(f.org, { name: "Denied supervisor villa" }) }));
+    await update(f, tx => tx.operationTask.createMany({ data: Array.from({ length: 60 }, () => ({ organizationId: f.org, propertyId: denied.id,
+      assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id, type: "INSPECTION", state: "ASSIGNED", dueDate: new Date("2025-01-01"), titleTranslations: { en: "Denied" }, idempotencyKey: randomUUID() })) }));
+    const allowed = await task(f, { assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id });
+    f.ctx.authContext.assignments = [
+      { permissions: new Set(["task:view"]), scope: { organizationId: f.org } },
+      { permissions: new Set(["task:validate"]), scope: { organizationId: f.org, scopeType: "property", scopeId: f.property.id } }
+    ];
+    const result = await pull(f, { mode: "supervised" }); expect(result.tasks.map(row => row.id)).toEqual([allowed.id]); expect(result.next_cursor).toBeNull();
+    f.ctx.authContext.assignments = [
+      { permissions: new Set(["task:view"]), scope: { organizationId: f.org, scopeType: "property", scopeId: denied.id } },
+      { permissions: new Set(["task:validate"]), scope: { organizationId: f.org, scopeType: "property", scopeId: f.property.id } }
+    ];
+    expect((await pull(f, { mode: "supervised" })).tasks).toEqual([]);
+    for (const grant of ["task:view", "task:validate"]) {
+      f.ctx.authContext.permissions = new Set([grant]);
+      await expect(pull(f, { mode: "supervised" })).rejects.toMatchObject({ code: "forbidden" });
+    }
+  });
+
+  it("supervised pull removes reassigned, archived, closed and foreign known records without business writes", async () => {
+    const f = await fixture(), foreign = await fixture(); f.ctx.authContext.permissions = new Set(["task:view", "task:validate"]);
+    const reassigned = await task(f, { assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id });
+    const archived = await task(f, { assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id });
+    const closed = await task(f, { assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id });
+    const active = await task(f, { assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id }), alien = await task(foreign);
+    const first = await pull(f, { mode: "supervised" }); expect(first.tasks).toHaveLength(4);
+    await update(f, async tx => {
+      await tx.operationTask.update({ where: { id: reassigned.id }, data: { assignedToPersonId: f.person.id, assignedToUserAccountId: f.account.id } });
+      await tx.operationTask.update({ where: { id: archived.id }, data: { archivedAt: new Date() } });
+      await tx.operationTask.update({ where: { id: closed.id }, data: { state: "CANCELLED" } });
+    });
+    const result = await pull(f, { mode: "supervised", cursor: first.cursor, only_known: true, known_tasks: [...known(first.tasks), { id: alien.id, revision: null }] });
+    expect(result.tombstones.sort()).toEqual([reassigned.id, archived.id, closed.id, alien.id].sort()); expect(result.tombstones).not.toContain(active.id);
+    expect(await update(f, tx => tx.auditLog.count())).toBe(0); expect(await update(f, tx => tx.syncOp.count())).toBe(0);
+    expect(await update(f, tx => tx.operationTask.count({ where: { organizationId: foreign.org } }))).toBe(0);
+  });
+
+  it("supervised pull detects critical progress and performer metadata changes without granting personal visibility", async () => {
+    const f = await fixture(); f.ctx.authContext.permissions = new Set(["task:view", "task:validate"]);
+    const job = await task(f, { assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id });
+    const first = await pull(f, { mode: "supervised" });
+    expect(first.tasks[0]).not.toHaveProperty("proxyValidation.performerName");
+    await update(f, tx => tx.operationTask.update({ where: { id: job.id }, data: { version: { increment: 1 } } }));
+    const changed = await pull(f, { mode: "supervised", known_tasks: known(first.tasks) });
+    expect(changed.known_changes[0]).toHaveProperty("proxyValidation.expectedVersion", job.version + 1);
+    f.ctx.authContext.permissions = new Set(["task:view", "task:validate", "team_member:view"]);
+    f.ctx.authContext.assignments = [
+      { permissions: new Set(["task:view", "task:validate"]), scope: { organizationId: f.org } },
+      { permissions: new Set(["team_member:view"]), scope: { organizationId: f.org, scopeType: "property", scopeId: randomUUID() } }
+    ];
+    expect((await pull(f, { mode: "supervised" })).tasks[0]).not.toHaveProperty("proxyValidation.performerName");
+    f.ctx.authContext.assignments = [
+      { permissions: new Set(["task:view", "task:validate"]), scope: { organizationId: f.org } },
+      { permissions: new Set(["team_member:view"]), scope: { organizationId: f.org } }
+    ];
+    const visible = await pull(f, { mode: "supervised" }); expect(visible.tasks[0]).toHaveProperty("proxyValidation.performerName", f.other.displayName);
+    await update(f, tx => tx.person.update({ where: { id: f.other.id }, data: { displayName: "Corrected performer" } }));
+    const renamed = await pull(f, { mode: "supervised", known_tasks: known(visible.tasks) });
+    expect(renamed.known_changes[0]).toHaveProperty("proxyValidation.performerName", "Corrected performer");
+    expect(renamed.known_changes[0].revision).not.toBe(visible.tasks[0].revision);
+    await expect(update(f, tx => tx.person.update({ where: { id: f.other.id }, data: { archivedAt: new Date() } }))).rejects.toThrow(/clear tasks and wallet/u);
+    await update(f, tx => tx.operationTask.update({ where: { id: job.id }, data: { assignedToPersonId: null, assignedToUserAccountId: null, state: "PLANNED" } }));
+    await update(f, tx => tx.person.update({ where: { id: f.other.id }, data: { archivedAt: new Date() } }));
+    expect((await pull(f, { mode: "supervised", known_tasks: known(renamed.known_changes) })).tombstones).toEqual([job.id]);
+  });
+
+  it("supervised pull binds cursor audience and resets expired or changed validation scope", async () => {
+    const f = await fixture(); f.ctx.authContext.permissions = new Set(["task:view", "task:validate"]);
+    await task(f); const colleague = await task(f, { assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id });
+    const first = await pull(f, { mode: "supervised" }), assigned = await pull(f, { mode: "assigned" });
+    await expect(pull(f, { mode: "assigned", cursor: first.cursor })).rejects.toMatchObject({ code: "invalid_cursor" });
+    await expect(pull(f, { mode: "supervised", cursor: assigned.cursor })).rejects.toMatchObject({ code: "invalid_cursor" });
+    f.ctx.authContext.assignments = [{ permissions: new Set(["task:view", "task:validate"]), scope: { organizationId: f.org, scopeType: "job", scopeId: randomUUID() } }];
+    await expect(pull(f, { mode: "supervised", cursor: first.cursor })).rejects.toMatchObject({ code: "reset_required" });
+    expect((await pull(f, { mode: "supervised", known_tasks: known(first.tasks) })).tombstones).toEqual([colleague.id]);
+    f.ctx.authContext.assignments = [{ permissions: new Set(["task:view"]), scope: { organizationId: f.org } },
+      { permissions: new Set(["task:validate"]), scope: { organizationId: f.org }, validTo: new Date("2001-01-01") }];
+    await expect(pull(f, { mode: "supervised" })).rejects.toMatchObject({ code: "forbidden" });
+  });
+
+  it("supervised pull paginates current colleague work and rejects actor and tenant substitution", async () => {
+    const f = await fixture(); f.ctx.authContext.permissions = new Set(["task:view", "task:validate"]);
+    await update(f, tx => tx.operationTask.createMany({ data: Array.from({ length: 53 }, () => ({ organizationId: f.org, propertyId: f.property.id,
+      assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id, type: "INSPECTION", state: "ASSIGNED", dueDate: new Date(day), titleTranslations: { en: "Colleague" }, idempotencyKey: randomUUID() })) }));
+    const first = await pull(f, { mode: "supervised" }); expect(first.tasks).toHaveLength(50); expect(first.next_cursor).toBeTruthy();
+    const second = await pull(f, { mode: "supervised", cursor: first.next_cursor }); expect(second.tasks).toHaveLength(3); expect(second.next_cursor).toBeNull();
+    expect(new Set([...first.tasks, ...second.tasks].map(row => row.id)).size).toBe(53);
+    await expect(pull(f, { mode: "supervised", actor_user_id: f.otherAccount.id })).rejects.toMatchObject({ code: "forbidden" });
+    await expect(pull(f, { mode: "supervised", organization_id: randomUUID() })).rejects.toMatchObject({ code: "forbidden" });
+    const repeated = await Promise.all(Array.from({ length: 6 }, () => pull(f, { mode: "supervised", cursor: second.cursor, only_known: true, known_tasks: known(second.tasks) })));
+    for (const row of repeated) expect({ tasks: row.tasks, changes: row.known_changes, tombstones: row.tombstones }).toEqual({ tasks: [], changes: [], tombstones: [] });
+  });
+
+  it("supervised pull uses property timezones for future and overdue work without broadening assigned mode", async () => {
+    const f = await fixture(); f.ctx.authContext.permissions = new Set(["task:view", "task:validate"]);
+    await update(f, tx => tx.property.update({ where: { id: f.property.id }, data: { timezone: "Pacific/Kiritimati" } }));
+    const future = await task(f, { dueDate: new Date("2026-10-25"), assignedToPersonId: f.other.id, assignedToUserAccountId: f.otherAccount.id, createdAt: new Date("2026-01-01") });
+    const own = await task(f, { dueDate: new Date("2026-10-24"), createdAt: new Date("2026-01-01") });
+    const now = new Date("2026-10-23T10:30:00Z"), result = await pull(f, { mode: "supervised" }, now);
+    expect(result.tasks).toHaveLength(1); expect(result.tasks[0]).toMatchObject({ id: future.id, businessDate: "2026-10-24", dueDate: "2026-10-25" });
+    expect((await pull(f, { mode: "today" }, now)).tasks.map(row => row.id)).toEqual([own.id]);
+  });
 });

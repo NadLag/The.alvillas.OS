@@ -4,6 +4,7 @@ import { expect, request, test } from "@playwright/test";
 import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { openFieldFixture } from "./support/field-fixture";
+import { fieldPullResultSchema } from "@/modules/reservations/domain/field-pull";
 
 test("Queued supervisor HTTP retries retain one reviewed validation and reject changed attribution", async ({ page }, info) => {
   test.skip(!process.env.DATABASE_URL, "Real PostgreSQL is required for queued supervisor HTTP acceptance");
@@ -25,6 +26,15 @@ test("Queued supervisor HTTP retries retain one reviewed validation and reject c
       checklistItemIds: await form.getByRole("checkbox").evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value)),
       reason: "Reviewed colleague work retained for reliable synchronization" };
     expect(payload.performedByPersonId).toBe(person.id);
+    const task = await withTenant(f.db, f.organizationId, tx => tx.operationTask.findUniqueOrThrow({ where: { id: f.taskId }, select: { propertyId: true } }));
+    const pullParams = new URLSearchParams({ organization_id: session.user.organizationId, actor_user_id: session.user.id, mode: "supervised", property_id: task.propertyId });
+    const response = await page.request.get(`/api/sync/pull?${pullParams}`); expect(response.status()).toBe(200);
+    expect(response.headers()["cache-control"]).toBe("private, no-store"); expect(response.headers().vary).toContain("Cookie");
+    const initial = fieldPullResultSchema.parse(await response.json()); expect(initial.tasks).toHaveLength(1);
+    expect(initial.tasks[0]).toMatchObject({ id: f.taskId, canEdit: false, proxyValidation: { expectedVersion: payload.expectedVersion, performedByPersonId: person.id } });
+    for (const key of ["guestEmail", "guestPhone", "financialSnapshot", "balance", "commission"]) expect(initial.tasks[0]).not.toHaveProperty(key);
+    const wrongAudience = new URLSearchParams(pullParams); wrongAudience.set("mode", "assigned"); wrongAudience.set("cursor", initial.cursor);
+    expect((await page.request.get(`/api/sync/pull?${wrongAudience}`)).status()).toBe(400);
     const op = { client_op_id: randomUUID(), type: "field_task.proxy_validate", payload, client_created_at: new Date().toISOString() };
     const batch = { device_id: randomUUID(), organization_id: session.user.organizationId, actor_user_id: session.user.id, op_schema_version: 1, ops: [op] };
     const result = z.object({ results: z.array(z.object({ status: z.string(), error_code: z.string().optional() })) });
@@ -41,7 +51,13 @@ test("Queued supervisor HTTP retries retain one reviewed validation and reject c
     const attributed = await post({ ...batch, ops: [{ ...op, client_op_id: randomUUID(), payload: { ...payload, validatedByUserAccountId: session.user.id } }] });
     expect(attributed.status()).toBe(400);
     const anonymous = await request.newContext({ baseURL: "http://127.0.0.1:3000" });
-    try { expect((await anonymous.post("/api/sync/push", { data: batch })).status()).toBe(401); } finally { await anonymous.dispose(); }
+    try {
+      expect((await anonymous.post("/api/sync/push", { data: batch })).status()).toBe(401);
+      expect((await anonymous.get(`/api/sync/pull?${pullParams}`)).status()).toBe(401);
+    } finally { await anonymous.dispose(); }
+    pullParams.set("cursor", initial.cursor); pullParams.set("only_known", "1"); pullParams.set("known_tasks", `${f.taskId}.${initial.tasks[0].revision}`);
+    const removed = fieldPullResultSchema.parse(await (await page.request.get(`/api/sync/pull?${pullParams}`)).json());
+    expect(removed.tombstones).toEqual([f.taskId]); expect(removed.tasks).toEqual([]); expect(removed.known_changes).toEqual([]);
     await page.reload(); await expect(page.getByTestId("field-proxy-completed")).toBeVisible(); await expect(page.getByTestId("field-proxy-form")).toHaveCount(0);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

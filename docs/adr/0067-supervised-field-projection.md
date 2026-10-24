@@ -1,0 +1,9 @@
+# 0067 — Partition supervised work at the field pull boundary
+
+The existing field pull endpoint gains a `supervised` audience alongside `today` and `assigned`. Reuse its encrypted actor-bound cursors, known revisions, tombstones, property calendars, bounded pages, tenant transaction and field presentation. Bind cursors to the audience so an assigned-work checkpoint cannot become a supervisor checkpoint.
+
+Intersect current task view and validation scopes in SQL before pagination, then recheck both capabilities on each record. Exclude the validator's own work, closed tasks and archived performers. Support assigned people without accounts. Each projection carries the assigned performer UUID and the critical integer task version required by the existing proxy command; it cannot be submitted as self completion. Performer names require a separately scoped `team_member:view` grant and pass through `present`. Guest and financial visibility remain independent.
+
+Known records use the same current audience scope as new pages. Reassignment, offboarding, terminal state and loss of visibility remove stale projections. Revisions include permitted performer metadata and critical task versions. Seven real PostgreSQL regressions fail before the audience exists; cases cover scope intersection before pagination, actor/tenant substitution, person-only performers, personal masking, critical changes, cursor replay, timezones and legal offboarding. The fixture also asserts that assigned staff cannot be archived before clearing their work.
+
+The combined sync protocol retains self completion, private evidence attachment and proxy validation as distinct commands. A concurrent mixed-batch regression requires one photo attachment, one proxy audit/outbox and no self-completion event. Durable supervisor cache/draft UI is still unfinished; F-FLD-15 remains IN-PROGRESS.

@@ -10,7 +10,7 @@ export class FieldPullError extends Error {
   constructor(readonly code: "forbidden" | "reset_required" | "invalid_cursor") { super(code); }
 }
 const cursorSchema = z.object({
-  kind: z.enum(["page", "checkpoint"]), mode: z.enum(["today", "assigned"]), propertyId: z.uuid().nullable(),
+  kind: z.enum(["page", "checkpoint"]), mode: z.enum(["today", "assigned", "supervised"]), propertyId: z.uuid().nullable(),
   scope: z.string().regex(/^[a-zA-Z0-9_-]{43}$/u), asOf: z.iso.datetime(), expiresAt: z.iso.datetime(),
   after: z.object({ date: stayDateSchema, id: z.uuid() }).strict().nullable()
 }).strict();
