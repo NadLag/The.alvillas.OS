@@ -53,26 +53,26 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
       }, error: () => setCached(null) });
       return queue;
     })();
-    const sync = async () => {
+    const sync = async (afterCurrent = false) => {
       try {
         const queue = await ready;
         if (disposed || !navigator.onLine) return;
         setSyncing(true);
         await syncFieldQueue(queue, scope);
         try {
-          await refreshFieldCache(queue, scope);
+          await refreshFieldCache(queue, scope, fetch, { afterCurrent });
           if (!disposed) { setCacheFailed(false); window.dispatchEvent(new Event("alvillas-field-cache-ready")); }
         } catch { if (!disposed) setCacheFailed(true); }
       } catch { if (!disposed) setNotice("unavailable"); }
       finally { if (!disposed) setSyncing(false); }
     };
-    retrySync.current = () => { void sync(); };
+    retrySync.current = () => { void sync(true); };
     const checkUpdate = async () => {
       if (!navigator.onLine || Date.now() - checkedAt < 60_000) return;
       checkedAt = Date.now();
       try { await registration.current?.update(); } catch { /* A lost connection never blocks field work. */ }
     };
-    const online = () => { network(); void sync(); void checkUpdate(); };
+    const online = () => { network(); void sync(true); void checkUpdate(); };
     const installAvailable = (event: Event) => { event.preventDefault(); setInstall(event as InstallEvent); };
     const installationFinished = () => { setInstalled(true); setInstall(null); setNotice(null); };
     const controllerChanged = () => {
