@@ -14,6 +14,7 @@ import { operationAllowed, operationHash, operationMeta, taskResource, type Oper
 import { ReservationAuthorizationError, ReservationConflictError, ReservationNotFoundError } from "./reservation-service";
 import { validEvidenceImage, persistOperationEvidence } from "./operation-evidence";
 import { readExactResponseBytes } from "@/platform/http/read-exact-response";
+import { permanentFieldUploadKey } from "@/platform/storage/upload-protocol";
 
 type UploadDeps = OperationDeps & { storage?: StorageProvider; transport?: typeof fetch };
 type CompleteUploadDeps = UploadDeps & { storage?: StorageProvider & {
@@ -124,7 +125,7 @@ export async function completeFieldUpload(ctx: ReservationActorContext, input: u
   if (createHash("sha256").update(bytes).digest("hex") !== initial.manifest.sha256 || !validEvidenceImage(initial.manifest.contentType, bytes))
     throw new ReservationConflictError("operation_photo_invalid");
   try {
-    const signed = await storage.createSignedUploadUrl({ key: `${ctx.organizationId}/tasks/${initial.upload.taskId}/${initial.manifest.localId}`, contentType: initial.manifest.contentType });
+    const signed = await storage.createSignedUploadUrl({ key: permanentFieldUploadKey(ctx.organizationId, initial.upload.taskId, initial.upload.id), contentType: initial.manifest.contentType });
     const response = await transport(signed.url, { method: "PUT", headers: { "Content-Type": initial.manifest.contentType }, body: bytes, signal: AbortSignal.timeout(15000) });
     if (!response.ok) throw new FieldUploadUnavailableError();
   } catch { throw new FieldUploadUnavailableError(); }
@@ -166,7 +167,7 @@ export async function attachFieldUploadEvidenceInTransaction(
   if (upload.status === "ATTACHED") return { id: upload.evidenceId!, idempotent: true };
   const result = await persistOperationEvidence(operations, ctx, meta, {
     taskId: task.id, idempotencyKey: value.idempotencyKey, note: manifest.note, contentType: manifest.contentType
-  }, { storageKey: `${ctx.organizationId}/tasks/${task.id}/${manifest.localId}`, size: manifest.size, sha256: manifest.sha256 });
+  }, { storageKey: permanentFieldUploadKey(ctx.organizationId, task.id, upload.id), size: manifest.size, sha256: manifest.sha256 });
   if (!result.id) throw new ReservationConflictError("upload_evidence_unavailable");
   if ((await uploads.attach(upload.id, result.id, new Date())).count !== 1) throw new ReservationConflictError("upload_evidence_unavailable");
   return result;

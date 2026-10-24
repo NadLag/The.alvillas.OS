@@ -103,7 +103,7 @@ describe("field photo uploads on real PostgreSQL", () => {
     await expect(withTenant(admin, f.org, tx => new FieldUploadRepository(tx, f.org).attach(upload.uploadId, foreign.id, new Date()))).rejects.toThrow(/mismatch/u);
     const evidence = await withTenant(db, f.org, tx => tx.operationTaskEvidence.create({ data: { organizationId: f.org, taskId: f.task.id, createdBy: f.account.id,
       note: f.input.manifest.note, contentType: f.input.manifest.contentType, size: f.input.manifest.size, sha256: f.input.manifest.sha256,
-      storageKey: `${f.org}/tasks/${f.task.id}/${f.input.manifest.localId}` } }));
+      storageKey: `${f.org}/tasks/${f.task.id}/uploads/${upload.uploadId}` } }));
     expect((await withTenant(db, f.org, tx => new FieldUploadRepository(tx, f.org).attach(upload.uploadId, evidence.id, new Date()))).count).toBe(1);
     expect((await withTenant(db, f.org, tx => new FieldUploadRepository(tx, f.org).attach(upload.uploadId, evidence.id, new Date()))).count).toBe(0);
   });
@@ -111,7 +111,7 @@ describe("field photo uploads on real PostgreSQL", () => {
     const f = await photoFixture(), permanent: Uint8Array[] = [];
     const transport = photoTransport((url, options) => {
       if (options?.method === "PUT") {
-        expect(url.pathname).toBe(`/${f.org}/tasks/${f.task.id}/${f.manifest.localId}`);
+        expect(url.pathname).toBe(`/${f.org}/tasks/${f.task.id}/uploads/${f.upload.uploadId}`);
         expect(options.headers).toEqual({ "Content-Type": "image/png" });
         permanent.push(new Uint8Array(options.body as Uint8Array)); return new Response(null, { status: 200 });
       }
@@ -189,7 +189,7 @@ describe("field photo uploads on real PostgreSQL", () => {
     expect(objects.size).toBe(1); expect(objects.get(`${f.org}/uploads/${f.upload.uploadId}/part-0`)).toEqual(new Uint8Array(f.chunks[0]));
     await storeFieldUploadPart(f.ctx, { ...part, index: 1 }, f.chunks[1], { ...deps(), storage: f.storage, transport });
     expect(await completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport })).toEqual({ uploadId: f.upload.uploadId, status: "READY" });
-    expect(objects.get(`${f.org}/tasks/${f.task.id}/${f.manifest.localId}`)).toEqual(new Uint8Array(f.bytes));
+    expect(objects.get(`${f.org}/tasks/${f.task.id}/uploads/${f.upload.uploadId}`)).toEqual(new Uint8Array(f.bytes));
     expect(signed).toHaveBeenCalledTimes(4);
   });
   it.skipIf(!url)("uses native evidence persistence and the original sync operation for lost acknowledgements and concurrent retries", async () => {
@@ -212,12 +212,59 @@ describe("field photo uploads on real PostgreSQL", () => {
     await withTenant(db, f.org, async tx => {
       const evidence = await tx.operationTaskEvidence.findMany({ where: { taskId: f.task.id } });
       expect(evidence).toHaveLength(1); expect(evidence[0]).toMatchObject({ createdBy: f.account.id, sha256: f.manifest.sha256,
-        size: f.manifest.size, contentType: "image/png", note: f.manifest.note, storageKey: `${f.org}/tasks/${f.task.id}/${f.manifest.localId}` });
+        size: f.manifest.size, contentType: "image/png", note: f.manifest.note, storageKey: `${f.org}/tasks/${f.task.id}/uploads/${f.upload.uploadId}` });
       expect((await tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }))).toMatchObject({ status: "ATTACHED", evidenceId: evidence[0].id });
       expect(await tx.auditLog.count({ where: { resourceId: f.task.id, action: "task.evidence.attached" } })).toBe(1);
       expect(await tx.syncOp.count({ where: { status: "APPLIED" } })).toBe(1);
       expect((await tx.operationTask.findUniqueOrThrow({ where: { id: f.task.id } })).state).toBe("ASSIGNED");
       expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted" } })).toBe(0);
+    });
+  });
+  it.skipIf(!url)("keeps prior private evidence immutable when a new assignee reuses a client photo nonce", async () => {
+    const f = await photoFixture(), objects = new Map<string, Uint8Array>();
+    const parts = new Map<string, readonly Uint8Array[]>([[f.upload.uploadId, f.chunks]]);
+    const transport = photoTransport((url, options) => {
+      if (options?.method === "PUT") {
+        expect(options.body).toBeInstanceOf(Uint8Array);
+        objects.set(url.pathname.slice(1), new Uint8Array(options.body as Uint8Array));
+        return new Response(null, { status: 200 });
+      }
+      const uploadId = url.pathname.split("/uploads/")[1]?.split("/")[0], index = Number(url.pathname.split("part-").at(-1));
+      const bytes = uploadId && parts.get(uploadId)?.[index];
+      return bytes ? new Response(new Uint8Array(bytes), { status: 200 }) : new Response(null, { status: 404 });
+    });
+    await completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport });
+    const input = syncPushInputSchema.parse({ ...f.request, op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.evidence.attach",
+      payload: { taskId: f.task.id, uploadId: f.upload.uploadId } }] });
+    expect((await pushSyncOps(f.ctx, input, deps())).results[0].status).toBe("APPLIED");
+    const original = await withTenant(db, f.org, tx => tx.operationTaskEvidence.findFirstOrThrow({ where: { taskId: f.task.id } }));
+    expect(objects.get(original.storageKey!)).toEqual(new Uint8Array(f.bytes));
+    const next = await withTenant(db, f.org, async tx => {
+      const person = await tx.person.create({ data: { organizationId: f.org, displayName: "Next photo assignee" } });
+      const account = await tx.userAccount.create({ data: { organizationId: f.org, personId: person.id } });
+      await tx.operationTask.update({ where: { id: f.task.id }, data: { assignedToUserAccountId: account.id, assignedToPersonId: person.id } });
+      return { person, account };
+    });
+    const ctx = { ...f.ctx, actorId: next.account.id, personId: next.person.id, authContext: {
+      ...f.ctx.authContext, userAccountId: next.account.id, personId: next.person.id
+    } };
+    const bytes = new Uint8Array(f.bytes); bytes[bytes.length - 1] ^= 1;
+    const chunks = [bytes.subarray(0, fieldUploadChunkBytes), bytes.subarray(fieldUploadChunkBytes)];
+    const manifest = { ...f.manifest, sha256: createHash("sha256").update(bytes).digest("hex"),
+      parts: chunks.map(chunk => ({ size: chunk.length, sha256: createHash("sha256").update(chunk).digest("hex") })) };
+    const device = randomUUID(), uploaded = await startFieldUpload(ctx, { ...f.input, actor_user_id: next.account.id, device_id: device, manifest }, deps());
+    parts.set(uploaded.uploadId, chunks);
+    await completeFieldUpload(ctx, { organization_id: f.org, actor_user_id: next.account.id, device_id: device, uploadId: uploaded.uploadId }, { ...deps(), storage: f.storage, transport });
+    expect(objects.get(original.storageKey!)).toEqual(new Uint8Array(f.bytes));
+    expect(createHash("sha256").update(objects.get(original.storageKey!)!).digest("hex")).toBe(original.sha256);
+    const secondInput = syncPushInputSchema.parse({ organization_id: f.org, actor_user_id: next.account.id, device_id: device, op_schema_version: 1,
+      ops: [{ client_op_id: randomUUID(), type: "field_task.evidence.attach", payload: { taskId: f.task.id, uploadId: uploaded.uploadId } }] });
+    expect((await pushSyncOps(ctx, secondInput, deps())).results[0].status).toBe("APPLIED");
+    await withTenant(db, f.org, async tx => {
+      const evidence = await tx.operationTaskEvidence.findMany({ where: { taskId: f.task.id } });
+      expect(evidence).toHaveLength(2); expect(new Set(evidence.map(row => row.storageKey)).size).toBe(2);
+      for (const row of evidence) expect(createHash("sha256").update(objects.get(row.storageKey!)!).digest("hex")).toBe(row.sha256);
+      expect(await tx.auditLog.count({ where: { resourceId: f.task.id, action: "task.evidence.attached" } })).toBe(2);
     });
   });
   it.skipIf(!url)("rechecks current upload ownership and permissions when applying queued evidence", async () => {

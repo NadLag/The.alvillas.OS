@@ -341,7 +341,6 @@ describe("PostgreSQL baseline", () => {
       expect(await tx.city.count({ where: { organizationId: { not: organization.id } } })).toBe(0);
     });
   });
-
   async function templateFixture() {
     const organization = await prisma.organization.create({ data: { name: `Template ${randomUUID()}` } });
     const permissions = new Set(["config_rule:view", "config_rule:create", "config_rule:configure", "property:view", "property:edit", "property:create", "owner:create", "owner:view", "financial_transaction:view", "reservation:view", "reservation:create", "guest:create", "guest:view", "task:view", "task:create", "task:edit"]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { startTransition, useActionState, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
 import { optionalGuestPhoneSchema } from "@/platform/notifications/whatsapp";
@@ -133,6 +133,7 @@ export function FieldTaskCompletionForm({
     "idle" | "queued" | "syncing" | "synced" | "conflict" | "rejected" | "storageError"
   >("idle");
   const syncing = useRef(false);
+  const completing = useRef(false);
   const [note, setNote] = useState("");
   const [offline, setOffline] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
@@ -173,11 +174,17 @@ export function FieldTaskCompletionForm({
       try {
         const queue = await ready;
         if (cancelled || !navigator.onLine) return;
-        const hadCurrent = (await queue.entries(scope)).some(item => item.operation.payload.taskId === taskId && item.syncStatus === "pending");
+        const hadCurrent = (await queue.entries(scope)).some(item => item.operation.type === "field_task.complete" && item.operation.payload.taskId === taskId && item.syncStatus === "pending");
         if (hadCurrent) setQueueStatus("syncing");
-        const result = await syncFieldQueue(queue, scope);
-        if (cancelled || result === "idle") return;
-        setQueueStatus(result);
+        let result = await syncFieldQueue(queue, scope);
+        let current = (await queue.entries(scope)).find(item => item.operation.type === "field_task.complete" && item.operation.payload.taskId === taskId);
+        // A completion can be appended while a photo-only drain is in flight.
+        if (current?.syncStatus === "pending" && (result === "synced" || result === "idle")) {
+          result = await syncFieldQueue(queue, scope);
+          current = (await queue.entries(scope)).find(item => item.operation.type === "field_task.complete" && item.operation.payload.taskId === taskId);
+        }
+        if (cancelled || result === "idle" || (!hadCurrent && !current)) return;
+        setQueueStatus(current?.syncStatus === "pending" && result === "synced" ? "queued" : result);
       } catch {
         if (!cancelled) setQueueStatus("storageError");
       } finally { syncing.current = false; }
@@ -227,6 +234,9 @@ export function FieldTaskCompletionForm({
     const note = typeof noteValue === "string" ? noteValue.trim() : "";
     if (checklistItemIds.length !== checklistItems.length) { setQueueStatus("conflict"); return; }
     try {
+      const review = (await fieldQueue().entries({ organizationId, userId })).find(entry => entry.operation.payload.taskId === taskId &&
+        (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach") && entry.syncStatus !== "pending");
+      if (review) { setQueueStatus(review.syncStatus === "conflict" ? "conflict" : "rejected"); return; }
       await fieldQueue().enqueue({ organizationId, userId }, { client_op_id: idempotencyKey,
         type: "field_task.complete", client_created_at: new Date().toISOString(),
         payload: { taskId, checklistItemIds, note: note || undefined } });
@@ -244,7 +254,18 @@ export function FieldTaskCompletionForm({
     if (document.querySelector('[data-field-photo-dirty="true"]')) { event.preventDefault(); setPhotoBlocked(true); return; }
     setPhotoBlocked(false);
     event.preventDefault();
-    void queueCompletion(new FormData(event.currentTarget));
+    if (completing.current || pending || queued) return;
+    completing.current = true;
+    const formData = new FormData(event.currentTarget);
+    void (async () => {
+      if (mode === "cached" || !navigator.onLine) { await queueCompletion(formData); return; }
+      const entries = await fieldQueue().entries({ organizationId, userId });
+      const photo = entries.find(entry => entry.operation.payload.taskId === taskId &&
+        (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach"));
+      if (photo?.syncStatus === "conflict" || photo?.syncStatus === "rejected") { setQueueStatus(photo.syncStatus); return; }
+      if (photo) await queueCompletion(formData);
+      else startTransition(() => formAction(formData));
+    })().catch(() => setQueueStatus("storageError")).finally(() => { completing.current = false; });
   }
 
   const queueMessage =

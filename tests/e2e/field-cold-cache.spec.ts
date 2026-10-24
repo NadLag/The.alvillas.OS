@@ -17,7 +17,7 @@ test("Field first visit preserves a draft through a cold offline reload", async 
   try {
     const first = await cold.newPage(); await first.goto(`/en/app/field/${f.taskId}`);
     await expect.poll(() => storedFieldData(first, "jobs")).toHaveLength(1);
-    const form = first.getByTestId("field-task-complete-form"), note = form.getByRole("textbox");
+    const form = first.getByTestId("field-task-complete-form"), note = form.locator('textarea[name="note"]');
     await first.getByTestId("field-checklist-item").first().check(); await note.fill("Cold first-visit draft remains available offline");
     await expect.poll(async () => z.array(z.object({ note: z.string() })).parse(await storedFieldData(first, "drafts"))[0]?.note).toBe("Cold first-visit draft remains available offline");
     expect(await first.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(false);

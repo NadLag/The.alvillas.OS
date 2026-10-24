@@ -52,7 +52,7 @@ for (const locale of ["en", "fr", "ar"] as const) {
       await expect(check).toBeChecked();
       expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-      const note = page.getByTestId("field-task-complete-form").getByRole("textbox");
+      const note = page.getByTestId("field-task-complete-form").locator('textarea[name="note"]');
       await note.fill("Field evidence retained across reload");
       await page.context().setOffline(true); await page.getByTestId("field-task-complete").click();
       await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.offlineQueued);

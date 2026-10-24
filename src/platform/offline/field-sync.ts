@@ -19,8 +19,17 @@ export function syncFieldQueue(queue: FieldQueueStore, scope: FieldQueueScope, s
 async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeof fetch, acknowledge?: Acknowledge): Promise<QueueOutcome> {
   const entries = await queue.entries(scope);
   let outcome: QueueOutcome = "idle";
+  const blockedPhotoTasks = new Map<string, "conflict" | "rejected">();
   for (let entry of entries) {
-    if (entry.syncStatus !== "pending") { outcome = entry.syncStatus; continue; }
+    const photo = entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach";
+    if (entry.syncStatus !== "pending") {
+      outcome = entry.syncStatus;
+      if (photo) blockedPhotoTasks.set(entry.operation.payload.taskId, entry.syncStatus);
+      continue;
+    }
+    if (entry.operation.type === "field_task.complete" && blockedPhotoTasks.has(entry.operation.payload.taskId)) {
+      outcome = blockedPhotoTasks.get(entry.operation.payload.taskId)!; continue;
+    }
     if (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach") {
       const prepared = await prepareQueuedPhoto(queue, scope, entry, send);
       if (prepared === "queued" || prepared === "rejected") return prepared;
@@ -53,6 +62,7 @@ async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeo
     outcome = applied
       ? outcome === "conflict" || outcome === "rejected" ? outcome : "synced"
       : result.status === "CONFLICT" ? "conflict" : "rejected";
+    if (!applied && photo) blockedPhotoTasks.set(entry.operation.payload.taskId, result.status === "CONFLICT" ? "conflict" : "rejected");
   }
   return outcome;
 }

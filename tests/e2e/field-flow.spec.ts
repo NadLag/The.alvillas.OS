@@ -16,7 +16,7 @@ test("Field checklist progress and language preserve unsaved and queued work", a
   const counter = page.getByTestId("field-checklist-progress");
   const checks = page.getByTestId("field-checklist-item");
   const finish = page.getByTestId("field-task-complete"), save = form.locator('button[data-progress="true"]');
-  const note = form.getByRole("textbox"), language = page.getByTestId("field-language");
+  const note = form.locator('textarea[name="note"]'), language = page.getByTestId("field-language");
   const label = (locale: "en" | "fr" | "ar", done: number) => ({ en, fr, ar }[locale].Operations.manage.progress.replace("{done}", String(done)).replace("{total}", "3"));
   try {
     await expect(counter).toHaveText(label("en", 0)); await expect(finish).toBeDisabled();

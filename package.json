@@ -91,7 +91,6 @@
     "eslint": "^10.12.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "fake-indexeddb": "6.2.6",
-    "msw": "2.15.0",
     "prisma": "^6.12.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",

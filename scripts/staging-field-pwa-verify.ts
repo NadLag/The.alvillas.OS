@@ -52,7 +52,7 @@ try {
   await checkpoint(); phase = "queued-update";
   await page.goto(`/en/app/field/${taskId}`);
   for (const item of await page.getByTestId("field-checklist-item").all()) if (!await item.isChecked()) { await item.focus(); await page.keyboard.press("Space"); }
-  const note = page.getByTestId("field-task-complete-form").getByRole("textbox");
+  const note = page.getByTestId("field-task-complete-form").locator('textarea[name="note"]');
   await note.fill("Authenticated PWA acceptance: queued work survives update and acknowledgement loss");
   await page.evaluate(async suffix => { await navigator.serviceWorker.register(`/sw.js?acceptance=${suffix}`, { scope: "/", updateViaCache: "none" }); }, randomUUID());
   const update = page.getByTestId("field-update"); await expect(update).toBeVisible(); await update.click();

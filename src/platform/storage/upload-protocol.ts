@@ -10,3 +10,8 @@ export function temporaryUploadPartKey({ organizationId, uploadId, index }: Temp
   z.number().int().min(0).max(fieldUploadMaximumParts - 1).parse(index);
   return `${organizationId}/uploads/${uploadId}/part-${index}`;
 }
+
+export function permanentFieldUploadKey(organizationId: string, taskId: string, uploadId: string): string {
+  z.uuid().parse(organizationId); z.uuid().parse(taskId); z.uuid().parse(uploadId);
+  return `${organizationId}/tasks/${taskId}/uploads/${uploadId}`;
+}

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, readdir, realpath, writeFile } from "node:fs/promises";
+import { basename, dirname } from "node:path";
 import { chromium, expect as playwrightExpect, request } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { z } from "zod";
@@ -9,16 +10,23 @@ import { syncPushInputSchema } from "../src/modules/reservations/domain/sync-pro
 const expect = playwrightExpect.configure({ timeout: 30000 });
 const sha = z.string().regex(/^[a-f0-9]{40}$/u).parse(process.env.STAGING_EXPECTED_SHA);
 const state = z.string().min(1).parse(process.env.STAGING_STORAGE_STATE_FILE);
+const profile = z.string().min(1).parse(process.env.STAGING_PROFILE_DIRECTORY);
 const file = z.string().min(1).parse(process.env.STAGING_EVIDENCE_FILE);
 const taskId = z.uuid().parse(process.env.STAGING_FIELD_TASK_ID);
 const propertyName = z.string().regex(/^Automation acceptance aut-[a-f0-9]{8}$/u).parse(process.env.STAGING_FIELD_PROPERTY_NAME);
 const previous = z.object({ photoSaving: z.boolean().optional(), queued: z.unknown().optional(), completed: z.boolean().optional() })
   .parse(JSON.parse(await readFile(file, "utf8")));
 if (previous.photoSaving || previous.queued || previous.completed) throw new Error("Verify the recorded photo and operation keys before any replay");
-const origin = "https://the-alvillas-os-staging.vercel.app", browser = await chromium.launch();
-const context = await browser.newContext({ baseURL: origin, storageState: state, timezoneId: "America/Denver", viewport: { width: 1440, height: 1000 } });
+const profilePath = await realpath(profile), privateParent = await realpath(dirname(state));
+if (dirname(profilePath) !== privateParent || !/^staging-field-photos-[a-z0-9-]+$/u.test(basename(profilePath)) || (await readdir(profilePath)).length) {
+  throw new Error("A new private photo acceptance profile is required; preserve any existing profile for recovery");
+}
+const origin = "https://the-alvillas-os-staging.vercel.app";
+const saved = z.object({ cookies: z.array(z.object({ name: z.string(), value: z.string(), domain: z.string(), path: z.string(), expires: z.number(), httpOnly: z.boolean(), secure: z.boolean(), sameSite: z.enum(["Strict", "Lax", "None"]) })) }).parse(JSON.parse(await readFile(state, "utf8")));
+const context = await chromium.launchPersistentContext(profilePath, { headless: true, channel: "chromium", baseURL: origin,
+  ignoreDefaultArgs: ["--disable-background-networking"], timezoneId: "America/Denver", viewport: { width: 1440, height: 1000 } });
 context.setDefaultTimeout(30000); context.setDefaultNavigationTimeout(90000);
-const page = await context.newPage(), checks: Array<{ locale: string; width: number }> = [], errors: string[] = [];
+const page = context.pages()[0] ?? await context.newPage(), checks: Array<{ locale: string; width: number }> = [], errors: string[] = [];
 const evidence: Record<string, unknown> = { sha, origin, taskId, propertyName, checks, completed: false };
 const operationRows = z.array(z.object({ deviceId: z.string(), operation: z.object({ client_op_id: z.uuid(), type: z.string(), payload: z.unknown() }) }));
 const photoRows = z.array(z.object({ manifest: z.object({ sha256: z.string(), size: z.number(), parts: z.array(z.object({ size: z.number() })) }), uploadedParts: z.array(z.number()) }));
@@ -26,6 +34,7 @@ const checkpoint = () => writeFile(file, JSON.stringify({ ...evidence, phase }, 
 let phase = "authentication", releaseParts = false, allowAcknowledgements = false, lost = false;
 const wireKeys: string[] = [], note = "Authenticated resumable field photo acceptance";
 try {
+  await context.addCookies(saved.cookies.filter(cookie => cookie.domain.replace(/^\./u, "") === new URL(origin).hostname));
   expect(await (await context.request.get("/api/version")).json()).toMatchObject({ version: sha, environment: "preview", commitRef: "main" });
   const session = z.object({ user: z.object({ id: z.uuid(), organizationId: z.uuid(), securitySetupRequired: z.literal(false) }) })
     .parse(await (await context.request.get("/api/auth/session")).json());
@@ -115,4 +124,4 @@ try {
   evidence.evidenceId = evidenceHref!.split("/").at(-1); evidence.completed = true; evidence.authenticated = true; phase = "complete"; await checkpoint();
   console.log(JSON.stringify({ sha, authenticatedResumablePhoto: true, localizedLayouts: checks.length, safeDuplicateRetry: true, privateDigestVerified: true }));
 } catch { await checkpoint(); throw new Error(`Staging photo acceptance incomplete at ${phase}; preserve the private checkpoint and original keys`); }
-finally { await browser.close(); }
+finally { await context.close(); }

@@ -8,6 +8,32 @@ import { openFieldFixture } from "./support/field-fixture";
 import { storedFieldData } from "./support/field-storage";
 
 test.use({ serviceWorkers: "allow", actionTimeout: 30000, navigationTimeout: 60000 });
+test("Online completion waits behind a transferring photo and preserves its original operation", async ({ page }, info) => {
+  test.skip(!process.env.DATABASE_URL, "Real PostgreSQL required for ordered online evidence"); test.setTimeout(180000);
+  const f = await openFieldFixture(page, info, "en"); let release = false;
+  try {
+    await page.context().route("**/api/field/uploads/part?**", route => release ? route.continue() : route.abort());
+    const capture = page.getByTestId("field-photo"); await expect(capture.getByTestId("field-photo-file")).toBeEnabled();
+    const image = await page.evaluate(() => { const canvas = document.createElement("canvas"); canvas.width = canvas.height = 32;
+      const context = canvas.getContext("2d")!; context.fillStyle = "#408060"; context.fillRect(0, 0, 32, 32); return canvas.toDataURL("image/png").split(",")[1]; });
+    await capture.getByTestId("field-photo-file").setInputFiles({ name: "ready.png", mimeType: "image/png", buffer: Buffer.from(image, "base64") });
+    await capture.getByTestId("field-photo-note").fill("Online ordered evidence"); await capture.getByTestId("field-photo-save").click();
+    await expect(capture.getByTestId("field-photo-queued")).toBeVisible();
+    await page.getByTestId("field-checklist-item").check(); await expect(page.getByTestId("field-task-complete")).toBeEnabled();
+    await page.getByTestId("field-task-complete").click(); await expect.poll(() => storedFieldData(page)).toHaveLength(2);
+    const original = queuedRows.parse(await storedFieldData(page));
+    expect(original[0].operation.type).toMatch(/^field_(?:photo\.prepare|task\.evidence\.attach)$/u); expect(original[1].operation.type).toBe("field_task.complete");
+    expect(await withTenant(f.db, f.organizationId, tx => tx.auditLog.count({ where: { resourceId: f.taskId, action: "task.complete" } }))).toBe(0);
+    release = true; await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page).toHaveURL(/\/en\/app\/field$/u, { timeout: 90000 }); await expect.poll(() => storedFieldData(page)).toEqual([]);
+    await withTenant(f.db, f.organizationId, async tx => {
+      expect(await tx.operationTaskEvidence.count({ where: { taskId: f.taskId } })).toBe(1);
+      expect(await tx.auditLog.count({ where: { resourceId: f.taskId, action: "task.complete" } })).toBe(1);
+      expect(await tx.syncOp.count({ where: { deviceId: original[0].deviceId, clientOpId: { in: original.map(entry => entry.operation.client_op_id) }, status: "APPLIED" } })).toBe(2);
+      expect((await tx.operationTask.findUniqueOrThrow({ where: { id: f.taskId } })).completionSource).toBe("OFFLINE_SYNC");
+    });
+  } finally { await f.db.$disconnect(); }
+});
 const photoRows = z.array(z.object({ manifest: z.object({ localId: z.uuid(), sha256: z.string(), parts: z.array(z.object({ size: z.number() })) }),
   uploadedParts: z.array(z.number()), ready: z.boolean() }));
 const queuedRows = z.array(z.object({ deviceId: z.string(), operation: z.object({ client_op_id: z.uuid(), type: z.string(), payload: z.unknown() }) }));

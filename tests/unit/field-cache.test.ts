@@ -41,6 +41,26 @@ function photoSend(handler: (url: URL, options?: RequestInit) => Response | Prom
 }
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(stores.splice(0).map(store => store.delete())); });
 describe("field work cache", () => {
+  it("retains completion behind rejected evidence while allowing unrelated queued work to synchronize", async () => {
+    const queue = await setup(), task = job(), other = job(), capture = photo(task);
+    await publish(queue, scope, 0, [task, other], [], "photos-review", stamp);
+    await queue.enqueuePhoto(scope, capture.manifest, capture.blob, (await queue.readCache(scope)).state!.incarnation);
+    const completion = await queue.enqueue(scope, { client_op_id: randomUUID(), type: "field_task.complete", payload: { taskId: task.id, checklistItemIds: [task.checklistItems[0].id] } });
+    const unrelated = await queue.enqueue(scope, { client_op_id: randomUUID(), type: "field_task.complete", payload: { taskId: other.id, checklistItemIds: [other.checklistItems[0].id] } });
+    const sent: string[] = [];
+    const send = photoSend((url, options) => {
+      if (url.pathname === "/api/field/uploads") return Response.json({ error: "forbidden" }, { status: 403 });
+      if (typeof options?.body !== "string") throw Error("Expected a JSON sync request body");
+      const input = syncPushInputSchema.parse(JSON.parse(options.body)); sent.push(input.ops[0].client_op_id);
+      return Response.json({ op_schema_version: 1, results: [{ client_op_id: input.ops[0].client_op_id, status: "APPLIED", server_version: null }] });
+    });
+    expect(await syncFieldQueue(queue, scope, send)).toBe("rejected");
+    await syncFieldQueue(queue, scope, send); expect(sent).toEqual([unrelated.operation.client_op_id]);
+    expect((await queue.entries(scope)).map(entry => ({ id: entry.operation.client_op_id, status: entry.syncStatus }))).toEqual([
+      { id: capture.manifest.localId, status: "rejected" }, { id: completion.operation.client_op_id, status: "pending" }
+    ]);
+    expect(await queue.photos.count()).toBe(1); expect(await queue.cachedJobs(scope)).toEqual([task]);
+  });
   it("upgrades a populated v2 device without losing its owner, original completion, draft or pull cursor", async () => {
     const name = `upgrade-${randomUUID()}`, legacy = new Dexie(name), task = job(), identity = fieldIdentity(scope), cacheId = `${identity}:${task.id}`;
     legacy.version(1).stores({ operations: "++sequence,&localId,[organizationId+userId]", metadata: "key" });

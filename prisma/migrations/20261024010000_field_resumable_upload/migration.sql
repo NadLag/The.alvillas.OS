@@ -46,7 +46,7 @@ BEGIN
    AND task_id=NEW.task_id AND created_by=NEW.actor_id
    AND sha256=NEW.manifest->>'sha256' AND content_type=NEW.manifest->>'contentType'
    AND size=(NEW.manifest->>'size')::integer
-   AND storage_key=NEW.organization_id::text||'/tasks/'||NEW.task_id::text||'/'||NEW.local_id::text
+   AND storage_key=NEW.organization_id::text||'/tasks/'||NEW.task_id::text||'/uploads/'||NEW.id::text
  ) THEN RAISE EXCEPTION 'upload evidence tenant or actor mismatch'; END IF;
  RETURN NEW;
 END $$;
