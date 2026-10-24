@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
+import type { Request as PlaywrightRequest } from "@playwright/test";
 import en from "../../messages/en.json" with { type: "json" };
 import fr from "../../messages/fr.json" with { type: "json" };
 import ar from "../../messages/ar.json" with { type: "json" };
@@ -39,7 +40,31 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
     await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.Field.offlineQueued); await expect(update).toBeDisabled();
     const queued = await storedFieldData(page); expect(queued).toHaveLength(1);
     await page.context().route("**/api/sync/push", route => route.abort()); await page.context().setOffline(false);
-    await expect(update).toBeEnabled(); const refreshed = page.waitForEvent("load"); await update.click(); await refreshed;
+    await expect(update).toBeEnabled();
+    const pendingRequests = new Set<string>();
+    const requestStarted = (request: PlaywrightRequest) => pendingRequests.add(new URL(request.url()).pathname);
+    const requestFinished = (request: PlaywrightRequest) => pendingRequests.delete(new URL(request.url()).pathname);
+    page.on("request", requestStarted); page.on("requestfinished", requestFinished); page.on("requestfailed", requestFinished);
+    const previousDocument = await page.evaluate(() => performance.timeOrigin);
+    try {
+      const refreshed = page.waitForEvent("load"); await update.click(); await refreshed;
+    } catch (error) {
+      const diagnostic = page.evaluate(async () => {
+        const worker = await navigator.serviceWorker.getRegistration();
+        return { documentReadyState: document.readyState, timeOrigin: performance.timeOrigin,
+          dirty: Boolean(document.querySelector('[data-field-dirty="true"]')), visibility: document.visibilityState,
+          updateDisabled: document.querySelector<HTMLButtonElement>('[data-testid="field-update"]')?.disabled,
+          notice: document.querySelector('[data-testid="field-pwa-notice"]')?.textContent,
+          controller: navigator.serviceWorker.controller?.state, waiting: worker?.waiting?.state, installing: worker?.installing?.state };
+      }).catch(() => ({ documentUnavailable: true }));
+      let diagnosticTimeout: ReturnType<typeof setTimeout> | undefined;
+      const state = await Promise.race([diagnostic, new Promise<{ documentUnavailable: true }>(resolve => {
+        diagnosticTimeout = setTimeout(() => resolve({ documentUnavailable: true }), 3000);
+      })]);
+      if (diagnosticTimeout) clearTimeout(diagnosticTimeout);
+      console.log(JSON.stringify({ fieldPwaRefreshFailure: { locale, project: info.project.name, previousDocument, state, pendingPaths: [...pendingRequests] } }));
+      throw error;
+    } finally { page.off("request", requestStarted); page.off("requestfinished", requestFinished); page.off("requestfailed", requestFinished); }
     await expect(note).toHaveValue("Queued work survives a service worker update"); await expect(check).toBeChecked();
     expect(await storedFieldData(page)).toEqual(queued);
     await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.Field.offlineQueued);
