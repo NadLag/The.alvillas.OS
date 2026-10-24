@@ -1519,6 +1519,26 @@ describe("operations on real PostgreSQL", () => {
     expect(minute(moved.scheduledStart!)).toBe(720);
     expect(moved.dueDate.toISOString().slice(0, 10)).toBe("2027-04-11");
   });
+  it("does not re-emit task completion events when evidence or issues are added after completion", async () => {
+    const f = await fixture(), selfTask = await assigned(f);
+    await completeAssignedFieldTask(f.workerCtx, { taskId: selfTask.id, idempotencyKey: randomUUID(),
+      checklistItemIds: selfTask.checklistItems.map(item => item.id), note: "Assigned worker completion" }, deps());
+    const evidence = { taskId: selfTask.id, note: "Additional completed-task evidence", idempotencyKey: randomUUID() };
+    await Promise.all([attachOperationEvidence(f.workerCtx, evidence, undefined, deps()), attachOperationEvidence(f.workerCtx, evidence, undefined, deps())]);
+    await reportOperationIssue(f.ctx, { taskId: selfTask.id, title: "Follow-up observation", description: "Observed after the task was completed",
+      severity: "LOW", idempotencyKey: randomUUID() }, deps());
+    const proxyTask = await assigned(f);
+    await proxyCompleteOperationTask(f.ctx, { taskId: proxyTask.id, expectedVersion: proxyTask.version, performedByPersonId: f.worker.id,
+      checklistItemIds: proxyTask.checklistItems.map(item => item.id), reason: "Supervisor verified the performer completed the checklist", idempotencyKey: randomUUID() }, deps());
+    await attachOperationEvidence(f.ctx, { taskId: proxyTask.id, note: "Additional supervisor evidence", idempotencyKey: randomUUID() }, undefined, deps());
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted", payload: { path: ["taskId"], equals: selfTask.id } } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted", payload: { path: ["taskId"], equals: proxyTask.id } } })).toBe(0);
+      expect(await tx.outboxEvent.count({ where: { type: "ProxyValidated", payload: { path: ["taskId"], equals: proxyTask.id } } })).toBe(1);
+      expect(await tx.operationTaskEvidence.count({ where: { taskId: { in: [selfTask.id, proxyTask.id] } } })).toBe(2);
+      expect(await tx.auditLog.count({ where: { action: "task.evidence.attached", resourceId: { in: [selfTask.id, proxyTask.id] } } })).toBe(2);
+    });
+  });
   it("persists assigned checklist progress, verifies private photo bytes and preserves issue and evidence history", async () => {
     const f = await fixture(),
       task = await assigned(f);
