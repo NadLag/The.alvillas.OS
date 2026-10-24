@@ -77,3 +77,15 @@ activation handler, application deadline and browser security settings retain
 their original behavior. This trace does not establish the cause of every
 earlier timeout; no reload, queue, attribution or single-execution assertion is
 removed or weakened.
+
+The complete v3 server run then passed all 164 journeys. The v4 client run
+retained a further desktop held-work failure: both native Sync lifetimes
+completed, and a lone `/api/sync/pull` restarted the old worker five milliseconds
+later. There was no new push reconciliation request. The page's initial drain
+had started before a replacement existed and performed its own pull after the
+acknowledgement; filtering new worker messages could not cancel that continuation.
+The automatic initial/timer continuation now checks the current waiting slot
+after its drain and defers that redundant pull. Existing foreground online/focus
+and explicit manual synchronization still opt in to a fresh cache pull. The
+native test, activation handler and deadlines remain unchanged; complete current
+local/CI and native staging checks are required before closing the feature.

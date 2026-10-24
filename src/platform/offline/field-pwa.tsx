@@ -66,6 +66,10 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
           const photo = next && await queue.photos.get(`${organizationId}:${userId}:${next.operation.client_op_id}`);
           if (!disposed && photo && !photo.ready && photo.retryAt > 0) photoRetry = setTimeout(() => { void sync(); }, Math.max(0, photo.retryAt - Date.now()));
         }
+        // The initial/timer drain may finish after explicit promotion started.
+        // Do not restart the exiting worker with a redundant automatic pull.
+        // Foreground online/focus and manual synchronization still opt in.
+        if (disposed || (!afterCurrent && registration.current?.waiting)) return;
         try {
           await refreshFieldCache(queue, scope, fetch, { afterCurrent });
           if (!disposed) { setCacheFailed(false); window.dispatchEvent(new Event("alvillas-field-cache-ready")); }
