@@ -914,9 +914,12 @@ textarea:disabled {
 .field-language .locale-switch a {
   min-block-size: var(--target-field-large);
   min-inline-size: var(--target-field-large);
+  transition: box-shadow var(--motion-duration-base) var(--motion-ease-standard);
 }
 
 .field-checklist-progress p, .field-language p { margin: 0; }
+.field-work-views button { transition: box-shadow var(--motion-duration-base) var(--motion-ease-standard); }
+.field-work-views button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-foreground); }
 
 .field-checklist-progress progress {
   inline-size: 100%;

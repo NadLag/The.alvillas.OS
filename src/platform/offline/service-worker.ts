@@ -8,6 +8,35 @@ declare const self: ServiceWorkerGlobalScope & { ALVILLAS_RELEASE: string };
 const prefix = "alvillas-public-assets-";
 const cacheName = prefix + self.ALVILLAS_RELEASE;
 installNotificationWorker(self);
+const offlineShell = /^\/(en|fr|ar)\/offline\/field$/u;
+
+async function prepareOfflineShells() {
+  const cache = await caches.open(cacheName), assets = new Map<string, Promise<void>>();
+  const download = (url: URL): Promise<void> => {
+    const existing = assets.get(url.href); if (existing) return existing;
+    const pending = (async () => {
+      const response = await fetch(url, { credentials: "omit" });
+      if (!response.ok) throw new Error("Offline public asset unavailable");
+      await cache.put(url, response.clone());
+      if (url.pathname.endsWith(".css")) {
+        const css = await response.text();
+        const fonts = [...css.matchAll(/url\(["']?([^\s)'"\n]+)["']?\)/gu)].map(match => new URL(match[1], url));
+        await Promise.all(fonts.filter(asset => asset.origin === self.location.origin && asset.pathname.startsWith("/_next/static/")).map(download));
+      }
+    })(); assets.set(url.href, pending); return pending;
+  };
+  await Promise.all(["en", "fr", "ar"].map(async locale => {
+    const url = new URL(`/${locale}/offline/field`, self.location.origin), response = await fetch(url, { credentials: "omit" });
+    if (!response.ok || response.redirected) throw new Error("Offline public shell unavailable");
+    const html = await response.clone().text();
+    if (!html.includes('data-field-offline-shell="public"')) throw new Error("Offline public shell marker missing");
+    const links = [...html.matchAll(/(?:src|href)="([^"<>]+)"/gu)].map(match => new URL(match[1].replaceAll("&amp;", "&"), url));
+    await Promise.all(links.filter(asset => asset.origin === self.location.origin && asset.pathname.startsWith("/_next/static/")).map(download));
+    // Publish HTML only after every referenced public asset is durable.
+    await cache.put(url, response);
+  }));
+}
+self.addEventListener("install", event => { event.waitUntil(prepareOfflineShells()); });
 
 // An update waits for the user's explicit refresh; queued work remains in IndexedDB.
 self.addEventListener("message", event => {
@@ -26,7 +55,22 @@ self.addEventListener("activate", event => {
 });
 self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
-  // Authenticated HTML, API responses and business records never enter CacheStorage.
+  if (event.request.method === "GET" && url.origin === self.location.origin && event.request.mode === "navigate") {
+    const field = url.pathname.match(/^\/(en|fr|ar)\/app\/field(?:\/([a-f0-9-]{36}))?$/u);
+    if (field || offlineShell.test(url.pathname)) {
+      event.respondWith((async () => {
+        try { return await fetch(event.request); }
+        catch (error) {
+          if (field) return Response.redirect(new URL(`/${field[1]}/offline/field${field[2] ? `?task=${field[2]}` : ""}`, url), 302);
+          const normalized = new URL(url.pathname, url.origin);
+          const cached = await (await caches.open(cacheName)).match(normalized);
+          if (cached) return cached;
+          throw error;
+        }
+      })()); return;
+    }
+  }
+  // Only static assets and the anonymous public shell enter CacheStorage.
   if (event.request.method !== "GET" || url.origin !== self.location.origin || !url.pathname.startsWith("/_next/static/")) return;
   event.respondWith((async () => {
     const cached = await caches.match(event.request);

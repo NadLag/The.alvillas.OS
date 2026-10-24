@@ -1,12 +1,13 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { EmptyState, FieldShell, ShellHeader } from "@/design-system/shells";
+import { FieldShell, ShellHeader } from "@/design-system/shells";
 import { FieldPwa } from "@/platform/offline/field-pwa";
 import { FieldLanguage } from "@/platform/offline/field-language";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
-import { listAssignedFieldTasks } from "@/modules/reservations/application/reservation-service";
-import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
+import { pullFieldWork } from "@/modules/reservations/application/field-pull-service";
+import { fieldPullInputSchema } from "@/modules/reservations/domain/field-pull";
+import { FieldJobs } from "@/platform/offline/field-jobs";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -32,7 +33,9 @@ export default async function FieldTasksPage({
     redirect(`/${appLocale}/login`);
   }
 
-  const [t, tasks] = await Promise.all([getTranslations("Field"), listAssignedFieldTasks(ctx)]);
+  const [t, work] = await Promise.all([getTranslations("Field"), pullFieldWork(ctx, fieldPullInputSchema.parse({
+    organization_id: ctx.organizationId, actor_user_id: ctx.actorId, mode: "assigned"
+  }))]);
 
   return (
     <FieldShell className="field-page" testId="field-page">
@@ -49,31 +52,7 @@ export default async function FieldTasksPage({
 
       <FieldLanguage locale={appLocale} path="/app/field" />
       <FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} />
-      {tasks.length === 0 ? (
-        <EmptyState testId="field-tasks-empty" tone="motif">{t("empty")}</EmptyState>
-      ) : (
-        <div className="field-task-list">
-          {tasks.map((task) => (
-            <Link
-              className="field-task-card"
-              data-testid="field-task-card"
-              href={`/${appLocale}/app/field/${task.id}`}
-              key={task.id}
-            >
-              <span>
-                <strong>{localizedTaskTitle(task.title, appLocale)}</strong>
-                <small>
-                  {t("rowMeta", {
-                    property: task.propertyName,
-                    reservation: task.reservationReference ?? t("noReservation")
-                  })}
-                </small>
-              </span>
-              <span>{t("checklistCount", { count: task.checklistItems.length })}</span>
-            </Link>
-          ))}
-        </div>
-      )}
+      <FieldJobs scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} locale={appLocale} initial={work.tasks} />
     </FieldShell>
   );
 }

@@ -100,7 +100,9 @@ export function FieldTaskCompletionForm({
   userId,
   organizationId,
   checklistItems,
-  labels
+  labels,
+  mode = "connected",
+  readOnly = false
 }: {
   locale: string;
   taskId: string;
@@ -109,6 +111,8 @@ export function FieldTaskCompletionForm({
   organizationId: string;
   checklistItems: ChecklistItemOption[];
   labels: FieldTaskLabels;
+  mode?: "connected" | "cached";
+  readOnly?: boolean;
 }) {
   const progressText=useTranslations('Operations.manage');
   const fieldText = useTranslations("Field");
@@ -124,6 +128,11 @@ export function FieldTaskCompletionForm({
   const syncing = useRef(false);
   const [note, setNote] = useState("");
   const [offline, setOffline] = useState(false);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftSaved, setDraftSaved] = useState(false);
+  const [cacheRevision, setCacheRevision] = useState(0);
+  const edited = useRef(false);
+  const draftIncarnation = useRef<string | null>(null);
   const message = messageForState(state, labels);
   const queued = queueStatus === "queued" || queueStatus === "syncing";
   const checkedCount = checklistItems.filter(item => checked.has(item.id)).length;
@@ -135,14 +144,22 @@ export function FieldTaskCompletionForm({
     const ready = (async () => {
       const { fieldQueue } = await import("@/platform/offline/field-queue");
       const queue = fieldQueue();
-      await queue.activate(scope);
+      const { resolveFieldScope } = await import("@/platform/offline/field-session");
+      if (!await resolveFieldScope(queue, navigator.onLine, scope)) throw new Error("FIELD_SESSION_CHANGED");
+      draftIncarnation.current = (await queue.readCache(scope)).state?.incarnation ?? null;
       await queue.migrateLegacy(scope, localStorage);
       const current = (await queue.entries(scope)).find(item => item.operation.payload.taskId === taskId);
       if (current && !cancelled) {
         setQueueStatus(current.syncStatus === "pending" ? "queued" : current.syncStatus);
         setChecked(new Set(current.operation.payload.checklistItemIds));
         setNote(current.operation.payload.note ?? "");
+      } else {
+        const draft = await queue.readDraft(scope, taskId);
+        if (draft && !cancelled && !edited.current) {
+          setChecked(new Set(draft.checklistItemIds)); setNote(draft.note);
+        }
       }
+      if (!cancelled) setDraftReady(true);
       return queue;
     })();
     async function sync(): Promise<void> {
@@ -162,17 +179,6 @@ export function FieldTaskCompletionForm({
       } finally { syncing.current = false; }
     }
     const handleSync = () => { if (!cancelled) { setOffline(!navigator.onLine); void sync(); } };
-    const acknowledged = (value: unknown) => {
-      if (!value || typeof value !== "object" || !("organizationId" in value) || value.organizationId !== organizationId ||
-        !("userId" in value) || value.userId !== userId || !("taskId" in value) || value.taskId !== taskId || cancelled) return;
-      window.location.assign(`/${locale}/app/field`);
-    };
-    const acknowledgedHere = (event: Event) => acknowledged((event as CustomEvent<unknown>).detail);
-    const acknowledgedByWorker = (event: MessageEvent<unknown>) => {
-      if (event.data && typeof event.data === "object" && "type" in event.data && event.data.type === "alvillas-field-acknowledged" && "detail" in event.data) acknowledged(event.data.detail);
-    };
-    window.addEventListener("alvillas-field-acknowledged", acknowledgedHere);
-    navigator.serviceWorker?.addEventListener("message", acknowledgedByWorker);
     queueMicrotask(handleSync);
     const retry = window.setInterval(handleSync, 30_000);
     window.addEventListener("online", handleSync);
@@ -184,10 +190,33 @@ export function FieldTaskCompletionForm({
       window.removeEventListener("online", handleSync);
       window.removeEventListener("offline", handleSync);
       window.removeEventListener("focus", handleSync);
-      window.removeEventListener("alvillas-field-acknowledged", acknowledgedHere);
-      navigator.serviceWorker?.removeEventListener("message", acknowledgedByWorker);
     };
   }, [locale, organizationId, userId, taskId]);
+
+  useEffect(() => {
+    const refreshed = () => setCacheRevision(value => value + 1);
+    window.addEventListener("alvillas-field-cache-ready", refreshed);
+    return () => window.removeEventListener("alvillas-field-cache-ready", refreshed);
+  }, []);
+
+  useEffect(() => {
+    if (!draftReady || queued || readOnly || !draftIncarnation.current) return;
+    const incarnation = draftIncarnation.current;
+    const scope = { organizationId, userId }; let cancelled = false;
+    void import("@/platform/offline/field-queue").then(({ fieldQueue }) => fieldQueue().saveDraft(scope, taskId, [...checked], note, incarnation))
+      .then(saved => { if (!cancelled) setDraftSaved(saved); })
+      .catch(() => { if (!cancelled) setQueueStatus("storageError"); });
+    return () => { cancelled = true; };
+  }, [checked, note, draftReady, queued, organizationId, userId, taskId, readOnly, cacheRevision]);
+
+  useEffect(() => {
+    if (mode !== "cached" || progress.status !== "saved") return;
+    const scope = { organizationId, userId };
+    void Promise.all([import("@/platform/offline/field-queue"), import("@/platform/offline/field-pull")])
+      .then(([{ fieldQueue }, { refreshFieldCache }]) => refreshFieldCache(fieldQueue(), scope))
+      .then(() => window.dispatchEvent(new Event("alvillas-field-cache-ready")))
+      .catch(() => { /* The saved server progress and local draft remain available for the next refresh. */ });
+  }, [mode, progress, organizationId, userId]);
 
   async function queueCompletion(formData: FormData): Promise<void> {
     const checklistItemIds = formData.getAll("checklistItemIds").map(String);
@@ -205,11 +234,12 @@ export function FieldTaskCompletionForm({
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    if (readOnly) { event.preventDefault(); return; }
     if ((event.nativeEvent as SubmitEvent).submitter?.getAttribute("data-progress") === "true") {
       if (!navigator.onLine) event.preventDefault();
       return;
     }
-    if (navigator.onLine) return;
+    if (navigator.onLine && mode === "connected") return;
     event.preventDefault();
     void queueCompletion(new FormData(event.currentTarget));
   }
@@ -248,8 +278,8 @@ export function FieldTaskCompletionForm({
             <input
               data-testid="field-checklist-item"
               checked={checked.has(item.id)}
-              disabled={queued || pending}
-              onChange={event=>setChecked(before=>{const next=new Set(before);if(event.target.checked)next.add(item.id);else next.delete(item.id);return next;})}
+              disabled={queued || pending || readOnly}
+              onChange={event=>{edited.current=true;setDraftSaved(false);setChecked(before=>{const next=new Set(before);if(event.target.checked)next.add(item.id);else next.delete(item.id);return next;});}}
               name="checklistItemIds"
               type="checkbox"
               value={item.id}
@@ -260,7 +290,7 @@ export function FieldTaskCompletionForm({
       </div>
       <label className="field">
         <span>{labels.note}</span>
-        <textarea name="note" rows={3} disabled={queued || pending} value={note} onChange={event => setNote(event.target.value)} />
+        <textarea name="note" rows={3} maxLength={1000} disabled={queued || pending || readOnly} value={note} onChange={event => { edited.current=true;setDraftSaved(false);setNote(event.target.value); }} />
       </label>
       {message ? (
         <p className="form-error" data-testid="field-task-form-error" role="alert">
@@ -279,13 +309,14 @@ export function FieldTaskCompletionForm({
       <button
         className="primary-button field-complete-button"
         data-testid="field-task-complete"
-        disabled={pending || queued || progressPending || checkedCount!==checklistItems.length}
+        disabled={readOnly || pending || queued || progressPending || checkedCount!==checklistItems.length}
         type="submit"
       >
         {pending || queueStatus === "syncing" ? labels.completing : labels.complete}
       </button>
-      <button className="secondary-button field-complete-button" type="submit" data-progress="true" formAction={progressAction} disabled={pending||queued||progressPending||offline}>{progressText('saveProgress')}</button>
+      <button className="secondary-button field-complete-button" type="submit" data-progress="true" formAction={progressAction} disabled={readOnly||pending||queued||progressPending||offline}>{progressText('saveProgress')}</button>
       {offline && !queued ? <p>{fieldText("offlineProgress")}</p> : null}
+      {draftSaved && !queued ? <p aria-live="polite" data-testid="field-draft-saved">{fieldText("draftSaved")}</p> : null}
       {progress.status==='saved'?<p role="status">{progressText('saved')}</p>:progress.status==='error'?<p role="alert">{progressText(`errors.${progress.message??'generic'}`)}</p>:null}
     </form>
   );
