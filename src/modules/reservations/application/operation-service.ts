@@ -168,7 +168,7 @@ export async function operationAudit(
   if (batch) batch.push(record);
   else await writeAuditEvent(repo.tx, record);
   const event = action === "task.create" ? "TaskCreated" : ["task.assigned","task.assignment.swapped"].includes(action) ? "TaskAssigned" :
-    task.state === "COMPLETED" ? (action.includes("proxy") ? "ProxyValidated" : "TaskCompleted") : null;
+    action === "task.proxy_validation.created" && task.state === "COMPLETED" ? "ProxyValidated" : null;
   if (event) await repo.event(event,task.id,task.propertyId,`task:${task.id}:${task.version}:${event}`);
 }
 export async function operationTaskDetail(
