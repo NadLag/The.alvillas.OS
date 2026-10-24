@@ -17,6 +17,18 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
   const native = await fieldBrowser(info), page = native.page, t = { en, fr, ar }[locale];
   let fixture: Awaited<ReturnType<typeof openFieldFixture>> | undefined;
   try {
+    await page.addInitScript(() => {
+      const messages: Array<{ at: number; script: string; state: string; type: unknown }> = [];
+      Object.defineProperty(window, "fieldWorkerMessages", { value: messages });
+      const send: unknown = Object.getOwnPropertyDescriptor(ServiceWorker.prototype, "postMessage")?.value;
+      if (typeof send !== "function") throw new Error("Native worker messaging unavailable");
+      ServiceWorker.prototype.postMessage = function (this: ServiceWorker, ...args: [unknown, (Transferable[] | StructuredSerializeOptions)?]) {
+        const data = args[0];
+        messages.push({ at: Date.now(), script: new URL(this.scriptURL).pathname + new URL(this.scriptURL).search,
+          state: this.state, type: data && typeof data === "object" && "type" in data ? data.type : null });
+        Reflect.apply(send, this, args);
+      };
+    });
     const f = await openFieldFixture(page, info, locale); fixture = f;
     await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
     const manifest = await page.request.get(`/${locale}/manifest.webmanifest`);
@@ -42,6 +54,16 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
     await page.context().route("**/api/sync/push", route => route.abort()); await page.context().setOffline(false);
     await expect(update).toBeEnabled();
     const pendingRequests = new Set<string>();
+    const nativeEvents: unknown[] = [], lifecycle = await page.context().newCDPSession(page);
+    lifecycle.on("ServiceWorker.workerVersionUpdated", event => {
+      nativeEvents.push({ at: Date.now(), versions: event.versions.map(worker => ({ id: worker.versionId, status: worker.status,
+        running: worker.runningStatus, script: new URL(worker.scriptURL).pathname + new URL(worker.scriptURL).search })) });
+    });
+    lifecycle.on("Page.frameStartedLoading", () => nativeEvents.push({ at: Date.now(), type: "frameStartedLoading" }));
+    lifecycle.on("Page.lifecycleEvent", event => nativeEvents.push({ at: Date.now(), type: event.name }));
+    lifecycle.on("Inspector.targetCrashed", () => nativeEvents.push({ at: Date.now(), type: "targetCrashed" }));
+    await lifecycle.send("Page.enable"); await lifecycle.send("Page.setLifecycleEventsEnabled", { enabled: true });
+    await lifecycle.send("ServiceWorker.enable");
     const requestStarted = (request: PlaywrightRequest) => pendingRequests.add(new URL(request.url()).pathname);
     const requestFinished = (request: PlaywrightRequest) => pendingRequests.delete(new URL(request.url()).pathname);
     page.on("request", requestStarted); page.on("requestfinished", requestFinished); page.on("requestfailed", requestFinished);
@@ -55,16 +77,17 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
           dirty: Boolean(document.querySelector('[data-field-dirty="true"]')), visibility: document.visibilityState,
           updateDisabled: document.querySelector<HTMLButtonElement>('[data-testid="field-update"]')?.disabled,
           notice: document.querySelector('[data-testid="field-pwa-notice"]')?.textContent,
-          controller: navigator.serviceWorker.controller?.state, waiting: worker?.waiting?.state, installing: worker?.installing?.state };
+          controller: navigator.serviceWorker.controller?.state, waiting: worker?.waiting?.state, installing: worker?.installing?.state,
+          sentMessages: "fieldWorkerMessages" in window ? window.fieldWorkerMessages : [] };
       }).catch(() => ({ documentUnavailable: true }));
       let diagnosticTimeout: ReturnType<typeof setTimeout> | undefined;
       const state = await Promise.race([diagnostic, new Promise<{ documentUnavailable: true }>(resolve => {
         diagnosticTimeout = setTimeout(() => resolve({ documentUnavailable: true }), 3000);
       })]);
       if (diagnosticTimeout) clearTimeout(diagnosticTimeout);
-      console.log(JSON.stringify({ fieldPwaRefreshFailure: { locale, project: info.project.name, previousDocument, state, pendingPaths: [...pendingRequests] } }));
+      console.log(JSON.stringify({ fieldPwaRefreshFailure: { locale, project: info.project.name, previousDocument, state, pendingPaths: [...pendingRequests], nativeEvents } }));
       throw error;
-    } finally { page.off("request", requestStarted); page.off("requestfinished", requestFinished); page.off("requestfailed", requestFinished); }
+    } finally { page.off("request", requestStarted); page.off("requestfinished", requestFinished); page.off("requestfailed", requestFinished); await lifecycle.detach(); }
     await expect(note).toHaveValue("Queued work survives a service worker update"); await expect(check).toBeChecked();
     expect(await storedFieldData(page)).toEqual(queued);
     await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.Field.offlineQueued);
