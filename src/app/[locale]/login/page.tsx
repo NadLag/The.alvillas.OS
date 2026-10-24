@@ -44,8 +44,8 @@ export default async function LoginPage({
       <div className="auth-panel">
         <div className="auth-panel-header">
           <p className="eyebrow">{t("eyebrow")}</p>
-          <h1>{t("title")}</h1>
-          <p>{t("subtitle")}</p>
+          <h1>{t(surface === "field" ? "fieldTitle" : "title")}</h1>
+          <p>{t(surface === "field" ? "fieldSubtitle" : "subtitle")}</p>
         </div>
         <LoginForm
           locale={appLocale}

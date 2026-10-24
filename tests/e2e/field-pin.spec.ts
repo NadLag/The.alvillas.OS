@@ -11,6 +11,7 @@ for (const locale of ["en", "fr", "ar"]) test(`Field Phone + PIN keypad signs in
   test.skip(!process.env.DATABASE_URL, "Real PostgreSQL required for field PIN sign-in"); test.setTimeout(240000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw new Error("Field invitation fixtures require a local database");
   const f = await openFieldFixture(page, info, "en"), phone = `+21264${randomInt(1_000_000, 10_000_000)}`;
+  const credential = locale === "ar" ? "001234" : "654321";
   try {
     const original = await withTenant(f.db, f.organizationId, tx => tx.operationTask.findUniqueOrThrow({ where: { id: f.taskId } }));
     await page.goto("/en/app/identity"); await page.getByTestId("invite-display-name").fill(`Local field keypad ${locale} ${phone.slice(-4)}`);
@@ -18,7 +19,7 @@ for (const locale of ["en", "fr", "ar"]) test(`Field Phone + PIN keypad signs in
     await page.getByTestId("invite-preferred-locale").selectOption(locale); await page.getByTestId("invite-submit").click();
     const code = (await page.getByTestId("invitation-code").innerText()).split(":").at(-1)?.trim(); expect(code).toBeTruthy();
     await page.goto("/en/app"); await page.getByTestId("logout-button").click(); await expect(page).toHaveURL(/\/en\/login$/u);
-    await page.goto(`/${locale}/activate/${code}`); await page.getByTestId("activation-phone").fill(phone); await page.getByTestId("activation-pin").fill("654321");
+    await page.goto(`/${locale}/activate/${code}`); await page.getByTestId("activation-phone").fill(phone); await page.getByTestId("activation-pin").fill(credential);
     await page.getByTestId("activation-submit").click(); await expect(page).toHaveURL(new RegExp(`/${locale}/login$`, "u"));
     await page.goto(`/${locale}/login?surface=field`);
     await expect(page.locator('input[name="method"][value="pin"]')).toBeChecked(); await expect(page.getByTestId("login-pin-keypad")).toBeVisible();
@@ -45,7 +46,7 @@ for (const locale of ["en", "fr", "ar"]) test(`Field Phone + PIN keypad signs in
     for (const digit of "654329") await page.getByTestId(`pin-key-${digit}`).click();
     await page.getByTestId("pin-key-delete").focus(); await page.keyboard.press("Enter"); await page.getByTestId("pin-key-1").click();
     await expect(page.getByTestId("login-pin")).toHaveValue("654321");
-    await page.getByTestId("pin-key-clear").click(); await page.getByTestId("login-pin").fill("٦٥٤٣٢١"); await expect(page.getByTestId("login-pin")).toHaveValue("654321");
+    await page.getByTestId("pin-key-clear").click(); await page.getByTestId("login-pin").fill(locale === "ar" ? "٠٠١٢٣٤" : "٦٥٤٣٢١"); await expect(page.getByTestId("login-pin")).toHaveValue(credential);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: info.outputPath(`field-pin-${locale}.png`), fullPage: true });
