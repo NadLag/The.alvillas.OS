@@ -117,11 +117,13 @@ export async function operationAction(
   }
   revalidatePath(`/${safeLocale(locale)}/app/operations`);
   revalidatePath(`/${safeLocale(locale)}/app/field`);
+  revalidatePath(`/${safeLocale(locale)}/app/field/validate`);
   revalidatePath(`/${safeLocale(locale)}/app/operations/recurring`);
   const taskId = form.get("taskId");
   if (typeof taskId === "string" && z.uuid().safeParse(taskId).success) {
     revalidatePath(`/${safeLocale(locale)}/app/operations/${taskId}`);
     revalidatePath(`/${safeLocale(locale)}/app/field/${taskId}`);
+    revalidatePath(`/${safeLocale(locale)}/app/field/validate/${taskId}`);
   }
   if (createdId) redirect(`/${safeLocale(locale)}/app/operations/${createdId}`);
   return { status: "saved", generation };

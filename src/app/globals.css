@@ -923,6 +923,14 @@ textarea:disabled {
 .pin-keypad { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); }
 .pin-keypad button { justify-content: center; min-block-size: 64px; padding-inline: var(--space-3); font-size: var(--font-size-xl); }
 .pin-keypad .pin-keypad-action { font-size: var(--font-size-md); }
+.field-proxy-identities { display: grid; gap: var(--space-4); margin: 0; }
+.field-proxy-identities dt { color: var(--text-secondary); font-size: var(--font-size-sm); }
+.field-proxy-identities dd { margin-inline-start: 0; overflow-wrap: anywhere; }
+.field-job-list { display: grid; gap: var(--space-4); list-style: none; padding: 0; }
+.field-proxy-form fieldset { border: 0; margin: 0; padding: 0; min-inline-size: 0; }
+.field-proxy-form legend { padding: 0; margin-block-end: var(--space-4); }
+.field-proxy-form textarea { inline-size: 100%; min-block-size: 112px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  padding: var(--space-5); background: var(--surface-panel); color: var(--text-primary); font: inherit; resize: vertical; }
 .field-auth-page { font-size: var(--font-size-lg); }
 
 .field-checklist-progress progress {

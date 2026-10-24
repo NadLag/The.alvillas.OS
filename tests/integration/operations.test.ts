@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { permissionCatalog } from "@/platform/authz/catalog";
+import { fieldProxyTasks } from "@/modules/reservations/application/field-proxy-service";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import {
   createOperationTask,
@@ -468,6 +469,41 @@ describe("operations on real PostgreSQL", () => {
       Array<{ rolbypassrls: boolean; rolsuper: boolean }>
     >`SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname='alvillas_ops_tests'`;
     expect(roles[0]).toEqual({ rolbypassrls: false, rolsuper: false });
+  });
+  it("paginates supervisor work including person-only assignees while excluding own and foreign tasks", async () => {
+    const f = await fixture(), foreign = await fixture();
+    await assigned(foreign);
+    const ids: string[] = [];
+    for (let index = 0; index < 51; index++) ids.push((await assigned(f)).id);
+    const self = await assigned(f);
+    await withTenant(db, f.org, async tx => {
+      await tx.operationTask.update({ where: { id: ids[0] }, data: { assignedToUserAccountId: null } });
+      await tx.operationTask.update({ where: { id: self.id }, data: { assignedToUserAccountId: f.account.id, assignedToPersonId: f.person.id } });
+    });
+    const first = await fieldProxyTasks(f.ctx, { page: 1 }, deps()), second = await fieldProxyTasks(f.ctx, { page: 2 }, deps());
+    expect(first.count).toBe(51); expect(first.tasks).toHaveLength(50); expect(second.tasks).toHaveLength(1);
+    expect(new Set([...first.tasks, ...second.tasks].map(row => row.id))).toEqual(new Set(ids));
+    expect(Object.keys(first.tasks[0]).sort()).toEqual(["dueDate", "id", "propertyName", "title"]);
+    await expect(fieldProxyTasks(f.workerCtx, { page: 1 }, deps())).rejects.toBeInstanceOf(ReservationAuthorizationError);
+  });
+  it("intersects scoped view and validate grants and denies an expired validation grant", async () => {
+    const f = await fixture(), task = await assigned(f);
+    const view = { permissions: new Set(["task:view"]), scope: { organizationId: f.org, scopeType: "organization" as const } };
+    const validation = { permissions: new Set(["task:validate"]), scope: { organizationId: f.org, scopeType: "property" as const, scopeId: randomUUID() as string } };
+    const scoped = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [view, validation] } };
+    expect((await fieldProxyTasks(scoped, { page: 1 }, deps())).tasks).toEqual([]);
+    const other = await withTenant(db, f.org, tx => tx.property.create({ data: { organizationId: f.org, name: "Other supervisor scope",
+      addressLine1: "Test", city: "Marrakech", propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [], photoUrls: [] } }));
+    expect(await fieldProxyTasks({ ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [
+      { ...view, scope: { organizationId: f.org, scopeType: "property", scopeId: f.property.id } },
+      { ...validation, scope: { ...validation.scope, scopeId: other.id } }] } }, { page: 1 }, deps())).toMatchObject({ count: 0, tasks: [] });
+    scoped.authContext.assignments = [view, { ...validation, scope: { ...validation.scope, scopeId: task.propertyId } }];
+    expect((await fieldProxyTasks(scoped, { page: 1 }, deps())).tasks.map(row => row.id)).toEqual([task.id]);
+    const expired = { ...scoped, authContext: { ...scoped.authContext, assignments: [view, { ...validation, validTo: new Date("2001-01-01") }] } };
+    expect(await fieldProxyTasks(expired, { page: 1 }, deps())).toMatchObject({ count: 0, tasks: [] });
+    await expect(proxyCompleteOperationTask(expired, { taskId: task.id, expectedVersion: task.version,
+      performedByPersonId: f.worker.id, checklistItemIds: task.checklistItems.map(item => item.id),
+      reason: "Expired grant must not validate", idempotencyKey: randomUUID() }, deps())).rejects.toBeInstanceOf(ReservationAuthorizationError);
   });
   it("requires exact checklists, distinct assigned performer and validator and records proxy identity exactly once", async () => {
     const f = await fixture(),
