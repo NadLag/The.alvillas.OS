@@ -15,7 +15,7 @@ export function FieldLanguage({ locale, path, onChangeLocale }: { locale: AppLoc
     const target = new URL(link.href).pathname.split("/")[1];
     if (onChangeLocale && isAppLocale(target)) { event.preventDefault(); onChangeLocale(target); setNotice(null); return; }
     if (!navigator.onLine) { event.preventDefault(); setNotice("offlineLanguage"); return; }
-    const dirty = document.querySelector<HTMLFormElement>('[data-field-dirty="true"]');
+    const dirty = document.querySelector<HTMLFormElement>('[data-field-dirty="true"], [data-field-photo-dirty="true"]');
     if (!dirty) { setNotice(null); return; }
     event.preventDefault();
     const note = dirty.querySelector<HTMLTextAreaElement>('textarea[name="note"]');

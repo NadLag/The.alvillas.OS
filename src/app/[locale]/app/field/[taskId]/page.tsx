@@ -1,6 +1,8 @@
 import { OperationEvidencePanel } from "@/modules/reservations/ui/operation-evidence-panel";
 import { FieldPwa } from "@/platform/offline/field-pwa";
 import { FieldLanguage } from "@/platform/offline/field-language";
+import { FieldPhotoCapture } from "@/platform/offline/field-photo-capture";
+import { OperationForm } from "@/modules/reservations/ui/operation-form";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -42,6 +44,7 @@ export default async function FieldTaskPage({
 
   const t = await getTranslations({locale,namespace:"Field"});
   const whatsapp = await getTranslations({locale,namespace:"Whatsapp"});
+  const photo = await getTranslations({locale,namespace:"FieldPhoto"});
   let task;
 
   try {
@@ -103,9 +106,11 @@ export default async function FieldTaskPage({
         userId={ctx.actorId}
         organizationId={ctx.organizationId}
         taskId={task.id}
+        beforeComplete={<FieldPhotoCapture key={`${ctx.organizationId}:${ctx.actorId}:${task.id}`} scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} taskId={task.id} />}
       />
       <Link className="secondary-button whatsapp-entry" data-testid="task-whatsapp" href={whatsappComposerPath(appLocale, { type: "task", id: task.id })}>{whatsapp("title")}</Link>
-      <OperationEvidencePanel ctx={ctx} taskId={task.id} locale={appLocale} />
+      <OperationEvidencePanel ctx={ctx} taskId={task.id} locale={appLocale} attachmentForm={<OperationForm operation="evidence" locale={appLocale}
+        taskId={task.id} idempotencyKey={randomUUID()} submit={photo("saveNote")}>{null}</OperationForm>} />
     </FieldShell>
   );
 }

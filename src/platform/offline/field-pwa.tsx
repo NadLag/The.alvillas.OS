@@ -36,6 +36,7 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
     let cacheSubscription: { unsubscribe(): void } | undefined;
     let hadController = "serviceWorker" in navigator && Boolean(navigator.serviceWorker.controller);
     let checkedAt = 0;
+    let photoRetry: ReturnType<typeof setTimeout> | undefined;
     const scope = { organizationId, userId };
     const network = () => setOffline(!navigator.onLine);
     const ready = (async () => {
@@ -58,7 +59,13 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
         const queue = await ready;
         if (disposed || !navigator.onLine) return;
         setSyncing(true);
-        await syncFieldQueue(queue, scope);
+        const outcome = await syncFieldQueue(queue, scope);
+        if (photoRetry) clearTimeout(photoRetry);
+        if (!disposed && outcome === "queued") {
+          const next = (await queue.entries(scope)).find(entry => entry.syncStatus === "pending");
+          const photo = next && await queue.photos.get(`${organizationId}:${userId}:${next.operation.client_op_id}`);
+          if (!disposed && photo && !photo.ready && photo.retryAt > 0) photoRetry = setTimeout(() => { void sync(); }, Math.max(0, photo.retryAt - Date.now()));
+        }
         try {
           await refreshFieldCache(queue, scope, fetch, { afterCurrent });
           if (!disposed) { setCacheFailed(false); window.dispatchEvent(new Event("alvillas-field-cache-ready")); }
@@ -128,6 +135,7 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
     window.addEventListener("alvillas-field-acknowledged", acknowledgedHere);
     return () => {
       disposed = true; subscription?.unsubscribe(); cacheSubscription?.unsubscribe();
+      if (photoRetry) clearTimeout(photoRetry);
       retrySync.current = () => undefined;
       window.removeEventListener("online", online); window.removeEventListener("offline", network); window.removeEventListener("focus", online);
       window.removeEventListener("beforeinstallprompt", installAvailable); window.removeEventListener("appinstalled", installationFinished);
@@ -147,12 +155,12 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
   }
   function updateApp() {
     if (!navigator.onLine) return;
-    if (document.querySelector('[data-field-dirty="true"]')) { setNotice("saveBeforeUpdate"); return; }
+    if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"]')) { setNotice("saveBeforeUpdate"); return; }
     if (updateRequested.current) return;
     updateRequested.current = true;
     refreshFieldApp(registration.current, () => {
       if (!navigator.onLine) { updateRequested.current = false; setOffline(true); return; }
-      if (document.querySelector('[data-field-dirty="true"]')) { updateRequested.current = false; setNotice("saveBeforeUpdate"); return; }
+      if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"]')) { updateRequested.current = false; setNotice("saveBeforeUpdate"); return; }
       window.location.reload();
     }, () => {
       updateRequested.current = false; setNotice("unavailable");

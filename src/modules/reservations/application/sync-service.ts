@@ -19,6 +19,7 @@ import {
   type SyncOpRecord
 } from "@/modules/reservations/infrastructure/sync-repository";
 import { prisma } from "@/platform/db/client";
+import { attachFieldUploadEvidenceInTransaction } from "./field-upload-service";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
 type SyncServiceDeps = {
@@ -75,9 +76,9 @@ function conflictResult(op: SyncPushOp, message: string): SyncPushOpResult {
     conflict: {
       expected: op.base_version ?? null,
       current: message,
-      incoming: "field_task.complete"
+      incoming: op.type
     },
-    error_code: "TASK_COMPLETION_CONFLICT"
+    error_code: op.type === "field_task.complete" ? "TASK_COMPLETION_CONFLICT" : "TASK_EVIDENCE_CONFLICT"
   };
 }
 
@@ -137,6 +138,13 @@ export async function pushSyncOps(
       });
 
       try {
+        if (op.type === "field_task.evidence.attach") {
+          const attached = await attachFieldUploadEvidenceInTransaction(ctx, { ...op.payload, deviceId: input.device_id, idempotencyKey: op.client_op_id }, tx,
+            { requestId: metaForOp(deps, op).requestId, ipAddress: deps.ipAddress ?? null });
+          const result: SyncPushOpResult = { ...appliedResult(op, null), status: attached.idempotent ? "DUPLICATE" : "APPLIED" };
+          await repository.finish(input.device_id, op.client_op_id, result.status, result, null);
+          results.push(result); continue;
+        }
         const completed = await completeAssignedFieldTaskInTransaction(
           ctx,
           {

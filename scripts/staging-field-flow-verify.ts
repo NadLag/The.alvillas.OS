@@ -32,7 +32,7 @@ try {
   const form = page.getByTestId("field-task-complete-form"), items = page.getByTestId("field-checklist-item");
   const total = await items.count(); expect(total).toBeGreaterThan(0);
   for (const item of await items.all()) await expect(item).not.toBeChecked();
-  const note = form.getByRole("textbox"), save = form.locator('button[data-progress="true"]');
+  const note = form.locator('textarea[name="note"]'), save = form.locator('button[data-progress="true"]');
   const language = page.getByTestId("field-language"), finish = page.getByTestId("field-task-complete");
   const label = (locale: "en" | "fr" | "ar", done: number) => locales[locale].Operations.manage.progress.replace("{done}", String(done)).replace("{total}", String(total));
   phase = "unsaved-work"; await expect(finish).toBeDisabled();

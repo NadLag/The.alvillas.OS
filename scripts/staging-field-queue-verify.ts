@@ -33,7 +33,7 @@ try {
   await expect.poll(async () => (await storedFieldData(page, "metadata")).length).toBe(2);
   const checkboxes = page.getByTestId("field-checklist-item");
   for (const item of await checkboxes.all()) if (!await item.isChecked()) { await item.focus(); await page.keyboard.press("Space"); }
-  const note = page.getByTestId("field-task-complete-form").getByRole("textbox");
+  const note = page.getByTestId("field-task-complete-form").locator('textarea[name="note"]');
   await note.fill("Authenticated Field queue staging acceptance: retained offline work");
   await context.setOffline(true); await page.getByTestId("field-task-complete").click();
   await expect(page.getByTestId("field-task-sync-status")).toHaveText(en.Field.offlineQueued);

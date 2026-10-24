@@ -136,6 +136,7 @@ model Organization {
   operationTaskMutations                         OperationTaskMutation[]
   operationSavedViews                            OperationSavedView[]
   operationEvidence                              OperationTaskEvidence[]
+  operationUploads                               OperationEvidenceUpload[]
   operationIssues                                OperationIssue[]
   taskChecklistItems                             OperationTaskChecklistItem[]
   syncOps                                        SyncOp[]
@@ -330,6 +331,7 @@ model Person {
 }
 
 model UserAccount {
+  operationUploads       OperationEvidenceUpload[]
   requestedApprovals     ApprovalRequest[]            @relation("ApprovalRequester")
   decidedApprovals       ApprovalRequest[]            @relation("ApprovalDecider")
   id                     String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -1042,6 +1044,7 @@ model OperationTask {
   events                   OperationTaskEvent[]
   mutations                OperationTaskMutation[]
   evidence                 OperationTaskEvidence[]
+  uploads                  OperationEvidenceUpload[]
   issues                   OperationIssue[]
 
   @@unique([organizationId, idempotencyKey], map: "operation_task_org_idempotency_unique")
@@ -1112,6 +1115,7 @@ model OperationSavedView {
 }
 
 model OperationTaskEvidence {
+ upload OperationEvidenceUpload?
  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
  organizationId String @map("organization_id") @db.Uuid
  taskId String @map("task_id") @db.Uuid
@@ -1126,6 +1130,32 @@ model OperationTaskEvidence {
  task OperationTask @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
  @@index([organizationId,taskId,createdAt],map:"operation_evidence_task_idx")
  @@map("operation_task_evidence")
+}
+
+model OperationEvidenceUpload {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ actorId String @map("actor_id") @db.Uuid
+ taskId String @map("task_id") @db.Uuid
+ localId String @map("local_id") @db.Uuid
+ deviceId String @map("device_id")
+ manifest Json
+ manifestHash String @map("manifest_hash")
+ status String @default("OPEN")
+ evidenceId String? @unique(map:"operation_evidence_upload_evidence_unique") @map("evidence_id") @db.Uuid
+ readyAt DateTime? @map("ready_at") @db.Timestamptz(6)
+ attachedAt DateTime? @map("attached_at") @db.Timestamptz(6)
+ cleanedAt DateTime? @map("cleaned_at") @db.Timestamptz(6)
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ actor UserAccount @relation(fields:[organizationId,actorId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ task OperationTask @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ evidence OperationTaskEvidence? @relation(fields:[evidenceId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ @@unique([organizationId,id],map:"operation_evidence_upload_org_id_unique")
+ @@unique([organizationId,actorId,localId],map:"operation_evidence_upload_actor_key_unique")
+ @@index([organizationId,status,createdAt],map:"operation_evidence_upload_org_status_created_idx")
+ @@map("operation_evidence_upload")
 }
 
 model OperationIssue {

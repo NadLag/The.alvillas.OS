@@ -34,7 +34,7 @@ test("Field day cache survives offline reload, language changes and a single dur
     await page.goto("/en/app/field"); await expect(page.getByTestId("field-view-today")).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByTestId("field-tasks-empty")).toBeVisible(); await page.getByTestId("field-view-assigned").focus(); await page.keyboard.press("Enter");
     await page.getByTestId("field-task-card").click();
-    const checks = page.getByTestId("field-checklist-item"), form = page.getByTestId("field-task-complete-form"), note = form.getByRole("textbox");
+    const checks = page.getByTestId("field-checklist-item"), form = page.getByTestId("field-task-complete-form"), note = form.locator('textarea[name="note"]');
     await checks.nth(0).check(); await note.fill("Partial offline checklist retained across reload and languages");
     await expect(page.getByTestId("field-draft-saved")).toBeVisible();
     await expect.poll(async () => drafts.parse(await storedFieldData(page, "drafts"))[0]?.note).toBe("Partial offline checklist retained across reload and languages");
@@ -106,7 +106,7 @@ test("Field cached work is removed after actual session revocation", async ({ pa
   try {
     await expect.poll(() => storedFieldData(page, "jobs")).toHaveLength(1);
     const session = z.object({ user: z.object({ id: z.uuid() }) }).parse(await (await page.request.get("/api/auth/session")).json());
-    await page.getByTestId("field-task-complete-form").getByRole("textbox").fill("Private field draft"); await expect(page.getByTestId("field-draft-saved")).toBeVisible();
+    await page.getByTestId("field-task-complete-form").locator('textarea[name="note"]').fill("Private field draft"); await expect(page.getByTestId("field-draft-saved")).toBeVisible();
     await page.goto("/fr/offline/field"); await page.getByTestId("field-view-assigned").click(); await expect(page.getByTestId("field-task-card")).toHaveCount(1);
     await withTenant(f.db, f.organizationId, tx => tx.authSession.updateMany({ where: { userAccountId: session.user.id, revokedAt: null }, data: { revokedAt: new Date() } }));
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -122,7 +122,7 @@ test("Field logout removes saved work, drafts and device metadata before offline
   const f = await openFieldFixture(page, info, "en");
   try {
     await expect.poll(() => storedFieldData(page, "jobs")).toHaveLength(1);
-    await page.getByTestId("field-task-complete-form").getByRole("textbox").fill("Private draft removed by logout"); await expect(page.getByTestId("field-draft-saved")).toBeVisible();
+    await page.getByTestId("field-task-complete-form").locator('textarea[name="note"]').fill("Private draft removed by logout"); await expect(page.getByTestId("field-draft-saved")).toBeVisible();
     await page.goto("/en/app"); await page.getByTestId("logout-button").click(); await expect(page).toHaveURL(/\/en\/login$/u);
     for (const table of ["jobs", "drafts", "operations", "cacheState", "metadata"]) expect(await storedFieldData(page, table)).toEqual([]);
     await page.context().setOffline(true); await page.goto("/en/offline/field"); await expect(page.getByTestId("field-cache-sign-in")).toBeVisible();

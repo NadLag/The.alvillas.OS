@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { startTransition, useActionState, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { z } from "zod";
 import { useTranslations } from "next-intl";
 import { optionalGuestPhoneSchema } from "@/platform/notifications/whatsapp";
@@ -105,7 +105,8 @@ export function FieldTaskCompletionForm({
   checklistItems,
   labels,
   mode = "connected",
-  readOnly = false
+  readOnly = false,
+  beforeComplete
 }: {
   locale: string;
   taskId: string;
@@ -116,9 +117,12 @@ export function FieldTaskCompletionForm({
   labels: FieldTaskLabels;
   mode?: "connected" | "cached";
   readOnly?: boolean;
+  beforeComplete?: ReactNode;
 }) {
   const progressText=useTranslations('Operations.manage');
   const fieldText = useTranslations("Field");
+  const photoText = useTranslations("FieldPhoto");
+  const [photoBlocked, setPhotoBlocked] = useState(false);
   const [progress,progressAction,progressPending]=useActionState(operationAction.bind(null,locale,'progress'),{status:'idle'} as OperationFormState);
   const [checked,setChecked]=useState(()=>new Set(checklistItems.filter(i=>i.completed).map(i=>i.id)));
   const [state, formAction, pending] = useActionState(
@@ -129,6 +133,7 @@ export function FieldTaskCompletionForm({
     "idle" | "queued" | "syncing" | "synced" | "conflict" | "rejected" | "storageError"
   >("idle");
   const syncing = useRef(false);
+  const completing = useRef(false);
   const [note, setNote] = useState("");
   const [offline, setOffline] = useState(false);
   const [draftReady, setDraftReady] = useState(false);
@@ -149,8 +154,8 @@ export function FieldTaskCompletionForm({
       if (!await resolveFieldScope(queue, navigator.onLine, scope)) throw new Error("FIELD_SESSION_CHANGED");
       draftIncarnation.current = (await queue.readCache(scope)).state?.incarnation ?? null;
       await queue.migrateLegacy(scope, localStorage);
-      const current = (await queue.entries(scope)).find(item => item.operation.payload.taskId === taskId);
-      if (current && !cancelled) {
+      const current = (await queue.entries(scope)).find(item => item.operation.type === "field_task.complete" && item.operation.payload.taskId === taskId);
+      if (current && current.operation.type === "field_task.complete" && !cancelled) {
         setQueueStatus(current.syncStatus === "pending" ? "queued" : current.syncStatus);
         setChecked(new Set(current.operation.payload.checklistItemIds));
         setNote(current.operation.payload.note ?? "");
@@ -169,11 +174,17 @@ export function FieldTaskCompletionForm({
       try {
         const queue = await ready;
         if (cancelled || !navigator.onLine) return;
-        const hadCurrent = (await queue.entries(scope)).some(item => item.operation.payload.taskId === taskId && item.syncStatus === "pending");
+        const hadCurrent = (await queue.entries(scope)).some(item => item.operation.type === "field_task.complete" && item.operation.payload.taskId === taskId && item.syncStatus === "pending");
         if (hadCurrent) setQueueStatus("syncing");
-        const result = await syncFieldQueue(queue, scope);
-        if (cancelled || result === "idle") return;
-        setQueueStatus(result);
+        let result = await syncFieldQueue(queue, scope);
+        let current = (await queue.entries(scope)).find(item => item.operation.type === "field_task.complete" && item.operation.payload.taskId === taskId);
+        // A completion can be appended while a photo-only drain is in flight.
+        if (current?.syncStatus === "pending" && (result === "synced" || result === "idle")) {
+          result = await syncFieldQueue(queue, scope);
+          current = (await queue.entries(scope)).find(item => item.operation.type === "field_task.complete" && item.operation.payload.taskId === taskId);
+        }
+        if (cancelled || result === "idle" || (!hadCurrent && !current)) return;
+        setQueueStatus(current?.syncStatus === "pending" && result === "synced" ? "queued" : result);
       } catch {
         if (!cancelled) setQueueStatus("storageError");
       } finally { syncing.current = false; }
@@ -223,6 +234,9 @@ export function FieldTaskCompletionForm({
     const note = typeof noteValue === "string" ? noteValue.trim() : "";
     if (checklistItemIds.length !== checklistItems.length) { setQueueStatus("conflict"); return; }
     try {
+      const review = (await fieldQueue().entries({ organizationId, userId })).find(entry => entry.operation.payload.taskId === taskId &&
+        (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach") && entry.syncStatus !== "pending");
+      if (review) { setQueueStatus(review.syncStatus === "conflict" ? "conflict" : "rejected"); return; }
       await fieldQueue().enqueue({ organizationId, userId }, { client_op_id: idempotencyKey,
         type: "field_task.complete", client_created_at: new Date().toISOString(),
         payload: { taskId, checklistItemIds, note: note || undefined } });
@@ -237,9 +251,21 @@ export function FieldTaskCompletionForm({
       if (!navigator.onLine) event.preventDefault();
       return;
     }
-    if (navigator.onLine && mode === "connected") return;
+    if (document.querySelector('[data-field-photo-dirty="true"]')) { event.preventDefault(); setPhotoBlocked(true); return; }
+    setPhotoBlocked(false);
     event.preventDefault();
-    void queueCompletion(new FormData(event.currentTarget));
+    if (completing.current || pending || queued) return;
+    completing.current = true;
+    const formData = new FormData(event.currentTarget);
+    void (async () => {
+      if (mode === "cached" || !navigator.onLine) { await queueCompletion(formData); return; }
+      const entries = await fieldQueue().entries({ organizationId, userId });
+      const photo = entries.find(entry => entry.operation.payload.taskId === taskId &&
+        (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach"));
+      if (photo?.syncStatus === "conflict" || photo?.syncStatus === "rejected") { setQueueStatus(photo.syncStatus); return; }
+      if (photo) await queueCompletion(formData);
+      else startTransition(() => formAction(formData));
+    })().catch(() => setQueueStatus("storageError")).finally(() => { completing.current = false; });
   }
 
   const queueMessage =
@@ -266,6 +292,7 @@ export function FieldTaskCompletionForm({
     >
       <input name="taskId" type="hidden" value={taskId} />
       <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
+      {photoBlocked ? <p role="status" data-testid="field-photo-completion-blocked">{photoText("unsaved")}</p> : null}
       <div className="field-checklist-progress">
         <p id={counterId} aria-live="polite" data-testid="field-checklist-progress">{progressText("progress", { done: checkedCount, total: checklistItems.length })}</p>
         {checklistItems.length ? <progress aria-labelledby={counterId} max={checklistItems.length} value={checkedCount} /> : null}
@@ -304,6 +331,7 @@ export function FieldTaskCompletionForm({
           {queueMessage}
         </p>
       ) : null}
+      {beforeComplete}
       <button
         className="primary-button field-complete-button"
         data-testid="field-task-complete"

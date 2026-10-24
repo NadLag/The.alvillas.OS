@@ -42,7 +42,7 @@ try {
   });
   for (const html of publicHtml) { expect(html).toContain('data-field-offline-shell="public"'); expect(html).not.toContain(propertyName); expect(html).not.toContain(taskId); }
   evidence.anonymousShells = 3;
-  const items = page.getByTestId("field-checklist-item"), form = page.getByTestId("field-task-complete-form"), note = form.getByRole("textbox");
+  const items = page.getByTestId("field-checklist-item"), form = page.getByTestId("field-task-complete-form"), note = form.locator('textarea[name="note"]');
   const total = await items.count(); expect(total).toBeGreaterThan(0);
   for (const item of await items.all()) await expect(item).not.toBeChecked();
   if (total > 1) await items.first().check();

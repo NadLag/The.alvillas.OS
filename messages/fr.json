@@ -2275,5 +2275,22 @@
     "photo": "Photo",
     "viewPhoto": "Voir la photo",
     "saveEvidence": "Enregistrer la note ou la photo"
+  },
+  "FieldPhoto": {
+    "title": "Photos",
+    "choose": "Prendre ou choisir une photo",
+    "note": "Note de la photo",
+    "save": "Enregistrer la photo",
+    "saveNote": "Enregistrer la note",
+    "saving": "Enregistrement de la photo…",
+    "saved": "Photo enregistrée.",
+    "queued": "Enregistrée sur cet appareil, en attente de synchronisation.",
+    "uploading": "Envoi de la photo…",
+    "review": "Cette photo doit être vérifiée. Conservez le travail enregistré sur cet appareil en attendant l’aide d’un responsable.",
+    "invalid": "Choisissez une photo JPEG ou PNG et ajoutez une note.",
+    "storage": "La photo n’a pas pu être enregistrée sur cet appareil. Gardez-la ouverte, libérez de l’espace et réessayez.",
+    "unsaved": "Enregistrez ou retirez la photo sélectionnée avant de quitter la page ou de terminer la mission.",
+    "discard": "Retirer la photo sélectionnée",
+    "progress": "Progression de l’envoi de la photo"
   }
 }

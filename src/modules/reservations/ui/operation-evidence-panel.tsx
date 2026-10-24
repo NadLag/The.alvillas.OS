@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ReactNode } from "react";
 import { getTranslations, getFormatter } from "next-intl/server";
 import { taskEvidence } from "../application/operation-evidence";
 import {
@@ -13,10 +14,12 @@ export async function OperationEvidencePanel({
   ctx,
   taskId,
   locale,
+  attachmentForm,
 }: {
   ctx: ReservationActorContext;
   taskId: string;
   locale: string;
+  attachmentForm?: ReactNode;
 }) {
   const [t, f, data, detail] = await Promise.all([
       getTranslations({ locale, namespace: "Operations.manage" }),
@@ -55,6 +58,7 @@ export async function OperationEvidencePanel({
         <p>{t("noEvidence")}</p>
       )}
       {authorize(ctx.authContext, "edit", resource) ? (
+        attachmentForm ??
         <OperationForm
           operation="evidence"
           locale={locale}

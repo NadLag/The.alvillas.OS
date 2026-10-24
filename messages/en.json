@@ -2275,5 +2275,22 @@
     "photo": "Photo",
     "viewPhoto": "View photo",
     "saveEvidence": "Save note or photo"
+  },
+  "FieldPhoto": {
+    "title": "Photos",
+    "choose": "Take or choose a photo",
+    "note": "Photo note",
+    "save": "Save photo",
+    "saveNote": "Save note",
+    "saving": "Saving photo…",
+    "saved": "Photo saved.",
+    "queued": "Saved on this device; waiting to sync.",
+    "uploading": "Sending photo…",
+    "review": "This photo needs review. Keep the saved work on this device until a supervisor can help.",
+    "invalid": "Choose a JPEG or PNG photo and add a note.",
+    "storage": "This photo could not be saved on the device. Keep it open, free some storage and try again.",
+    "unsaved": "Save or discard the selected photo before leaving or completing the job.",
+    "discard": "Discard selected photo",
+    "progress": "Photo upload progress"
   }
 }

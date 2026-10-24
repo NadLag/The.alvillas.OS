@@ -17,6 +17,18 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
   const native = await fieldBrowser(info), page = native.page, t = { en, fr, ar }[locale];
   let fixture: Awaited<ReturnType<typeof openFieldFixture>> | undefined;
   try {
+    await page.addInitScript(() => {
+      const messages: Array<{ at: number; script: string; state: string; type: unknown }> = [];
+      Object.defineProperty(window, "fieldWorkerMessages", { value: messages });
+      const send: unknown = Object.getOwnPropertyDescriptor(ServiceWorker.prototype, "postMessage")?.value;
+      if (typeof send !== "function") throw new Error("Native worker messaging unavailable");
+      ServiceWorker.prototype.postMessage = function (this: ServiceWorker, ...args: [unknown, (Transferable[] | StructuredSerializeOptions)?]) {
+        const data = args[0];
+        messages.push({ at: Date.now(), script: new URL(this.scriptURL).pathname + new URL(this.scriptURL).search,
+          state: this.state, type: data && typeof data === "object" && "type" in data ? data.type : null });
+        Reflect.apply(send, this, args);
+      };
+    });
     const f = await openFieldFixture(page, info, locale); fixture = f;
     await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
     const manifest = await page.request.get(`/${locale}/manifest.webmanifest`);
@@ -29,7 +41,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const check = page.getByTestId("field-checklist-item"); await check.focus(); await page.keyboard.press("Space");
-    const note = page.getByTestId("field-task-complete-form").getByRole("textbox"); await note.fill("Queued work survives a service worker update");
+    const note = page.getByTestId("field-task-complete-form").locator('textarea[name="note"]'); await note.fill("Queued work survives a service worker update");
     await page.evaluate(() => navigator.serviceWorker.addEventListener("controllerchange", event => event.stopImmediatePropagation(), { capture: true }));
     await page.evaluate(async suffix => {
       await navigator.serviceWorker.register(`/sw.js?acceptance=${suffix}`, { scope: "/", updateViaCache: "none" });
@@ -65,7 +77,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
           dirty: Boolean(document.querySelector('[data-field-dirty="true"]')), visibility: document.visibilityState,
           updateDisabled: document.querySelector<HTMLButtonElement>('[data-testid="field-update"]')?.disabled,
           notice: document.querySelector('[data-testid="field-pwa-notice"]')?.textContent,
-          controller: navigator.serviceWorker.controller?.state, waiting: worker?.waiting?.state, installing: worker?.installing?.state };
+          controller: navigator.serviceWorker.controller?.state, waiting: worker?.waiting?.state, installing: worker?.installing?.state,
+          sentMessages: "fieldWorkerMessages" in window ? window.fieldWorkerMessages : [] };
       }).catch(() => ({ documentUnavailable: true }));
       let diagnosticTimeout: ReturnType<typeof setTimeout> | undefined;
       const state = await Promise.race([diagnostic, new Promise<{ documentUnavailable: true }>(resolve => {
