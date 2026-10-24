@@ -109,7 +109,13 @@ test.describe("approval notification lifecycle", () => {
         });
         await deliverPushChannel(event, { db: client, channel }); await deliverPushChannel(event, { db: client, channel }); expect(transportCalls).toBe(1);
         const delivery = await withTenant(client, approver.organizationId, (tx) => tx.notificationDelivery.findFirstOrThrow({ where: { eventId: event.id } }));
-        await displayAndClickPush(pushPage, delivery.id); await expect(pushPage).toHaveURL(`http://127.0.0.1:3000/en/app/approvals/${id}`);
+        const payloadRoute = `**/api/notifications/push/${delivery.id}`;
+        await pushContext.route(payloadRoute, async route => {
+          if (route.request().method() === "GET") await new Promise(resolve => setTimeout(resolve, 6000));
+          await route.continue();
+        });
+        await displayAndClickPush(pushPage, delivery.id); await pushContext.unroute(payloadRoute);
+        await expect(pushPage).toHaveURL(`http://127.0.0.1:3000/en/app/approvals/${id}`);
         await expect(pushPage.getByTestId("approval-reason")).toBeVisible();
         await expect.poll(async () => withTenant(client, approver.organizationId, (tx) => tx.notificationDelivery.findFirstOrThrow({ where: { id: delivery.id } }))).toMatchObject({ displayedAt: expect.any(Date), openedAt: expect.any(Date) });
         expect((await page.request.get(`/api/notifications/push/${delivery.id}`)).status()).toBe(404);
