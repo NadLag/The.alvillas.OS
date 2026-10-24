@@ -1,5 +1,5 @@
 import type { SyncPushOpResult } from "@/modules/reservations/domain/sync-protocol";
-import { fieldIdentity, type FieldQueueStore, type FieldQueueScope, type QueueOutcome } from "./field-queue-store";
+import { fieldIdentity, isFieldResultApplied, type FieldQueueStore, type FieldQueueScope, type QueueOutcome } from "./field-queue-store";
 import { prepareQueuedPhoto } from "./field-photo-sync";
 
 const active = new WeakMap<FieldQueueStore, Map<string, Promise<QueueOutcome>>>();
@@ -19,8 +19,10 @@ export function syncFieldQueue(queue: FieldQueueStore, scope: FieldQueueScope, s
 async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeof fetch, acknowledge?: Acknowledge): Promise<QueueOutcome> {
   const entries = await queue.entries(scope);
   let outcome: QueueOutcome = "idle";
+  let appliedAny = false;
   const blockedPhotoTasks = new Map<string, "conflict" | "rejected">();
   for (let entry of entries) {
+    if (entry.resolvedByClientOpId) continue;
     const photo = entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach";
     if (entry.syncStatus !== "pending") {
       outcome = entry.syncStatus;
@@ -53,8 +55,9 @@ async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeo
     if (result.error_code === "REJECTED_SESSION_CHANGED") { await queue.wipe(scope); return "rejected"; }
     const saved = await queue.acknowledge(scope, entry, result);
     if (!saved) return "rejected";
-    const applied = result.status === "APPLIED" || (result.status === "DUPLICATE" && (!result.error_code || result.error_code === "DUPLICATE_COMPLETION"));
-    if (saved && applied && entry.operation.type === "field_task.complete") {
+    const applied = isFieldResultApplied(entry.operation.type, result);
+    appliedAny ||= applied;
+    if (saved && applied && (entry.operation.type === "field_task.complete" || entry.operation.type === "field_task.proxy_validate")) {
       const detail = { ...scope, taskId: entry.operation.payload.taskId, clientOpId: entry.operation.client_op_id };
       await acknowledge?.(detail);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("alvillas-field-acknowledged", { detail }));
@@ -63,6 +66,10 @@ async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeo
       ? outcome === "conflict" || outcome === "rejected" ? outcome : "synced"
       : result.status === "CONFLICT" ? "conflict" : "rejected";
     if (!applied && photo) blockedPhotoTasks.set(entry.operation.payload.taskId, result.status === "CONFLICT" ? "conflict" : "rejected");
+  }
+  if (appliedAny && (outcome === "conflict" || outcome === "rejected")) {
+    const remaining = await queue.entries(scope);
+    if (!remaining.some(entry => !entry.resolvedByClientOpId && entry.syncStatus !== "pending")) return "synced";
   }
   return outcome;
 }

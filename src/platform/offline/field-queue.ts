@@ -1,5 +1,5 @@
 import { syncPushOpSchema, type SyncPushOp } from "@/modules/reservations/domain/sync-protocol";
-import { FieldQueueStore, type FieldQueueScope, type FieldQueueEntry } from "./field-queue-store";
+import { FieldQueueStore, type FieldQueueScope, type FieldQueueEntry, type FieldProxyDraftInput } from "./field-queue-store";
 import { requestFieldBackgroundSync } from "./background-sync";
 import { fieldUploadManifestSchema } from "@/modules/reservations/domain/field-upload";
 export type { FieldQueueScope, FieldQueueEntry, QueueOutcome } from "./field-queue-store";
@@ -8,6 +8,16 @@ export { syncFieldQueue } from "./field-sync";
 const legacyQueueKey = "alvillas.fieldTaskQueue.v1";
 const legacyDeviceKey = "alvillas.fieldDeviceId.v1";
 export class FieldQueue extends FieldQueueStore {
+  async enqueueProxy(scope: FieldQueueScope, value: FieldProxyDraftInput, incarnation: string): Promise<FieldQueueEntry> {
+    const operation = syncPushOpSchema.parse({ client_op_id: value.clientOpId, type: "field_task.proxy_validate", client_created_at: new Date().toISOString(),
+      payload: { taskId: value.taskId, expectedVersion: value.expectedVersion, performedByPersonId: value.performedByPersonId,
+        checklistItemIds: value.checklistItemIds, reason: value.reason } });
+    if (operation.type !== "field_task.proxy_validate") throw new Error("FIELD_PROXY_INVALID");
+    const entry = await this.storeProxyOperation(scope, operation, incarnation);
+    if (entry.syncStatus === "pending") void requestFieldBackgroundSync();
+    return entry;
+  }
+
   async enqueuePhoto(scope: FieldQueueScope, manifest: unknown, blob: Blob, incarnation: string): Promise<FieldQueueEntry> {
     const stored = await this.storePhoto(scope, fieldUploadManifestSchema.parse(manifest), blob, incarnation);
     void requestFieldBackgroundSync(); return stored;

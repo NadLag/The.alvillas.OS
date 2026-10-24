@@ -2265,7 +2265,7 @@
     "you": "Vous",
     "checklist": "Confirmer le travail réalisé",
     "progress": "{count} / {total} confirmés",
-    "offline": "Vos saisies restent sur cet écran. Reconnectez-vous pour valider.",
+    "offline": "Vous pouvez mettre cette validation en attente sur cet appareil hors connexion.",
     "unsaved": "Terminez la validation ou effacez vos saisies avant de quitter.",
     "saving": "Enregistrement de la validation…",
     "submit": "Valider pour le collègue",
@@ -2274,7 +2274,12 @@
     "evidenceHelp": "Ajoutez une note ou une photo avant de valider la tâche.",
     "photo": "Photo",
     "viewPhoto": "Voir la photo",
-    "saveEvidence": "Enregistrer la note ou la photo"
+    "saveEvidence": "Enregistrer la note ou la photo",
+    "queued": "Validation enregistrée sur cet appareil. Elle sera synchronisée dès qu’une connexion sera disponible.",
+    "reviewRequired": "La tâche a changé ou la validation précédente nécessite une vérification. Vérifiez la personne affectée et la checklist avant de réessayer.",
+    "review": "Vérifier la tâche actuelle",
+    "storageError": "Cet appareil n’a pas pu enregistrer la validation. Gardez cette page ouverte et réessayez.",
+    "notPrepared": "Reconnectez-vous une fois pour préparer cette tâche à la validation hors connexion."
   },
   "FieldPhoto": {
     "title": "Photos",
