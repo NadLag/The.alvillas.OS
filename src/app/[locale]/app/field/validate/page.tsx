@@ -7,6 +7,7 @@ import { localizedText } from "@/i18n/content";
 import { auth } from "@/platform/auth/session";
 import { authorizeCollection } from "@/platform/authz/authorize";
 import { FieldLanguage } from "@/platform/offline/field-language";
+import { FieldPwa } from "@/platform/offline/field-pwa";
 import { fieldProxyTasks } from "@/modules/reservations/application/field-proxy-service";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import { taskText } from "@/modules/reservations/domain/operation-task";
@@ -26,6 +27,7 @@ export default async function ProxyTasksPage({ params, searchParams }: {
   return <FieldShell className="field-page" testId="field-proxy-list"><ShellHeader title={t("title")} eyebrow={t("eyebrow")} subtitle={t("help")}
     actions={<Link className="secondary-button" href={`/${locale}/app/field`}>{t("back")}</Link>} />
     <FieldLanguage locale={locale} path="/app/field/validate" />
+    <FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} audience="supervised" />
     <form method="get" className="team-search"><label htmlFor="field-proxy-search">{t("searchVilla")}</label>
       <input id="field-proxy-search" name="search" type="search" maxLength={120} defaultValue={search} data-testid="field-proxy-search" />
       <button className="secondary-button" type="submit">{t("search")}</button></form>

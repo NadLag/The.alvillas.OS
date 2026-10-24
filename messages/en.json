@@ -2265,7 +2265,7 @@
     "you": "You",
     "checklist": "Confirm the completed work",
     "progress": "{count} / {total} confirmed",
-    "offline": "Your entries stay on this screen. Reconnect to validate.",
+    "offline": "You can queue this validation on this device while offline.",
     "unsaved": "Finish validation or clear your entries before leaving.",
     "saving": "Recording validation…",
     "submit": "Validate on behalf",
@@ -2274,7 +2274,12 @@
     "evidenceHelp": "Add any note or photo before validating the job.",
     "photo": "Photo",
     "viewPhoto": "View photo",
-    "saveEvidence": "Save note or photo"
+    "saveEvidence": "Save note or photo",
+    "queued": "Validation saved on this device. It will sync when a connection is available.",
+    "reviewRequired": "The job changed or the previous validation needs review. Review the current assignee and checklist before trying again.",
+    "review": "Review current job",
+    "storageError": "This device could not save the validation. Keep this page open and try again.",
+    "notPrepared": "Reconnect once to prepare this job for offline validation."
   },
   "FieldPhoto": {
     "title": "Photos",

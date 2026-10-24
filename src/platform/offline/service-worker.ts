@@ -56,12 +56,15 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
   if (event.request.method === "GET" && url.origin === self.location.origin && event.request.mode === "navigate") {
-    const field = url.pathname.match(/^\/(en|fr|ar)\/app\/field(?:\/([a-f0-9-]{36}))?$/u);
+    const field = url.pathname.match(/^\/(en|fr|ar)\/app\/field(?:\/(validate))?(?:\/([a-f0-9-]{36}))?$/u);
     if (field || offlineShell.test(url.pathname)) {
       event.respondWith((async () => {
         try { return await fetch(event.request); }
         catch (error) {
-          if (field) return Response.redirect(new URL(`/${field[1]}/offline/field${field[2] ? `?task=${field[2]}` : ""}`, url), 302);
+          if (field) {
+            const query = new URLSearchParams(); if (field[2]) query.set("view", "supervised"); if (field[3]) query.set("task", field[3]);
+            return Response.redirect(new URL(`/${field[1]}/offline/field${query.size ? `?${query}` : ""}`, url), 302);
+          }
           const normalized = new URL(url.pathname, url.origin);
           const cached = await (await caches.open(cacheName)).match(normalized);
           if (cached) return cached;

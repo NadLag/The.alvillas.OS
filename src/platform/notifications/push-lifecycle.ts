@@ -30,12 +30,16 @@ export function usePushLifecycle() {
       finally { running = false; }
     };
     const schedule = () => { void sync(); };
+    const workerMessage = (event: MessageEvent<unknown>) => {
+      const value = event.data;
+      if (value && typeof value === "object" && "type" in value && value.type === "alvillas-push-subscription-changed") schedule();
+    };
     schedule();
     window.addEventListener("online", schedule); window.addEventListener("focus", schedule);
-    document.addEventListener("visibilitychange", schedule); navigator.serviceWorker.addEventListener("message", schedule);
+    document.addEventListener("visibilitychange", schedule); navigator.serviceWorker.addEventListener("message", workerMessage);
     let permission: PermissionStatus | undefined;
     void navigator.permissions?.query({ name: "notifications" }).then((value) => { permission = value; value.addEventListener("change", schedule); }).catch(() => {});
     return () => { window.removeEventListener("online", schedule); window.removeEventListener("focus", schedule);
-      document.removeEventListener("visibilitychange", schedule); navigator.serviceWorker.removeEventListener("message", schedule); permission?.removeEventListener("change", schedule); };
+      document.removeEventListener("visibilitychange", schedule); navigator.serviceWorker.removeEventListener("message", workerMessage); permission?.removeEventListener("change", schedule); };
   }, []);
 }
