@@ -504,6 +504,19 @@ describe("operations on real PostgreSQL", () => {
     await expect(proxyCompleteOperationTask(expired, { taskId: task.id, expectedVersion: task.version,
       performedByPersonId: f.worker.id, checklistItemIds: task.checklistItems.map(item => item.id),
       reason: "Expired grant must not validate", idempotencyKey: randomUUID() }, deps())).rejects.toBeInstanceOf(ReservationAuthorizationError);
+    const validationHere = { ...validation, scope: { ...validation.scope, scopeId: task.propertyId } };
+    const command = { taskId: task.id, expectedVersion: task.version, performedByPersonId: f.worker.id,
+      checklistItemIds: task.checklistItems.map(item => item.id), reason: "Current task data scope must also allow the validation", idempotencyKey: randomUUID() };
+    const noMatchingView = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [validationHere,
+      { ...view, scope: { organizationId: f.org, scopeType: "property" as const, scopeId: randomUUID() as string } }] } };
+    await expect(proxyCompleteOperationTask(noMatchingView, command, deps())).rejects.toBeInstanceOf(ReservationAuthorizationError);
+    const expiredView = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [validationHere,
+      { ...view, validTo: new Date("2001-01-01") }] } };
+    await expect(proxyCompleteOperationTask(expiredView, command, deps())).rejects.toBeInstanceOf(ReservationAuthorizationError);
+    await withTenant(db, f.org, async tx => {
+      expect((await tx.operationTask.findUniqueOrThrow({ where: { id: task.id } })).state).toBe("ASSIGNED");
+      expect(await tx.auditLog.count({ where: { resourceId: task.id, action: "task.proxy_validation.created" } })).toBe(0);
+    });
   });
   it("requires exact checklists, distinct assigned performer and validator and records proxy identity exactly once", async () => {
     const f = await fixture(),

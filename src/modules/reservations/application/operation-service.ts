@@ -405,6 +405,7 @@ export async function proxyCompleteOperationTask(
     const task = await repo.task(value.taskId);
     if (!task) throw new ReservationNotFoundError();
     operationAllowed(ctx, "validate", taskResource(task));
+    operationAllowed(ctx, "view", taskResource(task));
     const hash = operationHash({ operation: "proxy", value }),
       receipt = await repo.receipt(value.idempotencyKey);
     if (receipt) {
