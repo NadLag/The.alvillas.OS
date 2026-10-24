@@ -392,4 +392,37 @@ describe("field photo uploads on real PostgreSQL", () => {
     expect((await withTenant(db, f.org, tx => tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }))).cleanedAt).toBeNull();
     expect(await cleanupFieldUploadParts(f.org, cleanup)).toEqual({ cleaned: 1 });
   });
+  it.skipIf(!url)("retains separate photo and proxy effects when one native device batch is delivered concurrently", async () => {
+    const f = await photoFixture(); f.ctx.authContext.permissions = new Set(["task:view", "task:edit", "task:validate"]);
+    const transport = photoTransport((url, options) => options?.method === "PUT" ? new Response(null, { status: 200 }) :
+      new Response(new Uint8Array(f.chunks[Number(url.pathname.split("part-").at(-1))]), { status: 200 }));
+    await completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport });
+    const colleague = await withTenant(db, f.org, async tx => {
+      const person = await tx.person.create({ data: { organizationId: f.org, displayName: "Person-only mixed batch performer" } });
+      return tx.operationTask.create({ data: { organizationId: f.org, propertyId: f.property.id, assignedToPersonId: person.id, assignedToUserAccountId: null,
+        type: "INSPECTION", state: "ASSIGNED", dueDate: f.task.dueDate, titleTranslations: { en: "Mixed batch colleague" }, idempotencyKey: randomUUID(),
+        checklistItems: { create: { organizationId: f.org, key: "ready", labelTranslations: { en: "Ready" }, sortOrder: 0 } } }, include: { checklistItems: true } });
+    });
+    const batch = syncPushInputSchema.parse({ organization_id: f.org, actor_user_id: f.account.id, device_id: f.input.device_id, op_schema_version: 1, ops: [
+      { client_op_id: randomUUID(), type: "field_task.evidence.attach", payload: { taskId: f.task.id, uploadId: f.upload.uploadId } },
+      { client_op_id: randomUUID(), type: "field_task.proxy_validate", payload: { taskId: colleague.id, expectedVersion: colleague.version,
+        performedByPersonId: colleague.assignedToPersonId, checklistItemIds: colleague.checklistItems.map(item => item.id), reason: "Separate colleague review in the same retained device batch" } }
+    ] });
+    const results = await Promise.all(Array.from({ length: 6 }, () => pushSyncOps(f.ctx, batch, deps())));
+    for (const index of [0, 1]) {
+      expect(results.filter(row => row.results[index].status === "APPLIED")).toHaveLength(1);
+      expect(results.filter(row => row.results[index].status === "DUPLICATE")).toHaveLength(5);
+    }
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.operationTaskEvidence.count({ where: { taskId: f.task.id, createdBy: f.account.id } })).toBe(1);
+      expect(await tx.operationTask.findUniqueOrThrow({ where: { id: f.task.id } })).toMatchObject({ state: "ASSIGNED", completedAt: null });
+      expect(await tx.operationTask.findUniqueOrThrow({ where: { id: colleague.id } })).toMatchObject({ state: "COMPLETED", completionSource: "PROXY",
+        completedByPersonId: colleague.assignedToPersonId, completedByUserAccountId: null, validatedByUserAccountId: f.account.id });
+      expect(await tx.syncOp.count({ where: { deviceId: batch.device_id, status: "APPLIED" } })).toBe(2);
+      expect(await tx.auditLog.count({ where: { resourceId: f.task.id, action: "task.evidence.attached" } })).toBe(1);
+      expect(await tx.auditLog.count({ where: { resourceId: colleague.id, action: "task.proxy_validation.created" } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "ProxyValidated" } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted" } })).toBe(0);
+    });
+  });
 });

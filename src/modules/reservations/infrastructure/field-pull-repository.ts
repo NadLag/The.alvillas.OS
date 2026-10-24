@@ -7,8 +7,9 @@ import { dateToUtc } from "../domain/reservation-task";
 import { fieldTaskReadWhere } from "./field-task-scope";
 
 const metadataSelect = {
-  id: true, propertyId: true, reservationId: true, state: true, dueDate: true, updatedAt: true,
+  id: true, propertyId: true, reservationId: true, state: true, dueDate: true, updatedAt: true, version: true,
   assignedToUserAccountId: true, assignedToPersonId: true,
+  assignedToPerson: { select: { displayName: true, updatedAt: true, archivedAt: true } },
   property: { select: { city: true, cityId: true, region: true, regionId: true, timezone: true, updatedAt: true } },
   reservation: { select: { updatedAt: true, guestId: true } }
 } satisfies Prisma.OperationTaskSelect;
@@ -23,7 +24,14 @@ export type FieldPullSnapshotRecord = Prisma.OperationTaskGetPayload<{ select: t
 
 export class FieldPullRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
-  private scope(actorId: string, auth: AuthContext, now: Date): Prisma.OperationTaskWhereInput {
+  private scope(actorId: string, auth: AuthContext, now: Date, mode: FieldPullInput["mode"]): Prisma.OperationTaskWhereInput {
+    if (mode === "supervised") {
+      if (!auth.personId) return { organizationId: this.organizationId, OR: [] };
+      return { organizationId: this.organizationId, archivedAt: null, state: { in: ["ASSIGNED", "IN_PROGRESS"] },
+        assignedToPersonId: { not: auth.personId }, assignedToPerson: { is: { archivedAt: null } },
+        AND: [fieldTaskReadWhere(auth, now), fieldTaskReadWhere(auth, now, "validate")],
+        OR: [{ assignedToUserAccountId: null }, { assignedToUserAccountId: { not: actorId } }] };
+    }
     return { organizationId: this.organizationId, assignedToUserAccountId: actorId, archivedAt: null,
       state: { notIn: [...terminalTaskStates] }, AND: [fieldTaskReadWhere(auth, now)] };
   }
@@ -31,19 +39,19 @@ export class FieldPullRepository {
     // Every IANA calendar date is at most tomorrow relative to the UTC date.
     // Per-property calendar checks happen before returning any record.
     const upperDate = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate() + 1));
-    return this.tx.operationTask.findMany({ where: {
-      ...this.scope(actorId, auth, now), createdAt: { lte: asOf },
-      ...(input.mode === "today" ? { dueDate: { lte: upperDate } } : {}),
-      ...(input.property_id ? { propertyId: input.property_id } : {}),
-      AND: [fieldTaskReadWhere(auth, now), ...(after ? [{ OR: [
+    return this.tx.operationTask.findMany({ where: { AND: [
+      this.scope(actorId, auth, now, input.mode), { createdAt: { lte: asOf } },
+      ...(input.mode === "today" ? [{ dueDate: { lte: upperDate } }] : []),
+      ...(input.property_id ? [{ propertyId: input.property_id }] : []),
+      ...(after ? [{ OR: [
         { dueDate: { gt: dateToUtc(after.date) } }, { dueDate: dateToUtc(after.date), id: { gt: after.id } }
       ] }] : [])]
     }, select: metadataSelect, orderBy: [{ dueDate: "asc" }, { id: "asc" }], take: fieldPullPageSize + 1 });
   }
-  known(actorId: string, auth: AuthContext, now: Date, ids: string[]) {
-    return this.tx.operationTask.findMany({ where: { ...this.scope(actorId, auth, now), id: { in: ids } }, select: metadataSelect });
+  known(actorId: string, auth: AuthContext, now: Date, ids: string[], mode: FieldPullInput["mode"]) {
+    return this.tx.operationTask.findMany({ where: { AND: [this.scope(actorId, auth, now, mode), { id: { in: ids } }] }, select: metadataSelect });
   }
-  snapshots(actorId: string, auth: AuthContext, now: Date, ids: string[]) {
-    return this.tx.operationTask.findMany({ where: { ...this.scope(actorId, auth, now), id: { in: ids } }, select: snapshotSelect });
+  snapshots(actorId: string, auth: AuthContext, now: Date, ids: string[], mode: FieldPullInput["mode"]) {
+    return this.tx.operationTask.findMany({ where: { AND: [this.scope(actorId, auth, now, mode), { id: { in: ids } }] }, select: snapshotSelect });
   }
 }

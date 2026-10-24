@@ -9,6 +9,8 @@ import { withTenant } from "@/platform/db/tenant";
 import { storedFieldData } from "./support/field-storage";
 import { openFieldFixture } from "./support/field-fixture";
 import { fieldBrowser } from "./support/field-browser";
+import { inspectFieldWorker } from "./support/field-worker-diagnostics";
+import { fieldNetwork } from "./support/field-network";
 
 test.use({ actionTimeout: 30000, navigationTimeout: 30000, serviceWorkers: "allow", channel: "chromium" });
 for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability and safe update with queued work in ${locale}`, async ({ browserName }, info) => {
@@ -43,18 +45,19 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
     const check = page.getByTestId("field-checklist-item"); await check.focus(); await page.keyboard.press("Space");
     const note = page.getByTestId("field-task-complete-form").locator('textarea[name="note"]'); await note.fill("Queued work survives a service worker update");
     await page.evaluate(() => navigator.serviceWorker.addEventListener("controllerchange", event => event.stopImmediatePropagation(), { capture: true }));
-    await page.evaluate(async suffix => {
-      await navigator.serviceWorker.register(`/sw.js?acceptance=${suffix}`, { scope: "/", updateViaCache: "none" });
-    }, randomUUID());
+    const network = await fieldNetwork(page.context(), "unavailable"); await network.revision(randomUUID());
+    await page.evaluate(async () => { await (await navigator.serviceWorker.getRegistration())?.update(); });
     const update = page.getByTestId("field-update"); await expect(update).toBeVisible(); await update.click();
     await expect(page.getByTestId("field-pwa-notice")).toHaveText(t.FieldPwa.saveBeforeUpdate); await expect(check).toBeChecked();
     await page.context().setOffline(true); await page.getByTestId("field-task-complete").click();
     await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.Field.offlineQueued); await expect(update).toBeDisabled();
     const queued = await storedFieldData(page); expect(queued).toHaveLength(1);
-    await page.context().route("**/api/sync/push", route => route.abort()); await page.context().setOffline(false);
-    await expect(update).toBeEnabled();
-    const pendingRequests = new Set<string>();
+    const pendingRequests = new Set<PlaywrightRequest>();
     const nativeEvents: unknown[] = [], lifecycle = await page.context().newCDPSession(page);
+    let registrationId: string | undefined;
+    lifecycle.on("ServiceWorker.workerRegistrationUpdated", event => {
+      registrationId = event.registrations.find(row => row.scopeURL === "http://127.0.0.1:3000/")?.registrationId ?? registrationId;
+    });
     lifecycle.on("ServiceWorker.workerVersionUpdated", event => {
       nativeEvents.push({ at: Date.now(), versions: event.versions.map(worker => ({ id: worker.versionId, status: worker.status,
         running: worker.runningStatus, script: new URL(worker.scriptURL).pathname + new URL(worker.scriptURL).search })) });
@@ -62,11 +65,28 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
     lifecycle.on("Page.frameStartedLoading", () => nativeEvents.push({ at: Date.now(), type: "frameStartedLoading" }));
     lifecycle.on("Page.lifecycleEvent", event => nativeEvents.push({ at: Date.now(), type: event.name }));
     lifecycle.on("Inspector.targetCrashed", () => nativeEvents.push({ at: Date.now(), type: "targetCrashed" }));
+    lifecycle.on("ServiceWorker.workerErrorReported", event => nativeEvents.push({ at: Date.now(), type: "workerError", error: event.errorMessage.errorMessage,
+      script: event.errorMessage.sourceURL, line: event.errorMessage.lineNumber }));
     await lifecycle.send("Page.enable"); await lifecycle.send("Page.setLifecycleEventsEnabled", { enabled: true });
     await lifecycle.send("ServiceWorker.enable");
-    const requestStarted = (request: PlaywrightRequest) => pendingRequests.add(new URL(request.url()).pathname);
-    const requestFinished = (request: PlaywrightRequest) => pendingRequests.delete(new URL(request.url()).pathname);
-    page.on("request", requestStarted); page.on("requestfinished", requestFinished); page.on("requestfailed", requestFinished);
+    await expect.poll(() => registrationId).toBeTruthy();
+    const requestStarted = (request: PlaywrightRequest) => pendingRequests.add(request);
+    const requestFinished = (request: PlaywrightRequest) => pendingRequests.delete(request);
+    page.context().on("request", requestStarted); page.context().on("requestfinished", requestFinished); page.context().on("requestfailed", requestFinished);
+    await page.evaluate(() => {
+      let queued = false; Object.defineProperty(window, "fieldBackgroundQueued", { get: () => queued });
+      navigator.serviceWorker.addEventListener("message", (event: MessageEvent<unknown>) => {
+        const data = event.data;
+        if (data && typeof data === "object" && "type" in data && data.type === "alvillas-field-sync-finished" && "result" in data && data.result === "queued") queued = true;
+      });
+    });
+    await page.context().setOffline(false); await expect(update).toBeEnabled();
+    // This journey updates idle queued work. The separate held-acknowledgement
+    // journey verifies retained work and explicit retry while background work is active.
+    const settled = lifecycle.send("ServiceWorker.dispatchSyncEvent", { origin: "http://127.0.0.1:3000", registrationId: registrationId!,
+      tag: "alvillas-field-queue", lastChance: false }).then(() => true, () => false);
+    await expect.poll(() => page.evaluate(() => "fieldBackgroundQueued" in window && window.fieldBackgroundQueued === true)).toBe(true);
+    await settled;
     const previousDocument = await page.evaluate(() => performance.timeOrigin);
     try {
       const refreshed = page.waitForEvent("load"); await update.click(); await refreshed;
@@ -85,15 +105,34 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
         diagnosticTimeout = setTimeout(() => resolve({ documentUnavailable: true }), 3000);
       })]);
       if (diagnosticTimeout) clearTimeout(diagnosticTimeout);
-      console.log(JSON.stringify({ fieldPwaRefreshFailure: { locale, project: info.project.name, previousDocument, state, pendingPaths: [...pendingRequests], nativeEvents } }));
+      let probeTimeout: ReturnType<typeof setTimeout> | undefined;
+      const probes = Promise.all(page.context().serviceWorkers().map(async worker => {
+        const script = new URL(worker.url()).pathname + new URL(worker.url()).search;
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        try { return await Promise.race([worker.evaluate(() => {
+          const scope = globalThis as unknown as ServiceWorkerGlobalScope;
+          return { active: scope.registration.active?.state, waiting: scope.registration.waiting?.state,
+            globalType: scope.constructor.name, online: scope.navigator.onLine };
+        }).then(runtime => ({ script, runtime })), new Promise<{ script: string; unavailable: true }>(resolve => {
+          deadline = setTimeout(() => resolve({ script, unavailable: true }), 1000);
+        })]); } catch { return { script, unavailable: true }; }
+        finally { if (deadline) clearTimeout(deadline); }
+      }));
+      const workerRuntimes = await Promise.race([probes, new Promise<{ unavailable: true }>(resolve => {
+        probeTimeout = setTimeout(() => resolve({ unavailable: true }), 3000);
+      })]);
+      if (probeTimeout) clearTimeout(probeTimeout);
+      const protocolProbe = await inspectFieldWorker(page);
+      console.log(JSON.stringify({ fieldPwaRefreshFailure: { locale, project: info.project.name, previousDocument, state,
+        pendingPaths: [...pendingRequests].map(request => ({ path: new URL(request.url()).pathname, worker: Boolean(request.serviceWorker()) })), nativeEvents, workerRuntimes, protocolProbe } }));
       throw error;
-    } finally { page.off("request", requestStarted); page.off("requestfinished", requestFinished); page.off("requestfailed", requestFinished); await lifecycle.detach(); }
+    } finally { page.context().off("request", requestStarted); page.context().off("requestfinished", requestFinished); page.context().off("requestfailed", requestFinished); await lifecycle.detach(); }
     await expect(note).toHaveValue("Queued work survives a service worker update"); await expect(check).toBeChecked();
     expect(await storedFieldData(page)).toEqual(queued);
     await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.Field.offlineQueued);
     const jobsUrl = new RegExp(`/${locale}/app/field$`, "u");
     const returnedToJobs = page.waitForURL(jobsUrl, { waitUntil: "domcontentloaded" });
-    await page.context().unroute("**/api/sync/push"); await page.evaluate(() => window.dispatchEvent(new Event("focus"))); await returnedToJobs;
+    await network.release(); await page.evaluate(() => window.dispatchEvent(new Event("focus"))); await returnedToJobs;
     await expect(page).toHaveURL(jobsUrl); await expect(page.getByTestId("field-page")).toBeVisible(); expect(await storedFieldData(page)).toEqual([]);
     expect(await withTenant(f.db, f.organizationId, tx => tx.auditLog.count({ where: { action: "task.complete", resourceId: f.taskId } }))).toBe(1);
     const asset = await page.locator('script[src*="/_next/static/"]').first().getAttribute("src"); expect(asset).toBeTruthy();

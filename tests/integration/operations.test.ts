@@ -20,8 +20,8 @@ import {
   ReservationNotFoundError,
 } from "@/modules/reservations/application/reservation-service";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
-import { pushSyncOps } from "@/modules/reservations/application/sync-service";
-import type { SyncPushInput } from "@/modules/reservations/domain/sync-protocol";
+import { parseSyncPushInput, pushSyncOps } from "@/modules/reservations/application/sync-service";
+import type { SyncPushInput, SyncPushOp } from "@/modules/reservations/domain/sync-protocol";
 import { taskTypeSchema } from "@/platform/config/rule-registry";
 import defaultPolicy from "@/platform/config/defaults/operations.json";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
@@ -170,11 +170,20 @@ async function assigned(f: Awaited<ReturnType<typeof fixture>>) {
   return (await operationTaskDetail(f.ctx, task.id, undefined, deps())).task;
 }
 
-function queued(task: Awaited<ReturnType<typeof assigned>>): Omit<SyncPushInput, "ops"> & {
-  ops: Array<Extract<SyncPushInput["ops"][number], { type: "field_task.complete" }>>;
-} {
+function queued(task: Awaited<ReturnType<typeof assigned>>): Omit<SyncPushInput, "ops"> & { ops: Array<Extract<SyncPushOp, { type: "field_task.complete" }>> } {
   return { organization_id: task.organizationId, actor_user_id: task.assignedToUserAccountId!, device_id: randomUUID(), op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.complete",
     client_created_at: "2001-01-01T00:00:00.000Z", payload: { taskId: task.id, checklistItemIds: task.checklistItems.map(item => item.id), note: "Offline field evidence" } }] };
+}
+function parsedBatch(input: unknown): SyncPushInput {
+  const parsed = parseSyncPushInput(input);
+  if (!parsed.success) throw new Error("Expected a valid supervisor sync envelope");
+  return parsed.data;
+}
+function queuedProxy(task: Awaited<ReturnType<typeof assigned>>, ctx: ReservationActorContext): SyncPushInput {
+  return parsedBatch({ organization_id: ctx.organizationId, actor_user_id: ctx.actorId, device_id: randomUUID(), op_schema_version: 1,
+    ops: [{ client_op_id: randomUUID(), type: "field_task.proxy_validate", client_created_at: "2026-10-24T00:00:00-06:00",
+      payload: { taskId: task.id, expectedVersion: task.version, performedByPersonId: task.assignedToPersonId,
+        checklistItemIds: task.checklistItems.map(item => item.id), reason: "Review colleague work recorded while offline" } }] });
 }
 async function crew(f: Awaited<ReturnType<typeof fixture>>) {
   await ensureStandardIdentitySetup(f.org, { db });
@@ -253,6 +262,112 @@ describe("operations on real PostgreSQL", () => {
   afterAll(async () => {
     await db?.$disconnect();
     await admin?.$disconnect();
+  });
+  it("applies one queued proxy validation across concurrent retries with separate attribution", async () => {
+    const f = await fixture(), task = await assigned(f), batch = queuedProxy(task, f.ctx);
+    const results = await Promise.all(Array.from({ length: 6 }, () => pushSyncOps(f.ctx, batch, deps())));
+    expect(results.flatMap(result => result.results).filter(result => result.status === "APPLIED")).toHaveLength(1);
+    expect(results.flatMap(result => result.results).filter(result => result.status === "DUPLICATE")).toHaveLength(5);
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.operationTask.findUniqueOrThrow({ where: { id: task.id } })).toMatchObject({ state: "COMPLETED", completionSource: "PROXY",
+        completedByPersonId: f.worker.id, completedByUserAccountId: f.workerAccount.id, validatedByPersonId: f.person.id, validatedByUserAccountId: f.account.id,
+        completionIdempotencyKey: batch.ops[0].client_op_id });
+      expect(await tx.syncOp.count({ where: { clientOpId: batch.ops[0].client_op_id, status: "APPLIED" } })).toBe(1);
+      expect(await tx.auditLog.count({ where: { resourceId: task.id, action: "task.proxy_validation.created" } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "ProxyValidated", payload: { path: ["taskId"], equals: task.id } } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted", payload: { path: ["taskId"], equals: task.id } } })).toBe(0);
+      expect(await tx.operationTaskMutation.count({ where: { taskId: task.id } })).toBe(2);
+    });
+  });
+  it("retains stale proxy conflicts and requires a fresh reviewed operation instead of changing its original version", async () => {
+    const f = await fixture(), task = await assigned(f), batch = queuedProxy(task, f.ctx);
+    await saveOperationProgress(f.workerCtx, { taskId: task.id,
+      checklistItemIds: task.checklistItems.map(item => item.id), idempotencyKey: randomUUID() }, deps());
+    const conflict = (await pushSyncOps(f.ctx, batch, deps())).results[0];
+    expect(conflict).toMatchObject({ status: "CONFLICT", error_code: "TASK_PROXY_VALIDATION_CONFLICT",
+      conflict: { expected: String(task.version), incoming: "field_task.proxy_validate" } });
+    const current = (await operationTaskDetail(f.ctx, task.id, undefined, deps())).task;
+    const changed = parsedBatch({ ...batch, ops: [{ ...batch.ops[0], payload: { ...batch.ops[0].payload, expectedVersion: current.version } }] });
+    expect((await pushSyncOps(f.ctx, changed, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_IDEMPOTENCY_KEY_REUSED" });
+    expect((await pushSyncOps(f.ctx, batch, deps())).results[0]).toEqual(conflict);
+    expect((await pushSyncOps(f.ctx, queuedProxy(current, f.ctx), deps())).results[0].status).toBe("APPLIED");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.syncOp.count({ where: { status: "CONFLICT" } })).toBe(1);
+      expect(await tx.auditLog.count({ where: { resourceId: task.id, action: "task.proxy_validation.created" } })).toBe(1);
+    });
+  });
+  it("persists proxy permission denial and isolates forged sessions and foreign task payloads", async () => {
+    const f = await fixture(), other = await fixture(), task = await assigned(f), batch = queuedProxy(task, f.ctx);
+    const denied = actor(f.org, f.account.id, f.person.id, new Set(["task:view", "task:edit"]));
+    const rejected = (await pushSyncOps(denied, batch, deps())).results[0];
+    expect(rejected).toMatchObject({ status: "REJECTED", error_code: "REJECTED_FORBIDDEN" });
+    expect((await pushSyncOps(f.ctx, batch, deps())).results[0]).toEqual(rejected);
+    expect((await pushSyncOps(other.ctx, batch, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_SESSION_CHANGED" });
+    const foreign = parsedBatch({ ...batch, organization_id: other.org, actor_user_id: other.account.id });
+    expect((await pushSyncOps(other.ctx, foreign, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_NOT_ASSIGNED" });
+    await withTenant(db, f.org, async tx => {
+      expect((await tx.operationTask.findUniqueOrThrow({ where: { id: task.id } })).state).toBe("ASSIGNED");
+      expect(await tx.auditLog.count({ where: { resourceId: task.id, action: "task.proxy_validation.created" } })).toBe(0);
+      expect(await tx.syncOp.count({ where: { organizationId: other.org } })).toBe(0);
+    });
+    expect((await pushSyncOps(f.ctx, queuedProxy(task, f.ctx), deps())).results[0].status).toBe("APPLIED");
+  });
+  it("converges native form and queued proxy submissions sharing the same original key", async () => {
+    const f = await fixture(), task = await assigned(f), batch = queuedProxy(task, f.ctx), op = batch.ops[0];
+    if (op.type !== "field_task.proxy_validate") throw new Error("Expected supervisor operation");
+    const results = await Promise.all([
+      proxyCompleteOperationTask(f.ctx, { ...op.payload, idempotencyKey: op.client_op_id }, deps()),
+      pushSyncOps(f.ctx, batch, deps())
+    ]);
+    expect(results[0].completionSource).toBe("PROXY");expect(results[1].results[0].status).toBe("APPLIED");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.auditLog.count({ where: { resourceId: task.id, action: "task.proxy_validation.created" } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "ProxyValidated", payload: { path: ["taskId"], equals: task.id } } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted", payload: { path: ["taskId"], equals: task.id } } })).toBe(0);
+    });
+  });
+  it("rechecks the intersection of current view and validation scope for native and queued proxy writes", async () => {
+    const f = await fixture(), task = await assigned(f), batch = queuedProxy(task, f.ctx), op = batch.ops[0];
+    if (op.type !== "field_task.proxy_validate") throw new Error("Expected supervisor operation");
+    const validation = { permissions: new Set(["task:validate"]), scope: { organizationId: f.org, scopeType: "property" as const, scopeId: task.propertyId } };
+    const view = { permissions: new Set(["task:view"]), scope: { organizationId: f.org, scopeType: "property" as const, scopeId: randomUUID() as string } };
+    const scoped = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [view, validation] } };
+    await expect(proxyCompleteOperationTask(scoped, { ...op.payload, idempotencyKey: op.client_op_id }, deps())).rejects.toBeInstanceOf(ReservationAuthorizationError);
+    expect((await pushSyncOps(scoped, batch, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_FORBIDDEN" });
+    const expired = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [validation, { ...view, scope: { ...view.scope, scopeId: task.propertyId }, validTo: new Date("2001-01-01") }] } };
+    expect((await pushSyncOps(expired, queuedProxy(task, f.ctx), deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_FORBIDDEN" });
+    await withTenant(db, f.org, async tx => {
+      expect((await tx.operationTask.findUniqueOrThrow({ where: { id: task.id } })).state).toBe("ASSIGNED");
+      expect(await tx.auditLog.count({ where: { action: "task.proxy_validation.created", resourceId: task.id } })).toBe(0);
+    });
+    const allowed = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [validation, { ...view, scope: { ...view.scope, scopeId: task.propertyId } }] } };
+    expect((await pushSyncOps(allowed, queuedProxy(task, f.ctx), deps())).results[0].status).toBe("APPLIED");
+  });
+  it("keeps a person-only performer separate from the queued validator without fabricating an account", async () => {
+    const f = await fixture(), created = await assigned(f);
+    const person = await withTenant(db, f.org, tx => tx.person.create({ data: { organizationId: f.org, displayName: "Person-only offline colleague" } }));
+    await withTenant(db, f.org, tx => tx.operationTask.update({ where: { id: created.id }, data: { assignedToPersonId: person.id, assignedToUserAccountId: null } }));
+    const task = (await operationTaskDetail(f.ctx, created.id, undefined, deps())).task;
+    expect((await pushSyncOps(f.ctx, queuedProxy(task, f.ctx), deps())).results[0].status).toBe("APPLIED");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.operationTask.findUniqueOrThrow({ where: { id: task.id } })).toMatchObject({ completionSource: "PROXY", completedByPersonId: person.id,
+        completedByUserAccountId: null, validatedByUserAccountId: f.account.id, validatedByPersonId: f.person.id });
+      expect(await tx.userAccount.count({ where: { personId: person.id } })).toBe(0);
+    });
+  });
+  it("serializes opposing queued validators across devices without a performer-lock deadlock", async () => {
+    const f = await fixture(), first = await assigned(f), second = await assigned(f);
+    await withTenant(db, f.org, tx => tx.operationTask.update({ where: { id: second.id }, data: { assignedToPersonId: f.person.id, assignedToUserAccountId: f.account.id } }));
+    const current = (await operationTaskDetail(f.ctx, second.id, undefined, deps())).task;
+    const validator = actor(f.org, f.workerAccount.id, f.worker.id), a = queuedProxy(first, f.ctx), b = queuedProxy(current, validator);
+    const results = await Promise.all(Array.from({ length: 8 }, (_, index) => pushSyncOps(index % 2 ? validator : f.ctx, index % 2 ? b : a, deps())));
+    expect(results.flatMap(result => result.results).filter(result => result.status === "APPLIED")).toHaveLength(2);
+    expect(results.flatMap(result => result.results).filter(result => result.status === "DUPLICATE")).toHaveLength(6);
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.auditLog.count({ where: { action: "task.proxy_validation.created" } })).toBe(2);
+      expect(await tx.outboxEvent.count({ where: { type: "ProxyValidated" } })).toBe(2);
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted" } })).toBe(0);
+    });
   });
   it("serializes concurrent device retries and records one completion with explicit duplicate-completion acknowledgement", async () => {
     const f = await fixture(), task = await assigned(f), batch = queued(task);
