@@ -163,7 +163,7 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
     <div className="form-actions">
       {installed ? <span>{t("installed")}</span> : <button className="secondary-button" type="button" data-testid="field-install" onClick={() => { void installApp(); }}>{t("install")}</button>}
       {update ? <button className="secondary-button" type="button" data-testid="field-update" disabled={offline} onClick={updateApp}>{t("update")}</button> : null}
-      {pending || cacheFailed ? <button className="secondary-button" type="button" data-testid="field-sync-now" disabled={offline || syncing} onClick={() => retrySync.current()}>{t("syncNow")}</button> : null}
+      <button className="secondary-button" type="button" data-testid="field-sync-now" disabled={offline || syncing} onClick={() => retrySync.current()}>{t("syncNow")}</button>
     </div>
     <p role="status" data-testid="field-connection">{t(offline ? "offline" : "online")}{pending ? ` · ${t("pending", { count: pending })}` : ""}{failures ? ` · ${t("failures", { count: failures })}` : ""}</p>
     <p role="status" data-testid="field-cache-status">{cacheFailed ? cacheText("retry") : cached !== null ? cacheText("ready", { count: cached }) : cacheText(offline ? "notPrepared" : "preparing")}</p>
