@@ -27,6 +27,18 @@ async function draft(queue: FieldQueue, owner: FieldQueueScope, taskId: string, 
 const requestUrl = (input: Parameters<typeof fetch>[0]) => new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, "https://example.test");
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(stores.splice(0).map(store => store.delete())); });
 describe("field work cache", () => {
+  it("acknowledges photo evidence without removing a cached job or its unfinished checklist draft", async () => {
+    const queue = await setup(), task = job();
+    await publish(queue, scope, 0, [task], [], "cursor", stamp);
+    await draft(queue, scope, task.id, [task.checklistItems[0].id], "Checklist work retained");
+    const state = (await queue.readCache(scope)).state!;
+    const entry = await queue.enqueue(scope, { client_op_id: randomUUID(), type: "field_task.evidence.attach", payload: { taskId: task.id, uploadId: randomUUID() } });
+    expect(await queue.acknowledge(scope, entry, { client_op_id: entry.operation.client_op_id, status: "APPLIED", server_version: null })).toBe(true);
+    expect(await queue.entries(scope)).toEqual([]);
+    expect(await queue.cachedJobs(scope)).toEqual([task]);
+    expect((await queue.readDraft(scope, task.id))?.note).toBe("Checklist work retained");
+    expect((await queue.readCache(scope)).state).toEqual(state);
+  });
   it("rejects late pulls and drafts after logout and sign-in by the same account", async () => {
     const queue = await setup(), old = (await queue.readCache(scope)).state!, task = job();
     await queue.wipe(scope); await queue.activate(scope);

@@ -149,8 +149,8 @@ export function FieldTaskCompletionForm({
       if (!await resolveFieldScope(queue, navigator.onLine, scope)) throw new Error("FIELD_SESSION_CHANGED");
       draftIncarnation.current = (await queue.readCache(scope)).state?.incarnation ?? null;
       await queue.migrateLegacy(scope, localStorage);
-      const current = (await queue.entries(scope)).find(item => item.operation.payload.taskId === taskId);
-      if (current && !cancelled) {
+      const current = (await queue.entries(scope)).find(item => item.operation.type === "field_task.complete" && item.operation.payload.taskId === taskId);
+      if (current && current.operation.type === "field_task.complete" && !cancelled) {
         setQueueStatus(current.syncStatus === "pending" ? "queued" : current.syncStatus);
         setChecked(new Set(current.operation.payload.checklistItemIds));
         setNote(current.operation.payload.note ?? "");

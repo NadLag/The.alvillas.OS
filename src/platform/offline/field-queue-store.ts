@@ -81,10 +81,12 @@ export class FieldQueueStore extends Dexie {
       if ((await this.metadata.get("identity"))?.value !== fieldIdentity(scope)) return false;
       if (result.status === "APPLIED" || (result.status === "DUPLICATE" && (!result.error_code || result.error_code === "DUPLICATE_COMPLETION"))) {
         await this.operations.delete(entry.sequence!);
-        const key = fieldIdentity(scope), cacheId = `${key}:${entry.operation.payload.taskId}`;
-        await this.jobs.delete(cacheId); await this.drafts.delete(cacheId);
-        const state = await this.cacheState.get(key);
-        await this.cacheState.put({ ...state, ...scope, key, incarnation: state?.incarnation ?? crypto.randomUUID(), generation: (state?.generation ?? 0) + 1 });
+        if (entry.operation.type === "field_task.complete") {
+          const key = fieldIdentity(scope), cacheId = `${key}:${entry.operation.payload.taskId}`;
+          await this.jobs.delete(cacheId); await this.drafts.delete(cacheId);
+          const state = await this.cacheState.get(key);
+          await this.cacheState.put({ ...state, ...scope, key, incarnation: state?.incarnation ?? crypto.randomUUID(), generation: (state?.generation ?? 0) + 1 });
+        }
       } else {
         await this.operations.update(entry.sequence!, { syncStatus: result.status === "CONFLICT" ? "conflict" : "rejected", result });
       }

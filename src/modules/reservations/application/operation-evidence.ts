@@ -157,13 +157,38 @@ export async function attachOperationEvidence(
       if (!response.ok)
         throw new ReservationConflictError("operation_storage_unavailable");
     }
+    return persistOperationEvidence(repo, ctx, meta, value, bytes ? { storageKey: storageKey!, size: bytes.length, sha256: digest! } : null);
+  });
+}
+
+// Shared persistence for native evidence and server-verified resumable uploads.
+// Callers hold the task lock; no object transfer occurs in this function.
+export async function persistOperationEvidence(
+  repo: OperationRepository,
+  ctx: ReservationActorContext,
+  meta: Awaited<ReturnType<typeof operationMeta>>,
+  value: z.infer<typeof evidenceSchema>,
+  object: { storageKey: string; size: number; sha256: string } | null,
+) {
+    await repo.lock(value.idempotencyKey);
+    const task = await repo.task(value.taskId);
+    if (!task) throw new ReservationNotFoundError();
+    operationAllowed(ctx, "edit", taskResource(task));
+    const settings = await repo.policy(task.propertyId);
+    if (Boolean(value.contentType) !== Boolean(object) || (object && object.size > settings.evidence_max_bytes))
+      throw new ReservationConflictError("operation_photo_too_large");
+    const hash = operationHash({ operation: "evidence", value, digest: object?.sha256 ?? null }), receipt = await repo.receipt(value.idempotencyKey);
+    if (receipt) {
+      if (receipt.payloadHash !== hash || receipt.createdBy !== ctx.actorId || receipt.taskId !== task.id) throw new ReservationConflictError();
+      return { id: receipt.resultResourceId ?? undefined, idempotent: true };
+    }
     const evidence = await repo.addEvidence({
       taskId: task.id,
       note: value.note,
       contentType: value.contentType,
-      storageKey,
-      size: bytes?.length,
-      sha256: digest,
+      storageKey: object?.storageKey ?? null,
+      size: object?.size,
+      sha256: object?.sha256 ?? null,
       createdBy: ctx.actorId,
     });
     await repo.context(ctx.actorId, meta.requestId, value.note);
@@ -185,7 +210,6 @@ export async function attachOperationEvidence(
       value.note,
     );
     return { id: evidence.id, idempotent: false };
-  });
 }
 export async function taskEvidence(
   ctx: ReservationActorContext,

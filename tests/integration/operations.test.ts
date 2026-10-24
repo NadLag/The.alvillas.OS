@@ -170,7 +170,9 @@ async function assigned(f: Awaited<ReturnType<typeof fixture>>) {
   return (await operationTaskDetail(f.ctx, task.id, undefined, deps())).task;
 }
 
-function queued(task: Awaited<ReturnType<typeof assigned>>): SyncPushInput {
+function queued(task: Awaited<ReturnType<typeof assigned>>): Omit<SyncPushInput, "ops"> & {
+  ops: Array<Extract<SyncPushInput["ops"][number], { type: "field_task.complete" }>>;
+} {
   return { organization_id: task.organizationId, actor_user_id: task.assignedToUserAccountId!, device_id: randomUUID(), op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.complete",
     client_created_at: "2001-01-01T00:00:00.000Z", payload: { taskId: task.id, checklistItemIds: task.checklistItems.map(item => item.id), note: "Offline field evidence" } }] };
 }
@@ -278,7 +280,9 @@ describe("operations on real PostgreSQL", () => {
     expect(rejected).toMatchObject({ status: "REJECTED", error_code: "REJECTED_NOT_ASSIGNED" });
     await withTenant(db, f.org, tx => tx.operationTask.update({ where: { id: task.id }, data: { assignedToUserAccountId: f.workerAccount.id, assignedToPersonId: f.worker.id } }));
     expect((await pushSyncOps(f.workerCtx, batch, deps())).results[0]).toEqual(rejected);
-    const changed = structuredClone(batch); changed.ops[0].payload.note = "Replaced evidence";
+    const changed = structuredClone(batch);
+    if (changed.ops[0].type !== "field_task.complete") throw new Error("Expected queued completion fixture");
+    changed.ops[0].payload.note = "Replaced evidence";
     expect((await pushSyncOps(f.workerCtx, changed, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_IDEMPOTENCY_KEY_REUSED" });
     expect((await pushSyncOps(f.ctx, { ...batch, actor_user_id: f.ctx.actorId }, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_OP_OWNER", server_version: null });
     await withTenant(db, f.org, async tx => {

@@ -37,7 +37,7 @@ async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeo
     const saved = await queue.acknowledge(scope, entry, result);
     if (!saved) return "rejected";
     const applied = result.status === "APPLIED" || (result.status === "DUPLICATE" && (!result.error_code || result.error_code === "DUPLICATE_COMPLETION"));
-    if (saved && applied) {
+    if (saved && applied && entry.operation.type === "field_task.complete") {
       const detail = { ...scope, taskId: entry.operation.payload.taskId, clientOpId: entry.operation.client_op_id };
       await acknowledge?.(detail);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("alvillas-field-acknowledged", { detail }));

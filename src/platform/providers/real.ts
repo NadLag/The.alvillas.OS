@@ -1,6 +1,7 @@
 import { ICalAdapter } from "@/modules/reservations/domain/adapters";
 import { createHash, createHmac } from "node:crypto";
 import { escapeHtml } from "@/platform/encoding/html";
+import { temporaryUploadPartKey, type TemporaryUploadPart } from "@/platform/storage/upload-protocol";
 import type {
   EmailProvider,
   NotificationChannel,
@@ -258,7 +259,8 @@ export class R2StorageProvider implements StorageProvider {
 
   constructor(
     env: EnvLike = process.env,
-    private readonly now: () => Date = () => new Date()
+    private readonly now: () => Date = () => new Date(),
+    private readonly uploadTransport: typeof fetch = fetch
   ) {
     this.accountId = required(env, "R2_ACCOUNT_ID");
     this.accessKeyId = required(env, "R2_ACCESS_KEY_ID");
@@ -276,7 +278,16 @@ export class R2StorageProvider implements StorageProvider {
     return this.signedUrl(input.key, "GET", input.expiresInSeconds);
   }
 
-  private signedUrl(key: string, method: "PUT" | "GET", expiresInSeconds: number): Promise<{ url: string }> {
+  async deleteTemporaryUploadPart(input: TemporaryUploadPart): Promise<void> {
+    const key = temporaryUploadPartKey(input);
+    try {
+      const signed = await this.signedUrl(key, "DELETE", 900);
+      const response = await this.uploadTransport(signed.url, { method: "DELETE", signal: AbortSignal.timeout(15000) });
+      if (!response.ok && response.status !== 404) throw new Error("cleanup_failed");
+    } catch { throw new Error("Temporary upload cleanup unavailable"); }
+  }
+
+  private signedUrl(key: string, method: "PUT" | "GET" | "DELETE", expiresInSeconds: number): Promise<{ url: string }> {
     const { dateStamp, amzDate } = isoBasic(this.now());
     const host = `${this.accountId}.r2.cloudflarestorage.com`;
     const credentialScope = `${dateStamp}/auto/s3/aws4_request`;

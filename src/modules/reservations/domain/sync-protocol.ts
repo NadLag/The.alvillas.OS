@@ -14,13 +14,18 @@ export const fieldTaskCompletePayloadSchema = z.object({
   note: optionalText(1000)
 });
 
-export const syncPushOpSchema = z.object({
+export const fieldTaskCompleteOpSchema = z.object({
   client_op_id: z.string().uuid(),
   type: z.literal("field_task.complete"),
   payload: fieldTaskCompletePayloadSchema,
   base_version: z.string().trim().max(120).optional(),
   client_created_at: z.string().datetime({ offset: true }).optional()
 });
+export const fieldTaskEvidenceAttachOpSchema = fieldTaskCompleteOpSchema.extend({
+  type: z.literal("field_task.evidence.attach"),
+  payload: z.object({ taskId: z.uuid(), uploadId: z.uuid() }).strict()
+});
+export const syncPushOpSchema = z.discriminatedUnion("type", [fieldTaskCompleteOpSchema, fieldTaskEvidenceAttachOpSchema]);
 
 export const syncPushInputSchema = z.object({
   device_id: z.string().trim().min(8).max(160),
