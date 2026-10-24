@@ -96,8 +96,11 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
     const acknowledgedHere = (event: Event) => acknowledged((event as CustomEvent<unknown>).detail);
     const workerMessage = (event: MessageEvent<unknown>) => {
       const data = event.data;
-      if (data && typeof data === "object" && "type" in data && data.type === "alvillas-field-acknowledged" && "detail" in data) acknowledged(data.detail);
-      void sync();
+      if (!data || typeof data !== "object" || !("type" in data)) return;
+      if (data.type === "alvillas-field-acknowledged") { if ("detail" in data) acknowledged(data.detail); return; }
+      // The native acknowledgement already updates the queue and live cache.
+      // A new pull while promotion is pending can restart the exiting worker.
+      if (data.type === "alvillas-field-sync-finished" && !registration.current?.waiting) void sync();
     };
     const offlineNavigation = (event: MouseEvent) => {
       if (navigator.onLine || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
