@@ -42,6 +42,16 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
     await page.context().route("**/api/sync/push", route => route.abort()); await page.context().setOffline(false);
     await expect(update).toBeEnabled();
     const pendingRequests = new Set<string>();
+    const nativeEvents: unknown[] = [], lifecycle = await page.context().newCDPSession(page);
+    lifecycle.on("ServiceWorker.workerVersionUpdated", event => {
+      nativeEvents.push({ at: Date.now(), versions: event.versions.map(worker => ({ id: worker.versionId, status: worker.status,
+        running: worker.runningStatus, script: new URL(worker.scriptURL).pathname + new URL(worker.scriptURL).search })) });
+    });
+    lifecycle.on("Page.frameStartedLoading", () => nativeEvents.push({ at: Date.now(), type: "frameStartedLoading" }));
+    lifecycle.on("Page.lifecycleEvent", event => nativeEvents.push({ at: Date.now(), type: event.name }));
+    lifecycle.on("Inspector.targetCrashed", () => nativeEvents.push({ at: Date.now(), type: "targetCrashed" }));
+    await lifecycle.send("Page.enable"); await lifecycle.send("Page.setLifecycleEventsEnabled", { enabled: true });
+    await lifecycle.send("ServiceWorker.enable");
     const requestStarted = (request: PlaywrightRequest) => pendingRequests.add(new URL(request.url()).pathname);
     const requestFinished = (request: PlaywrightRequest) => pendingRequests.delete(new URL(request.url()).pathname);
     page.on("request", requestStarted); page.on("requestfinished", requestFinished); page.on("requestfailed", requestFinished);
@@ -62,9 +72,9 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
         diagnosticTimeout = setTimeout(() => resolve({ documentUnavailable: true }), 3000);
       })]);
       if (diagnosticTimeout) clearTimeout(diagnosticTimeout);
-      console.log(JSON.stringify({ fieldPwaRefreshFailure: { locale, project: info.project.name, previousDocument, state, pendingPaths: [...pendingRequests] } }));
+      console.log(JSON.stringify({ fieldPwaRefreshFailure: { locale, project: info.project.name, previousDocument, state, pendingPaths: [...pendingRequests], nativeEvents } }));
       throw error;
-    } finally { page.off("request", requestStarted); page.off("requestfinished", requestFinished); page.off("requestfailed", requestFinished); }
+    } finally { page.off("request", requestStarted); page.off("requestfinished", requestFinished); page.off("requestfailed", requestFinished); await lifecycle.detach(); }
     await expect(note).toHaveValue("Queued work survives a service worker update"); await expect(check).toBeChecked();
     expect(await storedFieldData(page)).toEqual(queued);
     await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.Field.offlineQueued);

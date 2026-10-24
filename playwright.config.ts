@@ -10,7 +10,7 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: "http://127.0.0.1:3000",
-    trace: "on-first-retry"
+    trace: "retain-on-failure"
   },
   webServer: {
     command: process.env.PLAYWRIGHT_PRODUCTION === "1"
