@@ -9,8 +9,8 @@ if (process.env.VERCEL || process.env.VERCEL_ENV || !["127.0.0.1", "localhost", 
   process.env.R2_ACCOUNT_ID !== "alvillas-e2e-local") throw new Error("Local storage fixture requires an isolated test server");
 const objects = new Map();
 const realFetch = globalThis.fetch;
-// Intercept only the fixture origin. Keep Node HTTP, Request/Headers and all
-// authentication/framework traffic on their original implementations.
+// Intercept only the object fixture origin; all other fetch calls retain their
+// original implementation. Opt-in HTTP fault gates load separately below.
 globalThis.fetch = async (input, init) => {
   const target = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
   if (target.origin !== "https://alvillas-e2e-local.r2.cloudflarestorage.com") return realFetch(input, init);
@@ -30,3 +30,5 @@ globalThis.fetch = async (input, init) => {
   return new globalThis.Response(new Uint8Array(object.bytes), { status: 200, headers: { "Content-Type": object.contentType,
     "Content-Length": String(object.bytes.length), ETag: createHash("sha256").update(object.bytes).digest("hex") } });
 };
+
+await import("./network-gates.mjs");

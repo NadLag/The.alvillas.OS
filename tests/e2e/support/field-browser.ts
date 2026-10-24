@@ -9,6 +9,7 @@ export async function fieldBrowser(info: TestInfo) {
   const context = await chromium.launchPersistentContext(profile, { baseURL: "http://127.0.0.1:3000", headless: true, channel: "chromium",
     userAgent: emulation.userAgent, isMobile: emulation.isMobile, hasTouch: emulation.hasTouch, deviceScaleFactor: emulation.deviceScaleFactor,
     ignoreDefaultArgs: ["--disable-background-networking"], viewport: info.project.name === "field-mobile" ? { width: 360, height: 800 } : { width: 1440, height: 1000 } });
+  context.setDefaultTimeout(30000); context.setDefaultNavigationTimeout(30000);
   return { context, page: await context.newPage(), close: async () => {
     await context.close();
     const absolute = await realpath(profile), parent = await realpath(tmpdir());
