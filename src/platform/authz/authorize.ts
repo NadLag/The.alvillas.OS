@@ -128,15 +128,15 @@ export function parseAuthorizationConditions(value: unknown): AuthorizationCondi
   return Object.keys(conditions).length > 0 ? conditions : undefined;
 }
 
-function scopeType(scope: Scope): ScopeType {
+export function scopeType(scope: Scope): ScopeType {
   return (scope.scopeType ?? scope.resourceType ?? "organization") as ScopeType;
 }
 
-function scopeId(scope: Scope): string | undefined {
+export function scopeId(scope: Scope): string | undefined {
   return scope.scopeId ?? scope.resourceId;
 }
 
-function assignmentCandidates(ctx: AuthContext): readonly AuthAssignment[] {
+export function assignmentCandidates(ctx: AuthContext): readonly AuthAssignment[] {
   if (ctx.assignments && ctx.assignments.length > 0) {
     return ctx.assignments;
   }
@@ -217,7 +217,7 @@ function conditionDate(value: Date | string | null | undefined): Date | null {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function conditionsMatch(
+export function conditionsMatch(
   ctx: AuthContext,
   assignment: AuthAssignment,
   resource: Resource,

@@ -43,8 +43,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
     await expect(note).toHaveValue("Queued work survives a service worker update"); await expect(check).toBeChecked();
     expect(await storedFieldData(page)).toEqual(queued);
     await expect(page.getByTestId("field-task-sync-status")).toHaveText(t.Field.offlineQueued);
-    await page.context().unroute("**/api/sync/push"); await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(page).toHaveURL(new RegExp(`/${locale}/app/field$`, "u")); expect(await storedFieldData(page)).toEqual([]);
+    const jobsUrl = new RegExp(`/${locale}/app/field$`, "u");
+    const returnedToJobs = page.waitForURL(jobsUrl, { waitUntil: "domcontentloaded" });
+    await page.context().unroute("**/api/sync/push"); await page.evaluate(() => window.dispatchEvent(new Event("focus"))); await returnedToJobs;
+    await expect(page).toHaveURL(jobsUrl); await expect(page.getByTestId("field-page")).toBeVisible(); expect(await storedFieldData(page)).toEqual([]);
     expect(await withTenant(f.db, f.organizationId, tx => tx.auditLog.count({ where: { action: "task.complete", resourceId: f.taskId } }))).toBe(1);
     const asset = await page.locator('script[src*="/_next/static/"]').first().getAttribute("src"); expect(asset).toBeTruthy();
     await page.evaluate(async asset => { await (await fetch(asset, { cache: "reload" })).text(); }, asset!);
