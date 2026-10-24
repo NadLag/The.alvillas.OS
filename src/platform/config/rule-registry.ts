@@ -10,6 +10,7 @@ import { pushPolicyKey, pushPolicySchema } from "@/platform/notifications/web-pu
 
 import { digestPolicyKey, digestPolicySchema } from "@/platform/notifications/digest";
 import { reservationSyncPolicyKey, reservationSyncPolicySchema } from "@/modules/reservations/domain/reservation";
+import { fieldDevicePolicyKey, fieldDevicePolicySchema } from "./field-device-policy";
 
 const moneyAmountSchema = z
   .string()
@@ -330,6 +331,7 @@ export const featureFlagConfigSchema = z
   .passthrough();
 
 export const configRuleSchemas = {
+  [fieldDevicePolicyKey]: fieldDevicePolicySchema,
   [reservationSyncPolicyKey]: reservationSyncPolicySchema,
   [teamPolicyKey]: teamPolicySchema,
   [pushPolicyKey]: pushPolicySchema,

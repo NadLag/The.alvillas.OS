@@ -4,6 +4,9 @@ import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { calendarDateAt } from "@/i18n/format";
+import { ConfigRuleRepository, type ResolvedConfigRule } from "@/platform/config/config-rule-repository";
+import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
+import { fieldDevicePolicyKey, fieldDevicePolicySnapshot } from "@/platform/config/field-device-policy";
 import { fieldPullInputSchema, fieldPullPageSize, fieldWorkSnapshotSchema, type FieldPullInput, type FieldPullResult, type FieldWorkSnapshot } from "../domain/field-pull";
 import { FieldPullRepository, type FieldPullMetadata, type FieldPullSnapshotRecord } from "../infrastructure/field-pull-repository";
 import { fieldTaskReadWhere } from "../infrastructure/field-task-scope";
@@ -30,6 +33,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
   const frame = previous && (previous.kind === "page" || input.only_known) ? previous : newFieldPullCursor(ctx, input, now);
   const asOf = new Date(frame.asOf), known = new Map(input.known_tasks.map(item => [item.id, item.revision]));
   const days = new Map<string, string>();
+  const devicePolicies = new Map<string, ResolvedConfigRule | null>();
   const businessDate = (zone: string) => {
     const existing = days.get(zone); if (existing) return existing;
     const date = calendarDateAt(asOf, zone); days.set(zone, date); return date;
@@ -40,12 +44,14 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
     const canEdit = input.mode !== "supervised" && authorize(ctx.authContext, "edit", task, now), date = businessDate(row.property.timezone);
     const canPerformer = input.mode === "supervised" && Boolean(row.assignedToPersonId) &&
       authorize(ctx.authContext, "view", { ...task, type: "team_member", id: row.assignedToPersonId ?? undefined }, now);
+    const devicePolicy = input.include_device_policy ? fieldDevicePolicySnapshot(devicePolicies.get(row.propertyId) ?? null) : undefined;
     const revision = createHash("sha256").update(JSON.stringify({ task: row.updatedAt.toISOString(),
       property: row.property.updatedAt.toISOString(), reservation: row.reservation?.updatedAt.toISOString() ?? null,
       scope: frame.scope, date, canGuest, canEdit,
       proxy: input.mode === "supervised" ? { version: row.version, performedBy: row.assignedToPersonId,
-        person: canPerformer ? row.assignedToPerson?.updatedAt.toISOString() : null } : null })).digest("base64url");
-    return { task, canGuest, canEdit, canPerformer, date, revision };
+        person: canPerformer ? row.assignedToPerson?.updatedAt.toISOString() : null } : null,
+      devicePolicy })).digest("base64url");
+    return { task, canGuest, canEdit, canPerformer, date, revision, devicePolicy };
   };
   const allowed = (row: FieldPullMetadata) => authorize(ctx.authContext, "view", resource(ctx, row, now), now) &&
     (input.mode !== "supervised" || (row.assignedToPersonId !== null && row.assignedToPersonId !== ctx.personId &&
@@ -58,6 +64,12 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
     const knownRows = input.known_tasks.length ? await repo.known(ctx.actorId, ctx.authContext, now, [...known.keys()], input.mode) : [];
     const dataRows = page.filter(row => allowed(row) && (input.mode !== "today" || row.dueDate.toISOString().slice(0, 10) <= businessDate(row.property.timezone)));
     const eligibleKnown = knownRows.filter(allowed);
+    if (input.include_device_policy && (dataRows.length || eligibleKnown.length)) {
+      const propertyIds = [...new Set([...dataRows, ...eligibleKnown].map(row => row.propertyId))];
+      const scopes = await new ReservationConfigScopeRepository(tx, ctx.organizationId).propertyScopes(propertyIds, asOf);
+      const resolved = await new ConfigRuleRepository(tx, ctx.organizationId).resolveScopeGroups(fieldDevicePolicyKey, scopes, asOf);
+      for (const [propertyId, policy] of resolved) devicePolicies.set(propertyId, policy);
+    }
     const changedData = dataRows.filter(row => known.get(row.id) !== visibility(row).revision);
     const changedKnown = eligibleKnown.filter(row => known.get(row.id) !== visibility(row).revision);
     const ids = [...new Set([...changedData, ...changedKnown].map(row => row.id))];
@@ -72,6 +84,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
         priority: row.priority, dueDate: row.dueDate.toISOString().slice(0, 10), businessDate: view.date,
         serverVersion: row.updatedAt.toISOString(), revision: view.revision, canEdit: view.canEdit,
         checklistItems: row.checklistItems.map(item => ({ id: item.id, key: item.key, label: toStringRecord(item.labelTranslations), completed: Boolean(item.completedAt) })),
+        ...(input.include_device_policy ? { devicePolicy: view.devicePolicy } : {}),
         ...(input.mode === "supervised" ? { proxyValidation: { performedByPersonId: row.assignedToPersonId!, expectedVersion: row.version,
           ...present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...view.task, data: { performerName: row.assignedToPerson!.displayName } },
             { performerName: { dataClass: "personal", mask: "omit", requiredPermission: view.canPerformer ? "team_member:view" : undefined } }, now) } } : {}) };

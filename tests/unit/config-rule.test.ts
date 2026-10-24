@@ -44,6 +44,7 @@ describe("config rule registry", () => {
       "agreement.responsibilities",
       "agreement.special_conditions",
       "feature_flag",
+      "field.device_hygiene",
       "finance.approval_thresholds",
       "finance.commission",
       "finance.expense_allocation",
