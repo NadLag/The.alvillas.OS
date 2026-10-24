@@ -1,0 +1,26 @@
+{
+  "description": "Locally generated synthetic public WebAuthn vector; contains no private key or account credential.",
+  "origin": "https://webauthn.example.test",
+  "rpId": "webauthn.example.test",
+  "challenge": "hHn68zwt0bsD_lsCMw4sbxZQBBY4SI8FqfbftugzOfI",
+  "credential": {
+    "id": "sCWyiYYl_Tp7AHYhniS3rImhn3TRbg18hXsbZO5KQYY",
+    "publicKey": "pQECAyYgASFYICvP1hYlBvZT__fwODAt51saVX2jhH6_pLvN_VHmAn5XIlgglLwBz-t3Els4Fhvm9AfG2fp4zEd0jAVM5n8D2O4henY",
+    "counter": 0
+  },
+  "response": {
+    "id": "sCWyiYYl_Tp7AHYhniS3rImhn3TRbg18hXsbZO5KQYY",
+    "rawId": "sCWyiYYl_Tp7AHYhniS3rImhn3TRbg18hXsbZO5KQYY",
+    "type": "public-key",
+    "clientExtensionResults": {},
+    "response": {
+      "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiaEhuNjh6d3QwYnNEX2xzQ013NHNieFpRQkJZNFNJOEZxZmJmdHVnek9mSSIsIm9yaWdpbiI6Imh0dHBzOi8vd2ViYXV0aG4uZXhhbXBsZS50ZXN0IiwiY3Jvc3NPcmlnaW4iOmZhbHNlfQ",
+      "authenticatorData": "G-dHRbZO5DSUgkbDEaT83tJMEsbWnSqygPglrQkgdWMFAAAAkg",
+      "signature": "MEMCH3wYK6K1o2ZwAEpVDZ-ZhZz6PdCM7Xd5AVnUwbOYZ70CIDcS6gPCO8WhBN05I4RyChOep3RotilmC9aCypOBGIRf"
+    }
+  },
+  "componentBytes": {
+    "r": 31,
+    "s": 32
+  }
+}

@@ -1,6 +1,6 @@
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { isoCBOR } from "@simplewebauthn/server/helpers";
-import type { AuthenticationResponseJSON, PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON, RegistrationResponseJSON } from "@simplewebauthn/types";
+import type { AuthenticationResponseJSON, PublicKeyCredentialCreationOptionsJSON, PublicKeyCredentialRequestOptionsJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 
 // A protocol authenticator for service-level PostgreSQL tests. Registration and
 // assertions still pass through the real WebAuthn verifier; no auth is skipped.

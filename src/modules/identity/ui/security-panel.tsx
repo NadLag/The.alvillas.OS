@@ -61,7 +61,7 @@ export function SecurityPanel({ labels, signInHref }: SecurityPanelProps) {
     startTransition(async () => {
       try {
         const { challengeId, options } = await beginPasskeyRegistrationAction();
-        const response = await startRegistration(options);
+        const response = await startRegistration({ optionsJSON: options });
         setState(await finishPasskeyRegistrationAction(challengeId, response));
       } catch {
         setState({ status: "error", messageKey: "generic" });

@@ -94,7 +94,7 @@ export function LoginForm({ locale, labels, surface }: LoginFormProps) {
     startPasskeyTransition(async () => {
       try {
         const { challengeId, options } = await beginPasskeyLoginAction(email);
-        const response = await startAuthentication(options);
+        const response = await startAuthentication({ optionsJSON: options });
         setPasskeyState(await finishPasskeyLoginAction(locale, email, challengeId, response, surface));
       } catch {
         setPasskeyState({ status: "error", messageKey: "generic" });

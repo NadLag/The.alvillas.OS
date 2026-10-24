@@ -4,7 +4,7 @@ import { AuthError } from "next-auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
+import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { auth, signIn, signOut } from "../../../../auth";
 import { appLocales, safeLocale } from "@/i18n/routing";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
