@@ -66,7 +66,7 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
       titleTestId={task ? "field-task-title" : undefined} subtitle={task ? t("detailMeta", { reservation: task.reservationReference ?? t("noReservation"), guest: task.guestName ?? t("noGuest") }) : cache("offlineWork")}
       actions={taskId ? <button className="secondary-button" type="button" onClick={() => openJob(null)}>{t("backToJobs")}</button> : undefined} />
     <FieldLanguage locale={locale} path={`/offline/field${taskId ? `?task=${taskId}` : ""}`} onChangeLocale={language} />
-    {loading ? <p role="status">{cache("preparing")}</p> : !scope ? <EmptyState testId="field-cache-sign-in"><span>{cache("signIn")}</span> <a className="primary-button" href={`/${locale}/login`}>{cache("signInAction")}</a></EmptyState> : <>
+    {loading ? <p role="status">{cache("preparing")}</p> : !scope ? <EmptyState testId="field-cache-sign-in"><span>{cache("signIn")}</span> <a className="primary-button" href={`/${locale}/login?surface=field`}>{cache("signInAction")}</a></EmptyState> : <>
       <FieldPwa organizationId={scope.organizationId} userId={scope.userId} />
       {snapshotAt ? <p>{cache("lastUpdated", { time: formatDateTime(locale, new Date(snapshotAt)) })}</p> : null}
       {taskId ? task ? <CachedChecklist key={task.id} task={task} scope={scope} locale={locale} /> : <EmptyState testId="field-cache-missing">{cache("unavailable")}</EmptyState>

@@ -30,9 +30,9 @@
     "authMethod": "Methode de connexion",
     "emailPassword": "Email + mot de passe",
     "phonePin": "Telephone + PIN",
-    "fieldWorker": "Telephone + PIN est reserve aux equipes terrain avec un appareil active.",
+    "fieldWorker": "Téléphone + PIN est réservé aux comptes terrain activés sur invitation.",
     "mfaTitle": "Deuxieme facteur",
-    "mfaSubtitle": "L'authentification principale est verifiee. Saisissez le code d'authentification pour ouvrir le tableau de bord.",
+    "mfaSubtitle": "Vos identifiants sont vérifiés. Saisissez le code de votre application d’authentification pour continuer.",
     "mfaCode": "Code d'authentification",
     "recoveryCode": "Code de recuperation",
     "useRecoveryCode": "Utiliser un code de recuperation",
@@ -44,9 +44,14 @@
     "submitting": "Verification...",
     "invalid": "Les identifiants n'ont pas pu etre verifies.",
     "mfaInvalid": "Le deuxieme facteur n'a pas pu etre verifie.",
-    "rateLimited": "Trop de tentatives. Attendez une minute puis reessayez.",
+    "rateLimited": "Trop de tentatives. Patientez avant de réessayer.",
     "generic": "Connexion impossible. Reessayez.",
-    "passkey": "Se connecter avec une clé d’accès"
+    "passkey": "Se connecter avec une clé d’accès",
+    "pinKeypad": "Clavier du code PIN",
+    "pinClear": "Effacer",
+    "pinDelete": "Effacer le dernier chiffre",
+    "fieldTitle": "Connexion terrain",
+    "fieldSubtitle": "Utilisez votre téléphone et votre code PIN pour retrouver vos tâches."
   },
   "AppShell": {
     "actions": "Actions de l'espace",

@@ -1,6 +1,6 @@
 "use server";
 
-import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/types";
+import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { refresh, revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";

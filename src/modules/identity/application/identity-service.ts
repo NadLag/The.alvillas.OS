@@ -11,7 +11,7 @@ import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
   RegistrationResponseJSON
-} from "@simplewebauthn/types";
+} from "@simplewebauthn/server";
 import { Prisma } from "@prisma/client";
 import { IdentityRepository, type IdentityAccountSummary, type InvitationSummary, type SessionSummary } from "@/modules/identity/infrastructure/identity-repository";
 import {
@@ -2060,7 +2060,7 @@ export async function beginPasskeyRegistration(
     const options = await generateRegistrationOptions({
       rpName: "ALVILLAS OS",
       rpID,
-      userID: account.id,
+      userID: new TextEncoder().encode(account.id),
       userName: account.email ?? account.id,
       userDisplayName: account.person.displayName,
       attestationType: "none",
@@ -2071,8 +2071,7 @@ export async function beginPasskeyRegistration(
       excludeCredentials: account.authCredentials
         .filter((credential) => credential.credentialId)
         .map((credential) => ({
-          id: Buffer.from(credential.credentialId ?? "", "base64url"),
-          type: "public-key",
+          id: credential.credentialId ?? "",
           transports: Array.isArray(credential.transports)
             ? credential.transports.filter((transport): transport is AuthenticatorTransport =>
                 typeof transport === "string"
@@ -2140,9 +2139,9 @@ export async function finishPasskeyRegistration(
         userAccountId: ctx.actorId,
         type: "PASSKEY",
         label: "Passkey",
-        credentialId: Buffer.from(verification.registrationInfo.credentialID).toString("base64url"),
-        publicKey: Buffer.from(verification.registrationInfo.credentialPublicKey),
-        counter: verification.registrationInfo.counter,
+        credentialId: verification.registrationInfo.credential.id,
+        publicKey: Buffer.from(verification.registrationInfo.credential.publicKey),
+        counter: verification.registrationInfo.credential.counter,
         transports: response.response.transports ?? Prisma.JsonNull,
         backupEligible: verification.registrationInfo.credentialDeviceType === "multiDevice",
         backedUp: verification.registrationInfo.credentialBackedUp
@@ -2212,8 +2211,7 @@ export async function beginPasskeyAuthentication(
       allowCredentials: account.authCredentials
         .filter((credential) => credential.credentialId)
         .map((credential) => ({
-          id: Buffer.from(credential.credentialId ?? "", "base64url"),
-          type: "public-key",
+          id: credential.credentialId ?? "",
           transports: Array.isArray(credential.transports)
             ? credential.transports.filter((transport): transport is AuthenticatorTransport =>
                 typeof transport === "string"
@@ -2289,9 +2287,9 @@ export async function verifyPasskeyAuthentication(
       expectedOrigin: origin,
       expectedRPID: rpIdFromOrigin(origin),
       requireUserVerification: true,
-      authenticator: {
-        credentialID: Buffer.from(credential.credentialId, "base64url"),
-        credentialPublicKey: Buffer.from(credential.publicKey),
+      credential: {
+        id: credential.credentialId,
+        publicKey: new Uint8Array(credential.publicKey),
         counter: credential.counter,
         transports: Array.isArray(credential.transports)
           ? credential.transports.filter((transport): transport is AuthenticatorTransport =>

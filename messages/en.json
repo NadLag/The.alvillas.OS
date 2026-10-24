@@ -30,9 +30,9 @@
     "authMethod": "Authentication method",
     "emailPassword": "Email + password",
     "phonePin": "Phone + PIN",
-    "fieldWorker": "Phone + PIN is reserved for field workers with an activated device.",
+    "fieldWorker": "Phone + PIN is for field accounts activated by invitation.",
     "mfaTitle": "Second factor",
-    "mfaSubtitle": "Primary authentication is verified. Enter your authenticator code to open the dashboard.",
+    "mfaSubtitle": "Your sign-in details are verified. Enter the code from your authenticator to continue.",
     "mfaCode": "Authenticator code",
     "recoveryCode": "Recovery code",
     "useRecoveryCode": "Use recovery code",
@@ -44,9 +44,14 @@
     "submitting": "Checking...",
     "invalid": "The credentials could not be verified.",
     "mfaInvalid": "The second factor could not be verified.",
-    "rateLimited": "Too many attempts. Wait a minute and try again.",
+    "rateLimited": "Too many attempts. Wait before trying again.",
     "generic": "Sign in failed. Try again.",
-    "passkey": "Sign in with a passkey"
+    "passkey": "Sign in with a passkey",
+    "pinKeypad": "PIN keypad",
+    "pinClear": "Clear",
+    "pinDelete": "Delete last digit",
+    "fieldTitle": "Field sign-in",
+    "fieldSubtitle": "Use your phone and PIN to open your assigned work."
   },
   "AppShell": {
     "actions": "Workspace actions",
