@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import type {
   BookingChannelInput,
   BookingChannelSummary,
@@ -1117,13 +1117,7 @@ export class CoreRepository {
             name: { equals: regionName, mode: "insensitive" }
           }
         })) ??
-        (await this.tx.region.create({
-          data: {
-            organizationId: this.organizationId,
-            name: regionName,
-            createdBy: actorId
-          }
-        }))
+        (await this.ensurePropertyRegion(regionName, actorId))
       : null;
     const cityName = input.city?.trim();
 
@@ -1142,18 +1136,30 @@ export class CoreRepository {
         },
         include: { region: true }
       })) ??
-      (await this.tx.city.create({
-        data: {
-          organizationId: this.organizationId,
-          regionId: region?.id,
-          name: cityName,
-          countryCode: input.countryCode,
-          timezone: input.timezone,
-          createdBy: actorId
-        },
-        include: { region: true }
-      }));
+      (await this.ensurePropertyCity(cityName, region?.id ?? null, input.countryCode, input.timezone, actorId));
 
     return { city };
+  }
+
+  private async ensurePropertyRegion(name: string, actorId: string) {
+    await this.tx.$executeRaw(Prisma.sql`
+      INSERT INTO region (organization_id, name, created_by)
+      VALUES (${this.organizationId}::uuid, ${name}, ${actorId}::uuid)
+      ON CONFLICT DO NOTHING
+    `);
+    return this.tx.region.findFirstOrThrow({ where: {
+      organizationId: this.organizationId, archivedAt: null, name: { equals: name, mode: "insensitive" }
+    } });
+  }
+
+  private async ensurePropertyCity(name: string, regionId: string | null, countryCode: string, timezone: string, actorId: string) {
+    await this.tx.$executeRaw(Prisma.sql`
+      INSERT INTO city (organization_id, region_id, name, country_code, timezone, created_by)
+      VALUES (${this.organizationId}::uuid, ${regionId}::uuid, ${name}, ${countryCode}, ${timezone}, ${actorId}::uuid)
+      ON CONFLICT DO NOTHING
+    `);
+    return this.tx.city.findFirstOrThrow({ where: {
+      organizationId: this.organizationId, archivedAt: null, regionId, countryCode, name: { equals: name, mode: "insensitive" }
+    }, include: { region: true } });
   }
 }

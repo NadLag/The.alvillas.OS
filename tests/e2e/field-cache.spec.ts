@@ -52,7 +52,12 @@ test("Field day cache survives offline reload, language changes and a single dur
     expect(z.array(z.object({ task: z.object({ priority: z.string() }) })).parse(await storedFieldData(page, "jobs"))[0].task.priority).toBe("NORMAL");
     await expect(note).toHaveValue("Partial offline checklist retained across reload and languages");
     await page.evaluate(() => { const target = window as Window & { fieldCacheOriginalPut?: typeof IDBObjectStore.prototype.put }; IDBObjectStore.prototype.put = target.fieldCacheOriginalPut!; delete target.fieldCacheOriginalPut; });
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page.getByTestId("field-cache-status")).toHaveText(createTranslator({ locale: "en", messages: en })("FieldCache.ready", { count: 1 }));
+    await expect(page.getByTestId("field-sync-now")).toBeEnabled();
+    const explicitPull = page.waitForResponse(response => new URL(response.url()).pathname === "/api/sync/pull" && response.ok());
     await page.getByTestId("field-sync-now").click();
+    await explicitPull;
     await expect.poll(async () => z.array(z.object({ task: z.object({ priority: z.string() }) })).parse(await storedFieldData(page, "jobs"))[0]?.task.priority).toBe("HIGH");
     await page.context().setOffline(true); await page.reload();
     await expect(page).toHaveURL(new RegExp(`/en/offline/field\\?task=${f.taskId}$`, "u"));

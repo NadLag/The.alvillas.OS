@@ -316,6 +316,32 @@ async function configureAppRole(databaseUrl: string): Promise<string> {
 }
 
 describe("PostgreSQL baseline", () => {
+  it.each([false, true])("concurrent native property creation shares first geography with region %s", async regional => {
+    const organization = await prisma.organization.create({ data: { name: `Concurrent geography ${randomUUID()}` } });
+    const identity = await withTenant(prisma, organization.id, async tx => {
+      const person = await tx.person.create({ data: { organizationId: organization.id, displayName: "Concurrent geography operator" } });
+      const account = await tx.userAccount.create({ data: { organizationId: organization.id, personId: person.id } });
+      return { person, account };
+    });
+    const ctx = { ...actorForOrganization(organization.id, new Set(["owner:create", "owner:view", "property:create", "property:view"])), actorId: identity.account.id, personId: identity.person.id };
+    const deps = { db: prisma as TenantTransactionRunner, requestId: randomUUID() };
+    const owner = await createOwner(ctx, ownerInputSchema.parse({ displayName: "Concurrent geography owner" }), deps);
+    const results = await Promise.allSettled(Array.from({ length: 8 }, (_, index) => createProperty(ctx, propertyInputSchema.parse({
+      ownerId: owner.id, name: `Concurrent villa ${index}`, addressLine1: "Concurrent road", city: index % 2 ? "NEW CITY" : "New city",
+      region: regional ? index % 2 ? "NEW REGION" : "New region" : undefined, countryCode: "MA", timezone: "Africa/Casablanca",
+      propertyType: "VILLA", bedrooms: 2, bathrooms: 2, maxGuests: 4
+    }), deps)));
+    expect(results.filter(result => result.status === "rejected").map(result => (result.reason as { code?: string }).code)).toEqual([]);
+    await withTenant(prisma, organization.id, async tx => {
+      const properties = await tx.property.findMany({ where: { organizationId: organization.id } });
+      expect(properties).toHaveLength(8); expect(new Set(properties.map(property => property.cityId)).size).toBe(1);
+      expect(await tx.city.count({ where: { organizationId: organization.id } })).toBe(1);
+      expect(await tx.region.count({ where: { organizationId: organization.id } })).toBe(regional ? 1 : 0);
+      expect(await tx.auditLog.count({ where: { organizationId: organization.id, action: "property.create" } })).toBe(8);
+      expect(await tx.city.count({ where: { organizationId: { not: organization.id } } })).toBe(0);
+    });
+  });
+
   async function templateFixture() {
     const organization = await prisma.organization.create({ data: { name: `Template ${randomUUID()}` } });
     const permissions = new Set(["config_rule:view", "config_rule:create", "config_rule:configure", "property:view", "property:edit", "property:create", "owner:create", "owner:view", "financial_transaction:view", "reservation:view", "reservation:create", "guest:create", "guest:view", "task:view", "task:create", "task:edit"]);
