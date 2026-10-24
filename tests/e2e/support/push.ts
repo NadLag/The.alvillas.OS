@@ -22,9 +22,28 @@ export async function displayAndClickPush(page: Page, deliveryId: string) {
   await expect.poll(() => registrationId).toBeTruthy();
   const worker = page.context().serviceWorkers().find((item) => item.url().endsWith("/sw.js"))!;
   await worker.evaluate("self.addEventListener('unhandledrejection', event => { self.testPushError = event.reason?.message ?? String(event.reason); }); self.addEventListener('push', event => { self.testPushText = event.data?.text(); });");
+  await worker.evaluate(`(() => {
+    self.testPushRequests = []; self.testPushWork = [];
+    const nativePushFetch = self.fetch.bind(self), nativeWaitUntil = ExtendableEvent.prototype.waitUntil;
+    self.fetch = async (...args) => {
+      const response = await nativePushFetch(...args); const url = new URL(typeof args[0] === 'string' ? args[0] : args[0].url, self.location.origin);
+      if (url.pathname.startsWith('/api/notifications/push/')) self.testPushRequests.push({ method: args[1]?.method ?? 'GET', status: response.status }); return response;
+    };
+    ExtendableEvent.prototype.waitUntil = function(work) {
+      const result = Reflect.apply(nativeWaitUntil, this, [work]);
+      if (this.type === 'push') self.testPushWork.push(Promise.resolve(work)); return result;
+    };
+  })();`);
   await client.send("ServiceWorker.deliverPushMessage", { origin: "http://127.0.0.1:3000", registrationId: registrationId!, data: JSON.stringify({ deliveryId }) });
   await expect.poll(() => worker.evaluate("({text:self.testPushText,error:self.testPushError})")).toEqual({ text: JSON.stringify({ deliveryId }), error: undefined });
-  await expect.poll(() => worker.evaluate("self.registration.getNotifications().then(items => items.length)")).toBe(1);
+  await expect.poll(() => worker.evaluate("self.testPushWork.length")).toBeGreaterThan(0);
+  await worker.evaluate("Promise.all(self.testPushWork)");
+  expect(await worker.evaluate("self.testPushRequests")).toContainEqual({ method: "GET", status: 200 });
+  try { await expect.poll(() => worker.evaluate("self.registration.getNotifications().then(items => items.length)")).toBe(1); }
+  catch (error) {
+    console.log(JSON.stringify({ nativePushFailure: await worker.evaluate("({ requests: self.testPushRequests, error: self.testPushError, state: self.serviceWorker?.state })") }));
+    throw error;
+  }
   const notifications = await worker.evaluate<Array<{ tag: string; title: string }>>("self.registration.getNotifications().then(items => items.map(item => ({ tag: item.tag, title: item.title })))");
   expect(notifications[0].tag).toBe(deliveryId);
   await client.detach();

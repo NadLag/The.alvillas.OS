@@ -2,11 +2,13 @@ import { fieldPullResultSchema, type FieldWorkSnapshot } from "@/modules/reserva
 import { fieldIdentity, type FieldQueueScope, type FieldQueueStore } from "./field-queue-store";
 
 const active = new WeakMap<FieldQueueStore, Map<string, Promise<void>>>();
-export function refreshFieldCache(queue: FieldQueueStore, scope: FieldQueueScope, send: typeof fetch = fetch): Promise<void> {
+export function refreshFieldCache(queue: FieldQueueStore, scope: FieldQueueScope, send: typeof fetch = fetch, options: { afterCurrent?: boolean } = {}): Promise<void> {
   let pending = active.get(queue);
   if (!pending) { pending = new Map(); active.set(queue, pending); }
   const key = fieldIdentity(scope), existing = pending.get(key);
-  if (existing) return existing;
+  if (existing) return options.afterCurrent
+    ? existing.catch(() => undefined).then(() => refreshFieldCache(queue, scope, send))
+    : existing;
   const result = refresh(queue, scope, send).finally(() => pending.delete(key));
   pending.set(key, result); return result;
 }
