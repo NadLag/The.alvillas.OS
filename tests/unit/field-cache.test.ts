@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FieldQueue, syncFieldQueue } from "@/platform/offline/field-queue";
 import { fieldUploadChunkBytes, type FieldUploadManifest } from "@/modules/reservations/domain/field-upload";
-import { fieldIdentity, type FieldQueueScope } from "@/platform/offline/field-queue-store";
+import { fieldIdentity, type FieldCacheState, type FieldCachedJob, type FieldDraft, type FieldQueueEntry, type FieldQueueScope } from "@/platform/offline/field-queue-store";
 import { refreshFieldCache } from "@/platform/offline/field-pull";
 import { resolveFieldScope } from "@/platform/offline/field-session";
 import { prepareQueuedPhoto } from "@/platform/offline/field-photo-sync";
@@ -41,6 +41,30 @@ function photoSend(handler: (url: URL, options?: RequestInit) => Response | Prom
 }
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(stores.splice(0).map(store => store.delete())); });
 describe("field work cache", () => {
+  it("upgrades a populated v2 device without losing its owner, original completion, draft or pull cursor", async () => {
+    const name = `upgrade-${randomUUID()}`, legacy = new Dexie(name), task = job(), identity = fieldIdentity(scope), cacheId = `${identity}:${task.id}`;
+    legacy.version(1).stores({ operations: "++sequence,&localId,[organizationId+userId]", metadata: "key" });
+    legacy.version(2).stores({ jobs: "&cacheId,[organizationId+userId]", drafts: "&cacheId,[organizationId+userId]", cacheState: "key" });
+    const deviceId = randomUUID(), state: FieldCacheState = { ...scope, key: identity, incarnation: randomUUID(), generation: 7, snapshotAt: stamp, cursor: "v2-private-cursor" };
+    const saved: FieldDraft = { ...scope, cacheId, taskId: task.id, checklistItemIds: [task.checklistItems[0].id], note: "Retained before photo update", savedAt: stamp };
+    const entry: FieldQueueEntry = { ...scope, localId: `${identity}:${randomUUID()}`, sequence: 12, deviceId, syncStatus: "pending", operation: {
+      client_op_id: randomUUID(), type: "field_task.complete", payload: { taskId: task.id, checklistItemIds: saved.checklistItemIds, note: saved.note }
+    } };
+    entry.localId = `${identity}:${entry.operation.client_op_id}`;
+    try {
+      await legacy.table<{ key: string; value: string }, string>("metadata").bulkPut([{ key: "identity", value: identity }, { key: "device", value: deviceId }]);
+      await legacy.table<FieldCachedJob, string>("jobs").put({ ...scope, cacheId, task });
+      await legacy.table<FieldDraft, string>("drafts").put(saved); await legacy.table<FieldCacheState, string>("cacheState").put(state);
+      await legacy.table<FieldQueueEntry, number>("operations").put(entry);
+    } finally { legacy.close(); }
+    const queue = new FieldQueue(name); stores.push(queue); await queue.activate(scope);
+    expect(queue.verno).toBe(3); expect((await queue.metadata.get("device"))?.value).toBe(deviceId); expect(await queue.entries(scope)).toEqual([entry]);
+    expect(await queue.cachedJobs(scope)).toEqual([task]); expect(await queue.drafts.get(cacheId)).toEqual(saved);
+    expect((await queue.readCache(scope)).state).toEqual(state); expect(await queue.photos.count()).toBe(0);
+    expect((await queue.photoSnapshot(scope, task.id)).canEdit).toBe(false);
+    expect(await queue.acknowledge(scope, entry, { client_op_id: entry.operation.client_op_id, status: "APPLIED", server_version: null })).toBe(true);
+    expect(await queue.entries(scope)).toEqual([]); expect(await queue.cachedJobs(scope)).toEqual([]); expect(await queue.drafts.count()).toBe(0);
+  });
   it("atomically persists photo bytes and the original ordered operation across reopening", async () => {
     const queue = await setup(), task = job(), capture = photo(task);
     await publish(queue, scope, 0, [task], [], "cursor", stamp);
