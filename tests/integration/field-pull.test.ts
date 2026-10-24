@@ -104,7 +104,6 @@ describe("field pull on real PostgreSQL", () => {
         assignedToPersonId: f.person.id, type: "INSPECTION", state: "ASSIGNED", dueDate: new Date(day), titleTranslations: { en: "Policy scope" }, idempotencyKey: randomUUID() })) });
     });
     const now = anchor(), firstRule = await devicePolicy(f, 15, new Date(now.getTime() - 60_000));
-    const later = new Date(now.getTime() + 60_000), futureRule = await devicePolicy(f, 0, later);
     const runtime = new URL(url!); runtime.username = "alvillas_ops_tests"; runtime.password = "alvillas_ops_tests";
     const measured = new PrismaClient({ datasourceUrl: runtime.toString(), log: [{ emit: "event", level: "query" }] }), statements: string[] = [];
     measured.$on("query", event => statements.push(event.query));
@@ -117,6 +116,10 @@ describe("field pull on real PostgreSQL", () => {
       expect(statements.filter(statement => statement.includes('"config_rule"'))).toHaveLength(1);
       expect(statements.length).toBeLessThanOrEqual(singleQueries.length + 1);
       expect(first.tasks.every(row => row.devicePolicy?.configRuleId === firstRule.id)).toBe(true);
+      // A later administrator may backdate a new version. It belongs to the
+      // next snapshot, rather than changing the remainder of this page cycle.
+      await new Promise(resolve => setTimeout(resolve, Math.max(0, now.getTime() - Date.now()) + 20));
+      const futureRule = await devicePolicy(f, 0, new Date(now.getTime() - 30_000)), later = anchor();
       const last = await pull(f, { mode: "assigned", include_device_policy: true, cursor: first.next_cursor }, later);
       expect(last.tasks).toHaveLength(1); expect(last.tasks[0].devicePolicy?.configRuleId).toBe(firstRule.id);
       const current = await pull(f, { mode: "assigned", include_device_policy: true, cursor: last.cursor }, later);

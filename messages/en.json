@@ -2215,6 +2215,7 @@
     }
   },
   "FieldPwa": {
+    "queueAgeWarning": "Saved changes to review: {count, number}. Oldest: {minutes, plural, =0 {under a minute} one {# minute} other {# minutes}}. Connect and check sync.",
     "tools": "App controls",
     "install": "Install app",
     "installed": "App installed",

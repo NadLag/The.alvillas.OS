@@ -67,7 +67,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
     if (input.include_device_policy && (dataRows.length || eligibleKnown.length)) {
       const propertyIds = [...new Set([...dataRows, ...eligibleKnown].map(row => row.propertyId))];
       const scopes = await new ReservationConfigScopeRepository(tx, ctx.organizationId).propertyScopes(propertyIds, asOf);
-      const resolved = await new ConfigRuleRepository(tx, ctx.organizationId).resolveScopeGroups(fieldDevicePolicyKey, scopes, asOf);
+      const resolved = await new ConfigRuleRepository(tx, ctx.organizationId).resolveScopeGroups(fieldDevicePolicyKey, scopes, asOf, { recordedAt: asOf });
       for (const [propertyId, policy] of resolved) devicePolicies.set(propertyId, policy);
     }
     const changedData = dataRows.filter(row => known.get(row.id) !== visibility(row).revision);
