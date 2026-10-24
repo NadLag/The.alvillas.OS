@@ -27,7 +27,7 @@ import {
 } from "@/platform/authz/authorize";
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { publishNotification } from "@/platform/notifications/notification-service";
 
@@ -398,13 +398,27 @@ export async function proxyCompleteOperationTask(
   operationAllowed(ctx, "validate");
   const value = proxyCompleteTaskSchema.parse(input),
     meta = await operationMeta(deps);
-  return withTenant(deps.db ?? prisma, ctx.organizationId, async (tx) => {
+  return withTenant(deps.db ?? prisma, ctx.organizationId, tx =>
+    proxyCompleteOperationTaskInTransaction(ctx, value, tx, meta, deps.now));
+}
+
+export async function proxyCompleteOperationTaskInTransaction(
+  ctx: ReservationActorContext,
+  input: unknown,
+  tx: TenantTransaction,
+  meta: Awaited<ReturnType<typeof operationMeta>>,
+  occurredAt?: Date,
+) {
+    operationAllowed(ctx, "validate");
+    const value = proxyCompleteTaskSchema.parse(input);
     const repo = new OperationRepository(tx, ctx.organizationId);
+    await repo.lock("crew-schedule");
     await repo.lock(value.taskId);
     await repo.lock(value.idempotencyKey);
     const task = await repo.task(value.taskId);
     if (!task) throw new ReservationNotFoundError();
     operationAllowed(ctx, "validate", taskResource(task));
+    operationAllowed(ctx, "view", taskResource(task));
     const hash = operationHash({ operation: "proxy", value }),
       receipt = await repo.receipt(value.idempotencyKey);
     if (receipt) {
@@ -427,7 +441,7 @@ export async function proxyCompleteOperationTask(
       throw new ReservationConflictError();
     if (!(await repo.performer(value.performedByPersonId)))
       throw new ReservationNotFoundError();
-    const now = deps.now ?? new Date();
+    const now = occurredAt ?? new Date();
     await repo.context(ctx.actorId, meta.requestId, value.reason);
     if (task.state === "ASSIGNED")
       await repo.update(task.id, { state: "IN_PROGRESS" });
@@ -474,5 +488,4 @@ export async function proxyCompleteOperationTask(
         `notification:task:${task.id}:completed`,
       );
     return after;
-  });
 }

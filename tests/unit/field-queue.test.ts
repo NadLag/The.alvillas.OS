@@ -52,7 +52,11 @@ describe("durable field operation queue", () => {
     const send = vi.fn<typeof fetch>().mockResolvedValue(response(op.client_op_id, status, { error_code: "REJECTED_NOT_ASSIGNED" }));
     expect(await syncFieldQueue(queue, scope, send)).toBe(status.toLowerCase());
     await syncFieldQueue(queue, scope, send);
-    expect(send).toHaveBeenCalledTimes(1); expect((await queue.entries(scope))[0].operation.payload.note).toBe("Work retained");
+    expect(send).toHaveBeenCalledTimes(1);
+    const retained = (await queue.entries(scope))[0].operation;
+    expect(retained.type).toBe("field_task.complete");
+    if (retained.type !== "field_task.complete") throw new Error("Expected the retained original completion");
+    expect(retained.payload.note).toBe("Work retained");
   });
 
   it.each([Response.json({ op_schema_version: 1, results: [] }), Response.json({ op_schema_version: 1, results: [{ status: "APPLIED" }] }), new Response("bad gateway", { status: 503 })])("keeps work after malformed or unsuccessful acknowledgements", async result => {

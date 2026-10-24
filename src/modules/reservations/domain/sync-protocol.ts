@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { proxyCompleteTaskSchema } from "./operation-task";
 
 const optionalText = (max: number) =>
   z.preprocess(
@@ -14,13 +15,15 @@ export const fieldTaskCompletePayloadSchema = z.object({
   note: optionalText(1000)
 });
 
-export const syncPushOpSchema = z.object({
+const syncOpEnvelope = z.object({
   client_op_id: z.string().uuid(),
-  type: z.literal("field_task.complete"),
-  payload: fieldTaskCompletePayloadSchema,
   base_version: z.string().trim().max(120).optional(),
   client_created_at: z.string().datetime({ offset: true }).optional()
 });
+export const syncPushOpSchema = z.discriminatedUnion("type", [
+  syncOpEnvelope.extend({ type: z.literal("field_task.complete"), payload: fieldTaskCompletePayloadSchema }),
+  syncOpEnvelope.extend({ type: z.literal("field_task.proxy_validate"), payload: proxyCompleteTaskSchema.omit({ idempotencyKey: true }) }).strict()
+]);
 
 export const syncPushInputSchema = z.object({
   device_id: z.string().trim().min(8).max(160),
