@@ -14,7 +14,7 @@ import { operationAllowed, operationHash, operationMeta, taskResource, type Oper
 import { ReservationAuthorizationError, ReservationConflictError, ReservationNotFoundError } from "./reservation-service";
 import { validEvidenceImage, persistOperationEvidence } from "./operation-evidence";
 import { readExactResponseBytes } from "@/platform/http/read-exact-response";
-import { permanentFieldUploadKey } from "@/platform/storage/upload-protocol";
+import { permanentFieldUploadKey, privateUploadTransportTimeoutMs, temporaryPartLeaseMilliseconds } from "@/platform/storage/upload-protocol";
 
 type UploadDeps = OperationDeps & { storage?: StorageProvider; transport?: typeof fetch };
 type CompleteUploadDeps = UploadDeps & { storage?: StorageProvider & {
@@ -66,10 +66,13 @@ export async function startFieldUpload(ctx: ReservationActorContext, input: unkn
 
 export async function signFieldUploadPart(ctx: ReservationActorContext, input: unknown, deps: UploadDeps = {}, bytes?: Uint8Array) {
   operationAllowed(ctx, "edit"); const value = partRequestSchema.parse(input); checkOwner(ctx, value);
+  const signedAt = deps.now ?? new Date();
   const key = await withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const uploads = new FieldUploadRepository(tx, ctx.organizationId), operations = new OperationRepository(tx, ctx.organizationId);
     const upload = await uploads.get(value.uploadId);
     if (!upload || upload.actorId !== ctx.actorId || upload.deviceId !== value.device_id) throw new ReservationNotFoundError();
+    await operations.lock("crew-schedule"); await operations.lock(upload.taskId);
+    await uploads.lock(`${ctx.actorId}:${upload.localId}`);
     const task = await operations.task(upload.taskId); assigned(ctx, task);
     const manifest = fieldUploadManifestSchema.parse(upload.manifest), policy = await operations.policy(task.propertyId);
     if (upload.status !== "OPEN" || value.index >= manifest.parts.length || manifest.size > policy.evidence_max_bytes)
@@ -77,9 +80,12 @@ export async function signFieldUploadPart(ctx: ReservationActorContext, input: u
     const part = manifest.parts[value.index];
     if (bytes && (bytes.length !== part.size || createHash("sha256").update(bytes).digest("hex") !== part.sha256))
       throw new ReservationConflictError("upload_digest_mismatch");
+    if (!await uploads.reservePart(upload.id, new Date(signedAt.getTime() + temporaryPartLeaseMilliseconds)))
+      throw new ReservationConflictError("upload_part_unavailable");
     return fieldUploadPartStorageKey(ctx.organizationId, upload.id, value.index);
   });
-  try { return await (deps.storage ?? new R2StorageProvider()).createSignedUploadUrl({ key, contentType: "application/octet-stream" }); }
+  // A delayed process cannot mint a newer signature after its persisted lease.
+  try { return await (deps.storage ?? new R2StorageProvider(undefined, () => signedAt)).createSignedUploadUrl({ key, contentType: "application/octet-stream" }); }
   catch { throw new FieldUploadUnavailableError(); }
 }
 
@@ -87,7 +93,7 @@ export async function storeFieldUploadPart(ctx: ReservationActorContext, input: 
   const signed = await signFieldUploadPart(ctx, input, deps, bytes);
   try {
     const response = await (deps.transport ?? fetch)(signed.url, { method: "PUT", headers: { "Content-Type": "application/octet-stream" },
-      body: new Uint8Array(bytes), signal: AbortSignal.timeout(15000) });
+      body: new Uint8Array(bytes), signal: AbortSignal.timeout(privateUploadTransportTimeoutMs) });
     if (!response.ok) throw new FieldUploadUnavailableError();
   } catch { throw new FieldUploadUnavailableError(); }
   return { stored: true };

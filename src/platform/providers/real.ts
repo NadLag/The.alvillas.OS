@@ -1,7 +1,7 @@
 import { ICalAdapter } from "@/modules/reservations/domain/adapters";
 import { createHash, createHmac } from "node:crypto";
 import { escapeHtml } from "@/platform/encoding/html";
-import { temporaryUploadPartKey, type TemporaryUploadPart } from "@/platform/storage/upload-protocol";
+import { privateUploadUrlLifetimeSeconds, temporaryUploadPartKey, type TemporaryUploadPart } from "@/platform/storage/upload-protocol";
 import type {
   EmailProvider,
   NotificationChannel,
@@ -270,7 +270,7 @@ export class R2StorageProvider implements StorageProvider {
 
   createSignedUploadUrl(input: { key: string; contentType: string }): Promise<{ url: string }> {
     void input.contentType;
-    return this.signedUrl(input.key, "PUT", 900);
+    return this.signedUrl(input.key, "PUT", privateUploadUrlLifetimeSeconds);
   }
 
   createSignedDownloadUrl(input: { key: string; expiresInSeconds: number }): Promise<{ url: string }> {
