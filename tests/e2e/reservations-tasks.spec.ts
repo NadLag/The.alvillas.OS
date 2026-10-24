@@ -81,6 +81,7 @@ test.describe("manual reservation to operations tasks journey", () => {
     await expect(page.getByTestId("field-task-page")).toBeVisible();
     await expect(page.getByTestId("notification-count")).toHaveText("1");
     await page.goto("/en/app/field");
+    await page.getByTestId("field-view-assigned").click();
     const fieldTask = page.getByTestId("field-task-card").filter({ hasText: propertyName }).first();
     await expect(fieldTask).toBeVisible();
     await fieldTask.click();
@@ -97,6 +98,7 @@ test.describe("manual reservation to operations tasks journey", () => {
     await expect(page.getByTestId("field-task-sync-status")).toContainText("Saved offline");
     await page.context().setOffline(false);
     await expect(page).toHaveURL(/\/en\/app\/field/u);
+    await page.getByTestId("field-view-assigned").click();
     await expect(page.getByTestId("field-task-card").filter({ hasText: propertyName })).toHaveCount(1);
   });
 

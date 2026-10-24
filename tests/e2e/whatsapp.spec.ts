@@ -80,7 +80,7 @@ test.describe("manual WhatsApp notification", () => {
       await page.getByTestId("operation-task-row").filter({ hasText: property.name }).first().getByTestId("task-whatsapp").click();
       // The default property task routing includes the assigned account.
       await expect(page.getByTestId("whatsapp-recipient")).toContainText("Operations");
-      await page.goto("/en/app/field"); await page.getByTestId("field-task-card").filter({ hasText: property.name }).first().click();
+      await page.goto("/en/app/field"); await page.getByTestId("field-view-assigned").click(); await page.getByTestId("field-task-card").filter({ hasText: property.name }).first().click();
       await page.getByTestId("task-whatsapp").click(); await expect(page.getByTestId("whatsapp-composer")).toBeVisible();
       await page.getByTestId("notification-bell").click(); await page.getByTestId("notification-whatsapp").first().click(); await expect(page.getByTestId("whatsapp-page")).toBeVisible();
       expect((await page.request.post("/api/notifications/whatsapp/open", { form: { type: "reservation", id: reservation.id } })).status()).toBe(403);

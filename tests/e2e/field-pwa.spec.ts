@@ -55,7 +55,9 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Field PWA installability
       for (const name of await caches.keys()) for (const request of await (await caches.open(name)).keys()) urls.push(new URL(request.url).pathname);
       return urls;
     });
-    expect(cached.length).toBeGreaterThan(0); expect(cached.every(path => path.startsWith("/_next/static/"))).toBe(true);
+    expect(cached.length).toBeGreaterThan(0);
+    expect(cached.every(path => path.startsWith("/_next/static/") || /^\/(en|fr|ar)\/offline\/field$/u.test(path))).toBe(true);
+    for (const language of ["en", "fr", "ar"]) expect(cached).toContain(`/${language}/offline/field`);
   } finally { await fixture?.db.$disconnect(); await native.close(); }
 });
 

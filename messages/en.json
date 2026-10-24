@@ -1141,7 +1141,7 @@
     "checklistCount": "{count, plural, one {# checklist item} other {# checklist items}}",
     "noReservation": "No reservation",
     "noGuest": "No guest",
-    "complete": "Complete task",
+    "complete": "Finish",
     "completing": "Completing...",
     "saving": "Saving...",
     "note": "Completion note",
@@ -1149,7 +1149,7 @@
     "offlineSyncing": "Syncing saved completion...",
     "offlineSynced": "Completion synced.",
     "offlineConflict": "This task changed before the saved completion synced.",
-    "offlineRejected": "This saved completion is no longer assigned to you.",
+    "offlineRejected": "This completion could not be accepted with your current assignment or permissions. Contact your supervisor.",
     "forms": {
       "validation": "Complete every checklist item before finishing.",
       "unauthorized": "Sign in again to continue.",
@@ -1163,7 +1163,8 @@
     "saveBeforeLanguage": "Save your checklist before changing language.",
     "noteBeforeLanguage": "Finish this job to save your completion note, or clear the note before changing language.",
     "offlineLanguage": "Reconnect to change language. Your checklist stays here.",
-    "offlineProgress": "Your checklist stays on this page while offline. Finish the job to save it on this device."
+    "offlineProgress": "You can keep working offline. Finish the job to queue its completion.",
+    "draftSaved": "Your changes are saved on this device."
   },
   "OwnerPortal": {
     "switch": {
@@ -2222,5 +2223,22 @@
     "saveBeforeUpdate": "Finish or save your current changes before updating the app.",
     "unavailable": "Keep this page open. This device could not finish preparing the app.",
     "syncNow": "Sync now"
+  },
+  "FieldCache": {
+    "views": "Work views",
+    "today": "Today",
+    "assigned": "My jobs",
+    "loadMore": "Show more jobs",
+    "preparing": "Preparing work on this device…",
+    "ready": "{count, plural, one {# job available on this device} other {# jobs available on this device}}",
+    "retry": "Saved work could not be updated. Keep this page open, check your connection and device storage, then try again.",
+    "notPrepared": "Reconnect to prepare work on this device.",
+    "offlineWork": "Your saved work is available without a connection.",
+    "signIn": "Sign in while connected to prepare your work on this device.",
+    "signInAction": "Sign in",
+    "lastUpdated": "Updated {time}",
+    "unavailable": "This job is no longer available in your saved work. Return to your jobs or reconnect to refresh.",
+    "dueDate": "Due {date} · {timezone}",
+    "readOnly": "You can view this job. Your current permissions do not allow changes."
   }
 }

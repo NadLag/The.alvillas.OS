@@ -1131,17 +1131,17 @@
   },
   "Field": {
     "eyebrow": "Application terrain",
-    "title": "Mes taches",
+    "title": "Mes tâches",
     "subtitle": "Uniquement le travail assigne, avec la checklist necessaire pour terminer.",
     "backToWorkspace": "Espace de travail",
-    "backToJobs": "Mes taches",
+    "backToJobs": "Mes tâches",
     "empty": "Aucune tache ne vous est assignee pour le moment.",
     "rowMeta": "{property} - {reservation}",
     "detailMeta": "{reservation} - {guest}",
     "checklistCount": "{count, plural, one {# element checklist} other {# elements checklist}}",
-    "noReservation": "Sans reservation",
-    "noGuest": "Sans voyageur",
-    "complete": "Terminer la tache",
+    "noReservation": "Aucune réservation",
+    "noGuest": "Aucun voyageur",
+    "complete": "Terminer",
     "completing": "Finalisation...",
     "saving": "Enregistrement...",
     "note": "Note de fin",
@@ -1149,7 +1149,7 @@
     "offlineSyncing": "Synchronisation de la fin de tache...",
     "offlineSynced": "Fin de tache synchronisee.",
     "offlineConflict": "Cette tache a change avant la synchronisation.",
-    "offlineRejected": "Cette fin de tache n'est plus assignee a vous.",
+    "offlineRejected": "Cet achèvement n’a pas pu être accepté avec votre affectation ou vos autorisations actuelles. Contactez votre responsable.",
     "forms": {
       "validation": "Completez chaque element de la checklist avant de terminer.",
       "unauthorized": "Reconnectez-vous pour continuer.",
@@ -1163,7 +1163,8 @@
     "saveBeforeLanguage": "Enregistrez votre liste de contrôle avant de changer de langue.",
     "noteBeforeLanguage": "Terminez cette tâche pour enregistrer votre note, ou effacez-la avant de changer de langue.",
     "offlineLanguage": "Une connexion est nécessaire pour changer de langue. Votre liste de contrôle reste ici.",
-    "offlineProgress": "Votre liste de contrôle reste sur cette page hors connexion. Terminez la tâche pour l’enregistrer sur cet appareil."
+    "offlineProgress": "Vous pouvez continuer à travailler hors connexion. Terminez la tâche pour mettre son envoi en attente.",
+    "draftSaved": "Vos modifications sont enregistrées sur cet appareil."
   },
   "OwnerPortal": {
     "switch": {
@@ -2222,5 +2223,22 @@
     "saveBeforeUpdate": "Terminez ou enregistrez vos modifications avant de mettre à jour l’application.",
     "unavailable": "Gardez cette page ouverte. Cet appareil n’a pas pu terminer la préparation de l’application.",
     "syncNow": "Synchroniser"
+  },
+  "FieldCache": {
+    "views": "Vues du travail",
+    "today": "Aujourd’hui",
+    "assigned": "Mes tâches",
+    "loadMore": "Afficher plus de tâches",
+    "preparing": "Préparation du travail sur cet appareil…",
+    "ready": "{count, plural, one {# tâche disponible sur cet appareil} other {# tâches disponibles sur cet appareil}}",
+    "retry": "Le travail enregistré n’a pas pu être actualisé. Gardez cette page ouverte, vérifiez votre connexion et l’espace de stockage, puis réessayez.",
+    "notPrepared": "Reconnectez-vous pour préparer le travail sur cet appareil.",
+    "offlineWork": "Votre travail enregistré est disponible sans connexion.",
+    "signIn": "Connectez-vous en ligne pour préparer votre travail sur cet appareil.",
+    "signInAction": "Se connecter",
+    "lastUpdated": "Mis à jour : {time}",
+    "unavailable": "Cette tâche n’est plus disponible dans votre travail enregistré. Revenez à vos tâches ou reconnectez-vous pour actualiser.",
+    "dueDate": "Échéance : {date} · {timezone}",
+    "readOnly": "Vous pouvez consulter cette tâche. Vos autorisations actuelles ne permettent pas de la modifier."
   }
 }

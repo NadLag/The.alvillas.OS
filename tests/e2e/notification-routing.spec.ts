@@ -74,6 +74,7 @@ test.describe("event notification routing", () => {
       await page.getByTestId("routing-reason").fill("Notify the assigned team when work is completed");
       await page.getByTestId("routing-save").click(); await expect(page.getByTestId("routing-status")).toContainText("Routing saved");
       await page.goto("/en/app/field");
+      await page.getByTestId("field-view-assigned").click();
       await page.getByTestId("field-task-card").filter({ hasText: propertyName }).first().click();
       await expect(page.getByTestId("field-task-page")).toBeVisible();
       const checks = page.getByTestId("field-checklist-item");
