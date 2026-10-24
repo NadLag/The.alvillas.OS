@@ -3,11 +3,15 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { withTenant } from "@/platform/db/tenant";
 import { openFieldFixture } from "./support/field-fixture";
+import { storedFieldData } from "./support/field-storage";
+import { z } from "zod";
+import { fieldWorkSnapshotSchema } from "@/modules/reservations/domain/field-pull";
 
 for (const locale of ["en", "fr", "ar"]) test(`Field supervisor validates person-only work with a stale-version guard in ${locale}`, async ({ page, context }, info) => {
   test.skip(!process.env.DATABASE_URL, "Real PostgreSQL required for supervisor validation"); test.setTimeout(240000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw new Error("Supervisor fixtures require local PostgreSQL");
   const f = await openFieldFixture(page, info, locale, { checklistItems: 2 });
+  const cachedTask = async () => z.array(z.object({ task: fieldWorkSnapshotSchema })).parse(await storedFieldData(page, "proxyJobs")).filter(row => row.task.id === f.taskId);
   try {
     const original = await withTenant(f.db, f.organizationId, tx => tx.operationTask.findUniqueOrThrow({ where: { id: f.taskId } }));
     const path = `/${locale}/app/field/validate/${f.taskId}`;
@@ -29,13 +33,17 @@ for (const locale of ["en", "fr", "ar"]) test(`Field supervisor validates person
     await expect(page.getByTestId("field-language-notice")).toBeVisible(); await expect(page).toHaveURL(new RegExp(`${path}$`, "u"));
     await page.locator(".shell-header a").click(); await expect(page.getByTestId("field-proxy-unsaved")).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`${path}$`, "u"));
-    await context.setOffline(true); await expect(submit).toBeDisabled(); await expect(page.getByTestId("field-proxy-offline")).toBeVisible();
+    await expect.poll(cachedTask).toHaveLength(1);
+    await context.setOffline(true); await expect(submit).toBeEnabled(); await expect(page.getByTestId("field-proxy-offline")).toBeVisible();
     await expect(form.locator('[name="reason"]')).toHaveValue("Worker has no internet connection"); await context.setOffline(false); await expect(submit).toBeEnabled();
     await page.getByTestId("field-proxy-evidence").locator("summary").click();
     const evidence = page.getByTestId("operation-evidence-form"); await evidence.locator('[name="reason"]').fill("Optional supervisor evidence");
     await evidence.locator('button[type="submit"]').click(); await expect(page.getByTestId("field-proxy-evidence")).toContainText("Optional supervisor evidence");
-    await expect(form.locator('[name="reason"]')).toHaveValue(""); await expect(form.getByRole("checkbox").first()).not.toBeChecked();
+    await expect(form.locator('[name="reason"]')).toHaveValue("Worker has no internet connection"); await expect(form.getByRole("checkbox").first()).toBeChecked();
+    await page.getByTestId("field-sync-now").click(); await expect(page.getByTestId("field-proxy-review-required")).toBeVisible();
+    await page.getByTestId("field-proxy-review").click(); await expect(form.getByRole("checkbox").first()).not.toBeChecked();
     await form.locator('[name="reason"]').fill("Worker has no internet connection"); for (const input of await form.getByRole("checkbox").all()) await input.check();
+    await context.route("**/api/sync/pull?**", route => route.abort());
     const second = await context.newPage(); await second.goto(`/${locale}/app/operations/${task.id}`);
     const transition = second.getByTestId("operation-transition-form"); await transition.locator('[name="state"]').selectOption("BLOCKED");
     await transition.locator('[name="reason"]').fill("A second client changed this job"); await transition.locator('button[type="submit"]').click();
@@ -44,6 +52,9 @@ for (const locale of ["en", "fr", "ar"]) test(`Field supervisor validates person
     await expect(form.locator('[name="reason"]')).toHaveValue("Worker has no internet connection");
     const blocked = await withTenant(f.db, f.organizationId, tx => tx.operationTask.findUniqueOrThrow({ where: { id: task.id } }));
     expect(blocked.state).toBe("BLOCKED"); expect(blocked.validatedAt).toBeNull();
+    await context.unroute("**/api/sync/pull?**");
+    await page.getByTestId("field-sync-now").click(); await expect.poll(cachedTask).toEqual([]);
+    expect(await storedFieldData(page, "proxyDrafts")).toEqual([]);
     await transition.locator('[name="state"]').selectOption("PLANNED"); await transition.locator('[name="reason"]').fill("Reopen the local acceptance job");
     await transition.locator('button[type="submit"]').click();
     await expect.poll(async () => (await withTenant(f.db, f.organizationId, tx => tx.operationTask.findUniqueOrThrow({ where: { id: task.id } }))).state).toBe("PLANNED");

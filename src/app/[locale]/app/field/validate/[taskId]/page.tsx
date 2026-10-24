@@ -9,6 +9,7 @@ import { localizedText } from "@/i18n/content";
 import { auth } from "@/platform/auth/session";
 import { authorize } from "@/platform/authz/authorize";
 import { FieldLanguage } from "@/platform/offline/field-language";
+import { FieldPwa } from "@/platform/offline/field-pwa";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
 import { operationTaskDetail, taskResource } from "@/modules/reservations/application/operation-service";
 import { ReservationAuthorizationError, ReservationNotFoundError } from "@/modules/reservations/application/reservation-service";
@@ -37,14 +38,16 @@ export default async function ProxyTaskPage({ params }: { params: Promise<{ loca
     <ShellHeader eyebrow={task.property.name} title={localizedText(taskText(task.titleTranslations), locale)} subtitle={t("help")}
       actions={<Link className="secondary-button" href={`/${locale}/app/field/validate`}>{t("backToValidation")}</Link>} />
     <FieldLanguage locale={locale} path={`/app/field/validate/${task.id}`} />
+    <FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} audience="supervised" />
     <dl className="field-proxy-identities" data-testid="field-proxy-identities">
       <div><dt>{t("performedBy")}</dt><dd>{person(task.completedByPersonId ?? task.assignedToPersonId)}</dd></div>
       <div><dt>{t("validatedBy")}</dt><dd>{completed ? person(task.validatedByPersonId) : session?.user?.name ?? t("you")}</dd></div>
       {completed && task.validatedAt ? <><div><dt>{t("validatedAt")}</dt><dd>{format.dateTime(task.validatedAt, { dateStyle: "medium", timeStyle: "short", timeZone: task.property.timezone })}</dd></div>
         <div><dt>{t("reason")}</dt><dd>{task.validationReason}</dd></div></> : null}
     </dl>
-    {completed ? <p role="status" data-testid="field-proxy-completed">{t("completed")}</p> : <FieldProxyForm key={task.version} locale={locale} taskId={task.id}
+    {completed ? <p role="status" data-testid="field-proxy-completed">{t("completed")}</p> : <FieldProxyForm locale={locale} taskId={task.id}
       version={task.version} performerId={task.assignedToPersonId} idempotencyKey={randomUUID()}
+      key={`${ctx.organizationId}:${ctx.actorId}:${task.id}`} organizationId={ctx.organizationId} userId={ctx.actorId}
       checklist={task.checklistItems.map(item => ({ id: item.id, label: localizedText(taskText(item.labelTranslations), locale) }))} />}
     <details className="panel" data-testid="field-proxy-evidence"><summary>{t("evidence")}</summary>
       <p>{t("evidenceHelp")}</p>

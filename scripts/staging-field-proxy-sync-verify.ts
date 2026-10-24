@@ -11,10 +11,12 @@ const fixture = z.object({ organizationId: z.uuid(), actorId: z.uuid(), actorPer
   propertyName: z.string().regex(/^Automation acceptance aut-[a-f0-9]{8}$/u) })
   .parse(JSON.parse(await readFile(z.string().min(1).parse(process.env.STAGING_OPERATIONS_FIXTURE_FILE), "utf8")));
 const context = await request.newContext({ baseURL: origin, storageState: state, timeout: 30000 }), anonymous = await request.newContext({ baseURL: origin });
+let phase = "authentication";
 try {
   expect(await (await context.get("/api/version")).json()).toMatchObject({ version: sha, environment: "preview", commitRef: "main" });
   expect(await (await context.get("/api/auth/session")).json()).toMatchObject({ user: { id: fixture.actorId, organizationId: fixture.organizationId,
     personId: fixture.actorPersonId, securitySetupRequired: false } });
+  phase = "scoped-projection";
   const query = new URLSearchParams({ organization_id: fixture.organizationId, actor_user_id: fixture.actorId, mode: "supervised" });
   const response = await context.get(`/api/sync/pull?${query}`); expect(response.status()).toBe(200);
   expect(response.headers()["cache-control"]).toContain("private"); expect(response.headers()["cache-control"]).toContain("no-store");
@@ -32,6 +34,7 @@ try {
     pages += 1; if (!page.next_cursor) break; if (pages > 100) throw new Error("Bounded staging pagination exceeded");
     query.set("cursor", page.next_cursor); page = fieldPullResultSchema.parse(await (await context.get(`/api/sync/pull?${query}`)).json());
   }
+  phase = "cursor-and-identity-boundaries";
   const wrongAudience = new URLSearchParams(query); wrongAudience.set("cursor", initial.cursor); wrongAudience.set("mode", "assigned");
   expect((await context.get(`/api/sync/pull?${wrongAudience}`)).status()).toBe(400);
   const forgedActor = new URLSearchParams(query); forgedActor.set("actor_user_id", randomUUID()); forgedActor.delete("cursor");
@@ -39,9 +42,11 @@ try {
   const foreignTenant = new URLSearchParams(query); foreignTenant.set("organization_id", randomUUID()); foreignTenant.delete("cursor");
   expect((await context.get(`/api/sync/pull?${foreignTenant}`)).status()).toBe(403);
   expect((await anonymous.get(`/api/sync/pull?${query}`)).status()).toBe(401);
-  query.delete("cursor"); query.set("only_known", "1"); query.set("known_tasks", `${fixture.taskId}.-`);
+  phase = "known-completed-tombstone";
+  query.set("cursor", page.cursor); query.set("only_known", "1"); query.set("known_tasks", `${fixture.taskId}.-`);
   const removed = fieldPullResultSchema.parse(await (await context.get(`/api/sync/pull?${query}`)).json());
   expect(removed.tasks).toEqual([]); expect(removed.known_changes).toEqual([]); expect(removed.tombstones).toEqual([fixture.taskId]);
+  phase = "forbidden-client-validator";
   const invalid = await context.post("/api/sync/push", { headers: { Origin: origin }, data: {
     device_id: `staging-schema-denial-${randomUUID()}`, organization_id: fixture.organizationId, actor_user_id: fixture.actorId, op_schema_version: 1,
     ops: [{ client_op_id: randomUUID(), type: "field_task.proxy_validate", payload: { taskId: fixture.taskId, expectedVersion: 1,
@@ -54,5 +59,5 @@ try {
     actorAndTenantDenied: true, audienceBoundCursor: true, completedProxyTombstone: true, clientValidatorDenied: true,
     nativeTaskMutations: 0, nativeQueuedClientAcceptancePending: true }, null, 2));
   console.log(JSON.stringify({ sha, authenticatedSupervisedProjection: true, scopedPages: pages, nativeTaskMutations: 0 }));
-} catch { throw new Error("Authenticated staging projection verification incomplete; no native task was submitted"); }
+} catch { throw new Error(`Authenticated staging projection verification incomplete at ${phase}; no native task was submitted`); }
 finally { await context.dispose(); await anonymous.dispose(); }

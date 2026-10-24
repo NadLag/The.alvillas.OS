@@ -20,9 +20,11 @@ import { fieldQueue } from "./field-queue";
 import { type FieldQueueScope } from "./field-queue-store";
 import { resolveFieldScope } from "./field-session";
 import { FieldPhotoCapture } from "./field-photo-capture";
+import { FieldProxyForm } from "@/modules/reservations/ui/field-proxy-form";
+import type { FieldCacheAudience } from "./field-queue-store";
 
 function fieldMessages(messages: typeof en) {
-  return { Field: messages.Field, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, Operations: { manage: messages.Operations.manage } };
+  return { Field: messages.Field, FieldProxy: messages.FieldProxy, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, Operations: { manage: messages.Operations.manage } };
 }
 const catalogs = { en: fieldMessages(en), fr: fieldMessages(fr), ar: fieldMessages(ar) };
 export function OfflineFieldApp({ initialLocale }: { initialLocale: AppLocale }) {
@@ -31,17 +33,19 @@ export function OfflineFieldApp({ initialLocale }: { initialLocale: AppLocale })
   return <NextIntlClientProvider locale={locale} messages={catalogs[locale]}><OfflineWork locale={locale} changeLocale={setLocale} /></NextIntlClientProvider>;
 }
 function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale: (locale: AppLocale) => void }) {
-  const t = useTranslations("Field"), cache = useTranslations("FieldCache");
+  const t = useTranslations("Field"), cache = useTranslations("FieldCache"), proxy = useTranslations("FieldProxy");
   const [scope, setScope] = useState<FieldQueueScope | null>(null), [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState<FieldWorkSnapshot[]>([]), [snapshotAt, setSnapshotAt] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [audience, setAudience] = useState<FieldCacheAudience>("assigned");
   const [photoBlocked, setPhotoBlocked] = useState(false), photo = useTranslations("FieldPhoto");
   useEffect(() => {
     let disposed = false;
     const queue = fieldQueue();
     const navigate = () => {
-      const task = z.uuid().safeParse(new URLSearchParams(location.search).get("task"));
+      const query = new URLSearchParams(location.search), task = z.uuid().safeParse(query.get("task"));
       setTaskId(task.success ? task.data : null);
+      setAudience(query.get("view") === "supervised" ? "supervised" : "assigned");
     };
     const verify = async () => {
       const identity = await resolveFieldScope(queue, navigator.onLine);
@@ -54,31 +58,47 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
   }, []);
   useEffect(() => {
     if (!scope) return;
-    const subscription = liveQuery(() => fieldQueue().readCache(scope)).subscribe({ next: value => {
+    const subscription = liveQuery(() => fieldQueue().readCache(scope, audience)).subscribe({ next: value => {
       setTasks(value.tasks); setSnapshotAt(value.state?.snapshotAt ?? null);
     }, error: () => { setScope(null); setTasks([]); setSnapshotAt(null); } });
     return () => subscription.unsubscribe();
-  }, [scope]);
-  const path = (nextLocale: AppLocale, id: string | null) => `/${nextLocale}/offline/field${id ? `?task=${id}` : ""}`;
+  }, [scope, audience]);
+  const path = (nextLocale: AppLocale, id: string | null) => {
+    const query = new URLSearchParams(); if (audience === "supervised") query.set("view", "supervised"); if (id) query.set("task", id);
+    return `/${nextLocale}/offline/field${query.size ? `?${query}` : ""}`;
+  };
   function openJob(id: string | null) {
-    if (document.querySelector('[data-field-photo-dirty="true"]')) { setPhotoBlocked(true); return; }
+    if (document.querySelector('[data-field-photo-dirty="true"]') ||
+      (audience === "supervised" && document.querySelector('[data-field-dirty="true"]'))) { setPhotoBlocked(true); return; }
     setPhotoBlocked(false); setTaskId(id); history.pushState(null, "", path(locale, id));
   }
   function language(nextLocale: AppLocale) { changeLocale(nextLocale); history.replaceState(null, "", path(nextLocale, taskId)); }
   const task = tasks.find(item => item.id === taskId);
   return <div data-field-offline-shell="public"><FieldShell className="field-page field-detail" testId={taskId ? "field-task-page" : "field-page"}>
-    <ShellHeader eyebrow={task?.propertyName ?? t("eyebrow")} title={task ? localizedTaskTitle(task.title, locale) : t("title")}
+    <ShellHeader eyebrow={task?.propertyName ?? (audience === "supervised" ? proxy("eyebrow") : t("eyebrow"))} title={task ? localizedTaskTitle(task.title, locale) : audience === "supervised" ? proxy("title") : t("title")}
       titleTestId={task ? "field-task-title" : undefined} subtitle={task ? t("detailMeta", { reservation: task.reservationReference ?? t("noReservation"), guest: task.guestName ?? t("noGuest") }) : cache("offlineWork")}
-      actions={taskId ? <button className="secondary-button" type="button" onClick={() => openJob(null)}>{t("backToJobs")}</button> : undefined} />
-    <FieldLanguage locale={locale} path={`/offline/field${taskId ? `?task=${taskId}` : ""}`} onChangeLocale={language} />
-    {photoBlocked ? <p role="status" data-testid="field-photo-navigation-blocked">{photo("unsaved")}</p> : null}
+      actions={taskId ? <button className="secondary-button" type="button" onClick={() => openJob(null)}>{audience === "supervised" ? proxy("backToValidation") : t("backToJobs")}</button> : undefined} />
+    <FieldLanguage locale={locale} path={path(locale, taskId).replace(`/${locale}`, "")} onChangeLocale={language} />
+    {photoBlocked ? <p role="status" data-testid="field-photo-navigation-blocked">{audience === "supervised" ? proxy("unsaved") : photo("unsaved")}</p> : null}
     {loading ? <p role="status">{cache("preparing")}</p> : !scope ? <EmptyState testId="field-cache-sign-in"><span>{cache("signIn")}</span> <a className="primary-button" href={`/${locale}/login?surface=field`}>{cache("signInAction")}</a></EmptyState> : <>
-      <FieldPwa organizationId={scope.organizationId} userId={scope.userId} />
+      <FieldPwa organizationId={scope.organizationId} userId={scope.userId} audience={audience} />
       {snapshotAt ? <p>{cache("lastUpdated", { time: formatDateTime(locale, new Date(snapshotAt)) })}</p> : null}
-      {taskId ? task ? <CachedChecklist key={task.id} task={task} scope={scope} locale={locale} /> : <EmptyState testId="field-cache-missing">{cache("unavailable")}</EmptyState>
-        : <FieldJobs scope={scope} locale={locale} initial={tasks} openJob={openJob} />}
+      {taskId ? task ? audience === "supervised" ? <CachedProxy key={`${scope.organizationId}:${scope.userId}:${task.id}`} task={task} scope={scope} locale={locale} /> : <CachedChecklist key={task.id} task={task} scope={scope} locale={locale} /> : <EmptyState testId="field-cache-missing">{cache("unavailable")}</EmptyState>
+        : <FieldJobs scope={scope} locale={locale} initial={tasks} openJob={openJob} audience={audience} />}
     </>}
   </FieldShell></div>;
+}
+function CachedProxy({ task, scope, locale }: { task: FieldWorkSnapshot; scope: FieldQueueScope; locale: AppLocale }) {
+  const t = useTranslations("FieldProxy"), cache = useTranslations("FieldCache"), key = useRef<string | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
+  useEffect(() => { queueMicrotask(() => { key.current ??= crypto.randomUUID(); setIdempotencyKey(key.current); }); }, []);
+  if (!idempotencyKey || !task.proxyValidation) return <p role="status">{cache("preparing")}</p>;
+  return <><p>{task.propertyAddress}</p><dl className="field-proxy-identities" data-testid="field-proxy-identities">
+    <dt>{t("performedBy")}</dt><dd>{task.proxyValidation.performerName ?? task.proxyValidation.performedByPersonId}</dd>
+    <dt>{t("validatedBy")}</dt><dd>{t("you")}</dd></dl>
+    <FieldProxyForm locale={locale} taskId={task.id} version={task.proxyValidation.expectedVersion} performerId={task.proxyValidation.performedByPersonId}
+      organizationId={scope.organizationId} userId={scope.userId} idempotencyKey={idempotencyKey} cached
+      checklist={task.checklistItems.map(item => ({ id: item.id, label: localizedTaskTitle(item.label, locale) }))} /></>;
 }
 function CachedChecklist({ task, scope, locale }: { task: FieldWorkSnapshot; scope: FieldQueueScope; locale: AppLocale }) {
   const t = useTranslations("Field"), cache = useTranslations("FieldCache"), key = useRef<string | null>(null);

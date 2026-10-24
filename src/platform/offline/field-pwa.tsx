@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import type { FieldQueueScope } from "./field-queue-store";
+import type { FieldCacheAudience, FieldQueueScope } from "./field-queue-store";
 import { refreshFieldApp } from "./field-update";
 import { liveQuery } from "dexie";
 import { fieldQueue } from "./field-queue";
@@ -12,7 +12,7 @@ import { refreshFieldCache } from "./field-pull";
 
 type InstallEvent = Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 
-export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
+export function FieldPwa({ organizationId, userId, audience = "assigned" }: FieldQueueScope & { audience?: FieldCacheAudience }) {
   const t = useTranslations("FieldPwa");
   const cacheText = useTranslations("FieldCache");
   const [install, setInstall] = useState<InstallEvent | null>(null);
@@ -46,9 +46,9 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
       if (disposed) return queue;
       subscription = liveQuery(() => queue.entries(scope)).subscribe({ next: entries => {
         setPending(entries.filter(entry => entry.syncStatus === "pending").length);
-        setFailures(entries.filter(entry => entry.syncStatus !== "pending").length);
+        setFailures(entries.filter(entry => entry.syncStatus !== "pending" && !entry.resolvedByClientOpId).length);
       }, error: () => setNotice("unavailable") });
-      cacheSubscription = liveQuery(() => queue.readCache(scope)).subscribe({ next: value => {
+      cacheSubscription = liveQuery(() => queue.readCache(scope, audience)).subscribe({ next: value => {
         if (value.state?.snapshotAt) setCached(value.tasks.length);
         else if (value.state?.invalidated) setCached(null);
       }, error: () => setCached(null) });
@@ -71,7 +71,7 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
         // Foreground online/focus and manual synchronization still opt in.
         if (disposed || (!afterCurrent && registration.current?.waiting)) return;
         try {
-          await refreshFieldCache(queue, scope, fetch, { afterCurrent });
+          await refreshFieldCache(queue, scope, fetch, { afterCurrent, audience });
           if (!disposed) { setCacheFailed(false); window.dispatchEvent(new Event("alvillas-field-cache-ready")); }
         } catch { if (!disposed) setCacheFailed(true); }
       } catch { if (!disposed) setNotice("unavailable"); }
@@ -93,9 +93,9 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
     const acknowledged = (value: unknown) => {
       if (disposed || !value || typeof value !== "object" || !("organizationId" in value) || value.organizationId !== organizationId ||
         !("userId" in value) || value.userId !== userId || !("taskId" in value)) return;
-      const path = location.pathname.match(/^\/(en|fr|ar)\/(?:app\/field(?:\/([a-f0-9-]{36}))?|offline\/field)$/u);
-      const currentTask = path?.[2] ?? new URLSearchParams(location.search).get("task");
-      if (path && currentTask === value.taskId) location.assign(`/${path[1]}/app/field`);
+      const path = location.pathname.match(/^\/(en|fr|ar)\/(?:app\/field(?:\/(validate))?(?:\/([a-f0-9-]{36}))?|offline\/field)$/u);
+      const currentTask = path?.[3] ?? new URLSearchParams(location.search).get("task");
+      if (path && currentTask === value.taskId) location.assign(`/${path[1]}/app/field${audience === "supervised" ? "/validate" : ""}`);
     };
     const acknowledgedHere = (event: Event) => acknowledged((event as CustomEvent<unknown>).detail);
     const workerMessage = (event: MessageEvent<unknown>) => {
@@ -110,10 +110,11 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
       if (navigator.onLine || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
       const anchor = event.target instanceof Element ? event.target.closest("a") : null;
       if (!anchor || anchor.closest('[data-testid="field-language"]')) return;
-      const url = new URL(anchor.href), match = url.pathname.match(/^\/(en|fr|ar)\/app\/field(?:\/([a-f0-9-]{36}))?$/u);
+      const url = new URL(anchor.href), match = url.pathname.match(/^\/(en|fr|ar)\/app\/field(?:\/(validate))?(?:\/([a-f0-9-]{36}))?$/u);
       if (url.origin !== location.origin || !match) return;
       event.preventDefault(); event.stopPropagation();
-      window.location.assign(`/${match[1]}/offline/field${match[2] ? `?task=${match[2]}` : ""}`);
+      const query = new URLSearchParams(); if (match[2]) query.set("view", "supervised"); if (match[3]) query.set("task", match[3]);
+      window.location.assign(`/${match[1]}/offline/field${query.size ? `?${query}` : ""}`);
     };
     queueMicrotask(() => {
       if (disposed) return;
@@ -153,7 +154,7 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
         navigator.serviceWorker.removeEventListener("message", workerMessage);
       }
     };
-  }, [organizationId, userId]);
+  }, [organizationId, userId, audience]);
 
   async function installApp() {
     if (!install) { setNotice(ios ? "iosHelp" : "installHelp"); return; }
