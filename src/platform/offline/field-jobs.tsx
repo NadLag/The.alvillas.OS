@@ -9,6 +9,7 @@ import { fieldPullPageSize, type FieldWorkSnapshot } from "@/modules/reservation
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
 import { fieldQueue } from "./field-queue";
 import type { FieldQueueScope } from "./field-queue-store";
+import { resolveFieldScope } from "./field-session";
 
 export function FieldJobs({ scope, locale, initial = [], openJob }: { scope: FieldQueueScope; locale: AppLocale; initial?: FieldWorkSnapshot[]; openJob?: (id: string) => void }) {
   const t = useTranslations("Field"), cache = useTranslations("FieldCache");
@@ -18,7 +19,7 @@ export function FieldJobs({ scope, locale, initial = [], openJob }: { scope: Fie
     let disposed = false, subscription: { unsubscribe(): void } | undefined;
     const queue = fieldQueue();
     const owner = { organizationId, userId };
-    void import("./field-session").then(({ resolveFieldScope }) => resolveFieldScope(queue, navigator.onLine, owner)).then(verified => {
+    void resolveFieldScope(queue, navigator.onLine, owner).then(verified => {
       if (!verified) { setTasks([]); return; }
       if (disposed) return;
       subscription = liveQuery(() => queue.readCache(owner)).subscribe({ next: value => {

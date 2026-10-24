@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import type { FieldQueueScope } from "./field-queue-store";
 import { refreshFieldApp } from "./field-update";
+import { liveQuery } from "dexie";
+import { fieldQueue } from "./field-queue";
+import { resolveFieldScope } from "./field-session";
+import { syncFieldQueue } from "./field-sync";
+import { refreshFieldCache } from "./field-pull";
 
 type InstallEvent = Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 
@@ -34,9 +39,7 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
     const scope = { organizationId, userId };
     const network = () => setOffline(!navigator.onLine);
     const ready = (async () => {
-      const [{ fieldQueue }, { liveQuery }] = await Promise.all([import("./field-queue"), import("dexie")]);
       const queue = fieldQueue();
-      const { resolveFieldScope } = await import("./field-session");
       if (!await resolveFieldScope(queue, navigator.onLine, scope)) throw new Error("FIELD_SESSION_CHANGED");
       await queue.migrateLegacy(scope, localStorage);
       if (disposed) return queue;
@@ -55,10 +58,8 @@ export function FieldPwa({ organizationId, userId }: FieldQueueScope) {
         const queue = await ready;
         if (disposed || !navigator.onLine) return;
         setSyncing(true);
-        const { syncFieldQueue } = await import("./field-sync");
         await syncFieldQueue(queue, scope);
         try {
-          const { refreshFieldCache } = await import("./field-pull");
           await refreshFieldCache(queue, scope);
           if (!disposed) { setCacheFailed(false); window.dispatchEvent(new Event("alvillas-field-cache-ready")); }
         } catch { if (!disposed) setCacheFailed(true); }

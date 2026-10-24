@@ -31,6 +31,7 @@ try {
   await expect(page.getByTestId("field-task-page").getByText(propertyName, { exact: true })).toBeVisible();
   await expect.poll(async () => z.array(z.object({ task: z.object({ id: z.uuid() }) })).parse(await storedFieldData(page, "jobs")).some(row => row.task.id === taskId)).toBe(true);
   expect(await storedFieldData(page)).toEqual([]);
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
   const publicHtml = await page.evaluate(async () => {
     const bodies: string[] = [];
     for (const language of ["en", "fr", "ar"]) {
@@ -46,8 +47,11 @@ try {
   for (const item of await items.all()) await expect(item).not.toBeChecked();
   if (total > 1) await items.first().check();
   await note.fill(noteText); await expect(page.getByTestId("field-draft-saved")).toBeVisible();
-  phase = "offline-reload"; await context.setOffline(true); await page.reload();
+  await expect.poll(async () => z.array(z.object({ taskId: z.uuid(), note: z.string() })).parse(await storedFieldData(page, "drafts"))
+    .some(row => row.taskId === taskId && row.note === noteText)).toBe(true);
+  phase = "offline-reload"; await checkpoint(); await context.setOffline(true); await page.reload();
   await expect(page).toHaveURL(new RegExp(`/en/offline/field\\?task=${taskId}$`, "u"));
+  phase = "offline-draft-restore";
   await expect(note).toHaveValue(noteText); await expect(page.getByTestId("field-task-complete")).toBeDisabled();
   phase = "localized-accessibility";
   for (const locale of ["en", "fr", "ar"] as const) for (const width of [1440, 360]) {

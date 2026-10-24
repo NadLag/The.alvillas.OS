@@ -15,6 +15,9 @@ import {
 } from "@/modules/reservations/application/reservation-actions";
 import { localizedChecklistLabel } from "@/modules/reservations/domain/reservation-task";
 import { operationAction,type OperationFormState } from '../application/operation-actions';
+import { fieldQueue, syncFieldQueue } from "@/platform/offline/field-queue";
+import { resolveFieldScope } from "@/platform/offline/field-session";
+import { refreshFieldCache } from "@/platform/offline/field-pull";
 
 type FormLabels = {
   saving: string;
@@ -142,9 +145,7 @@ export function FieldTaskCompletionForm({
     let cancelled = false;
     const scope = { organizationId, userId };
     const ready = (async () => {
-      const { fieldQueue } = await import("@/platform/offline/field-queue");
       const queue = fieldQueue();
-      const { resolveFieldScope } = await import("@/platform/offline/field-session");
       if (!await resolveFieldScope(queue, navigator.onLine, scope)) throw new Error("FIELD_SESSION_CHANGED");
       draftIncarnation.current = (await queue.readCache(scope)).state?.incarnation ?? null;
       await queue.migrateLegacy(scope, localStorage);
@@ -170,7 +171,6 @@ export function FieldTaskCompletionForm({
         if (cancelled || !navigator.onLine) return;
         const hadCurrent = (await queue.entries(scope)).some(item => item.operation.payload.taskId === taskId && item.syncStatus === "pending");
         if (hadCurrent) setQueueStatus("syncing");
-        const { syncFieldQueue } = await import("@/platform/offline/field-queue");
         const result = await syncFieldQueue(queue, scope);
         if (cancelled || result === "idle") return;
         setQueueStatus(result);
@@ -203,7 +203,7 @@ export function FieldTaskCompletionForm({
     if (!draftReady || queued || readOnly || !draftIncarnation.current) return;
     const incarnation = draftIncarnation.current;
     const scope = { organizationId, userId }; let cancelled = false;
-    void import("@/platform/offline/field-queue").then(({ fieldQueue }) => fieldQueue().saveDraft(scope, taskId, [...checked], note, incarnation))
+    void fieldQueue().saveDraft(scope, taskId, [...checked], note, incarnation)
       .then(saved => { if (!cancelled) setDraftSaved(saved); })
       .catch(() => { if (!cancelled) setQueueStatus("storageError"); });
     return () => { cancelled = true; };
@@ -212,8 +212,7 @@ export function FieldTaskCompletionForm({
   useEffect(() => {
     if (mode !== "cached" || progress.status !== "saved") return;
     const scope = { organizationId, userId };
-    void Promise.all([import("@/platform/offline/field-queue"), import("@/platform/offline/field-pull")])
-      .then(([{ fieldQueue }, { refreshFieldCache }]) => refreshFieldCache(fieldQueue(), scope))
+    void refreshFieldCache(fieldQueue(), scope)
       .then(() => window.dispatchEvent(new Event("alvillas-field-cache-ready")))
       .catch(() => { /* The saved server progress and local draft remain available for the next refresh. */ });
   }, [mode, progress, organizationId, userId]);
@@ -224,7 +223,6 @@ export function FieldTaskCompletionForm({
     const note = typeof noteValue === "string" ? noteValue.trim() : "";
     if (checklistItemIds.length !== checklistItems.length) { setQueueStatus("conflict"); return; }
     try {
-      const { fieldQueue } = await import("@/platform/offline/field-queue");
       await fieldQueue().enqueue({ organizationId, userId }, { client_op_id: idempotencyKey,
         type: "field_task.complete", client_created_at: new Date().toISOString(),
         payload: { taskId, checklistItemIds, note: note || undefined } });
