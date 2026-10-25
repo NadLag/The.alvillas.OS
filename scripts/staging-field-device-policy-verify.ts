@@ -3,6 +3,7 @@ import { basename, dirname } from "node:path";
 import { chromium, expect as playwrightExpect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { z } from "zod";
+import { blockStagingWorkerSync } from "./support/staging-worker-network";
 import { fieldDevicePolicyKey, fieldDevicePolicySnapshotSchema } from "../src/platform/config/field-device-policy";
 import { fieldWorkSnapshotSchema } from "../src/modules/reservations/domain/field-pull";
 import { syncPushInputSchema, syncPushOpSchema } from "../src/modules/reservations/domain/sync-protocol";
@@ -28,14 +29,16 @@ if (taskId === otherId || fixture.actorId === fixture.administratorId || basenam
 const saved = z.object({ cookies: z.array(z.object({ name: z.string(), value: z.string(), domain: z.string(), path: z.string(), expires: z.number(),
   httpOnly: z.boolean(), secure: z.boolean(), sameSite: z.enum(["Strict", "Lax", "None"]) })) }).parse(JSON.parse(await readFile(state, "utf8")));
 const context = await chromium.launchPersistentContext(profile, { headless: true, channel: "chromium", baseURL: origin,
+  args: ["--remote-debugging-port=0", "--remote-debugging-address=127.0.0.1"],
   ignoreDefaultArgs: ["--disable-background-networking"], viewport: { width: 1440, height: 1000 }, timezoneId: "America/Denver" });
+const gate = await blockStagingWorkerSync(profile, origin);
 const browser = await chromium.launch(), owner = await browser.newContext({ baseURL: origin, storageState: administratorState });
 for (const current of [context, owner]) { current.setDefaultTimeout(30000); current.setDefaultNavigationTimeout(90000); }
 const page = await context.newPage(), editor = await owner.newPage(), checks: Array<{ locale: string; width: number }> = [];
 const wire: Array<{ deviceId: string; clientOpId: string; status: string }> = [], errors: string[] = [];
 const evidence: Record<string, unknown> = { sha, ...fixture, taskId, otherId, checks, wire, completed: false };
 let phase = "authentication", blocked = true, loseApplied = true, originalNonce = "", originalDevice = "";
-const checkpoint = () => writeFile(file, JSON.stringify({ ...evidence, phase }, null, 2));
+const checkpoint = () => writeFile(file, JSON.stringify({ ...evidence, phase, workerTransport: gate.state() }, null, 2));
 page.on("pageerror", error => errors.push(error.message));
 try {
   await context.addCookies(saved.cookies.filter(cookie => cookie.domain.replace(/^\./u, "") === new URL(origin).hostname));
@@ -126,4 +129,4 @@ try {
   console.log(JSON.stringify({ configuredFieldWarning: "browser-verified", nativeLayouts: checks.length, originalKeyRetained: true, nativePinEmployee: true, readOnlyDataProofPending: true }));
 } catch {
   await checkpoint(); console.error(JSON.stringify({ configuredFieldWarning: "incomplete", phase, checkpointRetained: true })); process.exitCode = 1;
-} finally { await context.close(); await browser.close(); }
+} finally { await context.close(); gate.close(); await browser.close(); }
