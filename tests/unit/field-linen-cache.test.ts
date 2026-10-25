@@ -103,6 +103,44 @@ describe("durable field linen drafts and reviewed stocktake queue", () => {
     expect(history[0]).toMatchObject({ operation: original.operation, result, resolvedByClientOpId: second.clientOpId, syncStatus: "conflict" });
     expect((await queue.linenSnapshot(scope, task.id, value.itemKey)).draft).toBeUndefined();
   });
+  it("publishes the authoritative conflict position atomically before a delayed pull permits immediate review", async () => {
+    const { queue, task, value, incarnation } = await setup(); await queue.saveLinenDraft(scope, value, incarnation);
+    const original = await queue.enqueueLinen(scope, value, incarnation), before = (await queue.readCache(scope)).state!;
+    const result = { client_op_id: value.clientOpId, status: "CONFLICT" as const, server_version: "4", error_code: "STOCKTAKE_CONFLICT",
+      stocktake: { expected: { quantity: "12", revision: "3" }, current: { quantity: "11", revision: "4" } } };
+    expect(await queue.acknowledge(scope, original, result)).toBe(true);
+    const snapshot = await queue.linenSnapshot(scope, task.id, value.itemKey);
+    expect(snapshot.task!.linen!.items[0]).toMatchObject({ quantity: "11", revision: "4" });
+    expect(snapshot.state!.generation).toBe(before.generation + 1);
+    expect(snapshot.draft).toMatchObject(value); expect(snapshot.entries[0]).toMatchObject({ operation: original.operation, syncStatus: "conflict", result });
+    const reviewed = { ...draft(snapshot.task!), countedQuantity: "" }; expect(await queue.saveLinenDraft(scope, reviewed, incarnation, value.clientOpId)).toBe(true);
+    expect((await queue.linenSnapshot(scope, task.id, value.itemKey)).draft).toMatchObject({ expectedQuantity: "11", expectedRevision: "4", countedQuantity: "" });
+  });
+  it.each([
+    { expected: { quantity: "13", revision: "3" }, current: { quantity: "11", revision: "4" }, server: "4" },
+    { expected: { quantity: "12", revision: "2" }, current: { quantity: "11", revision: "4" }, server: "4" },
+    { expected: { quantity: "12", revision: "3" }, current: { quantity: "11", revision: "4" }, server: "5" },
+    { expected: { quantity: "12", revision: "3" }, current: { quantity: "11", revision: "3" }, server: "3" },
+    { expected: { quantity: "12", revision: "3" }, current: { quantity: "1.5", revision: "4" }, server: "4" },
+    { expected: { quantity: "12", revision: "3" }, current: { quantity: "11", revision: "-1" }, server: "-1" }
+  ])("retains the original stock and draft when a conflict snapshot fails provenance or canonical validation %#", async position => {
+    const { queue, task, value, incarnation } = await setup(); await queue.saveLinenDraft(scope, value, incarnation);
+    const original = await queue.enqueueLinen(scope, value, incarnation), before = (await queue.readCache(scope)).state!;
+    await queue.acknowledge(scope, original, { client_op_id: value.clientOpId, status: "CONFLICT", server_version: position.server,
+      error_code: "STOCKTAKE_CONFLICT", stocktake: { expected: position.expected, current: position.current } });
+    const snapshot = await queue.linenSnapshot(scope, task.id, value.itemKey);
+    expect(snapshot.task!.linen!.items[0]).toMatchObject({ quantity: "12", revision: "3" });
+    expect(snapshot.state).toEqual(before); expect(snapshot.draft).toMatchObject(value); expect(snapshot.entries[0].operation).toEqual(original.operation);
+  });
+  it("never overwrites a newer pulled position or its reviewed draft with a delayed conflict receipt", async () => {
+    const { queue, task, value, incarnation } = await setup(); await queue.saveLinenDraft(scope, value, incarnation);
+    const original = await queue.enqueueLinen(scope, value, incarnation), result = { client_op_id: value.clientOpId, status: "CONFLICT" as const,
+      server_version: "4", error_code: "STOCKTAKE_CONFLICT", stocktake: { expected: { quantity: "12", revision: "3" }, current: { quantity: "11", revision: "4" } } };
+    await queue.acknowledge(scope, original, result); const fresh = await advance(queue, task, "8", "5"), reviewed = draft(fresh);
+    await queue.saveLinenDraft(scope, reviewed, incarnation, value.clientOpId); const before = await queue.linenSnapshot(scope, task.id, value.itemKey);
+    await queue.acknowledge(scope, original, result); const after = await queue.linenSnapshot(scope, task.id, value.itemKey);
+    expect(after.task).toEqual(before.task); expect(after.draft).toEqual(before.draft); expect(after.state).toEqual(before.state);
+  });
   it("retains a queued count across lost acknowledgements and applies the original-key duplicate to its exact cached base", async () => {
     const { queue, task, value, incarnation } = await setup(); await queue.saveLinenDraft(scope, value, incarnation); await queue.enqueueLinen(scope, value, incarnation);
     const sent: string[] = []; let delivered = false;

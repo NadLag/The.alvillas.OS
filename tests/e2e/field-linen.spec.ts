@@ -20,7 +20,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Linen counts survive off
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw new Error("Linen fixtures require local PostgreSQL");
   const f = await openFieldFixture(page, info, locale), origin = new URL(page.url()).origin, t = { en, fr, ar }[locale].FieldLinen;
   const remote = await playwright.request.newContext({ baseURL: origin, storageState: await page.context().storageState() });
-  const network = await fieldNetwork(page.context(), "unavailable");
+  const network = await fieldNetwork(page.context(), "unavailable"); let releaseConflictPull: (() => void) | undefined;
   try {
     const user = z.object({ user: z.object({ id: z.uuid() }) }).parse(await (await remote.get("/api/auth/session")).json()).user;
     const rule = await withTenant(f.db, f.organizationId, async tx => {
@@ -54,14 +54,22 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Linen counts survive off
       ops: [{ type: "field_stocktake.record", client_op_id: randomUUID(), payload: { ...original.operation.payload, countedQuantity: "11", note: "Concurrent authorized physical count on another device" } }] });
     const remoteResult = await remote.post("/api/sync/push", { data: concurrent, headers: { Origin: origin } }); expect(remoteResult.status()).toBe(200);
     expect(z.object({ results: z.array(z.object({ status: z.string() })) }).parse(await remoteResult.json()).results[0].status).toBe("APPLIED");
+    const heldConflictPull = new Promise<void>(resolve => { releaseConflictPull = resolve; }); let conflictPullHeld = false;
+    await page.context().route("**/api/sync/pull**", async route => { const response = await route.fetch(); conflictPullHeld = true;
+      await heldConflictPull; await route.fulfill({ response }); });
     await network.release(); await page.context().setOffline(false); await page.evaluate(() => window.dispatchEvent(new Event("focus")));
     await expect(row.getByTestId("field-linen-review-required")).toBeVisible();
     await expect.poll(async () => entries.parse(await storedFieldData(page)).find(entry => entry.operation.client_op_id === original.operation.client_op_id)?.syncStatus).toBe("conflict");
     await expect(row.getByTestId("field-linen-save")).toBeDisabled(); await expect(row.getByTestId("field-linen-review" )).toBeEnabled();
     await expect(row.getByTestId("field-linen-review-required")).toContainText(new Intl.NumberFormat(locale).format(11));
+    await expect.poll(() => conflictPullHeld).toBe(true);
+    const cachedConflictPosition = z.array(z.object({ task: z.object({ id: z.uuid(), linen: z.object({ items: z.array(z.object({ quantity: z.string(), revision: z.string() })) }) }) }))
+      .parse(await storedFieldData(page, "jobs")).find(job => job.task.id === f.taskId)!.task.linen.items[0];
+    expect(cachedConflictPosition).toMatchObject({ quantity: "11", revision: "1" });
     await row.getByTestId("field-linen-review").click(); await expect(count).toHaveValue(""); await expect(note).toHaveValue(retainedNote);
     const reviewed = z.array(z.object({ clientOpId: z.uuid(), expectedQuantity: z.string(), expectedRevision: z.string() })).parse(await storedFieldData(page, "linenDrafts"))[0];
     expect(reviewed.clientOpId).not.toBe(original.operation.client_op_id); expect(reviewed).toMatchObject({ expectedQuantity: "11", expectedRevision: "1" });
+    releaseConflictPull?.(); await page.context().unrouteAll({ behavior: "wait" });
     await count.fill("12"); await row.getByTestId("field-linen-save").click();
     await expect.poll(async () => entries.parse(await storedFieldData(page)).filter(entry => !entry.resolvedByClientOpId)).toEqual([]);
     const history = entries.parse(await storedFieldData(page)); expect(history).toHaveLength(1);
@@ -94,5 +102,5 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Linen counts survive off
       expect(await tx.operationTask.findUniqueOrThrow({ where: { id: f.taskId } })).toMatchObject({ state: "ASSIGNED", completedAt: null });
       expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted", payload: { path: ["taskId"], equals: f.taskId } } })).toBe(0);
     });
-  } finally { await network.close(); await remote.dispose(); await f.db.$disconnect(); }
+  } finally { releaseConflictPull?.(); await page.context().unrouteAll({ behavior: "wait" }); await network.close(); await remote.dispose(); await f.db.$disconnect(); }
 });
