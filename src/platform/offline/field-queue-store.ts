@@ -4,7 +4,7 @@ import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull
 import type { FieldUploadManifest } from "@/modules/reservations/domain/field-upload";
 import { isUploadGeneration } from "@/platform/storage/upload-generation";
 import type { FieldDevicePolicySnapshot } from "@/platform/config/field-device-policy";
-import type { FieldStocktakePayload } from "@/platform/inventory/field-stocktake";
+import { stockPositionSchema, type FieldStocktakePayload, type StockPosition } from "@/platform/inventory/field-stocktake";
 
 export type FieldQueueScope = { organizationId: string; userId: string };
 export type FieldCacheAudience = "assigned" | "supervised";
@@ -130,6 +130,13 @@ export class FieldQueueStore extends Dexie {
     if (entry.operation.type === "field_photo.prepare" || result.client_op_id !== entry.operation.client_op_id) return false;
     if (entry.operation.type === "field_stocktake.record" && isFieldResultApplied(entry.operation.type, result) &&
       result.server_version !== (BigInt(entry.operation.payload.expectedRevision) + 1n).toString()) return false;
+    let conflictPosition: StockPosition | undefined;
+    if (entry.operation.type === "field_stocktake.record" && result.status === "CONFLICT" && result.error_code === "STOCKTAKE_CONFLICT") {
+      const expected = stockPositionSchema.safeParse(result.stocktake?.expected), current = stockPositionSchema.safeParse(result.stocktake?.current);
+      if (expected.success && current.success && expected.data.quantity === entry.operation.payload.expectedQuantity &&
+        expected.data.revision === entry.operation.payload.expectedRevision && current.data.revision === result.server_version &&
+        BigInt(current.data.revision) > BigInt(expected.data.revision)) conflictPosition = current.data;
+    }
     return this.transaction("rw", [this.operations, this.metadata, this.jobs, this.drafts, this.cacheState, this.photos, this.proxyJobs, this.proxyDrafts, this.linenDrafts], async () => {
       if ((await this.metadata.get("identity"))?.value !== fieldIdentity(scope)) return false;
       const current = entry.sequence === undefined ? undefined : await this.operations.get(entry.sequence);
@@ -141,15 +148,8 @@ export class FieldQueueStore extends Dexie {
         if (entry.operation.type === "field_stocktake.record") {
           const value = entry.operation.payload, identity = fieldIdentity(scope), cacheId = `${identity}:${value.taskId}:${value.itemKey}`;
           if ((await this.linenDrafts.get(cacheId))?.clientOpId === entry.operation.client_op_id) await this.linenDrafts.delete(cacheId);
-          const job = await this.jobs.get(`${identity}:${value.taskId}`), item = job?.task.linen?.items.find(item => item.key === value.itemKey);
-          // An acknowledged count can advance its exact cached base. A newer
-          // pull or another employee's count must never be overwritten.
-          if (job?.task.linen && item && item.quantity === value.expectedQuantity && item.revision === value.expectedRevision && item.unit === value.unit) {
-            await this.jobs.put({ ...job, task: { ...job.task, linen: { ...job.task.linen,
-              items: job.task.linen.items.map(current => current.key === value.itemKey ? { ...current, quantity: value.countedQuantity, revision: result.server_version! } : current) } } });
-          }
-          const state = await this.cacheState.get(identity);
-          await this.cacheState.put({ ...state, ...scope, key: identity, incarnation: state?.incarnation ?? crypto.randomUUID(), generation: (state?.generation ?? 0) + 1 });
+          await this.advanceLinenPosition(scope, value, { quantity: value.countedQuantity, revision: result.server_version! });
+          await this.fenceLinenPull(scope);
           let previousId = entry.supersedesClientOpId; const visited = new Set<string>();
           while (previousId && !visited.has(previousId)) {
             visited.add(previousId);
@@ -182,9 +182,28 @@ export class FieldQueueStore extends Dexie {
         }
       } else {
         await this.operations.update(entry.sequence!, { syncStatus: result.status === "CONFLICT" ? "conflict" : "rejected", result });
+        // Publish the verified server position with its failed receipt. Review
+        // must not depend on a later pull racing this live-query notification.
+        if (entry.operation.type === "field_stocktake.record" && conflictPosition &&
+          await this.advanceLinenPosition(scope, entry.operation.payload, conflictPosition)) await this.fenceLinenPull(scope);
       }
       return true;
     });
+  }
+
+  private async advanceLinenPosition(scope: FieldQueueScope, value: FieldStocktakePayload, position: StockPosition): Promise<boolean> {
+    const job = await this.jobs.get(`${fieldIdentity(scope)}:${value.taskId}`), item = job?.task.linen?.items.find(item => item.key === value.itemKey);
+    // Both successful and conflicted receipts advance only their exact base.
+    // A newer pull, count, unit or draft must never be overwritten.
+    if (!job?.task.linen || !item || item.quantity !== value.expectedQuantity || item.revision !== value.expectedRevision || item.unit !== value.unit) return false;
+    await this.jobs.put({ ...job, task: { ...job.task, linen: { ...job.task.linen,
+      items: job.task.linen.items.map(current => current.key === value.itemKey ? { ...current, ...position } : current) } } });
+    return true;
+  }
+
+  private async fenceLinenPull(scope: FieldQueueScope): Promise<void> {
+    const identity = fieldIdentity(scope), state = await this.cacheState.get(identity);
+    await this.cacheState.put({ ...state, ...scope, key: identity, incarnation: state?.incarnation ?? crypto.randomUUID(), generation: (state?.generation ?? 0) + 1 });
   }
 
   async wipe(scope?: FieldQueueScope): Promise<void> {
