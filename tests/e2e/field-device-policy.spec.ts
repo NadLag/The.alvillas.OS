@@ -22,6 +22,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
     const f = await openFieldFixture(page, info, locale); fixture = f;
     const jobs = await withTenant(f.db, f.organizationId, async tx => {
       const original = await tx.operationTask.findUniqueOrThrow({ where: { id: f.taskId } });
+      await tx.property.create({ data: { organizationId: f.organizationId, name: `Configuration scope property with a deliberately long name ${randomUUID()}`,
+        addressLine1: "Test", city: "Marrakech", propertyType: "VILLA", bedrooms: 2, bathrooms: 2, maxGuests: 4, amenities: [], photoUrls: [] } });
       const second = await tx.operationTask.create({ data: { organizationId: f.organizationId, propertyId: original.propertyId,
         assignedToUserAccountId: original.assignedToUserAccountId, assignedToPersonId: original.assignedToPersonId,
         type: "INSPECTION", state: "ASSIGNED", dueDate: original.dueDate, idempotencyKey: randomUUID(),
@@ -34,6 +36,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
     const configure = async (minutes: number | null) => {
       await editor.goto(`/${locale}/app/configuration`);
       const form = editor.getByTestId("config-rule-create-form");
+      await editor.evaluate(() => document.fonts.ready);
+      expect(await editor.evaluate(() => innerWidth)).toBe(editor.viewportSize()!.width);
+      expect(await editor.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      expect(await editor.locator(".audience-shell.resource-page").evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
       const propertyScope = form.locator('[name="scopeType"][value="property"]');
       try { await propertyScope.check(); } catch (error) {
         const geometry = await propertyScope.evaluate(input => {
