@@ -1,15 +1,15 @@
 import AxeBuilder from "@axe-core/playwright";
+import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
-import en from "../../messages/en.json";
-import fr from "../../messages/fr.json";
-import ar from "../../messages/ar.json";
 import { withTenant } from "@/platform/db/tenant";
 import { openFieldFixture } from "./support/field-fixture";
 import { storedFieldData, storedFieldPhotoDigests } from "./support/field-storage";
 
 test.use({ serviceWorkers: "allow", actionTimeout: 30000, navigationTimeout: 60000 });
-const catalogs = { en, fr, ar };
+const catalog = z.object({ FieldPhoto: z.object({ storage: z.string(), discard: z.string() }) });
+const catalogs = Object.fromEntries(["en", "fr", "ar"].map(locale => [locale,
+  catalog.parse(JSON.parse(readFileSync(new URL(`../../messages/${locale}.json`, import.meta.url), "utf8")))]));
 const draftContents = (rows: unknown[]) => z.array(z.record(z.string(), z.unknown())).parse(rows)
   .map(row => Object.fromEntries(Object.entries(row).filter(([key]) => key !== "savedAt")));
 const photoContents = (rows: unknown[]) => z.array(z.record(z.string(), z.unknown())).parse(rows)
