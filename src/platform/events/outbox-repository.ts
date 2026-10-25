@@ -9,6 +9,11 @@ export type OutboxDatabase = TenantTransactionRunner & {
 export class OutboxRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
 
+  append(type: string, payload: Prisma.InputJsonObject, idempotencyKey: string, occurredAt: Date) {
+    return this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } },
+      update: {}, create: { organizationId: this.organizationId, type, payload, idempotencyKey, occurredAt } });
+  }
+
   // The HTTP drain and Inngest runs share this lock, including across processes.
   async lockDispatcher() {
     await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`outbox:${this.organizationId}`}, 0))`);

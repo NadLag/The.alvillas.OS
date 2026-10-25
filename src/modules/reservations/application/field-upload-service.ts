@@ -11,7 +11,7 @@ import { OperationRepository } from "../infrastructure/operation-repository";
 import { fieldUploadManifestSchema, fieldUploadPartStorageKey } from "../domain/field-upload";
 import { syncPushInputSchema } from "../domain/sync-protocol";
 import type { ReservationActorContext } from "./reservation-access";
-import { operationAllowed, operationHash, operationMeta, taskResource, type OperationDeps, type OperationTask } from "./operation-service";
+import { operationAllowed, operationHash, operationMeta, requireAssignedOperationTask as assigned, type OperationDeps } from "./operation-service";
 import { ReservationAuthorizationError, ReservationConflictError, ReservationNotFoundError } from "./reservation-service";
 import { validEvidenceImage, persistOperationEvidence } from "./operation-evidence";
 import { readExactResponseBytes } from "@/platform/http/read-exact-response";
@@ -34,10 +34,6 @@ const completeRequestSchema = partRequestSchema.omit({ index: true });
 
 function checkOwner(ctx: ReservationActorContext, value: { organization_id: string; actor_user_id: string }) {
   if (value.organization_id !== ctx.organizationId || value.actor_user_id !== ctx.actorId) throw new ReservationAuthorizationError();
-}
-function assigned(ctx: ReservationActorContext, task: OperationTask | null): asserts task is OperationTask {
-  if (!task || task.assignedToUserAccountId !== ctx.actorId || task.assignedToPersonId !== ctx.personId) throw new ReservationNotFoundError();
-  operationAllowed(ctx, "edit", taskResource(task));
 }
 
 export async function startFieldUpload(ctx: ReservationActorContext, input: unknown, deps: UploadDeps = {}) {

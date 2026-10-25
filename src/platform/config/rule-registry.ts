@@ -12,6 +12,9 @@ import { digestPolicyKey, digestPolicySchema } from "@/platform/notifications/di
 import { reservationSyncPolicyKey, reservationSyncPolicySchema } from "@/modules/reservations/domain/reservation";
 import { fieldDevicePolicyKey, fieldDevicePolicySchema } from "./field-device-policy";
 import { fieldUploadLifecycleKey, fieldUploadLifecycleSchema } from "./field-upload-lifecycle-policy";
+import { configSlugSchema } from "./identifiers";
+import { inventoryMinimumsSchema } from "./inventory-policy";
+export { inventoryMinimumsSchema } from "./inventory-policy";
 
 const moneyAmountSchema = z
   .string()
@@ -19,7 +22,6 @@ const moneyAmountSchema = z
   .regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u, "Use a money amount with up to 2 decimals");
 
 const currencySchema = z.string().trim().regex(/^[A-Z]{3}$/u);
-const configSlugSchema = z.string().trim().min(1).max(120).regex(/^[a-z0-9_.-]+$/u);
 
 export const taskTypeSchema = z.enum([
   "ARRIVAL_PREPARATION",
@@ -220,22 +222,6 @@ const laundryPricingSchema = z
   })
   .passthrough();
 
-export const inventoryMinimumsSchema = z
-  .object({
-    minimums: z.array(
-      z
-        .object({
-          item: configSlugSchema,
-          quantity: z.number().int().min(0),
-          name: localizedTextSchema.optional(),
-          unit: z.string().trim().min(1).max(60).optional(),
-          category: z.enum(["CONSUMABLE", "LINEN", "EQUIPMENT"]).optional(),
-          expected_per_stay: z.number().int().min(0).optional()
-        })
-        .passthrough()
-    ).max(200).refine(v => new Set(v.map(i => i.item)).size === v.length, "Inventory item keys must be unique")
-  })
-  .passthrough();
 
 const workflowConditionSchema: z.ZodType = z.lazy(() =>
   z

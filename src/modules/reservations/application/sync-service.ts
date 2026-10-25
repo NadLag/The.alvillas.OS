@@ -22,6 +22,8 @@ import {
 import { prisma } from "@/platform/db/client";
 import { attachFieldUploadEvidenceInTransaction } from "./field-upload-service";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { prepareFieldStocktakeBatch, recordFieldStocktakeInTransaction } from "@/platform/inventory/field-stocktake-service";
+import { StocktakeConflictError, FieldStocktakeUnavailableError } from "@/platform/inventory/field-stocktake";
 
 type SyncServiceDeps = {
   db?: TenantTransactionRunner;
@@ -49,6 +51,7 @@ function resultFromExisting(op: SyncOpRecord): SyncPushOpResult {
     status: op.status === "APPLIED" || op.status === "DUPLICATE" ? "DUPLICATE" : op.status === "CONFLICT" ? "CONFLICT" : "REJECTED",
     server_version: serverVersion,
     ...(op.result?.conflict ? { conflict: op.result.conflict as SyncPushOpResult["conflict"] } : {}),
+    ...(op.result?.stocktake ? { stocktake: op.result.stocktake as SyncPushOpResult["stocktake"] } : {}),
     error_code: op.errorCode ?? undefined
   };
 }
@@ -113,10 +116,19 @@ export async function pushSyncOps(
     // A concurrent retry cannot observe a PENDING row or interleave this device's ops.
     await repository.lockDevice(input.device_id);
     const operations = new OperationRepository(tx, ctx.organizationId);
-    await operations.lock("crew-schedule");
+    // Physical stock observations do not mutate crew availability. Mixed batches
+    // retain the established schedule/task/actor lock order.
+    if (input.ops.some(op => op.type !== "field_stocktake.record")) await operations.lock("crew-schedule");
     for (const taskId of [...new Set(input.ops.map(op => op.payload.taskId))].sort()) await operations.lock(taskId);
     const people = [ctx.personId, ...input.ops.flatMap(op => op.type === "field_task.proxy_validate" ? [op.payload.performedByPersonId] : [])];
     for (const personId of [...new Set(people)].sort()) await repository.lockActor(personId);
+    const stocktakes = input.ops.flatMap(op => op.type === "field_stocktake.record" ? [op.payload] : []);
+    let stocktakeBatch: Awaited<ReturnType<typeof prepareFieldStocktakeBatch>> | undefined;
+    let stocktakeDenied = false;
+    if (stocktakes.length) {
+      try { stocktakeBatch = await prepareFieldStocktakeBatch(ctx, stocktakes, tx); }
+      catch (error) { if (error instanceof ReservationAuthorizationError) stocktakeDenied = true; else throw error; }
+    }
     for (const op of input.ops) {
       const existing = await repository.findByClientOp(input.device_id, op.client_op_id);
 
@@ -142,6 +154,14 @@ export async function pushSyncOps(
       });
 
       try {
+        if (op.type === "field_stocktake.record") {
+          if (stocktakeDenied || !stocktakeBatch) throw new ReservationAuthorizationError();
+          const observation = await recordFieldStocktakeInTransaction(ctx, op.payload, { deviceId: input.device_id,
+            clientOpId: op.client_op_id, clientCreatedAt: op.client_created_at ? new Date(op.client_created_at) : null }, tx, stocktakeBatch, metaForOp(deps, op));
+          const result = appliedResult(op, observation.serverVersion);
+          await repository.finish(input.device_id, op.client_op_id, result.status, result, null);
+          results.push(result); continue;
+        }
         if (op.type === "field_task.evidence.attach") {
           const attached = await attachFieldUploadEvidenceInTransaction(ctx, { ...op.payload, deviceId: input.device_id, idempotencyKey: op.client_op_id }, tx,
             { requestId: metaForOp(deps, op).requestId, ipAddress: deps.ipAddress ?? null });
@@ -171,6 +191,17 @@ export async function pushSyncOps(
         await repository.finish(input.device_id, op.client_op_id, applied.status, applied, applied.error_code ?? null);
         results.push(applied);
       } catch (error) {
+        if (error instanceof StocktakeConflictError) {
+          const conflict: SyncPushOpResult = { client_op_id: op.client_op_id, status: "CONFLICT", server_version: error.current.revision,
+            error_code: "STOCKTAKE_CONFLICT", stocktake: { expected: error.expected, current: error.current } };
+          await repository.finish(input.device_id, op.client_op_id, "CONFLICT", conflict, conflict.error_code!);
+          results.push(conflict); continue;
+        }
+        if (error instanceof FieldStocktakeUnavailableError) {
+          const rejected = rejectedResult(op, `STOCKTAKE_${error.code}`);
+          await repository.finish(input.device_id, op.client_op_id, "REJECTED", rejected, rejected.error_code!);
+          results.push(rejected); continue;
+        }
         if (error instanceof ReservationConflictError) {
           const conflict = conflictResult(op, error.message);
           await repository.finish(
