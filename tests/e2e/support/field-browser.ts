@@ -11,7 +11,9 @@ function fieldEmulation(info: TestInfo) {
 
 export async function fieldEditorContext(context: BrowserContext, info: TestInfo) {
   const browser = context.browser(); if (!browser) throw new Error("Native field browser required");
-  return browser.newContext({ ...fieldEmulation(info), storageState: await context.storageState() });
+  const editor = await browser.newContext({ ...fieldEmulation(info), storageState: await context.storageState() });
+  editor.setDefaultTimeout(30000); editor.setDefaultNavigationTimeout(30000);
+  return editor;
 }
 
 export async function fieldBrowser(info: TestInfo) {
