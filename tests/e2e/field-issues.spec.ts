@@ -22,7 +22,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Phone + PIN worker repor
     await role.getByTestId("custom-role-name").fill(`Local issue reporter ${roleKey.slice(-6)}`);
     await role.getByTestId("custom-role-key").fill(roleKey); await role.getByTestId("custom-role-description").fill("Assigned-job maintenance observations, without financial access");
     for (const permission of ["task:view", "task:edit", "issue:create"]) await role.locator(`input[name="permissionKeys"][value="${permission}"]`).check();
-    await role.getByTestId("custom-role-submit").click(); await expect(role.getByRole("status")).toHaveText("Custom role created.");
+    const roleCreation = page.waitForResponse(response => response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/en/app/identity" && Boolean(response.request().postData()?.includes(roleKey)));
+    await role.getByTestId("custom-role-submit").click(); expect((await roleCreation).ok()).toBe(true);
+    await expect(role.getByRole("status")).toHaveText("Custom role created.", { timeout: 30000 });
     await page.getByTestId("invite-display-name").fill(`Local issue employee ${locale}`); await page.getByTestId("invite-phone").fill(phone);
     await page.getByTestId("invite-role").selectOption(roleKey); await page.getByTestId("invite-scope-type").selectOption("job");
     await page.getByTestId("invite-scope-id").fill(f.taskId); await page.getByTestId("invite-preferred-locale").selectOption(locale);
