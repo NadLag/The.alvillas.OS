@@ -2,8 +2,9 @@ import { z } from "zod";
 import type { ResolvedConfigRule } from "./config-rule-repository";
 
 export const fieldDevicePolicyKey = "field.device_hygiene";
+export const fieldPolicyMinutesSchema = z.number().int().min(0).max(Math.floor(Number.MAX_SAFE_INTEGER / 60_000)).nullable();
 export const fieldDevicePolicySchema = z.object({
-  queueWarningAfterMinutes: z.number().int().min(0).max(Math.floor(Number.MAX_SAFE_INTEGER / 60_000)).nullable()
+  queueWarningAfterMinutes: fieldPolicyMinutesSchema
 }).strict();
 export const fieldDevicePolicySnapshotSchema = fieldDevicePolicySchema.extend({
   configRuleId: z.uuid(), configVersion: z.number().int().positive()

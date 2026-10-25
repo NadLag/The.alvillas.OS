@@ -9,6 +9,7 @@ export async function PUT(request: NextRequest) {
   return fieldUploadRequest(request, (ctx, value, meta) => {
     if (!(value instanceof Uint8Array)) throw new Error("Invalid upload body");
     return storeFieldUploadPart(ctx, { organization_id: params.get("organization_id"), actor_user_id: params.get("actor_user_id"),
-      device_id: params.get("device_id"), uploadId: params.get("uploadId"), index: params.has("index") ? Number(params.get("index")) : Number.NaN }, value, meta);
+      device_id: params.get("device_id"), uploadId: params.get("uploadId"), index: params.has("index") ? Number(params.get("index")) : Number.NaN,
+      ...(params.has("generation") ? { generation: Number(params.get("generation")) } : {}) }, value, meta);
   }, { contentType: "application/octet-stream", read: request => readBoundedRequestBytes(request, fieldUploadChunkBytes) });
 }

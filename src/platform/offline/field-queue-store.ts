@@ -2,6 +2,7 @@ import Dexie, { type Table } from "dexie";
 import type { SyncPushOp, SyncPushOpResult } from "@/modules/reservations/domain/sync-protocol";
 import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
 import type { FieldUploadManifest } from "@/modules/reservations/domain/field-upload";
+import { isUploadGeneration } from "@/platform/storage/upload-generation";
 
 export type FieldQueueScope = { organizationId: string; userId: string };
 export type FieldCacheAudience = "assigned" | "supervised";
@@ -26,7 +27,7 @@ export type FieldDraft = FieldQueueScope & { cacheId: string; taskId: string; ch
 export type FieldCacheRevision = { incarnation: string; generation: number };
 export type FieldCacheState = FieldQueueScope & FieldCacheRevision & { key: string; snapshotAt?: string; cursor?: string; invalidated?: boolean };
 export type FieldPhoto = FieldQueueScope & { cacheId: string; taskId: string; manifest: FieldUploadManifest; blob: Blob; deviceId: string;
-  incarnation: string; uploadId?: string; uploadedParts: number[]; ready: boolean; attempts: number; retryAt: number };
+  incarnation: string; uploadId?: string; generation?: number; uploadedParts: number[]; ready: boolean; attempts: number; retryAt: number };
 export type QueueOutcome = "idle" | "synced" | "conflict" | "rejected" | "queued";
 export const fieldIdentity = (scope: FieldQueueScope) => `${scope.organizationId}:${scope.userId}`;
 export const fieldCacheIdentity = (scope: FieldQueueScope, audience: FieldCacheAudience = "assigned") =>
@@ -194,13 +195,17 @@ export class FieldQueueStore extends Dexie {
   }
 
   async updatePhoto(scope: FieldQueueScope, localId: string, incarnation: string, update: {
-    uploadId?: string; uploadedPart?: number; ready?: true; attempts?: number; retryAt?: number;
+    uploadId?: string; generation?: number; uploadedPart?: number; ready?: true; attempts?: number; retryAt?: number;
     review?: { status: "CONFLICT" | "REJECTED"; errorCode: string };
-  }): Promise<boolean> {
+  }, options: { expectedGeneration?: number } = {}): Promise<boolean> {
     const identity = fieldIdentity(scope), cacheId = `${identity}:${localId}`;
     return this.transaction("rw", [this.operations, this.metadata, this.cacheState, this.photos], async () => {
       if ((await this.metadata.get("identity"))?.value !== identity || (await this.cacheState.get(identity))?.incarnation !== incarnation) return false;
       const photo = await this.photos.get(cacheId); if (!photo || photo.incarnation !== incarnation) return false;
+      const generation = photo.generation ?? 1;
+      if (options.expectedGeneration !== undefined && options.expectedGeneration !== generation) return false;
+      if (update.generation !== undefined && (!isUploadGeneration(update.generation) || update.generation < generation)) return false;
+      const recovered = update.generation !== undefined && update.generation > generation;
       if (update.uploadId && photo.uploadId && update.uploadId !== photo.uploadId) throw new Error("FIELD_PHOTO_KEY_REUSED");
       const entry = await this.operations.where("localId").equals(cacheId).first(); if (!entry) return false;
       if (update.review) await this.operations.update(entry.sequence!, { syncStatus: update.review.status === "CONFLICT" ? "conflict" : "rejected",
@@ -210,13 +215,14 @@ export class FieldQueueStore extends Dexie {
         client_op_id: entry.operation.client_op_id, type: "field_task.evidence.attach", client_created_at: entry.operation.client_created_at,
         payload: { taskId: photo.taskId, uploadId: update.uploadId }
       } });
-      const parts = [...photo.uploadedParts];
+      const parts = recovered ? [] : [...photo.uploadedParts];
       if (update.uploadedPart !== undefined) {
         if (!Number.isInteger(update.uploadedPart) || update.uploadedPart < 0 || update.uploadedPart >= photo.manifest.parts.length) throw new Error("FIELD_PHOTO_PART_INVALID");
         if (!parts.includes(update.uploadedPart)) parts.push(update.uploadedPart);
       }
-      await this.photos.put({ ...photo, uploadId: update.uploadId ?? photo.uploadId, uploadedParts: parts.sort((a, b) => a - b),
-        ready: update.ready ?? photo.ready, attempts: update.attempts ?? (update.ready ? 0 : photo.attempts), retryAt: update.retryAt ?? (update.ready ? 0 : photo.retryAt) });
+      await this.photos.put({ ...photo, uploadId: update.uploadId ?? photo.uploadId, ...(update.generation !== undefined ? { generation: update.generation } : {}),
+        uploadedParts: parts.sort((a, b) => a - b), ready: update.ready ?? (recovered ? false : photo.ready),
+        attempts: update.attempts ?? (update.ready || recovered ? 0 : photo.attempts), retryAt: update.retryAt ?? (update.ready || recovered ? 0 : photo.retryAt) });
       return true;
     });
   }

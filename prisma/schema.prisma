@@ -1141,6 +1141,11 @@ model OperationEvidenceUpload {
  deviceId String @map("device_id")
  manifest Json
  manifestHash String @map("manifest_hash")
+ generation Int @default(1)
+ lastActivityAt DateTime @default(now()) @map("last_activity_at") @db.Timestamptz(6)
+ lifecycleCheckedAt DateTime @default(now()) @map("lifecycle_checked_at") @db.Timestamptz(6)
+ expiredAt DateTime? @map("expired_at") @db.Timestamptz(6)
+ expiryPolicy Json? @map("expiry_policy")
  status String @default("OPEN")
  evidenceId String? @unique(map:"operation_evidence_upload_evidence_unique") @map("evidence_id") @db.Uuid
  readyAt DateTime? @map("ready_at") @db.Timestamptz(6)
@@ -1157,6 +1162,7 @@ model OperationEvidenceUpload {
  @@unique([organizationId,actorId,localId],map:"operation_evidence_upload_actor_key_unique")
  @@index([organizationId,status,createdAt],map:"operation_evidence_upload_org_status_created_idx")
  @@index([organizationId,status,cleanedAt,partUploadExpiresAt,createdAt],map:"operation_evidence_upload_cleanup_idx")
+ @@index([organizationId,status,lifecycleCheckedAt,id],map:"operation_evidence_upload_lifecycle_idx")
  @@map("operation_evidence_upload")
 }
 

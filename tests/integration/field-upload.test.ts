@@ -15,6 +15,8 @@ import { ReservationAuthorizationError, ReservationConflictError, ReservationNot
 import { FieldUploadRepository } from "@/modules/reservations/infrastructure/field-upload-repository";
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import { cleanupFieldUploadParts } from "@/modules/reservations/application/field-upload-cleanup";
+import { expireInactiveFieldUploads } from "@/modules/reservations/application/field-upload-lifecycle";
+import { fieldUploadLifecycleKey } from "@/platform/config/field-upload-lifecycle-policy";
 import { temporaryPartLeaseMilliseconds, type TemporaryUploadPart } from "@/platform/storage/upload-protocol";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -56,6 +58,12 @@ function photoTransport(handler: (url: URL, options?: RequestInit) => Response |
     new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url), options)));
 }
 
+function idlePolicy(f: Awaited<ReturnType<typeof fixture>>, minutes: number | null, scopeType: "organization" | "property" = "property", effectiveFrom = new Date("2020-01-01")) {
+  return withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: fieldUploadLifecycleKey,
+    scopeType, scopeId: scopeType === "property" ? f.property.id : null, effectiveFrom,
+    reason: "Explicit field transport expiry integration policy", value: { openUploadIdleAfterMinutes: minutes } }));
+}
+
 describe("field photo uploads on real PostgreSQL", () => {
   beforeAll(async () => {
     if (!url) return;
@@ -66,6 +74,125 @@ describe("field photo uploads on real PostgreSQL", () => {
     expect(await db.$queryRaw`SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user`).toEqual([{ rolsuper: false, rolbypassrls: false }]);
   }, 120000);
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it.skipIf(!url)("expires idle OPEN transport once under its effective scoped policy while an explicit property disable preserves work", async () => {
+    const f = await fixture(), started = await startFieldUpload(f.ctx, f.input, deps()), now = new Date(Date.now() + 3_600_000);
+    expect(await expireInactiveFieldUploads(f.org, { db, now })).toEqual({ expired: 0 });
+    await idlePolicy(f, 0, "organization"); await idlePolicy(f, null);
+    expect(await expireInactiveFieldUploads(f.org, { db, now })).toEqual({ expired: 0 });
+    const rule = await idlePolicy(f, 1, "property", new Date(now.getTime() - 1));
+    const results = await Promise.all([expireInactiveFieldUploads(f.org, { db, now }), expireInactiveFieldUploads(f.org, { db, now })]);
+    expect(results.reduce((sum, result) => sum + result.expired, 0)).toBe(1);
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: started.uploadId } })).toMatchObject({ status: "CANCELLED", generation: 1,
+        expiryPolicy: { openUploadIdleAfterMinutes: 1, configRuleId: rule.id, configVersion: rule.version }, expiredAt: now, evidenceId: null });
+      const audit = await tx.auditLog.findMany({ where: { resourceId: f.task.id, action: "task.photo.upload.expired" } });
+      expect(audit).toHaveLength(1); expect(audit[0].actorId).toBeNull();
+      expect(await tx.operationTaskEvidence.count()).toBe(0); expect(await tx.outboxEvent.count()).toBe(0);
+    });
+  });
+  it.skipIf(!url)("protects a live signed PUT lease even when the configured idle threshold has elapsed", async () => {
+    const f = await fixture(), now = new Date(Date.now() + 60_000), upload = await startFieldUpload(f.ctx, f.input, { ...deps(), now });
+    await idlePolicy(f, 1); const storage = new FakeStorageProvider("test");
+    await signFieldUploadPart(f.ctx, { organization_id: f.org, actor_user_id: f.account.id, device_id: f.input.device_id, uploadId: upload.uploadId, index: 0 }, { ...deps(), storage, now });
+    const remove = vi.fn().mockResolvedValue(undefined), cleanup = { db, storage: { deleteTemporaryUploadPart: remove } };
+    expect(await cleanupFieldUploadParts(f.org, { ...cleanup, now: new Date(now.getTime() + temporaryPartLeaseMilliseconds - 1) })).toEqual({ cleaned: 0 });
+    expect(remove).not.toHaveBeenCalled();
+    expect(await cleanupFieldUploadParts(f.org, { ...cleanup, now: new Date(now.getTime() + temporaryPartLeaseMilliseconds) })).toEqual({ cleaned: 1 });
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { resourceId: f.task.id, action: "task.photo.upload.expired" } }))).toBe(1);
+  });
+  it.skipIf(!url)("recovers the same manifest and upload identity in a fenced generation and attaches it exactly once", async () => {
+    const f = await photoFixture(), now = new Date(Date.now() + 3_600_000), remove = vi.fn().mockResolvedValue(undefined);
+    await idlePolicy(f, 1);
+    expect(await expireInactiveFieldUploads(f.org, { db, now })).toEqual({ expired: 1 });
+    const input = { ...f.input, manifest: f.manifest, include_generation: true };
+    await expect(startFieldUpload(f.ctx, input, { ...deps(), now })).rejects.toBeInstanceOf(FieldUploadUnavailableError);
+    await expect(startFieldUpload(f.ctx, { ...input, include_generation: false }, { ...deps(), now })).rejects.toBeInstanceOf(ReservationConflictError);
+    expect(await cleanupFieldUploadParts(f.org, { db, now, storage: { deleteTemporaryUploadPart: remove } })).toEqual({ cleaned: 1 });
+    const recovered = await Promise.all([startFieldUpload(f.ctx, input, { ...deps(), now }), startFieldUpload(f.ctx, input, { ...deps(), now })]);
+    expect(recovered).toEqual([{ uploadId: f.upload.uploadId, status: "OPEN", generation: 2 }, { uploadId: f.upload.uploadId, status: "OPEN", generation: 2 }]);
+    const request = { ...f.request, generation: 2 }, objects = new Map<string, Uint8Array>();
+    const transport = photoTransport((url, options) => {
+      const key = url.pathname.slice(1);
+      if (options?.method === "PUT") { objects.set(key, new Uint8Array(options.body as Uint8Array)); return new Response(null, { status: 200 }); }
+      const bytes = objects.get(key); return bytes ? new Response(new Uint8Array(bytes), { status: 200 }) : new Response(null, { status: 404 });
+    });
+    await expect(signFieldUploadPart(f.ctx, { ...f.request, index: 0 }, { ...deps(), storage: f.storage, now })).rejects.toEqual(new ReservationConflictError("upload_generation_changed"));
+    await expect(completeFieldUpload(f.ctx, f.request, { ...deps(), storage: f.storage, transport, now })).rejects.toBeInstanceOf(ReservationConflictError);
+    expect((await withTenant(db, f.org, tx => new FieldUploadRepository(tx, f.org).cleaned(f.upload.uploadId, now, 1))).count).toBe(0);
+    for (let index = 0; index < f.chunks.length; index++) await storeFieldUploadPart(f.ctx, { ...request, index }, f.chunks[index], { ...deps(), storage: f.storage, transport, now });
+    expect([...objects.keys()]).toEqual(f.chunks.map((_, index) => `${f.org}/uploads/${f.upload.uploadId}/generation-2/part-${index}`));
+    expect(await completeFieldUpload(f.ctx, request, { ...deps(), storage: f.storage, transport, now })).toEqual({ uploadId: f.upload.uploadId, status: "READY", generation: 2 });
+    const batch = syncPushInputSchema.parse({ ...f.request, op_schema_version: 1, ops: [{ client_op_id: randomUUID(), type: "field_task.evidence.attach", payload: { taskId: f.task.id, uploadId: f.upload.uploadId } }] });
+    const synced = await Promise.all([pushSyncOps(f.ctx, batch, deps()), pushSyncOps(f.ctx, batch, deps())]);
+    expect(synced.map(result => result.results[0].status).sort()).toEqual(["APPLIED", "DUPLICATE"]);
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } })).toMatchObject({ generation: 2, status: "ATTACHED", manifest: f.manifest, deviceId: f.input.device_id, localId: f.manifest.localId, expiredAt: null, expiryPolicy: null });
+      for (const action of ["task.photo.upload.started", "task.photo.upload.expired", "task.photo.upload.recovered", "task.photo.upload.ready", "task.evidence.attached"])
+        expect(await tx.auditLog.count({ where: { resourceId: f.task.id, action } })).toBe(1);
+      expect(await tx.operationTaskEvidence.count({ where: { taskId: f.task.id } })).toBe(1); expect(await tx.syncOp.count({ where: { status: "APPLIED" } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted" } })).toBe(0);
+    });
+  });
+  it.skipIf(!url)("denies cross-tenant, revoked, reassigned, changed-device and changed-manifest recovery", async () => {
+    const f = await fixture(), foreign = await fixture(), now = new Date(Date.now() + 3_600_000);
+    await startFieldUpload(f.ctx, f.input, deps()); await idlePolicy(f, 1);
+    await cleanupFieldUploadParts(f.org, { db, now, storage: { deleteTemporaryUploadPart: vi.fn().mockResolvedValue(undefined) } });
+    const input = { ...f.input, include_generation: true };
+    await expect(startFieldUpload(foreign.ctx, { ...input, organization_id: foreign.org, actor_user_id: foreign.account.id }, { ...deps(), now })).rejects.toBeInstanceOf(ReservationNotFoundError);
+    const revoked = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set(["task:view"]) } };
+    await expect(startFieldUpload(revoked, input, { ...deps(), now })).rejects.toBeInstanceOf(ReservationAuthorizationError);
+    await expect(startFieldUpload(f.ctx, { ...input, device_id: randomUUID() }, { ...deps(), now })).rejects.toBeInstanceOf(ReservationConflictError);
+    await expect(startFieldUpload(f.ctx, { ...input, manifest: { ...input.manifest, note: "Changed original evidence" } }, { ...deps(), now })).rejects.toBeInstanceOf(ReservationConflictError);
+    await withTenant(db, f.org, tx => tx.operationTask.update({ where: { id: f.task.id }, data: { assignedToUserAccountId: null, assignedToPersonId: null, state: "PLANNED" } }));
+    await expect(startFieldUpload(f.ctx, input, { ...deps(), now })).rejects.toBeInstanceOf(ReservationNotFoundError);
+    expect(await withTenant(db, foreign.org, tx => tx.operationEvidenceUpload.count())).toBe(0);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { action: "task.photo.upload.recovered" } }))).toBe(0);
+  });
+  it.skipIf(!url)("keeps a late cleanup acknowledgement and old DELETEs fenced away from a recovered transfer", async () => {
+    const f = await photoFixture(), now = new Date(Date.now() + 3_600_000), objects = new Map<string, Uint8Array>();
+    await idlePolicy(f, 0);
+    for (let index = 0; index < f.chunks.length; index++) objects.set(`${f.org}/uploads/${f.upload.uploadId}/part-${index}`, new Uint8Array(f.chunks[index]));
+    let release!: () => void, started!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; }), observed = new Promise<void>(resolve => { started = resolve; });
+    const remove = (part: TemporaryUploadPart) => { objects.delete(`${part.organizationId}/uploads/${part.uploadId}/part-${part.index}`); return Promise.resolve(); };
+    const late = cleanupFieldUploadParts(f.org, { db, now, storage: { deleteTemporaryUploadPart: async part => {
+      if (part.index === 0) { started(); await held; } await remove(part);
+    } } });
+    try {
+      await observed;
+      expect(await cleanupFieldUploadParts(f.org, { db, now, storage: { deleteTemporaryUploadPart: remove } })).toEqual({ cleaned: 1 });
+      expect(await startFieldUpload(f.ctx, { ...f.input, manifest: f.manifest, include_generation: true }, { ...deps(), now })).toMatchObject({ generation: 2 });
+      const transport = photoTransport((url, options) => { objects.set(url.pathname.slice(1), new Uint8Array(options?.body as Uint8Array)); return new Response(null, { status: 200 }); });
+      await storeFieldUploadPart(f.ctx, { ...f.request, index: 0, generation: 2 }, f.chunks[0], { ...deps(), storage: f.storage, transport, now });
+      release(); expect(await late).toEqual({ cleaned: 0 });
+      expect([...objects.keys()]).toEqual([`${f.org}/uploads/${f.upload.uploadId}/generation-2/part-0`]);
+      expect(await withTenant(db, f.org, tx => tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: f.upload.uploadId } }))).toMatchObject({ generation: 2, status: "OPEN", cleanedAt: null });
+    } finally { release(); await late; }
+  });
+  it.skipIf(!url)("uses server activity, future effective policy versions and tenant isolation for idle decisions", async () => {
+    const f = await fixture(), foreign = await fixture(), base = new Date(Date.now() + 60_000);
+    const upload = await startFieldUpload(f.ctx, f.input, { ...deps(), now: base }); await startFieldUpload(foreign.ctx, foreign.input, { ...deps(), now: base });
+    await idlePolicy(foreign, 0);
+    expect(await expireInactiveFieldUploads(f.org, { db, now: new Date(base.getTime() + 120_000) })).toEqual({ expired: 0 });
+    await idlePolicy(f, 1, "property", new Date(base.getTime() + 120_000));
+    expect(await expireInactiveFieldUploads(f.org, { db, now: new Date(base.getTime() + 119_999) })).toEqual({ expired: 0 });
+    const touch = new Date(base.getTime() + 119_998);
+    await startFieldUpload(f.ctx, { ...f.input, include_generation: true }, { ...deps(), now: touch });
+    expect(await expireInactiveFieldUploads(f.org, { db, now: new Date(touch.getTime() + 59_999) })).toEqual({ expired: 0 });
+    expect(await expireInactiveFieldUploads(f.org, { db, now: new Date(touch.getTime() + 60_000) })).toEqual({ expired: 1 });
+    expect(await withTenant(db, f.org, tx => tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: upload.uploadId } }))).toMatchObject({ lastActivityAt: touch });
+    expect(await withTenant(db, foreign.org, tx => tx.operationEvidenceUpload.findFirstOrThrow())).toMatchObject({ status: "OPEN", expiredAt: null });
+    expect(await withTenant(db, f.org, tx => tx.operationEvidenceUpload.count({ where: { organizationId: foreign.org } }))).toBe(0);
+  });
+  it.skipIf(!url)("rejects generation changes without an expired, physically cleaned OPEN lineage", async () => {
+    const f = await fixture(), upload = await startFieldUpload(f.ctx, f.input, deps());
+    await expect(withTenant(db, f.org, tx => tx.operationEvidenceUpload.update({ where: { id: upload.uploadId }, data: { generation: 2 } }))).rejects.toThrow(/generation/u);
+    await withTenant(db, f.org, tx => new FieldUploadRepository(tx, f.org).cancel(upload.uploadId));
+    expect((await withTenant(db, f.org, tx => new FieldUploadRepository(tx, f.org).recover(upload.uploadId, 1, new Date()))).count).toBe(0);
+    await expect(withTenant(db, f.org, tx => tx.operationEvidenceUpload.update({ where: { id: upload.uploadId }, data: { status: "OPEN", generation: 2 } }))).rejects.toThrow(/generation/u);
+    await expect(startFieldUpload(f.ctx, { ...f.input, include_generation: true }, deps())).rejects.toBeInstanceOf(ReservationConflictError);
+  });
   it.skipIf(!url)("serializes duplicate starts and rejects actor, device and payload reuse", async () => {
     const f = await fixture(), results = await Promise.all([startFieldUpload(f.ctx, f.input, deps()), startFieldUpload(f.ctx, f.input, deps())]);
     expect(results[0]).toEqual(results[1]);
