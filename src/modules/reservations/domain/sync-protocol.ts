@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { proxyCompleteTaskSchema } from "./operation-task";
+import { fieldStocktakePayloadSchema, type StockPosition } from "@/platform/inventory/field-stocktake";
 
 const optionalText = (max: number) =>
   z.preprocess(
@@ -29,6 +30,7 @@ export const fieldTaskEvidenceAttachOpSchema = fieldTaskCompleteOpSchema.extend(
 });
 export const syncPushOpSchema = z.discriminatedUnion("type", [
   fieldTaskCompleteOpSchema, fieldTaskEvidenceAttachOpSchema,
+  syncOpEnvelope.extend({ type: z.literal("field_stocktake.record"), payload: fieldStocktakePayloadSchema }).strict(),
   syncOpEnvelope.extend({ type: z.literal("field_task.proxy_validate"), payload: proxyCompleteTaskSchema.omit({ idempotencyKey: true }) }).strict()
 ]);
 
@@ -54,6 +56,7 @@ export type SyncPushOpResult = {
     incoming: string;
   };
   error_code?: string;
+  stocktake?: { expected: StockPosition; current: StockPosition };
 };
 
 export type SyncPushResult = {

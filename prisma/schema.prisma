@@ -71,9 +71,9 @@ model AutomationSuggestion {
 }
 
 model Organization {
-  automationRuns AutomationRun[]
-  automationAttempts AutomationAttempt[]
-  automationSuggestions AutomationSuggestion[]
+  automationRuns                                 AutomationRun[]
+  automationAttempts                             AutomationAttempt[]
+  automationSuggestions                          AutomationSuggestion[]
   teamCompensations                              TeamCompensation[]
   teamAvailabilities                             TeamAvailability[]
   teamDocuments                                  TeamDocument[]
@@ -151,6 +151,12 @@ model Organization {
   reservationCalendarBlockRecords                CalendarBlock[]                @relation("ReservationCalendarBlockOrganization")
   reservationReservationImportBatchRecords       ReservationImportBatch[]       @relation("ReservationReservationImportBatchOrganization")
   reservationReservationExceptionRecords         ReservationException[]         @relation("ReservationReservationExceptionOrganization")
+
+  inventoryItems        InventoryItem[]
+  inventoryLocations    InventoryLocation[]
+  inventoryStockCursors InventoryStockCursor[]
+  inventoryStocktakes   InventoryStocktake[]
+  inventoryMovements    InventoryMovement[]
 
   @@map("organization")
 }
@@ -367,6 +373,9 @@ model UserAccount {
   notificationPreference NotificationPreference?
   pushSubscriptions      PushSubscription[]
   notificationDeliveries NotificationDelivery[]
+
+  inventoryStocktakes InventoryStocktake[]
+  inventoryMovements  InventoryMovement[]
 
   @@unique([organizationId, id], map: "user_account_org_id_unique")
   @@unique([organizationId, email], map: "user_account_org_email_unique")
@@ -736,6 +745,9 @@ model Property {
   reverseReservationImportBatchpropertyIdLink ReservationImportBatch[] @relation("ReservationImportBatchpropertyIdLink")
   reverseReservationExceptionpropertyIdLink   ReservationException[]   @relation("ReservationExceptionpropertyIdLink")
 
+  inventoryLocations  InventoryLocation[]
+  inventoryStocktakes InventoryStocktake[]
+
   @@unique([organizationId, id], map: "property_org_id_unique")
   @@index([organizationId, city, name], map: "property_org_city_name_idx")
   @@index([organizationId, regionId, name], map: "property_org_region_name_idx")
@@ -1018,10 +1030,10 @@ model OperationTask {
   checklistTemplateKey     String?                      @map("checklist_template_key")
   checklistConfigRuleId    String?                      @map("checklist_config_rule_id") @db.Uuid
   requiredRoleKey          String?                      @map("required_role_key")
-  scheduledStart          DateTime?                    @map("scheduled_start") @db.Timestamptz(6)
-  scheduledEnd            DateTime?                    @map("scheduled_end") @db.Timestamptz(6)
-  seriesKey               String?                      @map("series_key")
-  seriesConfigRuleId      String?                      @map("series_config_rule_id") @db.Uuid
+  scheduledStart           DateTime?                    @map("scheduled_start") @db.Timestamptz(6)
+  scheduledEnd             DateTime?                    @map("scheduled_end") @db.Timestamptz(6)
+  seriesKey                String?                      @map("series_key")
+  seriesConfigRuleId       String?                      @map("series_config_rule_id") @db.Uuid
   type                     String
   state                    String                       @default("PLANNED")
   priority                 String                       @default("NORMAL")
@@ -1047,6 +1059,8 @@ model OperationTask {
   uploads                  OperationEvidenceUpload[]
   issues                   OperationIssue[]
 
+  inventoryStocktakes InventoryStocktake[]
+
   @@unique([organizationId, idempotencyKey], map: "operation_task_org_idempotency_unique")
   @@unique([organizationId, id], map: "operation_task_org_id_unique")
   @@unique([organizationId, completionIdempotencyKey], map: "operation_task_org_completion_idempotency_unique")
@@ -1062,18 +1076,18 @@ model OperationTask {
 }
 
 model OperationTaskEvent {
-  id             String   @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
-  taskId         String   @map("task_id") @db.Uuid
+  id             String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  taskId         String        @map("task_id") @db.Uuid
   version        Int
   kind           String
-  actorId        String?  @map("actor_id") @db.Uuid
-  requestId      String?  @map("request_id")
+  actorId        String?       @map("actor_id") @db.Uuid
+  requestId      String?       @map("request_id")
   reason         String?
   before         Json?
   after          Json
-  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operation_task_event_org_fk")
+  occurredAt     DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operation_task_event_org_fk")
   task           OperationTask @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "operation_task_event_task_fk")
 
   @@unique([organizationId, taskId, version], map: "operation_task_event_version_unique")
@@ -1082,16 +1096,16 @@ model OperationTaskEvent {
 }
 
 model OperationTaskMutation {
-  id             String   @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String   @map("organization_id") @db.Uuid
-  taskId         String   @map("task_id") @db.Uuid
-  key            String   @db.Uuid
-  payloadHash    String   @map("payload_hash")
-  resultResourceId String? @map("result_resource_id") @db.Uuid
-  createdBy      String   @map("created_by") @db.Uuid
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operation_task_mutation_org_fk")
-  task           OperationTask @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "operation_task_mutation_task_fk")
+  id               String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId   String        @map("organization_id") @db.Uuid
+  taskId           String        @map("task_id") @db.Uuid
+  key              String        @db.Uuid
+  payloadHash      String        @map("payload_hash")
+  resultResourceId String?       @map("result_resource_id") @db.Uuid
+  createdBy        String        @map("created_by") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "operation_task_mutation_org_fk")
+  task             OperationTask @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "operation_task_mutation_task_fk")
 
   @@unique([organizationId, key], map: "operation_task_mutation_key_unique")
   @@index([organizationId, taskId], map: "operation_task_mutation_task_idx")
@@ -1099,91 +1113,95 @@ model OperationTaskMutation {
 }
 
 model OperationSavedView {
-  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String @map("organization_id") @db.Uuid
-  userAccountId String @map("user_account_id") @db.Uuid
-  name String
-  filters Json
-  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
-  userAccount UserAccount @relation(fields:[organizationId,userAccountId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
-  @@unique([organizationId,userAccountId,name],map:"operation_saved_view_name_unique")
-  @@index([organizationId,userAccountId,archivedAt],map:"operation_saved_view_user_idx")
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  userAccountId  String       @map("user_account_id") @db.Uuid
+  name           String
+  filters        Json
+  archivedAt     DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  userAccount    UserAccount  @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, userAccountId, name], map: "operation_saved_view_name_unique")
+  @@index([organizationId, userAccountId, archivedAt], map: "operation_saved_view_user_idx")
   @@map("operation_saved_view")
 }
 
 model OperationTaskEvidence {
- upload OperationEvidenceUpload?
- id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
- organizationId String @map("organization_id") @db.Uuid
- taskId String @map("task_id") @db.Uuid
- note String
- storageKey String? @unique @map("storage_key")
- contentType String? @map("content_type")
- size Int?
- sha256 String?
- createdBy String @map("created_by") @db.Uuid
- createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
- organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
- task OperationTask @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
- @@index([organizationId,taskId,createdAt],map:"operation_evidence_task_idx")
- @@map("operation_task_evidence")
+  upload         OperationEvidenceUpload?
+  id             String                   @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                   @map("organization_id") @db.Uuid
+  taskId         String                   @map("task_id") @db.Uuid
+  note           String
+  storageKey     String?                  @unique @map("storage_key")
+  contentType    String?                  @map("content_type")
+  size           Int?
+  sha256         String?
+  createdBy      String                   @map("created_by") @db.Uuid
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task           OperationTask            @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organizationId, taskId, createdAt], map: "operation_evidence_task_idx")
+  @@map("operation_task_evidence")
 }
 
 model OperationEvidenceUpload {
- id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
- organizationId String @map("organization_id") @db.Uuid
- actorId String @map("actor_id") @db.Uuid
- taskId String @map("task_id") @db.Uuid
- localId String @map("local_id") @db.Uuid
- deviceId String @map("device_id")
- manifest Json
- manifestHash String @map("manifest_hash")
- generation Int @default(1)
- lastActivityAt DateTime @default(now()) @map("last_activity_at") @db.Timestamptz(6)
- lifecycleCheckedAt DateTime @default(now()) @map("lifecycle_checked_at") @db.Timestamptz(6)
- expiredAt DateTime? @map("expired_at") @db.Timestamptz(6)
- expiryPolicy Json? @map("expiry_policy")
- status String @default("OPEN")
- evidenceId String? @unique(map:"operation_evidence_upload_evidence_unique") @map("evidence_id") @db.Uuid
- readyAt DateTime? @map("ready_at") @db.Timestamptz(6)
- attachedAt DateTime? @map("attached_at") @db.Timestamptz(6)
- cleanedAt DateTime? @map("cleaned_at") @db.Timestamptz(6)
- partUploadExpiresAt DateTime? @map("part_upload_expires_at") @db.Timestamptz(6)
- createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
- updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
- organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
- actor UserAccount @relation(fields:[organizationId,actorId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
- task OperationTask @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
- evidence OperationTaskEvidence? @relation(fields:[evidenceId],references:[id],onDelete:Restrict,onUpdate:NoAction)
- @@unique([organizationId,id],map:"operation_evidence_upload_org_id_unique")
- @@unique([organizationId,actorId,localId],map:"operation_evidence_upload_actor_key_unique")
- @@index([organizationId,status,createdAt],map:"operation_evidence_upload_org_status_created_idx")
- @@index([organizationId,status,cleanedAt,partUploadExpiresAt,createdAt],map:"operation_evidence_upload_cleanup_idx")
- @@index([organizationId,status,lifecycleCheckedAt,id],map:"operation_evidence_upload_lifecycle_idx")
- @@map("operation_evidence_upload")
+  id                  String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String                 @map("organization_id") @db.Uuid
+  actorId             String                 @map("actor_id") @db.Uuid
+  taskId              String                 @map("task_id") @db.Uuid
+  localId             String                 @map("local_id") @db.Uuid
+  deviceId            String                 @map("device_id")
+  manifest            Json
+  manifestHash        String                 @map("manifest_hash")
+  generation          Int                    @default(1)
+  lastActivityAt      DateTime               @default(now()) @map("last_activity_at") @db.Timestamptz(6)
+  lifecycleCheckedAt  DateTime               @default(now()) @map("lifecycle_checked_at") @db.Timestamptz(6)
+  expiredAt           DateTime?              @map("expired_at") @db.Timestamptz(6)
+  expiryPolicy        Json?                  @map("expiry_policy")
+  status              String                 @default("OPEN")
+  evidenceId          String?                @unique(map: "operation_evidence_upload_evidence_unique") @map("evidence_id") @db.Uuid
+  readyAt             DateTime?              @map("ready_at") @db.Timestamptz(6)
+  attachedAt          DateTime?              @map("attached_at") @db.Timestamptz(6)
+  cleanedAt           DateTime?              @map("cleaned_at") @db.Timestamptz(6)
+  partUploadExpiresAt DateTime?              @map("part_upload_expires_at") @db.Timestamptz(6)
+  createdAt           DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  actor               UserAccount            @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  task                OperationTask          @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  evidence            OperationTaskEvidence? @relation(fields: [evidenceId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id], map: "operation_evidence_upload_org_id_unique")
+  @@unique([organizationId, actorId, localId], map: "operation_evidence_upload_actor_key_unique")
+  @@index([organizationId, status, createdAt], map: "operation_evidence_upload_org_status_created_idx")
+  @@index([organizationId, status, cleanedAt, partUploadExpiresAt, createdAt], map: "operation_evidence_upload_cleanup_idx")
+  @@index([organizationId, status, lifecycleCheckedAt, id], map: "operation_evidence_upload_lifecycle_idx")
+  @@map("operation_evidence_upload")
 }
 
 model OperationIssue {
- id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
- organizationId String @map("organization_id") @db.Uuid
- taskId String @map("task_id") @db.Uuid
- propertyId String @map("property_id") @db.Uuid
- title String
- description String
- severity String
- state String @default("OPEN")
- idempotencyKey String @map("idempotency_key") @db.Uuid
- createdBy String @map("created_by") @db.Uuid
- createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
- updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
- organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
- task OperationTask @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
- @@unique([organizationId,idempotencyKey],map:"operation_issue_key_unique")
- @@index([organizationId,propertyId,state],map:"operation_issue_property_state_idx")
- @@map("operation_issue")
+  id             String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  taskId         String        @map("task_id") @db.Uuid
+  propertyId     String        @map("property_id") @db.Uuid
+  title          String
+  description    String
+  severity       String
+  state          String        @default("OPEN")
+  idempotencyKey String        @map("idempotency_key") @db.Uuid
+  createdBy      String        @map("created_by") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task           OperationTask @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, idempotencyKey], map: "operation_issue_key_unique")
+  @@index([organizationId, propertyId, state], map: "operation_issue_property_state_idx")
+  @@map("operation_issue")
 }
 
 model OperationTaskChecklistItem {
@@ -1358,7 +1376,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
-  automationRuns AutomationRun[]
+  automationRuns       AutomationRun[]
   teamCompensations    TeamCompensation[]
   id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId       String                      @map("organization_id") @db.Uuid
@@ -1379,6 +1397,10 @@ model ConfigRule {
   commissionSnapshots  CommissionSnapshot[]
   reservationSnapshots ReservationConfigSnapshot[]
 
+  inventorySourceItems InventoryItem[]
+  inventoryStocktakes  InventoryStocktake[]
+
+  @@unique([organizationId, id], map: "config_rule_org_id_unique")
   @@index([organizationId, key, scopeType, effectiveFrom], map: "config_rule_org_key_scope_effective_idx")
   @@index([organizationId, key, scopeType, lifecycle, effectiveFrom], map: "config_rule_org_key_lifecycle_effective_idx")
   @@map("config_rule")
@@ -1941,4 +1963,117 @@ model ReservationException {
   @@unique([organizationId, key], map: "reservation_exception_org_key_unique")
   @@index([organizationId, propertyId, status, createdAt], map: "reservation_exception_org_status_idx")
   @@map("reservation_exception")
+}
+
+model InventoryItem {
+  id                 String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String                 @map("organization_id") @db.Uuid
+  key                String                 @db.VarChar(120)
+  category           String
+  unit               String?                @db.VarChar(60)
+  labels             Json
+  sourceConfigRuleId String?                @map("source_config_rule_id") @db.Uuid
+  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  archivedAt         DateTime?              @map("archived_at") @db.Timestamptz(6)
+  organization       Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  sourceConfigRule   ConfigRule?            @relation(fields: [organizationId, sourceConfigRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  cursors            InventoryStockCursor[]
+  stocktakes         InventoryStocktake[]
+  movements          InventoryMovement[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, key])
+  @@index([organizationId, category, archivedAt, key])
+  @@map("inventory_item")
+}
+
+model InventoryLocation {
+  id             String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                 @map("organization_id") @db.Uuid
+  kind           String
+  propertyId     String?                @map("property_id") @db.Uuid
+  label          String
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  archivedAt     DateTime?              @map("archived_at") @db.Timestamptz(6)
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property       Property?              @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  cursors        InventoryStockCursor[]
+  stocktakes     InventoryStocktake[]
+  movements      InventoryMovement[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, propertyId])
+  @@index([organizationId, kind, archivedAt, id])
+  @@map("inventory_location")
+}
+
+model InventoryStockCursor {
+  organizationId String            @map("organization_id") @db.Uuid
+  locationId     String            @map("location_id") @db.Uuid
+  itemId         String            @map("item_id") @db.Uuid
+  revision       BigInt            @default(0)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  location       InventoryLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  item           InventoryItem     @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([organizationId, locationId, itemId])
+  @@map("inventory_stock_cursor")
+}
+
+model InventoryStocktake {
+  id               String             @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId   String             @map("organization_id") @db.Uuid
+  propertyId       String?            @map("property_id") @db.Uuid
+  taskId           String?            @map("task_id") @db.Uuid
+  locationId       String             @map("location_id") @db.Uuid
+  itemId           String             @map("item_id") @db.Uuid
+  actorId          String             @map("actor_id") @db.Uuid
+  configRuleId     String?            @map("config_rule_id") @db.Uuid
+  expectedRevision BigInt             @map("expected_revision")
+  revision         BigInt
+  expectedQuantity Decimal            @map("expected_quantity") @db.Decimal(65, 0)
+  countedQuantity  BigInt             @map("counted_quantity")
+  note             String
+  deviceId         String             @map("device_id") @db.VarChar(160)
+  clientOpId       String             @map("client_op_id") @db.Uuid
+  clientCreatedAt  DateTime?          @map("client_created_at") @db.Timestamptz(6)
+  configSnapshot   Json               @map("config_snapshot")
+  receivedAt       DateTime           @default(now()) @map("received_at") @db.Timestamptz(6)
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property         Property?          @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  task             OperationTask?     @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  location         InventoryLocation  @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  item             InventoryItem      @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  actor            UserAccount        @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  configRule       ConfigRule?        @relation(fields: [organizationId, configRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  movement         InventoryMovement?
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, deviceId, clientOpId])
+  @@unique([organizationId, locationId, itemId, revision])
+  @@index([organizationId, taskId, receivedAt, id])
+  @@map("inventory_stocktake")
+}
+
+model InventoryMovement {
+  id             String              @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String              @map("organization_id") @db.Uuid
+  locationId     String              @map("location_id") @db.Uuid
+  itemId         String              @map("item_id") @db.Uuid
+  stocktakeId    String?             @map("stocktake_id") @db.Uuid
+  actorId        String              @map("actor_id") @db.Uuid
+  kind           String
+  revision       BigInt
+  quantityDelta  Decimal             @map("quantity_delta") @db.Decimal(65, 0)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  location       InventoryLocation   @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  item           InventoryItem       @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  stocktake      InventoryStocktake? @relation(fields: [organizationId, stocktakeId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  actor          UserAccount         @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, stocktakeId])
+  @@unique([organizationId, locationId, itemId, revision], map: "inventory_movement_stream_revision_key")
+  @@index([organizationId, locationId, itemId, createdAt, id])
+  @@map("inventory_movement")
 }

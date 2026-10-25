@@ -29,6 +29,8 @@ import operationDefaults from "@/platform/config/defaults/operations.json";
 import { OperationRepository } from "@/modules/reservations/infrastructure/operation-repository";
 import { propertyInstant } from "@/modules/reservations/domain/operation-task";
 import automationDefaults from "@/platform/config/defaults/automations.json";
+import { pushSyncOps } from "@/modules/reservations/application/sync-service";
+import { syncPushInputSchema } from "@/modules/reservations/domain/sync-protocol";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -1433,6 +1435,38 @@ describe("automation engine on real PostgreSQL", () => {
       }),
     );
     expect(retained.status).toBe("DISPATCHED");
+  });
+  it.each(["InventoryBelowMinimum", "StocktakeVariance"] as const)("consumes a native %s from an assigned field stocktake exactly once through the shared automation engine", async eventType => {
+    const f = await fixture();
+    const source = await withTenant(db, f.org, async tx => {
+      const task = await tx.operationTask.create({ data: { organizationId: f.org, propertyId: f.property.id, assignedToUserAccountId: f.account.id,
+        assignedToPersonId: f.person.id, state: "ASSIGNED", type: "INSPECTION", dueDate: new Date("2027-01-10"),
+        titleTranslations: { en: "Physical linen count", fr: "Comptage du linge" }, idempotencyKey: randomUUID(), createdBy: f.account.id } });
+      const catalog = await new ConfigRuleRepository(tx, f.org).createVersion({ key: "inventory.minimums", scopeType: "property", scopeId: f.property.id,
+        effectiveFrom: start, value: { minimums: [{ item: "bath_towel", quantity: 8, category: "LINEN", unit: "pieces" }] },
+        reason: "Explicit minimum for native physical stocktake" });
+      return { task, catalog };
+    });
+    await save(f, rule({ event: eventType, conditions: { path: "stocktake.delta", op: ">", value: "0" },
+      actions: [{ key: "reorder", type: "reorder_suggestion", title: { en: "Review linen reorder", fr: "Vérifier la commande de linge" } }] }));
+    const batch = syncPushInputSchema.parse({ organization_id: f.org, actor_user_id: f.account.id, device_id: randomUUID(), op_schema_version: 1,
+      ops: [{ type: "field_stocktake.record", client_op_id: randomUUID(), payload: { taskId: source.task.id, itemKey: "bath_towel", countedQuantity: "3",
+        expectedQuantity: "0", expectedRevision: "0", unit: "pieces", catalogRuleId: source.catalog.id, catalogVersion: source.catalog.version,
+        note: "Assigned employee observed physical linen" } }] });
+    expect((await pushSyncOps(f.actor, batch, deps())).results[0].status).toBe("APPLIED");
+    expect((await pushSyncOps(f.actor, batch, deps())).results[0].status).toBe("DUPLICATE");
+    const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: eventType } }));
+    const admitted = await Promise.all([enqueueAutomationEvent(f.org, event.id, deps()), enqueueAutomationEvent(f.org, event.id, deps())]);
+    expect(admitted[0]).toHaveLength(1); expect(admitted[1]).toEqual(admitted[0]);
+    const executed = await Promise.all([executeAutomationRun(f.org, admitted[0][0], deps()), executeAutomationRun(f.org, admitted[0][0], deps())]);
+    expect(executed).toEqual(["SUCCEEDED", "SUCCEEDED"]);
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.inventoryStocktake.count()).toBe(1); expect(await tx.inventoryMovement.count()).toBe(1);
+      expect(await tx.automationRun.count()).toBe(1); expect(await tx.automationSuggestion.count()).toBe(1);
+      expect((await tx.automationSuggestion.findFirstOrThrow()).quantity.toFixed(2)).toBe("5.00");
+      expect(await tx.operationTask.findUniqueOrThrow({ where: { id: source.task.id } })).toMatchObject({ state: "ASSIGNED", completedAt: null });
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted" } })).toBe(0);
+    });
   });
   it("creates a scoped reorder suggestion from configured minimums exactly once", async () => {
     const f = await fixture();

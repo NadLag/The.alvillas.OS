@@ -1,0 +1,13 @@
+# 0072 — Audited field stocktakes
+
+Date: 2026-10-25
+
+The shared field contract and orchestration live in `platform/inventory`, alongside the existing cross-module automation pattern. They call the existing operations authorization and task repositories and the inventory domain/repository; reservations and inventory modules do not import one another. All Prisma access stays in repositories.
+
+Physical counts use the existing assigned-task authorization and offline sync journal. An observation records its expected quantity and stream revision, the counted quantity, the employee, device and original operation key, server receipt time, an explanatory note and both reported and applied configuration versions. A mismatched base produces a durable conflict; reviewing a count requires a new operation key and preserves the original history. Quantities travel as decimal strings and use integer arithmetic. A revision cursor carries no balance: quantities are always sums of immutable movements.
+
+Only explicit `LINEN` entries in the effective `inventory.minimums` configuration are available to this field workflow. Property and effective agreement scope use the existing resolver. Compatible catalog changes retain the reported provenance and apply the current minimum; removed items, changed units and expired agreement references require review. The server materializes configured item and property-location identities on first use, with audits. It does not invent stock, units, thresholds or item categories.
+
+Additive tenant-bound item, location, cursor, observation and movement tables use forced row-level security and composite tenant references. PostgreSQL fences each revision, requires the exact immutable adjustment and audit in the observation transaction, and rejects history rewrites and business deletion. Device, task and actor locks retain established ordering; sorted inventory locks serialize each property/item stream. Existing catalog identities use shared locks so different properties can count the same item concurrently. Stocktake-only batches do not take the unrelated crew scheduling lock; mixed batches retain it.
+
+The shared outbox publishes `StocktakeVariance` for a nonzero adjustment and `InventoryBelowMinimum` below an explicitly configured minimum. Their source key is the immutable observation, so retries cannot repeat the effects. Stock quantities have a separate validated automation context from currency-bearing financial variance. Recording stock never completes its associated operational task. Field pull opts into catalog and historical stock snapshots, includes them in cache revisions, and keeps the legacy projection intact.

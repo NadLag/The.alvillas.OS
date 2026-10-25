@@ -70,6 +70,11 @@ export function operationAllowed(
   )
     throw new ReservationAuthorizationError();
 }
+export function requireAssignedOperationTask(ctx: ReservationActorContext, task: OperationTask | null): asserts task is OperationTask {
+  if (!task || task.assignedToUserAccountId !== ctx.actorId || task.assignedToPersonId !== ctx.personId) throw new ReservationNotFoundError();
+  operationAllowed(ctx, "edit", taskResource(task));
+}
+
 export async function operationScope(
   ctx: ReservationActorContext,
   action: Action,

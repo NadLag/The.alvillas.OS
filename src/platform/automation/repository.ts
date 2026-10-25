@@ -11,6 +11,7 @@ import {
   type EvaluationContext,
 } from "./rule";
 import { z } from "zod";
+import { stocktakeEventDataSchema } from "@/modules/inventory/domain/events";
 
 export const json = (v: unknown) =>
   JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
@@ -273,6 +274,7 @@ export class AutomationRepository {
           }
         : {}),
       ...(p.inventory ? { inventory: inventory.parse(p.inventory) } : {}),
+      ...(p.stocktake ? { stocktake: stocktakeEventDataSchema.parse(p.stocktake) } : {}),
       ...(p.variance ? { variance: amounts.parse(p.variance) } : {}),
     };
     const scopes = await new ReservationConfigScopeRepository(
