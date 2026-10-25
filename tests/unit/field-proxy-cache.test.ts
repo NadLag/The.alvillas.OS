@@ -98,7 +98,7 @@ describe("durable supervised field cache", () => {
     await legacy.table("drafts").put({ ...scope, cacheId: `${identity}:${task.id}`, taskId: task.id, checklistItemIds: [], note: "Original own note", savedAt: stamp });
     await legacy.table("cacheState").put({ ...scope, key: identity, incarnation, generation: 8, cursor: "original-v3-cursor", snapshotAt: stamp });
     await legacy.table("photos").put(record); legacy.close();
-    const queue = await setup(name); expect(queue.verno).toBe(4);
+    const queue = await setup(name); expect(queue.verno).toBe(5);
     expect((await queue.metadata.get("device"))?.value).toBe(deviceId); expect(await queue.entries(scope)).toEqual([entry]);
     expect((await queue.readCache(scope)).state).toMatchObject({ incarnation, generation: 8, cursor: "original-v3-cursor" });
     expect((await queue.readDraft(scope, task.id))?.note).toBe("Original own note");

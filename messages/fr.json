@@ -2298,5 +2298,33 @@
     "unsaved": "Enregistrez ou retirez la photo sélectionnée avant de quitter la page ou de terminer la mission.",
     "discard": "Retirer la photo sélectionnée",
     "progress": "Progression de l’envoi de la photo"
+  },
+  "FieldLinen": {
+    "title": "Linge",
+    "guidance": "Comptez le linge physiquement et indiquez le motif du relevé.",
+    "preparing": "Préparation de la liste de linge enregistrée…",
+    "empty": "Aucun article de linge ne figure pour cette intervention.",
+    "storageError": "Le relevé n’a pas pu être enregistré sur cet appareil. Gardez cette page ouverte, libérez de l’espace, puis réessayez.",
+    "unsaved": "Enregistrez ou mettez votre relevé en attente avant de quitter cette intervention.",
+    "expected": "Prévu : {quantity}",
+    "decrease": "Diminuer {item}",
+    "increase": "Augmenter {item}",
+    "count": "Quantité physique de {item}",
+    "enterCount": "Saisissez une quantité entière.",
+    "variance": "Écart : {quantity}",
+    "invalid": "Saisissez une quantité entière valide et un motif.",
+    "note": "Note de comptage ou motif",
+    "queued": "Relevé en attente. Vous pouvez continuer à travailler.",
+    "savedDraft": "Brouillon enregistré sur cet appareil.",
+    "synced": "Relevé synchronisé.",
+    "reviewRequired": "Le stock ou vos droits ont changé. Vérifiez le stock actuel et recomptez physiquement avant d’envoyer.",
+    "originalCount": "Votre relevé initial",
+    "currentStock": "Stock actuel",
+    "review": "Vérifier le stock actuel et recompter",
+    "previousCount": "Relevé précédent conservé pour vérification : {quantity}",
+    "unavailable": "Cet article de linge ne peut pas être compté pour cette intervention. Demandez une vérification à votre responsable.",
+    "save": "Enregistrer le relevé",
+    "saving": "Enregistrement du relevé…",
+    "saveBeforeComplete": "Enregistrez ou mettez votre relevé de linge en attente avant de terminer l’intervention."
   }
 }

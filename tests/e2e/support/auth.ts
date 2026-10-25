@@ -39,11 +39,13 @@ export async function completeE2EAdminMfa(page: Page, email: string): Promise<vo
 export async function enrollE2EAccountSecurity(email: string, password: string): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase();
   if (enrolledAuthenticators.has(normalizedEmail)) return;
+  const origin = new URL(process.env.PLAYWRIGHT_TEST_BASE_URL ?? "http://localhost:3000");
+  if (origin.protocol !== "http:" || !["localhost", "127.0.0.1"].includes(origin.hostname)) throw new Error("Security enrollment fixtures require a local test server");
   const browser = await chromium.launch();
   try {
     const page = await browser.newPage();
     page.setDefaultTimeout(30000);
-    await page.goto("http://localhost:3000/en/login");
+    await page.goto(`${origin.origin}/en/login`);
     await page.getByTestId("login-email").fill(normalizedEmail);
     await page.getByTestId("login-password").fill(password);
     const primaryEpoch = Math.floor(Date.now() / 60000);
@@ -62,7 +64,7 @@ export async function enrollE2EAccountSecurity(email: string, password: string):
     await page.getByTestId("totp-code").fill(totpCode(secret));
     await page.getByTestId("confirm-totp-button").click();
     await expect(page.getByTestId("mfa-recovery-code")).toHaveCount(8);
-    const session = await (await page.request.get("http://localhost:3000/api/auth/session")).json() as { user?: { id?: string } } | null;
+    const session = await (await page.request.get(`${origin.origin}/api/auth/session`)).json() as { user?: { id?: string } } | null;
     expect(session?.user?.id).toBeFalsy();
     enrolledAuthenticators.set(normalizedEmail, secret);
     loginAttempts.set(normalizedEmail, { epoch: primaryEpoch, count: 1 });

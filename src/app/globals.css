@@ -2496,3 +2496,15 @@ textarea:disabled {
 .field-photo .form-actions button { min-block-size: 64px; }
 .field-photo-queue article { min-inline-size: 0; overflow-wrap: anywhere; padding-block: var(--space-3); border-block-end: 1px solid var(--border); }
 .field-photo progress { inline-size: 100%; }
+
+.field-linen { display: grid; gap: var(--space-4); min-inline-size: 0; }
+.field-linen-item { display: grid; gap: var(--space-3); padding-block: var(--space-4); border-block-start: 1px solid var(--border); min-inline-size: 0; overflow-wrap: anywhere; }
+.field-linen-item h3, .field-linen-item p { margin: 0; }
+.field-linen-counter { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; gap: var(--space-3); align-items: center; }
+.field-linen-counter button { min-block-size: 64px; padding: var(--space-3); display: grid; place-items: center; }
+.field-linen-counter input { min-inline-size: 0; inline-size: 100%; min-block-size: 64px; text-align: center; font-size: var(--font-size-xl); font-variant-numeric: tabular-nums; }
+.field-linen-item textarea { min-inline-size: 0; inline-size: 100%; font-size: 17px; }
+.field-linen-item :is(input,textarea) { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); background: var(--surface-raised); color: var(--foreground); }
+.field-linen-review { display: grid; gap: var(--space-3); padding: var(--space-4); background: var(--surface); border-radius: var(--radius-md); }
+.field-linen-review dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); margin: 0; }
+.field-linen-review dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }

@@ -1,5 +1,5 @@
 import { syncPushOpSchema, type SyncPushOp } from "@/modules/reservations/domain/sync-protocol";
-import { FieldQueueStore, type FieldQueueScope, type FieldQueueEntry, type FieldProxyDraftInput } from "./field-queue-store";
+import { FieldQueueStore, type FieldQueueScope, type FieldQueueEntry, type FieldProxyDraftInput, type FieldLinenDraftInput } from "./field-queue-store";
 import { requestFieldBackgroundSync } from "./background-sync";
 import { fieldUploadManifestSchema } from "@/modules/reservations/domain/field-upload";
 export type { FieldQueueScope, FieldQueueEntry, QueueOutcome } from "./field-queue-store";
@@ -8,6 +8,15 @@ export { syncFieldQueue } from "./field-sync";
 const legacyQueueKey = "alvillas.fieldTaskQueue.v1";
 const legacyDeviceKey = "alvillas.fieldDeviceId.v1";
 export class FieldQueue extends FieldQueueStore {
+  async enqueueLinen(scope: FieldQueueScope, value: FieldLinenDraftInput, incarnation: string): Promise<FieldQueueEntry> {
+    const payload = { taskId: value.taskId, itemKey: value.itemKey, expectedQuantity: value.expectedQuantity, expectedRevision: value.expectedRevision,
+      countedQuantity: value.countedQuantity, unit: value.unit, catalogRuleId: value.catalogRuleId, catalogVersion: value.catalogVersion, note: value.note };
+    const operation = syncPushOpSchema.parse({ client_op_id: value.clientOpId, type: "field_stocktake.record", client_created_at: new Date().toISOString(), payload });
+    if (operation.type !== "field_stocktake.record") throw new Error("FIELD_LINEN_INVALID");
+    const entry = await this.storeLinenOperation(scope, operation, incarnation);
+    if (entry.syncStatus === "pending") void requestFieldBackgroundSync();
+    return entry;
+  }
   async enqueueProxy(scope: FieldQueueScope, value: FieldProxyDraftInput, incarnation: string): Promise<FieldQueueEntry> {
     const operation = syncPushOpSchema.parse({ client_op_id: value.clientOpId, type: "field_task.proxy_validate", client_created_at: new Date().toISOString(),
       payload: { taskId: value.taskId, expectedVersion: value.expectedVersion, performedByPersonId: value.performedByPersonId,
