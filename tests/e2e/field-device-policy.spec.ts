@@ -39,7 +39,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
       await editor.evaluate(() => document.fonts.ready);
       expect(await editor.evaluate(() => innerWidth)).toBe(editor.viewportSize()!.width);
       expect(await editor.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-      expect(await editor.locator(".audience-shell.resource-page").evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+      expect(await editor.locator(".audience-shell.resource-page").evaluateAll(elements => elements.length > 0 && elements.every(element => element.scrollWidth <= element.clientWidth + 1))).toBe(true);
       const propertyScope = form.locator('[name="scopeType"][value="property"]');
       try { await propertyScope.check(); } catch (error) {
         const geometry = await propertyScope.evaluate(input => {
