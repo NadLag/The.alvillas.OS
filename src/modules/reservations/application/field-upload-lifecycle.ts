@@ -33,7 +33,7 @@ export async function expireInactiveFieldUploads(organizationId: string, deps: L
       if (!upload || upload.status !== "OPEN" || upload.generation !== candidate.generation ||
         now.getTime() - upload.lastActivityAt.getTime() < policy.openUploadIdleAfterMinutes! * 60_000 ||
         (upload.partUploadExpiresAt && upload.partUploadExpiresAt > now)) return 0;
-      if ((await uploads.expire(upload.id, upload.generation, upload.lastActivityAt, now, policy)).count !== 1) return 0;
+      if ((await uploads.expire(upload.id, upload.generation, now, policy)).count !== 1) return 0;
       await writeAuditEvent(tx, { organizationId, actorId: null, action: "task.photo.upload.expired", resourceType: "task", resourceId: upload.taskId,
         propertyScopeId: candidate.task.propertyId, deviceId: upload.deviceId, requestId: `field-upload-expiry:${upload.id}:${upload.generation}`,
         reason: fieldUploadLifecycleKey, before: { uploadId: upload.id, generation: upload.generation, status: upload.status,
