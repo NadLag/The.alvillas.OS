@@ -685,7 +685,7 @@ Occupancy = occupied nights ÷ available nights (blocks excluded; configurable) 
 | 15 | Chef menu item ordered | Ingredients list, chef compensation, margin |
 | 16 | Task generated and assigned | Correct worker, due date, checklist |
 | 17 | Housekeeper completes job | Checklist, linen and inventory movements recorded |
-| 18 | Offline operation performed | Completed offline; sync converges; replay is idempotent |
+| 18 | Offline operation performed | Completed offline; sync converges; replay is idempotent. Original photo bytes, draft and device/operation keys survive cold reload, partial transfer, worker update and native quota rejection; age warnings never block work. Configured OPEN expiry respects signed leases and exact PostgreSQL timestamps; generation recovery retains one evidence row and applied receipt after lost-ACK retry. Session/device revoke and logout clear private state without revoking other devices. EN/FR/RTL desktop/mobile keyboard and axe: `field-photos.spec.ts`, `field-photo-recovery.spec.ts`, `field-photo-quota.spec.ts`, `field-device-policy.spec.ts`, `field-update-concurrency.spec.ts`, `field-cache.spec.ts` and `field-queue.spec.ts`. |
 | 19 | Proxy validation | Performed-by ≠ validated-by; reason recorded |
 | 20 | Laundry batch | Expected cost from price-list version |
 | 21 | Inventory updated | Stock equals Σ movements |
