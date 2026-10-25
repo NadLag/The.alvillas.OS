@@ -5,7 +5,7 @@ import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { fieldDevicePolicyKey, fieldDevicePolicySnapshotSchema } from "@/platform/config/field-device-policy";
 import { syncPushOpSchema } from "@/modules/reservations/domain/sync-protocol";
-import { fieldBrowser } from "./support/field-browser";
+import { fieldBrowser, fieldEditorContext } from "./support/field-browser";
 import { openFieldFixture } from "./support/field-fixture";
 import { fieldNetwork } from "./support/field-network";
 import { storedFieldData } from "./support/field-storage";
@@ -15,7 +15,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
   test.skip(!process.env.DATABASE_URL, "Real PostgreSQL is required for configured queue-age acceptance"); test.setTimeout(180000); expect(browserName).toBe("chromium");
   const native = await fieldBrowser(info), page = native.page;
   await page.clock.install();
-  let fixture: Awaited<ReturnType<typeof openFieldFixture>> | undefined, network: Awaited<ReturnType<typeof fieldNetwork>> | undefined;
+  let fixture: Awaited<ReturnType<typeof openFieldFixture>> | undefined, network: Awaited<ReturnType<typeof fieldNetwork>> | undefined,
+    editorContext: Awaited<ReturnType<typeof fieldEditorContext>> | undefined;
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
   try {
     const f = await openFieldFixture(page, info, locale); fixture = f;
@@ -29,11 +30,22 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
       return { propertyId: original.propertyId, actorId: original.assignedToUserAccountId!, secondId: second.id };
     });
     network = await fieldNetwork(native.context, "unavailable");
-    const editor = await native.context.newPage();
+    editorContext = await fieldEditorContext(native.context, info); const editor = await editorContext.newPage();
     const configure = async (minutes: number | null) => {
       await editor.goto(`/${locale}/app/configuration`);
       const form = editor.getByTestId("config-rule-create-form");
-      await form.locator('[name="scopeType"][value="property"]').check(); await form.getByTestId("config-rule-scope-id").selectOption(jobs.propertyId);
+      const propertyScope = form.locator('[name="scopeType"][value="property"]');
+      try { await propertyScope.check(); } catch (error) {
+        const geometry = await propertyScope.evaluate(input => {
+          const rect = input.getBoundingClientRect(), hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+          return { rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, scrollX, scrollY,
+            documentWidth: document.documentElement.scrollWidth, viewportWidth: innerWidth, viewportHeight: innerHeight, dir: document.documentElement.dir,
+            visual: visualViewport ? { offsetLeft: visualViewport.offsetLeft, offsetTop: visualViewport.offsetTop, scale: visualViewport.scale } : null,
+            hit: hit ? { tag: hit.tagName, radio: hit.closest("label")?.querySelector('input[type="radio"]')?.getAttribute("value") } : null };
+        }).catch(() => ({ unavailable: true }));
+        await info.attach("config-scope-hit-target", { body: JSON.stringify(geometry), contentType: "application/json" }); throw error;
+      }
+      await form.getByTestId("config-rule-scope-id").selectOption(jobs.propertyId);
       await form.getByTestId("config-rule-key").selectOption(fieldDevicePolicyKey); await expect(form.getByTestId("config-rule-key")).toHaveValue(fieldDevicePolicyKey);
       await form.getByTestId("config-rule-lifecycle").selectOption("ACTIVE");
       await form.getByTestId("config-rule-value").fill(JSON.stringify({ queueWarningAfterMinutes: minutes }));
@@ -59,7 +71,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
     const recorded = z.array(z.object({ deviceId: z.uuid(), operation: syncPushOpSchema, devicePolicy: fieldDevicePolicySnapshotSchema })).parse(original)[0];
     expect(recorded.devicePolicy.configRuleId).toBe(enabled.id); expect(recorded.operation.payload.taskId).toBe(f.taskId);
     await expect(page.getByTestId("field-queue-age-warning")).toHaveCount(0);
-    await page.clock.fastForward(60_001); await expect(page.getByTestId("field-queue-age-warning")).toBeVisible();
+    const clockGapBefore = await page.evaluate(() => Date.now()) - await editor.evaluate(() => Date.now());
+    await page.clock.fastForward(60_001);
+    expect(await page.evaluate(() => Date.now()) - await editor.evaluate(() => Date.now()) - clockGapBefore).toBeGreaterThan(55_000);
+    await expect(page.getByTestId("field-queue-age-warning")).toBeVisible();
     await page.reload(); await expect(page.getByTestId("field-queue-age-warning")).toBeVisible(); expect(await storedFieldData(page)).toEqual(original);
     await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
@@ -82,5 +97,5 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
       expect((await tx.operationTask.findUniqueOrThrow({ where: { id: jobs.secondId } })).state).toBe("ASSIGNED");
     });
     expect(errors).toEqual([]);
-  } finally { await network?.close(); await fixture?.db.$disconnect(); await native.close(); }
+  } finally { await network?.close(); await editorContext?.close(); await fixture?.db.$disconnect(); await native.close(); }
 });
