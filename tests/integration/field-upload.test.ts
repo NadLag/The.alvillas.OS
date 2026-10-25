@@ -17,7 +17,7 @@ import type { ReservationActorContext } from "@/modules/reservations/application
 import { cleanupFieldUploadParts } from "@/modules/reservations/application/field-upload-cleanup";
 import { expireInactiveFieldUploads } from "@/modules/reservations/application/field-upload-lifecycle";
 import { fieldUploadLifecycleKey } from "@/platform/config/field-upload-lifecycle-policy";
-import { temporaryPartLeaseMilliseconds, type TemporaryUploadPart } from "@/platform/storage/upload-protocol";
+import { temporaryPartLeaseMilliseconds, privateUploadTransportTimeoutMs, type TemporaryUploadPart } from "@/platform/storage/upload-protocol";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -192,6 +192,23 @@ describe("field photo uploads on real PostgreSQL", () => {
     expect((await withTenant(db, f.org, tx => new FieldUploadRepository(tx, f.org).recover(upload.uploadId, 1, new Date()))).count).toBe(0);
     await expect(withTenant(db, f.org, tx => tx.operationEvidenceUpload.update({ where: { id: upload.uploadId }, data: { status: "OPEN", generation: 2 } }))).rejects.toThrow(/generation/u);
     await expect(startFieldUpload(f.ctx, { ...f.input, include_generation: true }, deps())).rejects.toBeInstanceOf(ReservationConflictError);
+  });
+  it.skipIf(!url)("protects active generation negotiation before the first PUT under an explicit zero-minute idle policy", async () => {
+    const f = await fixture(), now = new Date(Date.now() + 60_000); await idlePolicy(f, 0);
+    const upload = await startFieldUpload(f.ctx, { ...f.input, include_generation: true }, { ...deps(), now });
+    const results = await Promise.all([expireInactiveFieldUploads(f.org, { db, now: new Date(now.getTime() + 1) }), expireInactiveFieldUploads(f.org, { db, now: new Date(now.getTime() + 1) })]);
+    expect(results).toEqual([{ expired: 0 }, { expired: 0 }]);
+    const request = { organization_id: f.org, actor_user_id: f.account.id, device_id: f.input.device_id, uploadId: upload.uploadId, generation: 1, index: 0 };
+    await signFieldUploadPart(f.ctx, request, { ...deps(), storage: new FakeStorageProvider("test"), now: new Date(now.getTime() + 2) });
+    expect(await expireInactiveFieldUploads(f.org, { db, now: new Date(now.getTime() + privateUploadTransportTimeoutMs + 1001) })).toEqual({ expired: 0 });
+    expect(await expireInactiveFieldUploads(f.org, { db, now: new Date(now.getTime() + temporaryPartLeaseMilliseconds + 3) })).toEqual({ expired: 1 });
+  });
+  it.skipIf(!url)("does not retroactively apply an idle policy recorded after the maintenance snapshot", async () => {
+    const f = await fixture(); await startFieldUpload(f.ctx, f.input, { ...deps(), now: new Date(Date.now() - 3_600_000) });
+    const asOf = new Date(); await new Promise(resolve => setTimeout(resolve, 5));
+    await idlePolicy(f, 0);
+    expect(await expireInactiveFieldUploads(f.org, { db, now: asOf })).toEqual({ expired: 0 });
+    expect(await expireInactiveFieldUploads(f.org, { db, now: new Date() })).toEqual({ expired: 1 });
   });
   it.skipIf(!url)("serializes duplicate starts and rejects actor, device and payload reuse", async () => {
     const f = await fixture(), results = await Promise.all([startFieldUpload(f.ctx, f.input, deps()), startFieldUpload(f.ctx, f.input, deps())]);

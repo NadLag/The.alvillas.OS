@@ -51,11 +51,18 @@ export class FieldUploadRepository {
     return this.tx.operationEvidenceUpload.findMany({ where: { organizationId: this.organizationId, cleanedAt: null,
       status: { in: ["READY", "ATTACHED", "CANCELLED"] }, OR: [
         { partUploadExpiresAt: { lte: now } }, { partUploadExpiresAt: null, updatedAt: { lte: legacyUntil } }
-      ] }, orderBy: [{ updatedAt: "asc" }, { id: "asc" }], take: limit });
+      ] }, orderBy: [{ lifecycleCheckedAt: "asc" }, { id: "asc" }], take: limit });
   }
   cleanupAttempted(id: string, now: Date, generation = 1) {
-    return this.tx.operationEvidenceUpload.updateMany({ where: { organizationId: this.organizationId, id, generation, cleanedAt: null,
-      status: { in: ["READY", "ATTACHED", "CANCELLED"] } }, data: { updatedAt: now } });
+    // Order retries strictly after pending work even when process clocks or
+    // millisecond timestamps tie. Transport ordering never extends a PUT lease
+    // or rewrites the closure time used by pre-lease cleanup protection.
+    return this.tx.$executeRaw(Prisma.sql`UPDATE operation_evidence_upload
+      SET lifecycle_checked_at=GREATEST(${now},COALESCE((SELECT MAX(lifecycle_checked_at)
+        FROM operation_evidence_upload WHERE organization_id=${this.organizationId}::uuid
+        AND status IN ('READY','ATTACHED','CANCELLED') AND cleaned_at IS NULL),${now})+INTERVAL '1 microsecond')
+      WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid AND generation=${generation}
+      AND cleaned_at IS NULL AND status IN ('READY','ATTACHED','CANCELLED')`);
   }
   create(actorId: string, deviceId: string, manifest: FieldUploadManifest, manifestHash: string, now = new Date()) {
     return this.tx.operationEvidenceUpload.create({ data: { organizationId: this.organizationId, actorId, deviceId,

@@ -17,7 +17,7 @@ export async function expireInactiveFieldUploads(organizationId: string, deps: L
     const repository = new FieldUploadRepository(tx, organizationId), rows = await repository.lifecycleCandidates(limit);
     if (!rows.length) return [];
     const scopes = await new ReservationConfigScopeRepository(tx, organizationId).propertyScopes([...new Set(rows.map(row => row.task.propertyId))], now);
-    const policies = await new ConfigRuleRepository(tx, organizationId).resolveScopeGroups(fieldUploadLifecycleKey, scopes, now);
+    const policies = await new ConfigRuleRepository(tx, organizationId).resolveScopeGroups(fieldUploadLifecycleKey, scopes, now, { recordedAt: now });
     await repository.lifecycleChecked(rows, now);
     return rows.flatMap(row => {
       const policy = fieldUploadLifecycleSnapshot(policies.get(row.task.propertyId) ?? null);

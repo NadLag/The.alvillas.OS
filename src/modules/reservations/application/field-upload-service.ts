@@ -15,7 +15,7 @@ import { operationAllowed, operationHash, operationMeta, taskResource, type Oper
 import { ReservationAuthorizationError, ReservationConflictError, ReservationNotFoundError } from "./reservation-service";
 import { validEvidenceImage, persistOperationEvidence } from "./operation-evidence";
 import { readExactResponseBytes } from "@/platform/http/read-exact-response";
-import { permanentFieldUploadKey, privateUploadTransportTimeoutMs, temporaryPartLeaseMilliseconds, uploadGenerationSchema } from "@/platform/storage/upload-protocol";
+import { permanentFieldUploadKey, privateUploadTransportTimeoutMs, temporaryPartLeaseMilliseconds, temporaryUploadActivityLeaseMilliseconds, uploadGenerationSchema } from "@/platform/storage/upload-protocol";
 
 type UploadDeps = OperationDeps & { storage?: StorageProvider; transport?: typeof fetch };
 type CompleteUploadDeps = UploadDeps & { storage?: StorageProvider & {
@@ -60,18 +60,24 @@ export async function startFieldUpload(ctx: ReservationActorContext, input: unkn
         if (!value.include_generation || !existing.expiredAt || !fieldUploadLifecycleSnapshotSchema.safeParse(existing.expiryPolicy).success)
           throw new ReservationConflictError("upload_idempotency_key_reused");
         if (!existing.cleanedAt || (await uploads.recover(existing.id, existing.generation, now)).count !== 1) throw new FieldUploadUnavailableError();
+        if (!await uploads.reservePart(existing.id, new Date(now.getTime() + temporaryUploadActivityLeaseMilliseconds), existing.generation + 1, now)) throw new FieldUploadUnavailableError();
         const recovered = (await uploads.get(existing.id))!;
         await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "task.photo.upload.recovered", resourceType: "task",
           resourceId: task.id, propertyScopeId: task.propertyId, deviceId: existing.deviceId,
           before: { uploadId: existing.id, generation: existing.generation, status: existing.status, expiredAt: existing.expiredAt,
             policy: existing.expiryPolicy, lastActivityAt: existing.lastActivityAt, partUploadExpiresAt: existing.partUploadExpiresAt, cleanedAt: existing.cleanedAt },
-          after: { uploadId: recovered.id, generation: recovered.generation, status: recovered.status }, reason: value.manifest.note, ...meta, occurredAt: now });
+          after: { uploadId: recovered.id, generation: recovered.generation, status: recovered.status, partUploadExpiresAt: recovered.partUploadExpiresAt }, reason: value.manifest.note, ...meta, occurredAt: now });
         return result(recovered);
       }
-      await uploads.touchOpen(existing.id, existing.generation, now);
+      if (existing.status === "OPEN") {
+        if (value.include_generation) {
+          if (!await uploads.reservePart(existing.id, new Date(now.getTime() + temporaryUploadActivityLeaseMilliseconds), existing.generation, now)) throw new FieldUploadUnavailableError();
+        } else await uploads.touchOpen(existing.id, existing.generation, now);
+      }
       return result(existing);
     }
     const upload = await uploads.create(ctx.actorId, value.device_id, value.manifest, hash, now);
+    if (value.include_generation && !await uploads.reservePart(upload.id, new Date(now.getTime() + temporaryUploadActivityLeaseMilliseconds), upload.generation, now)) throw new FieldUploadUnavailableError();
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "task.photo.upload.started", resourceType: "task",
       resourceId: task.id, propertyScopeId: task.propertyId, before: null,
       after: { uploadId: upload.id, contentType: value.manifest.contentType, size: value.manifest.size, sha256: value.manifest.sha256 },

@@ -7,7 +7,8 @@ export const fieldUploadMaximumParts = 64;
 // Signature validity and transport bounds, not business retention settings.
 export const privateUploadUrlLifetimeSeconds = 900;
 export const privateUploadTransportTimeoutMs = 15000;
-export const temporaryPartLeaseMilliseconds = privateUploadUrlLifetimeSeconds * 1000 + privateUploadTransportTimeoutMs + 1000;
+export const temporaryUploadActivityLeaseMilliseconds = privateUploadTransportTimeoutMs + 1000;
+export const temporaryPartLeaseMilliseconds = privateUploadUrlLifetimeSeconds * 1000 + temporaryUploadActivityLeaseMilliseconds;
 export const uploadGenerationSchema = z.number().int().positive().max(maximumUploadGeneration);
 export type TemporaryUploadPart = { organizationId: string; uploadId: string; index: number; generation?: number };
 

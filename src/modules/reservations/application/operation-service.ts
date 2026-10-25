@@ -1,4 +1,6 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import { operationHash } from "./operation-hash";
+export { operationHash } from "./operation-hash";
 import { headers } from "next/headers";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
@@ -138,9 +140,6 @@ export async function operationMeta(deps: OperationDeps) {
     requestId: h.get("x-request-id") ?? randomUUID(),
     ipAddress: h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
   };
-}
-export function operationHash(value: unknown) {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 export async function operationAudit(
   repo: OperationRepository,
