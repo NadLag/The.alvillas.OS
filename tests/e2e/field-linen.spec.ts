@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { fieldWorkSnapshotSchema } from "@/modules/reservations/domain/field-pull";
 import { syncPushInputSchema } from "@/modules/reservations/domain/sync-protocol";
 import { openFieldFixture } from "./support/field-fixture";
 import { storedFieldData } from "./support/field-storage";
@@ -15,10 +16,11 @@ import ar from "../../messages/ar.json" with { type: "json" };
 const entries = z.array(z.object({ deviceId: z.string(), operation: z.object({ client_op_id: z.uuid(), type: z.string(), payload: z.record(z.string(), z.unknown()) }),
   syncStatus: z.string(), resolvedByClientOpId: z.string().optional() }));
 test.use({ serviceWorkers: "allow", actionTimeout: 30000, navigationTimeout: 60000 });
-for (const locale of ["en", "fr", "ar"] as const) test(`Linen counts survive offline reload and require explicit conflict review in ${locale}`, async ({ page, playwright }, info) => {
+for (const category of ["LINEN", "CONSUMABLE", "EQUIPMENT"] as const) for (const locale of ["en", "fr", "ar"] as const) test(`${category === "LINEN" ? "Linen" : category === "CONSUMABLE" ? "Supply" : "Equipment"} counts survive offline reload and require explicit conflict review in ${locale}`, async ({ page, playwright }, info) => {
   test.skip(!process.env.DATABASE_URL, "Real PostgreSQL required for linen counters"); test.setTimeout(300000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw new Error("Linen fixtures require local PostgreSQL");
-  const f = await openFieldFixture(page, info, locale), origin = new URL(page.url()).origin, t = { en, fr, ar }[locale].FieldLinen;
+  const surface = category === "LINEN" ? "linen" : "inventory";
+  const f = await openFieldFixture(page, info, locale), origin = new URL(page.url()).origin, t = { en, fr, ar }[locale][surface === "linen" ? "FieldLinen" : "FieldInventory"];
   const remote = await playwright.request.newContext({ baseURL: origin, storageState: await page.context().storageState() });
   const network = await fieldNetwork(page.context(), "unavailable"); let releaseConflictPull: (() => void) | undefined;
   try {
@@ -27,16 +29,17 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Linen counts survive off
       const task = await tx.operationTask.findUniqueOrThrow({ where: { id: f.taskId } });
       return new ConfigRuleRepository(tx, f.organizationId).createVersion({ key: "inventory.minimums", scopeType: "property", scopeId: task.propertyId,
         effectiveFrom: new Date("2020-01-01"), createdBy: user.id, reason: "Explicit field linen counter acceptance", value: { minimums: [{
-          item: `linen_${randomUUID().replaceAll("-", "")}`, quantity: 8, category: "LINEN", unit: "pieces",
-          name: { en: "Bath towel", fr: "Serviette de bain", ar: "منشفة حمام" } }] } });
+          item: `linen_${randomUUID().replaceAll("-", "")}`, quantity: 8, category, unit: "pieces",
+          name: category === "LINEN" ? { en: "Bath towel", fr: "Serviette de bain", ar: "منشفة حمام" } : category === "CONSUMABLE"
+            ? { en: "Hand soap", fr: "Savon pour les mains", ar: "صابون اليدين" } : { en: "Vacuum cleaner", fr: "Aspirateur", ar: "مكنسة كهربائية" } }] } });
     });
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    const row = page.getByTestId("field-linen-item"), count = row.getByTestId("field-linen-count"), note = row.getByTestId("field-linen-note");
+    const row = page.getByTestId(`field-${surface}-item`), count = row.getByTestId(`field-${surface}-count`), note = row.getByTestId(`field-${surface}-note`);
     await expect(row).toHaveCount(1); await expect(count).toHaveValue("0"); await expect(count).toBeEnabled();
     await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
-    expect((await row.getByTestId("field-linen-increase").boundingBox())!.height).toBeGreaterThanOrEqual(64);
-    await row.getByTestId("field-linen-increase").focus(); await page.keyboard.press("Enter"); await expect(count).toHaveValue("1");
-    await row.getByTestId("field-linen-decrease").click(); await expect(count).toHaveValue("0");
+    expect((await row.getByTestId(`field-${surface}-increase`).boundingBox())!.height).toBeGreaterThanOrEqual(64);
+    await row.getByTestId(`field-${surface}-increase`).focus(); await page.keyboard.press("Enter"); await expect(count).toHaveValue("1");
+    await row.getByTestId(`field-${surface}-decrease`).click(); await expect(count).toHaveValue("0");
     await expect.poll(() => page.evaluate(async () => (await Promise.all(["en", "fr", "ar"].map(language => caches.match(`/${language}/offline/field`)))).every(Boolean))).toBe(true);
     await page.context().setOffline(true);
     await count.fill(locale === "ar" ? "١٢" : "12"); await expect(count).toHaveValue("12");
@@ -46,9 +49,12 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Linen counts survive off
     await page.reload(); await expect(page).toHaveURL(new RegExp(`/${locale}/offline/field\\?task=${f.taskId}$`, "u"));
     await expect(count).toHaveValue("12"); await expect(note).toHaveValue(retainedNote);
     expect(z.array(z.object({ clientOpId: z.uuid() })).parse(await storedFieldData(page, "linenDrafts"))[0]).toEqual(originalDraft);
-    await row.getByTestId("field-linen-save").click(); await expect(row.getByTestId("field-linen-queued")).toHaveText(t.queued);
+    await page.getByTestId("field-checklist-item").check(); await page.getByTestId("field-task-complete").click();
+    await expect(page.getByTestId(`field-${surface}-completion-blocked`)).toHaveText(t.saveBeforeComplete);
+    expect(entries.parse(await storedFieldData(page))).toEqual([]);
+    await row.getByTestId(`field-${surface}-save`).click(); await expect(row.getByTestId(`field-${surface}-queued`)).toHaveText(t.queued);
     const original = entries.parse(await storedFieldData(page))[0]; expect(original.operation.client_op_id).toBe(originalDraft.clientOpId);
-    await page.reload(); await expect(row.getByTestId("field-linen-queued")).toBeVisible(); expect(entries.parse(await storedFieldData(page))[0]).toEqual(original);
+    await page.reload(); await expect(row.getByTestId(`field-${surface}-queued`)).toBeVisible(); expect(entries.parse(await storedFieldData(page))[0]).toEqual(original);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const concurrent = syncPushInputSchema.parse({ organization_id: f.organizationId, actor_user_id: user.id, device_id: randomUUID(), op_schema_version: 1,
       ops: [{ type: "field_stocktake.record", client_op_id: randomUUID(), payload: { ...original.operation.payload, countedQuantity: "11", note: "Concurrent authorized physical count on another device" } }] });
@@ -58,19 +64,19 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Linen counts survive off
     await page.context().route("**/api/sync/pull**", async route => { const response = await route.fetch(); conflictPullHeld = true;
       await heldConflictPull; await route.fulfill({ response }); });
     await network.release(); await page.context().setOffline(false); await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(row.getByTestId("field-linen-review-required")).toBeVisible();
+    await expect(row.getByTestId(`field-${surface}-review-required`)).toBeVisible();
     await expect.poll(async () => entries.parse(await storedFieldData(page)).find(entry => entry.operation.client_op_id === original.operation.client_op_id)?.syncStatus).toBe("conflict");
-    await expect(row.getByTestId("field-linen-save")).toBeDisabled(); await expect(row.getByTestId("field-linen-review" )).toBeEnabled();
-    await expect(row.getByTestId("field-linen-review-required")).toContainText(new Intl.NumberFormat(locale).format(11));
+    await expect(row.getByTestId(`field-${surface}-save`)).toBeDisabled(); await expect(row.getByTestId(`field-${surface}-review`)).toBeEnabled();
+    await expect(row.getByTestId(`field-${surface}-review-required`)).toContainText(new Intl.NumberFormat(locale).format(11));
     await expect.poll(() => conflictPullHeld).toBe(true);
-    const cachedConflictPosition = z.array(z.object({ task: z.object({ id: z.uuid(), linen: z.object({ items: z.array(z.object({ quantity: z.string(), revision: z.string() })) }) }) }))
-      .parse(await storedFieldData(page, "jobs")).find(job => job.task.id === f.taskId)!.task.linen.items[0];
+    const cachedConflictPosition = z.array(z.object({ task: fieldWorkSnapshotSchema }))
+      .parse(await storedFieldData(page, "jobs")).find(job => job.task.id === f.taskId)!.task[surface]!.items[0];
     expect(cachedConflictPosition).toMatchObject({ quantity: "11", revision: "1" });
-    await row.getByTestId("field-linen-review").click(); await expect(count).toHaveValue(""); await expect(note).toHaveValue(retainedNote);
+    await row.getByTestId(`field-${surface}-review`).click(); await expect(count).toHaveValue(""); await expect(note).toHaveValue(retainedNote);
     const reviewed = z.array(z.object({ clientOpId: z.uuid(), expectedQuantity: z.string(), expectedRevision: z.string() })).parse(await storedFieldData(page, "linenDrafts"))[0];
     expect(reviewed.clientOpId).not.toBe(original.operation.client_op_id); expect(reviewed).toMatchObject({ expectedQuantity: "11", expectedRevision: "1" });
     releaseConflictPull?.(); await page.context().unrouteAll({ behavior: "wait" });
-    await count.fill("12"); await row.getByTestId("field-linen-save").click();
+    await count.fill("12"); await row.getByTestId(`field-${surface}-save`).click();
     await expect.poll(async () => entries.parse(await storedFieldData(page)).filter(entry => !entry.resolvedByClientOpId)).toEqual([]);
     const history = entries.parse(await storedFieldData(page)); expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({ operation: original.operation, syncStatus: "conflict", resolvedByClientOpId: reviewed.clientOpId });
@@ -79,20 +85,20 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Linen counts survive off
     // Invalid intermediate typing remains a draft, even when another device
     // changes stock and turns that draft into an explicit review.
     await count.fill("1.5"); await note.fill("Retain an invalid intermediate entry through a stock refresh");
-    await expect(row.getByRole("alert")).toHaveText(t.invalid); await expect(row.getByTestId("field-linen-save")).toBeDisabled();
+    await expect(row.getByRole("alert")).toHaveText(t.invalid); await expect(row.getByTestId(`field-${surface}-save`)).toBeDisabled();
     await expect.poll(async () => z.array(z.object({ countedQuantity: z.string() })).parse(await storedFieldData(page, "linenDrafts"))[0]?.countedQuantity).toBe("1.5");
     const nextRemote = syncPushInputSchema.parse({ ...concurrent, ops: [{ ...concurrent.ops[0], client_op_id: randomUUID(), payload: {
       ...concurrent.ops[0].payload, expectedQuantity: "12", expectedRevision: "2", countedQuantity: "13", note: "Another authorized physical count during draft editing" } }] });
     const nextResult = await remote.post("/api/sync/push", { data: nextRemote, headers: { Origin: origin } }); expect(nextResult.status()).toBe(200);
     expect(z.object({ results: z.array(z.object({ status: z.string() })) }).parse(await nextResult.json()).results[0].status).toBe("APPLIED");
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-    await expect(row.getByTestId("field-linen-review-required")).toBeVisible(); await expect(count).toHaveValue("1.5");
-    await expect(row.getByTestId("field-linen-review-required")).toContainText("1.5");
-    await row.getByTestId("field-linen-review").click(); await expect(count).toHaveValue(""); await count.fill("13");
-    await row.getByTestId("field-linen-save").click();
+    await expect(row.getByTestId(`field-${surface}-review-required`)).toBeVisible(); await expect(count).toHaveValue("1.5");
+    await expect(row.getByTestId(`field-${surface}-review-required`)).toContainText("1.5");
+    await row.getByTestId(`field-${surface}-review`).click(); await expect(count).toHaveValue(""); await count.fill("13");
+    await row.getByTestId(`field-${surface}-save`).click();
     await expect.poll(async () => entries.parse(await storedFieldData(page)).filter(entry => !entry.resolvedByClientOpId)).toEqual([]);
     await expect(count).toHaveValue("13"); expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-    await page.screenshot({ path: info.outputPath(`linen-${locale}.png`), fullPage: true });
+    await page.screenshot({ path: info.outputPath(`${category.toLowerCase()}-${locale}.png`), fullPage: true });
     await withTenant(f.db, f.organizationId, async tx => {
       const observations = await tx.inventoryStocktake.findMany({ where: { taskId: f.taskId }, orderBy: { revision: "asc" } });
       expect(observations.map(observation => observation.countedQuantity)).toEqual([11n, 12n, 13n, 13n]);

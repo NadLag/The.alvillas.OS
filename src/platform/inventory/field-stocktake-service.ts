@@ -53,17 +53,17 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   const property = await batch.repository.property(task.propertyId); if (!property) throw new ReservationNotFoundError();
   const rule = batch.rules.get(task.propertyId); if (!rule) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
   const current = inventoryMinimumsSchema.parse(rule.parsedValue).minimums.find(item => item.item === input.itemKey);
-  if (!current || current.category !== "LINEN") throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
+  if (!current?.category) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
   if (!batch.reportedRules.has(input.catalogRuleId)) batch.reportedRules.set(input.catalogRuleId, await new ConfigRuleRepository(tx, ctx.organizationId).findById(input.catalogRuleId));
   const reported = batch.reportedRules.get(input.catalogRuleId);
   if (!reported || reported.key !== inventoryMinimumsKey || reported.version !== input.catalogVersion || reported.lifecycle === "DRAFT" ||
     reported.effectiveFrom > batch.now || !(batch.scopes.get(task.propertyId) ?? []).some(scope => scope.scopeType === reported.scopeType && scope.scopeId === reported.scopeId))
     throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
   const prior = inventoryMinimumsSchema.parse(reported.value).minimums.find(item => item.item === input.itemKey);
-  if (!prior || prior.category !== "LINEN") throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
+  if (!prior?.category || prior.category !== current.category) throw new FieldStocktakeUnavailableError("CATALOG_CHANGED");
   if ((current.unit ?? null) !== input.unit || (prior.unit ?? null) !== input.unit) throw new FieldStocktakeUnavailableError("UNIT_CHANGED");
   let item = await batch.repository.item(input.itemKey), location = await batch.repository.propertyLocation(task.propertyId);
-  if (item?.archivedAt || location?.archivedAt || (item && item.category !== "LINEN")) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
+  if (item?.archivedAt || location?.archivedAt || (item && item.category !== current.category)) throw new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE");
   if (item && item.unit !== input.unit) throw new FieldStocktakeUnavailableError("UNIT_CHANGED");
   const position = item && location ? await batch.repository.position(location.id, item.id) : { quantity: "0", revision: "0" };
   const decision = decideStocktake({ expected: { quantity: input.expectedQuantity, revision: input.expectedRevision }, current: position,
@@ -77,7 +77,7 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
       before, after, reason: input.note, requestId: meta.requestId, ipAddress: meta.ipAddress ?? null, deviceId: transport.deviceId, occurredAt: batch.now });
   if (!item) {
     const labels = current.name ?? { en: input.itemKey, fr: input.itemKey };
-    item = await batch.repository.createItem({ key: input.itemKey, category: "LINEN", unit: input.unit,
+    item = await batch.repository.createItem({ key: input.itemKey, category: current.category, unit: input.unit,
       labels, sourceConfigRuleId: rule.id });
     await audit("inventory.item.materialized", "inventory_item", item.id, { key: item.key, category: item.category, unit: item.unit, appliedCatalog });
   }

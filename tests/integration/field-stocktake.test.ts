@@ -72,6 +72,11 @@ function pull(f: Fixture, extra: Record<string, unknown> = {}, ctx = f.ctx) {
   return pullFieldWork(ctx, fieldPullInputSchema.parse({ organization_id: f.org, actor_user_id: f.account.id, mode: "assigned", ...extra }),
     { db, env: { NODE_ENV: "test", ENCRYPTION_KEYS: `local:${Buffer.alloc(32, 0x31).toString("base64")}` } });
 }
+async function inventoryFixture(category: "CONSUMABLE" | "EQUIPMENT") {
+  const f = await fixture(), item = category === "CONSUMABLE" ? "soap" : "vacuum";
+  const value = { minimums: [{ ...catalog().minimums[0], item, category }] }, rule = await revise(f, value);
+  return { ...f, rule, input: { ...f.input, itemKey: item, catalogRuleId: rule.id, catalogVersion: rule.version }, value };
+}
 async function whileLocked(f: Fixture, lock: (tx: Parameters<Parameters<typeof withTenant>[2]>[0]) => Promise<unknown>, action: () => Promise<unknown>) {
   let release!: () => void, acquired!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; }), ready = new Promise<void>(resolve => { acquired = resolve; });
@@ -286,5 +291,93 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
       expect(await tx.inventoryStocktake.count()).toBe(0); expect(await tx.inventoryItem.count()).toBe(0);
       expect(await tx.outboxEvent.count()).toBe(0); expect(await tx.syncOp.count({ where: { status: "REJECTED" } })).toBe(1);
     });
+  });
+  for (const category of ["CONSUMABLE", "EQUIPMENT"] as const) {
+    it.skipIf(!url)(`records ${category} through the same immutable ledger and deduplicates concurrent deliveries`, async () => {
+      const f = await inventoryFixture(category), input = syncInput(f), before = await pull(f, { include_inventory: true, include_linen: true });
+      expect(before.tasks[0].inventory?.items).toMatchObject([{ key: f.input.itemKey, quantity: "0", revision: "0", available: true }]);
+      expect(before.tasks[0].linen?.items).toEqual([]);
+      expect((await Promise.all([push(f, input), push(f, input), push(f, input)])).map(result => result.results[0].status).sort())
+        .toEqual(["APPLIED", "DUPLICATE", "DUPLICATE"]);
+      const changed = await pull(f, { include_inventory: true, known_tasks: before.tasks.map(({ id, revision }) => ({ id, revision })) });
+      expect(changed.known_changes[0].inventory?.items[0]).toMatchObject({ key: f.input.itemKey, quantity: "3", revision: "1" });
+      await withTenant(db, f.org, async tx => {
+        expect(await tx.inventoryItem.findFirst()).toMatchObject({ key: f.input.itemKey, category, unit: "pieces" });
+        expect(await tx.inventoryStocktake.count()).toBe(1); expect(await tx.inventoryMovement.count()).toBe(1); expect(await tx.syncOp.count()).toBe(1);
+        expect(await tx.auditLog.count({ where: { action: "inventory.stocktake.record" } })).toBe(1);
+        expect((await tx.outboxEvent.findMany()).map(row => row.type).sort()).toEqual(["InventoryBelowMinimum", "StocktakeVariance"]);
+        expect(await tx.operationTask.findUniqueOrThrow({ where: { id: f.task.id } })).toMatchObject({ state: "ASSIGNED", completedAt: null, version: f.task.version });
+        expect(await tx.financialTransaction.count()).toBe(0);
+      });
+    });
+    it.skipIf(!url)(`requires a fresh explicit ${category} review and keeps current effective agreement provenance`, async () => {
+      const f = await inventoryFixture(category), original = syncInput(f), stale = syncInput(f, { ...f.input, countedQuantity: "5" });
+      expect((await push(f, original)).results[0].status).toBe("APPLIED");
+      expect((await push(f, stale)).results[0]).toMatchObject({ status: "CONFLICT", server_version: "1",
+        stocktake: { expected: { quantity: "0", revision: "0" }, current: { quantity: "3", revision: "1" } } });
+      const agreement = await withTenant(db, f.org, tx => tx.managementAgreement.create({ data: { organizationId: f.org, propertyId: f.property.id,
+        reference: "INVENTORY-AGREEMENT", status: "ACTIVE", effectiveFrom: new Date("2022-01-01") } }));
+      const applied = await revise(f, f.value, new Date("2022-01-01"), "agreement", agreement.id);
+      const reviewed = syncInput(f, { ...f.input, countedQuantity: "5", expectedQuantity: "3", expectedRevision: "1" });
+      expect((await push(f, reviewed)).results[0].status).toBe("APPLIED");
+      await withTenant(db, f.org, async tx => {
+        const rows = await tx.inventoryStocktake.findMany({ orderBy: { revision: "asc" } }); expect(rows).toHaveLength(2);
+        expect(rows[1]).toMatchObject({ countedQuantity: 5n, configRuleId: applied.id, configSnapshot: {
+          appliedCatalog: { id: applied.id, scopeType: "agreement", scopeId: agreement.id }, reportedCatalog: { id: f.rule.id, version: f.rule.version }, item: { category } } });
+        expect(await tx.syncOp.count({ where: { status: "CONFLICT" } })).toBe(1);
+      });
+    });
+    it.skipIf(!url)(`denies ${category} writes for read-only, wrong-job and foreign-tenant actors`, async () => {
+      const f = await inventoryFixture(category), foreign = await fixture();
+      const viewer = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set(["task:view"]) } };
+      expect((await pull(f, { include_inventory: true }, viewer)).tasks[0].inventory?.items[0].available).toBe(false);
+      await expect(record(f, f.input, viewer)).rejects.toBeInstanceOf(ReservationAuthorizationError);
+      await expect(record(f, f.input, { ...f.ctx, authContext: { ...f.ctx.authContext,
+        scopes: [{ organizationId: f.org, scopeType: "job", scopeId: randomUUID() }] } })).rejects.toBeInstanceOf(ReservationAuthorizationError);
+      await expect(record(f, f.input, foreign.ctx)).rejects.toBeInstanceOf(ReservationNotFoundError);
+      await empty(f); await empty(foreign);
+    });
+  }
+  it.skipIf(!url)("partitions one explicit effective catalog into linen and inventory without inventing missing categories or changing legacy revisions", async () => {
+    const f = await fixture(), foreign = await fixture(), linenOnly = await pull(f, { include_linen: true });
+    await revise(f, { minimums: [...catalog().minimums, { item: "soap", quantity: 4, category: "CONSUMABLE", unit: "bottles" },
+      { item: "vacuum", quantity: 1, category: "EQUIPMENT", unit: "pieces" }, { item: "unclassified", quantity: 7 }] });
+    const mixed = await pull(f, { include_inventory: true, include_linen: true, known_tasks: [{ id: foreign.task.id, revision: null }] });
+    expect(mixed.tasks[0].linen?.items.map(item => item.key)).toEqual(["bath_towel"]);
+    expect(mixed.tasks[0].inventory?.items.map(item => item.key)).toEqual(["soap", "vacuum"]); expect(mixed.tombstones).toEqual([foreign.task.id]);
+    expect((await pull(f)).tasks[0]).not.toHaveProperty("inventory");
+    const justLinen = await pull(f, { include_linen: true }); expect(justLinen.tasks[0]).not.toHaveProperty("inventory");
+    expect(linenOnly.tasks[0].linen?.items[0].quantity).toBe("0");
+    await expect(record(f, { ...f.input, itemKey: "unclassified", catalogRuleId: mixed.tasks[0].inventory!.catalog!.id,
+      catalogVersion: mixed.tasks[0].inventory!.catalog!.version })).rejects.toEqual(new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE"));
+    expect(JSON.stringify(mixed)).not.toContain(foreign.property.id); await empty(f);
+  });
+  it.skipIf(!url)("rejects category changes before and after materialization rather than recategorizing existing inventory", async () => {
+    const f = await inventoryFixture("CONSUMABLE");
+    const changed = await revise(f, { minimums: [{ ...f.value.minimums[0], category: "EQUIPMENT" }] });
+    await expect(record(f)).rejects.toEqual(new FieldStocktakeUnavailableError("CATALOG_CHANGED")); await empty(f);
+    await record(f, { ...f.input, catalogRuleId: changed.id, catalogVersion: changed.version });
+    const back = await revise(f, f.value, new Date("2023-01-01"));
+    expect((await pull(f, { include_inventory: true })).tasks[0].inventory?.items[0].available).toBe(false);
+    await expect(record(f, { ...f.input, expectedQuantity: "3", expectedRevision: "1", catalogRuleId: back.id, catalogVersion: back.version }))
+      .rejects.toEqual(new FieldStocktakeUnavailableError("ITEM_UNAVAILABLE"));
+    await withTenant(db, f.org, async tx => { expect(await tx.inventoryStocktake.count()).toBe(1); expect(await tx.inventoryItem.findFirst()).toMatchObject({ category: "EQUIPMENT" }); });
+  });
+  it.skipIf(!url)("batches both stocktake surfaces across properties without adding queries per job", async () => {
+    const f = await inventoryFixture("CONSUMABLE"), ctx = { ...f.ctx, authContext: { ...f.ctx.authContext, scopes: [{ organizationId: f.org }] } };
+    const scoped = new URL(url!); scoped.username = scoped.password = "alvillas_ops_tests";
+    const measured = new PrismaClient({ datasourceUrl: scoped.toString(), log: [{ emit: "event", level: "query" }] }); let queries = 0;
+    measured.$on("query", () => { queries += 1; });
+    const input = fieldPullInputSchema.parse({ organization_id: f.org, actor_user_id: f.account.id, mode: "assigned", include_linen: true, include_inventory: true });
+    const run = () => pullFieldWork(ctx, input, { db: measured, env: { NODE_ENV: "test", ENCRYPTION_KEYS: `local:${Buffer.alloc(32, 0x31).toString("base64")}` } });
+    try {
+      expect((await run()).tasks).toHaveLength(1); const single = queries;
+      for (let index = 0; index < 12; index += 1) {
+        const other = await fixture(f.org);
+        await withTenant(db, f.org, tx => tx.operationTask.update({ where: { id: other.task.id }, data: { assignedToUserAccountId: f.account.id, assignedToPersonId: f.person.id } }));
+      }
+      queries = 0; const many = await run(); expect(many.tasks).toHaveLength(13);
+      expect(many.tasks.every(task => task.linen && task.inventory)).toBe(true); expect(queries).toBeLessThanOrEqual(single + 2);
+    } finally { await measured.$disconnect(); }
   });
 });

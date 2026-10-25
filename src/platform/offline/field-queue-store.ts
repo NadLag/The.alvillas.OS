@@ -43,9 +43,14 @@ export function isFieldResultApplied(type: FieldQueueEntry["operation"]["type"],
     (!result.error_code || (type === "field_task.complete" && result.error_code === "DUPLICATE_COMPLETION")));
 }
 export function fieldLinenBaseMatches(value: FieldStocktakePayload, task: FieldWorkSnapshot): boolean {
-  const item = task.linen?.items.find(item => item.key === value.itemKey);
-  return Boolean(task.canEdit && item?.available && task.linen?.catalog?.id === value.catalogRuleId &&
-    task.linen.catalog.version === value.catalogVersion && item.unit === value.unit && item.quantity === value.expectedQuantity && item.revision === value.expectedRevision);
+  const surface = fieldStocktakeSurface(task, value.itemKey), snapshot = surface ? task[surface] : undefined;
+  const item = snapshot?.items.find(item => item.key === value.itemKey);
+  return Boolean(task.canEdit && item?.available && snapshot?.catalog?.id === value.catalogRuleId &&
+    snapshot.catalog.version === value.catalogVersion && item.unit === value.unit && item.quantity === value.expectedQuantity && item.revision === value.expectedRevision);
+}
+export function fieldStocktakeSurface(task: FieldWorkSnapshot, itemKey: string): "linen" | "inventory" | undefined {
+  const surfaces = (["linen", "inventory"] as const).filter(surface => task[surface]?.items.some(item => item.key === itemKey));
+  return surfaces.length === 1 ? surfaces[0] : undefined;
 }
 
 export class FieldQueueStore extends Dexie {
@@ -192,12 +197,13 @@ export class FieldQueueStore extends Dexie {
   }
 
   private async advanceLinenPosition(scope: FieldQueueScope, value: FieldStocktakePayload, position: StockPosition): Promise<boolean> {
-    const job = await this.jobs.get(`${fieldIdentity(scope)}:${value.taskId}`), item = job?.task.linen?.items.find(item => item.key === value.itemKey);
+    const job = await this.jobs.get(`${fieldIdentity(scope)}:${value.taskId}`), surface = job ? fieldStocktakeSurface(job.task, value.itemKey) : undefined;
+    const snapshot = surface ? job?.task[surface] : undefined, item = snapshot?.items.find(item => item.key === value.itemKey);
     // Both successful and conflicted receipts advance only their exact base.
     // A newer pull, count, unit or draft must never be overwritten.
-    if (!job?.task.linen || !item || item.quantity !== value.expectedQuantity || item.revision !== value.expectedRevision || item.unit !== value.unit) return false;
-    await this.jobs.put({ ...job, task: { ...job.task, linen: { ...job.task.linen,
-      items: job.task.linen.items.map(current => current.key === value.itemKey ? { ...current, ...position } : current) } } });
+    if (!job || !surface || !snapshot || !item || item.quantity !== value.expectedQuantity || item.revision !== value.expectedRevision || item.unit !== value.unit) return false;
+    await this.jobs.put({ ...job, task: { ...job.task, [surface]: { ...snapshot,
+      items: snapshot.items.map(current => current.key === value.itemKey ? { ...current, ...position } : current) } } });
     return true;
   }
 

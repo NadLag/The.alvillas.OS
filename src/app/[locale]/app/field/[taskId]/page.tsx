@@ -2,7 +2,7 @@ import { OperationEvidencePanel } from "@/modules/reservations/ui/operation-evid
 import { FieldPwa } from "@/platform/offline/field-pwa";
 import { FieldLanguage } from "@/platform/offline/field-language";
 import { FieldPhotoCapture } from "@/platform/offline/field-photo-capture";
-import { FieldLinen } from "@/platform/offline/field-linen";
+import { FieldInventory, FieldLinen } from "@/platform/offline/field-linen";
 import { OperationForm } from "@/modules/reservations/ui/operation-form";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
@@ -108,6 +108,7 @@ export default async function FieldTaskPage({
         organizationId={ctx.organizationId}
         taskId={task.id}
         beforeComplete={<><FieldLinen scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} taskId={task.id} locale={appLocale} />
+          <FieldInventory scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} taskId={task.id} locale={appLocale} />
           <FieldPhotoCapture key={`${ctx.organizationId}:${ctx.actorId}:${task.id}`} scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} taskId={task.id} /></>}
       />
       <Link className="secondary-button whatsapp-entry" data-testid="task-whatsapp" href={whatsappComposerPath(appLocale, { type: "task", id: task.id })}>{whatsapp("title")}</Link>

@@ -2326,5 +2326,33 @@
     "save": "Record count",
     "saving": "Saving count…",
     "saveBeforeComplete": "Save or queue your linen count before finishing the job."
+  },
+  "FieldInventory": {
+    "title": "Inventory count",
+    "guidance": "Count the configured supplies and equipment at this villa. Save each count before finishing the job.",
+    "preparing": "Preparing the saved inventory list…",
+    "empty": "No inventory items are configured for this villa.",
+    "storageError": "The count could not be saved on this device. Keep this page open and free device storage, then try again.",
+    "unsaved": "Your inventory count is saved on this device. Save the count before leaving this job.",
+    "expected": "Expected: {quantity}",
+    "decrease": "Decrease {item}",
+    "increase": "Increase {item}",
+    "count": "Physical count of {item}",
+    "enterCount": "Enter a whole count.",
+    "variance": "Difference: {quantity}",
+    "invalid": "Enter a valid whole count and a reason.",
+    "note": "Count note or reason",
+    "queued": "Count queued. You can continue working.",
+    "savedDraft": "Draft saved on this device.",
+    "synced": "Count synchronized.",
+    "reviewRequired": "Stock or access changed. Review the current stock and physically count again before submitting.",
+    "originalCount": "Your original count",
+    "currentStock": "Current stock",
+    "review": "Review current stock and recount",
+    "previousCount": "Previous count retained for review: {quantity}",
+    "unavailable": "This inventory item cannot be counted for this job. Ask your manager to review it.",
+    "save": "Record count",
+    "saving": "Saving count…",
+    "saveBeforeComplete": "Save your inventory counts before finishing the job."
   }
 }

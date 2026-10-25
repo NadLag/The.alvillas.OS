@@ -4,12 +4,36 @@ import Dexie from "dexie";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
 import { FieldQueue } from "@/platform/offline/field-queue";
-import { fieldIdentity, type FieldLinenDraftInput } from "@/platform/offline/field-queue-store";
+import { fieldIdentity, fieldLinenBaseMatches, type FieldLinenDraftInput } from "@/platform/offline/field-queue-store";
 import { syncFieldQueue } from "@/platform/offline/field-sync";
 import { syncPushInputSchema } from "@/modules/reservations/domain/sync-protocol";
 
 const scope = { organizationId: randomUUID(), userId: randomUUID() }, stamp = "2026-10-25T12:00:00.000Z";
 const stores: FieldQueue[] = [];
+
+describe("inventory shares the durable stocktake journal", () => {
+  for (const status of ["APPLIED", "CONFLICT"] as const) it(`advances an inventory ${status} receipt without changing linen or its draft`, async () => {
+    const task = job(), linen = structuredClone(task.linen!);
+    Object.assign(task, { inventory: { ...structuredClone(linen), items: [{ ...linen.items[0], key: "soap" }] } });
+    const queue = new FieldQueue(`inventory-${randomUUID()}`); stores.push(queue); await queue.activate(scope);
+    const state = await queue.prepareCache(scope); await queue.publishCache(scope, state, [task], [], "cursor", stamp);
+    const value = { ...draft(task), itemKey: "soap" };
+    expect(fieldLinenBaseMatches(value, task)).toBe(true);
+    await queue.saveLinenDraft(scope, value, state.incarnation); const original = await queue.enqueueLinen(scope, value, state.incarnation);
+    const result = status === "APPLIED" ? { client_op_id: value.clientOpId, status, server_version: "4" } : {
+      client_op_id: value.clientOpId, status, server_version: "4", error_code: "STOCKTAKE_CONFLICT",
+      stocktake: { expected: { quantity: "12", revision: "3" }, current: { quantity: "11", revision: "4" } } };
+    await queue.acknowledge(scope, original, result);
+    const cached = (await queue.cachedJobs(scope))[0]; expect(cached.linen).toEqual(linen);
+    expect(cached).toMatchObject({ inventory: { items: [{ key: "soap", quantity: status === "APPLIED" ? "10" : "11", revision: "4" }] } });
+    expect((await queue.entries(scope)).length).toBe(status === "APPLIED" ? 0 : 1);
+    await queue.wipe(scope); for (const table of queue.tables) expect(await table.count()).toBe(0);
+  });
+  it("refuses an item appearing in both stocktake surfaces instead of choosing an ambiguous base", () => {
+    const task = job(); Object.assign(task, { inventory: structuredClone(task.linen) });
+    expect(fieldLinenBaseMatches(draft(task), task)).toBe(false);
+  });
+});
 function job(): FieldWorkSnapshot {
   return { id: randomUUID(), propertyId: randomUUID(), propertyName: "Linen villa", propertyAddress: "Test", propertyTimezone: "Africa/Casablanca",
     reservationReference: null, title: { en: "Observe linen", fr: "Compter le linge" }, type: "INSPECTION", state: "ASSIGNED", priority: "NORMAL",
