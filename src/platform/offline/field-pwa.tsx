@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import type { FieldCacheAudience, FieldQueueEntry, FieldQueueScope } from "./field-queue-store";
 import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
 import { fieldQueueAge, type FieldQueueAge } from "./field-queue-age";
-import { refreshFieldApp } from "./field-update";
+import { refreshFieldApp, settleFieldForegroundWork } from "./field-update";
 import { liveQuery } from "dexie";
 import { fieldQueue } from "./field-queue";
 import { resolveFieldScope } from "./field-session";
@@ -31,9 +31,13 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
   const [notice, setNotice] = useState<"installHelp" | "iosHelp" | "saveBeforeUpdate" | "unavailable" | null>(null);
   const registration = useRef<ServiceWorkerRegistration | null>(null);
   const updateRequested = useRef(false);
+  const updateEpoch = useRef(0);
+  const foregroundWork = useRef(new Set<Promise<void>>());
+  const syncAfterUpdate = useRef(false);
   const retrySync = useRef<() => void>(() => undefined);
 
   useEffect(() => {
+    const epoch = updateEpoch.current;
     let disposed = false;
     let subscription: { unsubscribe(): void } | undefined;
     let cacheSubscription: { unsubscribe(): void } | undefined;
@@ -71,10 +75,10 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
       }, error: () => setCached(null) });
       return queue;
     })();
-    const sync = async (afterCurrent = false) => {
+    const performSync = async (afterCurrent = false) => {
       try {
         const queue = await ready;
-        if (disposed || !navigator.onLine) return;
+        if (disposed || !navigator.onLine || updateRequested.current) return;
         setSyncing(true);
         const outcome = await syncFieldQueue(queue, scope);
         if (photoRetry) clearTimeout(photoRetry);
@@ -86,13 +90,19 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
         // The initial/timer drain may finish after explicit promotion started.
         // Do not restart the exiting worker with a redundant automatic pull.
         // Foreground online/focus and manual synchronization still opt in.
-        if (disposed || (!afterCurrent && registration.current?.waiting)) return;
+        if (disposed || updateRequested.current || (!afterCurrent && registration.current?.waiting)) return;
         try {
           await refreshFieldCache(queue, scope, fetch, { afterCurrent, audience });
           if (!disposed) { setCacheFailed(false); window.dispatchEvent(new Event("alvillas-field-cache-ready")); }
         } catch { if (!disposed) setCacheFailed(true); }
       } catch { if (!disposed) setNotice("unavailable"); }
       finally { if (!disposed) setSyncing(false); }
+    };
+    const sync = (afterCurrent = false) => {
+      if (updateRequested.current) { syncAfterUpdate.current = true; return Promise.resolve(); }
+      const pending = performSync(afterCurrent); foregroundWork.current.add(pending);
+      void pending.finally(() => foregroundWork.current.delete(pending));
+      return pending;
     };
     retrySync.current = () => { void sync(true); };
     const checkUpdate = async () => {
@@ -160,6 +170,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     document.addEventListener("click", offlineNavigation, true);
     window.addEventListener("alvillas-field-acknowledged", acknowledgedHere);
     return () => {
+      updateEpoch.current = epoch + 1; updateRequested.current = false; syncAfterUpdate.current = false;
       disposed = true; subscription?.unsubscribe(); cacheSubscription?.unsubscribe();
       if (photoRetry) clearTimeout(photoRetry);
       if (ageTimer) clearTimeout(ageTimer);
@@ -185,13 +196,28 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"]')) { setNotice("saveBeforeUpdate"); return; }
     if (updateRequested.current) return;
     updateRequested.current = true;
-    refreshFieldApp(registration.current, () => {
-      if (!navigator.onLine) { updateRequested.current = false; setOffline(true); return; }
-      if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"]')) { updateRequested.current = false; setNotice("saveBeforeUpdate"); return; }
-      window.location.reload();
-    }, () => {
-      updateRequested.current = false; setNotice("unavailable");
-    });
+    const epoch = updateEpoch.current;
+    const resume = () => {
+      updateRequested.current = false;
+      if (syncAfterUpdate.current) { syncAfterUpdate.current = false; retrySync.current(); }
+    };
+    const unavailable = () => {
+      if (updateEpoch.current !== epoch) return;
+      resume(); setNotice("unavailable");
+    };
+    void settleFieldForegroundWork(foregroundWork.current).then(settled => {
+      if (updateEpoch.current !== epoch) return;
+      if (!settled) { unavailable(); return; }
+      const reload = () => {
+        if (updateEpoch.current !== epoch) return;
+        if (!navigator.onLine) { resume(); setOffline(true); return; }
+        if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"]')) { resume(); setNotice("saveBeforeUpdate"); return; }
+        window.location.reload();
+      };
+      if (!navigator.onLine) { resume(); setOffline(true); return; }
+      if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"]')) { resume(); setNotice("saveBeforeUpdate"); return; }
+      refreshFieldApp(registration.current, reload, unavailable);
+    }).catch(unavailable);
   }
 
   return <aside className="field-pwa-tools" aria-label={t("tools")} data-testid="field-pwa">

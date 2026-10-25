@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+import { z } from "zod";
 import type { CDPSession, Request } from "@playwright/test";
 import { withTenant } from "@/platform/db/tenant";
 import en from "../../messages/en.json" with { type: "json" };
@@ -11,6 +12,66 @@ import { inspectFieldWorker } from "./support/field-worker-diagnostics";
 import { fieldNetwork } from "./support/field-network";
 
 test.use({ serviceWorkers: "allow", channel: "chromium" });
+test("Explicit update waits for an active foreground cache response without losing queued work", async ({ browserName }, info) => {
+  test.skip(!process.env.DATABASE_URL, "Real PostgreSQL required for foreground update concurrency"); test.setTimeout(180000);
+  expect(browserName).toBe("chromium");
+  const native = await fieldBrowser(info), page = native.page;
+  let fixture: Awaited<ReturnType<typeof openFieldFixture>> | undefined, releasePull: (() => void) | undefined;
+  try {
+    await page.addInitScript(() => {
+      let requested = 0;
+      Object.defineProperty(window, "fieldForegroundPromotions", { get: () => requested });
+      const send: unknown = Object.getOwnPropertyDescriptor(ServiceWorker.prototype, "postMessage")?.value;
+      if (typeof send !== "function") throw Error("Native worker messaging required");
+      ServiceWorker.prototype.postMessage = function (this: ServiceWorker, ...args: [unknown, (Transferable[] | StructuredSerializeOptions)?]) {
+        const value = args[0];
+        if (value && typeof value === "object" && "type" in value && value.type === "ALVILLAS_SKIP_WAITING") requested++;
+        Reflect.apply(send, this, args);
+      };
+    });
+    const f = await openFieldFixture(page, info, "en"); fixture = f;
+    const network = await fieldNetwork(native.context, "unavailable"); await network.revision(randomUUID());
+    await page.evaluate(async () => { await (await navigator.serviceWorker.getRegistration())?.update(); });
+    const update = page.getByTestId("field-update"); await expect(update).toBeVisible();
+    await page.getByTestId("field-checklist-item").check();
+    await page.getByTestId("field-task-complete-form").locator('textarea[name="note"]').fill("Retain work while a real foreground response is pending");
+    await native.context.setOffline(true); await page.getByTestId("field-task-complete").click();
+    await expect(page.getByTestId("field-task-sync-status")).toHaveText(en.Field.offlineQueued);
+    const original = await storedFieldData(page); expect(original).toHaveLength(1);
+    const key = z.object({ deviceId: z.uuid(), operation: z.object({ client_op_id: z.uuid() }) }).parse(original[0]);
+    const held = new Promise<void>(resolve => { releasePull = resolve; }); let pullPending = false;
+    await native.context.route("**/api/sync/pull**", async route => {
+      const response = await route.fetch(); expect(response.status()).toBe(200); pullPending = true;
+      await held; await route.fulfill({ response });
+    });
+    await native.context.setOffline(false); await expect.poll(() => pullPending).toBe(true); await expect(update).toBeEnabled();
+    await expect(page.locator('[data-field-dirty="true"]')).toHaveCount(0);
+    const before = await page.evaluate(() => performance.timeOrigin);
+    await page.evaluate(async () => {
+      const expected = (await navigator.serviceWorker.getRegistration())?.waiting;
+      window.addEventListener("beforeunload", () => sessionStorage.setItem("field-foreground-controller-adopted", String(Boolean(expected) && navigator.serviceWorker.controller === expected)), { once: true });
+    });
+    await update.click();
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(before);
+    expect(await page.evaluate(() => "fieldForegroundPromotions" in window ? window.fieldForegroundPromotions : -1)).toBe(0);
+    await expect(page.getByTestId("field-pwa-notice")).toHaveText(en.FieldPwa.unavailable);
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(before); expect(await storedFieldData(page)).toEqual(original);
+    expect(await page.evaluate(() => "fieldForegroundPromotions" in window ? window.fieldForegroundPromotions : -1)).toBe(0);
+    if (!releasePull) throw Error("Native foreground response release required");
+    releasePull(); await expect(page.getByTestId("field-sync-now")).toBeEnabled();
+    const refreshed = page.waitForEvent("load"); await update.click(); await refreshed;
+    expect(await page.evaluate(() => sessionStorage.getItem("field-foreground-controller-adopted"))).toBe("true");
+    expect(await storedFieldData(page)).toEqual(original);
+    expect(await withTenant(f.db, f.organizationId, tx => tx.syncOp.count({ where: { payload: { path: ["taskId"], equals: f.taskId } } }))).toBe(0);
+    await network.release(); const jobs = page.waitForURL(/\/en\/app\/field$/u); await page.evaluate(() => window.dispatchEvent(new Event("focus"))); await jobs;
+    await expect.poll(() => storedFieldData(page)).toEqual([]);
+    await withTenant(f.db, f.organizationId, async tx => {
+      expect(await tx.syncOp.count({ where: { deviceId: key.deviceId, clientOpId: key.operation.client_op_id, status: "APPLIED" } })).toBe(1);
+      expect(await tx.auditLog.count({ where: { resourceId: f.taskId, action: "task.complete" } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "TaskCompleted", payload: { path: ["taskId"], equals: f.taskId } } })).toBe(1);
+    });
+  } finally { releasePull?.(); await native.close(); await fixture?.db.$disconnect(); }
+});
 test("Explicit update retains queued work while a native background acknowledgement is still pending", async ({ browserName }, info) => {
   test.skip(!process.env.DATABASE_URL, "Real PostgreSQL required for update/background concurrency"); test.setTimeout(180000); expect(browserName).toBe("chromium");
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw new Error("Update concurrency fixtures require local PostgreSQL");

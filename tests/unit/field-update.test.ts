@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { refreshFieldApp } from "@/platform/offline/field-update";
+import { refreshFieldApp, settleFieldForegroundWork } from "@/platform/offline/field-update";
 
 class UpdateChannel {
   static latest: UpdateChannel;
@@ -28,6 +28,30 @@ beforeEach(() => {
   vi.stubGlobal("navigator", { serviceWorker: serviceWorkers });
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+describe("foreground work before explicit worker promotion", () => {
+  it("waits for every concurrent foreground request", async () => {
+    let first!: () => void, second!: () => void, finished = false;
+    const requests = [new Promise<void>(resolve => { first = resolve; }), new Promise<void>(resolve => { second = resolve; })];
+    const waiting = settleFieldForegroundWork(requests).then(value => { finished = true; return value; });
+    second(); await Promise.resolve(); expect(finished).toBe(false);
+    first(); expect(await waiting).toBe(true); expect(vi.getTimerCount()).toBe(0);
+  });
+  it("settles idle work without leaving a timer", async () => {
+    expect(await settleFieldForegroundWork([])).toBe(true); expect(vi.getTimerCount()).toBe(0);
+  });
+  it("preserves a stuck request and allows a later explicit retry", async () => {
+    let release!: () => void, completed = false;
+    const request = new Promise<void>(resolve => { release = resolve; }).then(() => { completed = true; });
+    const first = settleFieldForegroundWork([request]); await vi.advanceTimersByTimeAsync(3000);
+    expect(await first).toBe(false); expect(completed).toBe(false); expect(vi.getTimerCount()).toBe(0);
+    release(); expect(await settleFieldForegroundWork([request])).toBe(true); expect(completed).toBe(true);
+  });
+  it("reports foreground failure without changing worker ownership", async () => {
+    expect(await settleFieldForegroundWork([Promise.reject(new Error("Cache response unavailable"))])).toBe(false);
+    expect(controller).toBeNull(); expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 describe("explicit field worker refresh", () => {
   it("does not reload after an acknowledgement until the replacement worker is activated", () => {
