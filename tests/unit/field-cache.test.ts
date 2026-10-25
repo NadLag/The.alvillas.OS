@@ -78,7 +78,7 @@ describe("field work cache", () => {
       await legacy.table<FieldQueueEntry, number>("operations").put(entry);
     } finally { legacy.close(); }
     const queue = new FieldQueue(name); stores.push(queue); await queue.activate(scope);
-    expect(queue.verno).toBe(4); expect((await queue.metadata.get("device"))?.value).toBe(deviceId); expect(await queue.entries(scope)).toEqual([entry]);
+    expect(queue.verno).toBe(5); expect((await queue.metadata.get("device"))?.value).toBe(deviceId); expect(await queue.entries(scope)).toEqual([entry]);
     expect(await queue.proxyJobs.count()).toBe(0); expect(await queue.proxyDrafts.count()).toBe(0);
     expect(await queue.cachedJobs(scope)).toEqual([task]); expect(await queue.drafts.get(cacheId)).toEqual(saved);
     expect((await queue.readCache(scope)).state).toEqual(state); expect(await queue.photos.count()).toBe(0);

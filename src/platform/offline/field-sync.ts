@@ -32,6 +32,11 @@ async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeo
     if (entry.operation.type === "field_task.complete" && blockedPhotoTasks.has(entry.operation.payload.taskId)) {
       outcome = blockedPhotoTasks.get(entry.operation.payload.taskId)!; continue;
     }
+    if (entry.operation.type === "field_task.complete") {
+      const taskId = entry.operation.payload.taskId;
+      const counts = (await queue.entries(scope)).filter(count => !count.resolvedByClientOpId && count.operation.type === "field_stocktake.record" && count.operation.payload.taskId === taskId);
+      if (counts.length) { outcome = counts.some(count => count.syncStatus === "conflict") ? "conflict" : counts.some(count => count.syncStatus === "rejected") ? "rejected" : "queued"; continue; }
+    }
     if (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach") {
       const prepared = await prepareQueuedPhoto(queue, scope, entry, send);
       if (prepared === "queued" || prepared === "rejected") return prepared;
