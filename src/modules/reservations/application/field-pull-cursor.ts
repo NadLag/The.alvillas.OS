@@ -12,7 +12,7 @@ export class FieldPullError extends Error {
 const cursorSchema = z.object({
   kind: z.enum(["page", "checkpoint"]), mode: z.enum(["today", "assigned", "supervised"]), propertyId: z.uuid().nullable(),
   scope: z.string().regex(/^[a-zA-Z0-9_-]{43}$/u), asOf: z.iso.datetime(), expiresAt: z.iso.datetime(),
-  after: z.object({ date: stayDateSchema, id: z.uuid() }).strict().nullable(), devicePolicy: z.boolean().optional()
+  after: z.object({ date: stayDateSchema, id: z.uuid() }).strict().nullable()
 }).strict();
 export type FieldPullCursor = z.infer<typeof cursorSchema>;
 const scopeValue = (scope: Scope) => ({ organizationId: scope.organizationId, scopeType: scope.scopeType,
@@ -39,8 +39,7 @@ export function newFieldPullCursor(ctx: ReservationActorContext, input: FieldPul
     .filter(value => Number.isFinite(value) && value >= now.getTime());
   const expiry = Math.max(now.getTime() + 1, Math.min(now.getTime() + 300_000, ...boundaries));
   return { kind: "checkpoint", mode: input.mode, propertyId: input.property_id ?? null,
-    scope: fieldScopeStamp(ctx.authContext), asOf: now.toISOString(), expiresAt: new Date(expiry).toISOString(), after: null,
-    ...(input.include_device_policy ? { devicePolicy: true } : {}) };
+    scope: fieldScopeStamp(ctx.authContext), asOf: now.toISOString(), expiresAt: new Date(expiry).toISOString(), after: null };
 }
 export function encodeFieldPullCursor(value: FieldPullCursor, ctx: ReservationActorContext, env?: NodeJS.ProcessEnv): string {
   return encryptBytes(Buffer.from(JSON.stringify(value)), context(ctx), env).toString("base64url");
@@ -51,7 +50,7 @@ export function decodeFieldPullCursor(token: string, ctx: ReservationActorContex
     if (token.length > 2048 || !/^[a-zA-Z0-9_-]+$/u.test(token)) throw new Error("invalid_cursor");
     value = cursorSchema.parse(JSON.parse(decryptBytes(Buffer.from(token, "base64url"), context(ctx), env).toString("utf8")));
   } catch { throw new FieldPullError("invalid_cursor"); }
-  if (value.mode !== input.mode || value.propertyId !== (input.property_id ?? null) || Boolean(value.devicePolicy) !== Boolean(input.include_device_policy)) throw new FieldPullError("invalid_cursor");
+  if (value.mode !== input.mode || value.propertyId !== (input.property_id ?? null)) throw new FieldPullError("invalid_cursor");
   if (value.scope !== fieldScopeStamp(ctx.authContext)) throw new FieldPullError("reset_required");
   if ((value.kind === "page" || input.only_known) && new Date(value.expiresAt).getTime() <= now.getTime()) throw new FieldPullError("reset_required");
   if (input.only_known && value.kind !== "checkpoint") throw new FieldPullError("invalid_cursor");

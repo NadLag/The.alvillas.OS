@@ -6,6 +6,9 @@ import { FieldQueue, syncFieldQueue } from "@/platform/offline/field-queue";
 import { fieldIdentity, type FieldPhoto, type FieldQueueEntry, type FieldQueueScope } from "@/platform/offline/field-queue-store";
 import { refreshFieldCache } from "@/platform/offline/field-pull";
 import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
+import { fieldPullInputSchema } from "@/modules/reservations/domain/field-pull";
+import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
+import { decodeFieldPullCursor, encodeFieldPullCursor, newFieldPullCursor } from "@/modules/reservations/application/field-pull-cursor";
 
 const stores: FieldQueue[] = [], scope: FieldQueueScope = { organizationId: randomUUID(), userId: randomUUID() }, stamp = new Date().toISOString();
 function job(supervised = false): FieldWorkSnapshot {
@@ -32,6 +35,55 @@ function capture(task: FieldWorkSnapshot) {
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(stores.splice(0).map(store => store.delete())); });
 
 describe("durable supervised field cache", () => {
+  it("preserves an unsent draft when a legacy cursor opts into operational policy metadata", async () => {
+    const queue = await setup(), task = job(), now = new Date(stamp);
+    const ctx: ReservationActorContext = { organizationId: scope.organizationId, actorId: scope.userId, personId: randomUUID(), authContext: {
+      organizationId: scope.organizationId, userAccountId: scope.userId, permissions: new Set(["task:view", "task:edit"]),
+      scopes: [{ organizationId: scope.organizationId, scopeType: "property", scopeId: task.propertyId }]
+    } };
+    const env = { NODE_ENV: "test", ENCRYPTION_KEYS: "v1:" + Buffer.alloc(32, 17).toString("base64") } satisfies NodeJS.ProcessEnv;
+    const input = fieldPullInputSchema.parse({ organization_id: scope.organizationId, actor_user_id: scope.userId, mode: "assigned" });
+    const legacy = encodeFieldPullCursor(newFieldPullCursor(ctx, input, now), ctx, env);
+    await queue.prepareCache(scope); const state = (await queue.readCache(scope)).state!;
+    await queue.publishCache(scope, state, [task], [], legacy, stamp);
+    await queue.saveDraft(scope, task.id, [task.checklistItems[0].id], "Retained across the client upgrade", state.incarnation);
+    const originalDraft = await queue.readDraft(scope, task.id);
+    const send = vi.fn<typeof fetch>(request => {
+      const url = new URL(typeof request === "string" ? request : request instanceof URL ? request.href : request.url, "https://example.test");
+      const incoming = fieldPullInputSchema.parse({ organization_id: url.searchParams.get("organization_id"), actor_user_id: url.searchParams.get("actor_user_id"),
+        mode: url.searchParams.get("mode"), include_device_policy: url.searchParams.get("include_device_policy") === "1" });
+      const token = url.searchParams.get("cursor");
+      if (token) {
+        try { decodeFieldPullCursor(token, ctx, incoming, now, env); } catch { return Promise.resolve(Response.json({ error: "invalid_cursor" }, { status: 400 })); }
+      }
+      return Promise.resolve(Response.json({ op_schema_version: 1, organization_id: scope.organizationId, actor_user_id: scope.userId, snapshot_at: stamp,
+        cursor: encodeFieldPullCursor(newFieldPullCursor(ctx, incoming, now), ctx, env), next_cursor: null,
+        tasks: [{ ...task, devicePolicy: null }], known_changes: [], tombstones: [] }));
+    });
+    await refreshFieldCache(queue, scope, send);
+    expect(await queue.readDraft(scope, task.id)).toEqual(originalDraft);
+    expect((await queue.readCache(scope)).state?.incarnation).toBe(state.incarnation);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+  it("retains separate own and supervised policy versions without changing a reused operation", async () => {
+    const queue = await setup(), own = job(), proxy = job(true);
+    own.devicePolicy = { configRuleId: randomUUID(), configVersion: 1, queueWarningAfterMinutes: 20 };
+    proxy.devicePolicy = { configRuleId: randomUUID(), configVersion: 2, queueWarningAfterMinutes: 5 };
+    await publish(queue, own, "assigned"); const supervised = await publish(queue, proxy, "supervised");
+    const ownOp = { client_op_id: randomUUID(), type: "field_task.complete" as const, client_created_at: stamp,
+      payload: { taskId: own.id, checklistItemIds: own.checklistItems.map(item => item.id) } };
+    const queued = await queue.enqueue(scope, ownOp), review = draft(proxy);
+    expect(await queue.saveProxyDraft(scope, review, supervised.incarnation)).toBe(true);
+    const reviewed = await queue.enqueueProxy(scope, review, supervised.incarnation);
+    expect(queued.devicePolicy).toEqual(own.devicePolicy); expect(reviewed.devicePolicy).toEqual(proxy.devicePolicy);
+    expect(queued.operation).toEqual(ownOp); expect(reviewed.operation.payload).not.toHaveProperty("devicePolicy");
+    own.devicePolicy = { configRuleId: randomUUID(), configVersion: 3, queueWarningAfterMinutes: 0 }; await publish(queue, own, "assigned");
+    expect(await queue.enqueue(scope, ownOp)).toEqual(queued);
+    const photo = capture(own), current = (await queue.readCache(scope)).state!;
+    const captured = await queue.enqueuePhoto(scope, photo.manifest, photo.blob, current.incarnation);
+    expect(captured.devicePolicy).toEqual(own.devicePolicy);
+    expect((await queue.entries(scope)).map(row => row.operation.client_op_id)).toEqual([ownOp.client_op_id, review.clientOpId, photo.manifest.localId]);
+  });
   it("upgrades populated v3 without changing the device, original queue, draft, cursor or photo bytes", async () => {
     const name = `proxy-upgrade-${randomUUID()}`, legacy = new Dexie(name), task = job(), photo = capture(task), identity = fieldIdentity(scope), deviceId = randomUUID(), incarnation = randomUUID();
     legacy.version(1).stores({ operations: "++sequence,&localId,[organizationId+userId]", metadata: "key" });

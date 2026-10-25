@@ -3,6 +3,7 @@ import type { SyncPushOp, SyncPushOpResult } from "@/modules/reservations/domain
 import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
 import type { FieldUploadManifest } from "@/modules/reservations/domain/field-upload";
 import { isUploadGeneration } from "@/platform/storage/upload-generation";
+import type { FieldDevicePolicySnapshot } from "@/platform/config/field-device-policy";
 
 export type FieldQueueScope = { organizationId: string; userId: string };
 export type FieldCacheAudience = "assigned" | "supervised";
@@ -20,6 +21,7 @@ export type FieldQueueEntry = FieldQueueScope & {
   result?: SyncPushOpResult;
   supersedesClientOpId?: string;
   resolvedByClientOpId?: string;
+  devicePolicy?: FieldDevicePolicySnapshot | null;
 };
 type Metadata = { key: string; value: string };
 export type FieldCachedJob = FieldQueueScope & { cacheId: string; task: FieldWorkSnapshot };
@@ -98,13 +100,15 @@ export class FieldQueueStore extends Dexie {
 
   async store(scope: FieldQueueScope, operation: SyncPushOp, deviceId?: string): Promise<FieldQueueEntry> {
     const parsed = operation;
-    return this.transaction("rw", this.operations, this.metadata, async () => {
+    const jobs = operation.type === "field_task.proxy_validate" ? this.proxyJobs : this.jobs;
+    return this.transaction("rw", [this.operations, this.metadata, jobs], async () => {
       if ((await this.metadata.get("identity"))?.value !== fieldIdentity(scope)) throw new Error("FIELD_SESSION_CHANGED");
       const localId = `${fieldIdentity(scope)}:${parsed.client_op_id}`;
       const existing = await this.operations.where("localId").equals(localId).first();
       if (existing) return existing;
+      const task = (await jobs.get(`${fieldIdentity(scope)}:${parsed.payload.taskId}`))?.task;
       const item: FieldQueueEntry = { ...scope, localId, deviceId: deviceId ?? (await this.metadata.get("device"))!.value,
-        operation: parsed, syncStatus: "pending" };
+        operation: parsed, syncStatus: "pending", ...(task?.devicePolicy !== undefined ? { devicePolicy: task.devicePolicy } : {}) };
       item.sequence = await this.operations.add(item);
       return item;
     });
@@ -165,7 +169,8 @@ export class FieldQueueStore extends Dexie {
     return this.transaction("rw", [this.operations, this.metadata, this.jobs, this.cacheState, this.photos], async () => {
       if ((await this.metadata.get("identity"))?.value !== identity || (await this.cacheState.get(identity))?.incarnation !== incarnation)
         throw new Error("FIELD_SESSION_CHANGED");
-      if (!(await this.jobs.get(`${identity}:${value.taskId}`))?.task.canEdit) throw new Error("FIELD_PHOTO_UNAVAILABLE");
+      const task = (await this.jobs.get(`${identity}:${value.taskId}`))?.task;
+      if (!task?.canEdit) throw new Error("FIELD_PHOTO_UNAVAILABLE");
       const existing = await this.photos.get(cacheId), entry = await this.operations.where("localId").equals(cacheId).first();
       if (existing) {
         if (JSON.stringify(existing.manifest) !== JSON.stringify(value) || !entry) throw new Error("FIELD_PHOTO_KEY_REUSED");
@@ -175,7 +180,8 @@ export class FieldQueueStore extends Dexie {
       const deviceId = (await this.metadata.get("device"))!.value;
       await this.photos.add({ ...scope, cacheId, taskId: value.taskId, manifest: value, blob, deviceId, incarnation,
         uploadedParts: [], ready: false, attempts: 0, retryAt: 0 });
-      const record: FieldQueueEntry = { ...scope, localId: cacheId, deviceId, syncStatus: "pending", operation: { client_op_id: value.localId,
+      const record: FieldQueueEntry = { ...scope, localId: cacheId, deviceId, syncStatus: "pending",
+        ...(task.devicePolicy !== undefined ? { devicePolicy: task.devicePolicy } : {}), operation: { client_op_id: value.localId,
         type: "field_photo.prepare", client_created_at: new Date().toISOString(), payload: { taskId: value.taskId, photoLocalId: value.localId } } };
       record.sequence = await this.operations.add(record); return record;
     });
