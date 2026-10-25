@@ -1,3 +1,16 @@
+const fieldUpdateTimeoutMs = 3000;
+
+/** Retain in-flight requests and allow explicit retry when they do not settle. */
+export async function settleFieldForegroundWork(work: Iterable<Promise<unknown>>): Promise<boolean> {
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      Promise.all(work).then(() => true, () => false),
+      new Promise<false>(resolve => { deadline = setTimeout(() => resolve(false), fieldUpdateTimeoutMs); })
+    ]);
+  } finally { if (deadline) clearTimeout(deadline); }
+}
+
 export function refreshFieldApp(registration: ServiceWorkerRegistration | null, reload: () => void, unavailable: () => void): void {
   const waiting = registration?.waiting;
   const initialWorker = waiting ?? registration?.active;
@@ -49,7 +62,7 @@ export function refreshFieldApp(registration: ServiceWorkerRegistration | null, 
   };
   // The waiting slot clears while the replacement is still activating. Neither
   // that empty slot nor an acknowledgement proves this document is controlled.
-  const timeout = window.setTimeout(() => finish(ready()), 3000);
+  const timeout = window.setTimeout(() => finish(ready()), fieldUpdateTimeoutMs);
   worker.addEventListener("statechange", changed);
   container.addEventListener("controllerchange", changed);
   channel.port1.onmessage = event => {

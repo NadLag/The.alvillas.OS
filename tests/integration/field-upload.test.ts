@@ -90,6 +90,30 @@ describe("field photo uploads on real PostgreSQL", () => {
       expect(await tx.operationTaskEvidence.count()).toBe(0); expect(await tx.outboxEvent.count()).toBe(0);
     });
   });
+  it.skipIf(!url)("expires migrated microsecond activity exactly once without rounding the idle boundary or rewriting provenance", async () => {
+    const f = await fixture(), activity = new Date(), started = await startFieldUpload(f.ctx, f.input, { ...deps(), now: new Date(activity.getTime() - 120_000) });
+    const policy = await idlePolicy(f, 1);
+    await withTenant(db, f.org, async tx => {
+      await tx.$executeRaw`UPDATE operation_evidence_upload SET last_activity_at=${activity}::timestamptz + INTERVAL '880 microseconds'
+        WHERE organization_id=${f.org}::uuid AND id=${started.uploadId}::uuid`;
+      expect(await tx.$queryRaw`SELECT last_activity_at > date_trunc('milliseconds',last_activity_at) AS precise
+        FROM operation_evidence_upload WHERE id=${started.uploadId}::uuid`).toEqual([{ precise: true }]);
+    });
+    const boundary = new Date(activity.getTime() + 60_000);
+    expect(await expireInactiveFieldUploads(f.org, { db, now: boundary })).toEqual({ expired: 0 });
+    const now = new Date(boundary.getTime() + 1);
+    const results = await Promise.all([expireInactiveFieldUploads(f.org, { db, now }), expireInactiveFieldUploads(f.org, { db, now })]);
+    expect(results.reduce((sum, result) => sum + result.expired, 0)).toBe(1);
+    await withTenant(db, f.org, async tx => {
+      const row = await tx.operationEvidenceUpload.findUniqueOrThrow({ where: { id: started.uploadId } });
+      expect(row).toMatchObject({ status: "CANCELLED", generation: 1, lastActivityAt: activity, expiredAt: now,
+        expiryPolicy: { configRuleId: policy.id, configVersion: policy.version, openUploadIdleAfterMinutes: 1 }, manifest: f.input.manifest });
+      expect(await tx.$queryRaw`SELECT last_activity_at > date_trunc('milliseconds',last_activity_at) AS precise
+        FROM operation_evidence_upload WHERE id=${started.uploadId}::uuid`).toEqual([{ precise: true }]);
+      expect(await tx.auditLog.count({ where: { resourceId: f.task.id, action: "task.photo.upload.expired" } })).toBe(1);
+      expect(await tx.operationTaskEvidence.count()).toBe(0); expect(await tx.syncOp.count()).toBe(0);
+    });
+  });
   it.skipIf(!url)("protects a live signed PUT lease even when the configured idle threshold has elapsed", async () => {
     const f = await fixture(), now = new Date(Date.now() + 60_000), upload = await startFieldUpload(f.ctx, f.input, { ...deps(), now });
     await idlePolicy(f, 1); const storage = new FakeStorageProvider("test");

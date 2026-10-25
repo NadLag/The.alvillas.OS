@@ -35,10 +35,19 @@ export class FieldUploadRepository {
   touchOpen(id: string, generation: number, now: Date) {
     return this.tx.operationEvidenceUpload.updateMany({ where: { organizationId: this.organizationId, id, generation, status: "OPEN", lastActivityAt: { lt: now } }, data: { lastActivityAt: now } });
   }
-  expire(id: string, generation: number, lastActivityAt: Date, now: Date, policy: FieldUploadLifecycleSnapshot) {
-    return this.tx.operationEvidenceUpload.updateMany({ where: { organizationId: this.organizationId, id, generation, status: "OPEN", lastActivityAt,
-      OR: [{ partUploadExpiresAt: null }, { partUploadExpiresAt: { lte: now } }] },
-    data: { status: "CANCELLED", expiredAt: now, expiryPolicy: policy, lifecycleCheckedAt: now } });
+  async expire(id: string, generation: number, now: Date, policy: FieldUploadLifecycleSnapshot) {
+    if (policy.openUploadIdleAfterMinutes === null) return { count: 0 };
+    // Compare the idle boundary in PostgreSQL: migrated TIMESTAMPTZ(6) values
+    // retain microseconds that a JavaScript Date cannot represent. The caller
+    // holds the task/upload locks; this predicate also fences newer activity.
+    const count = await this.tx.$executeRaw(Prisma.sql`UPDATE operation_evidence_upload
+      SET status='CANCELLED',expired_at=${now},expiry_policy=${JSON.stringify(policy)}::jsonb,
+        lifecycle_checked_at=${now},updated_at=CURRENT_TIMESTAMP
+      WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid
+        AND generation=${generation} AND status='OPEN'
+        AND last_activity_at <= ${now}::timestamptz - (${policy.openUploadIdleAfterMinutes}::bigint * INTERVAL '1 minute')
+        AND (part_upload_expires_at IS NULL OR part_upload_expires_at <= ${now}::timestamptz)`);
+    return { count };
   }
   recover(id: string, generation: number, now: Date) {
     if (generation >= 2_147_483_647) return Promise.resolve({ count: 0 });
