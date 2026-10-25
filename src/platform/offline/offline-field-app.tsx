@@ -20,12 +20,12 @@ import { fieldQueue } from "./field-queue";
 import { type FieldQueueScope } from "./field-queue-store";
 import { resolveFieldScope } from "./field-session";
 import { FieldPhotoCapture } from "./field-photo-capture";
-import { FieldLinen } from "./field-linen";
+import { FieldInventory, FieldLinen } from "./field-linen";
 import { FieldProxyForm } from "@/modules/reservations/ui/field-proxy-form";
 import type { FieldCacheAudience } from "./field-queue-store";
 
 function fieldMessages(messages: typeof en) {
-  return { Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, Operations: { manage: messages.Operations.manage } };
+  return { Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, Operations: { manage: messages.Operations.manage } };
 }
 const catalogs = { en: fieldMessages(en), fr: fieldMessages(fr), ar: fieldMessages(ar) };
 export function OfflineFieldApp({ initialLocale }: { initialLocale: AppLocale }) {
@@ -41,6 +41,7 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
   const [audience, setAudience] = useState<FieldCacheAudience>("assigned");
   const [photoBlocked, setPhotoBlocked] = useState(false), photo = useTranslations("FieldPhoto");
   const [linenBlocked, setLinenBlocked] = useState(false), linen = useTranslations("FieldLinen");
+  const [inventoryBlocked, setInventoryBlocked] = useState(false), inventory = useTranslations("FieldInventory");
   useEffect(() => {
     let disposed = false;
     const queue = fieldQueue();
@@ -70,6 +71,8 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
     return `/${nextLocale}/offline/field${query.size ? `?${query}` : ""}`;
   };
   function openJob(id: string | null) {
+    if (document.querySelector('[data-field-inventory-dirty="true"]')) { setInventoryBlocked(true); return; }
+    setInventoryBlocked(false);
     if (document.querySelector('[data-field-linen-dirty="true"]')) { setLinenBlocked(true); return; }
     setLinenBlocked(false);
     if (document.querySelector('[data-field-photo-dirty="true"]') ||
@@ -85,6 +88,7 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
     <FieldLanguage locale={locale} path={path(locale, taskId).replace(`/${locale}`, "")} onChangeLocale={language} />
     {photoBlocked ? <p role="status" data-testid="field-photo-navigation-blocked">{audience === "supervised" ? proxy("unsaved") : photo("unsaved")}</p> : null}
     {linenBlocked ? <p role="status" data-testid="field-linen-navigation-blocked">{linen("unsaved")}</p> : null}
+    {inventoryBlocked ? <p role="status" data-testid="field-inventory-navigation-blocked">{inventory("unsaved")}</p> : null}
     {loading ? <p role="status">{cache("preparing")}</p> : !scope ? <EmptyState testId="field-cache-sign-in"><span>{cache("signIn")}</span> <a className="primary-button" href={`/${locale}/login?surface=field`}>{cache("signInAction")}</a></EmptyState> : <>
       <FieldPwa organizationId={scope.organizationId} userId={scope.userId} audience={audience} />
       {snapshotAt ? <p>{cache("lastUpdated", { time: formatDateTime(locale, new Date(snapshotAt)) })}</p> : null}
@@ -115,6 +119,7 @@ function CachedChecklist({ task, scope, locale }: { task: FieldWorkSnapshot; sco
     {!task.canEdit ? <p role="status">{cache("readOnly")}</p> : null}
     <FieldTaskCompletionForm locale={locale} taskId={task.id} idempotencyKey={idempotencyKey} userId={scope.userId} organizationId={scope.organizationId}
       beforeComplete={<><FieldLinen scope={scope} taskId={task.id} locale={locale} />
+        <FieldInventory scope={scope} taskId={task.id} locale={locale} />
         <FieldPhotoCapture key={`${scope.organizationId}:${scope.userId}:${task.id}`} scope={scope} taskId={task.id} /></>}
       checklistItems={task.checklistItems} mode="cached" readOnly={!task.canEdit} labels={{
         saving: t("saving"), validation: t("forms.validation"), unauthorized: t("forms.unauthorized"), forbidden: t("forms.forbidden"),

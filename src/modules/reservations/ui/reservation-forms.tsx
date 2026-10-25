@@ -123,8 +123,10 @@ export function FieldTaskCompletionForm({
   const fieldText = useTranslations("Field");
   const photoText = useTranslations("FieldPhoto");
   const linenText = useTranslations("FieldLinen");
+  const inventoryText = useTranslations("FieldInventory");
   const [photoBlocked, setPhotoBlocked] = useState(false);
   const [linenBlocked, setLinenBlocked] = useState(false);
+  const [inventoryBlocked, setInventoryBlocked] = useState(false);
   const [progress,progressAction,progressPending]=useActionState(operationAction.bind(null,locale,'progress'),{status:'idle'} as OperationFormState);
   const [checked,setChecked]=useState(()=>new Set(checklistItems.filter(i=>i.completed).map(i=>i.id)));
   const [state, formAction, pending] = useActionState(
@@ -258,6 +260,8 @@ export function FieldTaskCompletionForm({
     setPhotoBlocked(false);
     if (document.querySelector('[data-field-linen-dirty="true"]')) { event.preventDefault(); setLinenBlocked(true); return; }
     setLinenBlocked(false);
+    if (document.querySelector('[data-field-inventory-dirty="true"]')) { event.preventDefault(); setInventoryBlocked(true); return; }
+    setInventoryBlocked(false);
     event.preventDefault();
     if (completing.current || pending || queued) return;
     completing.current = true;
@@ -338,6 +342,7 @@ export function FieldTaskCompletionForm({
       ) : null}
       {beforeComplete}
       {linenBlocked ? <p role="status" data-testid="field-linen-completion-blocked">{linenText("saveBeforeComplete")}</p> : null}
+      {inventoryBlocked ? <p role="status" data-testid="field-inventory-completion-blocked">{inventoryText("saveBeforeComplete")}</p> : null}
       <button
         className="primary-button field-complete-button"
         data-testid="field-task-complete"
@@ -349,7 +354,7 @@ export function FieldTaskCompletionForm({
       <button className="secondary-button field-complete-button" type="submit" data-progress="true" formAction={progressAction} disabled={readOnly||pending||queued||progressPending||offline}>{progressText('saveProgress')}</button>
       {offline && !queued ? <p>{fieldText("offlineProgress")}</p> : null}
       {draftSaved && !queued ? <p aria-live="polite" data-testid="field-draft-saved">{fieldText("draftSaved")}</p> : null}
-      {progress.status==='saved'?<p role="status">{progressText('saved')}</p>:progress.status==='error'?<p role="alert">{progressText(`errors.${progress.message??'generic'}`)}</p>:null}
+      {progress.status==='saved'?<p role="status" data-testid="field-task-progress-status">{progressText('saved')}</p>:progress.status==='error'?<p role="alert">{progressText(`errors.${progress.message??'generic'}`)}</p>:null}
     </form>
   );
 }

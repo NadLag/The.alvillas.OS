@@ -127,6 +127,7 @@ test.describe("identity lifecycle", () => {
     await editRoleForm.getByTestId("edit-custom-role-name").fill(editedCustomRoleName);
     await editRoleForm.locator('input[name="permissionKeys"][value="task:edit"]').check();
     await editRoleForm.getByTestId("edit-custom-role-submit").click();
+    await expect(editRoleForm.getByRole("status")).toHaveText("Custom role updated.", { timeout: 30_000 });
     await expect(page.getByTestId("role-catalog-row").filter({ hasText: editedCustomRoleName })).toContainText(
       "Custom role"
     );

@@ -4,6 +4,7 @@ import { configSlugSchema } from "./identifiers";
 
 export const inventoryMinimumsKey = "inventory.minimums";
 export const inventoryMaximumItems = 200;
+export const inventoryCategorySchema = z.enum(["CONSUMABLE", "LINEN", "EQUIPMENT"]);
 
 export const inventoryMinimumsSchema = z
   .object({
@@ -14,7 +15,7 @@ export const inventoryMinimumsSchema = z
           quantity: z.number().int().min(0),
           name: localizedTextSchema.optional(),
           unit: z.string().trim().min(1).max(60).optional(),
-          category: z.enum(["CONSUMABLE", "LINEN", "EQUIPMENT"]).optional(),
+          category: inventoryCategorySchema.optional(),
           expected_per_stay: z.number().int().min(0).optional()
         })
         .passthrough()

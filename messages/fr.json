@@ -2326,5 +2326,33 @@
     "save": "Enregistrer le relevé",
     "saving": "Enregistrement du relevé…",
     "saveBeforeComplete": "Enregistrez ou mettez votre relevé de linge en attente avant de terminer l’intervention."
+  },
+  "FieldInventory": {
+    "title": "Comptage du stock",
+    "guidance": "Comptez les fournitures et le matériel configurés pour cette villa. Enregistrez chaque comptage avant de terminer la tâche.",
+    "preparing": "Préparation de la liste de stock enregistrée…",
+    "empty": "Aucun article de stock n’est configuré pour cette villa.",
+    "storageError": "Le relevé n’a pas pu être enregistré sur cet appareil. Gardez cette page ouverte, libérez de l’espace, puis réessayez.",
+    "unsaved": "Votre comptage de stock est enregistré sur cet appareil. Enregistrez le comptage avant de quitter cette tâche.",
+    "expected": "Prévu : {quantity}",
+    "decrease": "Diminuer {item}",
+    "increase": "Augmenter {item}",
+    "count": "Quantité physique de {item}",
+    "enterCount": "Saisissez une quantité entière.",
+    "variance": "Écart : {quantity}",
+    "invalid": "Saisissez une quantité entière valide et un motif.",
+    "note": "Note de comptage ou motif",
+    "queued": "Relevé en attente. Vous pouvez continuer à travailler.",
+    "savedDraft": "Brouillon enregistré sur cet appareil.",
+    "synced": "Relevé synchronisé.",
+    "reviewRequired": "Le stock ou vos droits ont changé. Vérifiez le stock actuel et recomptez physiquement avant d’envoyer.",
+    "originalCount": "Votre relevé initial",
+    "currentStock": "Stock actuel",
+    "review": "Vérifier le stock actuel et recompter",
+    "previousCount": "Relevé précédent conservé pour vérification : {quantity}",
+    "unavailable": "Cet article de stock ne peut pas être compté pour cette tâche. Demandez à votre responsable de le vérifier.",
+    "save": "Enregistrer le relevé",
+    "saving": "Enregistrement du relevé…",
+    "saveBeforeComplete": "Enregistrez vos comptages de stock avant de terminer la tâche."
   }
 }

@@ -348,7 +348,7 @@ for (const locale of ["en", "fr", "ar"] as const)
       for (const item of await field.locator('[name="checklistItemIds"]').all())
         await item.check();
       await field.locator('[data-progress="true"]').click();
-      await expect(field.getByRole("status")).toHaveText(catalog.manage.saved);
+      await expect(field.getByTestId("field-task-progress-status")).toHaveText(catalog.manage.saved);
       const fieldEvidence = page.getByTestId("operation-evidence-form");
       await fieldEvidence
         .locator('[name="reason"]')
