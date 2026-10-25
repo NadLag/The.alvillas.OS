@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { fieldQueue, syncFieldQueue, type FieldQueueScope } from "./field-queue";
 import { resolveFieldScope } from "./field-session";
 import { prepareFieldPhoto } from "./prepare-field-photo";
+import { isStorageQuotaError } from "./storage-errors";
 
 type Snapshot = Awaited<ReturnType<ReturnType<typeof fieldQueue>["photoSnapshot"]>>;
 export function FieldPhotoCapture({ scope, taskId }: { scope: FieldQueueScope; taskId: string }) {
@@ -64,7 +65,7 @@ export function FieldPhotoCapture({ scope, taskId }: { scope: FieldQueueScope; t
       if (!mounted.current) return;
       setFile(null); setNote(""); prepared.current = null; if (input.current) input.current.value = "";
       setNotice("queued"); if (navigator.onLine) void syncFieldQueue(queue, scope).catch(() => undefined);
-    } catch (error) { if (mounted.current) setNotice(error && typeof error === "object" && "name" in error && error.name === "QuotaExceededError" ? "storage" : "invalid"); }
+    } catch (error) { if (mounted.current) setNotice(isStorageQuotaError(error) ? "storage" : "invalid"); }
     finally { if (mounted.current) setSaving(false); }
   }
   return <section className="field-photo" data-testid="field-photo">
