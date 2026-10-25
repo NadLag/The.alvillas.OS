@@ -1716,6 +1716,18 @@ textarea:disabled {
   gap: var(--space-7);
 }
 
+.config-admin-grid > *,
+.config-admin-grid .field,
+.config-preview .field {
+  min-inline-size: 0;
+}
+
+.config-admin-grid :is(input, select, textarea),
+.config-preview :is(input, select, textarea) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
 .config-rule-list {
   display: grid;
   gap: var(--space-5);
@@ -2197,6 +2209,10 @@ textarea:disabled {
   .auth-topbar,
   .home-nav {
     display: grid;
+  }
+
+  .config-admin-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .app-actions,

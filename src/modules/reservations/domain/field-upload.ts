@@ -24,6 +24,6 @@ export const fieldUploadManifestSchema = z.object({
 });
 export type FieldUploadManifest = z.infer<typeof fieldUploadManifestSchema>;
 
-export function fieldUploadPartStorageKey(organizationId: string, uploadId: string, index: number): string {
-  return temporaryUploadPartKey({ organizationId, uploadId, index });
+export function fieldUploadPartStorageKey(organizationId: string, uploadId: string, index: number, generation = 1): string {
+  return temporaryUploadPartKey({ organizationId, uploadId, index, generation });
 }

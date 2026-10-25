@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import type { FieldCacheAudience, FieldQueueScope } from "./field-queue-store";
+import type { FieldCacheAudience, FieldQueueEntry, FieldQueueScope } from "./field-queue-store";
+import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
+import { fieldQueueAge, type FieldQueueAge } from "./field-queue-age";
 import { refreshFieldApp } from "./field-update";
 import { liveQuery } from "dexie";
 import { fieldQueue } from "./field-queue";
@@ -22,6 +24,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
   const [update, setUpdate] = useState(false);
   const [pending, setPending] = useState(0);
   const [failures, setFailures] = useState(0);
+  const [queueAge, setQueueAge] = useState<FieldQueueAge>({ count: 0, oldestMinutes: 0, nextCheckAfterMs: null });
   const [syncing, setSyncing] = useState(false);
   const [cached, setCached] = useState<number | null>(null);
   const [cacheFailed, setCacheFailed] = useState(false);
@@ -37,17 +40,31 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     let hadController = "serviceWorker" in navigator && Boolean(navigator.serviceWorker.controller);
     let checkedAt = 0;
     let photoRetry: ReturnType<typeof setTimeout> | undefined;
+    let ageTimer: ReturnType<typeof setTimeout> | undefined;
+    let queueSnapshot: { entries: FieldQueueEntry[]; tasks: FieldWorkSnapshot[] } = { entries: [], tasks: [] };
     const scope = { organizationId, userId };
     const network = () => setOffline(!navigator.onLine);
+    const refreshAge = () => {
+      if (ageTimer) clearTimeout(ageTimer);
+      if (disposed) return;
+      const value = fieldQueueAge(scope, queueSnapshot.entries, queueSnapshot.tasks, Date.now());
+      setQueueAge(value);
+      if (value.nextCheckAfterMs !== null) ageTimer = setTimeout(refreshAge, Math.min(value.nextCheckAfterMs, 2_147_483_647));
+    };
     const ready = (async () => {
       const queue = fieldQueue();
       if (!await resolveFieldScope(queue, navigator.onLine, scope)) throw new Error("FIELD_SESSION_CHANGED");
       await queue.migrateLegacy(scope, localStorage);
       if (disposed) return queue;
-      subscription = liveQuery(() => queue.entries(scope)).subscribe({ next: entries => {
+      subscription = liveQuery(async () => {
+        const [entries, assigned, supervised] = await Promise.all([queue.entries(scope), queue.readCache(scope), queue.readCache(scope, "supervised")]);
+        return { entries, tasks: [...assigned.tasks, ...supervised.tasks] };
+      }).subscribe({ next: value => {
+        const { entries } = value; queueSnapshot = value;
         setPending(entries.filter(entry => entry.syncStatus === "pending").length);
         setFailures(entries.filter(entry => entry.syncStatus !== "pending" && !entry.resolvedByClientOpId).length);
-      }, error: () => setNotice("unavailable") });
+        refreshAge();
+      }, error: () => { queueSnapshot = { entries: [], tasks: [] }; refreshAge(); setNotice("unavailable"); } });
       cacheSubscription = liveQuery(() => queue.readCache(scope, audience)).subscribe({ next: value => {
         if (value.state?.snapshotAt) setCached(value.tasks.length);
         else if (value.state?.invalidated) setCached(null);
@@ -119,6 +136,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     queueMicrotask(() => {
       if (disposed) return;
       network();
+      refreshAge();
       setInstalled(window.matchMedia("(display-mode: standalone)").matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
       setIos(/iPad|iPhone|iPod/u.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
     });
@@ -144,6 +162,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     return () => {
       disposed = true; subscription?.unsubscribe(); cacheSubscription?.unsubscribe();
       if (photoRetry) clearTimeout(photoRetry);
+      if (ageTimer) clearTimeout(ageTimer);
       retrySync.current = () => undefined;
       window.removeEventListener("online", online); window.removeEventListener("offline", network); window.removeEventListener("focus", online);
       window.removeEventListener("beforeinstallprompt", installAvailable); window.removeEventListener("appinstalled", installationFinished);
@@ -183,6 +202,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     </div>
     <p role="status" data-testid="field-connection">{t(offline ? "offline" : "online")}{pending ? ` · ${t("pending", { count: pending })}` : ""}{failures ? ` · ${t("failures", { count: failures })}` : ""}</p>
     <p role="status" data-testid="field-cache-status">{cacheFailed ? cacheText("retry") : cached !== null ? cacheText("ready", { count: cached }) : cacheText(offline ? "notPrepared" : "preparing")}</p>
+    {queueAge.count ? <p role="status" data-testid="field-queue-age-warning">{t("queueAgeWarning", { count: queueAge.count, minutes: queueAge.oldestMinutes })}</p> : null}
     {notice ? <p role="status" data-testid="field-pwa-notice">{t(notice)}</p> : null}
   </aside>;
 }

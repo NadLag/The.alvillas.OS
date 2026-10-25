@@ -6,6 +6,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { R2StorageProvider } from "@/platform/providers/real";
 import type { StorageProvider } from "@/platform/providers";
 import { FieldUploadRepository } from "../infrastructure/field-upload-repository";
+import { fieldUploadLifecycleSnapshotSchema } from "@/platform/config/field-upload-lifecycle-policy";
 import { OperationRepository } from "../infrastructure/operation-repository";
 import { fieldUploadManifestSchema, fieldUploadPartStorageKey } from "../domain/field-upload";
 import { syncPushInputSchema } from "../domain/sync-protocol";
@@ -14,7 +15,7 @@ import { operationAllowed, operationHash, operationMeta, taskResource, type Oper
 import { ReservationAuthorizationError, ReservationConflictError, ReservationNotFoundError } from "./reservation-service";
 import { validEvidenceImage, persistOperationEvidence } from "./operation-evidence";
 import { readExactResponseBytes } from "@/platform/http/read-exact-response";
-import { permanentFieldUploadKey, privateUploadTransportTimeoutMs, temporaryPartLeaseMilliseconds } from "@/platform/storage/upload-protocol";
+import { permanentFieldUploadKey, privateUploadTransportTimeoutMs, temporaryPartLeaseMilliseconds, temporaryUploadActivityLeaseMilliseconds, uploadGenerationSchema } from "@/platform/storage/upload-protocol";
 
 type UploadDeps = OperationDeps & { storage?: StorageProvider; transport?: typeof fetch };
 type CompleteUploadDeps = UploadDeps & { storage?: StorageProvider & {
@@ -25,10 +26,10 @@ export class FieldUploadUnavailableError extends Error {
 }
 export const fieldUploadCreateSchema = z.object({ organization_id: syncPushInputSchema.shape.organization_id,
   actor_user_id: syncPushInputSchema.shape.actor_user_id, device_id: syncPushInputSchema.shape.device_id,
-  manifest: fieldUploadManifestSchema }).strict();
+  manifest: fieldUploadManifestSchema, include_generation: z.boolean().optional() }).strict();
 const partRequestSchema = z.object({ organization_id: syncPushInputSchema.shape.organization_id,
   actor_user_id: syncPushInputSchema.shape.actor_user_id, device_id: syncPushInputSchema.shape.device_id,
-  uploadId: z.uuid(), index: z.number().int().nonnegative() }).strict();
+  uploadId: z.uuid(), index: z.number().int().nonnegative(), generation: uploadGenerationSchema.optional() }).strict();
 const completeRequestSchema = partRequestSchema.omit({ index: true });
 
 function checkOwner(ctx: ReservationActorContext, value: { organization_id: string; actor_user_id: string }) {
@@ -41,7 +42,9 @@ function assigned(ctx: ReservationActorContext, task: OperationTask | null): ass
 
 export async function startFieldUpload(ctx: ReservationActorContext, input: unknown, deps: UploadDeps = {}) {
   operationAllowed(ctx, "edit"); const value = fieldUploadCreateSchema.parse(input); checkOwner(ctx, value);
-  const meta = await operationMeta(deps);
+  const meta = await operationMeta(deps), now = deps.now ?? new Date();
+  const result = (upload: { id: string; status: string; generation: number }) => ({ uploadId: upload.id, status: upload.status,
+    ...(value.include_generation ? { generation: upload.generation } : {}) });
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const operations = new OperationRepository(tx, ctx.organizationId), uploads = new FieldUploadRepository(tx, ctx.organizationId);
     // Same order as native evidence and assignment; no network work holds these locks.
@@ -51,16 +54,35 @@ export async function startFieldUpload(ctx: ReservationActorContext, input: unkn
     if (value.manifest.size > policy.evidence_max_bytes) throw new ReservationConflictError("operation_photo_too_large");
     const hash = operationHash({ deviceId: value.device_id, manifest: value.manifest }), existing = await uploads.byLocalId(ctx.actorId, value.manifest.localId);
     if (existing) {
-      if (existing.manifestHash !== hash || existing.taskId !== task.id || existing.deviceId !== value.device_id || existing.status === "CANCELLED")
+      if (existing.manifestHash !== hash || existing.taskId !== task.id || existing.deviceId !== value.device_id)
         throw new ReservationConflictError("upload_idempotency_key_reused");
-      return { uploadId: existing.id, status: existing.status };
+      if (existing.status === "CANCELLED") {
+        if (!value.include_generation || !existing.expiredAt || !fieldUploadLifecycleSnapshotSchema.safeParse(existing.expiryPolicy).success)
+          throw new ReservationConflictError("upload_idempotency_key_reused");
+        if (!existing.cleanedAt || (await uploads.recover(existing.id, existing.generation, now)).count !== 1) throw new FieldUploadUnavailableError();
+        if (!await uploads.reservePart(existing.id, new Date(now.getTime() + temporaryUploadActivityLeaseMilliseconds), existing.generation + 1, now)) throw new FieldUploadUnavailableError();
+        const recovered = (await uploads.get(existing.id))!;
+        await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "task.photo.upload.recovered", resourceType: "task",
+          resourceId: task.id, propertyScopeId: task.propertyId, deviceId: existing.deviceId,
+          before: { uploadId: existing.id, generation: existing.generation, status: existing.status, expiredAt: existing.expiredAt,
+            policy: existing.expiryPolicy, lastActivityAt: existing.lastActivityAt, partUploadExpiresAt: existing.partUploadExpiresAt, cleanedAt: existing.cleanedAt },
+          after: { uploadId: recovered.id, generation: recovered.generation, status: recovered.status, partUploadExpiresAt: recovered.partUploadExpiresAt }, reason: value.manifest.note, ...meta, occurredAt: now });
+        return result(recovered);
+      }
+      if (existing.status === "OPEN") {
+        if (value.include_generation) {
+          if (!await uploads.reservePart(existing.id, new Date(now.getTime() + temporaryUploadActivityLeaseMilliseconds), existing.generation, now)) throw new FieldUploadUnavailableError();
+        } else await uploads.touchOpen(existing.id, existing.generation, now);
+      }
+      return result(existing);
     }
-    const upload = await uploads.create(ctx.actorId, value.device_id, value.manifest, hash);
+    const upload = await uploads.create(ctx.actorId, value.device_id, value.manifest, hash, now);
+    if (value.include_generation && !await uploads.reservePart(upload.id, new Date(now.getTime() + temporaryUploadActivityLeaseMilliseconds), upload.generation, now)) throw new FieldUploadUnavailableError();
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "task.photo.upload.started", resourceType: "task",
       resourceId: task.id, propertyScopeId: task.propertyId, before: null,
       after: { uploadId: upload.id, contentType: value.manifest.contentType, size: value.manifest.size, sha256: value.manifest.sha256 },
       reason: value.manifest.note, ...meta, occurredAt: deps.now ?? new Date() });
-    return { uploadId: upload.id, status: upload.status };
+    return result(upload);
   });
 }
 
@@ -69,20 +91,23 @@ export async function signFieldUploadPart(ctx: ReservationActorContext, input: u
   const signedAt = deps.now ?? new Date();
   const key = await withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const uploads = new FieldUploadRepository(tx, ctx.organizationId), operations = new OperationRepository(tx, ctx.organizationId);
-    const upload = await uploads.get(value.uploadId);
-    if (!upload || upload.actorId !== ctx.actorId || upload.deviceId !== value.device_id) throw new ReservationNotFoundError();
-    await operations.lock("crew-schedule"); await operations.lock(upload.taskId);
-    await uploads.lock(`${ctx.actorId}:${upload.localId}`);
+    const initial = await uploads.get(value.uploadId);
+    if (!initial || initial.actorId !== ctx.actorId || initial.deviceId !== value.device_id) throw new ReservationNotFoundError();
+    await operations.lock("crew-schedule"); await operations.lock(initial.taskId);
+    await uploads.lock(`${ctx.actorId}:${initial.localId}`);
+    const upload = await uploads.get(initial.id); if (!upload) throw new ReservationNotFoundError();
     const task = await operations.task(upload.taskId); assigned(ctx, task);
+    if (upload.generation !== (value.generation ?? 1)) throw new ReservationConflictError("upload_generation_changed");
+    if (upload.status === "CANCELLED" && upload.expiredAt) throw new FieldUploadUnavailableError();
     const manifest = fieldUploadManifestSchema.parse(upload.manifest), policy = await operations.policy(task.propertyId);
     if (upload.status !== "OPEN" || value.index >= manifest.parts.length || manifest.size > policy.evidence_max_bytes)
       throw new ReservationConflictError("upload_part_unavailable");
     const part = manifest.parts[value.index];
     if (bytes && (bytes.length !== part.size || createHash("sha256").update(bytes).digest("hex") !== part.sha256))
       throw new ReservationConflictError("upload_digest_mismatch");
-    if (!await uploads.reservePart(upload.id, new Date(signedAt.getTime() + temporaryPartLeaseMilliseconds)))
+    if (!await uploads.reservePart(upload.id, new Date(signedAt.getTime() + temporaryPartLeaseMilliseconds), upload.generation, signedAt))
       throw new ReservationConflictError("upload_part_unavailable");
-    return fieldUploadPartStorageKey(ctx.organizationId, upload.id, value.index);
+    return fieldUploadPartStorageKey(ctx.organizationId, upload.id, value.index, upload.generation);
   });
   // A delayed process cannot mint a newer signature after its persisted lease.
   try { return await (deps.storage ?? new R2StorageProvider(undefined, () => signedAt)).createSignedUploadUrl({ key, contentType: "application/octet-stream" }); }
@@ -101,17 +126,21 @@ export async function storeFieldUploadPart(ctx: ReservationActorContext, input: 
 
 export async function completeFieldUpload(ctx: ReservationActorContext, input: unknown, deps: CompleteUploadDeps = {}) {
   operationAllowed(ctx, "edit"); const value = completeRequestSchema.parse(input); checkOwner(ctx, value);
+  const result = (upload: { id: string; status: string; generation: number }) => ({ uploadId: upload.id, status: upload.status,
+    ...(value.generation !== undefined ? { generation: upload.generation } : {}) });
   const load = () => withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const uploads = new FieldUploadRepository(tx, ctx.organizationId), operations = new OperationRepository(tx, ctx.organizationId);
     const upload = await uploads.get(value.uploadId);
     if (!upload || upload.actorId !== ctx.actorId || upload.deviceId !== value.device_id) throw new ReservationNotFoundError();
     const task = await operations.task(upload.taskId); assigned(ctx, task);
+    if (upload.generation !== (value.generation ?? 1)) throw new ReservationConflictError("upload_generation_changed");
+    if (upload.status === "CANCELLED" && upload.expiredAt) throw new FieldUploadUnavailableError();
     const manifest = fieldUploadManifestSchema.parse(upload.manifest), policy = await operations.policy(task.propertyId);
     if (upload.status === "CANCELLED" || manifest.size > policy.evidence_max_bytes) throw new ReservationConflictError("upload_unavailable");
     return { upload, manifest };
   });
   const initial = await load();
-  if (initial.upload.status !== "OPEN") return { uploadId: initial.upload.id, status: initial.upload.status };
+  if (initial.upload.status !== "OPEN") return result(initial.upload);
   const meta = await operationMeta(deps), storage = deps.storage ?? new R2StorageProvider(), transport = deps.transport ?? fetch;
   const bytes = new Uint8Array(initial.manifest.size);
   // Bounded parallel transport. No database transaction remains open during R2 I/O.
@@ -119,7 +148,7 @@ export async function completeFieldUpload(ctx: ReservationActorContext, input: u
     await Promise.all(initial.manifest.parts.slice(offset, offset + 4).map(async (part, relativeIndex) => {
       const index = offset + relativeIndex; let chunk: Uint8Array;
       try {
-        const signed = await storage.createSignedDownloadUrl({ key: fieldUploadPartStorageKey(ctx.organizationId, initial.upload.id, index), expiresInSeconds: 60 });
+        const signed = await storage.createSignedDownloadUrl({ key: fieldUploadPartStorageKey(ctx.organizationId, initial.upload.id, index, initial.upload.generation), expiresInSeconds: 60 });
         const response = await transport(signed.url, { cache: "no-store", signal: AbortSignal.timeout(15000) });
         if (!response.ok) throw new FieldUploadUnavailableError();
         chunk = await readExactResponseBytes(response, part.size);
@@ -141,15 +170,17 @@ export async function completeFieldUpload(ctx: ReservationActorContext, input: u
     const upload = await uploads.get(initial.upload.id);
     if (!upload || upload.actorId !== ctx.actorId || upload.deviceId !== value.device_id) throw new ReservationNotFoundError();
     const task = await operations.task(upload.taskId); assigned(ctx, task);
+    if (upload.generation !== initial.upload.generation) throw new ReservationConflictError("upload_generation_changed");
+    if (upload.status === "CANCELLED" && upload.expiredAt) throw new FieldUploadUnavailableError();
     const policy = await operations.policy(task.propertyId);
     if (upload.status === "CANCELLED" || initial.manifest.size > policy.evidence_max_bytes) throw new ReservationConflictError("upload_unavailable");
-    if (upload.status !== "OPEN") return { uploadId: upload.id, status: upload.status };
-    await uploads.ready(upload.id, deps.now ?? new Date());
+    if (upload.status !== "OPEN") return result(upload);
+    if ((await uploads.ready(upload.id, deps.now ?? new Date(), upload.generation)).count !== 1) throw new FieldUploadUnavailableError();
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "task.photo.upload.ready", resourceType: "task",
       resourceId: task.id, propertyScopeId: task.propertyId, before: { uploadId: upload.id, status: "OPEN" },
       after: { uploadId: upload.id, status: "READY", sha256: initial.manifest.sha256, size: initial.manifest.size },
       reason: initial.manifest.note, ...meta, occurredAt: deps.now ?? new Date() });
-    return { uploadId: upload.id, status: "READY" as const };
+    return result({ ...upload, status: "READY" });
   });
 }
 

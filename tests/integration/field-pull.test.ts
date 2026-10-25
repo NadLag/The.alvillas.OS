@@ -8,6 +8,8 @@ import { authorize, type AuthAssignment, type Scope } from "@/platform/authz/aut
 import type { ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import { pullFieldWork } from "@/modules/reservations/application/field-pull-service";
 import { fieldPullInputSchema, fieldPullResultSchema, type FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { fieldDevicePolicyKey } from "@/platform/config/field-device-policy";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -40,6 +42,10 @@ const input = (f: Fixture, extra = {}) => fieldPullInputSchema.parse({ organizat
 const pull = (f: Fixture, extra = {}, now = anchor()) => pullFieldWork(f.ctx, input(f, extra), { db, now });
 const known = (rows: FieldWorkSnapshot[]) => rows.map(({ id, revision }) => ({ id, revision }));
 const update = <T>(f: Fixture, work: (tx: TenantTransaction) => Promise<T>) => withTenant(db, f.org, work);
+const devicePolicy = (f: Fixture, minutes: number | null, effectiveFrom: Date, propertyId?: string) => update(f, tx => new ConfigRuleRepository(tx, f.org).createVersion({
+  key: fieldDevicePolicyKey, scopeType: propertyId ? "property" : "organization", scopeId: propertyId,
+  value: { queueWarningAfterMinutes: minutes }, effectiveFrom, reason: "Verify the configured field device policy"
+}));
 
 describe("field pull on real PostgreSQL", () => {
   beforeAll(async () => {
@@ -50,6 +56,81 @@ describe("field pull on real PostgreSQL", () => {
     db = new PrismaClient({ datasourceUrl: app.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+
+  it("opts into current scoped device policy values without changing legacy projections or exposing foreign rules", async () => {
+    const f = await fixture(), foreign = await fixture();
+    const second = await update(f, tx => tx.property.create({ data: propertyData(f.org, { name: "Policy fallback villa" }) }));
+    await task(f); await task(f, { propertyId: second.id }); const alien = await task(foreign), now = anchor();
+    const before = await pull(f, { mode: "assigned" }, now);
+    expect(before.tasks).toHaveLength(2); for (const row of before.tasks) expect(row).not.toHaveProperty("devicePolicy");
+    const missing = await pull(f, { mode: "assigned", include_device_policy: true }, now);
+    expect(missing.tasks.map(row => row.devicePolicy)).toEqual([null, null]);
+    const effective = new Date(now.getTime() - 60_000), organization = await devicePolicy(f, 73, effective);
+    const property = await devicePolicy(f, 5, effective, f.property.id); await devicePolicy(foreign, 0, effective);
+    const legacy = await pull(f, { mode: "assigned", known_tasks: known(before.tasks) }, now);
+    expect(legacy.tasks).toEqual([]); expect(legacy.known_changes).toEqual([]);
+    const opted = await pull(f, { mode: "assigned", include_device_policy: true, known_tasks: [{ id: alien.id, revision: null }] }, now);
+    expect(opted.tasks).toHaveLength(2); expect(opted.tombstones).toEqual([alien.id]);
+    expect(opted.tasks.find(row => row.propertyId === f.property.id)?.devicePolicy).toEqual({ queueWarningAfterMinutes: 5, configRuleId: property.id, configVersion: property.version });
+    expect(opted.tasks.find(row => row.propertyId === second.id)?.devicePolicy).toEqual({ queueWarningAfterMinutes: 73, configRuleId: organization.id, configVersion: organization.version });
+    expect(await update(f, tx => tx.configRule.count({ where: { organizationId: foreign.org } }))).toBe(0);
+    expect([...f.ctx.authContext.permissions].sort()).toEqual(["task:edit", "task:view"]);
+  });
+
+  it("invalidates policy revisions on effective version changes and explicit disable without mutating the job", async () => {
+    const f = await fixture(), job = await task(f), now = anchor();
+    const initialRule = await devicePolicy(f, 20, new Date(now.getTime() - 60_000));
+    const initial = await pull(f, { mode: "assigned", include_device_policy: true }, now);
+    expect(initial.tasks[0].devicePolicy?.configRuleId).toBe(initialRule.id);
+    const later = new Date(now.getTime() + 10_000), nextRule = await devicePolicy(f, 20, later);
+    const renewed = await pull(f, { mode: "assigned", include_device_policy: true, cursor: initial.cursor, known_tasks: known(initial.tasks) }, later);
+    expect(renewed.known_changes).toHaveLength(1);
+    expect(renewed.known_changes[0].devicePolicy).toEqual({ queueWarningAfterMinutes: 20, configRuleId: nextRule.id, configVersion: nextRule.version });
+    expect(renewed.known_changes[0].revision).not.toBe(initial.tasks[0].revision);
+    const disabledAt = new Date(later.getTime() + 10_000), disabled = await devicePolicy(f, null, disabledAt);
+    const off = await pull(f, { mode: "assigned", include_device_policy: true, known_tasks: known(renewed.known_changes) }, disabledAt);
+    expect(off.known_changes[0].devicePolicy).toEqual({ queueWarningAfterMinutes: null, configRuleId: disabled.id, configVersion: disabled.version });
+    expect(off.known_changes[0].revision).not.toBe(renewed.known_changes[0].revision);
+    const unchanged = await update(f, tx => tx.operationTask.findUniqueOrThrow({ where: { id: job.id } }));
+    expect(unchanged.updatedAt).toEqual(job.updatedAt); expect(unchanged.version).toBe(job.version);
+    expect(await update(f, tx => tx.syncOp.count())).toBe(0); expect(await update(f, tx => tx.auditLog.count())).toBe(0);
+  });
+
+  it("freezes policy versions through paging and keeps rule resolution bounded across fifty properties", async () => {
+    const f = await fixture(), ids = [f.property.id, ...Array.from({ length: 50 }, () => randomUUID())];
+    await update(f, async tx => {
+      await tx.property.createMany({ data: ids.slice(1).map(id => propertyData(f.org, { id })) });
+      await tx.operationTask.createMany({ data: ids.map(propertyId => ({ organizationId: f.org, propertyId, assignedToUserAccountId: f.account.id,
+        assignedToPersonId: f.person.id, type: "INSPECTION", state: "ASSIGNED", dueDate: new Date(day), titleTranslations: { en: "Policy scope" }, idempotencyKey: randomUUID() })) });
+    });
+    const now = anchor(), firstRule = await devicePolicy(f, 15, new Date(now.getTime() - 60_000));
+    const runtime = new URL(url!); runtime.username = "alvillas_ops_tests"; runtime.password = "alvillas_ops_tests";
+    const measured = new PrismaClient({ datasourceUrl: runtime.toString(), log: [{ emit: "event", level: "query" }] }), statements: string[] = [];
+    measured.$on("query", event => statements.push(event.query));
+    try {
+      await measured.$queryRaw`SELECT 1`; statements.length = 0;
+      const single = await pullFieldWork(f.ctx, input(f, { mode: "assigned", include_device_policy: true, property_id: f.property.id }), { db: measured, now });
+      expect(single.tasks).toHaveLength(1); const singleQueries = [...statements]; statements.length = 0;
+      const first = await pullFieldWork(f.ctx, input(f, { mode: "assigned", include_device_policy: true }), { db: measured, now });
+      expect(first.tasks).toHaveLength(50); expect(first.next_cursor).toBeTruthy();
+      expect(statements.filter(statement => statement.includes('"config_rule"'))).toHaveLength(1);
+      expect(statements.length).toBeLessThanOrEqual(singleQueries.length + 1);
+      expect(first.tasks.every(row => row.devicePolicy?.configRuleId === firstRule.id)).toBe(true);
+      // A later administrator may backdate a new version. It belongs to the
+      // next snapshot, rather than changing the remainder of this page cycle.
+      await new Promise(resolve => setTimeout(resolve, Math.max(0, now.getTime() - Date.now()) + 20));
+      const futureRule = await devicePolicy(f, 0, new Date(now.getTime() - 30_000)), later = anchor();
+      const last = await pull(f, { mode: "assigned", include_device_policy: true, cursor: first.next_cursor }, later);
+      expect(last.tasks).toHaveLength(1); expect(last.tasks[0].devicePolicy?.configRuleId).toBe(firstRule.id);
+      const current = await pull(f, { mode: "assigned", include_device_policy: true, cursor: last.cursor }, later);
+      expect(current.tasks).toHaveLength(50);
+      expect(current.tasks.every(row => row.devicePolicy?.configRuleId === futureRule.id && row.devicePolicy.queueWarningAfterMinutes === 0)).toBe(true);
+      statements.length = 0;
+      const forbidden = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set(["config_rule:view"]) } };
+      await expect(pullFieldWork(forbidden, input(f, { include_device_policy: true }), { db: measured, now })).rejects.toThrow("forbidden");
+      expect(statements).toEqual([]);
+    } finally { await measured.$disconnect(); }
+  });
 
   it("paginates over 500 properties without duplicates, hides financial/contact data and omits unchanged snapshots", async () => {
     const f = await fixture(), ids = Array.from({ length: 505 }, () => randomUUID());

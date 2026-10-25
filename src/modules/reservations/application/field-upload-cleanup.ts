@@ -4,6 +4,7 @@ import { R2StorageProvider } from "@/platform/providers/real";
 import { temporaryPartLeaseMilliseconds, type TemporaryUploadPart } from "@/platform/storage/upload-protocol";
 import { fieldUploadManifestSchema } from "../domain/field-upload";
 import { FieldUploadRepository } from "../infrastructure/field-upload-repository";
+import { expireInactiveFieldUploads } from "./field-upload-lifecycle";
 
 type CleanupDeps = { db?: TenantTransactionRunner; now?: Date; limit?: number; clock?: () => number;
   storage?: { deleteTemporaryUploadPart(input: TemporaryUploadPart): Promise<void> } };
@@ -13,6 +14,7 @@ export async function cleanupFieldUploadParts(organizationId: string, deps: Clea
   const now = deps.now ?? new Date(), db = deps.db ?? prisma, limit = deps.limit ?? 25;
   const clock = deps.clock ?? (() => performance.now()), started = clock();
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw Error("Invalid upload cleanup batch size");
+  await expireInactiveFieldUploads(organizationId, { db, now, limit });
   const candidates = await withTenant(db, organizationId, tx => new FieldUploadRepository(tx, organizationId)
     .cleanupCandidates(now, new Date(now.getTime() - temporaryPartLeaseMilliseconds), limit));
   if (!candidates.length) return { cleaned: 0 };
@@ -29,19 +31,20 @@ export async function cleanupFieldUploadParts(organizationId: string, deps: Clea
           return { cleaned };
         }
         await Promise.all(manifest.parts.slice(offset, offset + 4)
-          .map((_, index) => storage.deleteTemporaryUploadPart({ organizationId, uploadId: upload.id, index: offset + index })));
+          .map((_, index) => storage.deleteTemporaryUploadPart({ organizationId, uploadId: upload.id, index: offset + index,
+            ...(upload.generation > 1 ? { generation: upload.generation } : {}) })));
       }
       const result = await withTenant(db, organizationId, async tx => {
         const repository = new FieldUploadRepository(tx, organizationId);
         await repository.lock(`${upload.actorId}:${upload.localId}`);
-        return repository.cleaned(upload.id, now);
+        return repository.cleaned(upload.id, now, upload.generation);
       });
       cleaned += result.count;
     } catch {
       failed = true;
       // Rotate failed rows behind older pending work instead of starving the
       // next bounded batch. This changes infrastructure retry metadata only.
-      await withTenant(db, organizationId, tx => new FieldUploadRepository(tx, organizationId).cleanupAttempted(upload.id, now))
+      await withTenant(db, organizationId, tx => new FieldUploadRepository(tx, organizationId).cleanupAttempted(upload.id, now, upload.generation))
         .catch(() => undefined);
     }
   }

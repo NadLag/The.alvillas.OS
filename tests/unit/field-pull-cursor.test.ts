@@ -17,6 +17,19 @@ function fixture() {
   return { ctx, input, frame: newFieldPullCursor(ctx, input, now) };
 }
 describe("field pull cursor security", () => {
+  it("preserves the cursor format across optional metadata upgrades and rollbacks", () => {
+    const { ctx, input, frame } = fixture();
+    expect(frame).not.toHaveProperty("devicePolicy");
+    const legacy = encodeFieldPullCursor(frame, ctx, env), optedIn = { ...input, include_device_policy: true };
+    expect(decodeFieldPullCursor(legacy, ctx, input, now, env)).toEqual(frame);
+    expect(decodeFieldPullCursor(legacy, ctx, optedIn, now, env)).toEqual(frame);
+    const extended = newFieldPullCursor(ctx, optedIn, now), token = encodeFieldPullCursor(extended, ctx, env);
+    expect(extended).toEqual(frame);
+    expect(decodeFieldPullCursor(token, ctx, optedIn, now, env)).toEqual(extended);
+    expect(decodeFieldPullCursor(token, ctx, input, now, env)).toEqual(frame);
+    expect(() => decodeFieldPullCursor(token, ctx, { ...optedIn, mode: "supervised" }, now, env)).toThrow("invalid_cursor");
+    expect(fieldPullInputSchema.safeParse({ ...input, include_device_policy: "1" }).success).toBe(false);
+  });
   it("encrypts pagination and binds it to the organization, actor and view", () => {
     const { ctx, input, frame } = fixture();
     const page = { ...frame, kind: "page" as const, after: { date: "2026-10-23", id: randomUUID() } };
