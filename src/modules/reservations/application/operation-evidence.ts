@@ -16,7 +16,7 @@ import {
   ReservationNotFoundError,
 } from "./reservation-service";
 import { authorize } from "@/platform/authz/authorize";
-import { withTenant } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction } from "@/platform/db/tenant";
 import { prisma } from "@/platform/db/client";
 import { R2StorageProvider } from "@/platform/providers/real";
 import type { StorageProvider } from "@/platform/providers";
@@ -295,7 +295,16 @@ export async function reportOperationIssue(
   operationAllowed(ctx, "view");
   const value = issueSchema.parse(input),
     meta = await operationMeta(deps);
-  return withTenant(deps.db ?? prisma, ctx.organizationId, async (tx) => {
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => (await reportOperationIssueInTransaction(ctx, value, tx, meta)).id);
+}
+
+export async function reportOperationIssueInTransaction(
+  ctx: ReservationActorContext,
+  value: z.infer<typeof issueSchema>,
+  tx: TenantTransaction,
+  meta: Awaited<ReturnType<typeof operationMeta>>,
+  assignedOnly = false,
+) {
     const repo = new OperationRepository(tx, ctx.organizationId);
     await repo.lock(value.taskId);
     await repo.lock(value.idempotencyKey);
@@ -309,16 +318,28 @@ export async function reportOperationIssue(
       })
     )
       throw new ReservationAuthorizationError();
+    if (assignedOnly && (task.assignedToUserAccountId !== ctx.actorId || task.assignedToPersonId !== ctx.personId ||
+      !["ASSIGNED", "IN_PROGRESS", "COMPLETED"].includes(task.state))) throw new ReservationNotFoundError();
     const hash = operationHash({ operation: "issue", value }),
       receipt = await repo.receipt(value.idempotencyKey);
     if (receipt) {
       if (receipt.payloadHash !== hash || receipt.createdBy !== ctx.actorId)
         throw new ReservationConflictError();
       if (!receipt.resultResourceId) throw new ReservationConflictError();
-      return receipt.resultResourceId;
+      return { id: receipt.resultResourceId, idempotent: true };
+    }
+    let evidenceId: string | undefined;
+    if (value.photoClientOpId) {
+      const photo = await repo.receipt(value.photoClientOpId);
+      const evidence = photo?.resultResourceId ? await repo.evidenceById(photo.resultResourceId) : null;
+      if (photo?.taskId !== task.id || photo.createdBy !== ctx.actorId || !evidence?.contentType ||
+        evidence.taskId !== task.id || evidence.createdBy !== ctx.actorId) throw new ReservationConflictError("issue_photo_unavailable");
+      evidenceId = evidence.id;
     }
     const issue = await repo.addIssue({
-      ...value,
+      taskId: value.taskId, title: value.title, description: value.description,
+      severity: value.severity, idempotencyKey: value.idempotencyKey,
+      evidenceId,
       propertyId: task.propertyId,
       createdBy: ctx.actorId,
     });
@@ -346,6 +367,5 @@ export async function reportOperationIssue(
       task.propertyId,
       `issue:${issue.id}:reported`,
     );
-    return issue.id;
-  });
+    return { id: issue.id, idempotent: false };
 }

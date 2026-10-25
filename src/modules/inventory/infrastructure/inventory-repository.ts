@@ -84,6 +84,7 @@ export class InventoryRepository {
   }
 
   async snapshotPositions(streams: Array<{ propertyId: string; itemKey: string }>, at: Date) {
+    const before = new Date(at.getTime() + 1);
     if (!streams.length) return [];
     const pairs = streams.map(row => ({ property_id: row.propertyId, item_key: row.itemKey }));
     return this.tx.$queryRaw<Array<{ propertyId: string; itemKey: string; quantity: string; revision: string }>>(Prisma.sql`
@@ -93,9 +94,9 @@ export class InventoryRepository {
       LEFT JOIN inventory_location l ON l.organization_id=${this.organizationId}::uuid AND l.property_id=p.property_id
       LEFT JOIN inventory_item i ON i.organization_id=${this.organizationId}::uuid AND i.key=p.item_key
       LEFT JOIN LATERAL (SELECT sum(quantity_delta) AS quantity FROM inventory_movement m
-       WHERE m.organization_id=${this.organizationId}::uuid AND m.location_id=l.id AND m.item_id=i.id AND m.created_at<=${at}) q ON true
+       WHERE m.organization_id=${this.organizationId}::uuid AND m.location_id=l.id AND m.item_id=i.id AND m.created_at<${before}) q ON true
       LEFT JOIN LATERAL (SELECT max(revision) AS revision FROM inventory_stocktake s
-       WHERE s.organization_id=${this.organizationId}::uuid AND s.location_id=l.id AND s.item_id=i.id AND s.received_at<=${at}) v ON true
+       WHERE s.organization_id=${this.organizationId}::uuid AND s.location_id=l.id AND s.item_id=i.id AND s.received_at<${before}) v ON true
       ORDER BY p.property_id,p.item_key`);
   }
 }

@@ -2,12 +2,20 @@ import { syncPushOpSchema, type SyncPushOp } from "@/modules/reservations/domain
 import { FieldQueueStore, type FieldQueueScope, type FieldQueueEntry, type FieldProxyDraftInput, type FieldLinenDraftInput } from "./field-queue-store";
 import { requestFieldBackgroundSync } from "./background-sync";
 import { fieldUploadManifestSchema } from "@/modules/reservations/domain/field-upload";
+import type { FieldIssueOperation } from "./field-queue-store";
 export type { FieldQueueScope, FieldQueueEntry, QueueOutcome } from "./field-queue-store";
 export { syncFieldQueue } from "./field-sync";
 
 const legacyQueueKey = "alvillas.fieldTaskQueue.v1";
 const legacyDeviceKey = "alvillas.fieldDeviceId.v1";
 export class FieldQueue extends FieldQueueStore {
+  async enqueueIssue(scope: FieldQueueScope, operation: FieldIssueOperation, incarnation: string,
+    photo?: { manifest: unknown; blob: Blob }): Promise<FieldQueueEntry> {
+    const parsed = syncPushOpSchema.parse(operation);
+    if (parsed.type !== "field_task.issue.report") throw new Error("FIELD_ISSUE_INVALID");
+    const entry = await this.storeIssue(scope, parsed, incarnation, photo ? { manifest: fieldUploadManifestSchema.parse(photo.manifest), blob: photo.blob } : undefined);
+    void requestFieldBackgroundSync(); return entry;
+  }
   async enqueueLinen(scope: FieldQueueScope, value: FieldLinenDraftInput, incarnation: string): Promise<FieldQueueEntry> {
     const payload = { taskId: value.taskId, itemKey: value.itemKey, expectedQuantity: value.expectedQuantity, expectedRevision: value.expectedRevision,
       countedQuantity: value.countedQuantity, unit: value.unit, catalogRuleId: value.catalogRuleId, catalogVersion: value.catalogVersion, note: value.note };

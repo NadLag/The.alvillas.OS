@@ -9,7 +9,9 @@ import { InventoryRepository } from "@/modules/inventory/infrastructure/inventor
 export async function fieldStockSnapshots(tx: TenantTransaction, organizationId: string, propertyIds: string[], asOf: Date) {
   const ids = [...new Set(propertyIds)];
   const scopes = await new ReservationConfigScopeRepository(tx, organizationId).propertyScopes(ids, asOf);
-  const rules = await new ConfigRuleRepository(tx, organizationId).resolveScopeGroups(inventoryMinimumsKey, scopes, asOf, { recordedAt: asOf });
+  // Wire cursors have millisecond precision. Include that entire recorded-time
+  // bucket, without changing the effective business instant used for agreements.
+  const rules = await new ConfigRuleRepository(tx, organizationId).resolveScopeGroups(inventoryMinimumsKey, scopes, asOf, { recordedBefore: new Date(asOf.getTime() + 1) });
   const catalogs = new Map(ids.map(id => { const rule = rules.get(id); return [id, rule ? inventoryMinimumsSchema.parse(rule.parsedValue).minimums
     .filter(item => item.category !== undefined) : []] as const; }));
   const streams = [...catalogs].flatMap(([propertyId, items]) => items.map(item => ({ propertyId, itemKey: item.item })));

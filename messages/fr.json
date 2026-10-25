@@ -2354,5 +2354,21 @@
     "save": "Enregistrer le relevé",
     "saving": "Enregistrement du relevé…",
     "saveBeforeComplete": "Enregistrez vos comptages de stock avant de terminer la tâche."
+  },
+  "FieldIssue": {
+    "title": "Signaler un problème de maintenance",
+    "description": "Que faut-il vérifier ?",
+    "photo": "Photo (facultative)",
+    "loading": "Préparation du signalement…",
+    "unavailable": "Le signalement est indisponible pour cette tâche.",
+    "save": "Enregistrer le problème sur cet appareil",
+    "saving": "Enregistrement du problème…",
+    "discard": "Abandonner le problème non enregistré",
+    "queued": "Problème enregistré sur cet appareil. Il sera synchronisé dès la connexion.",
+    "saved": "Problème signalé.",
+    "invalid": "Vérifiez les détails et la photo, puis réessayez.",
+    "storage": "Le stockage est plein. Votre problème non enregistré est toujours ici. Libérez de l’espace et réessayez.",
+    "unsaved": "Enregistrez ou abandonnez le problème avant de quitter ou de terminer cette tâche.",
+    "review": "Ce problème nécessite une vérification. Le signalement et la photo restent sur cet appareil."
   }
 }

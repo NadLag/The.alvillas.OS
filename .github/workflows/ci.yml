@@ -89,7 +89,7 @@ jobs:
 
   deploy-staging:
     needs: checks
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STAGING_DEPLOYMENTS_PAUSED != 'true'
     runs-on: ubuntu-latest
     environment: staging
     concurrency:

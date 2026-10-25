@@ -15,11 +15,13 @@ export async function OperationEvidencePanel({
   taskId,
   locale,
   attachmentForm,
+  issueForm,
 }: {
   ctx: ReservationActorContext;
   taskId: string;
   locale: string;
   attachmentForm?: ReactNode;
+  issueForm?: ReactNode;
 }) {
   const [t, f, data, detail] = await Promise.all([
       getTranslations({ locale, namespace: "Operations.manage" }),
@@ -85,6 +87,7 @@ export async function OperationEvidencePanel({
               <strong>{issue.title}</strong>
               <p>{issue.description}</p>
               <span>{t(`priorities.${issue.severity}`)}</span>
+              {issue.evidenceId ? <a href={`/api/operations/evidence/${issue.evidenceId}`} target="_blank" rel="noopener noreferrer">{t("viewPhoto")}</a> : null}
             </li>
           ))}
         </ul>
@@ -92,7 +95,7 @@ export async function OperationEvidencePanel({
         <p>{t("noIssues")}</p>
       )}
       {authorize(ctx.authContext, "create", { ...resource, type: "issue" }) ? (
-        <OperationForm
+        issueForm ?? <OperationForm
           operation="issue"
           locale={locale}
           taskId={taskId}

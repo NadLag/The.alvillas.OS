@@ -32,42 +32,45 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
         !fieldTaskReadWhere(ctx.authContext, now, "validate").OR?.length))) throw new FieldPullError("forbidden");
   const previous = input.cursor ? decodeFieldPullCursor(input.cursor, ctx, input, now, deps.env) : null;
   if (input.only_known && !previous) throw new FieldPullError("invalid_cursor");
-  const frame = previous && (previous.kind === "page" || input.only_known) ? previous : newFieldPullCursor(ctx, input, now);
-  const asOf = new Date(frame.asOf), known = new Map(input.known_tasks.map(item => [item.id, item.revision]));
-  const days = new Map<string, string>();
-  const devicePolicies = new Map<string, ResolvedConfigRule | null>();
-  let stockSnapshots = new Map<string, { linen: FieldLinenSnapshot; inventory: FieldLinenSnapshot }>();
-  const businessDate = (zone: string) => {
-    const existing = days.get(zone); if (existing) return existing;
-    const date = calendarDateAt(asOf, zone); days.set(zone, date); return date;
-  };
-  const visibility = (row: FieldPullMetadata) => {
-    const task = resource(ctx, row, now);
-    const canGuest = authorize(ctx.authContext, "view", { ...task, type: "guest", status: undefined, id: row.reservation?.guestId ?? undefined }, now);
-    const canEdit = input.mode !== "supervised" && authorize(ctx.authContext, "edit", task, now), date = businessDate(row.property.timezone);
-    const canPerformer = input.mode === "supervised" && Boolean(row.assignedToPersonId) &&
-      authorize(ctx.authContext, "view", { ...task, type: "team_member", id: row.assignedToPersonId ?? undefined }, now);
-    const devicePolicy = input.include_device_policy ? fieldDevicePolicySnapshot(devicePolicies.get(row.propertyId) ?? null) : undefined;
-    const canCount = canEdit && row.assignedToUserAccountId === ctx.actorId && row.assignedToPersonId === ctx.personId;
-    const stock = (surface: "linen" | "inventory") => {
-      const source = stockSnapshots.get(row.propertyId)?.[surface];
-      return source ? { ...source, items: source.items.map(item => ({ ...item, available: item.available && canCount })) } : undefined;
-    };
-    const linen = input.include_linen ? stock("linen") : undefined, inventory = input.include_inventory ? stock("inventory") : undefined;
-    const revision = createHash("sha256").update(JSON.stringify({ task: row.updatedAt.toISOString(),
-      property: row.property.updatedAt.toISOString(), reservation: row.reservation?.updatedAt.toISOString() ?? null,
-      scope: frame.scope, date, canGuest, canEdit,
-      proxy: input.mode === "supervised" ? { version: row.version, performedBy: row.assignedToPersonId,
-        person: canPerformer ? row.assignedToPerson?.updatedAt.toISOString() : null } : null,
-      devicePolicy, linen, inventory })).digest("base64url");
-    return { task, canGuest, canEdit, canPerformer, date, revision, devicePolicy, linen, inventory };
-  };
-  const allowed = (row: FieldPullMetadata) => authorize(ctx.authContext, "view", resource(ctx, row, now), now) &&
-    (input.mode !== "supervised" || (row.assignedToPersonId !== null && row.assignedToPersonId !== ctx.personId &&
-      row.assignedToUserAccountId !== ctx.actorId && row.assignedToPerson?.archivedAt === null &&
-      ["ASSIGNED", "IN_PROGRESS"].includes(row.state) && authorize(ctx.authContext, "validate", resource(ctx, row, now), now)));
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repo = new FieldPullRepository(tx, ctx.organizationId);
+    const frame = previous && (previous.kind === "page" || input.only_known) ? previous : newFieldPullCursor(ctx, input, deps.now ?? await repo.snapshotTime());
+    const asOf = new Date(frame.asOf), known = new Map(input.known_tasks.map(item => [item.id, item.revision]));
+    const days = new Map<string, string>();
+    const devicePolicies = new Map<string, ResolvedConfigRule | null>();
+    let stockSnapshots = new Map<string, { linen: FieldLinenSnapshot; inventory: FieldLinenSnapshot }>();
+    const businessDate = (zone: string) => {
+      const existing = days.get(zone); if (existing) return existing;
+      const date = calendarDateAt(asOf, zone); days.set(zone, date); return date;
+    };
+    const visibility = (row: FieldPullMetadata) => {
+      const task = resource(ctx, row, now);
+      const canGuest = authorize(ctx.authContext, "view", { ...task, type: "guest", status: undefined, id: row.reservation?.guestId ?? undefined }, now);
+      const canEdit = input.mode !== "supervised" && authorize(ctx.authContext, "edit", task, now), date = businessDate(row.property.timezone);
+      const canPerformer = input.mode === "supervised" && Boolean(row.assignedToPersonId) &&
+        authorize(ctx.authContext, "view", { ...task, type: "team_member", id: row.assignedToPersonId ?? undefined }, now);
+      const devicePolicy = input.include_device_policy ? fieldDevicePolicySnapshot(devicePolicies.get(row.propertyId) ?? null) : undefined;
+      const canCount = canEdit && row.assignedToUserAccountId === ctx.actorId && row.assignedToPersonId === ctx.personId;
+      const canReportIssue = input.include_issue_capture ? input.mode !== "supervised" && row.assignedToUserAccountId === ctx.actorId &&
+        row.assignedToPersonId === ctx.personId && ["ASSIGNED", "IN_PROGRESS"].includes(row.state) &&
+        authorize(ctx.authContext, "create", { ...task, type: "issue" }, now) : undefined;
+      const stock = (surface: "linen" | "inventory") => {
+        const source = stockSnapshots.get(row.propertyId)?.[surface];
+        return source ? { ...source, items: source.items.map(item => ({ ...item, available: item.available && canCount })) } : undefined;
+      };
+      const linen = input.include_linen ? stock("linen") : undefined, inventory = input.include_inventory ? stock("inventory") : undefined;
+      const revision = createHash("sha256").update(JSON.stringify({ task: row.updatedAt.toISOString(),
+        property: row.property.updatedAt.toISOString(), reservation: row.reservation?.updatedAt.toISOString() ?? null,
+        scope: frame.scope, date, canGuest, canEdit,
+        proxy: input.mode === "supervised" ? { version: row.version, performedBy: row.assignedToPersonId,
+          person: canPerformer ? row.assignedToPerson?.updatedAt.toISOString() : null } : null,
+        devicePolicy, linen, inventory, canReportIssue })).digest("base64url");
+      return { task, canGuest, canEdit, canPerformer, date, revision, devicePolicy, linen, inventory, canReportIssue };
+    };
+    const allowed = (row: FieldPullMetadata) => authorize(ctx.authContext, "view", resource(ctx, row, now), now) &&
+      (input.mode !== "supervised" || (row.assignedToPersonId !== null && row.assignedToPersonId !== ctx.personId &&
+        row.assignedToUserAccountId !== ctx.actorId && row.assignedToPerson?.archivedAt === null &&
+        ["ASSIGNED", "IN_PROGRESS"].includes(row.state) && authorize(ctx.authContext, "validate", resource(ctx, row, now), now)));
     const candidates = input.only_known ? [] : await repo.page(ctx.actorId, ctx.authContext, now, asOf, input, frame.after);
     const page = candidates.slice(0, fieldPullPageSize), hasMore = candidates.length > fieldPullPageSize;
     const knownRows = input.known_tasks.length ? await repo.known(ctx.actorId, ctx.authContext, now, [...known.keys()], input.mode) : [];
@@ -95,6 +98,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
         guestName: row.reservation?.guestName ?? null, title: toStringRecord(row.titleTranslations), type: row.type, state: row.state,
         priority: row.priority, dueDate: row.dueDate.toISOString().slice(0, 10), businessDate: view.date,
         serverVersion: row.updatedAt.toISOString(), revision: view.revision, canEdit: view.canEdit,
+        ...(input.include_issue_capture ? { canReportIssue: view.canReportIssue } : {}),
         checklistItems: row.checklistItems.map(item => ({ id: item.id, key: item.key, label: toStringRecord(item.labelTranslations), completed: Boolean(item.completedAt) })),
         ...(input.include_device_policy ? { devicePolicy: view.devicePolicy } : {}),
         ...(input.include_linen ? { linen: view.linen } : {}),
