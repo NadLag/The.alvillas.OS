@@ -88,5 +88,18 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Assigned employee collec
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     for (const button of await cash.getByRole("button").all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(64);
     await page.screenshot({ path: info.outputPath(`native-field-cash-${locale}.png`), fullPage: true }); expect(errors).toEqual([]);
+    await context.setOffline(true);
+    for (const checkbox of await page.locator('.field-checklist-items input[type="checkbox"]').all()) await checkbox.check();
+    await page.locator('.field-checklist button[type="submit"]').first().click();
+    await expect.poll(async () => JSON.stringify(await storedFieldData(page, "operations"))).toContain("field_task.complete");
+    await expect(cash.getByTestId("field-cash-amount")).toBeDisabled();
+    await page.reload();
+    await expect(cash.getByTestId("field-cash-amount")).toBeDisabled();
+    await context.setOffline(false); await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(page).toHaveURL(new RegExp(`/${locale}/app/field$`, "u"));
+    await withTenant(f.db, f.organizationId, async tx => {
+      expect(await tx.auditLog.count({ where: { action: "task.complete", resourceId: f.taskId } })).toBe(1);
+      expect(await tx.cashCollection.count({ where: { taskId: f.taskId } })).toBe(1);
+    });
   } finally { await Promise.all([context.close(), otherContext.close()]); await f.db.$disconnect(); }
 });
