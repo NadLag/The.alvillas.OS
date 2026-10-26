@@ -32,9 +32,13 @@ async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeo
     if (entry.operation.type === "field_task.complete" && blockedPhotoTasks.has(entry.operation.payload.taskId)) {
       outcome = blockedPhotoTasks.get(entry.operation.payload.taskId)!; continue;
     }
+    if (entry.operation.type === "field_task.issue.report" && entry.operation.payload.photoClientOpId && blockedPhotoTasks.has(entry.operation.payload.taskId)) {
+      outcome = blockedPhotoTasks.get(entry.operation.payload.taskId)!; continue;
+    }
     if (entry.operation.type === "field_task.complete") {
       const taskId = entry.operation.payload.taskId;
-      const counts = (await queue.entries(scope)).filter(count => !count.resolvedByClientOpId && count.operation.type === "field_stocktake.record" && count.operation.payload.taskId === taskId);
+      const counts = (await queue.entries(scope)).filter(count => !count.resolvedByClientOpId &&
+        (count.operation.type === "field_stocktake.record" || count.operation.type === "field_task.issue.report") && count.operation.payload.taskId === taskId);
       if (counts.length) { outcome = counts.some(count => count.syncStatus === "conflict") ? "conflict" : counts.some(count => count.syncStatus === "rejected") ? "rejected" : "queued"; continue; }
     }
     if (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach") {

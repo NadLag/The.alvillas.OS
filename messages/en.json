@@ -2354,5 +2354,21 @@
     "save": "Record count",
     "saving": "Saving count…",
     "saveBeforeComplete": "Save your inventory counts before finishing the job."
+  },
+  "FieldIssue": {
+    "title": "Report a maintenance issue",
+    "description": "What needs attention?",
+    "photo": "Photo (optional)",
+    "loading": "Preparing issue reporting…",
+    "unavailable": "Issue reporting is unavailable for this job.",
+    "save": "Save issue on this device",
+    "saving": "Saving issue…",
+    "discard": "Discard unsaved issue",
+    "queued": "Issue saved on this device. It will sync when connected.",
+    "saved": "Issue reported.",
+    "invalid": "Check the issue details and photo, then try again.",
+    "storage": "Device storage is full. Your unsaved issue is still here. Free space and try again.",
+    "unsaved": "Save or discard the issue before leaving or finishing this job.",
+    "review": "This issue needs review. Your report and photo remain on this device."
   }
 }

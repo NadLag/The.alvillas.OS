@@ -1130,6 +1130,7 @@ model OperationSavedView {
 }
 
 model OperationTaskEvidence {
+  issues         OperationIssue[]
   upload         OperationEvidenceUpload?
   id             String                   @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String                   @map("organization_id") @db.Uuid
@@ -1144,6 +1145,7 @@ model OperationTaskEvidence {
   organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   task           OperationTask            @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@unique([organizationId, taskId, id], map: "operation_evidence_task_id_unique")
   @@index([organizationId, taskId, createdAt], map: "operation_evidence_task_idx")
   @@map("operation_task_evidence")
 }
@@ -1184,6 +1186,8 @@ model OperationEvidenceUpload {
 }
 
 model OperationIssue {
+  evidenceId     String?       @map("evidence_id") @db.Uuid
+  evidence       OperationTaskEvidence? @relation(fields: [organizationId, taskId, evidenceId], references: [organizationId, taskId, id], onDelete: Restrict, onUpdate: NoAction, map: "operation_issue_evidence_fkey")
   id             String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String        @map("organization_id") @db.Uuid
   taskId         String        @map("task_id") @db.Uuid

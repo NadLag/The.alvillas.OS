@@ -14,6 +14,7 @@ export type FieldProxyOperation = Extract<SyncPushOp, { type: "field_task.proxy_
 export type FieldLinenDraftInput = FieldStocktakePayload & { clientOpId: string };
 export type FieldLinenDraft = FieldQueueScope & FieldLinenDraftInput & { cacheId: string; savedAt: string; supersedesClientOpId?: string };
 export type FieldLinenOperation = Extract<SyncPushOp, { type: "field_stocktake.record" }>;
+export type FieldIssueOperation = Extract<SyncPushOp, { type: "field_task.issue.report" }>;
 type PendingPhotoOperation = { client_op_id: string; type: "field_photo.prepare"; client_created_at: string;
   payload: { taskId: string; photoLocalId: string } };
 export type FieldQueueEntry = FieldQueueScope & {
@@ -247,6 +248,42 @@ export class FieldQueueStore extends Dexie {
         ...(task.devicePolicy !== undefined ? { devicePolicy: task.devicePolicy } : {}), operation: { client_op_id: value.localId,
         type: "field_photo.prepare", client_created_at: new Date().toISOString(), payload: { taskId: value.taskId, photoLocalId: value.localId } } };
       record.sequence = await this.operations.add(record); return record;
+    });
+  }
+
+  async storeIssue(scope: FieldQueueScope, operation: FieldIssueOperation, incarnation: string,
+    photo?: { manifest: FieldUploadManifest; blob: Blob }): Promise<FieldQueueEntry> {
+    return this.transaction("rw", [this.operations, this.metadata, this.jobs, this.cacheState, this.photos], async () => {
+      const identity = fieldIdentity(scope), localId = `${identity}:${operation.client_op_id}`;
+      if ((await this.metadata.get("identity"))?.value !== identity || (await this.cacheState.get(identity))?.incarnation !== incarnation)
+        throw new Error("FIELD_SESSION_CHANGED");
+      const task = (await this.jobs.get(`${identity}:${operation.payload.taskId}`))?.task;
+      if (!task?.canReportIssue) throw new Error("FIELD_ISSUE_UNAVAILABLE");
+      const existing = await this.operations.where("localId").equals(localId).first();
+      if (existing) {
+        if (JSON.stringify(existing.operation) !== JSON.stringify(operation)) throw new Error("FIELD_ISSUE_KEY_REUSED");
+        return existing;
+      }
+      if (Boolean(photo) !== Boolean(operation.payload.photoClientOpId) || (photo &&
+        (photo.manifest.taskId !== operation.payload.taskId || photo.manifest.localId !== operation.payload.photoClientOpId ||
+          photo.manifest.localId === operation.client_op_id))) throw new Error("FIELD_ISSUE_PHOTO_INVALID");
+      const completing = (await this.entries(scope)).some(entry => entry.operation.type === "field_task.complete" &&
+        entry.operation.payload.taskId === operation.payload.taskId && entry.syncStatus === "pending");
+      if (completing) throw new Error("FIELD_ISSUE_UNAVAILABLE");
+      if (photo) await this.storePhoto(scope, photo.manifest, photo.blob, incarnation);
+      return this.store(scope, operation);
+    });
+  }
+
+  async issueSnapshot(scope: FieldQueueScope, taskId: string) {
+    return this.transaction("r", [this.metadata, this.cacheState, this.jobs, this.operations], async () => {
+      const identity = fieldIdentity(scope);
+      if ((await this.metadata.get("identity"))?.value !== identity) throw new Error("FIELD_SESSION_CHANGED");
+      const state = await this.cacheState.get(identity), job = await this.jobs.get(`${identity}:${taskId}`), entries = await this.entries(scope);
+      const completing = entries.some(entry => entry.operation.type === "field_task.complete" && entry.operation.payload.taskId === taskId && entry.syncStatus === "pending");
+      return { incarnation: state?.incarnation ?? null, canReport: Boolean(job?.task.canReportIssue) && !completing,
+        canAttach: Boolean(job?.task.canEdit), issues: entries.filter((entry): entry is FieldQueueEntry & { operation: FieldIssueOperation } =>
+          entry.operation.type === "field_task.issue.report" && entry.operation.payload.taskId === taskId) };
     });
   }
 

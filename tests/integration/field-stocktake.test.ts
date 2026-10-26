@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { provisionIntegrationRole } from "./support/database-role";
@@ -68,9 +68,9 @@ function syncInput(f: Fixture, payload = f.input, clientOpId: string = randomUUI
     ops: [{ type: "field_stocktake.record", client_op_id: clientOpId, client_created_at: "2077-01-01T00:00:00Z", payload }] });
 }
 const push = (f: Fixture, input = syncInput(f), ctx = f.ctx) => pushSyncOps(ctx, input, { db, requestId: randomUUID() });
-function pull(f: Fixture, extra: Record<string, unknown> = {}, ctx = f.ctx) {
+function pull(f: Fixture, extra: Record<string, unknown> = {}, ctx = f.ctx, now?: Date) {
   return pullFieldWork(ctx, fieldPullInputSchema.parse({ organization_id: f.org, actor_user_id: f.account.id, mode: "assigned", ...extra }),
-    { db, env: { NODE_ENV: "test", ENCRYPTION_KEYS: `local:${Buffer.alloc(32, 0x31).toString("base64")}` } });
+    { db, now, env: { NODE_ENV: "test", ENCRYPTION_KEYS: `local:${Buffer.alloc(32, 0x31).toString("base64")}` } });
 }
 async function inventoryFixture(category: "CONSUMABLE" | "EQUIPMENT") {
   const f = await fixture(), item = category === "CONSUMABLE" ? "soap" : "vacuum";
@@ -282,6 +282,31 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
     const snapshot = (await pull(f, { include_linen: true }, viewer)).tasks[0];
     expect(snapshot.canEdit).toBe(false); expect(snapshot.linen?.items[0].available).toBe(false);
     await empty(f);
+  });
+  it.skipIf(!url)("uses the database snapshot clock so application clock lag cannot hide committed inventory", async () => {
+    const f = await inventoryFixture("CONSUMABLE"), applicationTime = new Date(Date.now() - 60_000);
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(applicationTime);
+    try {
+      const snapshot = await pull(f, { include_inventory: true });
+      expect(snapshot.tasks).toHaveLength(1);
+      expect(snapshot.tasks[0].inventory).toMatchObject({ catalog: { id: f.rule.id, version: f.rule.version }, items: [{ key: "soap", available: true }] });
+      expect(new Date(snapshot.snapshot_at).getTime()).toBeGreaterThan(applicationTime.getTime() + 30_000);
+    } finally { vi.useRealTimers(); }
+  });
+  it.skipIf(!url)("includes the cursor millisecond's recorded catalog and excludes the next millisecond without shifting business time", async () => {
+    const f = await inventoryFixture("CONSUMABLE"), at = new Date("2030-01-01T00:00:00.123Z"), currentId = randomUUID();
+    await withTenant(db, f.org, async tx => {
+      for (const [offset, id, recordedAt, unit] of [[1, currentId, "2030-01-01T00:00:00.123456Z", "pieces"],
+        [2, randomUUID(), "2030-01-01T00:00:00.124000Z", "sets"]] as const) {
+        await tx.$executeRaw`INSERT INTO config_rule(id,organization_id,key,scope_type,scope_id,value,version,effective_from,created_at,created_by,reason)
+          VALUES(${id}::uuid,${f.org}::uuid,'inventory.minimums','property',${f.property.id}::uuid,
+          ${JSON.stringify({ minimums: [{ ...f.value.minimums[0], unit }] })}::jsonb,${f.rule.version + offset},
+          '2022-01-01'::timestamptz,${recordedAt}::timestamptz,${f.account.id}::uuid,'Exact cursor precision fixture')`;
+      }
+    });
+    const snapshot = await pull(f, { include_inventory: true }, f.ctx, at);
+    expect(snapshot.snapshot_at).toBe(at.toISOString());
+    expect(snapshot.tasks[0].inventory).toMatchObject({ catalog: { id: currentId, version: f.rule.version + 1 }, items: [{ key: "soap", unit: "pieces" }] });
   });
   it.skipIf(!url)("denies a previously cached count when its assigned task is now terminal without mutating stock", async () => {
     const f = await fixture(), input = syncInput(f);

@@ -21,6 +21,8 @@ import {
 } from "@/modules/reservations/application/reservation-service";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { parseSyncPushInput, pushSyncOps } from "@/modules/reservations/application/sync-service";
+import { pullFieldWork } from "@/modules/reservations/application/field-pull-service";
+import { fieldPullInputSchema } from "@/modules/reservations/domain/field-pull";
 import type { SyncPushInput, SyncPushOp } from "@/modules/reservations/domain/sync-protocol";
 import { taskTypeSchema } from "@/platform/config/rule-registry";
 import defaultPolicy from "@/platform/config/defaults/operations.json";
@@ -1799,4 +1801,89 @@ describe("operations on real PostgreSQL", () => {
         .length,
     ).toBeGreaterThan(3);
   });
+
+  it.skipIf(!url)("field issues serialize concurrent deliveries and cross-device retries into one issue, audit and outbox event", async () => {
+    const f = await fixture(), task = await assigned(f), ctx = issueActor(f, task.id), batch = issueBatch(ctx, task.id);
+    const results = await Promise.all(Array.from({ length: 4 }, () => pushSyncOps(ctx, batch, deps())));
+    expect(results.flatMap(result => result.results.map(row => row.status)).sort()).toEqual(["APPLIED", "DUPLICATE", "DUPLICATE", "DUPLICATE"]);
+    expect((await pushSyncOps(ctx, { ...batch, device_id: randomUUID() }, deps())).results[0].status).toBe("DUPLICATE");
+    await withTenant(db, f.org, async tx => {
+      const issues = await tx.operationIssue.findMany({ where: { taskId: task.id } }); expect(issues).toHaveLength(1);
+      expect(issues[0]).toMatchObject({ propertyId: task.propertyId, createdBy: ctx.actorId, state: "OPEN", evidenceId: null });
+      expect(issues[0].createdAt.getUTCFullYear()).toBeLessThan(2077);
+      expect(await tx.auditLog.count({ where: { resourceId: task.id, action: "task.issue.reported" } })).toBe(1);
+      expect(await tx.outboxEvent.count({ where: { type: "IssueReported", idempotencyKey: `issue:${issues[0].id}:reported` } })).toBe(1);
+      expect((await tx.operationTask.findUniqueOrThrow({ where: { id: task.id } })).state).toBe("ASSIGNED");
+    });
+    const changed = structuredClone(batch); if (changed.ops[0].type !== "field_task.issue.report") throw new Error("Expected issue");
+    changed.ops[0].payload.description = "Changed observation must not reuse the key";
+    expect((await pushSyncOps(ctx, changed, deps())).results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_IDEMPOTENCY_KEY_REUSED" });
+  });
+
+  it.skipIf(!url)("field issues require create permission, the original assignee, tenant and actor at execution", async () => {
+    const f = await fixture(), task = await assigned(f), other = await fixture();
+    const denied = await pushSyncOps(f.workerCtx, issueBatch(f.workerCtx, task.id), deps());
+    expect(denied.results[0]).toMatchObject({ status: "REJECTED", error_code: "REJECTED_FORBIDDEN" });
+    expect((await pushSyncOps(f.ctx, issueBatch(f.ctx, task.id), deps())).results[0].status).toBe("REJECTED");
+    expect((await pushSyncOps(other.ctx, issueBatch(other.ctx, task.id), deps())).results[0].status).toBe("REJECTED");
+    const ctx = issueActor(f, task.id), stale = issueBatch(ctx, task.id);
+    expect((await pushSyncOps(ctx, { ...stale, actor_user_id: randomUUID() }, deps())).results[0].error_code).toBe("REJECTED_SESSION_CHANGED");
+    await withTenant(db, f.org, tx => tx.operationTask.update({ where: { id: task.id }, data: { assignedToPersonId: f.person.id, assignedToUserAccountId: f.account.id } }));
+    expect((await pushSyncOps(ctx, stale, deps())).results[0].status).toBe("REJECTED");
+    expect(await withTenant(db, f.org, tx => tx.operationIssue.count({ where: { taskId: task.id } }))).toBe(0);
+  });
+
+  it.skipIf(!url)("field issue capability is optional for old clients and changes with the authorized job grant", async () => {
+    const f = await fixture(), task = await assigned(f), ctx = issueActor(f, task.id);
+    const input = fieldPullInputSchema.parse({ organization_id: f.org, actor_user_id: ctx.actorId, mode: "assigned" });
+    const old = await pullFieldWork(ctx, input, deps()); expect(old.tasks.find(row => row.id === task.id)).not.toHaveProperty("canReportIssue");
+    const current = await pullFieldWork(ctx, { ...input, include_issue_capture: true }, deps());
+    const allowed = current.tasks.find(row => row.id === task.id)!; expect(allowed.canReportIssue).toBe(true);
+    const denied = await pullFieldWork(f.workerCtx, { ...input, include_issue_capture: true }, deps());
+    expect(denied.tasks.find(row => row.id === task.id)).toMatchObject({ canEdit: true, canReportIssue: false });
+    expect(denied.tasks.find(row => row.id === task.id)!.revision).not.toBe(allowed.revision);
+  });
+
+  it.skipIf(!url)("field issues link only verified photos created by the same worker on that task", async () => {
+    const f = await fixture(), task = await assigned(f), ctx = issueActor(f, task.id), key = randomUUID();
+    const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDQAAAABJRU5ErkJggg==", "base64");
+    const image = await attachOperationEvidence(f.workerCtx, { taskId: task.id, idempotencyKey: key, note: "Photo of leaking tap", contentType: "image/png" }, bytes,
+      { ...deps(), storage: { createSignedUploadUrl: () => Promise.resolve({ url: "https://storage.example.test/photo" }), createSignedDownloadUrl: () => Promise.resolve({ url: "https://storage.example.test/photo" }) },
+        transport: () => Promise.resolve(new Response(null, { status: 200 })) });
+    const batch = issueBatch(ctx, task.id, key);
+    expect((await pushSyncOps(ctx, batch, deps())).results[0].status).toBe("APPLIED");
+    expect((await pushSyncOps(ctx, batch, deps())).results[0].status).toBe("DUPLICATE");
+    await withTenant(db, f.org, async tx => {
+      const issue = await tx.operationIssue.findFirstOrThrow({ where: { taskId: task.id } }); expect(issue.evidenceId).toBe(image.id);
+      expect(await tx.operationTaskEvidence.count({ where: { taskId: task.id } })).toBe(1);
+      expect(await tx.auditLog.count({ where: { resourceId: task.id, action: "task.issue.reported" } })).toBe(1);
+    });
+    const second = await assigned(f), secondCtx = issueActor(f, second.id);
+    expect((await pushSyncOps(secondCtx, issueBatch(secondCtx, second.id, key), deps())).results[0]).toMatchObject({ status: "CONFLICT", error_code: "TASK_ISSUE_CONFLICT" });
+    const otherKey = randomUUID(); await attachOperationEvidence(f.ctx, { taskId: task.id, idempotencyKey: otherKey, note: "Another person's photo", contentType: "image/png" }, bytes,
+      { ...deps(), storage: { createSignedUploadUrl: () => Promise.resolve({ url: "https://storage.example.test/other" }), createSignedDownloadUrl: () => Promise.resolve({ url: "https://storage.example.test/other" }) }, transport: () => Promise.resolve(new Response(null, { status: 200 })) });
+    expect((await pushSyncOps(ctx, issueBatch(ctx, task.id, otherKey), deps())).results[0].status).toBe("CONFLICT");
+    expect((await pushSyncOps(ctx, issueBatch(ctx, task.id, randomUUID()), deps())).results[0].status).toBe("CONFLICT");
+    expect(await withTenant(db, f.org, tx => tx.operationIssue.count())).toBe(1);
+  });
+
+  it.skipIf(!url)("issue evidence foreign keys reject cross-task links at the PostgreSQL boundary", async () => {
+    const f = await fixture(), first = await assigned(f), second = await assigned(f);
+    const evidence = await withTenant(db, f.org, tx => tx.operationTaskEvidence.create({ data: { organizationId: f.org, taskId: first.id,
+      note: "Existing task evidence", createdBy: f.workerAccount.id } }));
+    await expect(withTenant(db, f.org, tx => tx.operationIssue.create({ data: { organizationId: f.org, taskId: second.id,
+      propertyId: f.property.id, title: "Wrong link", description: "Cannot link a different task's photo", severity: "NORMAL",
+      idempotencyKey: randomUUID(), createdBy: f.workerAccount.id, evidenceId: evidence.id } }))).rejects.toThrow();
+    expect(await withTenant(db, f.org, tx => tx.operationIssue.count())).toBe(0);
+  });
 });
+
+function issueActor(f: Awaited<ReturnType<typeof fixture>>, taskId: string): ReservationActorContext {
+  return { ...f.workerCtx, authContext: { ...f.workerCtx.authContext, permissions: new Set(["task:view", "task:edit", "issue:create"]),
+    scopes: [{ organizationId: f.org, scopeType: "job", scopeId: taskId }] } };
+}
+function issueBatch(ctx: ReservationActorContext, taskId: string, photoClientOpId?: string): SyncPushInput {
+  return parsedBatch({ organization_id: ctx.organizationId, actor_user_id: ctx.actorId, device_id: randomUUID(), op_schema_version: 1,
+    ops: [{ type: "field_task.issue.report", client_op_id: randomUUID(), client_created_at: "2077-01-01T00:00:00+03:00",
+      payload: { taskId, title: "Leaking tap", description: "Water is leaking under the sink", severity: "HIGH", ...(photoClientOpId ? { photoClientOpId } : {}) } }] });
+}

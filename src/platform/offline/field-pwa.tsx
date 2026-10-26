@@ -193,7 +193,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
   }
   function updateApp() {
     if (!navigator.onLine) return;
-    if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"]')) { setNotice("saveBeforeUpdate"); return; }
+    if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"], [data-field-issue-dirty="true"]')) { setNotice("saveBeforeUpdate"); return; }
     if (updateRequested.current) return;
     updateRequested.current = true;
     const epoch = updateEpoch.current;
@@ -211,11 +211,11 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
       const reload = () => {
         if (updateEpoch.current !== epoch) return;
         if (!navigator.onLine) { resume(); setOffline(true); return; }
-        if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"]')) { resume(); setNotice("saveBeforeUpdate"); return; }
+        if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"], [data-field-issue-dirty="true"]')) { resume(); setNotice("saveBeforeUpdate"); return; }
         window.location.reload();
       };
       if (!navigator.onLine) { resume(); setOffline(true); return; }
-      if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"]')) { resume(); setNotice("saveBeforeUpdate"); return; }
+      if (document.querySelector('[data-field-dirty="true"], [data-field-photo-dirty="true"], [data-field-issue-dirty="true"]')) { resume(); setNotice("saveBeforeUpdate"); return; }
       refreshFieldApp(registration.current, reload, unavailable);
     }).catch(unavailable);
   }

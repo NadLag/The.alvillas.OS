@@ -184,6 +184,7 @@ export const issueInputSchema = z
     description: z.string().trim().min(6).max(1000),
     severity: z.enum(taskPriorities),
     idempotencyKey: z.uuid(),
+    photoClientOpId: z.uuid().optional(),
   })
   .strict();
 export function propertyInstant(

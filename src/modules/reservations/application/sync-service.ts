@@ -21,6 +21,7 @@ import {
 } from "@/modules/reservations/infrastructure/sync-repository";
 import { prisma } from "@/platform/db/client";
 import { attachFieldUploadEvidenceInTransaction } from "./field-upload-service";
+import { reportOperationIssueInTransaction } from "./operation-evidence";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { prepareFieldStocktakeBatch, recordFieldStocktakeInTransaction } from "@/platform/inventory/field-stocktake-service";
 import { StocktakeConflictError, FieldStocktakeUnavailableError } from "@/platform/inventory/field-stocktake";
@@ -83,7 +84,7 @@ function conflictResult(op: SyncPushOp, message: string): SyncPushOpResult {
       incoming: op.type
     },
     error_code: op.type === "field_task.proxy_validate" ? "TASK_PROXY_VALIDATION_CONFLICT" :
-      op.type === "field_task.complete" ? "TASK_COMPLETION_CONFLICT" : "TASK_EVIDENCE_CONFLICT"
+      op.type === "field_task.complete" ? "TASK_COMPLETION_CONFLICT" : op.type === "field_task.issue.report" ? "TASK_ISSUE_CONFLICT" : "TASK_EVIDENCE_CONFLICT"
   };
 }
 
@@ -159,6 +160,12 @@ export async function pushSyncOps(
           const observation = await recordFieldStocktakeInTransaction(ctx, op.payload, { deviceId: input.device_id,
             clientOpId: op.client_op_id, clientCreatedAt: op.client_created_at ? new Date(op.client_created_at) : null }, tx, stocktakeBatch, metaForOp(deps, op));
           const result = appliedResult(op, observation.serverVersion);
+          await repository.finish(input.device_id, op.client_op_id, result.status, result, null);
+          results.push(result); continue;
+        }
+        if (op.type === "field_task.issue.report") {
+          const issue = await reportOperationIssueInTransaction(ctx, { ...op.payload, idempotencyKey: op.client_op_id }, tx, metaForOp(deps, op), true);
+          const result: SyncPushOpResult = { ...appliedResult(op, null), status: issue.idempotent ? "DUPLICATE" : "APPLIED" };
           await repository.finish(input.device_id, op.client_op_id, result.status, result, null);
           results.push(result); continue;
         }

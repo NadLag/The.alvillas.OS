@@ -95,7 +95,15 @@ for (const category of ["LINEN", "CONSUMABLE", "EQUIPMENT"] as const) for (const
     await expect(row.getByTestId(`field-${surface}-review-required`)).toBeVisible(); await expect(count).toHaveValue("1.5");
     await expect(row.getByTestId(`field-${surface}-review-required`)).toContainText("1.5");
     await row.getByTestId(`field-${surface}-review`).click(); await expect(count).toHaveValue(""); await count.fill("13");
+    const finalReview = z.array(z.object({ taskId: z.uuid(), itemKey: z.string(), clientOpId: z.uuid(), expectedRevision: z.string() }))
+      .parse(await storedFieldData(page, "linenDrafts")).find(draft => draft.taskId === f.taskId && draft.itemKey === original.operation.payload.itemKey)!;
+    expect(finalReview.expectedRevision).toBe("3");
     await row.getByTestId(`field-${surface}-save`).click();
+    // An empty queue before enqueue finishes is not an acknowledgement. Wait
+    // for this exact review to commit, then retain the client receipt checks.
+    await expect.poll(() => withTenant(f.db, f.organizationId, tx => tx.syncOp.findFirst({
+      where: { clientOpId: finalReview.clientOpId, deviceId: original.deviceId }, select: { status: true },
+    })), { timeout: 30000 }).toEqual({ status: "APPLIED" });
     await expect.poll(async () => entries.parse(await storedFieldData(page)).filter(entry => !entry.resolvedByClientOpId)).toEqual([]);
     await expect(count).toHaveValue("13"); expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await page.screenshot({ path: info.outputPath(`${category.toLowerCase()}-${locale}.png`), fullPage: true });
@@ -103,6 +111,7 @@ for (const category of ["LINEN", "CONSUMABLE", "EQUIPMENT"] as const) for (const
       const observations = await tx.inventoryStocktake.findMany({ where: { taskId: f.taskId }, orderBy: { revision: "asc" } });
       expect(observations.map(observation => observation.countedQuantity)).toEqual([11n, 12n, 13n, 13n]);
       expect(observations[1]).toMatchObject({ clientOpId: reviewed.clientOpId, configRuleId: rule.id, note: retainedNote });
+      expect(observations[3]).toMatchObject({ clientOpId: finalReview.clientOpId });
       expect(await tx.syncOp.count({ where: { deviceId: original.deviceId } })).toBe(3);
       expect(await tx.auditLog.count({ where: { action: "inventory.stocktake.record", resourceId: { in: observations.map(observation => observation.id) } } })).toBe(4);
       expect(await tx.operationTask.findUniqueOrThrow({ where: { id: f.taskId } })).toMatchObject({ state: "ASSIGNED", completedAt: null });

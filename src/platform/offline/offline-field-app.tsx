@@ -20,12 +20,13 @@ import { fieldQueue } from "./field-queue";
 import { type FieldQueueScope } from "./field-queue-store";
 import { resolveFieldScope } from "./field-session";
 import { FieldPhotoCapture } from "./field-photo-capture";
+import { FieldIssueCapture } from "./field-issue-capture";
 import { FieldInventory, FieldLinen } from "./field-linen";
 import { FieldProxyForm } from "@/modules/reservations/ui/field-proxy-form";
 import type { FieldCacheAudience } from "./field-queue-store";
 
 function fieldMessages(messages: typeof en) {
-  return { Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, Operations: { manage: messages.Operations.manage } };
+  return { Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, FieldIssue: messages.FieldIssue, Operations: { manage: messages.Operations.manage } };
 }
 const catalogs = { en: fieldMessages(en), fr: fieldMessages(fr), ar: fieldMessages(ar) };
 export function OfflineFieldApp({ initialLocale }: { initialLocale: AppLocale }) {
@@ -39,6 +40,7 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
   const [tasks, setTasks] = useState<FieldWorkSnapshot[]>([]), [snapshotAt, setSnapshotAt] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [audience, setAudience] = useState<FieldCacheAudience>("assigned");
+  const [issueBlocked, setIssueBlocked] = useState(false), issue = useTranslations("FieldIssue");
   const [photoBlocked, setPhotoBlocked] = useState(false), photo = useTranslations("FieldPhoto");
   const [linenBlocked, setLinenBlocked] = useState(false), linen = useTranslations("FieldLinen");
   const [inventoryBlocked, setInventoryBlocked] = useState(false), inventory = useTranslations("FieldInventory");
@@ -71,6 +73,8 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
     return `/${nextLocale}/offline/field${query.size ? `?${query}` : ""}`;
   };
   function openJob(id: string | null) {
+    if (document.querySelector('[data-field-issue-dirty="true"]')) { setIssueBlocked(true); return; }
+    setIssueBlocked(false);
     if (document.querySelector('[data-field-inventory-dirty="true"]')) { setInventoryBlocked(true); return; }
     setInventoryBlocked(false);
     if (document.querySelector('[data-field-linen-dirty="true"]')) { setLinenBlocked(true); return; }
@@ -86,6 +90,7 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
       titleTestId={task ? "field-task-title" : undefined} subtitle={task ? t("detailMeta", { reservation: task.reservationReference ?? t("noReservation"), guest: task.guestName ?? t("noGuest") }) : cache("offlineWork")}
       actions={taskId ? <button className="secondary-button" type="button" onClick={() => openJob(null)}>{audience === "supervised" ? proxy("backToValidation") : t("backToJobs")}</button> : undefined} />
     <FieldLanguage locale={locale} path={path(locale, taskId).replace(`/${locale}`, "")} onChangeLocale={language} />
+    {issueBlocked ? <p role="status" data-testid="field-issue-navigation-blocked">{issue("unsaved")}</p> : null}
     {photoBlocked ? <p role="status" data-testid="field-photo-navigation-blocked">{audience === "supervised" ? proxy("unsaved") : photo("unsaved")}</p> : null}
     {linenBlocked ? <p role="status" data-testid="field-linen-navigation-blocked">{linen("unsaved")}</p> : null}
     {inventoryBlocked ? <p role="status" data-testid="field-inventory-navigation-blocked">{inventory("unsaved")}</p> : null}
@@ -120,6 +125,7 @@ function CachedChecklist({ task, scope, locale }: { task: FieldWorkSnapshot; sco
     <FieldTaskCompletionForm locale={locale} taskId={task.id} idempotencyKey={idempotencyKey} userId={scope.userId} organizationId={scope.organizationId}
       beforeComplete={<><FieldLinen scope={scope} taskId={task.id} locale={locale} />
         <FieldInventory scope={scope} taskId={task.id} locale={locale} />
+        <FieldIssueCapture scope={scope} taskId={task.id} />
         <FieldPhotoCapture key={`${scope.organizationId}:${scope.userId}:${task.id}`} scope={scope} taskId={task.id} /></>}
       checklistItems={task.checklistItems} mode="cached" readOnly={!task.canEdit} labels={{
         saving: t("saving"), validation: t("forms.validation"), unauthorized: t("forms.unauthorized"), forbidden: t("forms.forbidden"),
