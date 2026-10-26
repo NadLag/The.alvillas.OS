@@ -82,7 +82,7 @@ export async function importAirbnbSettlementAction(
 ): Promise<AirbnbSettlementFormState> {
   const appLocale = safeLocale(locale);
   const session = await auth();
-  const ctx = financeActorContextFromSession(session);
+  const ctx = await financeActorContextFromSession(session);
 
   if (!ctx) {
     return { status: "error", messageKey: "unauthorized" };

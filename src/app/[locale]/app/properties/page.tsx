@@ -1,9 +1,10 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AdminShell, EmptyState, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
-import { listOwners, listProperties } from "@/modules/core/application/core-service";
+import { CoreAuthorizationError, listOwners, listProperties } from "@/modules/core/application/core-service";
+import { authorizeCollection } from "@/platform/authz/authorize";
 import { PropertyCreateForm } from "@/modules/core/ui/core-forms";
 import { PropertyRegisterTable } from "@/modules/core/ui/core-tables";
 import { listGeography } from "@/modules/organization/application/geography-service";
@@ -27,7 +28,7 @@ export default async function PropertiesPage({
   setRequestLocale(appLocale);
 
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
   const organizationCtx = await organizationActorContextFromSession(session);
 
   if (!ctx) {
@@ -36,10 +37,10 @@ export default async function PropertiesPage({
 
   const [t, owners, properties, geography] = await Promise.all([
     getTranslations("Core"),
-    listOwners(ctx),
+    authorizeCollection(ctx.authContext, "view", "owner") ? listOwners(ctx) : [],
     listProperties(ctx),
     organizationCtx ? listGeography(organizationCtx).catch(() => ({ cities: [], regions: [] })) : { cities: [], regions: [] }
-  ]);
+  ]).catch(error => { if (error instanceof CoreAuthorizationError) notFound(); throw error; });
   const dsnT = await getTranslations("DesignSystem");
   const propertyRows = properties.map((property) => ({
     id: property.id,
@@ -87,7 +88,7 @@ export default async function PropertiesPage({
           />
         </section>
 
-        <aside className="workspace-side" aria-label={t("properties.createLabel")}>
+        {authorizeCollection(ctx.authContext, "create", "property") && authorizeCollection(ctx.authContext, "view", "owner") ? <aside className="workspace-side" aria-label={t("properties.createLabel")}>
           <p className="panel-label">{t("properties.createLabel")}</p>
           <PropertyCreateForm
             cities={geography.cities.map((city) => ({ id: city.id, name: city.name, regionName: city.regionName }))}
@@ -160,7 +161,7 @@ export default async function PropertiesPage({
               generic: t("forms.generic")
             }}
           />
-        </aside>
+        </aside> : null}
       </div>
     </AdminShell>
   );

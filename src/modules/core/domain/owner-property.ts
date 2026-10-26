@@ -452,6 +452,7 @@ export const propertyOwnershipShareInputSchema = z.object({
 export const propertyOwnershipInputSchema = z
   .object({
     propertyId: z.string().uuid(),
+    reason: z.string().trim().min(6).max(500),
     shares: z.array(propertyOwnershipShareInputSchema).min(1).max(20)
   })
   .superRefine((value, ctx) => {

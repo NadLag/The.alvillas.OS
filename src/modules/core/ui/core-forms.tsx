@@ -202,6 +202,7 @@ type ManagementAgreementLabels = FormLabels & {
 
 type PropertyOwnershipLabels = FormLabels & {
   addOwner: string;
+  reason: string;
   owner: string;
   ownershipSection: string;
   primary: string;
@@ -1670,6 +1671,7 @@ export function PropertyOwnershipForm({
           <input name="ownershipRowIndex" type="hidden" value={index} />
         </div>
       ))}
+      <label className="field"><span>{labels.reason}</span><input name="reason" data-testid="property-ownership-reason" required minLength={6} maxLength={500} /></label>
       {clientError ? (
         <p className="form-error" data-testid="property-ownership-client-error" role="alert">
           {clientError}

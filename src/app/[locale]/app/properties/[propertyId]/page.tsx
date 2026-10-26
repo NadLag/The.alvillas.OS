@@ -3,9 +3,10 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { AdminShell, EmptyState, ShellHeader } from "@/design-system/shells";
-import { agreementActorContextFromSession, coreActorContextFromSession } from "@/modules/core/application/core-access";
+import { coreActorContextFromSession } from "@/modules/core/application/core-access";
 import {
   CoreNotFoundError,
+  CoreAuthorizationError,
   allowedPropertyLifecycleTransitions,
   getProperty,
   listOwners,
@@ -26,7 +27,7 @@ import {
   listReservations
 } from "@/modules/reservations/application/reservation-service";
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
-import { authorize } from "@/platform/authz/authorize";
+import { authorize, authorizeCollection } from "@/platform/authz/authorize";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -155,8 +156,8 @@ export default async function PropertyDetailPage({
   }
 
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
-  const agreementCtx = await agreementActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
+  const agreementCtx = ctx;
   const reservationCtx = await reservationActorContextFromSession(session);
 
   if (!ctx) {
@@ -169,7 +170,7 @@ export default async function PropertyDetailPage({
   try {
     property = await getProperty(ctx, parsedId.data);
   } catch (error) {
-    if (error instanceof CoreNotFoundError) {
+    if (error instanceof CoreNotFoundError || error instanceof CoreAuthorizationError) {
       notFound();
     }
 
@@ -182,7 +183,8 @@ export default async function PropertyDetailPage({
     propertyId: property.id,
     city: property.cityId,
     region: property.regionId
-  });
+  }) && authorize(ctx.authContext, "edit", { type: "financial_transaction", organizationId: ctx.organizationId,
+    propertyId: property.id, city: property.cityId, region: property.regionId }) && authorizeCollection(ctx.authContext, "view", "owner");
   const propertyScopedResource = {
     organizationId: ctx.organizationId,
     propertyId: property.id,
@@ -1311,6 +1313,7 @@ export default async function PropertyDetailPage({
           <PropertyOwnershipForm
             labels={{
               addOwner: t("properties.ownership.addOwner"),
+              reason: t("properties.lifecycle.reason"),
               owner: t("properties.ownership.owner"),
               ownershipSection: t("properties.ownership.formTitle"),
               primary: t("properties.ownership.primary"),

@@ -250,7 +250,7 @@ export async function createOwnerAction(
 ): Promise<CoreFormState> {
   const appLocale = safeLocale(locale);
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
 
   if (!ctx) {
     return { status: "error", messageKey: "unauthorized" };
@@ -291,7 +291,7 @@ export async function createPropertyAction(
 ): Promise<CoreFormState> {
   const appLocale = safeLocale(locale);
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
 
   if (!ctx) {
     return { status: "error", messageKey: "unauthorized" };
@@ -354,7 +354,7 @@ export async function updatePropertyOperatingProfileAction(
 ): Promise<CoreFormState> {
   const appLocale = safeLocale(locale);
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
 
   if (!ctx) {
     return { status: "error", messageKey: "unauthorized" };
@@ -386,7 +386,7 @@ export async function updatePropertyOwnershipAction(
 ): Promise<CoreFormState> {
   const appLocale = safeLocale(locale);
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
 
   if (!ctx) {
     return { status: "error", messageKey: "unauthorized" };
@@ -394,6 +394,7 @@ export async function updatePropertyOwnershipAction(
 
   const parsed = parsePropertyOwnershipInput({
     propertyId,
+    reason: formValue(formData, "reason"),
     shares: propertyOwnershipShares(formData)
   });
 
@@ -421,7 +422,7 @@ export async function transitionPropertyLifecycleAction(
 ): Promise<CoreFormState> {
   const appLocale = safeLocale(locale);
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
 
   if (!ctx) {
     return { status: "error", messageKey: "unauthorized" };
@@ -457,7 +458,7 @@ export async function upsertPropertyBookingChannelAction(
 ): Promise<CoreFormState> {
   const appLocale = safeLocale(locale);
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
 
   if (!ctx) {
     return { status: "error", messageKey: "unauthorized" };
