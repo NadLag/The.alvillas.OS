@@ -40,9 +40,17 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Worker wallet requires i
     await admin.goto(`/en/app/team/${user.personId}`);
     await admin.getByText(en.Team.linkWallet, { exact: true }).click();
     const linkForm = admin.getByTestId("team-wallet-form"); await linkForm.locator('[name="ledgerAccountId"]').selectOption("");
-    await linkForm.locator('[name="accountName"]').fill(`Dedicated wallet ${locale}`); await linkForm.locator('[name="reason"]').fill("Local own-wallet read acceptance");
-    await linkForm.locator('button[type="submit"]').click(); await expect(linkForm.getByRole("status")).toHaveText(en.Team.result.saved, { timeout: 30000 });
-    const link = await withTenant(f.db, f.organizationId, tx => tx.teamWallet.findFirstOrThrow({ where: { personId: user.personId } }));
+    const accountName = `Dedicated wallet ${locale}`;
+    await linkForm.locator('[name="accountName"]').fill(accountName); await linkForm.locator('[name="reason"]').fill("Local own-wallet read acceptance");
+    const saved = admin.waitForResponse(response => response.request().method() === "POST" && new URL(response.url()).pathname === `/en/app/team/${user.personId}` && Boolean(response.request().postData()?.includes(accountName)), { timeout: 30000 });
+    await linkForm.locator('button[type="submit"]').click(); const savedResponse = await saved;
+    expect(savedResponse.ok()).toBe(true);
+    // Revalidation removes the successful setup form. Assert the native result,
+    // durable wallet UI and committed link rather than its transient status.
+    await expect(linkForm).toHaveCount(0); await expect(admin.getByText(en.Team.noMovements, { exact: true })).toBeVisible();
+    const link = await withTenant(f.db, f.organizationId, tx => tx.teamWallet.findFirstOrThrow({ where: { personId: user.personId }, include: { ledgerAccount: true } }));
+    expect(link.ledgerAccount.name).toBe(accountName);
+    expect(await withTenant(f.db, f.organizationId, tx => tx.teamWallet.count({ where: { personId: user.personId } }))).toBe(1);
     // These are isolated ledger fixtures for the read surface. Native financial
     // producer acceptance remains a separate mandatory feature dependency.
     await withTenant(f.db, f.organizationId, async tx => {
