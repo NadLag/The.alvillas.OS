@@ -2475,6 +2475,13 @@
       "POSTED": "Comptabilisée",
       "VOIDED": "Contrepassée"
     },
-    "emergencyException": "Cette dépense utilise l’exception de validation pour urgence prévue dans votre accord."
+    "emergencyException": "Cette dépense utilise l’exception de validation pour urgence prévue dans votre accord.",
+    "postTitle": "Enregistrer le paiement de la dépense approuvée",
+    "postGuidance": "Le paiement est enregistré depuis le compte sélectionné, à la date de la dépense, selon la répartition approuvée. Ajoutez la référence du paiement ou le motif.",
+    "recordPayment": "Enregistrer le paiement",
+    "voidTitle": "Contrepasser le paiement de la dépense",
+    "voidGuidance": "Enregistrez une correction motivée. Une écriture inverse préserve le paiement initial et son historique.",
+    "voidPayment": "Enregistrer la contrepassation",
+    "voidedGuidance": "Ce paiement a été contrepassé. Le paiement initial et sa contrepassation restent dans l’historique financier."
   }
 }

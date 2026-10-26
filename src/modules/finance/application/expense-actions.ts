@@ -7,6 +7,7 @@ import { captureException } from "@/platform/observability/sentry";
 import { financeActorContextFromSession } from "./finance-access";
 import { createExpenseDraft, submitExpense, ExpenseAccessError, ExpenseConflictError, ExpenseConfigurationError } from "./expense-service";
 import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
+import { postExpense,voidExpense } from "./expense-posting-service";
 
 async function run<T>(work: (actor: NonNullable<Awaited<ReturnType<typeof financeActorContextFromSession>>>) => Promise<T>) {
   const requestId = crypto.randomUUID();
@@ -23,4 +24,10 @@ async function run<T>(work: (actor: NonNullable<Awaited<ReturnType<typeof financ
 export async function createExpenseDraftAction(input: unknown) { return run(actor => createExpenseDraft(actor, input)); }
 export async function submitExpenseAction(input: unknown) {
   return run(async actor => { const result = await submitExpense(actor, input); revalidatePath("/[locale]/app/expenses/[id]", "page"); return result; });
+}
+export async function postExpenseAction(input:unknown){
+  return run(async actor=>{const result=await postExpense(actor,input);revalidatePath("/[locale]/app/expenses/[id]","page");return result;});
+}
+export async function voidExpenseAction(input:unknown){
+  return run(async actor=>{const result=await voidExpense(actor,input);revalidatePath("/[locale]/app/expenses/[id]","page");return result;});
 }

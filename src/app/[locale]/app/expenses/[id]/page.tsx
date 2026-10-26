@@ -7,7 +7,7 @@ import { formatCurrencyAmount, formatDate } from "@/i18n/format";
 import { auth } from "@/platform/auth/session";
 import { financeActorContextFromSession } from "@/modules/finance/application/finance-access";
 import { ExpenseAccessError, getExpense } from "@/modules/finance/application/expense-service";
-import { ExpenseSubmissionForm } from "@/modules/finance/ui/expense-form";
+import { ExpenseSubmissionForm,ExpensePostingForm,ExpenseVoidForm } from "@/modules/finance/ui/expense-form";
 
 export const dynamic = "force-dynamic";
 export default async function ExpensePage({ params }: { params: Promise<{ locale: string; id: string }> }) {
@@ -23,7 +23,7 @@ export default async function ExpensePage({ params }: { params: Promise<{ locale
       <dl className="detail-grid"><div><dt>{t("amount")}</dt><dd data-testid="expense-total" dir="auto">{formatCurrencyAmount(locale, expense.amount, expense.currency)}</dd></div>
         <div><dt>{t("category")}</dt><dd>{expense.category}</dd></div><div><dt>{t("occurredOn")}</dt><dd>{formatDate(locale, new Date(`${expense.occurredOn}T00:00:00Z`), { timeZone: "UTC" })}</dd></div></dl>
       {expense.approvalId ? <Link className="secondary-button" data-testid="expense-approval-link" href={`/${locale}/app/approvals/${expense.approvalId}`}>{t("viewApproval")}</Link> : null}
-      {expense.canSubmit ? <ExpenseSubmissionForm expense={expense} /> : <p>{t("submittedGuidance")}</p>}
+      {expense.canSubmit ? <ExpenseSubmissionForm expense={expense} /> :expense.canPost?<ExpensePostingForm expense={expense}/>:expense.canVoid?<ExpenseVoidForm expense={expense}/>:<p>{t(expense.state==="VOIDED"?"voidedGuidance":"submittedGuidance")}</p>}
     </section>
   </AdminShell>;
 }

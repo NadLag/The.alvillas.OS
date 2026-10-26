@@ -2475,6 +2475,13 @@
       "POSTED": "Posted",
       "VOIDED": "Reversed"
     },
-    "emergencyException": "This expense used the emergency approval exception defined in your agreement."
+    "emergencyException": "This expense used the emergency approval exception defined in your agreement.",
+    "postTitle": "Record approved expense payment",
+    "postGuidance": "This records payment from the selected account on the expense date, using the approved allocation. Add the payment reference or reason.",
+    "recordPayment": "Record payment",
+    "voidTitle": "Reverse expense payment",
+    "voidGuidance": "Record a correction with a reason. An opposite journal preserves the original payment and its history.",
+    "voidPayment": "Record reversal",
+    "voidedGuidance": "This payment was reversed. The original payment and its reversal remain in the financial history."
   }
 }

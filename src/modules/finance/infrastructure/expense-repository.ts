@@ -82,6 +82,9 @@ export class ExpenseRepository {
   submit(expenseId: string, submittedBy: string, snapshot: Prisma.InputJsonObject, submittedAt: Date) {
     return this.tx.expenseSubmission.create({ data: { organizationId: this.organizationId, expenseId, submittedBy, snapshot, submittedAt } });
   }
+  lifecycleAudit(expenseId:string,action:string) {
+    return this.tx.auditLog.findFirst({where:{organizationId:this.organizationId,resourceType:"expense",resourceId:expenseId,action},orderBy:{occurredAt:"asc"}});
+  }
   page(after?: { at: Date; id: string }) {
     return this.tx.expense.findMany({ where: { organizationId: this.organizationId, ...(after ? { OR: [{ createdAt: { lt: after.at } }, { createdAt: after.at, id: { lt: after.id } }] } : {}) },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 50, include });

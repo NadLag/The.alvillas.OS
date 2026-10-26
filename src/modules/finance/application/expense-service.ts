@@ -174,7 +174,11 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
     const target = viewableExpenseResource(ctx.authContext,row.property,{...row,amount:row.amount.toString()},stored.success?stored.data.policies.map(policy=>policy.ownerId):[],clock.now);
     if (!target) throw new ExpenseAccessError();
     const data = { ...facts(row), propertyName: row.property.name, approvalId: row.approval?.id ?? null,
-      emergencyException:stored.success&&Boolean(stored.data.postHocOwnerNotificationRequired),canSubmit: row.state === "DRAFT" && authorize(ctx.authContext, "edit", target, clock.now) };
+      emergencyException:stored.success&&Boolean(stored.data.postHocOwnerNotificationRequired),canSubmit: row.state === "DRAFT" && authorize(ctx.authContext, "edit", target, clock.now),
+      canPost:row.state==="APPROVED"&&authorize(ctx.authContext,"pay",target,clock.now)&&authorize(ctx.authContext,"create",{...target,type:"financial_transaction"},clock.now)&&
+        authorize(ctx.authContext,"view",{...target,type:"financial_transaction",id:row.fundingAccountId,financialRecordId:row.fundingAccountId},clock.now),
+      canVoid:row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"void",target,clock.now)&&
+        authorize(ctx.authContext,"void",{...target,type:"financial_transaction",id:row.transactionId!,financialRecordId:row.transactionId!},clock.now) };
     return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...target, data }, {}, clock.now) as typeof data;
   });
 }

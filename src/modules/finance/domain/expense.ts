@@ -32,7 +32,7 @@ export const expenseDraftSchema = z.object({
 export type ExpenseDraftInput = z.infer<typeof expenseDraftSchema>;
 
 export function expensePostings(input: {
-  amount: Money; allocation: ConfiguredExpenseAllocation; owners: readonly PropertyOwnerShare[]; ownerAmounts?: ReadonlyArray<{ ownerId: string; amount: Money }>;
+  amount: Money; allocation: Pick<ConfiguredExpenseAllocation,"ownerAmount"|"alvillasAmount"|"guestAmount">; owners: readonly PropertyOwnerShare[]; ownerAmounts?: ReadonlyArray<{ ownerId: string; amount: Money }>;
   ownerAccounts: ReadonlyMap<string, string>; companyExpenseAccountId: string; guestReceivableAccountId: string;
   fundingAccountId: string; dimensions: Record<string, unknown>;
 }): FinancePostingDraft[] {

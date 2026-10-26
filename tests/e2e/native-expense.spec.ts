@@ -98,6 +98,45 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense submissio
       expect(await tx.approvalStage.count({ where: { approvalId, state: "APPROVED", decidedBy: setup.ownerAccountId } })).toBe(1);
       expect(await tx.auditLog.count({ where: { resourceId: expenseId, action: "expense.approved" } })).toBe(1);
     });
+    await ownerPage.goto(`/${locale}/app/expenses/${expenseId}`);await expect(ownerPage.getByTestId("expense-detail-page")).toBeVisible();
+    await expect(ownerPage.getByTestId("expense-post-form")).toHaveCount(0);
+    await expect(admin.getByTestId("expense-post-form")).toBeVisible();await admin.getByTestId("expense-post-reason").fill("Dedicated accepted bank payment reference");
+    const postingRequest=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&
+      new URL(request.url()).pathname.endsWith(`/expenses/${expenseId}`)&&Boolean(request.postData()?.includes(expenseId)));
+    await admin.getByTestId("expense-post").click();const payment=await postingRequest;
+    await expect(admin.getByTestId("expense-post-form")).toHaveCount(0);await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
+    const paymentHeaders={"content-type":payment.headers()["content-type"],"next-action":payment.headers()["next-action"],accept:"text/x-component",origin};
+    const ownerDenied=await ownerPage.request.post(payment.url(),{data:payment.postDataBuffer()!,headers:paymentHeaders});
+    expect(await ownerDenied.text()).toContain('"code":"forbidden"');
+    const repeatedPayment=await admin.request.post(payment.url(),{data:payment.postDataBuffer()!,headers:paymentHeaders});
+    expect(await repeatedPayment.text()).toContain('"idempotent":true');
+    await withTenant(f.db,f.organizationId,async tx=>{
+      const expense=await tx.expense.findUniqueOrThrow({where:{id:expenseId}});expect(expense.state).toBe("POSTED");expect(expense.transactionId).not.toBeNull();
+      expect(await tx.financialTransaction.count({where:{idempotencyKey:`expense:${expenseId}:posted`}})).toBe(1);
+      const lines=await tx.posting.findMany({where:{transactionId:expense.transactionId!}});expect(lines).toHaveLength(2);
+      expect(lines.map(line=>({side:line.side,amount:line.amount.toString(),bucket:line.bucket}))).toEqual(expect.arrayContaining([
+        {side:"DEBIT",amount:"500.25",bucket:"OWNER_EXPENSE"},{side:"CREDIT",amount:"500.25",bucket:"EXPENSE_PAYMENT"}]));
+      expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.posted"}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.posted",actorId:setup.ownerAccountId}})).toBe(0);
+    });
+    await ownerPage.reload();await expect(ownerPage.getByTestId("expense-void-form")).toHaveCount(0);
+    await expect(admin.getByTestId("expense-void-form")).toBeVisible();await admin.getByTestId("expense-void-reason").fill("Dedicated reversal retains original payment history");
+    const voidRequest=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&
+      new URL(request.url()).pathname.endsWith(`/expenses/${expenseId}`)&&Boolean(request.postData()?.includes(expenseId)));
+    await admin.getByTestId("expense-void").click();const reversal=await voidRequest;
+    await expect(admin.getByTestId("expense-void-form")).toHaveCount(0);await expect(admin.getByTestId("expense-post-form")).toHaveCount(0);
+    const voidHeaders={"content-type":reversal.headers()["content-type"],"next-action":reversal.headers()["next-action"],accept:"text/x-component",origin};
+    const deniedVoid=await ownerPage.request.post(reversal.url(),{data:reversal.postDataBuffer()!,headers:voidHeaders});expect(await deniedVoid.text()).toContain('"code":"forbidden"');
+    const repeatedVoid=await admin.request.post(reversal.url(),{data:reversal.postDataBuffer()!,headers:voidHeaders});expect(await repeatedVoid.text()).toContain('"idempotent":true');
+    await withTenant(f.db,f.organizationId,async tx=>{
+      const expense=await tx.expense.findUniqueOrThrow({where:{id:expenseId}});expect(expense.state).toBe("VOIDED");
+      const original=await tx.financialTransaction.findUniqueOrThrow({where:{id:expense.transactionId!},include:{postings:true,reversedByTransactions:{include:{postings:true}}}});
+      expect(original.postings).toHaveLength(2);expect(original.reversedByTransactions).toHaveLength(1);
+      expect(original.reversedByTransactions[0].postings.map(line=>({account:line.ledgerAccountId,side:line.side,amount:line.amount.toString(),bucket:line.bucket,dimensions:line.dimensions}))).toEqual(expect.arrayContaining(
+        original.postings.map(line=>({account:line.ledgerAccountId,side:line.side==="DEBIT"?"CREDIT":"DEBIT",amount:line.amount.toString(),bucket:line.bucket,dimensions:line.dimensions}))));
+      expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.voided"}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.voided",actorId:setup.ownerAccountId}})).toBe(0);
+    });
     // The agreement may waive the owner decision, but never its durable notice or audit flag.
     await withTenant(f.db,f.organizationId,async tx=>{
       await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:setup.propertyId,

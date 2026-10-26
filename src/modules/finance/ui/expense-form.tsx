@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { expenseDraftSchema } from "../domain/expense";
-import { createExpenseDraftAction, submitExpenseAction } from "../application/expense-actions";
+import { createExpenseDraftAction, submitExpenseAction,postExpenseAction,voidExpenseAction } from "../application/expense-actions";
 import type { getExpenseEditor, getExpense } from "../application/expense-service";
 
 type ErrorCode = "forbidden" | "conflict" | "configuration" | "validation" | "error";
@@ -55,6 +55,40 @@ export function ExpenseSubmissionForm({ expense }: { expense: Awaited<ReturnType
     <fieldset className="resource-form" disabled={pending}><legend>{t("submit")}</legend><p>{t("submitGuidance")}</p>
       <label className="field"><span>{t("reason")}</span><textarea name="reason" data-testid="expense-submit-reason" minLength={6} maxLength={500} required /></label>
       <div className="form-actions"><button className="primary-button" data-testid="expense-submit" type="submit">{t(pending ? "saving" : "submit")}</button></div>
+    </fieldset>
+  </form>;
+}
+
+export function ExpensePostingForm({expense}:{expense:Awaited<ReturnType<typeof getExpense>>}){
+  const t=useTranslations("Expenses"),router=useRouter(),[pending,startTransition]=useTransition(),[error,setError]=useState<ErrorCode|null>(null);
+  return <form className="resource-form" data-testid="expense-post-form" aria-busy={pending} onSubmit={event=>{
+    event.preventDefault();if(pending)return;const form=new FormData(event.currentTarget);setError(null);
+    startTransition(async()=>{
+      try{const result=await postExpenseAction({id:expense.id,expectedVersion:expense.version,reason:form.get("reason")});if(!result.ok)setError(result.code);else router.refresh();}
+      catch{setError("error");}
+    });
+  }}>
+    {error?<p role="alert" data-testid="expense-error">{t(error)}</p>:null}
+    <fieldset disabled={pending}><legend>{t("postTitle")}</legend><p>{t("postGuidance")}</p>
+      <label className="field"><span>{t("reason")}</span><textarea name="reason" data-testid="expense-post-reason" minLength={6} maxLength={500} required /></label>
+      <div className="form-actions"><button type="submit" className="primary-button" data-testid="expense-post">{t(pending?"saving":"recordPayment")}</button></div>
+    </fieldset>
+  </form>;
+}
+
+export function ExpenseVoidForm({expense}:{expense:Awaited<ReturnType<typeof getExpense>>}){
+  const t=useTranslations("Expenses"),router=useRouter(),[pending,startTransition]=useTransition(),[error,setError]=useState<ErrorCode|null>(null);
+  return <form className="resource-form" data-testid="expense-void-form" aria-busy={pending} onSubmit={event=>{
+    event.preventDefault();if(pending)return;const form=new FormData(event.currentTarget);setError(null);
+    startTransition(async()=>{
+      try{const result=await voidExpenseAction({id:expense.id,expectedVersion:expense.version,reason:form.get("reason")});if(!result.ok)setError(result.code);else router.refresh();}
+      catch{setError("error");}
+    });
+  }}>
+    {error?<p role="alert" data-testid="expense-error">{t(error)}</p>:null}
+    <fieldset disabled={pending}><legend>{t("voidTitle")}</legend><p>{t("voidGuidance")}</p>
+      <label className="field"><span>{t("reason")}</span><textarea name="reason" data-testid="expense-void-reason" minLength={6} maxLength={500} required /></label>
+      <div className="form-actions"><button type="submit" className="secondary-button" data-testid="expense-void">{t(pending?"saving":"voidPayment")}</button></div>
     </fieldset>
   </form>;
 }
