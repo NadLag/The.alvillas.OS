@@ -159,7 +159,9 @@ export async function getExpenseEditor(ctx: FinanceActorContext, propertyId: str
     const reservations = (await repository.reservationChoices(propertyId)).filter(reservation => authorize(ctx.authContext, "view", {
       ...target, type: "reservation", id: reservation.id, reservationId: reservation.id, dataClass: "operational", status: reservation.status,
       assignedUserAccountId: reservation.createdBy }, clock.now)).map(({ id, reference }) => ({ id, reference }));
-    return { property: { id: property.id, name: property.name, timezone: property.timezone }, ...sources, accounts, reservations, today };
+    const chart = { type: "financial_transaction", organizationId: ctx.organizationId, dataClass: "financial" as const };
+    return { property: { id: property.id, name: property.name, timezone: property.timezone }, ...sources, accounts, reservations, today,
+      canConfigureAccounts: authorize(ctx.authContext, "view", chart, clock.now) && authorize(ctx.authContext, "configure", chart, clock.now) };
   });
 }
 export async function getExpense(ctx: FinanceActorContext, id: string, deps: Deps = {}) {

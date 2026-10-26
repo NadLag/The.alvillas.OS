@@ -13,6 +13,7 @@ import {
   updatePreferredLocaleAction
 } from "@/modules/identity/application/session-actions";
 import { resolveFeatureFlag } from "@/platform/config/feature-flags";
+import { authorize } from "@/platform/authz/authorize";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,8 @@ export default async function AppPage({
           <Link className="secondary-button" href={`/${appLocale}/app/audit`}>
             {t("audit")}
           </Link>
+          {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?
+            <Link className="secondary-button" data-testid="financial-accounts-link" href={`/${appLocale}/app/finance/accounts`}>{t("financialAccounts")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/configuration`}>
             {t("configuration")}
           </Link>
