@@ -11,6 +11,8 @@ import {
   type ConfigFormState
 } from "@/modules/config/application/config-actions";
 import type { ConfigAdminModel, ConfigRuleView } from "@/modules/config/application/config-service";
+import { formatDateTime } from "@/i18n/format";
+import { safeLocale } from "@/i18n/routing";
 
 type ConfigLabels = {
   createTitle: string;
@@ -53,9 +55,25 @@ type ConfigLabels = {
 
 const initialState: ConfigFormState = { status: "idle" };
 
-function localDateTime(date = new Date()): string {
-  const offset = date.getTimezoneOffset() * 60_000;
-  return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+export function ConfigHistoryFilter({ properties, keys, initial, labels }: {
+  properties: ConfigAdminModel["properties"]; keys: string[]; initial: { key: string; scopeType: string; scopeId: string };
+  labels: { key: string; scope: string; property: string; organization: string; allScopes: string; allProperties: string; find: string };
+}) {
+  const [scope, setScope] = useState(initial.scopeType);
+  return <form className="audit-filter-form" method="get" data-testid="config-history-filter">
+    <label className="field"><span>{labels.key}</span><input name="ruleKey" list="config-history-keys" defaultValue={initial.key} />
+      <datalist id="config-history-keys">{keys.map(key => <option key={key} value={key} />)}</datalist></label>
+    <label className="field"><span>{labels.scope}</span><select name="ruleScopeType" value={scope} onChange={event => setScope(event.target.value)}>
+      <option value="">{labels.allScopes}</option><option value="organization">{labels.organization}</option><option value="property">{labels.property}</option>
+    </select></label>
+    <label className="field"><span>{labels.property}</span><select name="ruleScopeId" disabled={scope !== "property"} defaultValue={initial.scopeId}>
+      <option value="">{labels.allProperties}</option>{properties.map(property => <option key={property.id} value={property.id}>{property.name} - {property.city}</option>)}
+    </select></label><button className="secondary-button" type="submit">{labels.find}</button>
+  </form>;
+}
+
+function utcDateTime(date = new Date()): string {
+  return date.toISOString().slice(0, 16);
 }
 
 function messageForState(state: ConfigFormState, labels: ConfigLabels): string | null {
@@ -118,7 +136,7 @@ function LifecycleActionForm({
       <input name="ruleId" type="hidden" value={rule.id} />
       <label className="field">
         <span>{labels.effectiveFrom}</span>
-        <input name="effectiveFrom" type="datetime-local" defaultValue={localDateTime()} required />
+        <input name="effectiveFrom" type="datetime-local" defaultValue={utcDateTime()} required />
       </label>
       <label className="field">
         <span>{labels.reason}</span>
@@ -151,7 +169,7 @@ function RuleRow({
   labels: ConfigLabels;
 }) {
   return (
-    <article className="config-rule-row" data-testid="config-rule-row">
+    <article className="config-rule-row" data-testid="config-rule-row" data-rule-version={rule.version}>
       <div className="config-rule-summary">
         <span>
           <strong>{rule.key}</strong>
@@ -165,7 +183,7 @@ function RuleRow({
         <div>
           <dt>{labels.dates}</dt>
           <dd>
-            {rule.effectiveFrom.toLocaleString()} - {rule.effectiveTo?.toLocaleString() ?? ""}
+            {formatDateTime(safeLocale(locale), rule.effectiveFrom, { timeZone: "UTC" })} - {rule.effectiveTo ? formatDateTime(safeLocale(locale), rule.effectiveTo, { timeZone: "UTC" }) : ""}
           </dd>
         </div>
         <div>
@@ -221,7 +239,7 @@ export function ConfigRuleAdmin({
     defaultValues: {
       key: defaultKey,
       valueJson: "",
-      effectiveFrom: localDateTime(),
+      effectiveFrom: utcDateTime(),
       reason: ""
     }
   });

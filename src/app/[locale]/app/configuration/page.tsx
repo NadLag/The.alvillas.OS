@@ -1,13 +1,15 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { configActorContextFromSession } from "@/modules/config/application/config-access";
 import {
   ConfigAuthorizationError,
+  ConfigValidationError,
+  configEffectiveDateSchema,
   getConfigAdminModel
 } from "@/modules/config/application/config-service";
-import { ConfigRuleAdmin } from "@/modules/config/ui/config-rule-admin";
+import { ConfigHistoryFilter, ConfigRuleAdmin } from "@/modules/config/ui/config-rule-admin";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -27,8 +29,8 @@ function searchDate(value: string | string[] | undefined): Date | undefined {
     return undefined;
   }
 
-  const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  const parsed = configEffectiveDateSchema.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
 }
 
 export default async function ConfigurationPage({
@@ -59,16 +61,20 @@ export default async function ConfigurationPage({
       previewKey: searchValue(query.key),
       previewScopeType: searchValue(query.scopeType),
       previewScopeId: searchValue(query.scopeId),
-      previewAsOf: searchDate(query.asOf)
+      previewAsOf: searchDate(query.asOf),
+      ruleKey: searchValue(query.ruleKey), ruleScopeType: searchValue(query.ruleScopeType), ruleScopeId: searchValue(query.ruleScopeId),
+      after: searchValue(query.after), before: searchValue(query.before)
     });
   } catch (error) {
+    if (error instanceof ConfigValidationError) notFound();
     if (error instanceof ConfigAuthorizationError) {
       denied = true;
       model = {
         rules: [],
         properties: [],
         preview: null,
-        catalogKeys: []
+        catalogKeys: [],
+        pagination: { next: null, previous: null }
       };
     } else {
       throw error;
@@ -132,6 +138,17 @@ export default async function ConfigurationPage({
               {t("form.preview")}
             </button>
           </form>
+          <ConfigHistoryFilter properties={model.properties} keys={model.catalogKeys}
+            initial={{ key: searchValue(query.ruleKey) ?? "", scopeType: searchValue(query.ruleScopeType) ?? "", scopeId: searchValue(query.ruleScopeId) ?? "" }}
+            labels={{ key: t("form.key"), scope: t("form.scopeType"), property: t("form.scopeProperty"), organization: t("form.scopeOrganization"),
+              allScopes: t("browse.allScopes"), allProperties: t("browse.allProperties"), find: t("browse.find") }} />
+          <nav className="actions" aria-label={t("browse.navigation")} data-testid="config-history-pages">
+            {([['previous', 'before'], ['next', 'after']] as const).map(([label, direction]) => {
+              const cursor = model.pagination[label]; if (!cursor) return null;
+              const params = new URLSearchParams(); for (const [key, value] of Object.entries(query)) { const text = searchValue(value); if (text && key !== 'after' && key !== 'before') params.set(key, text); }
+              params.set(direction, cursor); return <Link key={label} className="secondary-button" data-testid={`config-history-${label}`} href={`/${appLocale}/app/configuration?${params}`}>{t(`browse.${label}`)}</Link>;
+            })}
+          </nav>
           <ConfigRuleAdmin
             locale={appLocale}
             model={model}

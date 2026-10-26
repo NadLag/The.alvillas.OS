@@ -54,7 +54,11 @@ type AuditMeta = {
 };
 
 const uuidSchema = z.string().uuid();
-const effectiveDateSchema = z.coerce.date().refine((date) => !Number.isNaN(date.getTime()));
+export const configEffectiveDateSchema = z.preprocess(
+  value => typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?$/u.test(value)
+    ? `${value}Z` : value,
+  z.coerce.date().refine((date) => !Number.isNaN(date.getTime()))
+);
 
 export const configRuleInputSchema = z.object({
   key: z.string().trim().min(1).max(160),
@@ -63,14 +67,14 @@ export const configRuleInputSchema = z.object({
   scopeId: z.string().trim().optional(),
   lifecycle: z.enum(["DRAFT", "ACTIVE"]).default("ACTIVE"),
   valueJson: z.string().trim().min(2),
-  effectiveFrom: effectiveDateSchema,
-  effectiveTo: effectiveDateSchema.optional(),
+  effectiveFrom: configEffectiveDateSchema,
+  effectiveTo: configEffectiveDateSchema.optional(),
   reason: z.string().trim().min(6).max(500)
 });
 
 export const configRuleLifecycleActionSchema = z.object({
   ruleId: uuidSchema,
-  effectiveFrom: effectiveDateSchema,
+  effectiveFrom: configEffectiveDateSchema,
   reason: z.string().trim().min(6).max(500)
 });
 
@@ -104,7 +108,15 @@ export type ConfigAdminModel = {
   properties: ConfigPropertyScopeOption[];
   preview: ConfigPreview | null;
   catalogKeys: string[];
+  pagination: { next: string | null; previous: string | null };
 };
+
+export const configAdminPageSize = 50;
+const configBrowseSchema = z.object({
+  ruleKey: z.string().trim().min(1).max(160).optional(),
+  ruleScopeType: z.enum(["organization", "property"]).optional(), ruleScopeId: uuidSchema.optional(),
+  after: uuidSchema.optional(), before: uuidSchema.optional()
+}).refine(value => !(value.after && value.before) && (!value.ruleScopeId || value.ruleScopeType === "property"));
 
 function db(deps: ConfigServiceDeps): TenantTransactionRunner {
   return deps.db ?? prisma;
@@ -271,20 +283,6 @@ function toView(
   };
 }
 
-function previousRuleFor(rule: ConfigRuleRecord, rules: readonly ConfigRuleRecord[]): ConfigRuleRecord | null {
-  return (
-    rules
-      .filter(
-        (candidate) =>
-          candidate.key === rule.key &&
-          candidate.scopeType === rule.scopeType &&
-          candidate.scopeId === rule.scopeId &&
-          candidate.version < rule.version
-      )
-      .sort((left, right) => right.version - left.version)[0] ?? null
-  );
-}
-
 function resolvedToRecord(rule: ResolvedConfigRule): ConfigRuleRecord {
   return {
     id: rule.id,
@@ -317,25 +315,49 @@ export async function getConfigAdminModel(
     previewScopeType?: string;
     previewScopeId?: string | null;
     previewAsOf?: Date;
+    ruleKey?: string; ruleScopeType?: string; ruleScopeId?: string; after?: string; before?: string;
   } = {},
   deps: ConfigServiceDeps = {}
 ): Promise<ConfigAdminModel> {
   assertCollectionAllowed(ctx, "view");
+  if (ctx.actorId !== ctx.authContext.userAccountId || ctx.personId !== ctx.authContext.personId || ctx.organizationId !== ctx.authContext.organizationId)
+    throw new ConfigAuthorizationError();
+  const parsed = configBrowseSchema.safeParse({ ruleKey: input.ruleKey || undefined, ruleScopeType: input.ruleScopeType || undefined,
+    ruleScopeId: input.ruleScopeId || undefined, after: input.after || undefined, before: input.before || undefined });
+  if (!parsed.success) throw new ConfigValidationError();
+  const browse = parsed.data;
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
-    const [rules, properties] = await Promise.all([
-      repository.list({ take: 200, excludeScopeTypes: ["role_assignment"] }),
-      repository.listPropertyScopeOptions()
-    ]);
-    const visibleRules = rules.filter((rule) =>
+    const canView = (rule: ConfigRuleRecord) =>
       authorize(ctx.authContext, "view", {
         type: "config_rule",
         organizationId: ctx.organizationId,
         id: rule.id,
         propertyId: rule.scopeType === "property" ? rule.scopeId : undefined
-      }) && hasRuleFinancialAccess(ctx, rule.key, rule.scopeType, rule.scopeId)
-    );
+      }) && hasRuleFinancialAccess(ctx, rule.key, rule.scopeType, rule.scopeId);
+    const filter = { key: browse.ruleKey, scopeType: browse.ruleScopeType,
+      scopeId: browse.ruleScopeType === "organization" ? null : browse.ruleScopeId, excludeScopeTypes: ["role_assignment"] };
+    const matches = (rule: ConfigRuleRecord) => (!filter.key || rule.key === filter.key) && (!filter.scopeType || rule.scopeType === filter.scopeType) &&
+      (filter.scopeId === undefined || rule.scopeId === filter.scopeId);
+    const cursor = browse.before ?? browse.after;
+    if (cursor) {
+      const boundary = await repository.findById(cursor);
+      if (!boundary || !matches(boundary) || !canView(boundary)) throw new ConfigValidationError();
+    }
+    let position = cursor; const permitted: ConfigRuleRecord[] = [];
+    while (permitted.length <= configAdminPageSize) {
+      const batch = await repository.list({ ...filter, take: 100, ...(browse.before ? { before: position } : { after: position }) });
+      for (const rule of batch) if (canView(rule)) permitted.push(rule);
+      if (batch.length < 100) break;
+      position = batch.at(-1)!.id;
+    }
+    const more = permitted.length > configAdminPageSize;
+    const visibleRules = permitted.slice(0, configAdminPageSize); if (browse.before) visibleRules.reverse();
+    const predecessors = await repository.previousVersions(visibleRules);
+    const properties = (await repository.listPropertyScopeOptions()).filter(property => authorize(ctx.authContext, "view", {
+      type: "config_rule", organizationId: ctx.organizationId, propertyId: property.id
+    }));
     if (input.previewKey) {
       const scopeType = input.previewScopeType === "property" ? "property" : "organization";
       const scopeId = scopeType === "property" ? input.previewScopeId ?? null : null;
@@ -346,21 +368,25 @@ export async function getConfigAdminModel(
     }
     const preview =
       input.previewKey && schemaForConfigKey(input.previewKey)
-        ? await previewRule(repository, visibleRules, properties, input)
+        ? await previewRule(repository, canView, properties, input)
         : null;
 
     return {
-      rules: visibleRules.map((rule) => toView(rule, properties, previousRuleFor(rule, visibleRules))),
+      rules: visibleRules.map(rule => { const previous = predecessors.get(rule.id); return toView(rule, properties, previous && canView(previous) ? previous : null); }),
       properties,
       preview,
-      catalogKeys: Object.keys(configRuleSchemas).sort()
+      catalogKeys: [...new Set([...Object.keys(configRuleSchemas), ...visibleRules.map(rule => rule.key),
+        ...(input.previewKey && schemaForConfigKey(input.previewKey) ? [input.previewKey] : []),
+        ...(browse.ruleKey && schemaForConfigKey(browse.ruleKey) ? [browse.ruleKey] : [])])].sort(),
+      pagination: { next: (browse.before ? Boolean(cursor) : more) ? visibleRules.at(-1)?.id ?? null : null,
+        previous: (browse.before ? more : Boolean(cursor)) ? visibleRules[0]?.id ?? null : null }
     };
   });
 }
 
 async function previewRule(
   repository: ConfigRuleRepository,
-  rules: readonly ConfigRuleRecord[],
+  canView: (rule: ConfigRuleRecord) => boolean,
   properties: readonly ConfigPropertyScopeOption[],
   input: {
     previewKey?: string;
@@ -385,11 +411,12 @@ async function previewRule(
         : [{ scopeType: "organization", scopeId: null }]
   });
 
+  const previous = resolved ? (await repository.previousVersions([resolvedToRecord(resolved)])).get(resolved.id) : undefined;
   return {
     key,
     asOf,
     resolved: resolved
-      ? toView(resolvedToRecord(resolved), properties, previousRuleFor(resolved, rules))
+      ? toView(resolvedToRecord(resolved), properties, previous && canView(previous) ? previous : null)
       : null
   };
 }

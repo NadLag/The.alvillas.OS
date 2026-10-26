@@ -367,14 +367,14 @@
       "lifecycle": "Cycle",
       "value": "JSON de regle",
       "valuePlaceholder": "Collez une valeur JSON valide pour la cle selectionnee.",
-      "effectiveFrom": "Effectif depuis",
-      "effectiveTo": "Effectif jusqu'a",
+      "effectiveFrom": "Applicable à partir du (UTC)",
+      "effectiveTo": "Applicable jusqu’au (UTC)",
       "reason": "Raison",
       "createVersion": "Creer la version",
       "saving": "Enregistrement...",
       "activate": "Activer",
       "retire": "Retirer",
-      "asOf": "A la date",
+      "asOf": "Au (UTC)",
       "preview": "Previsualiser"
     },
     "lifecycle": {
@@ -386,7 +386,7 @@
       "version": "Version",
       "scope": "Portee",
       "status": "Statut",
-      "dates": "Dates",
+      "dates": "Dates (UTC)",
       "diff": "Diff",
       "value": "Valeur"
     },
@@ -411,6 +411,14 @@
     "denied": {
       "title": "Acces configuration refuse",
       "subtitle": "Ce compte n'a pas la permission de consulter l'historique de configuration."
+    },
+    "browse": {
+      "allScopes": "Toutes les portées",
+      "allProperties": "Toutes les propriétés",
+      "find": "Rechercher les versions",
+      "navigation": "Pages de l’historique des règles",
+      "previous": "Versions précédentes",
+      "next": "Versions suivantes"
     }
   },
   "Organization": {
@@ -1770,7 +1778,12 @@
       "POOL": "Piscine",
       "GARDEN": "Jardin",
       "MAINTENANCE": "Maintenance",
-      "CUSTOM": "Personnalisé"
+      "CUSTOM": "Personnalisé",
+      "CLEANING": "Ménage",
+      "LAUNDRY": "Blanchisserie",
+      "INVENTORY": "Inventaire",
+      "CHEF": "Chef",
+      "TRANSFER": "Transfert"
     },
     "anchors": {
       "CHECK_IN": "Arrivée",

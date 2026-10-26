@@ -367,14 +367,14 @@
       "lifecycle": "Lifecycle",
       "value": "Rule JSON",
       "valuePlaceholder": "Paste a valid JSON value for the selected rule key.",
-      "effectiveFrom": "Effective from",
-      "effectiveTo": "Effective until",
+      "effectiveFrom": "Effective from (UTC)",
+      "effectiveTo": "Effective until (UTC)",
       "reason": "Reason",
       "createVersion": "Create version",
       "saving": "Saving...",
       "activate": "Activate",
       "retire": "Retire",
-      "asOf": "As of",
+      "asOf": "As of (UTC)",
       "preview": "Preview"
     },
     "lifecycle": {
@@ -386,7 +386,7 @@
       "version": "Version",
       "scope": "Scope",
       "status": "Status",
-      "dates": "Dates",
+      "dates": "Dates (UTC)",
       "diff": "Diff",
       "value": "Value"
     },
@@ -411,6 +411,14 @@
     "denied": {
       "title": "Configuration access denied",
       "subtitle": "This account does not have permission to view configuration history."
+    },
+    "browse": {
+      "allScopes": "All scopes",
+      "allProperties": "All properties",
+      "find": "Find rule versions",
+      "navigation": "Rule history pages",
+      "previous": "Previous versions",
+      "next": "More versions"
     }
   },
   "Organization": {
@@ -1770,7 +1778,12 @@
       "POOL": "Pool",
       "GARDEN": "Garden",
       "MAINTENANCE": "Maintenance",
-      "CUSTOM": "Custom"
+      "CUSTOM": "Custom",
+      "CLEANING": "Cleaning",
+      "LAUNDRY": "Laundry",
+      "INVENTORY": "Inventory",
+      "CHEF": "Chef",
+      "TRANSFER": "Transfer"
     },
     "anchors": {
       "CHECK_IN": "Check-in",

@@ -9,6 +9,14 @@ const hasDatabase = Boolean(process.env.DATABASE_URL);
 async function expectConfigRuleCreated(page: Page): Promise<void> {
   await expect(page.getByTestId("config-rule-form-message")).toContainText("created");
   await expect(page.getByTestId("config-rule-submit")).toBeEnabled();
+  const create = page.getByTestId("config-rule-create-form"), filter = page.getByTestId("config-history-filter");
+  const scopeType = await create.locator('[name="scopeType"]:checked').inputValue();
+  const selectedKey = await page.getByTestId("config-rule-key").inputValue();
+  const key = selectedKey === "feature_flag" ? `feature_flag.${(await create.locator('[name="customFeatureFlagKey"]').inputValue()).trim()}` : selectedKey;
+  await filter.locator('[name="ruleKey"]').fill(key);
+  await filter.locator('[name="ruleScopeType"]').selectOption(scopeType);
+  await filter.locator('[name="ruleScopeId"]').selectOption(scopeType === "property" ? await page.getByTestId("config-rule-scope-id").inputValue() : "");
+  await filter.locator('button[type="submit"]').click();
 }
 
 async function expectCreateFormData(
@@ -190,6 +198,11 @@ test.describe("configuration engine journey", () => {
     await expect(reservationRow.getByTestId("reservation-revenue-posted")).toContainText("Revenue posted");
 
     await page.goto("/en/app/configuration");
+    const history = page.getByTestId("config-history-filter");
+    await history.locator('[name="ruleKey"]').fill("ops.reservation_task_templates");
+    await history.locator('[name="ruleScopeType"]').selectOption("property");
+    await history.locator('[name="ruleScopeId"]').selectOption(financeSetup.propertyId);
+    await history.locator('button[type="submit"]').click();
     const activeTaskRule = page
       .getByTestId("config-rule-row")
       .filter({ hasText: "ops.reservation_task_templates" })

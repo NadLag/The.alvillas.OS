@@ -261,6 +261,8 @@ export class ConfigRuleRepository {
     scopeId?: string | null;
     take?: number;
     excludeScopeTypes?: string[];
+    after?: string;
+    before?: string;
   } = {}): Promise<ConfigRuleRecord[]> {
     const rules = await this.tx.configRule.findMany({
       where: {
@@ -271,13 +273,15 @@ export class ConfigRuleRepository {
         scopeId: input.scopeId === undefined ? undefined : input.scopeId
       },
       orderBy: [
-        { key: "asc" },
-        { scopeType: "asc" },
-        { scopeId: "asc" },
-        { effectiveFrom: "desc" },
-        { version: "desc" },
-        { createdAt: "desc" }
+        { key: input.before ? "desc" : "asc" },
+        { scopeType: input.before ? "desc" : "asc" },
+        { scopeId: { sort: input.before ? "desc" : "asc", nulls: input.before ? "first" : "last" } },
+        { effectiveFrom: input.before ? "asc" : "desc" },
+        { version: input.before ? "asc" : "desc" },
+        { createdAt: input.before ? "asc" : "desc" },
+        { id: input.before ? "desc" : "asc" }
       ],
+      ...((input.after || input.before) ? { cursor: { id: input.after ?? input.before }, skip: 1 } : {}),
       take: input.take ?? 200,
       select: {
         id: true,
@@ -330,6 +334,22 @@ export class ConfigRuleRepository {
           lifecycle: normalizeLifecycle(rule.lifecycle)
         }
       : null;
+  }
+
+  async previousVersions(rules: readonly ConfigRuleRecord[]): Promise<Map<string, ConfigRuleRecord>> {
+    if (!rules.length) return new Map();
+    const inputs = JSON.stringify(rules.map(rule => ({ id: rule.id, key: rule.key, scope_type: rule.scopeType, scope_id: rule.scopeId, version: rule.version })));
+    const rows = await this.tx.$queryRaw<Array<ConfigRuleRecord & { sourceId: string }>>(Prisma.sql`
+      SELECT s.id AS "sourceId", p.id, p.key, p.scope_type AS "scopeType", p.scope_id AS "scopeId", p.value,
+        p.effective_from AS "effectiveFrom", p.effective_to AS "effectiveTo", p.version, p.lifecycle,
+        p.created_by AS "createdBy", p.reason, p.created_at AS "createdAt"
+      FROM jsonb_to_recordset(${inputs}::jsonb) AS s(id uuid, key text, scope_type text, scope_id uuid, version integer)
+      JOIN LATERAL (
+        SELECT r.* FROM config_rule r WHERE r.organization_id = ${this.organizationId}::uuid AND r.archived_at IS NULL
+          AND r.key = s.key AND r.scope_type = s.scope_type AND r.scope_id IS NOT DISTINCT FROM s.scope_id AND r.version < s.version
+        ORDER BY r.version DESC LIMIT 1
+      ) p ON true`);
+    return new Map(rows.map(({ sourceId, ...row }) => [sourceId, { ...row, lifecycle: normalizeLifecycle(row.lifecycle) }]));
   }
 
   async listPropertyScopeOptions(): Promise<ConfigPropertyScopeOption[]> {

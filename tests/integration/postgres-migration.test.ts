@@ -350,7 +350,9 @@ describe("PostgreSQL baseline", () => {
       const account = await tx.userAccount.create({ data: { organizationId: organization.id, personId: person.id } });
       return { person, account };
     });
-    const ctx = { ...actorForOrganization(organization.id, permissions), actorId: identity.account.id, personId: identity.person.id }, deps = { db: prisma as TenantTransactionRunner, requestId: randomUUID() };
+    const baseActor = actorForOrganization(organization.id, permissions);
+    const ctx = { ...baseActor, actorId: identity.account.id, personId: identity.person.id,
+      authContext: { ...baseActor.authContext, userAccountId: identity.account.id, personId: identity.person.id } }, deps = { db: prisma as TenantTransactionRunner, requestId: randomUUID() };
     const owner = await createOwner(ctx, ownerInputSchema.parse({ displayName: "Template owner" }), deps);
     const property = await createProperty(ctx, propertyInputSchema.parse({ ownerId: owner.id, name: "Villa 405", addressLine1: "Route de Fès", city: "Marrakech", propertyType: "Villa", bedrooms: 4, bathrooms: 3, maxGuests: 8, amenities: ["Wi-Fi"], photoUrls: ["https://example.test/villa.jpg"] }), deps);
     const second = await createProperty(ctx, propertyInputSchema.parse({ ownerId: owner.id, name: "Sultan's House", addressLine1: "Medina", city: "Marrakech", propertyType: "Riad", bedrooms: 3, bathrooms: 2, maxGuests: 6 }), deps);
