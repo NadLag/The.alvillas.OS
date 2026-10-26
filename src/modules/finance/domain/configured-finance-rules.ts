@@ -196,7 +196,11 @@ export function allocateConfiguredExpense(
   const treatment = categoryRule?.treatment ?? config.default_treatment;
   const shares = sharesForTreatment(categoryRule, treatment);
   const ownerAmount = shareAmount(subject.amount, shares.ownerShareBps);
-  const alvillasAmount = shareAmount(subject.amount, shares.alvillasShareBps);
+  // Assign the final participating share the remainder so rounding cannot
+  // create or lose a cent. The configured percentages remain unchanged.
+  const alvillasAmount = shares.alvillasShareBps > 0 && shares.guestShareBps === 0
+    ? subject.amount.subtract(ownerAmount)
+    : shareAmount(subject.amount, shares.alvillasShareBps);
   const guestAmount =
     shares.guestShareBps === 0
       ? Money.zero(subject.amount.currency)
