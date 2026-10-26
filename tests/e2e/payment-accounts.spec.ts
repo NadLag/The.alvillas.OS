@@ -12,6 +12,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native payment accounts 
   const f = await openFieldFixture(admin, info, "en"), origin = new URL(admin.url()).origin, suffix = randomUUID().slice(0, 8);
   const fieldContext = await browser.newContext({ baseURL: origin, storageState: { cookies: [], origins: [] }, viewport: { width: 360, height: 800 } });
   const field = await fieldContext.newPage(), prefix = `Dedicated funding ${suffix}`, errors: string[] = [];
+  const bankName = `${prefix} BANK ${"A".repeat(120)}`.slice(0, 120);
   admin.on("pageerror", error => errors.push(error.message));
   const phone = `+21266${randomInt(1_000_000, 10_000_000)}`, pin = "368247";
   try {
@@ -39,7 +40,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native payment accounts 
     await admin.getByTestId("payment-account-search-form").locator('button[type="submit"]').click();
     let captured: Request | undefined;
     for (const kind of ["BANK", "CASH", "OTHER"]) {
-      const name = `${prefix} ${kind}`;
+      const name = kind === "BANK" ? bankName : `${prefix} ${kind}`;
       await admin.getByTestId("payment-account-name").fill(name);
       await admin.getByTestId("payment-account-kind").selectOption(kind);
       await admin.getByTestId("payment-account-reason").fill("Dedicated native payment account acceptance");
@@ -48,6 +49,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native payment accounts 
       if (capture) captured = await capture;
       await expect(admin.getByTestId("payment-account-row").filter({ hasText: name })).toBeVisible();
       await expect(admin.getByTestId("payment-account-saved")).toBeVisible();
+      expect(await admin.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     }
     if (!captured) throw Error("Native account action was not captured");
     const request = captured;
@@ -67,7 +69,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native payment accounts 
         expect(await tx.auditLog.count({ where: { organizationId: f.organizationId, resourceId: account.id, actorId: fieldUser.id } })).toBe(0);
       }
       expect(await tx.financialTransaction.count()).toBe(setup.journals);
-      return accounts.find(account => account.name === `${prefix} BANK`)!;
+      return accounts.find(account => account.name === bankName)!;
     });
     expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);
     await expect(admin.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
