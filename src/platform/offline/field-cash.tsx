@@ -56,7 +56,10 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
   const queued = unresolved.some(entry => entry.syncStatus === "pending"), failed = unresolved.some(entry => entry.syncStatus !== "pending");
   const original = unresolved.find(entry => entry.operation.client_op_id === value?.clientOpId);
   const reviewRequired = Boolean(value && (original && original.syncStatus !== "pending" || value.expectedRevision !== cash?.revision));
-  const available = Boolean(cash?.canCollect), locked = !value || !available || busy || queued || reviewRequired || Boolean(snapshot?.draft?.submittedDeviceId);
+  const recovering = unresolved.some(entry => entry.syncStatus !== "pending" &&
+    (entry.operation.client_op_id === value?.clientOpId || entry.operation.client_op_id === value?.supersedesClientOpId));
+  const completing = Boolean(snapshot?.completionPending && !recovering);
+  const available = Boolean(cash?.canCollect), locked = !value || !available || busy || queued || completing || reviewRequired || Boolean(snapshot?.draft?.submittedDeviceId);
   const parsed = value ? fieldCashPayloadSchema.safeParse({ taskId, amount: value.amount, currency: value.currency, payer: value.payer, purpose: value.purpose, expectedRevision: value.expectedRevision }) : null;
   const currency = cash?.currencies.find(item => item.code === value?.currency);
   const valid = Boolean(parsed?.success && currency && new Decimal(parsed.data.amount).decimalPlaces() <= currency.minorUnit);
@@ -88,9 +91,9 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
     finally { if (mounted.current) setBusy(false); }
   }
   async function review() {
-    if (!snapshot || !value || !incarnation || !available || busy || queued) return;
+    if (!snapshot || !value || !incarnation || !available || busy || queued || completing) return;
     const initial = fresh(snapshot, taskId, locale); if (!initial) return;
-    const next = { ...initial, payer: value.payer, purpose: value.purpose, currency: value.currency, supersedesClientOpId: value.clientOpId };
+    const next = { ...initial, payer: value.payer, purpose: value.purpose, currency: value.currency, supersedesClientOpId: original?.operation.client_op_id ?? value.supersedesClientOpId };
     setBusy(true);
     try {
       await writes.current;
@@ -138,7 +141,7 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
       <label htmlFor={`${id}-purpose`}>{t("purpose")}</label><textarea id={`${id}-purpose`} dir="auto" rows={2} maxLength={500} value={value.purpose} disabled={locked} data-testid="field-cash-purpose" onChange={event => edit({ purpose: event.target.value })} />
       {queued ? <p role="status" data-testid="field-cash-queued">{t("queued")}</p> : null}
       {reviewRequired || failed ? <div className="field-linen-review" data-testid="field-cash-review-required"><p role="status">{t("reviewRequired")}</p>
-        <button type="button" className="secondary-button" data-testid="field-cash-review" disabled={!available || queued || busy} onClick={() => { void review(); }}>{t("reviewAdditional")}</button>
+        <button type="button" className="secondary-button" data-testid="field-cash-review" disabled={!available || queued || busy || completing} onClick={() => { void review(); }}>{t("reviewAdditional")}</button>
         {matching ? <><p>{t("matchingReceipt", { receipt: matching.id })}</p><label htmlFor={`${id}-reason`}>{t("reviewReason")}</label>
           <textarea id={`${id}-reason`} maxLength={500} value={reason} disabled={busy || queued} data-testid="field-cash-review-reason" onChange={event => setReason(event.target.value)} />
           <button type="button" className="secondary-button" data-testid="field-cash-confirm-existing" disabled={busy || queued || reason.trim().length < 6} onClick={() => { void confirm(); }}>{t("confirmExisting")}</button></> : null}
