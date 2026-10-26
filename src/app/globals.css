@@ -2487,9 +2487,10 @@ textarea:disabled {
 .automation-checkbox input { inline-size: 1.25rem; min-block-size: 1.25rem; }
 .automation-workspace summary { cursor: pointer; padding-block: var(--space-3); min-block-size: var(--target-min); }
 @media (max-width: 800px) { .automation-workspace, .automation-fields { grid-template-columns: minmax(0,1fr); } }
-.field-wallet { display: grid; gap: var(--space-3); min-inline-size: 0; }
+.field-wallet { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); min-inline-size: 0; }
 .field-wallet button { min-block-size: 64px; }
 .field-wallet-balances { display: flex; flex-wrap: wrap; gap: var(--space-4); padding: 0; list-style: none; font-size: var(--font-size-xl); }
+.field-wallet-balances li { min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }
 .field-wallet-movements { list-style: none; padding: 0; margin: 0; }
 .field-wallet-movements li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3); padding-block: var(--space-4); border-block-end: 1px solid var(--border); overflow-wrap: anywhere; }
 .field-wallet-movements li > div { min-inline-size: 0; }

@@ -79,14 +79,21 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Worker wallet requires i
     await expect(page.getByTestId("field-wallet-page")).toBeVisible(); const wallet = page.getByTestId("field-wallet");
     const euro = wallet.getByTestId("field-wallet-balances").getByRole("listitem").filter({ hasText: "EUR" });
     await expect(euro).toContainText(/[.,٫](?:99|٩٩)/u); await expect(wallet.getByTestId("field-wallet-compensation-masked")).toHaveText(maskedValue);
+    const balances = wallet.getByTestId("field-wallet-balances");
+    await balances.evaluate(element => { (element as HTMLElement).style.fontSize = `${Number.parseFloat(getComputedStyle(element).fontSize) * 2}px`; });
+    const overflow = await balances.getByRole("listitem").evaluateAll((elements, viewportWidth) => Math.max(0, ...[...elements, ...elements.flatMap(element => Array.from(element.querySelectorAll("strong")))].flatMap(element => {
+      const rectangle = element.getBoundingClientRect(); return [-rectangle.left, rectangle.right - viewportWidth];
+    })), page.viewportSize()!.width);
+    expect(overflow).toBeLessThanOrEqual(1);
     await expect(wallet.getByTestId("field-wallet-movement")).toHaveCount(25); await wallet.getByTestId("field-wallet-next").click();
     await expect(wallet.getByTestId("field-wallet-movement")).toHaveCount(5); await expect(wallet.getByTestId("field-wallet-next")).toBeDisabled();
+    await balances.evaluate(element => { (element as HTMLElement).style.fontSize = ""; });
     await expect.poll(() => page.evaluate(async () => (await Promise.all(["en", "fr", "ar"].map(language => caches.match(`/${language}/offline/field`)))).every(Boolean))).toBe(true);
     const privateCache = await storedFieldData(page, "cacheState"); expect(JSON.stringify(privateCache)).toContain("9007199254740991.99");
     await context.setOffline(true); await page.reload(); await expect(page).toHaveURL(new RegExp(`/${locale}/offline/field\\?view=wallet$`, "u"));
     await expect(euro).toContainText(/[.,٫](?:99|٩٩)/u); await expect(wallet.getByTestId("field-wallet-movement")).toHaveCount(5);
     await expect(wallet.getByTestId("field-wallet-notice")).toBeVisible(); await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
-    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]); expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]); expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     for (const button of await wallet.getByRole("button").all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(64);
     const publicCacheLeak = await page.evaluate(async () => {
       for (const name of await caches.keys()) { const cache = await caches.open(name); for (const request of await cache.keys()) {
