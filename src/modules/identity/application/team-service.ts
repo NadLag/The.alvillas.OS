@@ -34,6 +34,7 @@ import { present, catalogFieldPolicy } from "@/platform/authz/present";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { ensureLedgerAccount } from "@/platform/ledger/accounts";
+import { fieldWalletQuerySchema, fieldWalletSnapshotSchema, walletHistoryPageSchema } from "../domain/field-wallet";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string; propertyScopeId?: string | null };
 export class TeamConflictError extends Error {}
@@ -163,7 +164,7 @@ export async function teamMember(ctx: IdentityActorContext, input: unknown, deps
       personId: z.string().uuid(),
       from: z.coerce.date(),
       until: z.coerce.date(),
-      walletPage: z.coerce.number().int().min(1).max(100000).default(1)
+      walletPage: walletHistoryPageSchema
     })
     .strict()
     .refine((v) => v.until > v.from && v.until.getTime() - v.from.getTime() <= 366 * 86400000)
@@ -458,6 +459,39 @@ export async function teamMember(ctx: IdentityActorContext, input: unknown, deps
         canWallet
     };
   });
+}
+
+/** An employee's financial read; operational self-profile access grants no money access. */
+export async function ownFieldWallet(ctx: IdentityActorContext, input: unknown, deps: Deps = {}) {
+  const { page } = fieldWalletQuerySchema.parse(input);
+  if (ctx.organizationId !== ctx.authContext.organizationId || ctx.actorId !== ctx.authContext.userAccountId ||
+    ctx.personId !== ctx.authContext.personId || !ctx.authContext.permissions.has("wallet:view")) throw new IdentityAuthorizationError();
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const repository = new TeamRepository(tx, ctx.organizationId), link = await repository.walletLink(ctx.personId);
+    const resource = { ...repository.resource({ id: ctx.personId }, "wallet"), id: link?.id ?? ctx.personId, walletId: link?.id };
+    allowed(ctx, "view", resource);
+    const person = await repository.person(ctx.personId);
+    if (!person || person.archivedAt) throw new TeamNotFoundError();
+    const financialAssignments = person.roleAssignments.filter(assignment =>
+      authorize(ctx.authContext, "view", assignmentResource(ctx.organizationId, assignment, "staff_compensation")));
+    const compensationVisible = financialAssignments.length > 0 || authorize(ctx.authContext, "view", repository.resource(person, "staff_compensation"));
+    const [wallet, organization, compensation] = await Promise.all([
+      repository.wallet(person.id), repository.organization(), repository.compensationFor(financialAssignments.map(row => row.id)),
+    ]);
+    const history = wallet ? await repository.walletMovements(wallet.ledgerAccountId, page) : [];
+    const data = { balances: wallet?.balances ?? [], movements: history.slice(0, 25).map(row => ({ id: row.id,
+      reference: row.transaction.reference, description: row.transaction.description, occurredAt: row.transaction.occurredAt.toISOString(),
+      amount: row.amount.toString(), currency: row.currency, side: row.side as "DEBIT" | "CREDIT", bucket: row.bucket })) };
+    const visible = present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...resource, data }, catalogFieldPolicy<typeof data>("wallet")) as typeof data;
+    const now = new Date(), currentTerms = new Map<string, (typeof compensation)[number]>();
+    for (const term of compensation) if (term.effectiveFrom <= now && !currentTerms.has(term.assignmentId)) currentTerms.set(term.assignmentId, term);
+    const snapshot = fieldWalletSnapshotSchema.parse({ organizationId: ctx.organizationId, userId: ctx.actorId, snapshotAt: now.toISOString(), page,
+      linked: Boolean(wallet), baseCurrency: organization.baseCurrency, ...visible, hasNext: history.length > 25, compensationVisible,
+      compensationTerms: [...currentTerms.values()].map(term => ({ id: term.id, mode: term.mode, amount: term.amount.toString(), currency: term.currency, effectiveFrom: term.effectiveFrom.toISOString() })) });
+    await teamAudit(repository, ctx, "wallet.view.own", person.id, { walletId: link?.id ?? null, page, movementCount: visible.movements.length,
+      compensationVisible }, "Employee viewed their authorized wallet", deps);
+    return snapshot;
+  }, { isolationLevel: "RepeatableRead" });
 }
 
 export async function assignTeamRole(ctx: IdentityActorContext, input: unknown, deps: Deps = {}) {

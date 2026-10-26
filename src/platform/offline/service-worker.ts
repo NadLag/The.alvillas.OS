@@ -56,13 +56,13 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
   if (event.request.method === "GET" && url.origin === self.location.origin && event.request.mode === "navigate") {
-    const field = url.pathname.match(/^\/(en|fr|ar)\/app\/field(?:\/(validate))?(?:\/([a-f0-9-]{36}))?$/u);
+    const field = url.pathname.match(/^\/(en|fr|ar)\/app\/field(?:\/(validate|wallet))?(?:\/([a-f0-9-]{36}))?$/u);
     if (field || offlineShell.test(url.pathname)) {
       event.respondWith((async () => {
         try { return await fetch(event.request); }
         catch (error) {
           if (field) {
-            const query = new URLSearchParams(); if (field[2]) query.set("view", "supervised"); if (field[3]) query.set("task", field[3]);
+            const query = new URLSearchParams(); if (field[2] === "validate") query.set("view", "supervised"); else if (field[2] === "wallet") query.set("view", "wallet"); if (field[3]) query.set("task", field[3]);
             return Response.redirect(new URL(`/${field[1]}/offline/field${query.size ? `?${query}` : ""}`, url), 302);
           }
           const normalized = new URL(url.pathname, url.origin);

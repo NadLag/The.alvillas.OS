@@ -521,7 +521,7 @@ export class TeamRepository {
   walletMovements(ledgerAccountId: string, page: number) {
     return this.tx.posting.findMany({
       where: { organizationId: this.organizationId, ledgerAccountId },
-      include: { transaction: { select: { reference: true, occurredAt: true } } },
+      include: { transaction: { select: { reference: true, description: true, occurredAt: true } } },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: 26,
       skip: (page - 1) * 25
