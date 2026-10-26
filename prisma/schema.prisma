@@ -1322,6 +1322,7 @@ model FinancialTransaction {
   @@unique([organizationId, reference], map: "financial_transaction_org_reference_unique")
   @@unique([organizationId, idempotencyKey], map: "financial_transaction_org_idempotency_unique")
   @@index([organizationId, occurredAt], map: "financial_transaction_org_occurred_idx")
+  @@index([organizationId, reversesTransactionId], map: "financial_transaction_org_reversal_idx")
   @@map("financial_transaction")
 }
 

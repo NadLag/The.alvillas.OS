@@ -40,6 +40,20 @@ function moreLines(f: Fixture, transactionId = f.journal.id) {
     { organizationId: f.org, transactionId, ledgerAccountId: f.claim.id, side: "CREDIT", amount: "1", currency: "MAD", bucket: "JOURNAL_INTEGRITY", dimensions: {} }];
 }
 
+async function reverseJournal(tx: TenantTransaction, f: Fixture, options: { audit?: boolean; amount?: string; dimensions?: Prisma.InputJsonObject; originalId?: string } = {}) {
+  const originalId = options.originalId ?? f.journal.id;
+  const journal = await new FinanceRepository(tx, f.org).createFinancialTransaction({
+    reference: `Dedicated journal reversal ${randomUUID()}`, description: "Dedicated reasoned reversal", occurredAt: new Date(),
+    idempotencyKey: randomUUID(), reversesTransactionId: originalId, createdBy: f.account.id,
+    postings: f.journal.postings.map(line => ({ ledgerAccountId: line.ledgerAccountId, side: line.side === "DEBIT" ? "CREDIT" : "DEBIT",
+      amount: Money.of(options.amount ?? line.amount.toString(), line.currency), bucket: line.bucket!, dimensions: options.dimensions ?? {} })) });
+  if (options.audit !== false) await writeAuditEvent(tx, { organizationId: f.org, actorId: f.account.id,
+    action: "local.journal.integrity.reversed", resourceType: "financial_transaction", resourceId: journal.id,
+    after: { originalTransactionIds: [originalId], reversalTransactionIds: [journal.id] }, reason: "Dedicated reasoned journal correction",
+    requestId: randomUUID(), occurredAt: new Date() });
+  return journal;
+}
+
 describe("posted journal boundaries on real PostgreSQL", () => {
   beforeAll(async () => {
     const database = url ? new URL(url) : null;
@@ -97,6 +111,35 @@ describe("posted journal boundaries on real PostgreSQL", () => {
       await createJournal(tx, f);
       await tx.$executeRaw(Prisma.sql`SELECT set_config('app.current_organization_id',${other.org},true)`);
     })).rejects.toThrow(/must have at least two postings|could not be sealed in its tenant scope/u);
+    for (const source of [f, other]) expect(await withTenant(db, source.org, tx => tx.financialTransaction.count())).toBe(1);
+  });
+
+  it("requires an attributed reason and audit to commit with a reversal", async () => {
+    const f = await fixture();
+    await expect(withTenant(db, f.org, tx => reverseJournal(tx, f, { audit: false }))).rejects.toThrow("reversal audit must commit atomically");
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(1);
+  });
+
+  it("rejects balanced partial reversals and altered economic dimensions", async () => {
+    for (const options of [{ amount: "0.99" }, { dimensions: { owner_id: randomUUID() } }]) {
+      const f = await fixture();
+      await expect(withTenant(db, f.org, tx => reverseJournal(tx, f, options))).rejects.toThrow("exact opposite of the original journal");
+      expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(1);
+    }
+  });
+
+  it("permits one exact opposite journal under direct concurrent database writes", async () => {
+    const f = await fixture(), before = await withTenant(db, f.org, tx => tx.posting.findMany({ where: { transactionId: f.journal.id }, orderBy: { id: "asc" } }));
+    const attempts = await Promise.allSettled(Array.from({ length: 2 }, () => withTenant(db, f.org, tx => reverseJournal(tx, f))));
+    expect(attempts.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    expect(attempts.filter(result => result.status === "rejected")).toHaveLength(1);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+    expect(await withTenant(db, f.org, tx => tx.posting.findMany({ where: { transactionId: f.journal.id }, orderBy: { id: "asc" } }))).toEqual(before);
+  });
+
+  it("does not permit a reversal to reference a different tenant journal", async () => {
+    const f = await fixture(), other = await fixture();
+    await expect(withTenant(db, f.org, tx => reverseJournal(tx, f, { originalId: other.journal.id }))).rejects.toThrow("original journal is unavailable");
     for (const source of [f, other]) expect(await withTenant(db, source.org, tx => tx.financialTransaction.count())).toBe(1);
   });
 });

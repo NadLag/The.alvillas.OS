@@ -25,6 +25,9 @@ import { authorize, type Action, type AuthContext } from "@/platform/authz/autho
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
+import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
+import { matchesFinancialReversalAttempt } from "../domain/financial-reversal";
+import { reverseAirbnbSettlementInputSchema } from "../domain/airbnb-settlement";
 
 const airbnbSettlementSourceType = "AIRBNB_SETTLEMENT";
 
@@ -311,7 +314,7 @@ function mirrorPostings(
     ledgerAccountId: posting.ledgerAccountId,
     side: posting.side === "DEBIT" ? "CREDIT" : "DEBIT",
     amount: Money.of(posting.amount.toString(), posting.currency),
-    bucket: posting.bucket ?? "ADJUSTMENT",
+    bucket: posting.bucket,
     dimensions: {
       ...jsonObject(posting.dimensions),
       airbnb_settlement_id: settlementId,
@@ -561,9 +564,9 @@ export async function reverseAirbnbSettlement(
   input: ReverseAirbnbSettlementInput,
   deps: AirbnbSettlementServiceDeps = {}
 ): Promise<AirbnbSettlementReversalResult> {
-  assertAllowed(ctx, "view", "financial_transaction");
-  assertAllowed(ctx, "void", "financial_transaction");
-  assertAllowed(ctx, "reconcile", "financial_transaction");
+  input = reverseAirbnbSettlementInputSchema.parse(input);
+  if (!ctx.authContext.permissions.has("financial_transaction:void")) throw new AirbnbSettlementAuthorizationError();
+  if (ctx.actorId !== ctx.authContext.userAccountId || ctx.organizationId !== ctx.authContext.organizationId) throw new AirbnbSettlementAuthorizationError();
   const meta = await auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
@@ -574,6 +577,15 @@ export async function reverseAirbnbSettlement(
       throw new AirbnbSettlementNotFoundError("Airbnb settlement does not exist in this tenant");
     }
 
+    const now = await repository.lockReservationFinancialCorrection(settlement.reservationId);
+    const current = { ...ctx, authContext: await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId) };
+    const target = { organizationId: ctx.organizationId, propertyId: settlement.propertyId, reservationId: settlement.reservationId,
+      type: "financial_transaction" as const, dataClass: "financial" as const };
+    for (const authority of [ctx.authContext, current.authContext]) {
+      if (!authorize(authority, "view", target, now) || !authorize(authority, "void", target, now) ||
+        !authorize(authority, "reconcile", target, now)) throw new AirbnbSettlementAuthorizationError();
+    }
+
     const originals = await repository.findPostingTransactionsForAirbnbSettlement(settlement.id);
     if (originals.length === 0) {
       throw new AirbnbSettlementNotFoundError("Airbnb settlement has no active postings");
@@ -582,6 +594,8 @@ export async function reverseAirbnbSettlement(
     const reversalKeys = originals.map((transaction) => `${input.idempotencyKey}:reverse:${transaction.id}`);
     const existingReversals = await repository.findTransactionsByIdempotencyKeys(reversalKeys);
     if (existingReversals.length === originals.length) {
+      const audit = await repository.financialReversalAudit("airbnb.settlement.reversed", "airbnb_settlement", [settlement.id]);
+      if (!matchesFinancialReversalAttempt({ actorId: ctx.actorId, reason: input.reason, originalIds: originals.map(row => row.id), reversals: existingReversals, audit })) throw new AirbnbSettlementConflictError();
       return {
         settlementId: settlement.id,
         reversalTransactionIds: existingReversals.map((transaction) => transaction.id),
@@ -599,7 +613,7 @@ export async function reverseAirbnbSettlement(
       assertFinancePostingsBalanced(postings);
       const reversal = await repository.createFinancialTransaction({
         reference: `${original.reference}:REV:${input.idempotencyKey.slice(0, 8)}`,
-        occurredAt: new Date(),
+        occurredAt: now,
         description: `Reversal of ${original.reference}`,
         reversesTransactionId: original.id,
         idempotencyKey: `${input.idempotencyKey}:reverse:${original.id}`,
@@ -624,7 +638,7 @@ export async function reverseAirbnbSettlement(
       }),
       reason: input.reason,
       requestId: meta.requestId,
-      occurredAt: new Date()
+      occurredAt: now
     });
 
     return {
