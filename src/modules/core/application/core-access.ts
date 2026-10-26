@@ -1,5 +1,5 @@
 import type { Session } from "next-auth";
-import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
+import { authContextForAccount } from "@/platform/authz/account-context";
 import type { AuthContext } from "@/platform/authz/authorize";
 
 export type CoreActorContext = {
@@ -10,15 +10,17 @@ export type CoreActorContext = {
 
 export async function coreActorContextFromSession(
   session: Session | null,
-  deps: Parameters<typeof identityActorContextFromSession>[1] = {}
+  deps: Parameters<typeof authContextForAccount>[2] = {}
 ): Promise<CoreActorContext | null> {
-  if (session?.user?.securitySetupRequired || session?.user?.sessionRevoked) return null;
-  return identityActorContextFromSession(session, deps);
+  const user = session?.user;
+  if (!user?.id || !user.personId || !user.organizationId || user.securitySetupRequired || user.sessionRevoked) return null;
+  return { organizationId: user.organizationId, actorId: user.id,
+    authContext: { ...(await authContextForAccount(user.organizationId, user.id, deps)), personId: user.personId } };
 }
 
 export async function agreementActorContextFromSession(
   session: Session | null,
-  deps: Parameters<typeof identityActorContextFromSession>[1] = {}
+  deps: Parameters<typeof authContextForAccount>[2] = {}
 ): Promise<CoreActorContext | null> {
   return coreActorContextFromSession(session, deps);
 }

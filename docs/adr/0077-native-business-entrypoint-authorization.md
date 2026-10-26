@@ -6,10 +6,12 @@ and agreement adapters supplied them when stored grants were empty. Real
 PostgreSQL regressions reproduced unauthorized financial transactions, owner
 creation and configuration creation after grant expiry.
 
-All four adapters now reuse the existing identity account-context loader.
+All four adapters now reuse the existing platform account-context loader.
 Business callers await its current assignments, scopes, conditions, validity
 and enrollment policy. Revoked and setup-required sessions cannot obtain a
 business context. Empty assignments never acquire fallback permissions.
+Adapters do not import another module's application layer or inherit identity's
+separate self-service security grant. The existing module boundary check stays enforced.
 
 Collection access permits discovery of candidates. Creation also checks the
 actual new owner/property resource inside its transaction before commit or
