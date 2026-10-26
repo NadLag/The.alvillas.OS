@@ -2414,5 +2414,30 @@
       "PER_HOUR": "Par heure",
       "PERCENTAGE": "Pourcentage"
     }
+  },
+  "FieldCash": {
+    "title": "Encaisser des espèces",
+    "guidance": "Enregistrez les espèces que vous avez personnellement reçues pour cette mission. L’encaissement constate la garde des fonds ; leur affectation suit l’accord et les règles du service applicables.",
+    "amount": "Montant reçu",
+    "currency": "Devise",
+    "payer": "Reçu de",
+    "purpose": "Objet du paiement",
+    "save": "Enregistrer les espèces reçues",
+    "saving": "Enregistrement…",
+    "savedDraft": "Brouillon enregistré sur cet appareil.",
+    "queued": "Encaissement en attente. Gardez cet appareil jusqu’à la fin de la synchronisation.",
+    "synced": "Encaissement synchronisé.",
+    "storageError": "Impossible d’enregistrer l’encaissement. Gardez cette page ouverte et réessayez.",
+    "invalid": "Saisissez un montant positif avec la précision autorisée pour la devise, un payeur et un objet de paiement.",
+    "reviewRequired": "Cet encaissement doit être vérifié. La tentative initiale est conservée. Vérifiez les encaissements récents avant d’ajouter des espèces.",
+    "reviewAdditional": "Vérifier un encaissement supplémentaire distinct",
+    "matchingReceipt": "Un encaissement identique existe : {receipt}. Confirmez uniquement si les deux tentatives concernent les mêmes espèces.",
+    "reviewReason": "Motif de confirmation de l’encaissement existant",
+    "confirmExisting": "Confirmer que ces espèces sont déjà enregistrées",
+    "clearDraft": "Abandonner le brouillon non envoyé",
+    "recent": "Vos encaissements récents pour cette mission",
+    "noReceipts": "Aucun encaissement enregistré pour cette mission.",
+    "saveBeforeComplete": "Enregistrez ou résolvez l’encaissement avant de terminer cette mission.",
+    "unsaved": "Enregistrez ou résolvez l’encaissement avant de quitter cette mission."
   }
 }

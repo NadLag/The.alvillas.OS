@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
+import type { Resource } from "@/platform/authz/authorize";
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -78,5 +79,15 @@ export class AuditRepository {
     return this.tx.auditLog.count({
       where: whereFor(this.organizationId, filters)
     });
+  }
+  async cashResources(ids: string[]): Promise<Map<string, Resource>> {
+    if (!ids.length) return new Map();
+    const rows = await this.tx.cashCollection.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
+      select: { id: true, taskId: true, propertyId: true, reservationId: true, transactionId: true, collectorUserAccountId: true, collectorPersonId: true, amount: true,
+        task: { select: { state: true } }, property: { select: { city: true, cityId: true, region: true, regionId: true } } } });
+    return new Map(rows.map(row => [row.id, { type: "cash_collection", organizationId: this.organizationId, id: row.id,
+      financialRecordId: row.transactionId, propertyId: row.propertyId, reservationId: row.reservationId, taskId: row.taskId, jobId: row.taskId,
+      assignedUserAccountId: row.collectorUserAccountId, assignedPersonId: row.collectorPersonId, amount: row.amount.toString(),
+      city: row.property.cityId ?? row.property.city, region: row.property.regionId ?? row.property.region, status: row.task.state, dataClass: "financial" }]));
   }
 }

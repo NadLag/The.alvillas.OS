@@ -59,6 +59,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
       const queue = fieldQueue();
       if (!await resolveFieldScope(queue, navigator.onLine, scope)) throw new Error("FIELD_SESSION_CHANGED");
       await queue.migrateLegacy(scope, localStorage);
+      await queue.restoreSubmittedCash(scope);
       if (disposed) return queue;
       subscription = liveQuery(async () => {
         const [entries, assigned, supervised] = await Promise.all([queue.entries(scope), queue.readCache(scope), queue.readCache(scope, "supervised")]);

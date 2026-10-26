@@ -6,6 +6,7 @@ import { isUploadGeneration } from "@/platform/storage/upload-generation";
 import type { FieldDevicePolicySnapshot } from "@/platform/config/field-device-policy";
 import type { FieldWalletSnapshot } from "@/modules/identity/domain/field-wallet";
 import { stockPositionSchema, type FieldStocktakePayload, type StockPosition } from "@/platform/inventory/field-stocktake";
+import { fieldCashPayloadSchema, type FieldCashPayload } from "@/platform/ledger/field-cash";
 
 export type FieldQueueScope = { organizationId: string; userId: string };
 export type FieldCacheAudience = "assigned" | "supervised";
@@ -31,7 +32,8 @@ export type FieldQueueEntry = FieldQueueScope & {
 };
 type Metadata = { key: string; value: string };
 export type FieldCachedJob = FieldQueueScope & { cacheId: string; task: FieldWorkSnapshot };
-export type FieldDraft = FieldQueueScope & { cacheId: string; taskId: string; checklistItemIds: string[]; note: string; savedAt: string };
+export type FieldCashDraft = FieldCashPayload & { clientOpId: string; clientCreatedAt: string; submittedDeviceId?: string; supersedesClientOpId?: string };
+export type FieldDraft = FieldQueueScope & { cacheId: string; taskId: string; checklistItemIds: string[]; note: string; savedAt: string; cash?: FieldCashDraft };
 export type FieldCacheRevision = { incarnation: string; generation: number };
 export type FieldCacheState = FieldQueueScope & FieldCacheRevision & { key: string; snapshotAt?: string; cursor?: string; invalidated?: boolean; wallet?: FieldWalletSnapshot; walletReadId?: string };
 export type FieldPhoto = FieldQueueScope & { cacheId: string; taskId: string; manifest: FieldUploadManifest; blob: Blob; deviceId: string;
@@ -160,6 +162,8 @@ export class FieldQueueStore extends Dexie {
   }
 
   async acknowledge(scope: FieldQueueScope, entry: FieldQueueEntry, result: SyncPushOpResult): Promise<boolean> {
+    if ((entry.operation.type === "field_cash.collect" || entry.operation.type === "field_cash.confirm_existing") && isFieldResultApplied(entry.operation.type, result) &&
+      !/^[a-zA-Z0-9_-]{43}$/u.test(result.server_version ?? "")) return false;
     if (entry.operation.type === "field_photo.prepare" || result.client_op_id !== entry.operation.client_op_id) return false;
     if (entry.operation.type === "field_stocktake.record" && isFieldResultApplied(entry.operation.type, result) &&
       result.server_version !== (BigInt(entry.operation.payload.expectedRevision) + 1n).toString()) return false;
@@ -178,6 +182,23 @@ export class FieldQueueStore extends Dexie {
       if (isFieldResultApplied(entry.operation.type, result)) {
         await this.operations.delete(entry.sequence!);
         if (entry.operation.type === "field_task.evidence.attach") await this.photos.delete(`${fieldIdentity(scope)}:${entry.operation.client_op_id}`);
+        if (entry.operation.type === "field_cash.collect" || entry.operation.type === "field_cash.confirm_existing") {
+          const identity = fieldIdentity(scope), taskId = entry.operation.payload.taskId, cacheId = `${identity}:${taskId}`;
+          const draft = await this.drafts.get(cacheId);
+          const draftId = entry.operation.type === "field_cash.collect" ? entry.operation.client_op_id : entry.operation.payload.originalClientOpId;
+          if (draft?.cash?.clientOpId === draftId) { const next = { ...draft }; delete next.cash; await this.drafts.put(next); }
+          const job = await this.jobs.get(cacheId);
+          if (job?.task.cash && (entry.operation.type === "field_cash.confirm_existing" || job.task.cash.revision === entry.operation.payload.expectedRevision))
+            await this.jobs.put({ ...job, task: { ...job.task, cash: { ...job.task.cash, revision: result.server_version! } } });
+          let previousId = entry.supersedesClientOpId; const visited = new Set<string>();
+          while (previousId && !visited.has(previousId)) {
+            visited.add(previousId); const previous = await this.operations.where("localId").equals(`${identity}:${previousId}`).first();
+            if (!previous || previous.organizationId !== scope.organizationId || previous.userId !== scope.userId || previous.syncStatus === "pending" ||
+              !["field_cash.collect", "field_cash.confirm_existing"].includes(previous.operation.type) || previous.operation.payload.taskId !== taskId) break;
+            await this.operations.update(previous.sequence!, { resolvedByClientOpId: entry.operation.client_op_id }); previousId = previous.supersedesClientOpId;
+          }
+          const state = await this.cacheState.get(identity); if (state) await this.cacheState.put({ ...state, generation: state.generation + 1 });
+        }
         if (entry.operation.type === "field_stocktake.record") {
           const value = entry.operation.payload, identity = fieldIdentity(scope), cacheId = `${identity}:${value.taskId}:${value.itemKey}`;
           if ((await this.linenDrafts.get(cacheId))?.clientOpId === entry.operation.client_op_id) await this.linenDrafts.delete(cacheId);
@@ -196,7 +217,10 @@ export class FieldQueueStore extends Dexie {
           const audience = entry.operation.type === "field_task.proxy_validate" ? "supervised" : "assigned";
           const key = fieldCacheIdentity(scope, audience), cacheId = `${fieldIdentity(scope)}:${entry.operation.payload.taskId}`;
           const jobs = audience === "supervised" ? this.proxyJobs : this.jobs, drafts = audience === "supervised" ? this.proxyDrafts : this.drafts;
-          await jobs.delete(cacheId); await drafts.delete(cacheId);
+          await jobs.delete(cacheId);
+          const ownDraft = audience === "assigned" ? await this.drafts.get(cacheId) : undefined;
+          if (ownDraft?.cash) await this.drafts.put({ ...ownDraft, checklistItemIds: [], note: "" });
+          else await drafts.delete(cacheId);
           if (audience === "assigned") await this.linenDrafts.where("[organizationId+userId]").equals([scope.organizationId, scope.userId])
             .filter(draft => draft.taskId === entry.operation.payload.taskId).delete();
           const state = await this.cacheState.get(key);
@@ -527,8 +551,59 @@ export class FieldQueueStore extends Dexie {
       if ((await this.cacheState.get(fieldIdentity(scope)))?.incarnation !== incarnation) throw new Error("FIELD_SESSION_CHANGED");
       const cacheId = `${fieldIdentity(scope)}:${taskId}`;
       if (!await this.jobs.get(cacheId)) return false;
-      await this.drafts.put({ ...scope, cacheId, taskId, checklistItemIds, note, savedAt: new Date().toISOString() });
+      const previous = await this.drafts.get(cacheId);
+      await this.drafts.put({ ...scope, cacheId, taskId, checklistItemIds, note, savedAt: new Date().toISOString(), ...(previous?.cash ? { cash: previous.cash } : {}) });
       return true;
+    });
+  }
+
+  async cashSnapshot(scope: FieldQueueScope, taskId: string) {
+    return this.transaction("r", [this.metadata, this.jobs, this.drafts, this.cacheState, this.operations], async () => {
+      const identity = fieldIdentity(scope); if ((await this.metadata.get("identity"))?.value !== identity) throw new Error("FIELD_SESSION_CHANGED");
+      return { state: await this.cacheState.get(identity), task: (await this.jobs.get(`${identity}:${taskId}`))?.task,
+        draft: (await this.drafts.get(`${identity}:${taskId}`))?.cash,
+        entries: (await this.entries(scope)).filter(entry => ["field_cash.collect", "field_cash.confirm_existing"].includes(entry.operation.type) && entry.operation.payload.taskId === taskId) };
+    });
+  }
+  async saveCashDraft(scope: FieldQueueScope, value: FieldCashDraft, incarnation: string): Promise<boolean> {
+    return this.transaction("rw", [this.metadata, this.jobs, this.drafts, this.cacheState, this.operations], async () => {
+      const identity = fieldIdentity(scope), cacheId = `${identity}:${value.taskId}`;
+      if ((await this.metadata.get("identity"))?.value !== identity || (await this.cacheState.get(identity))?.incarnation !== incarnation) throw new Error("FIELD_SESSION_CHANGED");
+      const previous = await this.drafts.get(cacheId), task = (await this.jobs.get(cacheId))?.task;
+      const pending = (await this.entries(scope)).some(entry => entry.syncStatus === "pending" && entry.operation.payload.taskId === value.taskId);
+      if (!task?.cash?.canCollect || pending || previous?.cash?.submittedDeviceId && previous.cash.clientOpId === value.clientOpId) return false;
+      await this.drafts.put({ ...scope, cacheId, taskId: value.taskId, checklistItemIds: previous?.checklistItemIds ?? [], note: previous?.note ?? "",
+        savedAt: new Date().toISOString(), cash: value }); return true;
+    });
+  }
+  async clearCashDraft(scope: FieldQueueScope, taskId: string, clientOpId: string): Promise<boolean> {
+    return this.transaction("rw", [this.metadata, this.drafts], async () => {
+      const identity = fieldIdentity(scope); if ((await this.metadata.get("identity"))?.value !== identity) throw new Error("FIELD_SESSION_CHANGED");
+      const draft = await this.drafts.get(`${identity}:${taskId}`);
+      if (!draft?.cash || draft.cash.clientOpId !== clientOpId || draft.cash.submittedDeviceId) return false;
+      const next = { ...draft }; delete next.cash; await this.drafts.put(next); return true;
+    });
+  }
+  async storeCashOperation(scope: FieldQueueScope, operation: Extract<SyncPushOp, { type: "field_cash.collect" | "field_cash.confirm_existing" }>, incarnation: string, supersedesClientOpId?: string) {
+    return this.transaction("rw", [this.metadata, this.operations, this.jobs, this.drafts, this.cacheState], async () => {
+      const identity = fieldIdentity(scope), cacheId = `${identity}:${operation.payload.taskId}`;
+      if ((await this.metadata.get("identity"))?.value !== identity || (await this.cacheState.get(identity))?.incarnation !== incarnation) throw new Error("FIELD_SESSION_CHANGED");
+      const draft = await this.drafts.get(cacheId), cash = draft?.cash, task = (await this.jobs.get(cacheId))?.task;
+      if (!cash || (!task?.cash?.canCollect && !(operation.type === "field_cash.collect" && cash.submittedDeviceId))) throw new Error("FIELD_CASH_UNAVAILABLE");
+      const deviceId = (await this.metadata.get("device"))?.value;
+      if (!deviceId || cash.submittedDeviceId && cash.submittedDeviceId !== deviceId) throw new Error("FIELD_SESSION_CHANGED");
+      const existing = await this.operations.where("localId").equals(`${identity}:${operation.client_op_id}`).first();
+      if (existing) { if (JSON.stringify(existing.operation) !== JSON.stringify(operation)) throw new Error("FIELD_CASH_KEY_REUSED"); return existing; }
+      if (operation.type === "field_cash.collect") {
+        const payload = fieldCashPayloadSchema.parse({ taskId: cash.taskId, amount: cash.amount, currency: cash.currency, payer: cash.payer, purpose: cash.purpose, expectedRevision: cash.expectedRevision });
+        if (JSON.stringify(operation.payload) !== JSON.stringify(payload) || operation.client_created_at !== cash.clientCreatedAt) throw new Error("FIELD_CASH_KEY_REUSED");
+      }
+      if ((await this.entries(scope)).some(entry => entry.syncStatus === "pending" && entry.operation.payload.taskId === cash.taskId)) throw new Error("FIELD_CASH_PENDING");
+      if (operation.type === "field_cash.collect" && (cash.clientOpId !== operation.client_op_id || !cash.submittedDeviceId && cash.expectedRevision !== task?.cash?.revision)) throw new Error("FIELD_CASH_REVIEW_REQUIRED");
+      const entry = await this.store(scope, operation, deviceId);
+      if (supersedesClientOpId) await this.operations.update(entry.sequence!, { supersedesClientOpId });
+      await this.drafts.put({ ...draft, cash: { ...cash, submittedDeviceId: deviceId } });
+      return { ...entry, ...(supersedesClientOpId ? { supersedesClientOpId } : {}) };
     });
   }
 
@@ -541,7 +616,14 @@ export class FieldQueueStore extends Dexie {
       if (state?.generation !== revision.generation || state.incarnation !== revision.incarnation) return false;
       await jobs.bulkPut(tasks.map(task => ({ ...scope, cacheId: `${identity}:${task.id}`, task })));
       const removed = tombstones.map(id => `${identity}:${id}`);
-      await jobs.bulkDelete(removed); await drafts.bulkDelete(removed);
+      await jobs.bulkDelete(removed);
+      const removedDrafts: string[] = [];
+      for (const id of removed) {
+        const ownDraft = audience === "assigned" ? await this.drafts.get(id) : undefined;
+        if (ownDraft?.cash) await this.drafts.put({ ...ownDraft, checklistItemIds: [], note: "" });
+        else removedDrafts.push(id);
+      }
+      await drafts.bulkDelete(removedDrafts);
       if (audience === "assigned" && tombstones.length) await this.linenDrafts.where("[organizationId+userId]").equals([scope.organizationId, scope.userId])
         .filter(draft => tombstones.includes(draft.taskId)).delete();
       await this.cacheState.put({ ...scope, key, incarnation: revision.incarnation, generation: revision.generation + 1, cursor, snapshotAt,

@@ -4,6 +4,7 @@ import { FieldLanguage } from "@/platform/offline/field-language";
 import { FieldIssueCapture } from "@/platform/offline/field-issue-capture";
 import { FieldPhotoCapture } from "@/platform/offline/field-photo-capture";
 import { FieldInventory, FieldLinen } from "@/platform/offline/field-linen";
+import { FieldCash } from "@/platform/offline/field-cash";
 import { OperationForm } from "@/modules/reservations/ui/operation-form";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
@@ -110,6 +111,7 @@ export default async function FieldTaskPage({
         taskId={task.id}
         beforeComplete={<><FieldLinen scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} taskId={task.id} locale={appLocale} />
           <FieldInventory scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} taskId={task.id} locale={appLocale} />
+          <FieldCash scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} taskId={task.id} locale={appLocale} />
           <FieldIssueCapture scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} taskId={task.id} />
           <FieldPhotoCapture key={`${ctx.organizationId}:${ctx.actorId}:${task.id}`} scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} taskId={task.id} /></>}
       />

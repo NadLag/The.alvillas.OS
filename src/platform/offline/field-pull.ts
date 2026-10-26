@@ -25,7 +25,7 @@ async function refresh(queue: FieldQueueStore, scope: FieldQueueScope, send: typ
     do {
       const params = new URLSearchParams({ organization_id: scope.organizationId, actor_user_id: scope.userId, mode: audience });
       params.set("include_device_policy", "1");
-      if (audience === "assigned") { params.set("include_linen", "1"); params.set("include_inventory", "1"); params.set("include_issue_capture", "1"); }
+      if (audience === "assigned") { params.set("include_linen", "1"); params.set("include_inventory", "1"); params.set("include_issue_capture", "1"); params.set("include_cash", "1"); }
       if (cursor) params.set("cursor", cursor);
       if (next === null && offset > 0) params.set("only_known", "1");
       if (known.length > offset) params.set("known_tasks", known.slice(offset, offset + 50).join(","));

@@ -6,7 +6,7 @@ import {
 } from "@/modules/audit/infrastructure/audit-repository";
 import type { AuditActorContext } from "@/modules/audit/application/audit-access";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
-import { authorize, type Action } from "@/platform/authz/authorize";
+import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
@@ -79,8 +79,15 @@ function containsServicePricing(value: unknown): boolean {
 export function presentAuditHistoryRow(
   ctx: AuditActorContext,
   row: AuditHistoryRow,
-  action: "view" | "export" = "view"
+  action: "view" | "export" = "view",
+  cashResource?: Resource
 ): AuditHistoryRow {
+  if (row.resourceType === "cash_collection") {
+    const allowed = Boolean(cashResource && authorize(ctx.authContext, action, cashResource));
+    return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,
+      { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
+      { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
+  }
   const teamResource = row.action.startsWith("team.compensation.")
     ? "staff_compensation"
     : row.action.startsWith("team.document.")
@@ -176,7 +183,9 @@ export async function listAuditHistory(
       repository.count(filters)
     ]);
 
-    return { rows: rows.map((row) => presentAuditHistoryRow(ctx, row)), total, limit };
+    const cashIds = rows.filter(row => row.resourceType === "cash_collection").flatMap(row => row.resourceId ? [row.resourceId] : []);
+    const cashResources = cashIds.length ? await repository.cashResources(cashIds) : new Map<string, Resource>();
+    return { rows: rows.map((row) => presentAuditHistoryRow(ctx, row, "view", row.resourceId ? cashResources.get(row.resourceId) : undefined)), total, limit };
   });
 }
 
@@ -272,6 +281,8 @@ export async function exportAuditHistoryCsv(
       occurredAt: new Date()
     });
 
-    return auditHistoryCsv(rows.map((row) => presentAuditHistoryRow(ctx, row, "export")));
+    const cashIds = rows.filter(row => row.resourceType === "cash_collection").flatMap(row => row.resourceId ? [row.resourceId] : []);
+    const cashResources = cashIds.length ? await repository.cashResources(cashIds) : new Map<string, Resource>();
+    return auditHistoryCsv(rows.map((row) => presentAuditHistoryRow(ctx, row, "export", row.resourceId ? cashResources.get(row.resourceId) : undefined)));
   });
 }

@@ -25,6 +25,8 @@ import { reportOperationIssueInTransaction } from "./operation-evidence";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { prepareFieldStocktakeBatch, recordFieldStocktakeInTransaction } from "@/platform/inventory/field-stocktake-service";
 import { StocktakeConflictError, FieldStocktakeUnavailableError } from "@/platform/inventory/field-stocktake";
+import { recordFieldCashInTransaction, confirmExistingFieldCashInTransaction } from "@/platform/ledger/field-cash-service";
+import { FieldCashConflictError, FieldCashUnavailableError } from "@/platform/ledger/field-cash";
 
 type SyncServiceDeps = {
   db?: TenantTransactionRunner;
@@ -119,7 +121,7 @@ export async function pushSyncOps(
     const operations = new OperationRepository(tx, ctx.organizationId);
     // Physical stock observations do not mutate crew availability. Mixed batches
     // retain the established schedule/task/actor lock order.
-    if (input.ops.some(op => op.type !== "field_stocktake.record")) await operations.lock("crew-schedule");
+    if (input.ops.some(op => !["field_stocktake.record", "field_cash.collect", "field_cash.confirm_existing"].includes(op.type))) await operations.lock("crew-schedule");
     for (const taskId of [...new Set(input.ops.map(op => op.payload.taskId))].sort()) await operations.lock(taskId);
     const people = [ctx.personId, ...input.ops.flatMap(op => op.type === "field_task.proxy_validate" ? [op.payload.performedByPersonId] : [])];
     for (const personId of [...new Set(people)].sort()) await repository.lockActor(personId);
@@ -155,6 +157,17 @@ export async function pushSyncOps(
       });
 
       try {
+        if (op.type === "field_cash.confirm_existing") {
+          const reviewed = await confirmExistingFieldCashInTransaction(ctx, op.payload, tx, metaForOp(deps, op), input.device_id);
+          const result = appliedResult(op, reviewed.serverVersion);
+          await repository.finish(input.device_id, op.client_op_id, result.status, result, null); results.push(result); continue;
+        }
+        if (op.type === "field_cash.collect") {
+          const cash = await recordFieldCashInTransaction(ctx, op.payload, { deviceId: input.device_id, clientOpId: op.client_op_id,
+            clientCreatedAt: op.client_created_at ? new Date(op.client_created_at) : null }, tx, metaForOp(deps, op));
+          const result: SyncPushOpResult = { ...appliedResult(op, cash.serverVersion), status: cash.idempotent ? "DUPLICATE" : "APPLIED" };
+          await repository.finish(input.device_id, op.client_op_id, result.status, result, null); results.push(result); continue;
+        }
         if (op.type === "field_stocktake.record") {
           if (stocktakeDenied || !stocktakeBatch) throw new ReservationAuthorizationError();
           const observation = await recordFieldStocktakeInTransaction(ctx, op.payload, { deviceId: input.device_id,
@@ -198,6 +211,15 @@ export async function pushSyncOps(
         await repository.finish(input.device_id, op.client_op_id, applied.status, applied, applied.error_code ?? null);
         results.push(applied);
       } catch (error) {
+        if (error instanceof FieldCashConflictError) {
+          const conflict: SyncPushOpResult = { client_op_id: op.client_op_id, status: "CONFLICT", server_version: error.current,
+            conflict: { expected: error.expected, current: error.current, incoming: op.type }, error_code: "CASH_COLLECTION_CONFLICT" };
+          await repository.finish(input.device_id, op.client_op_id, "CONFLICT", conflict, conflict.error_code!); results.push(conflict); continue;
+        }
+        if (error instanceof FieldCashUnavailableError) {
+          const rejected = rejectedResult(op, `CASH_${error.code}`);
+          await repository.finish(input.device_id, op.client_op_id, "REJECTED", rejected, rejected.error_code!); results.push(rejected); continue;
+        }
         if (error instanceof StocktakeConflictError) {
           const conflict: SyncPushOpResult = { client_op_id: op.client_op_id, status: "CONFLICT", server_version: error.current.revision,
             error_code: "STOCKTAKE_CONFLICT", stocktake: { expected: error.expected, current: error.current } };

@@ -124,6 +124,8 @@ export function FieldTaskCompletionForm({
   const photoText = useTranslations("FieldPhoto"), issueText = useTranslations("FieldIssue");
   const linenText = useTranslations("FieldLinen");
   const inventoryText = useTranslations("FieldInventory");
+  const cashText = useTranslations("FieldCash");
+  const [cashBlocked, setCashBlocked] = useState(false);
   const [photoBlocked, setPhotoBlocked] = useState(false);
   const [issueBlocked, setIssueBlocked] = useState(false);
   const [linenBlocked, setLinenBlocked] = useState(false);
@@ -240,7 +242,7 @@ export function FieldTaskCompletionForm({
     if (checklistItemIds.length !== checklistItems.length) { setQueueStatus("conflict"); return; }
     try {
       const review = (await fieldQueue().entries({ organizationId, userId })).find(entry => entry.operation.payload.taskId === taskId &&
-        (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach" || (entry.operation.type === "field_stocktake.record" || entry.operation.type === "field_task.issue.report")) &&
+        (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach" || entry.operation.type === "field_stocktake.record" || entry.operation.type === "field_task.issue.report" || entry.operation.type === "field_cash.collect" || entry.operation.type === "field_cash.confirm_existing") &&
         entry.syncStatus !== "pending" && !entry.resolvedByClientOpId);
       if (review) { setQueueStatus(review.syncStatus === "conflict" ? "conflict" : "rejected"); return; }
       await fieldQueue().enqueue({ organizationId, userId }, { client_op_id: idempotencyKey,
@@ -265,6 +267,8 @@ export function FieldTaskCompletionForm({
     setLinenBlocked(false);
     if (document.querySelector('[data-field-inventory-dirty="true"]')) { event.preventDefault(); setInventoryBlocked(true); return; }
     setInventoryBlocked(false);
+    if (document.querySelector('[data-field-cash-dirty="true"]')) { event.preventDefault(); setCashBlocked(true); return; }
+    setCashBlocked(false);
     event.preventDefault();
     if (completing.current || pending || queued) return;
     completing.current = true;
@@ -273,7 +277,7 @@ export function FieldTaskCompletionForm({
       if (mode === "cached" || !navigator.onLine) { await queueCompletion(formData); return; }
       const entries = await fieldQueue().entries({ organizationId, userId });
       const photo = entries.find(entry => entry.operation.payload.taskId === taskId &&
-        (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach" || (entry.operation.type === "field_stocktake.record" || entry.operation.type === "field_task.issue.report")) && !entry.resolvedByClientOpId);
+        (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach" || entry.operation.type === "field_stocktake.record" || entry.operation.type === "field_task.issue.report" || entry.operation.type === "field_cash.collect" || entry.operation.type === "field_cash.confirm_existing") && !entry.resolvedByClientOpId);
       if (photo?.syncStatus === "conflict" || photo?.syncStatus === "rejected") { setQueueStatus(photo.syncStatus); return; }
       if (photo) await queueCompletion(formData);
       else startTransition(() => formAction(formData));
@@ -347,6 +351,7 @@ export function FieldTaskCompletionForm({
       {beforeComplete}
       {linenBlocked ? <p role="status" data-testid="field-linen-completion-blocked">{linenText("saveBeforeComplete")}</p> : null}
       {inventoryBlocked ? <p role="status" data-testid="field-inventory-completion-blocked">{inventoryText("saveBeforeComplete")}</p> : null}
+      {cashBlocked ? <p role="status" data-testid="field-cash-completion-blocked">{cashText("saveBeforeComplete")}</p> : null}
       <button
         className="primary-button field-complete-button"
         data-testid="field-task-complete"

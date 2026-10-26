@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { proxyCompleteTaskSchema, issueInputSchema } from "./operation-task";
 import { fieldStocktakePayloadSchema, type StockPosition } from "@/platform/inventory/field-stocktake";
+import { fieldCashPayloadSchema, fieldCashConfirmSchema } from "@/platform/ledger/field-cash";
 
 const optionalText = (max: number) =>
   z.preprocess(
@@ -32,6 +33,8 @@ export const syncPushOpSchema = z.discriminatedUnion("type", [
   fieldTaskCompleteOpSchema, fieldTaskEvidenceAttachOpSchema,
   syncOpEnvelope.extend({ type: z.literal("field_task.issue.report"), payload: issueInputSchema.omit({ idempotencyKey: true }) }).strict(),
   syncOpEnvelope.extend({ type: z.literal("field_stocktake.record"), payload: fieldStocktakePayloadSchema }).strict(),
+  syncOpEnvelope.extend({ type: z.literal("field_cash.collect"), payload: fieldCashPayloadSchema }).strict(),
+  syncOpEnvelope.extend({ type: z.literal("field_cash.confirm_existing"), payload: fieldCashConfirmSchema }).strict(),
   syncOpEnvelope.extend({ type: z.literal("field_task.proxy_validate"), payload: proxyCompleteTaskSchema.omit({ idempotencyKey: true }) }).strict()
 ]);
 
