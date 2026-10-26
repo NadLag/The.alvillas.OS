@@ -3,6 +3,7 @@ import { authorize, type AuthContext, type Resource } from "@/platform/authz/aut
 
 export const notificationEventType = "notification.requested";
 export const notificationInputSchema = z.discriminatedUnion("kind", [
+  z.object({ kind:z.literal("expense_emergency"),recipientId:z.uuid(),targetId:z.uuid() }).strict(),
   z.object({ kind: z.literal("staff_document_expiring"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("approval_requested"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("approval_decided"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
@@ -55,6 +56,7 @@ export function notificationDestination(
     return authorize(selfContext, "configure", target) ? `/${locale}/app${input.kind === "security_session_revoked" ? "/security" : ""}` : null;
   }
   if (!authorize(ctx, "view", target)) return null;
+  if (input.kind === "expense_emergency") return target.type === "expense" ? `/${locale}/app/expenses/${target.id}` : null;
   if (input.kind === "staff_document_expiring") return target.type === "staff_document" && target.assignedPersonId && target.id === target.assignedPersonId ? `/${locale}/app/team/${target.assignedPersonId}` : null;
   if (input.kind === "approval_requested" || input.kind === "approval_decided") return target.type === "property" || target.type === "expense" && target.approvalId ? `/${locale}/app/approvals/${referenceId}` : null;
   if (input.kind === "reservation_created") return target.type === "reservation" ? `/${locale}/app/reservations` : null;

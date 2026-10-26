@@ -12,6 +12,7 @@ import { evaluate, type EvaluationContext } from "@/platform/automation/rule";
 
 type ApprovalThreshold = ApprovalThresholdsConfig["thresholds"][number];
 type ExpenseCategoryRule = NonNullable<ExpenseTreatmentConfig["categories"]>[string];
+export class ExpenseAllocationConfigurationError extends Error {}
 
 export type ApprovalSubject = {
   category: string;
@@ -150,6 +151,12 @@ function sharesForTreatment(rule: ExpenseCategoryRule | null, treatment: string)
   alvillasShareBps: number;
   guestShareBps: number;
 } {
+  if(treatment==="CUSTOM"){
+    const ownerShareBps=rule?.owner_share_bps,alvillasShareBps=rule?.alvillas_share_bps,guestShareBps=rule?.guest_share_bps;
+    if(typeof ownerShareBps!=="number"||typeof alvillasShareBps!=="number"||typeof guestShareBps!=="number"||
+      ownerShareBps+alvillasShareBps+guestShareBps!==10000)throw new ExpenseAllocationConfigurationError("Custom expense allocation requires three configured shares totaling 10000 bps");
+    return{ownerShareBps,alvillasShareBps,guestShareBps};
+  }
   if (treatment === "SHARED") {
     const ownerShareBps = rule?.owner_share_bps;
     const alvillasShareBps = rule?.alvillas_share_bps;

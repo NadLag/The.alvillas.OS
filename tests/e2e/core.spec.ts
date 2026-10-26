@@ -12,6 +12,8 @@ test.describe("owners and properties journey", () => {
   test("creates an owner, creates a property, and opens both detail screens", async ({
     page
   }, testInfo) => {
+    // This journey includes real MFA enrollment and the complete property lifecycle.
+    test.setTimeout(120000);
     const suffix = `${testInfo.project.name}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/gu, "-");
     const ownerName = `Owner ${suffix}`;
     const ownerEmail = `owner-${suffix}@example.test`;

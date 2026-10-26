@@ -37,7 +37,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense submissio
       await config.createVersion({ key: "finance.approval_thresholds", scopeType: "property", scopeId: task.propertyId, effectiveFrom: new Date("2020-01-01"),
         reason: "Dedicated scoped owner approval", value: { thresholds: [{ key: "native_expense", amount: "100", currency: "MAD", requires_approval_from: ["owner"] }],
           routing: { owner: { roles: [role.id], people: [], assigned: false, channels: ["in_app"] } } } });
-      return { propertyId: task.propertyId, bankId: bank.id, ownerAccountId: account.id };
+      return { propertyId: task.propertyId, bankId: bank.id, ownerAccountId: account.id, ownerRoleId: role.id };
     });
     await admin.goto("/en/app/identity"); await admin.getByTestId("invite-display-name").fill(`Dedicated expense field ${suffix}`);
     await admin.getByTestId("invite-phone").fill(phone); await admin.getByTestId("invite-role").selectOption("field_staff");
@@ -97,6 +97,114 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense submissio
       expect(await tx.expenseSubmission.count({ where: { expenseId } })).toBe(1);
       expect(await tx.approvalStage.count({ where: { approvalId, state: "APPROVED", decidedBy: setup.ownerAccountId } })).toBe(1);
       expect(await tx.auditLog.count({ where: { resourceId: expenseId, action: "expense.approved" } })).toBe(1);
+    });
+    await ownerPage.goto(`/${locale}/app/expenses/${expenseId}`);await expect(ownerPage.getByTestId("expense-detail-page")).toBeVisible();
+    await expect(ownerPage.getByTestId("expense-post-form")).toHaveCount(0);
+    await expect(admin.getByTestId("expense-post-form")).toBeVisible();await admin.getByTestId("expense-post-reason").fill("Dedicated accepted bank payment reference");
+    const postingRequest=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&
+      new URL(request.url()).pathname.endsWith(`/expenses/${expenseId}`)&&Boolean(request.postData()?.includes(expenseId)));
+    await admin.getByTestId("expense-post").click();const payment=await postingRequest;
+    await expect(admin.getByTestId("expense-post-form")).toHaveCount(0);await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
+    const paymentHeaders={"content-type":payment.headers()["content-type"],"next-action":payment.headers()["next-action"],accept:"text/x-component",origin};
+    const ownerDenied=await ownerPage.request.post(payment.url(),{data:payment.postDataBuffer()!,headers:paymentHeaders});
+    expect(await ownerDenied.text()).toContain('"code":"forbidden"');
+    const repeatedPayment=await admin.request.post(payment.url(),{data:payment.postDataBuffer()!,headers:paymentHeaders});
+    expect(await repeatedPayment.text()).toContain('"idempotent":true');
+    await withTenant(f.db,f.organizationId,async tx=>{
+      const expense=await tx.expense.findUniqueOrThrow({where:{id:expenseId}});expect(expense.state).toBe("POSTED");expect(expense.transactionId).not.toBeNull();
+      expect(await tx.financialTransaction.count({where:{idempotencyKey:`expense:${expenseId}:posted`}})).toBe(1);
+      const lines=await tx.posting.findMany({where:{transactionId:expense.transactionId!}});expect(lines).toHaveLength(2);
+      expect(lines.map(line=>({side:line.side,amount:line.amount.toString(),bucket:line.bucket}))).toEqual(expect.arrayContaining([
+        {side:"DEBIT",amount:"500.25",bucket:"OWNER_EXPENSE"},{side:"CREDIT",amount:"500.25",bucket:"EXPENSE_PAYMENT"}]));
+      expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.posted"}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.posted",actorId:setup.ownerAccountId}})).toBe(0);
+    });
+    await ownerPage.reload();await expect(ownerPage.getByTestId("expense-void-form")).toHaveCount(0);
+    await expect(admin.getByTestId("expense-void-form")).toBeVisible();
+    await admin.locator("main").evaluate(element=>{(element as HTMLElement).style.fontSize="200%";});
+    expect(await admin.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
+    await admin.screenshot({path:info.outputPath(`native-expense-reversal-zoom-${locale}.png`),fullPage:true});
+    await admin.locator("main").evaluate(element=>{(element as HTMLElement).style.fontSize="";});
+    await admin.getByTestId("expense-void-reason").fill("Dedicated reversal retains original payment history");
+    const voidRequest=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&
+      new URL(request.url()).pathname.endsWith(`/expenses/${expenseId}`)&&Boolean(request.postData()?.includes(expenseId)));
+    await admin.getByTestId("expense-void").click();const reversal=await voidRequest;
+    await expect(admin.getByTestId("expense-void-form")).toHaveCount(0);await expect(admin.getByTestId("expense-post-form")).toHaveCount(0);
+    const voidHeaders={"content-type":reversal.headers()["content-type"],"next-action":reversal.headers()["next-action"],accept:"text/x-component",origin};
+    const deniedVoid=await ownerPage.request.post(reversal.url(),{data:reversal.postDataBuffer()!,headers:voidHeaders});expect(await deniedVoid.text()).toContain('"code":"forbidden"');
+    const repeatedVoid=await admin.request.post(reversal.url(),{data:reversal.postDataBuffer()!,headers:voidHeaders});expect(await repeatedVoid.text()).toContain('"idempotent":true');
+    await withTenant(f.db,f.organizationId,async tx=>{
+      const expense=await tx.expense.findUniqueOrThrow({where:{id:expenseId}});expect(expense.state).toBe("VOIDED");
+      const original=await tx.financialTransaction.findUniqueOrThrow({where:{id:expense.transactionId!},include:{postings:true,reversedByTransactions:{include:{postings:true}}}});
+      expect(original.postings).toHaveLength(2);expect(original.reversedByTransactions).toHaveLength(1);
+      expect(original.reversedByTransactions[0].postings.map(line=>({account:line.ledgerAccountId,side:line.side,amount:line.amount.toString(),bucket:line.bucket,dimensions:line.dimensions}))).toEqual(expect.arrayContaining(
+        original.postings.map(line=>({account:line.ledgerAccountId,side:line.side==="DEBIT"?"CREDIT":"DEBIT",amount:line.amount.toString(),bucket:line.bucket,dimensions:line.dimensions}))));
+      expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.voided"}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.voided",actorId:setup.ownerAccountId}})).toBe(0);
+    });
+    // The agreement may waive the owner decision, but never its durable notice or audit flag.
+    await withTenant(f.db,f.organizationId,async tx=>{
+      await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:setup.propertyId,
+        effectiveFrom:new Date("2020-01-01"),reason:"Dedicated configured emergency exception",value:{
+          thresholds:[{key:"native_expense",amount:"100",currency:"MAD",requires_approval_from:["owner"],emergency_bypass_owner:true}],
+          routing:{owner:{roles:[setup.ownerRoleId],people:[],assigned:false,channels:["in_app"]}}
+        }});
+      await tx.notificationPreference.upsert({where:{organizationId_userAccountId:{organizationId:f.organizationId,userAccountId:setup.ownerAccountId}},
+        create:{organizationId:f.organizationId,userAccountId:setup.ownerAccountId,inAppEnabled:false,inAppOperations:false},update:{inAppEnabled:false,inAppOperations:false}});
+    });
+    await admin.goto(`/${locale}/app/properties/${setup.propertyId}/expenses/new`);
+    const emergencyForm=admin.getByTestId("expense-draft-form"); await emergencyForm.getByTestId("expense-amount").fill("500.25");
+    await emergencyForm.getByTestId("expense-category").fill("maintenance"); await emergencyForm.getByTestId("expense-purpose").fill(`Dedicated emergency ${suffix}`);
+    await emergencyForm.getByTestId("expense-funding-account").selectOption(setup.bankId); await emergencyForm.getByTestId("expense-occurred-on").fill("2026-10-26");
+    await emergencyForm.getByTestId("expense-emergency").check(); await emergencyForm.getByTestId("expense-reason").fill("Dedicated emergency entry");
+    await emergencyForm.getByTestId("expense-create").click(); await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
+    const emergencyId=new URL(admin.url()).pathname.split("/").at(-1)!;
+    await admin.getByTestId("expense-submit-reason").fill("Dedicated emergency agreement exception"); await admin.getByTestId("expense-submit").click();
+    await expect(admin.getByTestId("expense-emergency-notice")).toBeVisible(); await expect(admin.getByTestId("expense-approval-link")).toHaveCount(0);
+    await ownerPage.reload(); await ownerPage.getByTestId("notification-bell").click();
+    const emergencyNotice=ownerPage.getByTestId("notification-item").filter({hasText:locale==="en"?"Emergency expense approval exception":locale==="fr"?"Exception de validation pour une dépense urgente":"استثناء موافقة لمصروف طارئ"});
+    await expect(emergencyNotice).toHaveCount(1); await emergencyNotice.getByRole("button").first().click();
+    await expect(ownerPage).toHaveURL(new RegExp(`/${locale}/app/expenses/${emergencyId}$`,"u"));
+    await expect(ownerPage.getByTestId("expense-emergency-notice")).toBeVisible(); await expect(ownerPage.getByTestId("expense-submit-form")).toHaveCount(0);
+    await expect(ownerPage.getByTestId("expense-total")).toHaveText(formatCurrencyAmount(locale,"500.25","MAD"));
+    expect((await new AxeBuilder({page:ownerPage}).analyze()).violations).toEqual([]);
+    await withTenant(f.db,f.organizationId,async tx=>{
+      const expense=await tx.expense.findUniqueOrThrow({where:{id:emergencyId}}); expect(expense.state).toBe("APPROVED"); expect(expense.transactionId).toBeNull();
+      expect(await tx.approvalRequest.count({where:{expenseId:emergencyId}})).toBe(0);
+      expect(await tx.notification.count({where:{kind:"expense_emergency",targetId:emergencyId,recipientId:setup.ownerAccountId}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:emergencyId,action:"expense.emergency_owner_notified"}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:emergencyId,actorId:setup.ownerAccountId}})).toBe(0);
+    });
+    const customRule=await withTenant(f.db,f.organizationId,tx=>new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:setup.propertyId,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated configured three-party allocation",value:{default_treatment:"OWNER_PAID",categories:{maintenance:{treatment:"CUSTOM",owner_share_bps:2500,alvillas_share_bps:2500,guest_share_bps:5000}}}}));
+    await admin.goto(`/${locale}/app/properties/${setup.propertyId}/expenses/new`);
+    const customForm=admin.getByTestId("expense-draft-form");await customForm.getByTestId("expense-amount").fill("100.11");await customForm.getByTestId("expense-category").fill("maintenance");
+    await customForm.getByTestId("expense-purpose").fill(`Dedicated custom expense ${suffix}`);await customForm.getByTestId("expense-funding-account").selectOption(setup.bankId);
+    await customForm.getByTestId("expense-occurred-on").fill("2026-10-26");await customForm.getByTestId("expense-reason").fill("Dedicated custom allocation entry");
+    await customForm.getByTestId("expense-create").click();await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
+    const customId=new URL(admin.url()).pathname.split("/").at(-1)!;
+    await admin.getByTestId("expense-edit").click();await expect(admin.getByTestId("expense-edit-page")).toBeVisible();
+    await expect(admin.getByTestId("expense-amount")).toHaveValue("100.11");await expect(admin.getByTestId("expense-funding-account")).toHaveValue(setup.bankId);
+    await admin.getByTestId("expense-amount").fill("100.01");await admin.getByTestId("expense-reason").fill("Dedicated audited correction before approval");
+    expect((await new AxeBuilder({page:admin}).analyze()).violations).toEqual([]);
+    const editedRequest=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&new URL(request.url()).pathname.endsWith(`/expenses/${customId}/edit`)&&Boolean(request.postData()?.includes(customId)));
+    await admin.getByTestId("expense-create").click();const edited=await editedRequest;
+    await expect(admin.getByTestId("expense-detail-page")).toBeVisible();await expect(admin.getByTestId("expense-total")).toHaveText(formatCurrencyAmount(locale,"100.01","MAD"));
+    expect((await fieldPage.request.get(`/${locale}/app/expenses/${customId}/edit`)).status()).toBe(404);
+    const deniedEdit=await fieldPage.request.post(edited.url(),{data:edited.postDataBuffer()!,headers:{"content-type":edited.headers()["content-type"],"next-action":edited.headers()["next-action"],accept:"text/x-component",origin}});
+    expect(await deniedEdit.text()).toContain('"code":"forbidden"');
+    await admin.getByTestId("expense-submit-reason").fill("Dedicated custom allocation owner review");await admin.getByTestId("expense-submit").click();
+    await expect(admin.getByTestId("expense-approval-link")).toBeVisible();await ownerPage.goto((await admin.getByTestId("expense-approval-link").getAttribute("href"))!);
+    await expect(ownerPage.getByTestId("approval-approve")).toBeEnabled();await ownerPage.getByTestId("approval-reason").fill("Owner accepts the configured custom expense");await ownerPage.getByTestId("approval-approve").click();
+    await expect(ownerPage.getByTestId("approval-approve")).toHaveCount(0);await admin.reload();await expect(admin.getByTestId("expense-post-form")).toBeVisible();
+    await admin.getByTestId("expense-post-reason").fill("Dedicated approved custom allocation payment");await admin.getByTestId("expense-post").click();await expect(admin.getByTestId("expense-void-form")).toBeVisible();
+    await withTenant(f.db,f.organizationId,async tx=>{
+      const expense=await tx.expense.findUniqueOrThrow({where:{id:customId}});expect(expense.state).toBe("POSTED");
+      const lines=await tx.posting.findMany({where:{transactionId:expense.transactionId!}});expect(lines).toHaveLength(4);
+      expect(Object.fromEntries(lines.filter(line=>line.side==="DEBIT").map(line=>[line.bucket,line.amount.toString()]))).toEqual({OWNER_EXPENSE:"25",ALVILLAS_EXPENSE:"25",GUEST_EXPENSE:"50.01"});
+      expect(lines.find(line=>line.side==="CREDIT")?.amount.toString()).toBe("100.01");
+      expect((await tx.expenseSubmission.findFirstOrThrow({where:{expenseId:customId}})).snapshot).toMatchObject({policies:[{allocationRule:{configRuleId:customRule.id,version:customRule.version}}]});
+      expect(await tx.auditLog.count({where:{resourceId:customId,action:"expense.updated"}})).toBe(1);
     });
     await expect(admin.locator("html")).toHaveAttribute("dir",locale === "ar" ? "rtl" : "ltr");
     expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);

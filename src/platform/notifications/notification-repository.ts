@@ -9,7 +9,10 @@ import { defaultNotificationPreferences, shouldDeliverNotification, type Notific
 import { authorize } from "@/platform/authz/authorize";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
 import { approvalResource } from "@/platform/approvals/approval";
-import { contextForRoleAssignments } from "@/platform/authz/account-context";
+import { contextForRoleAssignments,authContextForAccountInTransaction } from "@/platform/authz/account-context";
+import { expenseEmergencyNoticeSchema,expenseResource,viewableExpenseResource,type ExpenseEmergencyNotice } from "@/modules/finance/domain/expense";
+import { z } from "zod";
+import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { initialNotificationRouting, notificationRoutingKey, notificationRoutingSchema, type NotificationRouting, type RoutedNotificationKind } from "./notification-routing";
 
@@ -61,8 +64,10 @@ export class NotificationRepository {
 
   private async deliverLocked(event: OutboxEvent, batch?: DeliveryBatch): Promise<void> {
     const input = notificationInputSchema.parse(event.payload);
-    const target = batch ? batch.targets.get(`${input.kind}:${input.targetId}`) :
-      (await this.targets([{ kind: input.kind, targetId: input.targetId }])).get(input.targetId);
+    const financialNotice=input.kind==="expense_emergency"?await this.expenseEmergencySource(event,input):null;
+    const target = financialNotice?.target ?? (batch ? batch.targets.get(`${input.kind}:${input.targetId}`) :
+      (await this.targets([{ kind: input.kind, targetId: input.targetId }])).get(input.targetId));
+    if(input.kind==="expense_emergency"&&!financialNotice)return this.finish(event.id,batch);
     if (!target) return this.finish(event.id, batch);
     if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id, batch);
     const identity = target.type === "identity";
@@ -73,40 +78,62 @@ export class NotificationRepository {
     if (approval?.expenseId && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
     const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
-    const routing = approval ? notificationRoutingSchema.parse(stage?.routingSnapshot ?? approval.routingSnapshot) :
-      batch?.routing.get(routingKey) ?? await this.routing(input.kind, target.propertyId ?? null, event.occurredAt);
-    if (batch && !approval) batch.routing.set(routingKey, routing);
+    let routing:NotificationRouting;
+    if(input.kind==="expense_emergency")routing=financialNotice!.notice.routing;
+    else routing=approval?notificationRoutingSchema.parse(stage?.routingSnapshot??approval.routingSnapshot):batch?.routing.get(routingKey)??await this.routing(input.kind,target.propertyId??null,event.occurredAt);
+    if (batch && !approval&&!financialNotice) batch.routing.set(routingKey, routing);
     const mandatory = input.kind === "security_session_revoked";
     const assignedId = identity ? input.targetId : target.assignedUserAccountId;
-    const recipientIds = approvalRecipients?.map((row) => row.userAccountId);
+    const recipientIds = financialNotice?[input.recipientId]:approvalRecipients?.map((row) => row.userAccountId);
     const selectedId = (mandatory || routing.assigned) ? assignedId : null;
     const candidateKey = JSON.stringify([routing, selectedId, recipientIds]);
-    const candidates = batch?.candidates.get(candidateKey) ?? await this.candidates(routing, selectedId, recipientIds);
+    const candidates = batch?.candidates.get(candidateKey) ?? await this.candidates(financialNotice?{...routing,roles:[],people:[],assigned:false}:routing, selectedId, recipientIds,Boolean(financialNotice));
     if (batch) batch.candidates.set(candidateKey, candidates);
     const data = [];
     for (const candidate of candidates) {
       // Account notices never reveal one person's security/account activity to another.
       if (identity && candidate.id !== input.targetId) continue;
+      if(financialNotice&&candidate.id!==input.recipientId)continue;
       if (approval && !approvalRecipients?.some((row) => row.userAccountId === candidate.id)) continue;
       const selected = (mandatory || routing.assigned) && candidate.id === assignedId;
       const explicit = routing.people.includes(candidate.personId);
       const roleAssignments = candidate.roleAssignments.filter((assignment) => routing.roles.includes(assignment.role.id));
-      const ctx = contextForRoleAssignments(this.organizationId, candidate.id, explicit || selected || approval ? candidate.roleAssignments : roleAssignments);
-      if (!identity && securityEnrollment(candidate).setupRequired) continue;
-      if (!identity && !authorize(ctx, "view", target)) continue;
+      const current=financialNotice?await new IdentityRepository(this.tx,this.organizationId).authorizationState(candidate.id):null;
+      const ctx = contextForRoleAssignments(this.organizationId, candidate.id, current?current.assignments:explicit || selected || approval ? candidate.roleAssignments : roleAssignments);
+      if(current&&(!current.account||securityEnrollment(current.account,current.now).setupRequired))continue;
+      if (!identity && !current&&securityEnrollment(candidate).setupRequired) continue;
+      if (!identity && !authorize(ctx, "view", target,current?.now)) continue;
       if (approval && !authorize(ctx, "approve", target) && !authorize(ctx, "reject", target)) continue;
       for (const channel of ["email", "push"] as const) {
         if ((!mandatory && !routing.channels.includes(channel)) || !shouldDeliverNotification(input.kind, channel, this.preferenceValue(candidate.notificationPreference))) continue;
         await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } }, update: {},
           create: { organizationId: this.organizationId, type: "notification.channel.requested", payload: { channel, recipientId: candidate.id, kind: input.kind, targetId: input.targetId, sourceEventId: event.id }, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } });
       }
-      if (!mandatory && (!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
+      if (!mandatory && !financialNotice&&(!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
       data.push({ organizationId: this.organizationId, recipientId: candidate.id,
         eventId: event.id, kind: input.kind, targetId: input.targetId, createdAt: event.occurredAt });
     }
     if (batch) batch.inbox.push(...data);
     else if (data.length) await this.tx.notification.createMany({ data, skipDuplicates: true });
     await this.finish(event.id, batch);
+  }
+
+  private async expenseEmergencySource(event:OutboxEvent,input:Extract<NotificationInput,{kind:"expense_emergency"}>) {
+    const expense=await this.tx.expense.findFirst({where:{organizationId:this.organizationId,id:input.targetId,property:{archivedAt:null}},include:{property:true,submission:true}});
+    const snapshot=z.object({postHocOwnerNotificationRequired:z.literal(true),postHocNotices:z.array(expenseEmergencyNoticeSchema).min(1)}).safeParse(expense?.submission?.snapshot);
+    if(!expense||!snapshot.success)return null;
+    const notice=snapshot.data.postHocNotices.find(notice=>notice.recipients.includes(input.recipientId)&&event.idempotencyKey===`expense:${expense.id}:emergency:${notice.ownerId}:${input.recipientId}`);
+    return notice&&notice.routing.channels.includes("in_app")?{notice,target:expenseResource(this.organizationId,expense.property,{...expense,amount:expense.amount.toString()},notice.ownerId)}:null;
+  }
+
+  async publishExpenseEmergencyNotices(expenseId:string,notices:ExpenseEmergencyNotice[]) {
+    const entries=notices.flatMap(notice=>notice.recipients.map(recipientId=>({input:{kind:"expense_emergency" as const,recipientId,targetId:expenseId},key:`expense:${expenseId}:emergency:${notice.ownerId}:${recipientId}`})));
+    await this.publishMany(entries);
+    const events=await this.tx.outboxEvent.findMany({where:{organizationId:this.organizationId,idempotencyKey:{in:entries.map(entry=>entry.key)}}});
+    const receipts=await this.tx.notification.findMany({where:{organizationId:this.organizationId,kind:"expense_emergency",targetId:expenseId,eventId:{in:events.map(event=>event.id)}}});
+    for(const notice of notices)if(!receipts.some(receipt=>notice.recipients.includes(receipt.recipientId)&&events.some(event=>event.id===receipt.eventId&&event.idempotencyKey===`expense:${expenseId}:emergency:${notice.ownerId}:${receipt.recipientId}`)))
+      throw new Error("Required emergency owner notice was not delivered");
+    return {count:receipts.length};
   }
 
   finish(id: string, batch?: DeliveryBatch) {
@@ -128,6 +155,14 @@ export class NotificationRepository {
       return !securityEnrollment(candidate).setupRequired && authorize(ctx, "view", resource) && (authorize(ctx, "approve", resource) || authorize(ctx, "reject", resource));
     }).map((candidate) => candidate.id);
   }
+  async viewers(routing:NotificationRouting,resource:Resource):Promise<string[]> {
+    const candidates=await this.candidates(routing,undefined,undefined,true),current=await new IdentityRepository(this.tx,this.organizationId).authorizationStates(candidates.map(candidate=>candidate.id));
+    return candidates.filter(candidate=>{
+      const state=current.states.get(candidate.id);if(!state?.account||securityEnrollment(state.account,current.now).setupRequired)return false;
+      const assignments=routing.people.includes(candidate.personId)?state.assignments:state.assignments.filter(assignment=>routing.roles.includes(assignment.role.id));
+      return authorize(contextForRoleAssignments(this.organizationId,candidate.id,assignments),"view",resource,current.now);
+    }).map(candidate=>candidate.id);
+  }
 
   async manualRecipients(kind: RoutedNotificationKind, resource: Resource) {
     const routing = await this.routing(kind, resource.propertyId ?? null);
@@ -140,13 +175,13 @@ export class NotificationRepository {
     });
   }
 
-  private candidates(routing: NotificationRouting, assignedId?: string | null, recipientIds?: string[]) {
+  private candidates(routing: NotificationRouting, assignedId?: string | null, recipientIds?: string[],authoritative=false) {
     const now = new Date();
     return this.tx.userAccount.findMany({ where: { organizationId: this.organizationId, status: "ACTIVE", person: { archivedAt: null }, OR: [
       ...(assignedId ? [{ id: assignedId }] : []), ...(recipientIds ? [{ id: { in: recipientIds } }] : []), { personId: { in: routing.people } },
-      { roleAssignments: { some: { organizationId: this.organizationId, archivedAt: null, roleId: { in: routing.roles }, role: { archivedAt: null }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] } } }
+      { roleAssignments: { some: { organizationId: this.organizationId, archivedAt: null, roleId: { in: routing.roles }, role: { archivedAt: null }, ...(authoritative?{}:{validFrom:{lte:now},OR:[{validTo:null},{validTo:{gt:now}}]}) } } }
     ] }, include: { person: { select: { preferredLocale: true, displayName: true, phone: true } }, authCredentials: { where: { revokedAt: null }, select: { type: true, expiresAt: true, revokedAt: true } }, notificationPreference: true, roleAssignments: { where: {
-      organizationId: this.organizationId, archivedAt: null, role: { archivedAt: null }, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }]
+      organizationId: this.organizationId, archivedAt: null, role: { archivedAt: null }, ...(authoritative?{}:{validFrom:{lte:now},OR:[{validTo:null},{validTo:{gt:now}}]})
     }, include: { role: { include: { rolePermissions: { include: { permission: true } } } } } } } });
   }
 
@@ -219,6 +254,7 @@ export class NotificationRepository {
     const inputs = pending.map(event => notificationInputSchema.parse(event.payload));
     const targets = new Map<string, Resource>();
     for (const kind of new Set(inputs.map(input => input.kind))) {
+      if(kind==="expense_emergency")continue;
       for (const [id, target] of await this.targets(inputs.filter(input => input.kind === kind)))
         targets.set(`${kind}:${id}`, target);
     }
@@ -271,6 +307,16 @@ export class NotificationRepository {
     for (const row of approvals) {
       const ownStage = readerId ? row.financialStages.find(stage => stage.recipients.some(recipient => recipient.userAccountId === readerId)) : undefined;
       targets.set(row.id, { ...approvalResource(row, ownStage?.ownerId ?? row.financialStages.find(stage => stage.state === "PENDING")?.ownerId), assignedUserAccountId: row.requestedBy });
+    }
+    const expenseIds=rows.filter(row=>row.kind==="expense_emergency").map(row=>row.targetId);
+    const expenses=expenseIds.length?await this.tx.expense.findMany({where:{organizationId:this.organizationId,id:{in:expenseIds},property:{archivedAt:null}},include:{property:true,submission:true}}):[];
+    const reader=readerId&&expenses.length?await authContextForAccountInTransaction(this.tx,this.organizationId,readerId):null;
+    for(const expense of expenses){
+      const stored=z.object({postHocNotices:z.array(expenseEmergencyNoticeSchema)}).safeParse(expense.submission?.snapshot);
+      if(!readerId||!reader||!stored.success)continue;
+      const owners=stored.data.postHocNotices.filter(notice=>notice.recipients.includes(readerId)).map(notice=>notice.ownerId);
+      const resource=owners.length?viewableExpenseResource(reader,expense.property,{...expense,amount:expense.amount.toString()},owners):null;
+      if(resource)targets.set(expense.id,resource);
     }
     return targets;
   }

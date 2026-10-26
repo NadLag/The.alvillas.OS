@@ -1271,7 +1271,8 @@
       "approval_requested": "An approval needs your decision.",
       "approval_decided": "An approval decision was recorded.",
       "staff_document_expiring": "A staff document is expiring.",
-      "task_overdue": "An assigned task is overdue."
+      "task_overdue": "An assigned task is overdue.",
+      "expense_emergency": "Emergency expense approval exception"
     },
     "settings": {
       "eyebrow": "Your account",
@@ -2473,6 +2474,19 @@
       "REJECTED": "Rejected",
       "POSTED": "Posted",
       "VOIDED": "Reversed"
-    }
+    },
+    "emergencyException": "This expense used the emergency approval exception defined in your agreement.",
+    "postTitle": "Record approved expense payment",
+    "postGuidance": "This records payment from the selected account on the expense date, using the approved allocation. Add the payment reference or reason.",
+    "recordPayment": "Record payment",
+    "voidTitle": "Reverse expense payment",
+    "voidGuidance": "Record a correction with a reason. An opposite journal preserves the original payment and its history.",
+    "voidPayment": "Record reversal",
+    "voidedGuidance": "This payment was reversed. The original payment and its reversal remain in the financial history.",
+    "editDraft": "Edit draft",
+    "selectFunding": "Select the payment account",
+    "unavailableFunding": "The previous account is unavailable. Select an authorized account.",
+    "retainedReservation": "Keep the linked reservation",
+    "backToExpense": "Back to expense"
   }
 }
