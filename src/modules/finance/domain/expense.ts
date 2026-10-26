@@ -14,7 +14,7 @@ export const expenseDraftSchema = z.object({
 export type ExpenseDraftInput = z.infer<typeof expenseDraftSchema>;
 
 export function expensePostings(input: {
-  amount: Money; allocation: ConfiguredExpenseAllocation; owners: readonly PropertyOwnerShare[];
+  amount: Money; allocation: ConfiguredExpenseAllocation; owners: readonly PropertyOwnerShare[]; ownerAmounts?: ReadonlyArray<{ ownerId: string; amount: Money }>;
   ownerAccounts: ReadonlyMap<string, string>; companyExpenseAccountId: string; guestReceivableAccountId: string;
   fundingAccountId: string; dimensions: Record<string, unknown>;
 }): FinancePostingDraft[] {
@@ -27,8 +27,16 @@ export function expensePostings(input: {
     if (!ledgerAccountId || ledgerAccountId === input.fundingAccountId) throw new Error("Expense funding and beneficiary accounts must be distinct");
     postings.push({ ledgerAccountId, side: "DEBIT", amount: share, bucket, dimensions: { ...dimensions, ...extra } });
   };
-  if (allocation.ownerAmount.amount.gt(0)) for (const owner of allocateGrossRevenueByOwnerShare(allocation.ownerAmount, input.owners))
-    debit(input.ownerAccounts.get(owner.ownerId), owner.grossAmount, "OWNER_EXPENSE", { owner_id: owner.ownerId });
+  if (allocation.ownerAmount.amount.gt(0) || input.ownerAmounts) {
+    const owners = input.ownerAmounts ?? allocateGrossRevenueByOwnerShare(allocation.ownerAmount, input.owners).map(owner => ({ ownerId: owner.ownerId, amount: owner.grossAmount }));
+    const ids = new Set<string>(); let allocated = allocation.ownerAmount.subtract(allocation.ownerAmount);
+    for (const owner of owners) {
+      if (ids.has(owner.ownerId) || !input.owners.some(source => source.ownerId === owner.ownerId) || owner.amount.amount.lt(0)) throw new Error("Expense owner allocation requires distinct source owners");
+      ids.add(owner.ownerId); allocated = allocated.add(owner.amount);
+      debit(input.ownerAccounts.get(owner.ownerId), owner.amount, "OWNER_EXPENSE", { owner_id: owner.ownerId });
+    }
+    if (!allocated.amount.eq(allocation.ownerAmount.amount)) throw new Error("Expense owner allocation must conserve its configured total");
+  }
   debit(input.companyExpenseAccountId, allocation.alvillasAmount, "ALVILLAS_EXPENSE");
   debit(input.guestReceivableAccountId, allocation.guestAmount, "GUEST_EXPENSE");
   postings.push({ ledgerAccountId: input.fundingAccountId, side: "CREDIT", amount, bucket: "EXPENSE_PAYMENT", dimensions });

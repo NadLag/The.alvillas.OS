@@ -1,6 +1,6 @@
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
-import { automationRuleSchema } from "@/platform/automation/rule";
+import { automationRuleSchema, ruleConditionSchema } from "@/platform/automation/rule";
 import { operationPolicySchema, recurringTasksSchema } from "./operation-policy";
 import { teamPolicyKey, teamPolicySchema } from "@/modules/identity/domain/team";
 import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
@@ -150,11 +150,17 @@ export const approvalThresholdsConfigSchema = z
           amount: moneyAmountSchema.optional(),
           currency: currencySchema.optional(),
           percentage_of_revenue_bps: z.number().int().min(0).max(10000).optional(),
+          conditions: ruleConditionSchema.optional(),
           emergency_bypass_owner: z.boolean().default(false),
           requires_approval_from: z.array(approvalStepSchema).min(1)
         })
         .passthrough()
-    )
+    ),
+    routing: z.record(z.enum(["manager", "owner", "finance"]), notificationRoutingSchema).optional(),
+    revenue_period: z.discriminatedUnion("unit", [
+      z.object({ unit: z.enum(["MONTH", "YEAR", "RESERVATION"]) }).strict(),
+      z.object({ unit: z.literal("ROLLING_DAYS"), days: z.number().int().positive().safe() }).strict()
+    ]).optional()
   })
   .passthrough();
 

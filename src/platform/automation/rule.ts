@@ -90,6 +90,7 @@ export function boundedJson(
     Object.values(value).every((v) => boundedJson(v, depth + 1, budget))
   );
 }
+export const ruleConditionSchema = z.unknown().refine(value => boundedJson(value)).pipe(condition);
 const due = z
   .object({
     from: path,

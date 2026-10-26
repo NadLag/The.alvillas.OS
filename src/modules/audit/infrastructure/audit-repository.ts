@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
+import { calendarDateStart } from "@/platform/time/calendar";
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -94,9 +95,9 @@ export class AuditRepository {
     if (!ids.length) return new Map();
     const rows = await this.tx.expense.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
       select: { id: true, propertyId: true, reservationId: true, amount: true, state: true, createdBy: true, occurredOn: true,
-        property: { select: { city: true, cityId: true, region: true, regionId: true } } } });
+        property: { select: { city: true, cityId: true, region: true, regionId: true, timezone: true } } } });
     return new Map(rows.map(row => [row.id, { type: "expense", organizationId: this.organizationId, id: row.id, financialRecordId: row.id,
-      propertyId: row.propertyId, reservationId: row.reservationId, amount: row.amount.toString(), occurredAt: row.occurredOn,
+      propertyId: row.propertyId, reservationId: row.reservationId, amount: row.amount.toString(), occurredAt: calendarDateStart(row.occurredOn.toISOString().slice(0,10), row.property.timezone),
       assignedUserAccountId: row.createdBy, city: row.property.cityId ?? row.property.city, region: row.property.regionId ?? row.property.region,
       status: row.state, dataClass: "financial" }]));
   }

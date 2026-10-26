@@ -11,6 +11,8 @@ import { ExpenseRepository } from "@/modules/finance/infrastructure/expense-repo
 import { presentAuditHistoryRow } from "@/modules/audit/application/audit-service";
 import { AuditRepository } from "@/modules/audit/infrastructure/audit-repository";
 import { maskedValue } from "@/platform/authz/present";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { evaluateExpensePolicy } from "@/modules/finance/application/finance-config-service";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -116,5 +118,41 @@ describe("native expense drafts on real PostgreSQL", () => {
     await expect(withTenant(db, f.org, tx => tx.expenseSubmission.updateMany({ data: { snapshot: {} } }))).rejects.toThrow("append-only");
     expect(await withTenant(db, other.org, tx => tx.expense.findMany({ where: { id: row.id } }))).toEqual([]);
     expect(await withTenant(db, f.org, tx => tx.expense.findUniqueOrThrow({ where: { id: row.id } }))).toMatchObject({ state: "PENDING_APPROVAL", version: 2 });
+  });
+  it("resolves agreement scope and versioned condition references through the existing policy consumer", async () => {
+    const f = await fixture();
+    const source = await withTenant(db, f.org, async tx => {
+      const role = await tx.role.create({ data: { organizationId: f.org, key: "expense_policy_configurer", name: "Dedicated policy configuration" } });
+      const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: ["financial_transaction:configure", "financial_transaction:view"] } } });
+      expect(permissions).toHaveLength(2);
+      await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: role.id, permissionId: permission.id })) });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, userAccountId: f.account.id, personId: f.person.id, roleId: role.id,
+        scopeType: "organization", validFrom: new Date("2020-01-01") } });
+      const agreement = await tx.managementAgreement.create({ data: { organizationId: f.org, propertyId: f.property.id, reference: "Dedicated expense agreement",
+        effectiveFrom: new Date("2026-01-01"), status: "ACTIVE" } });
+      const rules = new ConfigRuleRepository(tx, f.org);
+      await tx.configRule.create({ data: { organizationId: f.org, key: "legacy.unrecognized", scopeType: "property", scopeId: f.property.id,
+        effectiveFrom: new Date("2020-01-01"), version: 1, lifecycle: "ACTIVE", reason: "Dedicated preserved legacy metadata", value: { preserved: true } } });
+      await rules.createVersion({ key: "finance.expense_allocation", scopeType: "property", scopeId: f.property.id,
+        effectiveFrom: new Date("2020-01-01"), reason: "Dedicated property fallback", value: { default_treatment: "OWNER_PAID" } });
+      const allocation = await rules.createVersion({ key: "finance.expense_allocation", scopeType: "agreement", scopeId: agreement.id,
+        effectiveFrom: new Date("2026-01-01"), reason: "Dedicated effective agreement policy", value: { default_treatment: "ALVILLAS_PAID" } });
+      const reference = await rules.createVersion({ key: "finance.payout_schedule", scopeType: "property", scopeId: f.property.id,
+        effectiveFrom: new Date("2026-01-01"), reason: "Dedicated referenced configured amount", value: { cadence: "MONTHLY", holdback_amount: "600", holdback_currency: "MAD" } });
+      await rules.createVersion({ key: "finance.approval_thresholds", scopeType: "agreement", scopeId: agreement.id,
+        effectiveFrom: new Date("2026-01-01"), reason: "Dedicated configured approval condition", value: { thresholds: [{ key: "configured_reference",
+          conditions: { path: "expense.amount", op: ">", value: { config: "finance.payout_schedule", path: "holdback_amount" } }, requires_approval_from: ["manager_owner"] }] } });
+      return { allocation, reference };
+    });
+    const input = { propertyId: f.property.id, category: "maintenance", amount: "1000", currency: "MAD", asOf: new Date("2026-10-26T00:00:00Z") };
+    const first = await evaluateExpensePolicy(await actor(f), input, { db });
+    expect(first.allocationRule.configRuleId).toBe(source.allocation.id); expect(first.allocation.alvillasAmount.toJSON().amount).toBe("1000.00");
+    expect(first.approval.requiredSteps).toEqual(["manager_owner"]); expect(first.configReferences[0].configRuleId).toBe(source.reference.id);
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.payout_schedule", scopeType: "property", scopeId: f.property.id,
+      effectiveFrom: new Date("2026-10-27"), reason: "Dedicated future policy version", value: { cadence: "MONTHLY", holdback_amount: "1200", holdback_currency: "MAD" } }));
+    expect((await evaluateExpensePolicy(await actor(f), input, { db })).configReferences[0].configRuleId).toBe(source.reference.id);
+    expect((await evaluateExpensePolicy(await actor(f), { ...input, asOf: new Date("2026-10-28") }, { db })).approval.requiredSteps).toEqual([]);
+    expect(first.configReferences[0].version).toBe(1);
+    expect(await withTenant(db, f.org, tx => tx.configRule.findFirstOrThrow({ where: { key: "legacy.unrecognized" } }))).toMatchObject({ value: { preserved: true } });
   });
 });

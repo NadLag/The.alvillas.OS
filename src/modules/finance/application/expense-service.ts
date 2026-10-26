@@ -5,6 +5,7 @@ import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { Money } from "@/platform/money/money";
+import { calendarDateStart } from "@/platform/time/calendar";
 import { expenseDraftSchema, type ExpenseDraftInput } from "../domain/expense";
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
@@ -23,7 +24,7 @@ type Property = NonNullable<Awaited<ReturnType<ExpenseRepository["property"]>>>;
 function resource(ctx: FinanceActorContext, property: Property, facts: { id: string; amount: string; reservationId?: string | null; state: string; occurredOn: Date; createdBy: string }): Resource {
   return { type: "expense", organizationId: ctx.organizationId, id: facts.id, financialRecordId: facts.id,
     propertyId: property.id, reservationId: facts.reservationId, city: property.cityId ?? property.city, region: property.regionId ?? property.region,
-    status: facts.state, amount: facts.amount, occurredAt: facts.occurredOn, assignedUserAccountId: facts.createdBy, dataClass: "financial" };
+    status: facts.state, amount: facts.amount, occurredAt: calendarDateStart(facts.occurredOn.toISOString().slice(0,10), property.timezone), assignedUserAccountId: facts.createdBy, dataClass: "financial" };
 }
 async function current(ctx: FinanceActorContext, tx: TenantTransaction, at: Date): Promise<FinanceActorContext> {
   return { ...ctx, authContext: { ...await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId, at), personId: ctx.authContext.personId } };

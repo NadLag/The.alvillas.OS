@@ -8,6 +8,7 @@ import {
   type PayoutScheduleConfig
 } from "@/platform/config/rule-registry";
 import { Money } from "@/platform/money/money";
+import { evaluate, type EvaluationContext } from "@/platform/automation/rule";
 
 type ApprovalThreshold = ApprovalThresholdsConfig["thresholds"][number];
 type ExpenseCategoryRule = NonNullable<ExpenseTreatmentConfig["categories"]>[string];
@@ -17,6 +18,7 @@ export type ApprovalSubject = {
   amount: Money;
   periodRevenue?: Money;
   emergency?: boolean;
+  evaluation?: EvaluationContext;
 };
 
 export type ConfiguredApprovalDecision = {
@@ -63,6 +65,9 @@ function thresholdMatches(threshold: ApprovalThreshold, subject: ApprovalSubject
   if (threshold.category && threshold.category !== subject.category) {
     return false;
   }
+  if (threshold.conditions && !evaluate(threshold.conditions, subject.evaluation ?? {
+    fields: { expense: { category: subject.category, amount: subject.amount.amount.toString(), currency: subject.amount.currency, emergency: subject.emergency ?? false } }, configs: {}
+  })) return false;
 
   let hasCondition = false;
   let matched = false;
