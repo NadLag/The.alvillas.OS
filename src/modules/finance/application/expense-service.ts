@@ -6,9 +6,8 @@ import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { Money } from "@/platform/money/money";
-import { calendarDateStart } from "@/platform/time/calendar";
 import { calendarDateAt } from "@/i18n/format";
-import { expenseDraftSchema, type ExpenseDraftInput } from "../domain/expense";
+import { expenseDraftSchema, expenseResource, viewableExpenseResource, type ExpenseDraftInput } from "../domain/expense";
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import type { FinanceActorContext } from "./finance-access";
@@ -28,9 +27,7 @@ function assertActor(ctx: FinanceActorContext) {
 }
 type Property = NonNullable<Awaited<ReturnType<ExpenseRepository["property"]>>>;
 function resource(ctx: FinanceActorContext, property: Property, facts: { id: string; amount: string; reservationId?: string | null; state: string; occurredOn: Date; createdBy: string }): Resource {
-  return { type: "expense", organizationId: ctx.organizationId, id: facts.id, financialRecordId: facts.id,
-    propertyId: property.id, reservationId: facts.reservationId, city: property.cityId ?? property.city, region: property.regionId ?? property.region,
-    status: facts.state, amount: facts.amount, occurredAt: calendarDateStart(facts.occurredOn.toISOString().slice(0,10), property.timezone), assignedUserAccountId: facts.createdBy, dataClass: "financial" };
+  return expenseResource(ctx.organizationId,property,facts);
 }
 async function current(ctx: FinanceActorContext, tx: TenantTransaction): Promise<FinanceActorContext> {
   return { ...ctx, authContext: { ...await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId), personId: ctx.authContext.personId } };
@@ -138,6 +135,12 @@ export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps
       submissionId: submission.id, version: row.version + 1, state, ...(approvalId ? { approvalId } : {}) };
     await repository.event("ExpenseSubmitted", row.id, payload, clock.now);
     if (plan.overThreshold) await repository.event("ExpenseOverThreshold", row.id, payload, clock.now);
+    if (plan.postHocNotices.length) {
+      const receipt = await new NotificationRepository(tx,ctx.organizationId).publishExpenseEmergencyNotices(row.id,plan.postHocNotices);
+      await writeAuditEvent(tx,{ organizationId:ctx.organizationId,actorId:ctx.actorId,action:"expense.emergency_owner_notified",resourceType:"expense",resourceId:row.id,
+        propertyScopeId:row.propertyId,after:{ ownerIds:plan.postHocNotices.map(notice=>notice.ownerId),noticeCount:receipt.count,ownerApprovalBypassed:true },
+        reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:clock.now });
+    }
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "expense.submitted", resourceType: "expense", resourceId: row.id,
       propertyScopeId: row.propertyId, before: facts(row), after: { state, version, submissionId: submission.id, approvalId, policy: plan.snapshot },
       reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: clock.now });
@@ -167,10 +170,11 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx);
     const row = await repository.find(id); if (!row || row.property.archivedAt) throw new ExpenseAccessError();
-    const target = resource(ctx, row.property, { ...row, amount: row.amount.toString() });
-    if (!authorize(ctx.authContext, "view", target, clock.now)) throw new ExpenseAccessError();
+    const stored = z.object({ policies:z.array(z.object({ownerId:z.uuid()})),postHocOwnerNotificationRequired:z.boolean().optional() }).safeParse(row.submission?.snapshot);
+    const target = viewableExpenseResource(ctx.authContext,row.property,{...row,amount:row.amount.toString()},stored.success?stored.data.policies.map(policy=>policy.ownerId):[],clock.now);
+    if (!target) throw new ExpenseAccessError();
     const data = { ...facts(row), propertyName: row.property.name, approvalId: row.approval?.id ?? null,
-      canSubmit: row.state === "DRAFT" && authorize(ctx.authContext, "edit", target, clock.now) };
+      emergencyException:stored.success&&Boolean(stored.data.postHocOwnerNotificationRequired),canSubmit: row.state === "DRAFT" && authorize(ctx.authContext, "edit", target, clock.now) };
     return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...target, data }, {}, clock.now) as typeof data;
   });
 }

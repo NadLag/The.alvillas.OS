@@ -7,7 +7,7 @@ import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
-import { createExpenseDraft, updateExpenseDraft, submitExpense, ExpenseAccessError, ExpenseConflictError } from "@/modules/finance/application/expense-service";
+import { createExpenseDraft, updateExpenseDraft, submitExpense,getExpense, ExpenseAccessError, ExpenseConflictError,ExpenseConfigurationError } from "@/modules/finance/application/expense-service";
 import { getApproval, decideApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
 import { captureReservationCommissionSnapshots } from "@/platform/reservations/finance";
@@ -19,6 +19,8 @@ import { Money } from "@/platform/money/money";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
 import { resolveNotificationChannel } from "@/platform/notifications/notification-channel-service";
 import { defaultNotificationPreferences } from "@/platform/notifications/notification-preferences";
+import { ownNotificationContext } from "@/platform/notifications/notification";
+import { getNotificationPage,openNotification,NotificationAccessError } from "@/platform/notifications/notification-service";
 import { authorize } from "@/platform/authz/authorize";
 import { ExpenseRepository } from "@/modules/finance/infrastructure/expense-repository";
 import { presentAuditHistoryRow } from "@/modules/audit/application/audit-service";
@@ -70,12 +72,12 @@ async function policy(f: Fixture, approval: Prisma.InputJsonObject = { threshold
     return { owner, allocation };
   });
 }
-async function approver(f: Fixture, scopeType: "property" | "owner", scopeId: string, financial = true) {
+async function approver(f: Fixture, scopeType: "property" | "owner", scopeId: string, financial:boolean|"view" = true) {
   const identity = await withTenant(db, f.org, async tx => {
     const person = await tx.person.create({ data: { organizationId: f.org, displayName: "Dedicated approval reviewer" } });
     const account = await tx.userAccount.create({ data: { organizationId: f.org, personId: person.id, email: `reviewer-${randomUUID()}@example.test` } });
     const role = await tx.role.create({ data: { organizationId: f.org, key: `dedicated_approval_${randomUUID()}`, name: "Dedicated scoped reviewer" } });
-    const keys = financial ? ["expense:view", "expense:approve", "expense:reject"] : ["property:view", "property:approve", "property:reject"];
+    const keys = financial==="view"?["expense:view"]:financial ? ["expense:view", "expense:approve", "expense:reject"] : ["property:view", "property:approve", "property:reject"];
     const permissions = await tx.permission.findMany({ where: { key: { in: keys } } }); expect(permissions).toHaveLength(keys.length);
     await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: role.id, permissionId: permission.id })) });
     const grant = await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: account.id, personId: person.id,
@@ -83,6 +85,16 @@ async function approver(f: Fixture, scopeType: "property" | "owner", scopeId: st
     return { person, account, grant };
   });
   return { ...identity, actor: { organizationId: f.org, accountId: identity.account.id, authContext: await authContextForAccount(f.org, identity.account.id, { db }) } };
+}
+async function emergencyFixture(){
+  const f=await fixture(),configured=await policy(f),receiver=await approver(f,"owner",configured.owner.id,"view");
+  await withTenant(db,f.org,async tx=>{
+    await new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated configured emergency exception",value:{thresholds:[{key:"emergency_owner",requires_approval_from:["owner"],emergency_bypass_owner:true}],
+        routing:{owner:{people:[receiver.person.id],roles:[],assigned:false,channels:["in_app"]}}}});
+    const defaults=defaultNotificationPreferences();await new NotificationRepository(tx,f.org).savePreferences(receiver.account.id,{...defaults,in_app:{...defaults.in_app,enabled:false,operations:false}});
+  });
+  const draft=await create(f,{...f.input,emergency:true});return{f,configured,receiver,draft,input:{id:draft.id,expectedVersion:1,reason:"Dedicated emergency owner notice"}};
 }
 
 describe("native expenses on real PostgreSQL", () => {
@@ -93,6 +105,52 @@ describe("native expenses on real PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it("retains one configured emergency owner notice and audit without inventing an owner decision",async()=>{
+    const {f,configured,receiver,draft,input}=await emergencyFixture(),ctx=await actor(f);
+    expect(await submitExpense(ctx,input,{db})).toMatchObject({state:"APPROVED",approvalId:null,idempotent:false});
+    expect(await submitExpense(ctx,input,{db})).toMatchObject({state:"APPROVED",approvalId:null,idempotent:true});
+    const event=await withTenant(db,f.org,async tx=>{
+      const notices=await tx.notification.findMany({where:{kind:"expense_emergency",targetId:draft.id}});expect(notices).toHaveLength(1);expect(notices[0].recipientId).toBe(receiver.account.id);
+      expect(await tx.approvalRequest.count()).toBe(0);expect(await tx.financialTransaction.count()).toBe(0);
+      expect(await tx.auditLog.count({where:{resourceId:draft.id,action:"expense.emergency_owner_notified"}})).toBe(1);
+      const event=await tx.outboxEvent.findUniqueOrThrow({where:{organizationId_idempotencyKey:{organizationId:f.org,idempotencyKey:`expense:${draft.id}:emergency:${configured.owner.id}:${receiver.account.id}`}}});
+      await new NotificationRepository(tx,f.org).deliver({...event,status:"PENDING"});expect(await tx.notification.count({where:{kind:"expense_emergency",targetId:draft.id}})).toBe(1);return event;
+    });
+    const owner={organizationId:f.org,actorId:receiver.account.id,authContext:await authContextForAccount(f.org,receiver.account.id,{db})};
+    expect(await getExpense(owner,draft.id,{db})).toMatchObject({state:"APPROVED",emergencyException:true,canSubmit:false});
+    expect(owner.authContext.permissions.has("expense:approve")).toBe(false);
+    const inbox={organizationId:f.org,accountId:receiver.account.id,authContext:ownNotificationContext(owner.authContext,receiver.account.id)};
+    const notice=(await getNotificationPage(inbox,{}, {db})).items.find(item=>item.kind==="expense_emergency")!;
+    expect(notice.available).toBe(true);expect(await openNotification(inbox,notice.id,"fr",{db})).toBe(`/fr/app/expenses/${draft.id}`);
+    const operations=await approver(f,"property",f.property.id,false);
+    await expect(withTenant(db,f.org,tx=>tx.notification.create({data:{organizationId:f.org,recipientId:operations.account.id,eventId:event.id,targetId:draft.id,kind:"expense_emergency"}}))).rejects.toThrow("retained owner source");
+    const other=await fixture();
+    await expect(withTenant(db,other.org,tx=>tx.notification.create({data:{organizationId:other.org,recipientId:other.account.id,eventId:event.id,targetId:draft.id,kind:"expense_emergency"}}))).rejects.toThrow("retained owner source");
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:receiver.grant.id},data:{validTo:new Date()}}));
+    await expect(getExpense(owner,draft.id,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    expect((await getNotificationPage(inbox,{}, {db})).items.find(item=>item.id===notice.id)).toMatchObject({available:false});
+    await expect(openNotification(inbox,notice.id,"fr",{db})).rejects.toBeInstanceOf(NotificationAccessError);
+    expect(await withTenant(db,f.org,tx=>tx.notification.count({where:{kind:"expense_emergency",targetId:draft.id}}))).toBe(1);
+  });
+  it("rolls back an emergency exception if the mandatory notice has no durable receipt and safely retries",async()=>{
+    const {f,draft,input}=await emergencyFixture();
+    const fault=vi.spyOn(NotificationRepository.prototype,"publishExpenseEmergencyNotices").mockResolvedValueOnce({count:1});
+    try{await expect(submitExpense(await actor(f),input,{db})).rejects.toThrow("delivered atomically");}finally{fault.mockRestore();}
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.expense.findFirstOrThrow()).toMatchObject({state:"DRAFT",version:1});expect(await tx.expenseSubmission.count()).toBe(0);
+      expect(await tx.outboxEvent.count({where:{type:"ExpenseSubmitted"}})).toBe(0);expect(await tx.auditLog.count({where:{action:"expense.emergency_owner_notified"}})).toBe(0);
+    });
+    expect(await submitExpense(await actor(f),input,{db})).toMatchObject({id:draft.id,state:"APPROVED",idempotent:false});
+    expect(await withTenant(db,f.org,tx=>tx.notification.count({where:{targetId:draft.id,kind:"expense_emergency"}}))).toBe(1);
+  });
+  it("does not disclose an emergency expense to a future owner grant when the process clock is ahead",async()=>{
+    const {f,receiver,input}=await emergencyFixture();
+    const at=await withTenant(db,f.org,async tx=>{const at=(await tx.$queryRaw<Array<{at:Date}>>`SELECT clock_timestamp() AS at`)[0].at;
+      await tx.roleAssignment.update({where:{id:receiver.grant.id},data:{validFrom:new Date(at.getTime()+60_000)}});return at;});
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date(at.getTime()+600_000));
+    try{await expect(submitExpense(await actor(f),input,{db})).rejects.toThrow("authorized owner notice recipient");}finally{vi.useRealTimers();}
+    await withTenant(db,f.org,async tx=>{expect(await tx.expenseSubmission.count()).toBe(0);expect(await tx.notification.count({where:{kind:"expense_emergency"}})).toBe(0);});
+  });
   it.each(["behind","ahead"] as const)("uses PostgreSQL grant validity when the application clock is %s", async direction => {
     const f = await fixture();
     const at = await withTenant(db, f.org, async tx => {
@@ -267,10 +325,10 @@ describe("native expenses on real PostgreSQL", () => {
       expect((await tx.commissionSnapshot.findUniqueOrThrow({ where: { id: original.before.id } })).snapshotValue).toEqual(original.before.snapshotValue);
     });
   });
-  it("does not bypass an owner approval while the required emergency notification workflow is unavailable", async () => {
+  it("does not bypass an owner approval without configured durable owner notice routing", async () => {
     const f = await fixture(); await policy(f, { thresholds: [{ key: "emergency", emergency_bypass_owner: true, requires_approval_from: ["owner"] }] });
     const draft = await create(f, { ...f.input, emergency: true });
-    await expect(submitExpense(await actor(f), { id: draft.id, expectedVersion: 1, reason: "Dedicated emergency notification dependency" }, { db })).rejects.toThrow("post-hoc owner notification");
+    await expect(submitExpense(await actor(f), { id: draft.id, expectedVersion: 1, reason: "Dedicated emergency notification dependency" }, { db })).rejects.toBeInstanceOf(ExpenseConfigurationError);
     await withTenant(db, f.org, async tx => {
       expect(await tx.expense.findFirstOrThrow()).toMatchObject({ state: "DRAFT", version: 1 }); expect(await tx.expenseSubmission.count()).toBe(0);
       expect(await tx.outboxEvent.count({ where: { type: "ExpenseSubmitted" } })).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);

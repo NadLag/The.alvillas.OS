@@ -37,7 +37,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense submissio
       await config.createVersion({ key: "finance.approval_thresholds", scopeType: "property", scopeId: task.propertyId, effectiveFrom: new Date("2020-01-01"),
         reason: "Dedicated scoped owner approval", value: { thresholds: [{ key: "native_expense", amount: "100", currency: "MAD", requires_approval_from: ["owner"] }],
           routing: { owner: { roles: [role.id], people: [], assigned: false, channels: ["in_app"] } } } });
-      return { propertyId: task.propertyId, bankId: bank.id, ownerAccountId: account.id };
+      return { propertyId: task.propertyId, bankId: bank.id, ownerAccountId: account.id, ownerRoleId: role.id };
     });
     await admin.goto("/en/app/identity"); await admin.getByTestId("invite-display-name").fill(`Dedicated expense field ${suffix}`);
     await admin.getByTestId("invite-phone").fill(phone); await admin.getByTestId("invite-role").selectOption("field_staff");
@@ -97,6 +97,39 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense submissio
       expect(await tx.expenseSubmission.count({ where: { expenseId } })).toBe(1);
       expect(await tx.approvalStage.count({ where: { approvalId, state: "APPROVED", decidedBy: setup.ownerAccountId } })).toBe(1);
       expect(await tx.auditLog.count({ where: { resourceId: expenseId, action: "expense.approved" } })).toBe(1);
+    });
+    // The agreement may waive the owner decision, but never its durable notice or audit flag.
+    await withTenant(f.db,f.organizationId,async tx=>{
+      await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:setup.propertyId,
+        effectiveFrom:new Date("2020-01-01"),reason:"Dedicated configured emergency exception",value:{
+          thresholds:[{key:"native_expense",amount:"100",currency:"MAD",requires_approval_from:["owner"],emergency_bypass_owner:true}],
+          routing:{owner:{roles:[setup.ownerRoleId],people:[],assigned:false,channels:["in_app"]}}
+        }});
+      await tx.notificationPreference.upsert({where:{organizationId_userAccountId:{organizationId:f.organizationId,userAccountId:setup.ownerAccountId}},
+        create:{organizationId:f.organizationId,userAccountId:setup.ownerAccountId,inAppEnabled:false,inAppOperations:false},update:{inAppEnabled:false,inAppOperations:false}});
+    });
+    await admin.goto(`/${locale}/app/properties/${setup.propertyId}/expenses/new`);
+    const emergencyForm=admin.getByTestId("expense-draft-form"); await emergencyForm.getByTestId("expense-amount").fill("500.25");
+    await emergencyForm.getByTestId("expense-category").fill("maintenance"); await emergencyForm.getByTestId("expense-purpose").fill(`Dedicated emergency ${suffix}`);
+    await emergencyForm.getByTestId("expense-funding-account").selectOption(setup.bankId); await emergencyForm.getByTestId("expense-occurred-on").fill("2026-10-26");
+    await emergencyForm.getByTestId("expense-emergency").check(); await emergencyForm.getByTestId("expense-reason").fill("Dedicated emergency entry");
+    await emergencyForm.getByTestId("expense-create").click(); await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
+    const emergencyId=new URL(admin.url()).pathname.split("/").at(-1)!;
+    await admin.getByTestId("expense-submit-reason").fill("Dedicated emergency agreement exception"); await admin.getByTestId("expense-submit").click();
+    await expect(admin.getByTestId("expense-emergency-notice")).toBeVisible(); await expect(admin.getByTestId("expense-approval-link")).toHaveCount(0);
+    await ownerPage.reload(); await ownerPage.getByTestId("notification-bell").click();
+    const emergencyNotice=ownerPage.getByTestId("notification-item").filter({hasText:locale==="en"?"Emergency expense approval exception":locale==="fr"?"Exception de validation pour une dépense urgente":"استثناء موافقة لمصروف طارئ"});
+    await expect(emergencyNotice).toHaveCount(1); await emergencyNotice.getByRole("button").first().click();
+    await expect(ownerPage).toHaveURL(new RegExp(`/${locale}/app/expenses/${emergencyId}$`,"u"));
+    await expect(ownerPage.getByTestId("expense-emergency-notice")).toBeVisible(); await expect(ownerPage.getByTestId("expense-submit-form")).toHaveCount(0);
+    await expect(ownerPage.getByTestId("expense-total")).toHaveText(formatCurrencyAmount(locale,"500.25","MAD"));
+    expect((await new AxeBuilder({page:ownerPage}).analyze()).violations).toEqual([]);
+    await withTenant(f.db,f.organizationId,async tx=>{
+      const expense=await tx.expense.findUniqueOrThrow({where:{id:emergencyId}}); expect(expense.state).toBe("APPROVED"); expect(expense.transactionId).toBeNull();
+      expect(await tx.approvalRequest.count({where:{expenseId:emergencyId}})).toBe(0);
+      expect(await tx.notification.count({where:{kind:"expense_emergency",targetId:emergencyId,recipientId:setup.ownerAccountId}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:emergencyId,action:"expense.emergency_owner_notified"}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:emergencyId,actorId:setup.ownerAccountId}})).toBe(0);
     });
     await expect(admin.locator("html")).toHaveAttribute("dir",locale === "ar" ? "rtl" : "ltr");
     expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);

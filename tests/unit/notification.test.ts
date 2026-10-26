@@ -10,6 +10,18 @@ const resource: Resource = { type: "task", organizationId: org, id: task, proper
 const input = { kind: "task_assigned" as const, recipientId: account, targetId: task };
 
 describe("personal notification permissions and safe destinations", () => {
+  it("opens an emergency notice only through the recipient's current financial expense view scope", () => {
+    const scope={organizationId:org,scopeType:"owner" as const,scopeId:"owner-a"},permissions=new Set(["expense:view"]);
+    const ctx=ownNotificationContext({organizationId:org,permissions,scopes:[scope],assignments:[{scope,permissions,conditions:{maxAmount:"600"}}]},account);
+    const subject:Resource={type:"expense",organizationId:org,id:task,financialRecordId:task,ownerId:"owner-a",amount:"500.25",dataClass:"financial"};
+    const notice={kind:"expense_emergency" as const,recipientId:account,targetId:task};
+    for(const locale of ["en","fr","ar"] as const)expect(notificationDestination(ctx,notice,subject,locale)).toBe(`/${locale}/app/expenses/${task}`);
+    for(const denied of [{...subject,ownerId:"owner-b"},{...subject,amount:"600.01"},{...subject,organizationId:task},{...subject,id:account},{...subject,type:"task"}])
+      expect(notificationDestination(ctx,notice,denied,"en")).toBeNull();
+    expect(notificationDestination(context(),notice,subject,"en")).toBeNull();
+    expect(notificationDestination(ctx,{...notice,recipientId:task},subject,"en")).toBeNull();
+    expect(authorize(ctx,"approve",subject)).toBe(false);
+  });
   it("links a financial approval through its request ID while authorizing its distinct expense source", () => {
     const approvalId = "018f0a0b-0000-7000-9000-000000000004", expenseId = "018f0a0b-0000-7000-9000-000000000005";
     const scope = { organizationId: org, scopeType: "owner" as const, scopeId: "owner-a" }, permissions = new Set(["expense:view"]);

@@ -13,6 +13,7 @@ import { allocateGrossRevenueByOwnerShare, type PropertyOwnerShare } from "../do
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
 import { evaluateExpensePolicyInTransaction, type ExpensePolicyDecision, type ConfigDecisionEvidence } from "./finance-config-service";
 import type { FinanceActorContext } from "./finance-access";
+import type { ExpenseEmergencyNotice } from "../domain/expense";
 
 export class ExpensePolicyUnavailableError extends Error {}
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
@@ -55,6 +56,7 @@ export async function prepareExpenseSubmissionPolicy(ctx: FinanceActorContext, r
   } else owners = source.owners;
   if (!owners.length) throw new ExpensePolicyUnavailableError("Expense property ownership is not configured");
   const amount = Money.of(row.amount.toString(), row.currency), slices = allocateGrossRevenueByOwnerShare(amount, owners), policies = [], stages: Stage[] = [];
+  const postHocNotices: ExpenseEmergencyNotice[] = [];
   let ownerTotal = Money.zero(row.currency), companyTotal = Money.zero(row.currency), guestTotal = Money.zero(row.currency), postHocOwnerNotificationRequired = false, overThreshold = false;
   const notifications = new NotificationRepository(tx, ctx.organizationId);
   for (const slice of slices) {
@@ -114,14 +116,21 @@ export async function prepareExpenseSubmissionPolicy(ctx: FinanceActorContext, r
       stages.push({ kind, ownerId: slice.ownerId, amount: amount.amount.toString(), currency: row.currency, routing: json(routing), recipients });
     }
     postHocOwnerNotificationRequired ||= policy.approval.postHocOwnerNotificationRequired;
+    if (policy.approval.postHocOwnerNotificationRequired) {
+      const routing=notificationRoutingSchema.parse(configured.routing?.owner);
+      await notifications.validateRoutingReferences(routing,row.propertyId);
+      if (!routing.channels.includes("in_app")) throw new ExpensePolicyUnavailableError("Emergency approval requires a durable owner inbox notice");
+      const recipients=await notifications.viewers(routing,{...target,ownerId:slice.ownerId,status:"PENDING_APPROVAL"});
+      if (!recipients.length) throw new ExpensePolicyUnavailableError("Emergency approval has no authorized owner notice recipient");
+      postHocNotices.push({ownerId:slice.ownerId,routing,recipients});
+    }
     policies.push({ ownerId: slice.ownerId, ownerName: slice.ownerName, shareBps: slice.shareBps, sourceAmount: slice.grossAmount.toJSON(),
       allocation: { treatment: policy.allocation.treatment, owner: policy.allocation.ownerAmount.toJSON(), alvillas: policy.allocation.alvillasAmount.toJSON(), guest: policy.allocation.guestAmount.toJSON() },
       approval: policy.approval, allocationRule: policy.allocationRule, approvalRule: policy.approvalRule, configReferences: policy.configReferences, revenueEvidence });
   }
   if (!ownerTotal.add(companyTotal).add(guestTotal).amount.eq(amount.amount)) throw new ExpensePolicyUnavailableError("Owner expense policies do not conserve the invoice total");
-  if (postHocOwnerNotificationRequired) throw new ExpensePolicyUnavailableError("Emergency approval requires its post-hoc owner notification workflow");
-  return { stages, overThreshold, snapshot: json({ schemaVersion: 1, sourceExpenseVersion: row.version, propertyId: row.propertyId, reservationId: row.reservationId,
+  return { stages, overThreshold,postHocNotices, snapshot: json({ schemaVersion: 1, sourceExpenseVersion: row.version, propertyId: row.propertyId, reservationId: row.reservationId,
     occurredOn: row.occurredOn.toISOString().slice(0,10), timezone: row.property.timezone, amount: amount.toJSON(), category: row.category, purpose: row.purpose,
     fundingAccountId: row.fundingAccountId, emergency: row.emergency, ownershipSnapshotId: source.snapshot?.id ?? null, policies,
-    allocation: { owner: ownerTotal.toJSON(), alvillas: companyTotal.toJSON(), guest: guestTotal.toJSON() }, stages, postHocOwnerNotificationRequired }) };
+    allocation: { owner: ownerTotal.toJSON(), alvillas: companyTotal.toJSON(), guest: guestTotal.toJSON() }, stages,postHocNotices, postHocOwnerNotificationRequired }) };
 }

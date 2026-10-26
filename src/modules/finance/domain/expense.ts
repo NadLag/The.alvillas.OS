@@ -3,6 +3,24 @@ import Decimal from "decimal.js";
 import type { Money } from "@/platform/money/money";
 import type { ConfiguredExpenseAllocation } from "./configured-finance-rules";
 import { allocateGrossRevenueByOwnerShare, assertFinancePostingsBalanced, type FinancePostingDraft, type PropertyOwnerShare } from "./reservation-revenue";
+import { authorize, type AuthContext, type Resource } from "@/platform/authz/authorize";
+import { calendarDateStart } from "@/platform/time/calendar";
+import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
+
+export const expenseEmergencyNoticeSchema = z.object({ ownerId: z.uuid(), routing: notificationRoutingSchema, recipients: z.array(z.uuid()).min(1) }).strict();
+export type ExpenseEmergencyNotice = z.infer<typeof expenseEmergencyNoticeSchema>;
+type ExpenseProperty = { id: string; cityId?: string | null; city?: string | null; regionId?: string | null; region?: string | null; timezone: string };
+type ExpenseFacts = { id: string; amount: string; reservationId?: string | null; state: string; occurredOn: Date; createdBy: string };
+export function expenseResource(organizationId: string, property: ExpenseProperty, facts: ExpenseFacts, ownerId?: string | null): Resource {
+  return { type: "expense", organizationId, id: facts.id, financialRecordId: facts.id, ownerId, propertyId: property.id,
+    reservationId: facts.reservationId, city: property.cityId ?? property.city, region: property.regionId ?? property.region, status: facts.state,
+    amount: facts.amount, occurredAt: calendarDateStart(facts.occurredOn.toISOString().slice(0,10),property.timezone), assignedUserAccountId: facts.createdBy, dataClass: "financial" };
+}
+export function viewableExpenseResource(ctx: AuthContext, property: ExpenseProperty, facts: ExpenseFacts, ownerIds: readonly string[], at = new Date()): Resource | null {
+  const base = expenseResource(ctx.organizationId,property,facts);
+  if (authorize(ctx,"view",base,at)) return base;
+  return ownerIds.map(ownerId=>expenseResource(ctx.organizationId,property,facts,ownerId)).find(resource=>authorize(ctx,"view",resource,at)) ?? null;
+}
 
 export const expenseDraftSchema = z.object({
   propertyId: z.uuid(), reservationId: z.uuid().optional(), category: z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/u),

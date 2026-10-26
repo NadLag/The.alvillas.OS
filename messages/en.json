@@ -1271,7 +1271,8 @@
       "approval_requested": "An approval needs your decision.",
       "approval_decided": "An approval decision was recorded.",
       "staff_document_expiring": "A staff document is expiring.",
-      "task_overdue": "An assigned task is overdue."
+      "task_overdue": "An assigned task is overdue.",
+      "expense_emergency": "Emergency expense approval exception"
     },
     "settings": {
       "eyebrow": "Your account",
@@ -2473,6 +2474,7 @@
       "REJECTED": "Rejected",
       "POSTED": "Posted",
       "VOIDED": "Reversed"
-    }
+    },
+    "emergencyException": "This expense used the emergency approval exception defined in your agreement."
   }
 }

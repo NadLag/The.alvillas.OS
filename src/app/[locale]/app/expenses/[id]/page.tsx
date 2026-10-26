@@ -19,6 +19,7 @@ export default async function ExpensePage({ params }: { params: Promise<{ locale
   return <AdminShell className="resource-page" testId="expense-detail-page"><ShellHeader eyebrow={expense.propertyName} title={expense.purpose} subtitle={t("description")}
     actions={<Link className="secondary-button" href={`/${locale}/app/properties/${expense.propertyId}`}>{t("back")}</Link>} />
     <section className="notification-settings"><p data-testid="expense-state" role="status">{t(`states.${expense.state}`)}</p>
+      {expense.emergencyException?<p role="status" data-testid="expense-emergency-notice">{t("emergencyException")}</p>:null}
       <dl className="detail-grid"><div><dt>{t("amount")}</dt><dd data-testid="expense-total" dir="auto">{formatCurrencyAmount(locale, expense.amount, expense.currency)}</dd></div>
         <div><dt>{t("category")}</dt><dd>{expense.category}</dd></div><div><dt>{t("occurredOn")}</dt><dd>{formatDate(locale, new Date(`${expense.occurredOn}T00:00:00Z`), { timeZone: "UTC" })}</dd></div></dl>
       {expense.approvalId ? <Link className="secondary-button" data-testid="expense-approval-link" href={`/${locale}/app/approvals/${expense.approvalId}`}>{t("viewApproval")}</Link> : null}

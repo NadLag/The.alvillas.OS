@@ -1271,7 +1271,8 @@
       "approval_requested": "Une approbation attend votre décision.",
       "approval_decided": "Une décision d’approbation a été enregistrée.",
       "staff_document_expiring": "Un document du personnel arrive à expiration.",
-      "task_overdue": "Une tâche attribuée est en retard."
+      "task_overdue": "Une tâche attribuée est en retard.",
+      "expense_emergency": "Exception de validation pour une dépense urgente"
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -2473,6 +2474,7 @@
       "REJECTED": "Refusée",
       "POSTED": "Comptabilisée",
       "VOIDED": "Contrepassée"
-    }
+    },
+    "emergencyException": "Cette dépense utilise l’exception de validation pour urgence prévue dans votre accord."
   }
 }
