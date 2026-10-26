@@ -2482,6 +2482,11 @@
     "voidTitle": "Reverse expense payment",
     "voidGuidance": "Record a correction with a reason. An opposite journal preserves the original payment and its history.",
     "voidPayment": "Record reversal",
-    "voidedGuidance": "This payment was reversed. The original payment and its reversal remain in the financial history."
+    "voidedGuidance": "This payment was reversed. The original payment and its reversal remain in the financial history.",
+    "editDraft": "Edit draft",
+    "selectFunding": "Select the payment account",
+    "unavailableFunding": "The previous account is unavailable. Select an authorized account.",
+    "retainedReservation": "Keep the linked reservation",
+    "backToExpense": "Back to expense"
   }
 }

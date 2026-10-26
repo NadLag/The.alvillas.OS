@@ -131,6 +131,7 @@ export const expenseTreatmentConfigSchema = z
           treatment: expenseTreatmentSchema,
           owner_share_bps: z.number().int().min(0).max(10000).optional(),
           alvillas_share_bps: z.number().int().min(0).max(10000).optional(),
+          guest_share_bps: z.number().int().min(0).max(10000).optional(),
           approval_rule_key: configSlugSchema.optional()
         })
         .passthrough()

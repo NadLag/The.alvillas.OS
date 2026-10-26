@@ -24,7 +24,7 @@ export class ExpenseRepository {
     return this.tx.property.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null },
       select: { id: true, name: true, city: true, cityId: true, region: true, regionId: true, timezone: true } });
   }
-  reservation(id: string) { return this.tx.reservation.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null }, select: { id: true, propertyId: true, source: true, reference: true } }); }
+  reservation(id: string) { return this.tx.reservation.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null }, select: { id: true, propertyId: true, source: true, reference: true,status:true,createdBy:true } }); }
   currency(code: string) { return this.tx.currency.findUnique({ where: { code }, select: { code: true, minorUnit: true } }); }
   async editorSources() {
     const [organization, currencies] = await Promise.all([

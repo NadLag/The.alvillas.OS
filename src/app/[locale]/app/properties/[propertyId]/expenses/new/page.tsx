@@ -15,6 +15,6 @@ export default async function NewExpensePage({ params }: { params: Promise<{ loc
   const t = await getTranslations("Expenses"); let editor;
   try { editor = await getExpenseEditor(actor, input.propertyId); }
   catch (error) { if (error instanceof ExpenseAccessError || error instanceof Error && error.name === "ZodError") notFound(); throw error; }
-  return <AdminShell className="resource-page" testId="expense-new-page"><ShellHeader eyebrow={editor.property.name} title={t("new")} subtitle={t("description")}
+  return <AdminShell className="resource-page expense-page" testId="expense-new-page"><ShellHeader eyebrow={editor.property.name} title={t("new")} subtitle={t("description")}
     actions={<Link className="secondary-button" href={`/${locale}/app/properties/${editor.property.id}`}>{t("back")}</Link>} /><ExpenseDraftForm editor={editor} /></AdminShell>;
 }

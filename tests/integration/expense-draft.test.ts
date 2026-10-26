@@ -7,7 +7,7 @@ import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
-import { createExpenseDraft, updateExpenseDraft, submitExpense,getExpense, ExpenseAccessError, ExpenseConflictError,ExpenseConfigurationError } from "@/modules/finance/application/expense-service";
+import { createExpenseDraft, updateExpenseDraft, submitExpense,getExpense,getExpenseDraftEditor, ExpenseAccessError, ExpenseConflictError,ExpenseConfigurationError } from "@/modules/finance/application/expense-service";
 import { getApproval, decideApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
 import { captureReservationCommissionSnapshots } from "@/platform/reservations/finance";
@@ -219,6 +219,60 @@ describe("native expenses on real PostgreSQL", () => {
         after:{transactionId:posted.transactionId,reversalTransactionId:reverse.id},reason:"Dedicated raw partial reversal rejection",requestId:randomUUID(),occurredAt:new Date()});
     })).rejects.toThrow("mirror every original posting exactly");
     expect(await withTenant(db,f.org,tx=>tx.financialTransaction.count())).toBe(1);
+  });
+  it("posts a custom owner, company and guest split from the retained submitted configuration",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f);
+    const config=await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated custom allocation agreement",value:{default_treatment:"OWNER_PAID",categories:{maintenance:{treatment:"CUSTOM",owner_share_bps:2500,alvillas_share_bps:2500,guest_share_bps:5000}}}}));
+    const draft=await create(f,{...f.input,amount:"100.01"}),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated custom allocation submission"},{db});
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-03"),reason:"Later custom agreement must not change the submitted split",value:{default_treatment:"OWNER_PAID",categories:{maintenance:{treatment:"CUSTOM",owner_share_bps:7500,alvillas_share_bps:0,guest_share_bps:2500}}}}));
+    const result=await postExpense(await actor(f),{id:draft.id,expectedVersion:submitted.version,reason:"Dedicated retained custom split payment"},{db});
+    await withTenant(db,f.org,async tx=>{
+      const lines=await tx.posting.findMany({where:{transactionId:result.transactionId}});expect(lines).toHaveLength(4);
+      expect(Object.fromEntries(lines.filter(line=>line.side==="DEBIT").map(line=>[line.bucket,line.amount.toString()]))).toEqual({OWNER_EXPENSE:"25",ALVILLAS_EXPENSE:"25",GUEST_EXPENSE:"50.01"});
+      expect(lines.find(line=>line.side==="CREDIT")?.amount.toString()).toBe("100.01");
+      expect((await tx.expenseSubmission.findUniqueOrThrow({where:{organizationId_expenseId:{organizationId:f.org,expenseId:draft.id}}})).snapshot).toMatchObject({policies:[{allocationRule:{configRuleId:config.id,version:config.version}}]});
+    });
+  });
+  it("keeps an expense editable and unposted when its custom percentages are incomplete",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f);
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated incomplete custom rule rejection",value:{default_treatment:"OWNER_PAID",categories:{maintenance:{treatment:"CUSTOM",owner_share_bps:2500,alvillas_share_bps:2500}}}}));
+    const draft=await create(f);await expect(submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Reject incomplete custom financial configuration"},{db})).rejects.toBeInstanceOf(ExpenseConfigurationError);
+    await withTenant(db,f.org,async tx=>{expect(await tx.expense.findUniqueOrThrow({where:{id:draft.id}})).toMatchObject({state:"DRAFT",version:1});
+      expect(await tx.financialTransaction.count()).toBe(0);expect(await tx.expenseSubmission.count()).toBe(0);expect(await tx.outboxEvent.count({where:{type:"ExpenseSubmitted"}})).toBe(0);});
+  });
+  it("loads the authorized draft editor without granting create rights and rejects read-only or submitted edits",async()=>{
+    const f=await fixture();await policy(f);const draft=await create(f);
+    await withTenant(db,f.org,async tx=>{
+      const permission=await tx.permission.findFirstOrThrow({where:{key:"expense:create"}});
+      await tx.rolePermission.deleteMany({where:{organizationId:f.org,roleId:f.grant.roleId,permissionId:permission.id}});
+    });
+    const ctx=await actor(f),editor=await getExpenseDraftEditor(ctx,draft.id,{db});expect(ctx.authContext.permissions.has("expense:create")).toBe(false);
+    expect(editor.draft).toMatchObject({id:draft.id,version:1,amount:"500.25",fundingAccountId:f.bank.id,idempotencyKey:f.input.idempotencyKey});
+    expect(editor.editor.accounts.map(account=>account.id)).toContain(f.bank.id);
+    const reader=await approver(f,"property",f.property.id,"view");
+    await expect(getExpenseDraftEditor({organizationId:f.org,actorId:reader.account.id,authContext:reader.actor.authContext},draft.id,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    await updateExpenseDraft(ctx,{id:draft.id,expectedVersion:1,draft:{...f.input,amount:"100.01",reason:"Dedicated audited draft correction"}},{db});
+    await submitExpense(ctx,{id:draft.id,expectedVersion:2,reason:"Dedicated corrected draft submission"},{db});
+    await expect(getExpenseDraftEditor(ctx,draft.id,{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+  });
+  it("retains an older linked reservation beyond the choice page without exposing unauthorized booking references",async()=>{
+    const f=await fixture(),linkedId=randomUUID();
+    await withTenant(db,f.org,async tx=>{
+      const permission=await tx.permission.findFirstOrThrow({where:{key:"reservation:view"}});
+      await tx.rolePermission.create({data:{organizationId:f.org,roleId:f.grant.roleId,permissionId:permission.id}});
+      await tx.reservation.createMany({data:Array.from({length:101},(_,index)=>({id:index===0?linkedId:randomUUID(),organizationId:f.org,propertyId:f.property.id,reference:randomUUID(),source:"DIRECT",status:"IMPORTED",
+        guestName:"Dedicated draft editor booking",checkIn:new Date(Date.UTC(2025,0,index*3+1)),checkOut:new Date(Date.UTC(2025,0,index*3+3)),nights:2,idempotencyKey:randomUUID()}))});
+    });
+    const draft=await create(f,{...f.input,reservationId:linkedId}),ctx=await actor(f),visible=await getExpenseDraftEditor(ctx,draft.id,{db});
+    expect(visible.editor.reservations).toHaveLength(101);expect(visible.editor.reservations.some(row=>row.id===linkedId)).toBe(true);
+    await withTenant(db,f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{key:"reservation:view"}});
+      await tx.rolePermission.deleteMany({where:{organizationId:f.org,roleId:f.grant.roleId,permissionId:permission.id}});});
+    const financialOnly=await getExpenseDraftEditor(ctx,draft.id,{db});expect(financialOnly.editor.reservations).toHaveLength(0);expect(financialOnly.draft.reservationId).toBe(linkedId);
+    await updateExpenseDraft(ctx,{id:draft.id,expectedVersion:1,draft:{...f.input,reservationId:linkedId,amount:"100.01",reason:"Retain the original financial booking link"}},{db});
+    expect(await withTenant(db,f.org,tx=>tx.expense.findUniqueOrThrow({where:{id:draft.id}}))).toMatchObject({reservationId:linkedId,version:2});
   });
   it("retains one configured emergency owner notice and audit without inventing an owner decision",async()=>{
     const {f,configured,receiver,draft,input}=await emergencyFixture(),ctx=await actor(f);

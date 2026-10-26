@@ -2482,6 +2482,11 @@
     "voidTitle": "Contrepasser le paiement de la dépense",
     "voidGuidance": "Enregistrez une correction motivée. Une écriture inverse préserve le paiement initial et son historique.",
     "voidPayment": "Enregistrer la contrepassation",
-    "voidedGuidance": "Ce paiement a été contrepassé. Le paiement initial et sa contrepassation restent dans l’historique financier."
+    "voidedGuidance": "Ce paiement a été contrepassé. Le paiement initial et sa contrepassation restent dans l’historique financier.",
+    "editDraft": "Modifier le brouillon",
+    "selectFunding": "Sélectionnez le compte de paiement",
+    "unavailableFunding": "Le compte précédent est indisponible. Sélectionnez un compte autorisé.",
+    "retainedReservation": "Conserver la réservation associée",
+    "backToExpense": "Retour à la dépense"
   }
 }
