@@ -2515,3 +2515,9 @@ textarea:disabled {
 .field-linen-review { display: grid; gap: var(--space-3); padding: var(--space-4); background: var(--surface); border-radius: var(--radius-md); }
 .field-linen-review dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); margin: 0; }
 .field-linen-review dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.field-cash { grid-template-columns: minmax(0, 1fr); }
+.field-cash :is(input,select,textarea) { inline-size: 100%; min-inline-size: 0; min-block-size: 64px; font: inherit; font-size: 17px; }
+.field-cash select { border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); background: var(--surface-raised); color: var(--foreground); }
+.field-cash button { min-block-size: 64px; white-space: normal; overflow-wrap: anywhere; }
+.field-cash-receipts { list-style: none; padding: 0; margin: 0; }
+.field-cash-receipts li { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); padding-block: var(--space-4); border-block-end: 1px solid var(--border); overflow-wrap: anywhere; }

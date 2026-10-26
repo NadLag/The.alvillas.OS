@@ -35,6 +35,7 @@ export const permissionResources = [
   "issue",
   "service",
   "wallet",
+  "cash_collection",
   "financial_transaction",
   "owner_portal",
   "owner_portal_property",
@@ -81,7 +82,7 @@ const operationalFull = permissionsFor(
 const geographyView = permissionsFor(["region", "city"], ["view"]);
 
 const financeFull = permissionsFor(
-  ["financial_transaction", "wallet", "owner_statement", "report"],
+  ["financial_transaction", "wallet", "cash_collection", "owner_statement", "report"],
   ["view", "create", "edit", "void", "approve", "reject", "export", "pay", "reconcile"]
 );
 
@@ -212,7 +213,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     key: "driver",
     name: "Driver",
     description: "Assigned transfers and own cash collection work.",
-    permissions: [permissionKey("task", "view"), permissionKey("task", "edit")],
+    permissions: [permissionKey("task", "view"), permissionKey("task", "edit"), permissionKey("cash_collection", "view"), permissionKey("cash_collection", "create")],
     mfaRequired: false
   },
   {

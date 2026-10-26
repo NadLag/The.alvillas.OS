@@ -71,6 +71,7 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  cashCollections                                CashCollection[]
   automationRuns                                 AutomationRun[]
   automationAttempts                             AutomationAttempt[]
   automationSuggestions                          AutomationSuggestion[]
@@ -308,6 +309,7 @@ model TeamWallet {
 }
 
 model Person {
+  cashCollections    CashCollection[]
   teamAvailabilities TeamAvailability[]
   teamDocuments      TeamDocument[]
   teamWallet         TeamWallet?
@@ -337,6 +339,7 @@ model Person {
 }
 
 model UserAccount {
+  cashCollections        CashCollection[]
   operationUploads       OperationEvidenceUpload[]
   requestedApprovals     ApprovalRequest[]            @relation("ApprovalRequester")
   decidedApprovals       ApprovalRequest[]            @relation("ApprovalDecider")
@@ -695,6 +698,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  cashCollections      CashCollection[]
   templateVersions     PropertyTemplateVersion[]
   templateRevisions    PropertyTemplateRevision[]
   approvalRequests     ApprovalRequest[]
@@ -940,6 +944,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  cashCollections                                      CashCollection[]
   id                                                   String                         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId                                       String                         @map("organization_id") @db.Uuid
   propertyId                                           String                         @map("property_id") @db.Uuid
@@ -1012,6 +1017,7 @@ model ReservationConflict {
 }
 
 model OperationTask {
+  cashCollections          CashCollection[]
   id                       String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId           String                       @map("organization_id") @db.Uuid
   propertyId               String                       @map("property_id") @db.Uuid
@@ -1186,22 +1192,22 @@ model OperationEvidenceUpload {
 }
 
 model OperationIssue {
-  evidenceId     String?       @map("evidence_id") @db.Uuid
+  evidenceId     String?                @map("evidence_id") @db.Uuid
   evidence       OperationTaskEvidence? @relation(fields: [organizationId, taskId, evidenceId], references: [organizationId, taskId, id], onDelete: Restrict, onUpdate: NoAction, map: "operation_issue_evidence_fkey")
-  id             String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String        @map("organization_id") @db.Uuid
-  taskId         String        @map("task_id") @db.Uuid
-  propertyId     String        @map("property_id") @db.Uuid
+  id             String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                 @map("organization_id") @db.Uuid
+  taskId         String                 @map("task_id") @db.Uuid
+  propertyId     String                 @map("property_id") @db.Uuid
   title          String
   description    String
   severity       String
-  state          String        @default("OPEN")
-  idempotencyKey String        @map("idempotency_key") @db.Uuid
-  createdBy      String        @map("created_by") @db.Uuid
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  task           OperationTask @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  state          String                 @default("OPEN")
+  idempotencyKey String                 @map("idempotency_key") @db.Uuid
+  createdBy      String                 @map("created_by") @db.Uuid
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task           OperationTask          @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organizationId, idempotencyKey], map: "operation_issue_key_unique")
   @@index([organizationId, propertyId, state], map: "operation_issue_property_state_idx")
@@ -1256,18 +1262,19 @@ model SyncOp {
 }
 
 model LedgerAccount {
-  teamWallet     TeamWallet?
-  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String       @map("organization_id") @db.Uuid
-  code           String
-  name           String
-  accountType    String       @map("account_type")
-  normalSide     String       @map("normal_side")
-  archivedAt     DateTime?    @map("archived_at") @db.Timestamptz(6)
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  postings       Posting[]
+  cashCollections CashCollection[]
+  teamWallet      TeamWallet?
+  id              String           @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String           @map("organization_id") @db.Uuid
+  code            String
+  name            String
+  accountType     String           @map("account_type")
+  normalSide      String           @map("normal_side")
+  archivedAt      DateTime?        @map("archived_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  postings        Posting[]
 
   @@unique([organizationId, code], map: "ledger_account_org_code_unique")
   @@unique([organizationId, id], map: "ledger_account_org_id_unique")
@@ -1275,6 +1282,7 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  cashCollection         CashCollection?
   id                     String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId         String                 @map("organization_id") @db.Uuid
   reference              String
@@ -1289,6 +1297,7 @@ model FinancialTransaction {
   reversesTransaction    FinancialTransaction?  @relation("FinancialTransactionReversal", fields: [reversesTransactionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   reversedByTransactions FinancialTransaction[] @relation("FinancialTransactionReversal")
 
+  @@unique([organizationId, id], map: "financial_transaction_org_id_unique")
   @@unique([organizationId, reference], map: "financial_transaction_org_reference_unique")
   @@unique([organizationId, idempotencyKey], map: "financial_transaction_org_idempotency_unique")
   @@index([organizationId, occurredAt], map: "financial_transaction_org_occurred_idx")
@@ -1347,6 +1356,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  cashCollections    CashCollection[]
   teamCompensations  TeamCompensation[]
   code               String              @id @db.Char(3)
   name               String
@@ -2080,4 +2090,43 @@ model InventoryMovement {
   @@unique([organizationId, locationId, itemId, revision], map: "inventory_movement_stream_revision_key")
   @@index([organizationId, locationId, itemId, createdAt, id])
   @@map("inventory_movement")
+}
+
+model CashCollection {
+  id                     String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId         String               @map("organization_id") @db.Uuid
+  taskId                 String               @map("task_id") @db.Uuid
+  propertyId             String               @map("property_id") @db.Uuid
+  reservationId          String?              @map("reservation_id") @db.Uuid
+  collectorUserAccountId String               @map("collector_user_account_id") @db.Uuid
+  collectorPersonId      String               @map("collector_person_id") @db.Uuid
+  custodyAccountId       String               @map("custody_account_id") @db.Uuid
+  transactionId          String               @map("transaction_id") @db.Uuid
+  amount                 Decimal              @db.Decimal(18, 2)
+  currency               String               @db.Char(3)
+  payer                  String               @db.VarChar(240)
+  purpose                String               @db.VarChar(500)
+  revision               BigInt
+  reportedRevision       String               @map("reported_revision") @db.VarChar(43)
+  deviceId               String               @map("device_id") @db.VarChar(160)
+  clientOpId             String               @map("client_op_id") @db.Uuid
+  clientCreatedAt        DateTime?            @map("client_created_at") @db.Timestamptz(6)
+  recordedAt             DateTime             @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  provenance             Json
+  organization           Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  task                   OperationTask        @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  property               Property             @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reservation            Reservation?         @relation(fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  collectorAccount       UserAccount          @relation(fields: [organizationId, collectorUserAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  collectorPerson        Person               @relation(fields: [organizationId, collectorPersonId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  custodyAccount         LedgerAccount        @relation(fields: [organizationId, custodyAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  transaction            FinancialTransaction @relation(fields: [organizationId, transactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  currencyRef            Currency             @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id], map: "cash_collection_org_id_unique")
+  @@unique([organizationId, transactionId], map: "cash_collection_org_transaction_unique")
+  @@unique([organizationId, deviceId, clientOpId], map: "cash_collection_org_operation_unique")
+  @@unique([organizationId, taskId, revision], map: "cash_collection_task_revision_unique")
+  @@index([organizationId, collectorUserAccountId, recordedAt, id], map: "cash_collection_collector_idx")
+  @@map("cash_collection")
 }

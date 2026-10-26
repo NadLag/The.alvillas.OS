@@ -37,8 +37,10 @@ async function drain(queue: FieldQueueStore, scope: FieldQueueScope, send: typeo
     }
     if (entry.operation.type === "field_task.complete") {
       const taskId = entry.operation.payload.taskId;
+      const cash = await queue.cashSnapshot(scope, taskId);
+      if (cash.draft && !cash.draft.submittedDeviceId) { outcome = "queued"; continue; }
       const counts = (await queue.entries(scope)).filter(count => !count.resolvedByClientOpId &&
-        (count.operation.type === "field_stocktake.record" || count.operation.type === "field_task.issue.report") && count.operation.payload.taskId === taskId);
+        (count.operation.type === "field_stocktake.record" || count.operation.type === "field_task.issue.report" || count.operation.type === "field_cash.collect" || count.operation.type === "field_cash.confirm_existing") && count.operation.payload.taskId === taskId);
       if (counts.length) { outcome = counts.some(count => count.syncStatus === "conflict") ? "conflict" : counts.some(count => count.syncStatus === "rejected") ? "rejected" : "queued"; continue; }
     }
     if (entry.operation.type === "field_photo.prepare" || entry.operation.type === "field_task.evidence.attach") {

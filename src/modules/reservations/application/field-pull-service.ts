@@ -15,6 +15,8 @@ import type { ReservationActorContext } from "./reservation-access";
 import { decodeFieldPullCursor, encodeFieldPullCursor, FieldPullError, newFieldPullCursor } from "./field-pull-cursor";
 import { fieldStockSnapshots } from "@/platform/inventory/field-stock-snapshot";
 import type { FieldLinenSnapshot } from "@/platform/inventory/field-stocktake";
+import { fieldCashSnapshots } from "@/platform/ledger/field-cash-snapshot";
+import type { FieldCashSnapshot } from "@/platform/ledger/field-cash";
 
 type Deps = { db?: TenantTransactionRunner; now?: Date; env?: NodeJS.ProcessEnv };
 function resource(ctx: ReservationActorContext, row: FieldPullMetadata, now: Date): Resource {
@@ -39,6 +41,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
     const days = new Map<string, string>();
     const devicePolicies = new Map<string, ResolvedConfigRule | null>();
     let stockSnapshots = new Map<string, { linen: FieldLinenSnapshot; inventory: FieldLinenSnapshot }>();
+    let cashSnapshots = new Map<string, FieldCashSnapshot>();
     const businessDate = (zone: string) => {
       const existing = days.get(zone); if (existing) return existing;
       const date = calendarDateAt(asOf, zone); days.set(zone, date); return date;
@@ -59,13 +62,14 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
         return source ? { ...source, items: source.items.map(item => ({ ...item, available: item.available && canCount })) } : undefined;
       };
       const linen = input.include_linen ? stock("linen") : undefined, inventory = input.include_inventory ? stock("inventory") : undefined;
+      const cash = input.include_cash ? cashSnapshots.get(row.id) : undefined;
       const revision = createHash("sha256").update(JSON.stringify({ task: row.updatedAt.toISOString(),
         property: row.property.updatedAt.toISOString(), reservation: row.reservation?.updatedAt.toISOString() ?? null,
         scope: frame.scope, date, canGuest, canEdit,
         proxy: input.mode === "supervised" ? { version: row.version, performedBy: row.assignedToPersonId,
           person: canPerformer ? row.assignedToPerson?.updatedAt.toISOString() : null } : null,
-        devicePolicy, linen, inventory, canReportIssue })).digest("base64url");
-      return { task, canGuest, canEdit, canPerformer, date, revision, devicePolicy, linen, inventory, canReportIssue };
+        devicePolicy, linen, inventory, canReportIssue, cash })).digest("base64url");
+      return { task, canGuest, canEdit, canPerformer, date, revision, devicePolicy, linen, inventory, canReportIssue, cash };
     };
     const allowed = (row: FieldPullMetadata) => authorize(ctx.authContext, "view", resource(ctx, row, now), now) &&
       (input.mode !== "supervised" || (row.assignedToPersonId !== null && row.assignedToPersonId !== ctx.personId &&
@@ -76,6 +80,13 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
     const knownRows = input.known_tasks.length ? await repo.known(ctx.actorId, ctx.authContext, now, [...known.keys()], input.mode) : [];
     const dataRows = page.filter(row => allowed(row) && (input.mode !== "today" || row.dueDate.toISOString().slice(0, 10) <= businessDate(row.property.timezone)));
     const eligibleKnown = knownRows.filter(allowed);
+    if (input.include_cash && input.mode !== "supervised") {
+      cashSnapshots = await fieldCashSnapshots(tx, ctx, [...new Map([...dataRows, ...eligibleKnown].map(row => [row.id, row])).values()].map(row => ({
+        id: row.id, version: row.version, resource: resource(ctx, row, now),
+        assigned: row.assignedToUserAccountId === ctx.actorId && row.assignedToPersonId === ctx.personId,
+        canEdit: authorize(ctx.authContext, "edit", resource(ctx, row, now), now)
+      })), asOf, now);
+    }
     if ((input.include_linen || input.include_inventory) && (dataRows.length || eligibleKnown.length)) {
       stockSnapshots = await fieldStockSnapshots(tx, ctx.organizationId, [...dataRows, ...eligibleKnown].map(row => row.propertyId), asOf);
     }
@@ -103,6 +114,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
         ...(input.include_device_policy ? { devicePolicy: view.devicePolicy } : {}),
         ...(input.include_linen ? { linen: view.linen } : {}),
         ...(input.include_inventory ? { inventory: view.inventory } : {}),
+        ...(input.include_cash ? { cash: view.cash } : {}),
         ...(input.mode === "supervised" ? { proxyValidation: { performedByPersonId: row.assignedToPersonId!, expectedVersion: row.version,
           ...present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...view.task, data: { performerName: row.assignedToPerson!.displayName } },
             { performerName: { dataClass: "personal", mask: "omit", requiredPermission: view.canPerformer ? "team_member:view" : undefined } }, now) } } : {}) };

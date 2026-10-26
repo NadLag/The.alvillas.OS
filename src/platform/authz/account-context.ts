@@ -4,7 +4,7 @@ import {
   type ScopeType
 } from "@/platform/authz/authorize";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
 
@@ -37,9 +37,16 @@ export async function authContextForAccount(
   userAccountId: string,
   deps: AccountAuthContextDeps = {}
 ): Promise<AuthContext> {
-  return withTenant(db(deps), organizationId, async (tx) => {
-    const account = await new IdentityRepository(tx, organizationId).findSessionSecurityAccount(userAccountId);
-    if (!account || securityEnrollment(account).setupRequired) {
+  return withTenant(db(deps), organizationId, tx => authContextForAccountInTransaction(tx, organizationId, userAccountId));
+}
+
+// Financial commands may wait for resource locks. Resolve their current grants
+// inside the existing transaction after those locks, using the same loader.
+export async function authContextForAccountInTransaction(
+  tx: TenantTransaction, organizationId: string, userAccountId: string, at = new Date()
+): Promise<AuthContext> {
+    const account = await new IdentityRepository(tx, organizationId).findSessionSecurityAccount(userAccountId, at);
+    if (!account || securityEnrollment(account, at).setupRequired) {
       return { organizationId, userAccountId, permissions: new Set<string>(), scopes: [{ organizationId }], assignments: [] };
     }
     const assignments = (await tx.roleAssignment.findMany({
@@ -48,8 +55,8 @@ export async function authContextForAccount(
         userAccountId,
         archivedAt: null,
         role: { archivedAt: null },
-        validFrom: { lte: new Date() },
-        OR: [{ validTo: null }, { validTo: { gt: new Date() } }]
+        validFrom: { lte: at },
+        OR: [{ validTo: null }, { validTo: { gt: at } }]
       },
       include: {
         role: {
@@ -65,7 +72,6 @@ export async function authContextForAccount(
     })) as RolePermissionRow[];
 
     return contextForRoleAssignments(organizationId, userAccountId, assignments);
-  });
 }
 
 export function contextForRoleAssignments(organizationId: string, userAccountId: string, assignments: RolePermissionRow[]): AuthContext {

@@ -2414,5 +2414,30 @@
       "PER_HOUR": "Per hour",
       "PERCENTAGE": "Percentage"
     }
+  },
+  "FieldCash": {
+    "title": "Collect cash",
+    "guidance": "Record cash you personally received for this assigned job. Collection records custody; revenue allocation follows the applicable agreement and service rules.",
+    "amount": "Amount received",
+    "currency": "Currency",
+    "payer": "Received from",
+    "purpose": "Payment purpose",
+    "save": "Record cash received",
+    "saving": "Saving…",
+    "savedDraft": "Draft saved on this device.",
+    "queued": "Cash receipt queued. Keep this device until synchronization finishes.",
+    "synced": "Cash receipt synchronized.",
+    "storageError": "Cash could not be saved. Keep this page open and try again.",
+    "invalid": "Enter a positive amount with the currency’s permitted precision, a payer and a payment purpose.",
+    "reviewRequired": "This receipt needs review. The original attempt is retained. Check recent receipts before recording additional cash.",
+    "reviewAdditional": "Review a separate additional collection",
+    "matchingReceipt": "A matching receipt exists: {receipt}. Confirm only if both attempts describe the same cash.",
+    "reviewReason": "Reason for confirming the existing receipt",
+    "confirmExisting": "Confirm this cash was already recorded",
+    "clearDraft": "Discard unsubmitted draft",
+    "recent": "Your recent cash receipts for this job",
+    "noReceipts": "No cash receipts recorded for this job.",
+    "saveBeforeComplete": "Save or resolve the cash receipt before completing this job.",
+    "unsaved": "Save or resolve the cash receipt before leaving this job."
   }
 }
