@@ -21,12 +21,13 @@ import { type FieldQueueScope } from "./field-queue-store";
 import { resolveFieldScope } from "./field-session";
 import { FieldPhotoCapture } from "./field-photo-capture";
 import { FieldIssueCapture } from "./field-issue-capture";
+import { FieldWallet } from "./field-wallet";
 import { FieldInventory, FieldLinen } from "./field-linen";
 import { FieldProxyForm } from "@/modules/reservations/ui/field-proxy-form";
 import type { FieldCacheAudience } from "./field-queue-store";
 
 function fieldMessages(messages: typeof en) {
-  return { Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, FieldIssue: messages.FieldIssue, Operations: { manage: messages.Operations.manage } };
+  return { Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, FieldIssue: messages.FieldIssue, FieldWallet: messages.FieldWallet, Operations: { manage: messages.Operations.manage } };
 }
 const catalogs = { en: fieldMessages(en), fr: fieldMessages(fr), ar: fieldMessages(ar) };
 export function OfflineFieldApp({ initialLocale }: { initialLocale: AppLocale }) {
@@ -39,6 +40,7 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
   const [scope, setScope] = useState<FieldQueueScope | null>(null), [loading, setLoading] = useState(true);
   const [tasks, setTasks] = useState<FieldWorkSnapshot[]>([]), [snapshotAt, setSnapshotAt] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [walletOpen, setWalletOpen] = useState(false), [walletAvailable, setWalletAvailable] = useState(false), wallet = useTranslations("FieldWallet");
   const [audience, setAudience] = useState<FieldCacheAudience>("assigned");
   const [issueBlocked, setIssueBlocked] = useState(false), issue = useTranslations("FieldIssue");
   const [photoBlocked, setPhotoBlocked] = useState(false), photo = useTranslations("FieldPhoto");
@@ -50,6 +52,7 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
     const navigate = () => {
       const query = new URLSearchParams(location.search), task = z.uuid().safeParse(query.get("task"));
       setTaskId(task.success ? task.data : null);
+      setWalletOpen(query.get("view") === "wallet");
       setAudience(query.get("view") === "supervised" ? "supervised" : "assigned");
     };
     const verify = async () => {
@@ -64,12 +67,12 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
   useEffect(() => {
     if (!scope) return;
     const subscription = liveQuery(() => fieldQueue().readCache(scope, audience)).subscribe({ next: value => {
-      setTasks(value.tasks); setSnapshotAt(value.state?.snapshotAt ?? null);
+      setTasks(value.tasks); setWalletAvailable(Boolean(value.state?.wallet)); setSnapshotAt(value.state?.snapshotAt ?? null);
     }, error: () => { setScope(null); setTasks([]); setSnapshotAt(null); } });
     return () => subscription.unsubscribe();
   }, [scope, audience]);
-  const path = (nextLocale: AppLocale, id: string | null) => {
-    const query = new URLSearchParams(); if (audience === "supervised") query.set("view", "supervised"); if (id) query.set("task", id);
+  const path = (nextLocale: AppLocale, id: string | null, showWallet = false) => {
+    const query = new URLSearchParams(); if (showWallet) query.set("view", "wallet"); else if (audience === "supervised") query.set("view", "supervised"); if (id) query.set("task", id);
     return `/${nextLocale}/offline/field${query.size ? `?${query}` : ""}`;
   };
   function openJob(id: string | null) {
@@ -81,15 +84,15 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
     setLinenBlocked(false);
     if (document.querySelector('[data-field-photo-dirty="true"]') ||
       (audience === "supervised" && document.querySelector('[data-field-dirty="true"]'))) { setPhotoBlocked(true); return; }
-    setPhotoBlocked(false); setTaskId(id); history.pushState(null, "", path(locale, id));
+    setPhotoBlocked(false); setWalletOpen(false); setTaskId(id); history.pushState(null, "", path(locale, id));
   }
-  function language(nextLocale: AppLocale) { changeLocale(nextLocale); history.replaceState(null, "", path(nextLocale, taskId)); }
+  function language(nextLocale: AppLocale) { changeLocale(nextLocale); history.replaceState(null, "", path(nextLocale, taskId, walletOpen)); }
   const task = tasks.find(item => item.id === taskId);
-  return <div data-field-offline-shell="public"><FieldShell className="field-page field-detail" testId={taskId ? "field-task-page" : "field-page"}>
-    <ShellHeader eyebrow={task?.propertyName ?? (audience === "supervised" ? proxy("eyebrow") : t("eyebrow"))} title={task ? localizedTaskTitle(task.title, locale) : audience === "supervised" ? proxy("title") : t("title")}
-      titleTestId={task ? "field-task-title" : undefined} subtitle={task ? t("detailMeta", { reservation: task.reservationReference ?? t("noReservation"), guest: task.guestName ?? t("noGuest") }) : cache("offlineWork")}
-      actions={taskId ? <button className="secondary-button" type="button" onClick={() => openJob(null)}>{audience === "supervised" ? proxy("backToValidation") : t("backToJobs")}</button> : undefined} />
-    <FieldLanguage locale={locale} path={path(locale, taskId).replace(`/${locale}`, "")} onChangeLocale={language} />
+  return <div data-field-offline-shell="public"><FieldShell className="field-page field-detail" testId={walletOpen ? "field-wallet-page" : taskId ? "field-task-page" : "field-page"}>
+    <ShellHeader eyebrow={task?.propertyName ?? (audience === "supervised" ? proxy("eyebrow") : t("eyebrow"))} title={walletOpen ? wallet("title") : task ? localizedTaskTitle(task.title, locale) : audience === "supervised" ? proxy("title") : t("title")}
+      titleTestId={task ? "field-task-title" : undefined} subtitle={walletOpen ? wallet("subtitle") : task ? t("detailMeta", { reservation: task.reservationReference ?? t("noReservation"), guest: task.guestName ?? t("noGuest") }) : cache("offlineWork")}
+      actions={walletOpen || taskId ? <button className="secondary-button" type="button" onClick={() => openJob(null)}>{walletOpen ? wallet("back") : audience === "supervised" ? proxy("backToValidation") : t("backToJobs")}</button> : undefined} />
+    <FieldLanguage locale={locale} path={path(locale, taskId, walletOpen).replace(`/${locale}`, "")} onChangeLocale={language} />
     {issueBlocked ? <p role="status" data-testid="field-issue-navigation-blocked">{issue("unsaved")}</p> : null}
     {photoBlocked ? <p role="status" data-testid="field-photo-navigation-blocked">{audience === "supervised" ? proxy("unsaved") : photo("unsaved")}</p> : null}
     {linenBlocked ? <p role="status" data-testid="field-linen-navigation-blocked">{linen("unsaved")}</p> : null}
@@ -97,7 +100,8 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
     {loading ? <p role="status">{cache("preparing")}</p> : !scope ? <EmptyState testId="field-cache-sign-in"><span>{cache("signIn")}</span> <a className="primary-button" href={`/${locale}/login?surface=field`}>{cache("signInAction")}</a></EmptyState> : <>
       <FieldPwa organizationId={scope.organizationId} userId={scope.userId} audience={audience} />
       {snapshotAt ? <p>{cache("lastUpdated", { time: formatDateTime(locale, new Date(snapshotAt)) })}</p> : null}
-      {taskId ? task ? audience === "supervised" ? <CachedProxy key={`${scope.organizationId}:${scope.userId}:${task.id}`} task={task} scope={scope} locale={locale} /> : <CachedChecklist key={task.id} task={task} scope={scope} locale={locale} /> : <EmptyState testId="field-cache-missing">{cache("unavailable")}</EmptyState>
+      {!walletOpen && !taskId && walletAvailable ? <button className="secondary-button" type="button" data-testid="field-wallet-entry" onClick={() => { setWalletOpen(true); history.pushState(null, "", path(locale, null, true)); }}>{wallet("title")}</button> : null}
+      {walletOpen ? <FieldWallet scope={scope} locale={locale} /> : taskId ? task ? audience === "supervised" ? <CachedProxy key={`${scope.organizationId}:${scope.userId}:${task.id}`} task={task} scope={scope} locale={locale} /> : <CachedChecklist key={task.id} task={task} scope={scope} locale={locale} /> : <EmptyState testId="field-cache-missing">{cache("unavailable")}</EmptyState>
         : <FieldJobs scope={scope} locale={locale} initial={tasks} openJob={openJob} audience={audience} />}
     </>}
   </FieldShell></div>;

@@ -61,13 +61,7 @@ export function formatNumber(
 }
 
 export function formatCurrency(locale: AppLocale, money: Money): string {
-  return new Intl.NumberFormat(locale, {
-    style: "currency",
-    currency: money.currency,
-    currencyDisplay: "code",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(decimalToSafeNumber(money.amount));
+  return formatCurrencyAmount(locale, money.amount, money.currency);
 }
 
 export function formatCurrencyAmount(
@@ -75,13 +69,19 @@ export function formatCurrencyAmount(
   amount: DecimalInput,
   currency: string
 ): string {
-  return new Intl.NumberFormat(locale, {
+  const decimal = new Decimal(amount);
+  if (!decimal.isFinite()) throw new Error("Cannot format a non-finite number");
+  const formatter = new Intl.NumberFormat(locale, {
     style: "currency",
     currency,
     currencyDisplay: "code",
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
-  }).format(decimalToSafeNumber(amount));
+  });
+  // ECMA-402 ToIntlMathematicalValue preserves a decimal string's exact value.
+  // TypeScript's NumberFormat declaration still omits this supported input.
+  const formatDecimal = formatter.format.bind(formatter) as (value: number | bigint | string) => string;
+  return formatDecimal(decimal.toFixed());
 }
 
 export function pluralCategory(locale: AppLocale, count: number): Intl.LDMLPluralRule {

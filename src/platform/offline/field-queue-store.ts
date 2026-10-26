@@ -4,6 +4,7 @@ import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull
 import type { FieldUploadManifest } from "@/modules/reservations/domain/field-upload";
 import { isUploadGeneration } from "@/platform/storage/upload-generation";
 import type { FieldDevicePolicySnapshot } from "@/platform/config/field-device-policy";
+import type { FieldWalletSnapshot } from "@/modules/identity/domain/field-wallet";
 import { stockPositionSchema, type FieldStocktakePayload, type StockPosition } from "@/platform/inventory/field-stocktake";
 
 export type FieldQueueScope = { organizationId: string; userId: string };
@@ -32,7 +33,7 @@ type Metadata = { key: string; value: string };
 export type FieldCachedJob = FieldQueueScope & { cacheId: string; task: FieldWorkSnapshot };
 export type FieldDraft = FieldQueueScope & { cacheId: string; taskId: string; checklistItemIds: string[]; note: string; savedAt: string };
 export type FieldCacheRevision = { incarnation: string; generation: number };
-export type FieldCacheState = FieldQueueScope & FieldCacheRevision & { key: string; snapshotAt?: string; cursor?: string; invalidated?: boolean };
+export type FieldCacheState = FieldQueueScope & FieldCacheRevision & { key: string; snapshotAt?: string; cursor?: string; invalidated?: boolean; wallet?: FieldWalletSnapshot; walletReadId?: string };
 export type FieldPhoto = FieldQueueScope & { cacheId: string; taskId: string; manifest: FieldUploadManifest; blob: Blob; deviceId: string;
   incarnation: string; uploadId?: string; generation?: number; uploadedParts: number[]; ready: boolean; attempts: number; retryAt: number };
 export type QueueOutcome = "idle" | "synced" | "conflict" | "rejected" | "queued";
@@ -114,6 +115,32 @@ export class FieldQueueStore extends Dexie {
 
   async entries(scope: FieldQueueScope): Promise<FieldQueueEntry[]> {
     return this.operations.where("[organizationId+userId]").equals([scope.organizationId, scope.userId]).sortBy("sequence");
+  }
+
+  async walletSnapshot(scope: FieldQueueScope) {
+    return this.transaction("r", [this.metadata, this.cacheState], async () => {
+      const key = fieldIdentity(scope);
+      if ((await this.metadata.get("identity"))?.value !== key) throw new Error("FIELD_SESSION_CHANGED");
+      const state = await this.cacheState.get(key);
+      return { incarnation: state?.incarnation ?? null, wallet: state?.wallet ?? null };
+    });
+  }
+
+  async beginWalletRead(scope: FieldQueueScope, incarnation: string): Promise<string> {
+    return this.transaction("rw", [this.metadata, this.cacheState], async () => {
+      const key = fieldIdentity(scope), state = await this.cacheState.get(key);
+      if ((await this.metadata.get("identity"))?.value !== key || state?.incarnation !== incarnation) throw new Error("FIELD_SESSION_CHANGED");
+      const walletReadId = crypto.randomUUID(); await this.cacheState.put({ ...state, walletReadId }); return walletReadId;
+    });
+  }
+
+  async saveWalletSnapshot(scope: FieldQueueScope, wallet: FieldWalletSnapshot | null, incarnation: string, requestId: string): Promise<boolean> {
+    return this.transaction("rw", [this.metadata, this.cacheState], async () => {
+      const key = fieldIdentity(scope), state = await this.cacheState.get(key);
+      if ((await this.metadata.get("identity"))?.value !== key || state?.incarnation !== incarnation || state.walletReadId !== requestId ||
+        (wallet && (wallet.organizationId !== scope.organizationId || wallet.userId !== scope.userId))) return false;
+      await this.cacheState.put({ ...state, wallet: wallet ?? undefined, walletReadId: undefined }); return true;
+    });
   }
 
   async store(scope: FieldQueueScope, operation: SyncPushOp, deviceId?: string): Promise<FieldQueueEntry> {
@@ -517,7 +544,8 @@ export class FieldQueueStore extends Dexie {
       await jobs.bulkDelete(removed); await drafts.bulkDelete(removed);
       if (audience === "assigned" && tombstones.length) await this.linenDrafts.where("[organizationId+userId]").equals([scope.organizationId, scope.userId])
         .filter(draft => tombstones.includes(draft.taskId)).delete();
-      await this.cacheState.put({ ...scope, key, incarnation: revision.incarnation, generation: revision.generation + 1, cursor, snapshotAt });
+      await this.cacheState.put({ ...scope, key, incarnation: revision.incarnation, generation: revision.generation + 1, cursor, snapshotAt,
+        ...(audience === "assigned" ? { wallet: state.wallet, walletReadId: state.walletReadId } : {}) });
       return true;
     });
   }
