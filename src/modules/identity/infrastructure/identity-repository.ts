@@ -2,6 +2,13 @@ import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { AppLocale } from "@/i18n/routing";
 
+function securityAccountSelect(now:Date,assignmentIds?:string[]){
+  return {id:true,sessionVersion:true,mfaRequired:true,person:{select:{preferredLocale:true}},
+    authCredentials:{where:{revokedAt:null},select:{type:true,expiresAt:true,revokedAt:true}},
+    roleAssignments:{where:{archivedAt:null,...(assignmentIds?{id:{in:assignmentIds}}:{validFrom:{lte:now},OR:[{validTo:null},{validTo:{gt:now}}]})},select:{role:{select:{key:true}}}}
+  } satisfies Prisma.UserAccountSelect;
+}
+
 export type IdentityAccountSummary = {
   id: string;
   personId: string;
@@ -277,33 +284,32 @@ export class IdentityRepository {
   }
 
   async authorizationState(id: string) {
+    const batch=await this.authorizationStates([id]),state=batch.states.get(id);
+    return {account:state?.account??null,assignments:state?.assignments??[],now:batch.now};
+  }
+
+  async authorizationStates(ids:readonly string[]) {
     const [clock] = await this.tx.$queryRaw<Array<{ now: Date; ids: string[] }>>(Prisma.sql`
       WITH checked AS MATERIALIZED (SELECT clock_timestamp() AS at)
       SELECT date_trunc('milliseconds',checked.at) AS now, ARRAY(
         SELECT a.id::text FROM role_assignment a JOIN role r ON r.id=a.role_id AND r.organization_id=a.organization_id
-        WHERE a.organization_id=${this.organizationId}::uuid AND a.user_account_id=${id}::uuid
+        WHERE a.organization_id=${this.organizationId}::uuid AND ${ids.length?Prisma.sql`a.user_account_id IN (${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))})`:Prisma.sql`FALSE`}
           AND a.archived_at IS NULL AND r.archived_at IS NULL AND a.valid_from<=checked.at AND (a.valid_to IS NULL OR a.valid_to>checked.at)
       ) AS ids FROM checked`);
-    const [account, assignments] = await Promise.all([
-      this.findSessionSecurityAccount(id, clock.now, clock.ids),
-      this.tx.roleAssignment.findMany({ where: { organizationId: this.organizationId, userAccountId: id, id: { in: clock.ids }, archivedAt: null, role: { archivedAt: null } },
+    const [accounts, assignments] = await Promise.all([
+      this.tx.userAccount.findMany({where:{organizationId:this.organizationId,id:{in:[...ids]},status:"ACTIVE"},select:securityAccountSelect(clock.now,clock.ids)}),
+      this.tx.roleAssignment.findMany({ where: { organizationId: this.organizationId, userAccountId: {in:[...ids]}, id: { in: clock.ids }, archivedAt: null, role: { archivedAt: null } },
         include: { role: { include: { rolePermissions: { include: { permission: true } } } } } })
     ]);
-    return { account, assignments, now: clock.now };
+    const grouped=new Map<string,typeof assignments>();
+    for(const assignment of assignments){if(!assignment.userAccountId)continue;const rows=grouped.get(assignment.userAccountId)??[];rows.push(assignment);grouped.set(assignment.userAccountId,rows);}
+    return {states:new Map(accounts.map(account=>[account.id,{account,assignments:grouped.get(account.id)??[]}])),now:clock.now};
   }
 
   findSessionSecurityAccount(id: string, now = new Date(), assignmentIds?: string[]) {
     return this.tx.userAccount.findFirst({
       where: { id, organizationId: this.organizationId, status: "ACTIVE" },
-      select: {
-        sessionVersion: true, mfaRequired: true,
-        person: { select: { preferredLocale: true } },
-        authCredentials: { where: { revokedAt: null }, select: { type: true, expiresAt: true, revokedAt: true } },
-        roleAssignments: {
-          where: { archivedAt: null, ...(assignmentIds ? { id: { in: assignmentIds } } : { validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] }) },
-          select: { role: { select: { key: true } } }
-        }
-      }
+      select:securityAccountSelect(now,assignmentIds)
     });
   }
 

@@ -24,7 +24,7 @@ export class ExpenseRepository {
     return this.tx.property.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null },
       select: { id: true, name: true, city: true, cityId: true, region: true, regionId: true, timezone: true } });
   }
-  reservation(id: string) { return this.tx.reservation.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null }, select: { id: true, propertyId: true, source: true, reference: true } }); }
+  reservation(id: string) { return this.tx.reservation.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null }, select: { id: true, propertyId: true, source: true, reference: true,status:true,createdBy:true } }); }
   currency(code: string) { return this.tx.currency.findUnique({ where: { code }, select: { code: true, minorUnit: true } }); }
   async editorSources() {
     const [organization, currencies] = await Promise.all([
@@ -81,6 +81,9 @@ export class ExpenseRepository {
   }
   submit(expenseId: string, submittedBy: string, snapshot: Prisma.InputJsonObject, submittedAt: Date) {
     return this.tx.expenseSubmission.create({ data: { organizationId: this.organizationId, expenseId, submittedBy, snapshot, submittedAt } });
+  }
+  lifecycleAudit(expenseId:string,action:string) {
+    return this.tx.auditLog.findFirst({where:{organizationId:this.organizationId,resourceType:"expense",resourceId:expenseId,action},orderBy:{occurredAt:"asc"}});
   }
   page(after?: { at: Date; id: string }) {
     return this.tx.expense.findMany({ where: { organizationId: this.organizationId, ...(after ? { OR: [{ createdAt: { lt: after.at } }, { createdAt: after.at, id: { lt: after.id } }] } : {}) },

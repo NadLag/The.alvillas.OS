@@ -7,7 +7,7 @@ import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
-import { createExpenseDraft, updateExpenseDraft, submitExpense, ExpenseAccessError, ExpenseConflictError } from "@/modules/finance/application/expense-service";
+import { createExpenseDraft, updateExpenseDraft, submitExpense,getExpense,getExpenseDraftEditor, ExpenseAccessError, ExpenseConflictError,ExpenseConfigurationError } from "@/modules/finance/application/expense-service";
 import { getApproval, decideApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
 import { captureReservationCommissionSnapshots } from "@/platform/reservations/finance";
@@ -19,6 +19,8 @@ import { Money } from "@/platform/money/money";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
 import { resolveNotificationChannel } from "@/platform/notifications/notification-channel-service";
 import { defaultNotificationPreferences } from "@/platform/notifications/notification-preferences";
+import { ownNotificationContext } from "@/platform/notifications/notification";
+import { getNotificationPage,openNotification,NotificationAccessError } from "@/platform/notifications/notification-service";
 import { authorize } from "@/platform/authz/authorize";
 import { ExpenseRepository } from "@/modules/finance/infrastructure/expense-repository";
 import { presentAuditHistoryRow } from "@/modules/audit/application/audit-service";
@@ -26,6 +28,8 @@ import { AuditRepository } from "@/modules/audit/infrastructure/audit-repository
 import { maskedValue } from "@/platform/authz/present";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { evaluateExpensePolicy } from "@/modules/finance/application/finance-config-service";
+import { postExpense,voidExpense } from "@/modules/finance/application/expense-posting-service";
+import { writeAuditEvent } from "@/platform/audit/audit-writer";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -70,12 +74,12 @@ async function policy(f: Fixture, approval: Prisma.InputJsonObject = { threshold
     return { owner, allocation };
   });
 }
-async function approver(f: Fixture, scopeType: "property" | "owner", scopeId: string, financial = true) {
+async function approver(f: Fixture, scopeType: "property" | "owner", scopeId: string, financial:boolean|"view" = true) {
   const identity = await withTenant(db, f.org, async tx => {
     const person = await tx.person.create({ data: { organizationId: f.org, displayName: "Dedicated approval reviewer" } });
     const account = await tx.userAccount.create({ data: { organizationId: f.org, personId: person.id, email: `reviewer-${randomUUID()}@example.test` } });
     const role = await tx.role.create({ data: { organizationId: f.org, key: `dedicated_approval_${randomUUID()}`, name: "Dedicated scoped reviewer" } });
-    const keys = financial ? ["expense:view", "expense:approve", "expense:reject"] : ["property:view", "property:approve", "property:reject"];
+    const keys = financial==="view"?["expense:view"]:financial ? ["expense:view", "expense:approve", "expense:reject"] : ["property:view", "property:approve", "property:reject"];
     const permissions = await tx.permission.findMany({ where: { key: { in: keys } } }); expect(permissions).toHaveLength(keys.length);
     await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: role.id, permissionId: permission.id })) });
     const grant = await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: account.id, personId: person.id,
@@ -83,6 +87,23 @@ async function approver(f: Fixture, scopeType: "property" | "owner", scopeId: st
     return { person, account, grant };
   });
   return { ...identity, actor: { organizationId: f.org, accountId: identity.account.id, authContext: await authContextForAccount(f.org, identity.account.id, { db }) } };
+}
+async function emergencyFixture(){
+  const f=await fixture(),configured=await policy(f),receiver=await approver(f,"owner",configured.owner.id,"view");
+  await withTenant(db,f.org,async tx=>{
+    await new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated configured emergency exception",value:{thresholds:[{key:"emergency_owner",requires_approval_from:["owner"],emergency_bypass_owner:true}],
+        routing:{owner:{people:[receiver.person.id],roles:[],assigned:false,channels:["in_app"]}}}});
+    const defaults=defaultNotificationPreferences();await new NotificationRepository(tx,f.org).savePreferences(receiver.account.id,{...defaults,in_app:{...defaults.in_app,enabled:false,operations:false}});
+  });
+  const draft=await create(f,{...f.input,emergency:true});return{f,configured,receiver,draft,input:{id:draft.id,expectedVersion:1,reason:"Dedicated emergency owner notice"}};
+}
+async function postingGrant(f:Fixture,voiding=false){
+  await withTenant(db,f.org,async tx=>{
+    const keys=["expense:pay","financial_transaction:create",...(voiding?["expense:void","financial_transaction:void"]:[])];
+    const permissions=await tx.permission.findMany({where:{key:{in:keys}}});expect(permissions).toHaveLength(keys.length);
+    await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:f.grant.roleId,permissionId:permission.id}))});
+  });
 }
 
 describe("native expenses on real PostgreSQL", () => {
@@ -93,6 +114,212 @@ describe("native expenses on real PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it("posts the approved retained owner allocation exactly once across concurrent retries",async()=>{
+    const f=await fixture(),configured=await policy(f);await postingGrant(f);
+    const draft=await create(f),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated posting approval"},{db});
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Later company policy cannot change approved owner charges",value:{default_treatment:"ALVILLAS_PAID"}}));
+    const input={id:draft.id,expectedVersion:submitted.version,reason:"Dedicated authorized owner expense payment"},ctx=await actor(f);
+    const results=await Promise.all([postExpense(ctx,input,{db}),postExpense(ctx,input,{db})]);expect(results.map(row=>row.idempotent).sort()).toEqual([false,true]);
+    expect(results[0].transactionId).toBe(results[1].transactionId);
+    await withTenant(db,f.org,async tx=>{
+      const journal=await tx.financialTransaction.findFirstOrThrow({include:{postings:{include:{ledgerAccount:true}}}});
+      expect(journal.postings).toHaveLength(2);expect(journal.createdBy).toBe(f.account.id);
+      expect(journal.postings.map(posting=>({side:posting.side,amount:posting.amount.toString(),code:posting.ledgerAccount.code}))).toEqual(expect.arrayContaining([
+        {side:"DEBIT",amount:"500.25",code:"OWNER_PAYABLE"},{side:"CREDIT",amount:"500.25",code:"DEDICATED_EXPENSE_BANK"}]));
+      expect(journal.postings.find(posting=>posting.side==="DEBIT")?.dimensions).toMatchObject({expense_id:draft.id,owner_id:configured.owner.id,property_id:f.property.id});
+      expect(await tx.financialTransaction.count()).toBe(1);expect(await tx.expense.findUniqueOrThrow({where:{id:draft.id}})).toMatchObject({state:"POSTED",transactionId:journal.id});
+      expect(await tx.auditLog.count({where:{action:"expense.posted",resourceId:draft.id}})).toBe(1);
+    });
+    await expect(postExpense(ctx,{...input,reason:"Different intent is not an exact payment retry"},{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+  });
+  it("rejects linking an approved expense to an unrelated balanced journal without its source audit",async()=>{
+    const f=await fixture();await policy(f);const draft=await create(f),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated raw posting guard source"},{db});
+    await expect(withTenant(db,f.org,async tx=>{
+      const journal=await new FinanceRepository(tx,f.org).createFinancialTransaction({reference:"Dedicated unrelated journal",description:"Dedicated unrelated balanced movement",
+        occurredAt:new Date("2026-10-26"),idempotencyKey:"unrelated-expense-journal",createdBy:f.account.id,postings:[
+          {ledgerAccountId:f.bank.id,side:"DEBIT",amount:Money.of("500.25","MAD"),bucket:"TEST",dimensions:{property_id:f.property.id}},
+          {ledgerAccountId:f.bank.id,side:"CREDIT",amount:Money.of("500.25","MAD"),bucket:"TEST",dimensions:{property_id:f.property.id}}]});
+      await new ExpenseRepository(tx,f.org).transition(draft.id,submitted.version,"APPROVED","POSTED",f.account.id,journal.id);
+    })).rejects.toThrow("expense posting must retain");
+  });
+  it("requires independent posting permission and a final financial approval before changing money",async()=>{
+    const f=await fixture(),configured=await policy(f),reviewer=await approver(f,"owner",configured.owner.id);
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated final owner payment gate",value:{thresholds:[{key:"owner_gate",requires_approval_from:["owner"]}],routing:{owner:{roles:[],people:[reviewer.person.id],assigned:false,channels:["in_app"]}}}}));
+    const draft=await create(f),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated pending owner submission"},{db});
+    const input={id:draft.id,expectedVersion:submitted.version,reason:"Dedicated final approval payment"};
+    await expect(postExpense(await actor(f),input,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    await postingGrant(f);await expect(postExpense(await actor(f),input,{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+    const approval=await getApproval(reviewer.actor,submitted.approvalId!,{db});
+    await decideApproval(reviewer.actor,{id:approval.id,stageId:approval.stageId,decision:"APPROVED",reason:"Dedicated owner decision before payment"},{db});
+    await expect(postExpense({organizationId:f.org,actorId:reviewer.account.id,authContext:reviewer.actor.authContext},{...input,expectedVersion:submitted.version+1},{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    expect(await withTenant(db,f.org,tx=>tx.financialTransaction.count())).toBe(0);
+    expect(await postExpense(await actor(f),{...input,expectedVersion:submitted.version+1},{db})).toMatchObject({id:draft.id,idempotent:false});
+    const other=await fixture();await postingGrant(other);await expect(postExpense(await actor(other),input,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+  });
+  it.each([
+    {treatment:"ALVILLAS_PAID",amount:"500.25",expected:{ALVILLAS_EXPENSE:"500.25"}},
+    {treatment:"INCLUDED_IN_COMMISSION",amount:"500.25",expected:{ALVILLAS_EXPENSE:"500.25"}},
+    {treatment:"GUEST_PAID",amount:"500.25",expected:{GUEST_EXPENSE:"500.25"}},
+    {treatment:"SHARED",amount:"500.25",expected:{OWNER_EXPENSE:"250.13",ALVILLAS_EXPENSE:"250.12"}},
+    {treatment:"SHARED",amount:"0.01",expected:{OWNER_EXPENSE:"0.01"}}
+  ])("posts configured $treatment expense $amount without losing money or charging an excluded party",async({treatment,amount,expected})=>{
+    const f=await fixture();await policy(f);await postingGrant(f);
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated configured expense treatment",value:{default_treatment:treatment,
+        ...(treatment==="SHARED"?{categories:{maintenance:{treatment,owner_share_bps:5000,alvillas_share_bps:5000}}}:{})}}));
+    const draft=await create(f,{...f.input,amount}),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated allocation submission"},{db});
+    const posted=await postExpense(await actor(f),{id:draft.id,expectedVersion:submitted.version,reason:"Dedicated configured payment"},{db});
+    await withTenant(db,f.org,async tx=>{
+      const lines=await tx.posting.findMany({where:{transactionId:posted.transactionId}});
+      expect(Object.fromEntries(lines.filter(line=>line.side==="DEBIT").map(line=>[line.bucket,line.amount.toString()]))).toEqual(expected);
+      expect(lines.filter(line=>line.side==="CREDIT")).toHaveLength(1);
+      expect(lines.find(line=>line.side==="CREDIT")?.amount.toString()).toBe(amount);
+    });
+  });
+  it("voids a posted expense once with exact opposite movements and retains the immutable original",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f,true);const draft=await create(f);
+    const submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated reversible expense submission"},{db});
+    const posted=await postExpense(await actor(f),{id:draft.id,expectedVersion:submitted.version,reason:"Dedicated original expense payment"},{db});
+    const before=await withTenant(db,f.org,tx=>tx.posting.findMany({where:{transactionId:posted.transactionId},orderBy:{id:"asc"}}));
+    const input={id:draft.id,expectedVersion:posted.version,reason:"Dedicated correction reverses the original payment"},ctx=await actor(f);
+    const results=await Promise.all([voidExpense(ctx,input,{db}),voidExpense(ctx,input,{db})]);expect(results.map(row=>row.idempotent).sort()).toEqual([false,true]);
+    expect(results[0].reversalTransactionId).toBe(results[1].reversalTransactionId);
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.posting.findMany({where:{transactionId:posted.transactionId},orderBy:{id:"asc"}})).toEqual(before);
+      const reverse=await tx.financialTransaction.findUniqueOrThrow({where:{id:results[0].reversalTransactionId},include:{postings:true}});
+      expect(reverse.reversesTransactionId).toBe(posted.transactionId);
+      expect(reverse.postings.map(line=>({account:line.ledgerAccountId,side:line.side,amount:line.amount.toString(),bucket:line.bucket,dimensions:line.dimensions}))).toEqual(expect.arrayContaining(
+        before.map(line=>({account:line.ledgerAccountId,side:line.side==="DEBIT"?"CREDIT":"DEBIT",amount:line.amount.toString(),bucket:line.bucket,dimensions:line.dimensions}))));
+      expect(await tx.financialTransaction.count()).toBe(2);expect(await tx.auditLog.count({where:{action:"expense.voided",resourceId:draft.id}})).toBe(1);
+      expect(await tx.expense.findUniqueOrThrow({where:{id:draft.id}})).toMatchObject({state:"VOIDED",transactionId:posted.transactionId});
+    });
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:f.grant.id},data:{validTo:new Date()}}));
+    await expect(voidExpense(ctx,input,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+  });
+  it("rejects a void state without an attributed mirror journal and denies payment-only users reversal access",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f);const draft=await create(f);
+    const submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated guarded reversal source"},{db});
+    const posted=await postExpense(await actor(f),{id:draft.id,expectedVersion:submitted.version,reason:"Dedicated payment only grant"},{db});
+    await expect(voidExpense(await actor(f),{id:draft.id,expectedVersion:posted.version,reason:"Payment grants do not authorize reversals"},{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    await expect(withTenant(db,f.org,tx=>new ExpenseRepository(tx,f.org).transition(draft.id,posted.version,"POSTED","VOIDED",f.account.id))).rejects.toThrow("expense void requires");
+  });
+  it("rejects an attributed balanced reversal that changes even one original amount",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f,true);const draft=await create(f);
+    const submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated exact reversal source"},{db});
+    const posted=await postExpense(await actor(f),{id:draft.id,expectedVersion:submitted.version,reason:"Dedicated original bank payment"},{db});
+    await expect(withTenant(db,f.org,async tx=>{
+      const lines=await tx.posting.findMany({where:{transactionId:posted.transactionId}});
+      const reverse=await new FinanceRepository(tx,f.org).createFinancialTransaction({reference:`EXPENSE:${draft.id}:VOID`,description:"Dedicated invalid partial reversal",occurredAt:new Date(),
+        idempotencyKey:`expense:${draft.id}:voided`,createdBy:f.account.id,reversesTransactionId:posted.transactionId,postings:lines.map(line=>({ledgerAccountId:line.ledgerAccountId,
+          side:line.side==="DEBIT"?"CREDIT":"DEBIT",amount:Money.of("500.24","MAD"),bucket:z.string().parse(line.bucket),dimensions:z.record(z.string(),z.unknown()).parse(line.dimensions)}))});
+      await new ExpenseRepository(tx,f.org).transition(draft.id,posted.version,"POSTED","VOIDED",f.account.id);
+      await writeAuditEvent(tx,{organizationId:f.org,actorId:f.account.id,action:"expense.voided",resourceType:"expense",resourceId:draft.id,
+        after:{transactionId:posted.transactionId,reversalTransactionId:reverse.id},reason:"Dedicated raw partial reversal rejection",requestId:randomUUID(),occurredAt:new Date()});
+    })).rejects.toThrow("mirror every original posting exactly");
+    expect(await withTenant(db,f.org,tx=>tx.financialTransaction.count())).toBe(1);
+  });
+  it("posts a custom owner, company and guest split from the retained submitted configuration",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f);
+    const config=await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated custom allocation agreement",value:{default_treatment:"OWNER_PAID",categories:{maintenance:{treatment:"CUSTOM",owner_share_bps:2500,alvillas_share_bps:2500,guest_share_bps:5000}}}}));
+    const draft=await create(f,{...f.input,amount:"100.01"}),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated custom allocation submission"},{db});
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-03"),reason:"Later custom agreement must not change the submitted split",value:{default_treatment:"OWNER_PAID",categories:{maintenance:{treatment:"CUSTOM",owner_share_bps:7500,alvillas_share_bps:0,guest_share_bps:2500}}}}));
+    const result=await postExpense(await actor(f),{id:draft.id,expectedVersion:submitted.version,reason:"Dedicated retained custom split payment"},{db});
+    await withTenant(db,f.org,async tx=>{
+      const lines=await tx.posting.findMany({where:{transactionId:result.transactionId}});expect(lines).toHaveLength(4);
+      expect(Object.fromEntries(lines.filter(line=>line.side==="DEBIT").map(line=>[line.bucket,line.amount.toString()]))).toEqual({OWNER_EXPENSE:"25",ALVILLAS_EXPENSE:"25",GUEST_EXPENSE:"50.01"});
+      expect(lines.find(line=>line.side==="CREDIT")?.amount.toString()).toBe("100.01");
+      expect((await tx.expenseSubmission.findUniqueOrThrow({where:{organizationId_expenseId:{organizationId:f.org,expenseId:draft.id}}})).snapshot).toMatchObject({policies:[{allocationRule:{configRuleId:config.id,version:config.version}}]});
+    });
+  });
+  it("keeps an expense editable and unposted when its custom percentages are incomplete",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f);
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated incomplete custom rule rejection",value:{default_treatment:"OWNER_PAID",categories:{maintenance:{treatment:"CUSTOM",owner_share_bps:2500,alvillas_share_bps:2500}}}}));
+    const draft=await create(f);await expect(submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Reject incomplete custom financial configuration"},{db})).rejects.toBeInstanceOf(ExpenseConfigurationError);
+    await withTenant(db,f.org,async tx=>{expect(await tx.expense.findUniqueOrThrow({where:{id:draft.id}})).toMatchObject({state:"DRAFT",version:1});
+      expect(await tx.financialTransaction.count()).toBe(0);expect(await tx.expenseSubmission.count()).toBe(0);expect(await tx.outboxEvent.count({where:{type:"ExpenseSubmitted"}})).toBe(0);});
+  });
+  it("loads the authorized draft editor without granting create rights and rejects read-only or submitted edits",async()=>{
+    const f=await fixture();await policy(f);const draft=await create(f);
+    await withTenant(db,f.org,async tx=>{
+      const permission=await tx.permission.findFirstOrThrow({where:{key:"expense:create"}});
+      await tx.rolePermission.deleteMany({where:{organizationId:f.org,roleId:f.grant.roleId,permissionId:permission.id}});
+    });
+    const ctx=await actor(f),editor=await getExpenseDraftEditor(ctx,draft.id,{db});expect(ctx.authContext.permissions.has("expense:create")).toBe(false);
+    expect(editor.draft).toMatchObject({id:draft.id,version:1,amount:"500.25",fundingAccountId:f.bank.id,idempotencyKey:f.input.idempotencyKey});
+    expect(editor.editor.accounts.map(account=>account.id)).toContain(f.bank.id);
+    const reader=await approver(f,"property",f.property.id,"view");
+    await expect(getExpenseDraftEditor({organizationId:f.org,actorId:reader.account.id,authContext:reader.actor.authContext},draft.id,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    await updateExpenseDraft(ctx,{id:draft.id,expectedVersion:1,draft:{...f.input,amount:"100.01",reason:"Dedicated audited draft correction"}},{db});
+    await submitExpense(ctx,{id:draft.id,expectedVersion:2,reason:"Dedicated corrected draft submission"},{db});
+    await expect(getExpenseDraftEditor(ctx,draft.id,{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+  });
+  it("retains an older linked reservation beyond the choice page without exposing unauthorized booking references",async()=>{
+    const f=await fixture(),linkedId=randomUUID();
+    await withTenant(db,f.org,async tx=>{
+      const permission=await tx.permission.findFirstOrThrow({where:{key:"reservation:view"}});
+      await tx.rolePermission.create({data:{organizationId:f.org,roleId:f.grant.roleId,permissionId:permission.id}});
+      await tx.reservation.createMany({data:Array.from({length:101},(_,index)=>({id:index===0?linkedId:randomUUID(),organizationId:f.org,propertyId:f.property.id,reference:randomUUID(),source:"DIRECT",status:"IMPORTED",
+        guestName:"Dedicated draft editor booking",checkIn:new Date(Date.UTC(2025,0,index*3+1)),checkOut:new Date(Date.UTC(2025,0,index*3+3)),nights:2,idempotencyKey:randomUUID()}))});
+    });
+    const draft=await create(f,{...f.input,reservationId:linkedId}),ctx=await actor(f),visible=await getExpenseDraftEditor(ctx,draft.id,{db});
+    expect(visible.editor.reservations).toHaveLength(101);expect(visible.editor.reservations.some(row=>row.id===linkedId)).toBe(true);
+    await withTenant(db,f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{key:"reservation:view"}});
+      await tx.rolePermission.deleteMany({where:{organizationId:f.org,roleId:f.grant.roleId,permissionId:permission.id}});});
+    const financialOnly=await getExpenseDraftEditor(ctx,draft.id,{db});expect(financialOnly.editor.reservations).toHaveLength(0);expect(financialOnly.draft.reservationId).toBe(linkedId);
+    await updateExpenseDraft(ctx,{id:draft.id,expectedVersion:1,draft:{...f.input,reservationId:linkedId,amount:"100.01",reason:"Retain the original financial booking link"}},{db});
+    expect(await withTenant(db,f.org,tx=>tx.expense.findUniqueOrThrow({where:{id:draft.id}}))).toMatchObject({reservationId:linkedId,version:2});
+  });
+  it("retains one configured emergency owner notice and audit without inventing an owner decision",async()=>{
+    const {f,configured,receiver,draft,input}=await emergencyFixture(),ctx=await actor(f);
+    expect(await submitExpense(ctx,input,{db})).toMatchObject({state:"APPROVED",approvalId:null,idempotent:false});
+    expect(await submitExpense(ctx,input,{db})).toMatchObject({state:"APPROVED",approvalId:null,idempotent:true});
+    const event=await withTenant(db,f.org,async tx=>{
+      const notices=await tx.notification.findMany({where:{kind:"expense_emergency",targetId:draft.id}});expect(notices).toHaveLength(1);expect(notices[0].recipientId).toBe(receiver.account.id);
+      expect(await tx.approvalRequest.count()).toBe(0);expect(await tx.financialTransaction.count()).toBe(0);
+      expect(await tx.auditLog.count({where:{resourceId:draft.id,action:"expense.emergency_owner_notified"}})).toBe(1);
+      const event=await tx.outboxEvent.findUniqueOrThrow({where:{organizationId_idempotencyKey:{organizationId:f.org,idempotencyKey:`expense:${draft.id}:emergency:${configured.owner.id}:${receiver.account.id}`}}});
+      await new NotificationRepository(tx,f.org).deliver({...event,status:"PENDING"});expect(await tx.notification.count({where:{kind:"expense_emergency",targetId:draft.id}})).toBe(1);return event;
+    });
+    const owner={organizationId:f.org,actorId:receiver.account.id,authContext:await authContextForAccount(f.org,receiver.account.id,{db})};
+    expect(await getExpense(owner,draft.id,{db})).toMatchObject({state:"APPROVED",emergencyException:true,canSubmit:false});
+    expect(owner.authContext.permissions.has("expense:approve")).toBe(false);
+    const inbox={organizationId:f.org,accountId:receiver.account.id,authContext:ownNotificationContext(owner.authContext,receiver.account.id)};
+    const notice=(await getNotificationPage(inbox,{}, {db})).items.find(item=>item.kind==="expense_emergency")!;
+    expect(notice.available).toBe(true);expect(await openNotification(inbox,notice.id,"fr",{db})).toBe(`/fr/app/expenses/${draft.id}`);
+    const operations=await approver(f,"property",f.property.id,false);
+    await expect(withTenant(db,f.org,tx=>tx.notification.create({data:{organizationId:f.org,recipientId:operations.account.id,eventId:event.id,targetId:draft.id,kind:"expense_emergency"}}))).rejects.toThrow("retained owner source");
+    const other=await fixture();
+    await expect(withTenant(db,other.org,tx=>tx.notification.create({data:{organizationId:other.org,recipientId:other.account.id,eventId:event.id,targetId:draft.id,kind:"expense_emergency"}}))).rejects.toThrow("retained owner source");
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:receiver.grant.id},data:{validTo:new Date()}}));
+    await expect(getExpense(owner,draft.id,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    expect((await getNotificationPage(inbox,{}, {db})).items.find(item=>item.id===notice.id)).toMatchObject({available:false});
+    await expect(openNotification(inbox,notice.id,"fr",{db})).rejects.toBeInstanceOf(NotificationAccessError);
+    expect(await withTenant(db,f.org,tx=>tx.notification.count({where:{kind:"expense_emergency",targetId:draft.id}}))).toBe(1);
+  });
+  it("rolls back an emergency exception if the mandatory notice has no durable receipt and safely retries",async()=>{
+    const {f,draft,input}=await emergencyFixture();
+    const fault=vi.spyOn(NotificationRepository.prototype,"publishExpenseEmergencyNotices").mockResolvedValueOnce({count:1});
+    try{await expect(submitExpense(await actor(f),input,{db})).rejects.toThrow("delivered atomically");}finally{fault.mockRestore();}
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.expense.findFirstOrThrow()).toMatchObject({state:"DRAFT",version:1});expect(await tx.expenseSubmission.count()).toBe(0);
+      expect(await tx.outboxEvent.count({where:{type:"ExpenseSubmitted"}})).toBe(0);expect(await tx.auditLog.count({where:{action:"expense.emergency_owner_notified"}})).toBe(0);
+    });
+    expect(await submitExpense(await actor(f),input,{db})).toMatchObject({id:draft.id,state:"APPROVED",idempotent:false});
+    expect(await withTenant(db,f.org,tx=>tx.notification.count({where:{targetId:draft.id,kind:"expense_emergency"}}))).toBe(1);
+  });
+  it("does not disclose an emergency expense to a future owner grant when the process clock is ahead",async()=>{
+    const {f,receiver,input}=await emergencyFixture();
+    const at=await withTenant(db,f.org,async tx=>{const at=(await tx.$queryRaw<Array<{at:Date}>>`SELECT clock_timestamp() AS at`)[0].at;
+      await tx.roleAssignment.update({where:{id:receiver.grant.id},data:{validFrom:new Date(at.getTime()+60_000)}});return at;});
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date(at.getTime()+600_000));
+    try{await expect(submitExpense(await actor(f),input,{db})).rejects.toThrow("authorized owner notice recipient");}finally{vi.useRealTimers();}
+    await withTenant(db,f.org,async tx=>{expect(await tx.expenseSubmission.count()).toBe(0);expect(await tx.notification.count({where:{kind:"expense_emergency"}})).toBe(0);});
+  });
   it.each(["behind","ahead"] as const)("uses PostgreSQL grant validity when the application clock is %s", async direction => {
     const f = await fixture();
     const at = await withTenant(db, f.org, async tx => {
@@ -267,10 +494,10 @@ describe("native expenses on real PostgreSQL", () => {
       expect((await tx.commissionSnapshot.findUniqueOrThrow({ where: { id: original.before.id } })).snapshotValue).toEqual(original.before.snapshotValue);
     });
   });
-  it("does not bypass an owner approval while the required emergency notification workflow is unavailable", async () => {
+  it("does not bypass an owner approval without configured durable owner notice routing", async () => {
     const f = await fixture(); await policy(f, { thresholds: [{ key: "emergency", emergency_bypass_owner: true, requires_approval_from: ["owner"] }] });
     const draft = await create(f, { ...f.input, emergency: true });
-    await expect(submitExpense(await actor(f), { id: draft.id, expectedVersion: 1, reason: "Dedicated emergency notification dependency" }, { db })).rejects.toThrow("post-hoc owner notification");
+    await expect(submitExpense(await actor(f), { id: draft.id, expectedVersion: 1, reason: "Dedicated emergency notification dependency" }, { db })).rejects.toBeInstanceOf(ExpenseConfigurationError);
     await withTenant(db, f.org, async tx => {
       expect(await tx.expense.findFirstOrThrow()).toMatchObject({ state: "DRAFT", version: 1 }); expect(await tx.expenseSubmission.count()).toBe(0);
       expect(await tx.outboxEvent.count({ where: { type: "ExpenseSubmitted" } })).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);
