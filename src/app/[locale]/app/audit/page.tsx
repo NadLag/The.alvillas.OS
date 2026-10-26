@@ -183,7 +183,7 @@ export default async function AuditPage({
           <EmptyState testId="audit-empty" tone="motif">{t("empty")}</EmptyState>
         ) : (
           <div className="audit-table" data-testid="audit-table">
-            <div className="audit-table-head" role="row">
+            <div className="audit-table-head">
               <span>{t("columns.when")}</span>
               <span>{t("columns.actor")}</span>
               <span>{t("columns.action")}</span>

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import { expect, test, type Page } from "@playwright/test";
-import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow, enrollE2EAccountSecurity } from "./support/auth";
+import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import AxeBuilder from "@axe-core/playwright";
 import { maskedValue } from "@/platform/authz/present";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
@@ -136,7 +136,7 @@ async function ensureE2EUserWithRole(input: {
       let role = await repository.findRoleByKey(input.roleKey);
       if (!role && input.permissionKeys) {
         role = await tx.role.create({ data: { organizationId: bootstrapOrganizationId, key: input.roleKey, name: "Dedicated audit-only reader" } });
-        const permissions = await tx.permission.findMany({ where: { key: { in: input.permissionKeys } } });
+        const permissions = await tx.permission.findMany({ where: { organizationId: bootstrapOrganizationId, key: { in: input.permissionKeys } } });
         expect(permissions).toHaveLength(input.permissionKeys.length);
         await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: bootstrapOrganizationId, roleId: role!.id, permissionId: permission.id })) });
       }
@@ -274,7 +274,6 @@ test.describe("audit history", () => {
       const email = e2eEmail(label, testInfo.project.name);
       const password = "dedicated local audit privacy fixture";
       await ensureE2EUserWithRole({ email, password, roleKey: `audit_private_${randomUUID()}`, permissionKeys: ["audit_log:view", "audit_log:export"] });
-      await enrollE2EAccountSecurity(email, password);
       const resourceId = await seedAuditEvents(await userAccountId(email), label);
       await login(page, email, password);
       await page.goto(`/${locale}/app/audit?resourceId=${resourceId}`);
