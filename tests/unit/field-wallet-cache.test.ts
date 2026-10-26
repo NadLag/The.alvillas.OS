@@ -56,4 +56,14 @@ describe("wallet cache reuses existing account-scoped private state", () => {
     await f.queue.saveWalletSnapshot(owner, null, f.state.incarnation, await f.queue.beginWalletRead(owner, f.state.incarnation));
     expect(await delayed()).toBe(false); expect((await f.queue.walletSnapshot(owner)).wallet).toBeNull();
   });
+  it("rejects an in-flight read across a scope cursor reset and accepts only a fresh read", async () => {
+    const f = await setup();
+    await f.queue.invalidateCache(owner);
+    await f.queue.publishCache(owner, (await f.queue.readCache(owner)).state!, [], [], "new-scope", new Date().toISOString());
+    expect(await f.queue.saveWalletSnapshot(owner, f.snapshot, f.state.incarnation, f.readId)).toBe(false);
+    expect((await f.queue.walletSnapshot(owner)).wallet).toBeNull();
+    const fresh = await f.queue.beginWalletRead(owner, f.state.incarnation);
+    expect(await f.queue.saveWalletSnapshot(owner, f.snapshot, f.state.incarnation, fresh)).toBe(true);
+    expect((await f.queue.walletSnapshot(owner)).wallet).toEqual(f.snapshot);
+  });
 });

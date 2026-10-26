@@ -31,6 +31,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Worker wallet requires i
     const user = z.object({ user: z.object({ id: z.uuid(), personId: z.uuid(), organizationId: z.uuid() }) }).parse(await (await page.request.get("/api/auth/session")).json()).user;
     expect(user.organizationId).toBe(f.organizationId); expect((await page.request.get("/api/field/wallet")).status()).toBe(403);
     await expect(page.getByTestId("field-wallet-entry")).toHaveCount(0);
+    await expect.poll(async () => (await storedFieldData(page, "cacheState")).some(row => Boolean(row && typeof row === "object" && "cursor" in row && row.cursor))).toBe(true);
     await withTenant(f.db, f.organizationId, async tx => {
       const account = await tx.userAccount.findUniqueOrThrow({ where: { id: user.id }, include: { authCredentials: true } });
       expect(account.passwordHash).toBeNull(); expect(account.authCredentials.find(row => row.type === "PIN")?.secretHash).toMatch(/^\$argon2id\$/u);
@@ -75,10 +76,31 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Worker wallet requires i
     expect(model.balances).toContainEqual({ currency: "MAD", amount: "476.00" }); expect(model.balances).toContainEqual({ currency: "EUR", amount: "9007199254740991.99" });
     expect(model.movements).toHaveLength(25); expect(model.hasNext).toBe(true); expect(model.compensationVisible).toBe(false);
     expect((await page.request.get(`/api/field/wallet?personId=${randomUUID()}`)).status()).toBe(400);
+    // Exercise the real scope-change cursor rejection while a valid wallet
+    // response is in flight. Only transport timing changes; both API responses
+    // and the cache reset come from the application and PostgreSQL.
+    let releaseCursor!: () => void, cacheReady!: () => void;
+    const walletStarted = new Promise<void>(resolve => { releaseCursor = resolve; });
+    const refreshedCache = new Promise<void>(resolve => { cacheReady = resolve; });
+    let resetObserved = false, heldWallet = false;
+    await page.exposeFunction("walletScopeCacheReady", () => { if (resetObserved) cacheReady(); });
+    await page.addInitScript(() => window.addEventListener("alvillas-field-cache-ready", () => { void (window as unknown as { walletScopeCacheReady(): Promise<void> }).walletScopeCacheReady(); }));
+    await page.route("**/api/sync/pull?**", async route => {
+      const response = await route.fetch();
+      if (response.status() === 409 && !resetObserved) { resetObserved = true; await walletStarted; }
+      await route.fulfill({ response });
+    });
+    await page.route("**/api/field/wallet?page=1", async route => {
+      const response = await route.fetch();
+      if (!heldWallet) { heldWallet = true; releaseCursor(); await refreshedCache; }
+      await route.fulfill({ response });
+    });
     await page.goto(`/${locale}/app/field`); await expect(page.getByTestId("field-wallet-entry")).toBeVisible(); await page.getByTestId("field-wallet-entry").click();
     await expect(page.getByTestId("field-wallet-page")).toBeVisible(); const wallet = page.getByTestId("field-wallet");
     const euro = wallet.getByTestId("field-wallet-balances").getByRole("listitem").filter({ hasText: "EUR" });
     await expect(euro).toContainText(/[.,٫](?:99|٩٩)/u); await expect(wallet.getByTestId("field-wallet-compensation-masked")).toHaveText(maskedValue);
+    expect(resetObserved).toBe(true); expect(heldWallet).toBe(true);
+    await page.unroute("**/api/sync/pull?**"); await page.unroute("**/api/field/wallet?page=1");
     const balances = wallet.getByTestId("field-wallet-balances");
     await balances.evaluate(element => { (element as HTMLElement).style.fontSize = `${Number.parseFloat(getComputedStyle(element).fontSize) * 2}px`; });
     const overflow = await balances.getByRole("listitem").evaluateAll((elements, viewportWidth) => Math.max(0, ...[...elements, ...elements.flatMap(element => Array.from(element.querySelectorAll("strong")))].flatMap(element => {
