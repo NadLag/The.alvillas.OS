@@ -9,7 +9,7 @@ import { openFieldFixture } from "./support/field-fixture";
 import { ensureE2EAdmin, e2eEmail, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 
 test.use({ serviceWorkers: "allow", actionTimeout: 30000, navigationTimeout: 60000 });
-for (const locale of ["en", "fr", "ar"] as const) test(`Native expense submission and scoped owner approval in ${locale}`, async ({ page: admin, browser }, info) => {
+for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval, posting, reversal and transaction groups in ${locale}`, async ({ page: admin, browser }, info) => {
   test.skip(!process.env.DATABASE_URL, "Real local PostgreSQL is required"); test.setTimeout(420000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw new Error("Native expense acceptance requires local PostgreSQL");
   const f = await openFieldFixture(admin, info, "en"), origin = new URL(admin.url()).origin, suffix = randomUUID().slice(0,8);
@@ -210,6 +210,73 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense submissio
     expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);
     await admin.locator("main").evaluate(element => { (element as HTMLElement).style.fontSize="200%"; });
     expect(await admin.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-    await admin.screenshot({ path: info.outputPath(`native-expense-${locale}.png`), fullPage: true }); expect(errors).toEqual([]);
+    await admin.screenshot({ path: info.outputPath(`native-expense-${locale}.png`), fullPage: true });
+    // Group the real payment and exact reversal produced by the native workflow.
+    const groupSource = await withTenant(f.db, f.organizationId, async tx => {
+      const expense = await tx.expense.findUniqueOrThrow({ where: { id: expenseId } });
+      const original = await tx.financialTransaction.findUniqueOrThrow({ where: { id: expense.transactionId! }, include: { reversedByTransactions: true } });
+      const ids = [original.id, original.reversedByTransactions[0].id];
+      const headers = await tx.financialTransaction.findMany({ where: { id: { in: ids } }, orderBy: { id: "asc" } });
+      const postings = await tx.posting.findMany({ where: { transactionId: { in: ids } }, orderBy: { id: "asc" } });
+      return { ids, headers, postings };
+    });
+    await admin.goto(`/${locale}/app`); await admin.getByTestId("transaction-groups-link").click();
+    await expect(admin.getByTestId("transaction-groups-page")).toBeVisible();
+    const groupName = `Dedicated related expense ${suffix} ${"B".repeat(120)}`.slice(0, 120);
+    await admin.getByTestId("transaction-group-name").fill(groupName);
+    await admin.getByTestId("transaction-group-reason").fill("Dedicated native payment and reversal grouping");
+    expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);
+    const groupRequest = admin.waitForRequest(value => value.method() === "POST" && Boolean(value.headers()["next-action"]) && Boolean(value.postData()?.includes(groupName)));
+    await admin.getByTestId("transaction-group-create").click(); const groupCreated = await groupRequest;
+    await expect(admin.getByTestId("transaction-group-detail")).toBeVisible();
+    const groupId = new URL(admin.url()).pathname.split("/").at(-1)!;
+    const actionRequest = (value: typeof groupCreated) => ({ data: value.postDataBuffer()!, headers: {
+      "content-type": value.headers()["content-type"], "next-action": value.headers()["next-action"], accept: "text/x-component", origin } });
+    for (const response of await Promise.all(Array.from({ length: 4 }, () => admin.request.post(groupCreated.url(), actionRequest(groupCreated))))) expect(await response.text()).toContain('"ok":true');
+    for (const restricted of [fieldPage, ownerPage]) {
+      const response = await restricted.request.get(`/${locale}/app/finance/groups/${groupId}`);
+      expect(response.status()).toBe(404); expect(await response.text()).not.toContain(groupName);
+      expect(await (await restricted.request.post(groupCreated.url(), actionRequest(groupCreated))).text()).toContain('"code":"forbidden"');
+    }
+    const attach = async (source: typeof groupSource.headers[number]) => {
+      await admin.getByTestId("transaction-group-candidate-search").fill(source.reference);
+      await admin.getByTestId("transaction-group-candidate-search-form").locator('button[type="submit"]').click();
+      await admin.getByTestId("transaction-group-candidate").selectOption(source.id);
+      const form = admin.getByTestId("transaction-group-attach-form");
+      await form.getByTestId("transaction-group-membership-reason").fill("Dedicated native related transaction association");
+      const captured = admin.waitForRequest(value => value.method() === "POST" && Boolean(value.headers()["next-action"]) && Boolean(value.postData()?.includes(source.id)));
+      await form.getByTestId("transaction-group-attach").click(); const mutation = await captured;
+      await expect(admin.getByTestId("transaction-group-member").filter({ has: admin.getByRole("heading", { name: source.reference, exact: true }) })).toHaveCount(1);
+      return mutation;
+    };
+    const firstGroupAttachment = await attach(groupSource.headers[0]); await attach(groupSource.headers[1]);
+    for (const response of await Promise.all(Array.from({ length: 4 }, () => admin.request.post(firstGroupAttachment.url(), actionRequest(firstGroupAttachment))))) expect(await response.text()).toContain('"ok":true');
+    expect(await (await fieldPage.request.post(firstGroupAttachment.url(), actionRequest(firstGroupAttachment))).text()).toContain('"code":"forbidden"');
+    await expect(admin.getByTestId("transaction-group-member")).toHaveCount(2);
+    await expect(admin.getByTestId("transaction-group-history")).toHaveCount(2);
+    await expect(admin.getByTestId("transaction-group-movement")).toHaveCount(2);
+    for (const movement of await admin.getByTestId("transaction-group-movement").all()) await expect(movement.locator("strong")).toHaveText(formatCurrencyAmount(locale, "0.00", "MAD"));
+    const member = admin.getByTestId("transaction-group-member").filter({ has: admin.getByRole("heading", { name: groupSource.headers[0].reference, exact: true }) });
+    await member.locator("details").last().locator("summary").click();
+    await member.getByTestId("transaction-group-membership-reason").fill("Dedicated grouping correction preserves journal facts");
+    await member.getByTestId("transaction-group-detach").click(); await expect(admin.getByTestId("transaction-group-member")).toHaveCount(1);
+    await expect(admin.getByTestId("transaction-group-history")).toHaveCount(3);
+    expect(await (await admin.request.post(firstGroupAttachment.url(), actionRequest(firstGroupAttachment))).text()).toContain('"ok":true');
+    await admin.reload(); await expect(admin.getByTestId("transaction-group-member")).toHaveCount(1);
+    await attach(groupSource.headers[0]); await expect(admin.getByTestId("transaction-group-history")).toHaveCount(4);
+    await withTenant(f.db, f.organizationId, async tx => {
+      expect(await tx.financialTransaction.findMany({ where: { id: { in: groupSource.ids } }, orderBy: { id: "asc" } })).toEqual(groupSource.headers);
+      expect(await tx.posting.findMany({ where: { transactionId: { in: groupSource.ids } }, orderBy: { id: "asc" } })).toEqual(groupSource.postings);
+      expect(await tx.transactionGroup.count({ where: { id: groupId } })).toBe(1);
+      expect(await tx.transactionGroupEntry.count({ where: { groupId } })).toBe(4);
+      expect(await tx.auditLog.count({ where: { resourceType: "transaction_group", resourceId: groupId } })).toBe(5);
+      expect(await tx.auditLog.count({ where: { resourceType: "transaction_group", resourceId: groupId, actorId: { in: [fieldUser.id, setup.ownerAccountId] } } })).toBe(0);
+    });
+    await expect(admin.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
+    expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);
+    await admin.locator("main").evaluate(element => { (element as HTMLElement).style.fontSize = "200%"; });
+    expect(await admin.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await admin.screenshot({ path: info.outputPath(`native-transaction-group-${locale}.png`), fullPage: true });
+    expect(errors).toEqual([]);
   } finally { await Promise.all([ownerContext.close(),fieldContext.close()]); await f.db.$disconnect(); }
 });

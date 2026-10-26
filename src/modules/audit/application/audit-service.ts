@@ -82,15 +82,17 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: Resource
 ): AuditHistoryRow {
-  if (["cash_collection", "expense", "financial_transaction", "ledger_account"].includes(row.resourceType)) {
-    const expectedType = row.resourceType === "ledger_account" ? "financial_transaction" : row.resourceType;
-    const requiresSourceId = ["financial_transaction", "ledger_account"].includes(row.resourceType);
+  if (["cash_collection", "expense", "financial_transaction", "ledger_account", "transaction_group"].includes(row.resourceType)) {
+    const expectedType = ["ledger_account", "transaction_group"].includes(row.resourceType) ? "financial_transaction" : row.resourceType;
+    const requiresSourceId = ["financial_transaction", "ledger_account", "transaction_group"].includes(row.resourceType);
+    const permissionResource = row.resourceType === "transaction_group" ?
+      { type: "financial_transaction", organizationId: ctx.organizationId, dataClass: "financial" as const } : financialResource;
     const allowed = Boolean(financialResource && financialResource.type === expectedType &&
-      (!requiresSourceId || financialResource.id === row.resourceId) && authorize(ctx.authContext, action, financialResource) &&
+      (!requiresSourceId || financialResource.id === row.resourceId) && permissionResource && authorize(ctx.authContext, action, permissionResource) &&
       [row.before, row.after].every(value => {
         if (!value || typeof value !== "object" || Array.isArray(value) || !Object.hasOwn(value, "amount")) return true;
         return typeof value.amount === "string" && /^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u.test(value.amount) &&
-          authorize(ctx.authContext, action, { ...financialResource, amount: value.amount });
+          authorize(ctx.authContext, action, { ...permissionResource, amount: value.amount });
       }));
     return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,
       { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
@@ -181,17 +183,19 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts] = await Promise.all([
+  const [cash, expenses, transactions, accounts, groups] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
-    read("ledger_account", ids => repository.ledgerAccountResources(ids))
+    read("ledger_account", ids => repository.ledgerAccountResources(ids)),
+    read("transaction_group", ids => repository.transactionGroupResources(ids))
   ]);
   return new Map([
     ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),
     ...[...expenses].map(([id, resource]) => [`expense:${id}`, resource] as const),
     ...[...transactions].map(([id, resource]) => [`financial_transaction:${id}`, resource] as const),
-    ...[...accounts].map(([id, resource]) => [`ledger_account:${id}`, resource] as const)
+    ...[...accounts].map(([id, resource]) => [`ledger_account:${id}`, resource] as const),
+    ...[...groups].map(([id, resource]) => [`transaction_group:${id}`, resource] as const)
   ]);
 }
 

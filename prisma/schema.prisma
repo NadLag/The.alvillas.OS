@@ -109,6 +109,8 @@ model Organization {
   exchangeRates                                  ExchangeRate[]
   ledgerAccounts                                 LedgerAccount[]
   transactions                                   FinancialTransaction[]
+  transactionGroups                              TransactionGroup[]
+  transactionGroupEntries                        TransactionGroupEntry[]
   postings                                       Posting[]
   commissionSnapshots                            CommissionSnapshot[]
   rateLimitBuckets                               RateLimitBucket[]
@@ -343,6 +345,8 @@ model Person {
 }
 
 model UserAccount {
+  createdTransactionGroups    TransactionGroup[]
+  transactionGroupEntries     TransactionGroupEntry[]
   createdExpenses             Expense[]                    @relation("ExpenseCreator")
   updatedExpenses             Expense[]                    @relation("ExpenseUpdater")
   expenseSubmissions          ExpenseSubmission[]
@@ -1296,6 +1300,7 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  groupEntries           TransactionGroupEntry[]
   expense                Expense?
   cashCollection         CashCollection?
   id                     String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -1318,6 +1323,49 @@ model FinancialTransaction {
   @@unique([organizationId, idempotencyKey], map: "financial_transaction_org_idempotency_unique")
   @@index([organizationId, occurredAt], map: "financial_transaction_org_occurred_idx")
   @@map("financial_transaction")
+}
+
+model TransactionGroup {
+  id             String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                  @map("organization_id") @db.Uuid
+  name           String
+  reason         String
+  idempotencyKey String                  @map("idempotency_key") @db.Uuid
+  createdBy      String                  @map("created_by") @db.Uuid
+  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  creator        UserAccount             @relation(fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  entries        TransactionGroupEntry[]
+
+  @@unique([organizationId, id], map: "transaction_group_org_id_unique")
+  @@unique([organizationId, idempotencyKey], map: "transaction_group_org_key_unique")
+  @@map("transaction_group")
+}
+
+model TransactionGroupEntry {
+  id              String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String                 @map("organization_id") @db.Uuid
+  groupId         String                 @map("group_id") @db.Uuid
+  transactionId   String                 @map("transaction_id") @db.Uuid
+  previousEntryId String?                @map("previous_entry_id") @db.Uuid
+  action          String
+  reason          String
+  idempotencyKey  String                 @map("idempotency_key") @db.Uuid
+  createdBy       String                 @map("created_by") @db.Uuid
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  group           TransactionGroup       @relation(fields: [organizationId, groupId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  transaction     FinancialTransaction   @relation(fields: [organizationId, transactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator         UserAccount            @relation(fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  previousEntry   TransactionGroupEntry? @relation("TransactionGroupHistory", fields: [organizationId, previousEntryId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  nextEntry       TransactionGroupEntry? @relation("TransactionGroupHistory")
+
+  @@unique([organizationId, id], map: "transaction_group_entry_org_id_unique")
+  @@unique([organizationId, idempotencyKey], map: "transaction_group_entry_org_key_unique")
+  @@unique([organizationId, previousEntryId], map: "transaction_group_entry_next_unique")
+  @@index([organizationId, transactionId], map: "transaction_group_entry_transaction_idx")
+  @@index([organizationId, groupId, createdAt, id], map: "transaction_group_entry_history_idx")
+  @@map("transaction_group_entry")
 }
 
 model Posting {
