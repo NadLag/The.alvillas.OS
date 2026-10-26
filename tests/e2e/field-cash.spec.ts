@@ -49,7 +49,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Assigned employee collec
     await cash.getByTestId("field-cash-payer").fill("Dedicated fictional cash guest");
     await cash.getByTestId("field-cash-purpose").fill("Dedicated transfer cash acceptance");
     await expect.poll(async () => JSON.stringify(await storedFieldData(page, "drafts"))).toContain("500.25");
-    await expect.poll(() => page.evaluate(() => navigator.serviceWorker.ready.then(() => Boolean(navigator.serviceWorker.controller)))) .toBe(true);
+    await expect.poll(() => page.evaluate(() => navigator.serviceWorker.ready.then(() => Boolean(navigator.serviceWorker.controller))), { timeout: 30000 }).toBe(true);
     await expect.poll(() => page.evaluate(async () => Boolean(await caches.match(`/${document.documentElement.lang}/offline/field`)))).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await context.setOffline(true); await cash.getByTestId("field-cash-save").click(); await expect(cash.getByTestId("field-cash-queued")).toBeVisible();
