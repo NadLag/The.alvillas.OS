@@ -1307,6 +1307,7 @@ model FinancialTransaction {
   idempotencyKey         String?                @map("idempotency_key")
   createdBy              String?                @map("created_by") @db.Uuid
   createdAt              DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  sealed                 Boolean                @default(true)
   organization           Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   postings               Posting[]
   reversesTransaction    FinancialTransaction?  @relation("FinancialTransactionReversal", fields: [reversesTransactionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
