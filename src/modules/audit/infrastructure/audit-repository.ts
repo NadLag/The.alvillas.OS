@@ -102,6 +102,11 @@ export class AuditRepository {
       financialRecordId: row.id, dataClass: "financial"
     }]));
   }
+  async transactionGroupResources(ids: string[]): Promise<Map<string, Resource>> {
+    if (!ids.length) return new Map();
+    const rows = await this.tx.transactionGroup.findMany({ where: { organizationId: this.organizationId, id: { in: ids } }, select: { id: true } });
+    return new Map(rows.map(row => [row.id, { type: "financial_transaction", organizationId: this.organizationId, id: row.id, dataClass: "financial" }]));
+  }
   async transactionResources(ids: string[]): Promise<Map<string, Resource>> {
     if (!ids.length) return new Map();
     const rows = await this.tx.financialTransaction.findMany({

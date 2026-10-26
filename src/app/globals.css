@@ -2533,3 +2533,4 @@ textarea:disabled {
 .financial-accounts-page > *, .financial-accounts-page :is(.resource-form, .field, .form-actions, .resource-list, .detail-grid) { min-inline-size: 0; }
 .financial-accounts-page .resource-list { list-style: none; margin: 0; padding: 0; }
 .financial-accounts-page .resource-list > li { min-inline-size: 0; overflow-wrap: anywhere; }
+.transaction-groups-page { overflow-wrap: anywhere; }
