@@ -26,6 +26,7 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
   const t = useTranslations("FieldCash"), id = useId(), { organizationId, userId } = scope;
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null), [value, setValue] = useState<FieldCashDraft | null>(null);
   const valueRef = useRef<FieldCashDraft | null>(null), wasQueued = useRef(false), mounted = useRef(false);
+  const touched = useRef(false);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   const [notice, setNotice] = useState<"savedDraft" | "queued" | "synced" | "storageError" | "invalid" | null>(null);
   const [busy, setBusy] = useState(false), [reason, setReason] = useState("");
@@ -36,9 +37,15 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
       setSnapshot(next);
       const pending = next.entries.some(entry => entry.syncStatus === "pending");
       if (wasQueued.current && !pending && !next.draft) {
+        touched.current = false;
         const initial = fresh(next, taskId, locale); valueRef.current = initial; setValue(initial); setNotice("synced"); wasQueued.current = false;
       } else if (!valueRef.current || next.draft && next.draft.clientOpId !== valueRef.current.clientOpId) {
+        touched.current = Boolean(next.draft);
         const initial = next.draft ?? fresh(next, taskId, locale); valueRef.current = initial; setValue(initial);
+      } else if (!touched.current && !next.draft && !next.entries.some(entry => !entry.resolvedByClientOpId)) {
+        // Checklist progress can change the task revision. An untouched cash
+        // form has no financial intent to review; entered drafts keep their base.
+        const initial = fresh(next, taskId, locale); valueRef.current = initial; setValue(initial);
       }
       if (pending) wasQueued.current = true;
     }, error: () => { if (mounted.current) { setSnapshot(null); setValue(null); valueRef.current = null; setNotice("storageError"); } } });
@@ -53,7 +60,9 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
   const parsed = value ? fieldCashPayloadSchema.safeParse({ taskId, amount: value.amount, currency: value.currency, payer: value.payer, purpose: value.purpose, expectedRevision: value.expectedRevision }) : null;
   const currency = cash?.currencies.find(item => item.code === value?.currency);
   const valid = Boolean(parsed?.success && currency && new Decimal(parsed.data.amount).decimalPlaces() <= currency.minorUnit);
-  const blocked = Boolean(snapshot?.draft && !snapshot.draft.submittedDeviceId || failed);
+  const edited = Boolean(value && (value.amount || value.payer !== (snapshot?.task?.guestName ?? "") || value.currency !== cash?.baseCurrency ||
+    value.purpose !== (snapshot?.task ? localizedTaskTitle(snapshot.task.title, locale).slice(0,500) : "")));
+  const blocked = Boolean(!queued && (snapshot?.draft || edited) || failed);
   useEffect(() => {
     if (!blocked) return;
     const unload = (event: BeforeUnloadEvent) => { if (!queued) { event.preventDefault(); event.returnValue = ""; } };
@@ -61,7 +70,7 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
   }, [blocked, queued]);
   function edit(update: Partial<Pick<FieldCashDraft, "amount" | "currency" | "payer" | "purpose">>) {
     if (!value || !incarnation || locked) return;
-    const next = { ...value, ...update }; valueRef.current = next; setValue(next); setNotice(null);
+    const next = { ...value, ...update }; touched.current = true; valueRef.current = next; setValue(next); setNotice(null);
     writes.current = writes.current.catch(() => undefined).then(async () => {
       const saved = await fieldQueue().saveCashDraft({ organizationId, userId }, next, incarnation);
       if (mounted.current && valueRef.current?.clientOpId === next.clientOpId) setNotice(saved ? "savedDraft" : "storageError");
@@ -96,7 +105,7 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
     try {
       await writes.current;
       if (!await fieldQueue().clearCashDraft(scope, taskId, value.clientOpId)) throw new Error("FIELD_CASH_UNAVAILABLE");
-      const initial = snapshot ? fresh(snapshot, taskId, locale) : null; valueRef.current = initial; setValue(initial); setNotice(null);
+      const initial = snapshot ? fresh(snapshot, taskId, locale) : null; touched.current = false; valueRef.current = initial; setValue(initial); setNotice(null);
     } catch { if (mounted.current) setNotice("storageError"); }
     finally { if (mounted.current) setBusy(false); }
   }

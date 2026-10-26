@@ -45,6 +45,7 @@ test("Field checklist progress and language preserve unsaved and queued work", a
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await checks.nth(1).check(); await expect(counter).toHaveText(label("fr", 2));
     await expect(finish).toBeDisabled(); await save.click();
+    await expect(page.getByTestId("field-cash-review-required")).toHaveCount(0);
     await expect(form.getByRole("status")).toHaveText(fr.Operations.manage.saved);
     await expect(form).not.toHaveAttribute("data-field-dirty", "true");
     expect(await withTenant(fixture.db, fixture.organizationId, tx => tx.auditLog.count({ where: { action: "task.checklist.progress", resourceId: fixture.taskId } }))).toBe(4);
