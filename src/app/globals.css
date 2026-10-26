@@ -2337,6 +2337,8 @@ textarea:disabled {
 .whatsapp-preview textarea { resize: vertical; min-block-size: 160px; }
 
 .notification-settings, .notification-routing-settings { max-inline-size: 800px; }
+.expense-page .resource-form fieldset { min-inline-size: 0; max-inline-size: 100%; }
+.expense-page :is(legend, .primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
 .notification-routing-settings { margin-block-start: var(--space-8); padding-block-start: var(--space-6); border-block-start: 1px solid var(--border-subtle); }
 .notification-policy { padding: var(--space-5); background: var(--surface-muted); border-radius: var(--radius-md); }
 .notification-channel { margin: 0; padding: var(--space-6) 0; border: 0; border-block-end: 1px solid var(--border-subtle); min-inline-size: 0; }

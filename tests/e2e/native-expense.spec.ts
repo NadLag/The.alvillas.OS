@@ -120,7 +120,12 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense submissio
       expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.posted",actorId:setup.ownerAccountId}})).toBe(0);
     });
     await ownerPage.reload();await expect(ownerPage.getByTestId("expense-void-form")).toHaveCount(0);
-    await expect(admin.getByTestId("expense-void-form")).toBeVisible();await admin.getByTestId("expense-void-reason").fill("Dedicated reversal retains original payment history");
+    await expect(admin.getByTestId("expense-void-form")).toBeVisible();
+    await admin.locator("main").evaluate(element=>{(element as HTMLElement).style.fontSize="200%";});
+    expect(await admin.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
+    await admin.screenshot({path:info.outputPath(`native-expense-reversal-zoom-${locale}.png`),fullPage:true});
+    await admin.locator("main").evaluate(element=>{(element as HTMLElement).style.fontSize="";});
+    await admin.getByTestId("expense-void-reason").fill("Dedicated reversal retains original payment history");
     const voidRequest=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&
       new URL(request.url()).pathname.endsWith(`/expenses/${expenseId}`)&&Boolean(request.postData()?.includes(expenseId)));
     await admin.getByTestId("expense-void").click();const reversal=await voidRequest;

@@ -16,7 +16,7 @@ export default async function ExpensePage({ params }: { params: Promise<{ locale
   const t = await getTranslations("Expenses"); let expense;
   try { expense = await getExpense(actor, input.id); }
   catch (error) { if (error instanceof ExpenseAccessError || error instanceof Error && error.name === "ZodError") notFound(); throw error; }
-  return <AdminShell className="resource-page" testId="expense-detail-page"><ShellHeader eyebrow={expense.propertyName} title={expense.purpose} subtitle={t("description")}
+  return <AdminShell className="resource-page expense-page" testId="expense-detail-page"><ShellHeader eyebrow={expense.propertyName} title={expense.purpose} subtitle={t("description")}
     actions={<Link className="secondary-button" href={`/${locale}/app/properties/${expense.propertyId}`}>{t("back")}</Link>} />
     <section className="notification-settings"><p data-testid="expense-state" role="status">{t(`states.${expense.state}`)}</p>
       {expense.emergencyException?<p role="status" data-testid="expense-emergency-notice">{t("emergencyException")}</p>:null}
