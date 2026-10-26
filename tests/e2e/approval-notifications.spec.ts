@@ -91,7 +91,9 @@ test.describe("approval notification lifecycle", () => {
         await pushPage.getByTestId("notification-push-enabled").check(); await pushPage.getByTestId("notification-push-operations").check();
         await pushPage.getByTestId("notification-preferences-save").click();
         await expect(pushPage.getByTestId("notification-preferences").getByRole("status")).toContainText("Your preferences have been saved.");
-        await pushPage.getByTestId("push-enable").click(); await expect(pushPage.getByTestId("push-disable")).toHaveCount(1);
+        await pushPage.getByTestId("push-enable").click();
+        await expect.poll(()=>pushPage.evaluate(()=>navigator.serviceWorker.getRegistration("/").then(registration=>registration?.active?.state??registration?.installing?.state??"unregistered")),{timeout:30000}).toBe("activated");
+        await expect(pushPage.getByTestId("push-disable")).toHaveCount(1);
         await page.goto("/en/app/notifications"); await expect(page.getByTestId("routing-in-app")).toBeVisible();
         await page.getByTestId("routing-event").selectOption("approval_requested"); await expect(page.getByTestId("routing-in-app")).toBeVisible();
         await page.getByTestId("routing-scope").selectOption(property.id); await page.getByTestId("routing-push").check();
