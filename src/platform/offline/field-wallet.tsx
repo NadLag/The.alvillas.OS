@@ -17,10 +17,11 @@ export function FieldWallet({ scope, locale }: { scope: FieldQueueScope; locale:
   const [notice, setNotice] = useState<"saved" | "unavailable" | "retry" | null>(null), [refresh, setRefresh] = useState(0);
   const { organizationId, userId } = scope;
   useEffect(() => {
-    let disposed = false, busy = false, subscription: { unsubscribe(): void } | undefined;
+    let disposed = false, busy = false, cacheVersion = 0, retryOnCacheReady = false, subscription: { unsubscribe(): void } | undefined;
     const owner = { organizationId, userId }, queue = fieldQueue();
     async function load() {
       if (busy || disposed) return; busy = true; setLoading(true);
+      const startedAtCacheVersion = cacheVersion; retryOnCacheReady = false;
       try {
         const verified = await resolveFieldScope(queue, navigator.onLine, owner);
         if (disposed) return;
@@ -45,12 +46,23 @@ export function FieldWallet({ scope, locale }: { scope: FieldQueueScope; locale:
         if (disposed) return;
         if (!await queue.saveWalletSnapshot(owner, value, saved.incarnation, requestId)) throw new Error("FIELD_SESSION_CHANGED");
         setSnapshot(value); setNotice(null);
-      } catch { if (!disposed) setNotice("retry"); }
-      finally { busy = false; if (!disposed) setLoading(false); }
+      } catch { if (!disposed) { retryOnCacheReady = true; setNotice("retry"); } }
+      finally {
+        busy = false;
+        if (!disposed) {
+          setLoading(false);
+          // A scope-change cursor reset can invalidate the pending wallet read.
+          // Refetch after that work pull finishes, even when readiness arrived
+          // before the rejected response. Every retry verifies the session anew.
+          if (retryOnCacheReady && cacheVersion > startedAtCacheVersion) queueMicrotask(() => { void load(); });
+        }
+      }
     }
     queueMicrotask(() => { if (!disposed) void load(); });
     const reload = () => { void load(); }; window.addEventListener("focus", reload); window.addEventListener("online", reload); window.addEventListener("offline", reload);
-    return () => { disposed = true; subscription?.unsubscribe(); window.removeEventListener("focus", reload); window.removeEventListener("online", reload); window.removeEventListener("offline", reload); };
+    const cacheReady = () => { cacheVersion++; if (retryOnCacheReady) void load(); };
+    window.addEventListener("alvillas-field-cache-ready", cacheReady);
+    return () => { disposed = true; subscription?.unsubscribe(); window.removeEventListener("focus", reload); window.removeEventListener("online", reload); window.removeEventListener("offline", reload); window.removeEventListener("alvillas-field-cache-ready", cacheReady); };
   }, [organizationId, userId, page, refresh]);
   const money = (amount: string, currency: string) => formatCurrency(locale, Money.of(amount, currency));
   const wallet = snapshot?.organizationId === organizationId && snapshot.userId === userId ? snapshot : null;
