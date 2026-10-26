@@ -92,14 +92,14 @@ export function allocateGrossRevenueByOwnerShare(
   if (totalShareBps !== 10000) {
     throw new Error("Active property owner shares must total 10000 bps");
   }
+  if (owners.some(owner => !Number.isSafeInteger(owner.shareBps) || owner.shareBps < 0 || owner.shareBps > 10000))
+    throw new Error("Active property owner shares must be nonnegative basis points");
 
   let allocated = Money.zero(total.currency);
 
   return owners.map((owner, index) => {
-    const grossAmount =
-      index === owners.length - 1
-        ? total.subtract(allocated)
-        : total.multiply(new Decimal(owner.shareBps).div("10000"));
+    const remaining = total.subtract(allocated), proportional = total.multiply(new Decimal(owner.shareBps).div("10000"));
+    const grossAmount = index === owners.length - 1 || proportional.amount.gt(remaining.amount) ? remaining : proportional;
     allocated = allocated.add(grossAmount);
 
     return {

@@ -67,14 +67,18 @@ export class NotificationRepository {
     if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id, batch);
     const identity = target.type === "identity";
     if (identity && input.targetId !== input.recipientId) throw new Error("Invalid notification subject");
-    const approval = input.kind === "approval_requested" ? await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: input.targetId }, include: { recipients: true } }) : null;
+    const approval = input.kind === "approval_requested" ? await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: input.targetId },
+      include: { recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } }) : null;
+    const stage = approval?.financialStages.find(stage => stage.state === "PENDING");
+    if (approval?.expenseId && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
+    const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
-    const routing = approval ? notificationRoutingSchema.parse(approval.routingSnapshot) :
+    const routing = approval ? notificationRoutingSchema.parse(stage?.routingSnapshot ?? approval.routingSnapshot) :
       batch?.routing.get(routingKey) ?? await this.routing(input.kind, target.propertyId ?? null, event.occurredAt);
     if (batch && !approval) batch.routing.set(routingKey, routing);
     const mandatory = input.kind === "security_session_revoked";
     const assignedId = identity ? input.targetId : target.assignedUserAccountId;
-    const recipientIds = approval?.recipients.map((row) => row.userAccountId);
+    const recipientIds = approvalRecipients?.map((row) => row.userAccountId);
     const selectedId = (mandatory || routing.assigned) ? assignedId : null;
     const candidateKey = JSON.stringify([routing, selectedId, recipientIds]);
     const candidates = batch?.candidates.get(candidateKey) ?? await this.candidates(routing, selectedId, recipientIds);
@@ -83,7 +87,7 @@ export class NotificationRepository {
     for (const candidate of candidates) {
       // Account notices never reveal one person's security/account activity to another.
       if (identity && candidate.id !== input.targetId) continue;
-      if (approval && !approval.recipients.some((row) => row.userAccountId === candidate.id)) continue;
+      if (approval && !approvalRecipients?.some((row) => row.userAccountId === candidate.id)) continue;
       const selected = (mandatory || routing.assigned) && candidate.id === assignedId;
       const explicit = routing.people.includes(candidate.personId);
       const roleAssignments = candidate.roleAssignments.filter((assignment) => routing.roles.includes(assignment.role.id));
@@ -245,7 +249,7 @@ export class NotificationRepository {
     return this.tx.notification.updateMany({ where: { organizationId: this.organizationId, recipientId, id, readAt: null }, data: { readAt } });
   }
 
-  async targets(rows: Pick<Notification, "kind" | "targetId">[]): Promise<Map<string, Resource>> {
+  async targets(rows: Pick<Notification, "kind" | "targetId">[], readerId?: string): Promise<Map<string, Resource>> {
     const ids = rows.filter((row) => row.kind === "task_assigned" || (row.kind === "task_completed" || row.kind === "task_overdue")).map((row) => row.targetId);
     const tasks = ids.length ? await this.tx.operationTask.findMany({ where: { organizationId: this.organizationId, id: { in: ids }, archivedAt: null },
       select: { id: true, propertyId: true, state: true, assignedToUserAccountId: true, property: { select: { regionId: true, cityId: true } } } }) : [];
@@ -262,9 +266,24 @@ export class NotificationRepository {
     const reservations = reservationIds.length ? await this.tx.reservation.findMany({ where: { organizationId: this.organizationId, id: { in: reservationIds }, archivedAt: null }, select: { id: true, propertyId: true, status: true, property: { select: { regionId: true, cityId: true } } } }) : [];
     for (const row of reservations) targets.set(row.id, { type: "reservation", organizationId: this.organizationId, id: row.id, reservationId: row.id, propertyId: row.propertyId, region: row.property.regionId, city: row.property.cityId, status: row.status });
     const approvalIds = rows.filter((row) => row.kind === "approval_requested" || row.kind === "approval_decided").map((row) => row.targetId);
-    const approvals = approvalIds.length ? await this.tx.approvalRequest.findMany({ where: { organizationId: this.organizationId, id: { in: approvalIds }, property: { archivedAt: null } }, include: { property: true } }) : [];
-    for (const row of approvals) targets.set(row.id, { ...approvalResource(row), assignedUserAccountId: row.requestedBy });
+    const approvals = approvalIds.length ? await this.tx.approvalRequest.findMany({ where: { organizationId: this.organizationId, id: { in: approvalIds }, property: { archivedAt: null } },
+      include: { property: true, expense: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } }) : [];
+    for (const row of approvals) {
+      const ownStage = readerId ? row.financialStages.find(stage => stage.recipients.some(recipient => recipient.userAccountId === readerId)) : undefined;
+      targets.set(row.id, { ...approvalResource(row, ownStage?.ownerId ?? row.financialStages.find(stage => stage.state === "PENDING")?.ownerId), assignedUserAccountId: row.requestedBy });
+    }
     return targets;
+  }
+  async approvalDeliveryAllowed(approvalId: string, recipientId: string, sourceEventId?: string) {
+    const row = await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: approvalId },
+      include: { recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } });
+    if (!row || row.state !== "PENDING") return false;
+    if (!row.expenseId) return row.recipients.some(recipient => recipient.userAccountId === recipientId);
+    const stage = row.financialStages.find(stage => stage.state === "PENDING");
+    if (!stage || !sourceEventId || !stage.recipients.some(recipient => recipient.userAccountId === recipientId)) return false;
+    const event = await this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id: sourceEventId, type: notificationEventType } });
+    return Boolean(event && event.idempotencyKey === `approval:${row.id}:stage:${stage.id}:requested` &&
+      notificationInputSchema.safeParse(event.payload).success && (event.payload as Prisma.JsonObject).targetId === row.id);
   }
 
   async channelRecipient(id: string) {

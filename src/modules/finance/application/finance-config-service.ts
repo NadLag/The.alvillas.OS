@@ -5,10 +5,13 @@ import {
   type ConfigScopeCandidate,
   type ResolvedConfigRule
 } from "@/platform/config/config-rule-repository";
-import { authorize, type AuthContext } from "@/platform/authz/authorize";
+import { authorize, roleKeysForResource, type AuthContext, type Resource } from "@/platform/authz/authorize";
+import { approvalThresholdsConfigSchema, type ApprovalThresholdsConfig } from "@/platform/config/rule-registry";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
+import { referencedConfigs } from "@/platform/automation/rule";
+import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
 import {
   allocateConfiguredExpense,
   evaluateConfiguredApproval,
@@ -56,6 +59,7 @@ export type ExpensePolicyDecision = {
   approval: ConfiguredApprovalDecision;
   allocationRule: ConfigDecisionEvidence;
   approvalRule: ConfigDecisionEvidence | null;
+  configReferences: ConfigDecisionEvidence[];
 };
 
 export type OwnerPayoutPlanDecision = {
@@ -152,49 +156,50 @@ export async function evaluateExpensePolicy(
   deps: FinanceConfigServiceDeps = {}
 ): Promise<ExpensePolicyDecision> {
   assertAllowed(ctx);
+  return withTenant(db(deps), ctx.organizationId, tx => evaluateExpensePolicyInTransaction(ctx, rawInput, tx));
+}
+
+/** Caller authorizes the actual expense before resolving its financial policy. */
+export async function evaluateExpensePolicyInTransaction(ctx: FinanceConfigActorContext, rawInput: ExpensePolicyInput, tx: TenantTransaction,
+  options: { resource?: Resource; approvalAmount?: Money; resolvePeriodRevenue?: (config: ApprovalThresholdsConfig) => Promise<Money>; now?: Date } = {}): Promise<ExpensePolicyDecision> {
   const input = expensePolicyInputSchema.parse(rawInput);
   const amount = Money.of(input.amount, input.currency);
-  const periodRevenue = input.periodRevenueAmount
+  let periodRevenue = input.periodRevenueAmount
     ? Money.of(input.periodRevenueAmount, input.currency)
     : undefined;
   const asOf = input.asOf ?? new Date();
 
-  return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
-    const scopes = scopesFor(input);
-    const allocationRule =
-      (await repository.resolve({
-        key: "finance.expense_allocation",
-        scopes,
-        asOf
-      })) ??
-      (await repository.resolve({
-        key: "finance.expense_treatment",
-        scopes,
-        asOf
-      }));
+    const scopes = await new ReservationConfigScopeRepository(tx, ctx.organizationId).scopes({ ...input, asOf });
+    const snapshot = await repository.scopedSnapshot(scopes, asOf);
+    const allocationRule = snapshot.resolve("finance.expense_allocation") ?? snapshot.resolve("finance.expense_treatment");
 
     if (!allocationRule) {
       throw new FinanceConfigNotFoundError("Missing finance expense allocation rule");
     }
 
-    const approvalRule = await repository.resolve({
-      key: "finance.approval_thresholds",
-      scopes,
-      asOf
-    });
+    const approvalRule = snapshot.resolve("finance.approval_thresholds");
+    if (approvalRule && options.resolvePeriodRevenue) periodRevenue = await options.resolvePeriodRevenue(approvalThresholdsConfigSchema.parse(approvalRule.value));
+    const references = approvalRule ? referencedConfigs(approvalRule.value).map(key => {
+      const rule = snapshot.resolve(key); if (!rule) throw new FinanceConfigNotFoundError(`Missing referenced finance configuration: ${key}`); return rule;
+    }) : [];
+    const subject = options.resource ?? { type: "expense", organizationId: ctx.organizationId, propertyId: input.propertyId, ownerId: input.ownerId, amount: input.amount, dataClass: "financial" as const };
+    const roles = roleKeysForResource(ctx.authContext, subject, options.now ?? new Date());
+    const allocation = allocateConfiguredExpense(allocationRule.value, { category: input.category, amount });
+    const evaluation = { fields: { expense: { propertyId: input.propertyId, ownerId: input.ownerId ?? null, category: input.category,
+      amount: (options.approvalAmount ?? amount).amount.toString(), allocatedAmount: amount.amount.toString(), currency: input.currency, emergency: input.emergency }, actor: { userAccountId: ctx.actorId, roles } },
+      configs: Object.fromEntries(references.map(rule => [rule.key, rule.parsedValue])) };
 
     return {
-      allocation: allocateConfiguredExpense(allocationRule.value, {
-        category: input.category,
-        amount
-      }),
+      allocation,
       approval: approvalRule
         ? evaluateConfiguredApproval(approvalRule.value, {
             category: input.category,
-            amount,
+            amount: options.approvalAmount ?? amount,
+            ruleKey: allocation.approvalRuleKey ?? undefined,
             periodRevenue,
-            emergency: input.emergency
+            emergency: input.emergency,
+            evaluation
           })
         : {
             matchedThresholdKey: null,
@@ -202,9 +207,9 @@ export async function evaluateExpensePolicy(
             postHocOwnerNotificationRequired: false
           },
       allocationRule: evidence(allocationRule),
-      approvalRule: approvalRule ? evidence(approvalRule) : null
+      approvalRule: approvalRule ? evidence(approvalRule) : null,
+      configReferences: references.map(evidence)
     };
-  });
 }
 
 export async function planOwnerPayout(

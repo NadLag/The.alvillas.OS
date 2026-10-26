@@ -249,6 +249,19 @@ export class ConfigRuleRepository {
       AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gt: asOf } }] }, { OR: [{ scopeType: "organization", scopeId: null }, { scopeType: "property", scopeId: { in: propertyIds } }] }] } });
     return new Map(propertyIds.map(id => [id, resolveConfigCandidates(rules.filter(rule => rule.scopeType === "organization" || rule.scopeId === id))]));
   }
+  async scopedSnapshot(scopes: readonly ConfigScopeCandidate[], asOf: Date) {
+    const wanted = normalizedScopes(scopes);
+    const rules = wanted.length ? await this.tx.configRule.findMany({ where: { organizationId: this.organizationId, archivedAt: null,
+      lifecycle: { in: ["ACTIVE", "RETIRED"] }, effectiveFrom: { lte: asOf }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: asOf } }],
+      AND: [{ OR: wanted.map(scopeFilter) }] } }) : [];
+    const selected = new Map<string, ResolvedConfigRule | null>();
+    // Resolve base policies and their references from one PostgreSQL snapshot.
+    // Parse only requested keys, preserving unrelated legacy configuration.
+    return { resolve(key: string) {
+      if (!selected.has(key)) selected.set(key, resolveConfigCandidates(rules.filter(rule => rule.key === key)));
+      return selected.get(key) ?? null;
+    } };
+  }
   async resolveScopeGroups(key:string,groups:Map<string,ConfigScopeCandidate[]>,asOf:Date,options:{recordedAt?:Date;recordedBefore?:Date}={}){
     const candidates=[...new Map([...groups.values()].flat().map(s=>[`${s.scopeType}:${s.scopeId}`,s])).values()];
     const rules=await this.tx.configRule.findMany({where:{organizationId:this.organizationId,key,archivedAt:null,lifecycle:{in:['ACTIVE','RETIRED']},effectiveFrom:{lte:asOf},...(options.recordedBefore?{createdAt:{lt:options.recordedBefore}}:options.recordedAt?{createdAt:{lte:options.recordedAt}}:{}),AND:[{OR:[{effectiveTo:null},{effectiveTo:{gt:asOf}}]},{OR:candidates}]}});

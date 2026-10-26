@@ -207,6 +207,11 @@ async function actionPlan(
     return { type: action.type, dueDate: date, taskType: action.task_type };
   }
   if (action.type === "create_approval_request") {
+    if (ctx.expense) {
+      allowed(actor, "view", ctx.expense.resource); allowed(actor, "edit", ctx.expense.resource);
+      if (!ctx.expense.approvalId) throw new Error("automation_expense_approval_not_required");
+      return { type: action.type };
+    }
     allowed(actor, "edit", resource(actor, p, "property"));
     // Any rule depending on finance, including its approval thresholds, needs
     // the same financial visibility as a manual financial request.
@@ -355,7 +360,7 @@ async function perform(
     }
     producedIds = tasks.map((t) => t.id);
   } else if (action.type === "create_approval_request") {
-    producedIds = [
+    producedIds = ctx.expense ? [text(ctx.expense.approvalId)] : [
       (
         await requestApproval(
           {
@@ -448,7 +453,7 @@ function authorizeEvaluation(actor: AutomationActor, ctx: Context) {
   // Predicate results are observable. Protect financial inputs before deciding
   // whether a rule matches, including a condition which evaluates to false.
   if (
-    /^(Expense|Payout|Payment|BankLine|PeriodClosed|Variance)/u.test(
+    ctx.expense || /^(Expense|Payout|Payment|BankLine|PeriodClosed|Variance)/u.test(
       ctx.event.type,
     ) ||
     Object.hasOwn(ctx.evaluation.fields, "variance") ||
@@ -458,8 +463,10 @@ function authorizeEvaluation(actor: AutomationActor, ctx: Context) {
   ) {
     allowed(actor, "view", {
       ...resource(actor, ctx.property, "financial_transaction"),
+      ...(ctx.expense ? { ...ctx.expense.resource, type: "financial_transaction" } : {}),
       dataClass: "financial",
     });
+    if (ctx.expense) allowed(actor, "view", ctx.expense.resource);
   }
 }
 

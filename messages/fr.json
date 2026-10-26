@@ -2439,5 +2439,40 @@
     "noReceipts": "Aucun encaissement enregistré pour cette mission.",
     "saveBeforeComplete": "Enregistrez ou résolvez l’encaissement avant de terminer cette mission.",
     "unsaved": "Enregistrez ou résolvez l’encaissement avant de quitter cette mission."
+  },
+  "Expenses": {
+    "new": "Enregistrer une dépense",
+    "description": "Retrouvez la dépense, son financement et les validations requises au même endroit.",
+    "amount": "Montant",
+    "currency": "Devise",
+    "category": "Catégorie",
+    "occurredOn": "Date de la dépense",
+    "purpose": "Quel est l’objet de cette dépense ?",
+    "fundingAccount": "Payée depuis",
+    "reservation": "Réservation (facultatif)",
+    "noReservation": "Dépense de la propriété",
+    "emergency": "Dépense urgente",
+    "reason": "Motif de cette modification",
+    "saveDraft": "Enregistrer le brouillon",
+    "saving": "Enregistrement…",
+    "submit": "Soumettre pour validation",
+    "submitGuidance": "L’accord configuré détermine la répartition et les étapes de validation. La soumission conserve les détails d’origine.",
+    "submittedGuidance": "Les détails soumis et l’historique des validations sont conservés. La comptabilisation est distincte et suit la validation requise.",
+    "viewApproval": "Voir la validation",
+    "back": "Retour à la propriété",
+    "noAccounts": "Aucun compte de financement autorisé n’est disponible.",
+    "validation": "Vérifiez le montant, la catégorie, la date et les champs obligatoires.",
+    "forbidden": "Vous n’avez pas l’autorisation d’accéder à cette dépense.",
+    "conflict": "Cette dépense a changé. Actualisez avant de continuer.",
+    "configuration": "La politique de dépense ou ses destinataires de validation doivent être configurés.",
+    "error": "La dépense n’a pas pu être enregistrée. Réessayez.",
+    "states": {
+      "DRAFT": "Brouillon",
+      "PENDING_APPROVAL": "En attente de validation",
+      "APPROVED": "Approuvée",
+      "REJECTED": "Refusée",
+      "POSTED": "Comptabilisée",
+      "VOIDED": "Contrepassée"
+    }
   }
 }

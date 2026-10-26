@@ -165,6 +165,7 @@ export default async function PropertyDetailPage({
   }
 
   const t = await getTranslations("Core");
+  const expenseText = await getTranslations("Expenses");
   let property;
 
   try {
@@ -461,7 +462,8 @@ export default async function PropertyDetailPage({
     <AdminShell className="resource-page" testId="property-detail-page">
       <ShellHeader
         actions={
-        <>{canEditOwnership ? <Link className="secondary-button" href={`/${appLocale}/app/properties/${property.id}/approvals/new`}>{t("properties.requestApproval")}</Link> : null}
+        <>{authorize(ctx.authContext, "create", { ...propertyScopedResource, type: "expense", amount: "0", status: "DRAFT", assignedUserAccountId: ctx.actorId }) ? <Link className="secondary-button" data-testid="property-new-expense" href={`/${appLocale}/app/properties/${property.id}/expenses/new`}>{expenseText("new")}</Link> : null}
+          {canEditOwnership ? <Link className="secondary-button" href={`/${appLocale}/app/properties/${property.id}/approvals/new`}>{t("properties.requestApproval")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/templates?property=${property.id}`}>{t("properties.templates")}</Link>
         <Link className="secondary-button" href={`/${appLocale}/app/properties`}>
           {t("properties.backToProperties")}

@@ -36,6 +36,7 @@ export const permissionResources = [
   "service",
   "wallet",
   "cash_collection",
+  "expense",
   "financial_transaction",
   "owner_portal",
   "owner_portal_property",
@@ -82,7 +83,7 @@ const operationalFull = permissionsFor(
 const geographyView = permissionsFor(["region", "city"], ["view"]);
 
 const financeFull = permissionsFor(
-  ["financial_transaction", "wallet", "cash_collection", "owner_statement", "report"],
+  ["financial_transaction", "wallet", "cash_collection", "expense", "owner_statement", "report"],
   ["view", "create", "edit", "void", "approve", "reject", "export", "pay", "reconcile"]
 );
 
@@ -90,7 +91,8 @@ const ownerPortalPermissions = [
   permissionKey("owner_portal", "view"),
   permissionKey("owner_portal_property", "view"),
   permissionKey("owner_statement", "view"),
-  permissionKey("owner_statement", "export")
+  permissionKey("owner_statement", "export"),
+  permissionKey("expense", "view"), permissionKey("expense", "approve"), permissionKey("expense", "reject")
 ];
 
 export type StandardRoleKey =

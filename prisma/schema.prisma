@@ -71,6 +71,10 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  expenses                                       Expense[]
+  expenseSubmissions                             ExpenseSubmission[]
+  financialApprovalStages                        ApprovalStage[]
+  financialApprovalRecipients                    ApprovalStageRecipient[]
   cashCollections                                CashCollection[]
   automationRuns                                 AutomationRun[]
   automationAttempts                             AutomationAttempt[]
@@ -339,43 +343,48 @@ model Person {
 }
 
 model UserAccount {
-  cashCollections        CashCollection[]
-  operationUploads       OperationEvidenceUpload[]
-  requestedApprovals     ApprovalRequest[]            @relation("ApprovalRequester")
-  decidedApprovals       ApprovalRequest[]            @relation("ApprovalDecider")
-  id                     String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId         String                       @map("organization_id") @db.Uuid
-  personId               String                       @map("person_id") @db.Uuid
-  email                  String?
-  phone                  String?
-  passwordHash           String?                      @map("password_hash")
-  status                 String                       @default("ACTIVE")
-  sessionVersion         Int                          @default(1) @map("session_version")
-  mfaRequired            Boolean                      @default(false) @map("mfa_required")
-  lastLoginAt            DateTime?                    @map("last_login_at") @db.Timestamptz(6)
-  suspendedAt            DateTime?                    @map("suspended_at") @db.Timestamptz(6)
-  deactivatedAt          DateTime?                    @map("deactivated_at") @db.Timestamptz(6)
-  createdAt              DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt              DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization           Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  person                 Person                       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  authCredentials        AuthCredential[]
-  authSessions           AuthSession[]
-  authDevices            AuthDevice[]
-  authChallenges         AuthChallenge[]
-  invitations            Invitation[]
-  roleAssignments        RoleAssignment[]
-  assignedTasks          OperationTask[]              @relation("OperationTaskAssignedAccount")
-  completedTasks         OperationTask[]              @relation("OperationTaskCompletedAccount")
-  completedChecks        OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
-  operationViews         OperationSavedView[]
-  syncOps                SyncOp[]                     @relation("SyncOpActorAccount")
-  ownerPortalAccesses    OwnerPortalAccess[]
-  notifications          Notification[]
-  approvalRecipients     ApprovalRecipient[]
-  notificationPreference NotificationPreference?
-  pushSubscriptions      PushSubscription[]
-  notificationDeliveries NotificationDelivery[]
+  createdExpenses             Expense[]                    @relation("ExpenseCreator")
+  updatedExpenses             Expense[]                    @relation("ExpenseUpdater")
+  expenseSubmissions          ExpenseSubmission[]
+  decidedFinancialStages      ApprovalStage[]
+  financialApprovalRecipients ApprovalStageRecipient[]
+  cashCollections             CashCollection[]
+  operationUploads            OperationEvidenceUpload[]
+  requestedApprovals          ApprovalRequest[]            @relation("ApprovalRequester")
+  decidedApprovals            ApprovalRequest[]            @relation("ApprovalDecider")
+  id                          String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId              String                       @map("organization_id") @db.Uuid
+  personId                    String                       @map("person_id") @db.Uuid
+  email                       String?
+  phone                       String?
+  passwordHash                String?                      @map("password_hash")
+  status                      String                       @default("ACTIVE")
+  sessionVersion              Int                          @default(1) @map("session_version")
+  mfaRequired                 Boolean                      @default(false) @map("mfa_required")
+  lastLoginAt                 DateTime?                    @map("last_login_at") @db.Timestamptz(6)
+  suspendedAt                 DateTime?                    @map("suspended_at") @db.Timestamptz(6)
+  deactivatedAt               DateTime?                    @map("deactivated_at") @db.Timestamptz(6)
+  createdAt                   DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                   DateTime                     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization                Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  person                      Person                       @relation(fields: [personId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  authCredentials             AuthCredential[]
+  authSessions                AuthSession[]
+  authDevices                 AuthDevice[]
+  authChallenges              AuthChallenge[]
+  invitations                 Invitation[]
+  roleAssignments             RoleAssignment[]
+  assignedTasks               OperationTask[]              @relation("OperationTaskAssignedAccount")
+  completedTasks              OperationTask[]              @relation("OperationTaskCompletedAccount")
+  completedChecks             OperationTaskChecklistItem[] @relation("OperationTaskChecklistCompletedAccount")
+  operationViews              OperationSavedView[]
+  syncOps                     SyncOp[]                     @relation("SyncOpActorAccount")
+  ownerPortalAccesses         OwnerPortalAccess[]
+  notifications               Notification[]
+  approvalRecipients          ApprovalRecipient[]
+  notificationPreference      NotificationPreference?
+  pushSubscriptions           PushSubscription[]
+  notificationDeliveries      NotificationDelivery[]
 
   inventoryStocktakes InventoryStocktake[]
   inventoryMovements  InventoryMovement[]
@@ -601,25 +610,27 @@ model RoleAssignment {
 }
 
 model Owner {
-  id                  String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId      String                @map("organization_id") @db.Uuid
-  displayName         String                @map("display_name")
-  legalName           String?               @map("legal_name")
-  email               String?
-  phone               String?
-  preferredLocale     String                @default("fr") @map("preferred_locale") @db.Char(2)
-  notes               String?
-  archivedAt          DateTime?             @map("archived_at") @db.Timestamptz(6)
-  createdBy           String?               @map("created_by") @db.Uuid
-  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt           DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  propertyOwners      PropertyOwner[]
-  ownerPortalAccesses OwnerPortalAccess[]
-  commissionSnapshots CommissionSnapshot[]
-  representatives     OwnerRepresentative[]
-  payoutMethods       OwnerPayoutMethod[]
+  expenseApprovalStages ApprovalStage[]
+  id                    String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId        String                @map("organization_id") @db.Uuid
+  displayName           String                @map("display_name")
+  legalName             String?               @map("legal_name")
+  email                 String?
+  phone                 String?
+  preferredLocale       String                @default("fr") @map("preferred_locale") @db.Char(2)
+  notes                 String?
+  archivedAt            DateTime?             @map("archived_at") @db.Timestamptz(6)
+  createdBy             String?               @map("created_by") @db.Uuid
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  propertyOwners        PropertyOwner[]
+  ownerPortalAccesses   OwnerPortalAccess[]
+  commissionSnapshots   CommissionSnapshot[]
+  representatives       OwnerRepresentative[]
+  payoutMethods         OwnerPayoutMethod[]
 
+  @@unique([organizationId, id], map: "owner_org_id_unique")
   @@unique([organizationId, email], map: "owner_org_email_unique")
   @@index([organizationId, displayName], map: "owner_org_display_name_idx")
   @@index([organizationId, archivedAt], map: "owner_org_archived_idx")
@@ -698,6 +709,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  expenses             Expense[]
   cashCollections      CashCollection[]
   templateVersions     PropertyTemplateVersion[]
   templateRevisions    PropertyTemplateRevision[]
@@ -944,6 +956,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  expenses                                             Expense[]
   cashCollections                                      CashCollection[]
   id                                                   String                         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId                                       String                         @map("organization_id") @db.Uuid
@@ -1262,6 +1275,7 @@ model SyncOp {
 }
 
 model LedgerAccount {
+  fundedExpenses  Expense[]
   cashCollections CashCollection[]
   teamWallet      TeamWallet?
   id              String           @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -1282,6 +1296,7 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  expense                Expense?
   cashCollection         CashCollection?
   id                     String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId         String                 @map("organization_id") @db.Uuid
@@ -1356,18 +1371,20 @@ model ReferenceSequence {
 }
 
 model Currency {
-  cashCollections    CashCollection[]
-  teamCompensations  TeamCompensation[]
-  code               String              @id @db.Char(3)
-  name               String
-  minorUnit          Int                 @default(2) @map("minor_unit")
-  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  exchangeRatesFrom  ExchangeRate[]      @relation("ExchangeRateFromCurrency")
-  exchangeRatesTo    ExchangeRate[]      @relation("ExchangeRateToCurrency")
-  postings           Posting[]
-  airbnbSettlements  AirbnbSettlement[]
-  variances          Variance[]
-  ownerPayoutMethods OwnerPayoutMethod[]
+  expenses                Expense[]
+  financialApprovalStages ApprovalStage[]
+  cashCollections         CashCollection[]
+  teamCompensations       TeamCompensation[]
+  code                    String              @id @db.Char(3)
+  name                    String
+  minorUnit               Int                 @default(2) @map("minor_unit")
+  createdAt               DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  exchangeRatesFrom       ExchangeRate[]      @relation("ExchangeRateFromCurrency")
+  exchangeRatesTo         ExchangeRate[]      @relation("ExchangeRateToCurrency")
+  postings                Posting[]
+  airbnbSettlements       AirbnbSettlement[]
+  variances               Variance[]
+  ownerPayoutMethods      OwnerPayoutMethod[]
 
   @@map("currency")
 }
@@ -1697,6 +1714,9 @@ model AuditLog {
 }
 
 model ApprovalRequest {
+  expenseId       String?             @map("expense_id") @db.Uuid
+  expense         Expense?            @relation(fields: [organizationId, expenseId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  financialStages ApprovalStage[]
   id              String              @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId  String              @map("organization_id") @db.Uuid
   propertyId      String              @map("property_id") @db.Uuid
@@ -1716,6 +1736,7 @@ model ApprovalRequest {
   decider         UserAccount?        @relation("ApprovalDecider", fields: [organizationId, decidedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "approval_request_decider_tenant_fk")
   recipients      ApprovalRecipient[]
 
+  @@unique([organizationId, expenseId], map: "approval_request_org_expense_unique")
   @@unique([organizationId, id])
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, propertyId, state, createdAt])
@@ -2129,4 +2150,97 @@ model CashCollection {
   @@unique([organizationId, taskId, revision], map: "cash_collection_task_revision_unique")
   @@index([organizationId, collectorUserAccountId, recordedAt, id], map: "cash_collection_collector_idx")
   @@map("cash_collection")
+}
+
+model Expense {
+  id               String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId   String                @map("organization_id") @db.Uuid
+  propertyId       String                @map("property_id") @db.Uuid
+  reservationId    String?               @map("reservation_id") @db.Uuid
+  fundingAccountId String                @map("funding_account_id") @db.Uuid
+  transactionId    String?               @map("transaction_id") @db.Uuid
+  createdBy        String                @map("created_by") @db.Uuid
+  updatedBy        String                @map("updated_by") @db.Uuid
+  version          Int                   @default(1)
+  state            String                @default("DRAFT")
+  amount           Decimal               @db.Decimal(18, 2)
+  currency         String                @db.Char(3)
+  category         String                @db.VarChar(120)
+  purpose          String                @db.VarChar(1000)
+  occurredOn       DateTime              @map("occurred_on") @db.Date
+  emergency        Boolean               @default(false)
+  idempotencyKey   String                @map("idempotency_key") @db.Uuid
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property         Property              @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reservation      Reservation?          @relation(fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  fundingAccount   LedgerAccount         @relation(fields: [organizationId, fundingAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  transaction      FinancialTransaction? @relation(fields: [organizationId, transactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator          UserAccount           @relation("ExpenseCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  updater          UserAccount           @relation("ExpenseUpdater", fields: [organizationId, updatedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  moneyCurrency    Currency              @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  submission       ExpenseSubmission?
+  approval         ApprovalRequest?
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, idempotencyKey])
+  @@unique([organizationId, transactionId])
+  @@index([organizationId, propertyId, state, occurredOn, id])
+  @@map("expense")
+}
+
+model ExpenseSubmission {
+  id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  expenseId      String       @map("expense_id") @db.Uuid
+  submittedBy    String       @map("submitted_by") @db.Uuid
+  snapshot       Json
+  submittedAt    DateTime     @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  expense        Expense      @relation(fields: [organizationId, expenseId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  submitter      UserAccount  @relation(fields: [organizationId, submittedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, expenseId])
+  @@map("expense_submission")
+}
+
+model ApprovalStage {
+  id              String                   @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId  String                   @map("organization_id") @db.Uuid
+  approvalId      String                   @map("approval_id") @db.Uuid
+  position        Int
+  kind            String                   @db.VarChar(120)
+  ownerId         String?                  @map("owner_id") @db.Uuid
+  amount          Decimal                  @db.Decimal(18, 2)
+  currency        String                   @db.Char(3)
+  state           String                   @default("PENDING")
+  routingSnapshot Json                     @map("routing_snapshot")
+  decidedBy       String?                  @map("decided_by") @db.Uuid
+  decisionReason  String?                  @map("decision_reason") @db.VarChar(500)
+  decidedAt       DateTime?                @map("decided_at") @db.Timestamptz(6)
+  organization    Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  approval        ApprovalRequest          @relation(fields: [organizationId, approvalId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  owner           Owner?                   @relation(fields: [organizationId, ownerId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  decider         UserAccount?             @relation(fields: [organizationId, decidedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  moneyCurrency   Currency                 @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  recipients      ApprovalStageRecipient[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, approvalId, position])
+  @@map("approval_stage")
+}
+
+model ApprovalStageRecipient {
+  id             String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  stageId        String        @map("stage_id") @db.Uuid
+  userAccountId  String        @map("user_account_id") @db.Uuid
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stage          ApprovalStage @relation(fields: [organizationId, stageId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  account        UserAccount   @relation(fields: [organizationId, userAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, stageId, userAccountId])
+  @@map("approval_stage_recipient")
 }

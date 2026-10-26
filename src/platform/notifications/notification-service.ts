@@ -110,7 +110,7 @@ export async function getNotificationPage(actor: NotificationActor, input: unkno
     const repository = new NotificationRepository(tx, actor.organizationId);
     const [rows, unreadCount] = await Promise.all([repository.page(actor.accountId, cursor), repository.unreadCount(actor.accountId)]);
     const visible = rows.slice(0, 20);
-    const targets = await repository.targets(visible);
+    const targets = await repository.targets(visible, actor.accountId);
     const last = visible.at(-1);
     return { unreadCount, nextCursor: rows.length > 20 && last ? { createdAt: last.createdAt.toISOString(), id: last.id } : null,
       items: visible.map((row) => {
@@ -148,7 +148,7 @@ export async function openNotification(actor: NotificationActor, id: string, loc
     const row = await repository.find(actor.accountId, id);
     if (!row) throw new NotificationAccessError();
     const input = notificationInputSchema.parse({ kind: row.kind, targetId: row.targetId, recipientId: row.recipientId });
-    const targets = await repository.targets([row]);
+    const targets = await repository.targets([row], actor.accountId);
     const destination = notificationDestination(actor.authContext, input, targets.get(row.targetId) ?? null, locale);
     if (!destination) throw new NotificationAccessError();
     return destination;

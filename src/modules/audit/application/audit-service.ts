@@ -80,10 +80,15 @@ export function presentAuditHistoryRow(
   ctx: AuditActorContext,
   row: AuditHistoryRow,
   action: "view" | "export" = "view",
-  cashResource?: Resource
+  financialResource?: Resource
 ): AuditHistoryRow {
-  if (row.resourceType === "cash_collection") {
-    const allowed = Boolean(cashResource && authorize(ctx.authContext, action, cashResource));
+  if (row.resourceType === "cash_collection" || row.resourceType === "expense") {
+    const allowed = Boolean(financialResource && financialResource.type === row.resourceType && authorize(ctx.authContext, action, financialResource) &&
+      [row.before, row.after].every(value => {
+        if (!value || typeof value !== "object" || Array.isArray(value) || !Object.hasOwn(value, "amount")) return true;
+        return typeof value.amount === "string" && /^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u.test(value.amount) &&
+          authorize(ctx.authContext, action, { ...financialResource, amount: value.amount });
+      }));
     return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,
       { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
       { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
@@ -184,8 +189,10 @@ export async function listAuditHistory(
     ]);
 
     const cashIds = rows.filter(row => row.resourceType === "cash_collection").flatMap(row => row.resourceId ? [row.resourceId] : []);
-    const cashResources = cashIds.length ? await repository.cashResources(cashIds) : new Map<string, Resource>();
-    return { rows: rows.map((row) => presentAuditHistoryRow(ctx, row, "view", row.resourceId ? cashResources.get(row.resourceId) : undefined)), total, limit };
+    const expenseIds = rows.filter(row => row.resourceType === "expense").flatMap(row => row.resourceId ? [row.resourceId] : []);
+    const [cash, expenses] = await Promise.all([cashIds.length ? repository.cashResources(cashIds) : new Map<string, Resource>(), expenseIds.length ? repository.expenseResources(expenseIds) : new Map<string, Resource>()]);
+    const resources = new Map([...cash, ...expenses]);
+    return { rows: rows.map((row) => presentAuditHistoryRow(ctx, row, "view", row.resourceId ? resources.get(row.resourceId) : undefined)), total, limit };
   });
 }
 
@@ -282,7 +289,9 @@ export async function exportAuditHistoryCsv(
     });
 
     const cashIds = rows.filter(row => row.resourceType === "cash_collection").flatMap(row => row.resourceId ? [row.resourceId] : []);
-    const cashResources = cashIds.length ? await repository.cashResources(cashIds) : new Map<string, Resource>();
-    return auditHistoryCsv(rows.map((row) => presentAuditHistoryRow(ctx, row, "export", row.resourceId ? cashResources.get(row.resourceId) : undefined)));
+    const expenseIds = rows.filter(row => row.resourceType === "expense").flatMap(row => row.resourceId ? [row.resourceId] : []);
+    const [cash, expenses] = await Promise.all([cashIds.length ? repository.cashResources(cashIds) : new Map<string, Resource>(), expenseIds.length ? repository.expenseResources(expenseIds) : new Map<string, Resource>()]);
+    const resources = new Map([...cash, ...expenses]);
+    return auditHistoryCsv(rows.map((row) => presentAuditHistoryRow(ctx, row, "export", row.resourceId ? resources.get(row.resourceId) : undefined)));
   });
 }

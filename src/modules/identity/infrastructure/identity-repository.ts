@@ -276,7 +276,23 @@ export class IdentityRepository {
     return { before, after, changed: true };
   }
 
-  findSessionSecurityAccount(id: string, now = new Date()) {
+  async authorizationState(id: string) {
+    const [clock] = await this.tx.$queryRaw<Array<{ now: Date; ids: string[] }>>(Prisma.sql`
+      WITH checked AS MATERIALIZED (SELECT clock_timestamp() AS at)
+      SELECT date_trunc('milliseconds',checked.at) AS now, ARRAY(
+        SELECT a.id::text FROM role_assignment a JOIN role r ON r.id=a.role_id AND r.organization_id=a.organization_id
+        WHERE a.organization_id=${this.organizationId}::uuid AND a.user_account_id=${id}::uuid
+          AND a.archived_at IS NULL AND r.archived_at IS NULL AND a.valid_from<=checked.at AND (a.valid_to IS NULL OR a.valid_to>checked.at)
+      ) AS ids FROM checked`);
+    const [account, assignments] = await Promise.all([
+      this.findSessionSecurityAccount(id, clock.now, clock.ids),
+      this.tx.roleAssignment.findMany({ where: { organizationId: this.organizationId, userAccountId: id, id: { in: clock.ids }, archivedAt: null, role: { archivedAt: null } },
+        include: { role: { include: { rolePermissions: { include: { permission: true } } } } } })
+    ]);
+    return { account, assignments, now: clock.now };
+  }
+
+  findSessionSecurityAccount(id: string, now = new Date(), assignmentIds?: string[]) {
     return this.tx.userAccount.findFirst({
       where: { id, organizationId: this.organizationId, status: "ACTIVE" },
       select: {
@@ -284,7 +300,7 @@ export class IdentityRepository {
         person: { select: { preferredLocale: true } },
         authCredentials: { where: { revokedAt: null }, select: { type: true, expiresAt: true, revokedAt: true } },
         roleAssignments: {
-          where: { archivedAt: null, validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] },
+          where: { archivedAt: null, ...(assignmentIds ? { id: { in: assignmentIds } } : { validFrom: { lte: now }, OR: [{ validTo: null }, { validTo: { gt: now } }] }) },
           select: { role: { select: { key: true } } }
         }
       }

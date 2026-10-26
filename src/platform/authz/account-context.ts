@@ -43,34 +43,12 @@ export async function authContextForAccount(
 // Financial commands may wait for resource locks. Resolve their current grants
 // inside the existing transaction after those locks, using the same loader.
 export async function authContextForAccountInTransaction(
-  tx: TenantTransaction, organizationId: string, userAccountId: string, at = new Date()
+  tx: TenantTransaction, organizationId: string, userAccountId: string
 ): Promise<AuthContext> {
-    const account = await new IdentityRepository(tx, organizationId).findSessionSecurityAccount(userAccountId, at);
-    if (!account || securityEnrollment(account, at).setupRequired) {
+    const { account, assignments, now } = await new IdentityRepository(tx, organizationId).authorizationState(userAccountId);
+    if (!account || securityEnrollment(account, now).setupRequired) {
       return { organizationId, userAccountId, permissions: new Set<string>(), scopes: [{ organizationId }], assignments: [] };
     }
-    const assignments = (await tx.roleAssignment.findMany({
-      where: {
-        organizationId,
-        userAccountId,
-        archivedAt: null,
-        role: { archivedAt: null },
-        validFrom: { lte: at },
-        OR: [{ validTo: null }, { validTo: { gt: at } }]
-      },
-      include: {
-        role: {
-          include: {
-            rolePermissions: {
-              include: {
-                permission: true
-              }
-            }
-          }
-        }
-      }
-    })) as RolePermissionRow[];
-
     return contextForRoleAssignments(organizationId, userAccountId, assignments);
 }
 

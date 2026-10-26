@@ -15,14 +15,15 @@ export const channelPayloadSchema = z.object({ channel: z.enum(["email", "push"]
 export async function resolveNotificationChannel(repository: NotificationRepository, payload: z.infer<typeof channelPayloadSchema>) {
   const input = notificationInputSchema.parse({ kind: payload.kind, recipientId: payload.recipientId, targetId: payload.targetId });
   const candidate = await repository.channelRecipient(input.recipientId);
-  const target = (await repository.targets([input])).get(input.targetId);
+  const target = (await repository.targets([input], input.recipientId)).get(input.targetId);
   const preferences = await repository.preferences(input.recipientId);
   const ctx = candidate ? contextForRoleAssignments(candidate.organizationId, candidate.id, candidate.roleAssignments) : null;
   const locale = safeLocale(candidate?.person.preferredLocale ?? "en");
   const destination = ctx && target ? notificationDestination(ctx, input, target, locale) : null;
+  const currentApproval = input.kind !== "approval_requested" || await repository.approvalDeliveryAllowed(input.targetId, input.recipientId, payload.sourceEventId);
   const allowed = Boolean(candidate && ctx && target && destination && (target.type === "identity" || !securityEnrollment(candidate).setupRequired)
     && (target.type === "identity" || authorize(ctx, "view", target))
-    && (input.kind !== "approval_requested" || (target.status === "PENDING" && (authorize(ctx, "approve", target) || authorize(ctx, "reject", target))))
+    && (input.kind !== "approval_requested" || (currentApproval && (authorize(ctx, "approve", target) || authorize(ctx, "reject", target))))
     && shouldDeliverNotification(input.kind, payload.channel, preferences));
   return { input, candidate, target, locale, destination, allowed, labels: { en, fr, ar }[locale].Notifications };
 }

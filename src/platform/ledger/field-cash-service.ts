@@ -20,7 +20,7 @@ async function assignedCashContext(ctx: ReservationActorContext, taskId: string,
     throw new ReservationAuthorizationError();
   await operations.lock(taskId);
   const repository = new CashCustodyRepository(tx, ctx.organizationId), clock = await repository.clock();
-  ctx = { ...ctx, authContext: { ...(await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId, clock.now)), personId: ctx.personId } };
+  ctx = { ...ctx, authContext: { ...(await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId)), personId: ctx.personId } };
   const task = await operations.task(taskId); requireAssignedOperationTask(ctx, task);
   operationAllowed(ctx, "view", taskResource(task));
   if (!["ASSIGNED", "IN_PROGRESS"].includes(task.state)) throw new ReservationNotFoundError();

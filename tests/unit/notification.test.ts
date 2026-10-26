@@ -10,6 +10,17 @@ const resource: Resource = { type: "task", organizationId: org, id: task, proper
 const input = { kind: "task_assigned" as const, recipientId: account, targetId: task };
 
 describe("personal notification permissions and safe destinations", () => {
+  it("links a financial approval through its request ID while authorizing its distinct expense source", () => {
+    const approvalId = "018f0a0b-0000-7000-9000-000000000004", expenseId = "018f0a0b-0000-7000-9000-000000000005";
+    const scope = { organizationId: org, scopeType: "owner" as const, scopeId: "owner-a" }, permissions = new Set(["expense:view"]);
+    const ctx = ownNotificationContext({ organizationId: org, permissions, scopes: [scope], assignments: [{ scope, permissions }] }, account);
+    const subject: Resource = { type: "expense", organizationId: org, id: expenseId, financialRecordId: expenseId, approvalId, ownerId: "owner-a", amount: "500.25", dataClass: "financial" };
+    const notice = { kind: "approval_requested" as const, recipientId: account, targetId: approvalId };
+    expect(notificationDestination(ctx, notice, subject, "fr")).toBe(`/fr/app/approvals/${approvalId}`);
+    for (const denied of [{ ...subject, ownerId: "owner-b" }, { ...subject, approvalId: expenseId }, { ...subject, approvalId: undefined }])
+      expect(notificationDestination(ctx, notice, denied, "fr")).toBeNull();
+    expect(notificationDestination(context(), notice, subject, "fr")).toBeNull();
+  });
   it("grants only the account inbox and never other inboxes, collections or tenants", () => {
     const ctx = context();
     expect(authorize(ctx, "view", { type: "notification", organizationId: org, id: account })).toBe(true);

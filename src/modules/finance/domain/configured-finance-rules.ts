@@ -8,6 +8,7 @@ import {
   type PayoutScheduleConfig
 } from "@/platform/config/rule-registry";
 import { Money } from "@/platform/money/money";
+import { evaluate, type EvaluationContext } from "@/platform/automation/rule";
 
 type ApprovalThreshold = ApprovalThresholdsConfig["thresholds"][number];
 type ExpenseCategoryRule = NonNullable<ExpenseTreatmentConfig["categories"]>[string];
@@ -17,6 +18,8 @@ export type ApprovalSubject = {
   amount: Money;
   periodRevenue?: Money;
   emergency?: boolean;
+  evaluation?: EvaluationContext;
+  ruleKey?: string;
 };
 
 export type ConfiguredApprovalDecision = {
@@ -63,6 +66,9 @@ function thresholdMatches(threshold: ApprovalThreshold, subject: ApprovalSubject
   if (threshold.category && threshold.category !== subject.category) {
     return false;
   }
+  if (threshold.conditions && !evaluate(threshold.conditions, subject.evaluation ?? {
+    fields: { expense: { category: subject.category, amount: subject.amount.amount.toString(), currency: subject.amount.currency, emergency: subject.emergency ?? false } }, configs: {}
+  })) return false;
 
   let hasCondition = false;
   let matched = false;
@@ -119,7 +125,8 @@ export function evaluateConfiguredApproval(
   subject: ApprovalSubject
 ): ConfiguredApprovalDecision {
   const config = approvalThresholdsConfigSchema.parse(value);
-  const threshold = config.thresholds.find((candidate) => thresholdMatches(candidate, subject));
+  if (subject.ruleKey && !config.thresholds.some(candidate => candidate.key === subject.ruleKey)) throw new Error("Configured approval rule key is missing");
+  const threshold = config.thresholds.find((candidate) => (!subject.ruleKey || candidate.key === subject.ruleKey) && thresholdMatches(candidate, subject));
 
   if (!threshold) {
     return {
@@ -196,7 +203,11 @@ export function allocateConfiguredExpense(
   const treatment = categoryRule?.treatment ?? config.default_treatment;
   const shares = sharesForTreatment(categoryRule, treatment);
   const ownerAmount = shareAmount(subject.amount, shares.ownerShareBps);
-  const alvillasAmount = shareAmount(subject.amount, shares.alvillasShareBps);
+  // Assign the final participating share the remainder so rounding cannot
+  // create or lose a cent. The configured percentages remain unchanged.
+  const alvillasAmount = shares.alvillasShareBps > 0 && shares.guestShareBps === 0
+    ? subject.amount.subtract(ownerAmount)
+    : shareAmount(subject.amount, shares.alvillasShareBps);
   const guestAmount =
     shares.guestShareBps === 0
       ? Money.zero(subject.amount.currency)
