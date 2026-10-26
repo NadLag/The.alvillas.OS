@@ -1,5 +1,6 @@
 import type { Session } from "next-auth";
-import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
+import type { AuthContext } from "@/platform/authz/authorize";
+import { authContextForAccount } from "@/platform/authz/account-context";
 
 export type FinanceActorContext = {
   organizationId: string;
@@ -7,28 +8,12 @@ export type FinanceActorContext = {
   authContext: AuthContext;
 };
 
-const bootstrapFinancePermissions = new Set([
-  permissionKey("reservation", "view"),
-  permissionKey("financial_transaction", "view"),
-  permissionKey("financial_transaction", "create"),
-  permissionKey("financial_transaction", "void"),
-  permissionKey("financial_transaction", "reconcile")
-]);
-
-export function financeActorContextFromSession(session: Session | null): FinanceActorContext | null {
+export async function financeActorContextFromSession(
+  session: Session | null,
+  deps: Parameters<typeof authContextForAccount>[2] = {}
+): Promise<FinanceActorContext | null> {
   const user = session?.user;
-
-  if (!user?.id || !user.organizationId) {
-    return null;
-  }
-
-  return {
-    organizationId: user.organizationId,
-    actorId: user.id,
-    authContext: {
-      organizationId: user.organizationId,
-      permissions: bootstrapFinancePermissions,
-      scopes: [{ organizationId: user.organizationId }]
-    }
-  };
+  if (!user?.id || !user.personId || !user.organizationId || user.securitySetupRequired || user.sessionRevoked) return null;
+  return { organizationId: user.organizationId, actorId: user.id,
+    authContext: { ...(await authContextForAccount(user.organizationId, user.id, deps)), personId: user.personId } };
 }

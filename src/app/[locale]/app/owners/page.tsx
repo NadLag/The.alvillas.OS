@@ -1,9 +1,10 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AdminShell, EmptyState, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
-import { listOwners } from "@/modules/core/application/core-service";
+import { CoreAuthorizationError, listOwners } from "@/modules/core/application/core-service";
+import { authorize } from "@/platform/authz/authorize";
 import { OwnerCreateForm } from "@/modules/core/ui/core-forms";
 import { OwnerRegisterTable } from "@/modules/core/ui/core-tables";
 import { auth } from "@/platform/auth/session";
@@ -25,7 +26,7 @@ export default async function OwnersPage({
   setRequestLocale(appLocale);
 
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
 
   if (!ctx) {
     redirect(`/${appLocale}/login`);
@@ -35,7 +36,7 @@ export default async function OwnersPage({
     getTranslations("Core"),
     getTranslations("DesignSystem"),
     listOwners(ctx)
-  ]);
+  ]).catch(error => { if (error instanceof CoreAuthorizationError) notFound(); throw error; });
   const ownerRows = owners.map((owner) => ({
     id: owner.id,
     contact: owner.email ?? owner.phone ?? t("common.noContact"),
@@ -80,7 +81,7 @@ export default async function OwnersPage({
           />
         </section>
 
-        <aside className="workspace-side" aria-label={t("owners.createLabel")}>
+        {authorize(ctx.authContext, "create", { type: "owner", organizationId: ctx.organizationId }) ? <aside className="workspace-side" aria-label={t("owners.createLabel")}>
           <p className="panel-label">{t("owners.createLabel")}</p>
           <OwnerCreateForm
             locale={appLocale}
@@ -116,7 +117,7 @@ export default async function OwnersPage({
               generic: t("forms.generic")
             }}
           />
-        </aside>
+        </aside> : null}
       </div>
     </AdminShell>
   );

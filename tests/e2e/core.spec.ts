@@ -126,6 +126,7 @@ test.describe("owners and properties journey", () => {
     await page.getByTestId("property-owner-share-add").click();
     await page.getByTestId("property-owner-share-owner").nth(1).selectOption({ label: coOwnerName });
     await page.getByTestId("property-owner-share-percent").nth(1).fill("40");
+    await page.getByTestId("property-ownership-reason").fill("Record the signed ownership shares");
     await page.getByTestId("property-owner-share-submit").click();
     await expect(page.getByTestId("property-ownership-form-success")).toContainText("Ownership saved");
     await expect(page.getByTestId("property-ownership-summary")).toContainText(ownerName);

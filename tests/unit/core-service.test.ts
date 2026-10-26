@@ -147,6 +147,7 @@ describe("core service authorization", () => {
   it("validates multi-owner share sets before they reach the repository", () => {
     const valid = parsePropertyOwnershipInput({
       propertyId: "00000000-0000-7000-8000-000000000100",
+      reason: "Record the signed ownership shares",
       shares: [
         {
           ownerId: "00000000-0000-7000-8000-000000000101",
@@ -162,6 +163,7 @@ describe("core service authorization", () => {
     });
     const invalid = parsePropertyOwnershipInput({
       propertyId: "00000000-0000-7000-8000-000000000100",
+      reason: "Retain the existing invalid-share regression",
       shares: [
         {
           ownerId: "00000000-0000-7000-8000-000000000101",
@@ -178,6 +180,7 @@ describe("core service authorization", () => {
 
     expect(valid.success).toBe(true);
     expect(invalid.success).toBe(false);
+    if (valid.success) expect(parsePropertyOwnershipInput({ ...valid.data, reason: "" }).success).toBe(false);
   });
 
   it("denies ownership updates without property edit permission", async () => {
@@ -192,6 +195,7 @@ describe("core service authorization", () => {
         ctx,
         {
           propertyId: "00000000-0000-7000-8000-000000000100",
+          reason: "Property edit permission is required first",
           shares: [
             {
               ownerId: "00000000-0000-7000-8000-000000000101",

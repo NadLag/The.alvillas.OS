@@ -27,6 +27,7 @@ import { IntegrationAuthenticator } from "./support/authenticator";
 import { beginPasskeyRegistration, finishPasskeyRegistration, startTotpEnrollment, confirmTotpEnrollment, beginPasskeyAuthentication, verifyPasskeyAuthentication } from "@/modules/identity/application/identity-service";
 import { authenticatePassword, authenticateMfaChallenge, beginVerifiedPasskeyLogin, validateAuthSession } from "@/platform/auth/identity-auth";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
+import { financeActorContextFromSession } from "@/modules/finance/application/finance-access";
 import { totpCode } from "@/platform/auth/totp";
 import { ResendEmailProvider, type HttpTransport } from "@/platform/providers/real";
 import { createInngestOutboxHandlers } from "@/platform/events/inngest";
@@ -38,7 +39,7 @@ import {
   IdentityAuthorizationError,
   authContextForAccount
 } from "@/modules/identity/application/identity-access";
-import type { CoreActorContext } from "@/modules/core/application/core-access";
+import { coreActorContextFromSession, agreementActorContextFromSession, type CoreActorContext } from "@/modules/core/application/core-access";
 import {
   CoreAuthorizationError,
   CoreValidationError,
@@ -94,7 +95,7 @@ import {
   listAirbnbSettlementVariances,
   reverseAirbnbSettlement
 } from "@/modules/finance/application/airbnb-settlement-service";
-import type { ConfigActorContext } from "@/modules/config/application/config-access";
+import { configActorContextFromSession, type ConfigActorContext } from "@/modules/config/application/config-access";
 import {
   ConfigAuthorizationError,
   ConfigValidationError,
@@ -2846,7 +2847,8 @@ describe("PostgreSQL baseline", () => {
           permissionKey("owner", "create"),
           permissionKey("property", "view"),
           permissionKey("property", "create"),
-          permissionKey("property", "edit")
+          permissionKey("property", "edit"),
+          permissionKey("financial_transaction", "edit")
         ]),
         scopes: [{ organizationId: orgA.id }]
       }
@@ -2934,6 +2936,7 @@ describe("PostgreSQL baseline", () => {
       ctx,
       {
         propertyId: property.id,
+        reason: "Record the signed co-ownership allocation",
         shares: [
           {
             ownerId: primaryOwner.id,
@@ -2985,6 +2988,7 @@ describe("PostgreSQL baseline", () => {
     ]);
     expect(stored.links.find((link) => link.ownerId === archivedOwner.id)?.archivedAt).toBeInstanceOf(Date);
     expect(visibleToOrgB).toHaveLength(0);
+    expect(stored.audit.reason).toBe("Record the signed co-ownership allocation");
     expect(stored.audit.before).toEqual({
       owners: [
         expect.objectContaining({
@@ -7756,6 +7760,114 @@ describe("PostgreSQL baseline", () => {
     const event = "UID:stable-ota\r\nDTSTART;VALUE=DATE:20290410\r\nDTEND;VALUE=DATE:20290414\r\nSUMMARY:Reserved";
     return { organization, ctx, ...setup, deps, manual, feed, ical, event };
   }
+
+  it("native finance session denies an operational employee before any financial mutation", async () => {
+    const f = await reservationManagementFixture(), stay = await f.manual();
+    const worker = await withTenant(prisma, f.organization.id, async tx => {
+      const person = await tx.person.create({ data: { organizationId: f.organization.id, displayName: "Restricted finance regression employee" } });
+      const account = await tx.userAccount.create({ data: { organizationId: f.organization.id, personId: person.id } });
+      const role = await tx.role.findFirstOrThrow({ where: { key: "field_staff" } });
+      await tx.roleAssignment.create({ data: { organizationId: f.organization.id, personId: person.id, userAccountId: account.id, roleId: role.id, scopeType: "property", scopeId: f.property.id } });
+      const bank = await tx.ledgerAccount.create({ data: { organizationId: f.organization.id, code: "BANK_FINANCE_GUARD", name: "Isolated finance guard bank", accountType: "ASSET_LOCATION", normalSide: "DEBIT" } });
+      return { person, account, bank };
+    });
+    const signedIn = sessionForOwnerPortal({ organizationId: f.organization.id, userAccountId: worker.account.id, personId: worker.person.id, email: "restricted-finance@example.test" });
+    const ctx = await financeActorContextFromSession(signedIn, { db: prisma }); expect(ctx).not.toBeNull();
+    const before = await withTenant(prisma, f.organization.id, async tx => ({ transactions: await tx.financialTransaction.count(), audits: await tx.auditLog.count() }));
+    let failure: unknown;
+    try { await recordReservationAccommodationRevenue(ctx!, { reservationId: stay.reservation.id, amount: "500.00", currency: "MAD", receivedAccountId: worker.bank.id, idempotencyKey: randomUUID() }, f.deps); }
+    catch (error) { failure = error; }
+    const after = await withTenant(prisma, f.organization.id, async tx => ({ transactions: await tx.financialTransaction.count(), audits: await tx.auditLog.count() }));
+    expect({ denied: failure instanceof ReservationRevenueAuthorizationError, transactionDelta: after.transactions - before.transactions, auditDelta: after.audits - before.audits })
+      .toEqual({ denied: true, transactionDelta: 0, auditDelta: 0 });
+    await expect(importAirbnbSettlementCsv(ctx!, { csv: "private input must not be parsed before permission checks", receivedAccountId: worker.bank.id, idempotencyKey: randomUUID() }, f.deps)).rejects.toBeInstanceOf(AirbnbSettlementAuthorizationError);
+    await withTenant(prisma, f.organization.id, async tx => {
+      const finance = await tx.role.findFirstOrThrow({ where: { key: "finance" } });
+      await tx.roleAssignment.create({ data: { organizationId: f.organization.id, personId: worker.person.id, userAccountId: worker.account.id, roleId: finance.id, scopeType: "organization" } });
+    });
+    const enrollmentPending = await financeActorContextFromSession(signedIn, { db: prisma }); expect(enrollmentPending).not.toBeNull();
+    expect(enrollmentPending!.authContext.permissions.has("financial_transaction:create")).toBe(false);
+    await expect(recordReservationAccommodationRevenue(enrollmentPending!, { reservationId: stay.reservation.id, amount: "500.00", currency: "MAD", receivedAccountId: worker.bank.id, idempotencyKey: randomUUID() }, f.deps)).rejects.toBeInstanceOf(ReservationRevenueAuthorizationError);
+    expect(await financeActorContextFromSession({ ...signedIn, user: { ...signedIn.user, securitySetupRequired: true } }, { db: prisma })).toBeNull();
+    expect(await financeActorContextFromSession({ ...signedIn, user: { ...signedIn.user, sessionRevoked: true } }, { db: prisma })).toBeNull();
+  });
+
+  it("native finance session rechecks stored grant expiry for an existing signed-in account", async () => {
+    const f = await reservationManagementFixture(), first = await f.manual(), second = await f.manual({ checkIn: "2029-05-10", checkOut: "2029-05-14", guestEmail: "second-finance@example.test" });
+    const bank = await withTenant(prisma, f.organization.id, tx => tx.ledgerAccount.create({ data: { organizationId: f.organization.id, code: "BANK_FINANCE_EXPIRY", name: "Isolated current grant bank", accountType: "ASSET_LOCATION", normalSide: "DEBIT" } }));
+    const signedIn = sessionForOwnerPortal({ organizationId: f.organization.id, userAccountId: f.ctx.actorId, personId: f.ctx.personId, email: "current-finance@example.test" });
+    const current = await financeActorContextFromSession(signedIn, { db: prisma }); expect(current).not.toBeNull();
+    const posted = await recordReservationAccommodationRevenue(current!, { reservationId: first.reservation.id, amount: "8000.00", currency: "MAD", receivedAccountId: bank.id, idempotencyKey: randomUUID() }, f.deps);
+    expect(posted.grossAmount.toJSON().amount).toBe("8000.00");
+    await withTenant(prisma, f.organization.id, tx => tx.roleAssignment.updateMany({ where: { userAccountId: f.ctx.actorId, role: { key: "reservation-integration-operator" } }, data: { validTo: new Date("2020-01-02") } }));
+    const expired = await financeActorContextFromSession(signedIn, { db: prisma }); expect(expired).not.toBeNull();
+    const before = await withTenant(prisma, f.organization.id, tx => tx.financialTransaction.count()); let failure: unknown;
+    try { await recordReservationAccommodationRevenue(expired!, { reservationId: second.reservation.id, amount: "500.00", currency: "MAD", receivedAccountId: bank.id, idempotencyKey: randomUUID() }, f.deps); }
+    catch (error) { failure = error; }
+    const after = await withTenant(prisma, f.organization.id, tx => tx.financialTransaction.count());
+    expect({ denied: failure instanceof ReservationRevenueAuthorizationError, transactionDelta: after - before }).toEqual({ denied: true, transactionDelta: 0 });
+  });
+
+  it("native business contexts do not grant owner creation to a field employee", async () => {
+    const f = await reservationManagementFixture();
+    const worker = await withTenant(prisma, f.organization.id, async tx => {
+      const person = await tx.person.create({ data: { organizationId: f.organization.id, displayName: "Core scope regression employee" } });
+      const account = await tx.userAccount.create({ data: { organizationId: f.organization.id, personId: person.id } });
+      const role = await tx.role.findFirstOrThrow({ where: { key: "field_staff" } });
+      await tx.roleAssignment.create({ data: { organizationId: f.organization.id, personId: person.id, userAccountId: account.id, roleId: role.id, scopeType: "property", scopeId: f.property.id } });
+      return { person, account };
+    });
+    const signedIn = sessionForOwnerPortal({ organizationId: f.organization.id, userAccountId: worker.account.id, personId: worker.person.id, email: "restricted-core@example.test" });
+    const ctx = await coreActorContextFromSession(signedIn, { db: prisma }); expect(ctx).not.toBeNull();
+    const before = await withTenant(prisma, f.organization.id, tx => tx.owner.count()); let failure: unknown;
+    try { await createOwner(ctx!, ownerInputSchema.parse({ displayName: "Unauthorized fictional owner" }), f.deps); } catch (error) { failure = error; }
+    const after = await withTenant(prisma, f.organization.id, tx => tx.owner.count());
+    expect({ denied: failure instanceof CoreAuthorizationError, ownerDelta: after - before }).toEqual({ denied: true, ownerDelta: 0 });
+  });
+
+  it("native business contexts never replace expired grants with configuration or agreement permissions", async () => {
+    const f = await reservationManagementFixture();
+    await withTenant(prisma, f.organization.id, tx => tx.roleAssignment.updateMany({ where: { userAccountId: f.ctx.actorId }, data: { validTo: new Date("2020-01-02") } }));
+    const signedIn = sessionForOwnerPortal({ organizationId: f.organization.id, userAccountId: f.ctx.actorId, personId: f.ctx.personId, email: "expired-core@example.test" });
+    const ctx = await configActorContextFromSession(signedIn, { db: prisma }); expect(ctx).not.toBeNull();
+    const before = await withTenant(prisma, f.organization.id, tx => tx.configRule.count()); let failure: unknown;
+    try { await createConfigRuleVersion(ctx!, { key: `feature_flag.expired_${randomUUID().replaceAll("-", "")}`, scopeType: "organization", lifecycle: "DRAFT", valueJson: '{"enabled":true}', effectiveFrom: new Date("2020-01-01"), reason: "Expired grant must not create a version" }, f.deps); }
+    catch (error) { failure = error; }
+    const after = await withTenant(prisma, f.organization.id, tx => tx.configRule.count());
+    const agreement = await agreementActorContextFromSession(signedIn, { db: prisma }); expect(agreement).not.toBeNull();
+    expect({ denied: failure instanceof ConfigAuthorizationError, versionDelta: after - before,
+      agreementAllowed: authorize(agreement!.authContext, "create", { type: "config_rule", organizationId: f.organization.id, propertyId: f.property.id }) })
+      .toEqual({ denied: true, versionDelta: 0, agreementAllowed: false });
+  });
+
+  it("native business contexts bind scoped creation to the new resource while preserving an allowed own-property edit", async () => {
+    const f = await reservationManagementFixture();
+    const worker = await withTenant(prisma, f.organization.id, async tx => {
+      const person = await tx.person.create({ data: { organizationId: f.organization.id, displayName: "Scoped creation regression employee" } });
+      const account = await tx.userAccount.create({ data: { organizationId: f.organization.id, personId: person.id } });
+      const role = await tx.role.create({ data: { organizationId: f.organization.id, key: "scoped-core-writer", name: "Explicit scoped core writer" } });
+      for (const key of ["owner:view", "owner:create", "property:view", "property:create", "property:edit"]) {
+        const permission = await tx.permission.findFirstOrThrow({ where: { key } });
+        await tx.rolePermission.create({ data: { organizationId: f.organization.id, roleId: role.id, permissionId: permission.id } });
+      }
+      await tx.roleAssignment.create({ data: { organizationId: f.organization.id, personId: person.id, userAccountId: account.id, roleId: role.id, scopeType: "property", scopeId: f.property.id } });
+      return { person, account };
+    });
+    const ctx = await coreActorContextFromSession(sessionForOwnerPortal({ organizationId: f.organization.id, userAccountId: worker.account.id, personId: worker.person.id, email: "scoped-creation@example.test" }), { db: prisma }); expect(ctx).not.toBeNull();
+    const before = await withTenant(prisma, f.organization.id, async tx => ({ owners: await tx.owner.count(), properties: await tx.property.count() }));
+    let ownerFailure: unknown, propertyFailure: unknown;
+    try { await createOwner(ctx!, ownerInputSchema.parse({ displayName: "Out-of-scope fictional owner" }), f.deps); } catch (error) { ownerFailure = error; }
+    try { await createProperty(ctx!, propertyInputSchema.parse({ ownerId: f.owner.id, name: "Out-of-scope fictional property", addressLine1: "Local fixture", city: "Marrakech", propertyType: "Villa", bedrooms: 2, bathrooms: 2, maxGuests: 4 }), f.deps); } catch (error) { propertyFailure = error; }
+    const ownershipBefore = await withTenant(prisma, f.organization.id, tx => tx.propertyOwner.findMany({ where: { propertyId: f.property.id }, orderBy: { ownerId: "asc" } }));
+    let ownershipFailure: unknown;
+    try { await updatePropertyOwnership(ctx!, { propertyId: f.property.id, reason: "Operational grants must not alter ownership", shares: [{ ownerId: f.owner.id, shareBps: 10000, isPrimary: true }] }, f.deps); } catch (error) { ownershipFailure = error; }
+    expect(ownershipFailure).toBeInstanceOf(CoreAuthorizationError);
+    expect(await withTenant(prisma, f.organization.id, tx => tx.propertyOwner.findMany({ where: { propertyId: f.property.id }, orderBy: { ownerId: "asc" } }))).toEqual(ownershipBefore);
+    expect((await transitionPropertyLifecycle(ctx!, { propertyId: f.property.id, status: "ONBOARDING", reason: "Explicit permitted own-property transition" }, f.deps)).status).toBe("ONBOARDING");
+    const after = await withTenant(prisma, f.organization.id, async tx => ({ owners: await tx.owner.count(), properties: await tx.property.count() }));
+    expect({ ownerDenied: ownerFailure instanceof CoreAuthorizationError, propertyDenied: propertyFailure instanceof CoreAuthorizationError,
+      ownerDelta: after.owners - before.owners, propertyDelta: after.properties - before.properties }).toEqual({ ownerDenied: true, propertyDenied: true, ownerDelta: 0, propertyDelta: 0 });
+  });
 
   it("F-RES scheduled-feed persistence: idempotent resync, conditional 304, missing UIDs, changed dates and reviewed cancellations", async () => {
     const f = await reservationManagementFixture(), feed = await f.feed();

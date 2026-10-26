@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { coreActorContextFromSession } from "@/modules/core/application/core-access";
-import { CoreNotFoundError, getOwner } from "@/modules/core/application/core-service";
+import { CoreAuthorizationError, CoreNotFoundError, getOwner } from "@/modules/core/application/core-service";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -32,7 +32,7 @@ export default async function OwnerDetailPage({
   }
 
   const session = await auth();
-  const ctx = coreActorContextFromSession(session);
+  const ctx = await coreActorContextFromSession(session);
 
   if (!ctx) {
     redirect(`/${appLocale}/login`);
@@ -44,7 +44,7 @@ export default async function OwnerDetailPage({
   try {
     owner = await getOwner(ctx, parsedId.data);
   } catch (error) {
-    if (error instanceof CoreNotFoundError) {
+    if (error instanceof CoreNotFoundError || error instanceof CoreAuthorizationError) {
       notFound();
     }
 

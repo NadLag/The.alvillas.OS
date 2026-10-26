@@ -396,6 +396,8 @@ export async function createOwner(
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new CoreRepository(tx, ctx.organizationId);
     const owner = await repository.createOwner(input, ctx.actorId);
+    if (!authorize(ctx.authContext, "create", { type: "owner", organizationId: ctx.organizationId,
+      id: owner.id, ownerId: owner.id })) throw new CoreAuthorizationError();
 
     await writeAuditEvent(tx, {
       organizationId: ctx.organizationId,
@@ -468,6 +470,8 @@ export async function createProperty(
     }
 
     const property = await repository.createProperty(input, ctx.actorId);
+    if (!authorize(ctx.authContext, "create", { type: "property", organizationId: ctx.organizationId,
+      id: property.id, propertyId: property.id, ownerId: input.ownerId, city: property.cityId, region: property.regionId })) throw new CoreAuthorizationError();
 
     await writeAuditEvent(tx, {
       organizationId: ctx.organizationId,
@@ -769,6 +773,11 @@ export async function updatePropertyOwnership(
   deps: CoreServiceDeps = {}
 ): Promise<PropertySummary> {
   assertAllowed(ctx, "edit", "property", input.propertyId);
+  if (!authorize(ctx.authContext, "edit", { type: "financial_transaction", organizationId: ctx.organizationId,
+    propertyId: input.propertyId, dataClass: "financial" })) throw new CoreAuthorizationError();
+  const parsed = propertyOwnershipInputSchema.safeParse(input);
+  if (!parsed.success) throw new CoreValidationError();
+  const ownershipInput = parsed.data;
   const meta = await auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
@@ -779,7 +788,7 @@ export async function updatePropertyOwnership(
       throw new CoreNotFoundError();
     }
 
-    const property = await repository.replacePropertyOwnership(input, ctx.actorId);
+    const property = await repository.replacePropertyOwnership(ownershipInput, ctx.actorId);
 
     if (!property) {
       throw new CoreNotFoundError();
@@ -799,7 +808,7 @@ export async function updatePropertyOwnership(
       after: {
         owners: property.owners
       },
-      reason: "F-ORG-05 property ownership update",
+      reason: ownershipInput.reason,
       requestId: meta.requestId,
       occurredAt: new Date()
     });
