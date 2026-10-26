@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
+import { liveQuery } from "dexie";
 import { FieldQueue } from "@/platform/offline/field-queue";
 import type { FieldCashDraft } from "@/platform/offline/field-queue-store";
 import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
@@ -23,6 +24,35 @@ async function setup() {
 }
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.delete())); });
 describe("cash uses the existing private draft and operation stores", () => {
+  it("keeps a cash subscription alive when it starts before local identity binding", async () => {
+    const source = await setup(), queue = new FieldQueue(`cash-startup-${randomUUID()}`); stores.push(queue);
+    const seen: Array<Awaited<ReturnType<FieldQueue["cashSnapshot"]>>> = [], errors: unknown[] = [];
+    const subscription = liveQuery(() => queue.cashSnapshot(scope, source.task.id, "observe")).subscribe({ next: value => { seen.push(value); }, error: (error: unknown) => { errors.push(error); } });
+    try {
+      await expect.poll(() => seen.length + errors.length).toBeGreaterThan(0);
+      expect(errors).toEqual([]);
+      expect(seen.at(-1)?.draft).toBeUndefined(); expect(seen.at(-1)?.task).toBeUndefined();
+      await queue.activate(scope); const state = await queue.prepareCache(scope);
+      await queue.publishCache(scope, state, [source.task], [], "startup", stamp);
+      await expect.poll(() => seen.at(-1)?.task?.cash?.canCollect).toBe(true);
+      expect(errors).toEqual([]);
+    } finally { subscription.unsubscribe(); }
+  });
+  it("masks a cash subscription after identity changes without clearing intent or authorizing writes", async () => {
+    const f = await setup(); await f.queue.saveCashDraft(scope, f.draft, f.state.incarnation);
+    const seen: Array<Awaited<ReturnType<FieldQueue["cashSnapshot"]>>> = [], errors: unknown[] = [];
+    const subscription = liveQuery(() => f.queue.cashSnapshot(scope, f.task.id, "observe")).subscribe({ next: value => { seen.push(value); }, error: (error: unknown) => { errors.push(error); } });
+    try {
+      await expect.poll(() => seen.at(-1)?.draft?.clientOpId).toBe(f.draft.clientOpId);
+      const count = seen.length;
+      await f.queue.metadata.put({ key: "identity", value: `${randomUUID()}:${randomUUID()}` });
+      await expect.poll(() => seen.length + errors.length).toBeGreaterThan(count);
+      expect(errors).toEqual([]);
+      expect(seen.at(-1)?.task).toBeUndefined(); expect(seen.at(-1)?.draft).toBeUndefined(); expect(seen.at(-1)?.entries).toEqual([]);
+      expect((await f.queue.drafts.toArray())[0].cash).toEqual(f.draft);
+      await expect(f.queue.saveCashDraft(scope, f.draft, f.state.incarnation)).rejects.toThrow("FIELD_SESSION_CHANGED");
+    } finally { subscription.unsubscribe(); }
+  });
   it("queues cash behind nonterminal task evidence without blocking the financial draft", async () => {
     const f = await setup();
     await f.queue.enqueue(scope, { type: "field_task.evidence.attach", client_op_id: randomUUID(), payload: { taskId: f.task.id, uploadId: randomUUID() } });

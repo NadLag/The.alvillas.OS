@@ -573,9 +573,16 @@ export class FieldQueueStore extends Dexie {
     });
   }
 
-  async cashSnapshot(scope: FieldQueueScope, taskId: string) {
+  async cashSnapshot(scope: FieldQueueScope, taskId: string, identityMode: "strict" | "observe" = "strict") {
     return this.transaction("r", [this.metadata, this.jobs, this.drafts, this.cacheState, this.operations], async () => {
-      const identity = fieldIdentity(scope); if ((await this.metadata.get("identity"))?.value !== identity) throw new Error("FIELD_SESSION_CHANGED");
+      const identity = fieldIdentity(scope);
+      // A view can subscribe before verified session activation binds local
+      // identity. Keep watching metadata without exposing another scope or
+      // terminating the subscription. Mutations retain their strict guards.
+      if ((await this.metadata.get("identity"))?.value !== identity) {
+        if (identityMode === "strict") throw new Error("FIELD_SESSION_CHANGED");
+        return { state: undefined, task: undefined, draft: undefined, completionPending: false, entries: [] as FieldQueueEntry[] };
+      }
       const entries = (await this.entries(scope)).filter(entry => entry.operation.payload.taskId === taskId);
       return { state: await this.cacheState.get(identity), task: (await this.jobs.get(`${identity}:${taskId}`))?.task,
         draft: (await this.drafts.get(`${identity}:${taskId}`))?.cash,

@@ -32,9 +32,13 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
   const [busy, setBusy] = useState(false), [reason, setReason] = useState("");
   useEffect(() => {
     mounted.current = true;
-    const subscription = liveQuery(() => fieldQueue().cashSnapshot({ organizationId, userId }, taskId)).subscribe({ next: next => {
+    const subscription = liveQuery(() => fieldQueue().cashSnapshot({ organizationId, userId }, taskId, "observe")).subscribe({ next: next => {
       if (!mounted.current) return;
       setSnapshot(next);
+      if (!next.state) {
+        valueRef.current = null; setValue(null); touched.current = false; wasQueued.current = false; setNotice(null);
+        return;
+      }
       const pending = next.entries.some(entry => entry.syncStatus === "pending");
       if (wasQueued.current && !pending && !next.draft) {
         touched.current = false;
