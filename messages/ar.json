@@ -367,14 +367,14 @@
       "lifecycle": "Lifecycle",
       "value": "Rule JSON",
       "valuePlaceholder": "Paste a valid JSON value for the selected rule key.",
-      "effectiveFrom": "Effective from",
-      "effectiveTo": "Effective until",
+      "effectiveFrom": "ساري من (UTC)",
+      "effectiveTo": "ساري حتى (UTC)",
       "reason": "Reason",
       "createVersion": "Create version",
       "saving": "Saving...",
       "activate": "Activate",
       "retire": "Retire",
-      "asOf": "As of",
+      "asOf": "في (UTC)",
       "preview": "Preview"
     },
     "lifecycle": {
@@ -386,7 +386,7 @@
       "version": "Version",
       "scope": "Scope",
       "status": "Status",
-      "dates": "Dates",
+      "dates": "التواريخ (UTC)",
       "diff": "Diff",
       "value": "Value"
     },
@@ -411,6 +411,14 @@
     "denied": {
       "title": "Configuration access denied",
       "subtitle": "This account does not have permission to view configuration history."
+    },
+    "browse": {
+      "allScopes": "جميع النطاقات",
+      "allProperties": "جميع العقارات",
+      "find": "البحث عن إصدارات القاعدة",
+      "navigation": "صفحات سجل القواعد",
+      "previous": "الإصدارات السابقة",
+      "next": "المزيد من الإصدارات"
     }
   },
   "Organization": {
@@ -1770,7 +1778,12 @@
       "POOL": "مسبح",
       "GARDEN": "حديقة",
       "MAINTENANCE": "صيانة",
-      "CUSTOM": "مخصص"
+      "CUSTOM": "مخصص",
+      "CLEANING": "التنظيف",
+      "LAUNDRY": "الغسيل",
+      "INVENTORY": "المخزون",
+      "CHEF": "الطاهي",
+      "TRANSFER": "النقل"
     },
     "anchors": {
       "CHECK_IN": "الوصول",
