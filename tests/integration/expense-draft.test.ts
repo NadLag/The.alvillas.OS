@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant } from "@/platform/db/tenant";
@@ -93,6 +93,25 @@ describe("native expenses on real PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it.each(["behind","ahead"] as const)("uses PostgreSQL grant validity when the application clock is %s", async direction => {
+    const f = await fixture();
+    const at = await withTenant(db, f.org, async tx => {
+      const clock = (await tx.$queryRaw<Array<{ at: Date }>>`SELECT clock_timestamp() AS at`)[0].at;
+      await tx.roleAssignment.update({ where: { id: f.grant.id }, data: { validFrom: new Date(clock.getTime()-60_000) } });
+      const role = await tx.role.create({ data: { organizationId: f.org, key: "future_expense_approver", name: "Future approval grant" } });
+      const permission = await tx.permission.findFirstOrThrow({ where: { key: "expense:approve" } });
+      await tx.rolePermission.create({ data: { organizationId: f.org, roleId: role.id, permissionId: permission.id } });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: f.account.id, personId: f.person.id,
+        scopeType: "property", scopeId: f.property.id, validFrom: new Date(clock.getTime()+60_000) } });
+      return clock;
+    });
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(at.getTime()+(direction === "behind" ? -600_000 : 600_000)));
+    try {
+      const ctx = await authContextForAccount(f.org,f.account.id,{ db });
+      expect(ctx.permissions.has("expense:edit")).toBe(true); expect(ctx.permissions.has("expense:approve")).toBe(false);
+      expect(authorize(ctx,"edit",{ type:"expense",organizationId:f.org,propertyId:f.property.id,amount:f.input.amount },at)).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
   it("creates an audited unposted draft once across concurrent original-key retries", async () => {
     const f = await fixture(), results = await Promise.all([create(f), create(f)]);
     expect(results.map(result => result.idempotent).sort()).toEqual([false,true]); expect(results[0].id).toBe(results[1].id);

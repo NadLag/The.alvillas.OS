@@ -32,8 +32,8 @@ function resource(ctx: FinanceActorContext, property: Property, facts: { id: str
     propertyId: property.id, reservationId: facts.reservationId, city: property.cityId ?? property.city, region: property.regionId ?? property.region,
     status: facts.state, amount: facts.amount, occurredAt: calendarDateStart(facts.occurredOn.toISOString().slice(0,10), property.timezone), assignedUserAccountId: facts.createdBy, dataClass: "financial" };
 }
-async function current(ctx: FinanceActorContext, tx: TenantTransaction, at: Date): Promise<FinanceActorContext> {
-  return { ...ctx, authContext: { ...await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId, at), personId: ctx.authContext.personId } };
+async function current(ctx: FinanceActorContext, tx: TenantTransaction): Promise<FinanceActorContext> {
+  return { ...ctx, authContext: { ...await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId), personId: ctx.authContext.personId } };
 }
 async function validateFacts(ctx: FinanceActorContext, tx: TenantTransaction, input: ExpenseDraftInput, id: string, now: Date, action: "create" | "edit") {
   const repository = new ExpenseRepository(tx, ctx.organizationId), property = await repository.property(input.propertyId);
@@ -65,7 +65,7 @@ export async function createExpenseDraft(ctx: FinanceActorContext, raw: unknown,
   assertActor(ctx); const input = expenseDraftSchema.parse(raw);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new ExpenseRepository(tx, ctx.organizationId); await repository.lock(`draft:${input.idempotencyKey}`);
-    const clock = await repository.clock(); ctx = await current(ctx, tx, clock.now);
+    const clock = await repository.clock(); ctx = await current(ctx, tx);
     await validateFacts(ctx, tx, input, clock.id, clock.now, "create");
     const previous = await repository.byKey(input.idempotencyKey);
     if (previous) {
@@ -82,7 +82,7 @@ export async function updateExpenseDraft(ctx: FinanceActorContext, raw: unknown,
   assertActor(ctx); const { id, expectedVersion, draft: input } = updateSchema.parse(raw);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new ExpenseRepository(tx, ctx.organizationId); await repository.lock(id);
-    const clock = await repository.clock(); ctx = await current(ctx, tx, clock.now);
+    const clock = await repository.clock(); ctx = await current(ctx, tx);
     const previous = await repository.find(id);
     if (!previous || previous.property.archivedAt || !authorize(ctx.authContext, "edit", resource(ctx, previous.property,
       { ...previous, amount: previous.amount.toString() }), clock.now)) throw new ExpenseAccessError();
@@ -100,7 +100,7 @@ export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps
   assertActor(ctx); const input = submitSchema.parse(raw);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new ExpenseRepository(tx, ctx.organizationId); await repository.lock(input.id);
-    const clock = await repository.clock(); ctx = await current(ctx, tx, clock.now);
+    const clock = await repository.clock(); ctx = await current(ctx, tx);
     const row = await repository.find(input.id);
     if (!row || row.property.archivedAt) throw new ExpenseAccessError();
     const target = resource(ctx, row.property, { ...row, amount: row.amount.toString() });
@@ -148,7 +148,7 @@ export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps
 export async function getExpenseEditor(ctx: FinanceActorContext, propertyId: string, deps: Deps = {}) {
   assertActor(ctx); z.uuid().parse(propertyId);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
-    const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx, clock.now);
+    const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx);
     const property = await repository.property(propertyId); if (!property) throw new ExpenseAccessError();
     const today = calendarDateAt(clock.now, property.timezone);
     const target = resource(ctx, property, { id: clock.id, amount: "0", state: "DRAFT", createdBy: ctx.actorId, occurredOn: new Date(`${today}T00:00:00Z`) });
@@ -165,7 +165,7 @@ export async function getExpenseEditor(ctx: FinanceActorContext, propertyId: str
 export async function getExpense(ctx: FinanceActorContext, id: string, deps: Deps = {}) {
   assertActor(ctx); z.uuid().parse(id);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
-    const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx, clock.now);
+    const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx);
     const row = await repository.find(id); if (!row || row.property.archivedAt) throw new ExpenseAccessError();
     const target = resource(ctx, row.property, { ...row, amount: row.amount.toString() });
     if (!authorize(ctx.authContext, "view", target, clock.now)) throw new ExpenseAccessError();

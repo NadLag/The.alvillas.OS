@@ -13,12 +13,12 @@ import { ApprovalAccessError, ApprovalConflictError, approvalDecisionSchema, app
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 type Approval = NonNullable<Awaited<ReturnType<ApprovalRepository["find"]>>>;
-async function currentFinancialActor(actor: NotificationActor, tx: TenantTransaction, now: Date) {
-  return { ...actor, authContext: await authContextForAccountInTransaction(tx, actor.organizationId, actor.accountId, now) };
+async function currentFinancialActor(actor: NotificationActor, tx: TenantTransaction) {
+  return { ...actor, authContext: await authContextForAccountInTransaction(tx, actor.organizationId, actor.accountId) };
 }
 async function decideFinancial(actor: NotificationActor, input: z.infer<typeof approvalDecisionSchema>, row: Approval,
   tx: TenantTransaction, repository: ApprovalRepository, deps: Deps) {
-  const now = await repository.clock(); actor = await currentFinancialActor(actor, tx, now);
+  const now = await repository.clock(); actor = await currentFinancialActor(actor, tx);
   const stage = row.financialStages.find(stage => stage.id === input.stageId), action = input.decision === "APPROVED" ? "approve" : "reject";
   if (!row.expense || !stage || !stage.recipients.some(recipient => recipient.userAccountId === actor.accountId) ||
     !await new NotificationRepository(tx, actor.organizationId).activeRecipient(actor.accountId) ||
@@ -92,7 +92,7 @@ export async function getApproval(actor: NotificationActor, id: string, deps: De
   return withTenant(deps.db ?? prisma, actor.organizationId, async (tx) => {
     const row = await new ApprovalRepository(tx, actor.organizationId).find(id);
     if (!row) throw new ApprovalAccessError();
-    if (row.expenseId) actor = await currentFinancialActor(actor, tx, await new ApprovalRepository(tx, actor.organizationId).clock());
+    if (row.expenseId) actor = await currentFinancialActor(actor, tx);
     const active = row.financialStages.find(stage => stage.state === "PENDING");
     const own = row.financialStages.find(stage => stage.recipients.some(recipient => recipient.userAccountId === actor.accountId) && authorize(actor.authContext, "view", approvalResource(row, stage.ownerId)));
     const source = approvalResource(row, own?.ownerId ?? active?.ownerId);
