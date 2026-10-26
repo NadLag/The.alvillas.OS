@@ -5,7 +5,7 @@ import { prisma } from "@/platform/db/client";
 import { withTenant,type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { Money } from "@/platform/money/money";
-import { expensePostings,expenseResource } from "../domain/expense";
+import { expensePostings,expenseResource,isExpenseFundingAccount } from "../domain/expense";
 import { ExpenseRepository } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import type { FinanceActorContext } from "./finance-access";
@@ -40,7 +40,7 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const amount=Money.of(row.amount.toString(),row.currency),money=(value:z.infer<typeof moneySchema>)=>Money.of(value.amount,value.currency);
     const allocation={ownerAmount:money(frozen.data.allocation.owner),alvillasAmount:money(frozen.data.allocation.alvillas),guestAmount:money(frozen.data.allocation.guest)};
     const finance=new FinanceRepository(tx,ctx.organizationId),funding=await finance.findLedgerAccountById(row.fundingAccountId);
-    if(!funding||funding.archivedAt||!["ASSET","ASSET_LOCATION"].includes(funding.accountType)||funding.normalSide!=="DEBIT"||funding.code.startsWith("CASH_CUSTODY_"))throw new ExpenseConfigurationError("Expense funding account is unavailable");
+    if(!funding||!isExpenseFundingAccount(funding))throw new ExpenseConfigurationError("Expense funding account is unavailable");
     async function account(code:string,name:string,accountType:string,normalSide:"DEBIT"|"CREDIT",needed:boolean){
       if(!needed)return "";
       const result=await finance.ensureLedgerAccount({code,name,accountType,normalSide});

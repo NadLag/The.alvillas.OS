@@ -9,12 +9,14 @@ import { ExpenseAccessError, getExpenseEditor } from "@/modules/finance/applicat
 import { ExpenseDraftForm } from "@/modules/finance/ui/expense-form";
 
 export const dynamic = "force-dynamic";
-export default async function NewExpensePage({ params }: { params: Promise<{ locale: string; propertyId: string }> }) {
+export default async function NewExpensePage({ params, searchParams }: { params: Promise<{ locale: string; propertyId: string }>; searchParams: Promise<{ fundingAccountId?: string }> }) {
   const input = await params, locale = safeLocale(input.locale); setRequestLocale(locale);
   const actor = await financeActorContextFromSession(await auth()); if (!actor) redirect(`/${locale}/login`);
+  const { fundingAccountId } = await searchParams;
   const t = await getTranslations("Expenses"); let editor;
-  try { editor = await getExpenseEditor(actor, input.propertyId); }
+  try { editor = await getExpenseEditor(actor, input.propertyId, {}, fundingAccountId); }
   catch (error) { if (error instanceof ExpenseAccessError || error instanceof Error && error.name === "ZodError") notFound(); throw error; }
   return <AdminShell className="resource-page expense-page" testId="expense-new-page"><ShellHeader eyebrow={editor.property.name} title={t("new")} subtitle={t("description")}
-    actions={<Link className="secondary-button" href={`/${locale}/app/properties/${editor.property.id}`}>{t("back")}</Link>} /><ExpenseDraftForm editor={editor} /></AdminShell>;
+    actions={<div className="form-actions">{editor.canConfigureAccounts ? <Link className="secondary-button" data-testid="expense-manage-accounts" href={`/${locale}/app/finance/accounts?propertyId=${editor.property.id}`}>{t("manageAccounts")}</Link> : null}
+      <Link className="secondary-button" href={`/${locale}/app/properties/${editor.property.id}`}>{t("back")}</Link></div>} /><ExpenseDraftForm editor={editor} fundingAccountId={fundingAccountId} /></AdminShell>;
 }

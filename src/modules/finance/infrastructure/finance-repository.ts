@@ -9,6 +9,7 @@ import { commissionConfigKey } from "@/modules/finance/domain/reservation-revenu
 import { ConfigRuleRepository, configRuleSnapshotMetadata } from "@/platform/config/config-rule-repository";
 import { referencedConfigs } from "@/platform/automation/rule";
 import type { TenantTransaction } from "@/platform/db/tenant";
+import { paymentAccountCode, paymentAccountKinds } from "../domain/payment-account";
 
 type ReservationWithFinanceContext = Prisma.ReservationGetPayload<{
   include: {
@@ -113,6 +114,34 @@ export class FinanceRepository {
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
   ) {}
+
+  async lockPaymentAccount(key: string): Promise<Date> {
+    await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":payment-account:" + key},0))::text`);
+    return this.clock();
+  }
+
+  async clock(): Promise<Date> {
+    const [clock] = await this.tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT clock_timestamp() AS now`);
+    return clock.now;
+  }
+
+  paymentAccountsByKey(idempotencyKey: string) {
+    return this.tx.ledgerAccount.findMany({ where: { organizationId: this.organizationId,
+      code: { in: paymentAccountKinds.map(kind => paymentAccountCode({ kind, idempotencyKey })) } }, take: 2 });
+  }
+
+  ledgerAccountCreationAudit(id: string) {
+    return this.tx.auditLog.findFirst({ where: { organizationId: this.organizationId,
+      resourceType: "ledger_account", resourceId: id, action: "finance.account.created" }, orderBy: { createdAt: "asc" } });
+  }
+
+  listLedgerAccounts(input: { after?: string; query?: string; take: number }) {
+    return this.tx.ledgerAccount.findMany({ where: { organizationId: this.organizationId,
+      ...(input.after ? { id: { gt: input.after } } : {}),
+      ...(input.query ? { OR: [ { name: { contains: input.query, mode: "insensitive" as const } }, { code: { contains: input.query, mode: "insensitive" as const } } ] } : {}) },
+      orderBy: { id: "asc" }, take: input.take,
+      select: { id: true, code: true, name: true, accountType: true, normalSide: true, archivedAt: true } });
+  }
 
   async findOrganizationBaseCurrency(): Promise<string> {
     const organization = await this.tx.organization.findUniqueOrThrow({

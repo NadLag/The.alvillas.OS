@@ -7,7 +7,7 @@ import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
-import { createExpenseDraft, updateExpenseDraft, submitExpense,getExpense,getExpenseDraftEditor, ExpenseAccessError, ExpenseConflictError,ExpenseConfigurationError } from "@/modules/finance/application/expense-service";
+import { createExpenseDraft, updateExpenseDraft, submitExpense,getExpense,getExpenseDraftEditor,getExpenseEditor, ExpenseAccessError, ExpenseConflictError,ExpenseConfigurationError } from "@/modules/finance/application/expense-service";
 import { getApproval, decideApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
 import { captureReservationCommissionSnapshots } from "@/platform/reservations/finance";
@@ -319,6 +319,21 @@ describe("native expenses on real PostgreSQL", () => {
     vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date(at.getTime()+600_000));
     try{await expect(submitExpense(await actor(f),input,{db})).rejects.toThrow("authorized owner notice recipient");}finally{vi.useRealTimers();}
     await withTenant(db,f.org,async tx=>{expect(await tx.expenseSubmission.count()).toBe(0);expect(await tx.notification.count({where:{kind:"expense_emergency"}})).toBe(0);});
+  });
+  it("retains an authorized draft funding account beyond the first hundred choices", async () => {
+    const f = await fixture(), draft = await create(f);
+    await withTenant(db, f.org, tx => tx.ledgerAccount.createMany({ data: Array.from({ length: 101 }, (_, index) => ({ organizationId: f.org,
+      code: `EARLIER_FUNDING_${index}`, name: `A earlier funding ${index}`, accountType: "ASSET_LOCATION", normalSide: "DEBIT" })) }));
+    const result = await getExpenseDraftEditor(await actor(f), draft.id, { db });
+    expect(result.editor.accounts.some(account => account.id === f.bank.id)).toBe(true);
+    expect(result.draft.fundingAccountId).toBe(f.bank.id);
+    const selected = await getExpenseEditor(await actor(f), f.property.id, { db }, f.bank.id);
+    expect(selected.accounts.some(account => account.id === f.bank.id)).toBe(true);
+    const other = await fixture();
+    await expect(getExpenseEditor(await actor(f), f.property.id, { db }, other.bank.id)).rejects.toBeInstanceOf(ExpenseAccessError);
+    await withTenant(db, f.org, tx => tx.ledgerAccount.update({ where: { id: f.bank.id }, data: { archivedAt: new Date() } }));
+    expect((await getExpenseDraftEditor(await actor(f), draft.id, { db })).editor.accounts.some(account => account.id === f.bank.id)).toBe(false);
+    await expect(getExpenseEditor(await actor(f), f.property.id, { db }, f.bank.id)).rejects.toBeInstanceOf(ExpenseAccessError);
   });
   it.each(["behind","ahead"] as const)("uses PostgreSQL grant validity when the application clock is %s", async direction => {
     const f = await fixture();

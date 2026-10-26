@@ -8,7 +8,7 @@ import { createExpenseDraftAction,updateExpenseDraftAction, submitExpenseAction,
 import type { getExpenseEditor,getExpenseDraftEditor, getExpense } from "../application/expense-service";
 
 type ErrorCode = "forbidden" | "conflict" | "configuration" | "validation" | "error";
-export function ExpenseDraftForm({ editor,draft }: { editor: Awaited<ReturnType<typeof getExpenseEditor>>;draft?:Awaited<ReturnType<typeof getExpenseDraftEditor>>["draft"] }) {
+export function ExpenseDraftForm({ editor,draft,fundingAccountId }: { editor: Awaited<ReturnType<typeof getExpenseEditor>>;draft?:Awaited<ReturnType<typeof getExpenseDraftEditor>>["draft"];fundingAccountId?:string }) {
   const t = useTranslations("Expenses"), locale = useLocale(), router = useRouter(), key = useRef<string | null>(null);
   const [ready, setReady] = useState(false), [pending, startTransition] = useTransition(), [error, setError] = useState<ErrorCode | null>(null);
   useEffect(() => { queueMicrotask(() => { key.current = draft?.idempotencyKey??crypto.randomUUID(); setReady(true); }); }, [draft?.idempotencyKey]);
@@ -35,7 +35,7 @@ export function ExpenseDraftForm({ editor,draft }: { editor: Awaited<ReturnType<
         <label className="field"><span>{t("occurredOn")}</span><input name="occurredOn" data-testid="expense-occurred-on" type="date" defaultValue={draft?.occurredOn??editor.today} required /></label>
       </div>
       <label className="field"><span>{t("purpose")}</span><textarea name="purpose" data-testid="expense-purpose" defaultValue={draft?.purpose} minLength={3} maxLength={1000} required /></label>
-      <label className="field"><span>{t("fundingAccount")}</span><select name="fundingAccountId" data-testid="expense-funding-account" defaultValue={draft?.fundingAccountId??""} required>
+      <label className="field"><span>{t("fundingAccount")}</span><select name="fundingAccountId" data-testid="expense-funding-account" defaultValue={draft?.fundingAccountId??fundingAccountId??""} required>
         <option value="" disabled>{t("selectFunding")}</option>{draft&&!editor.accounts.some(account=>account.id===draft.fundingAccountId)?<option value={draft.fundingAccountId} disabled>{t("unavailableFunding")}</option>:null}
         {editor.accounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
       <label className="field"><span>{t("reservation")}</span><select name="reservationId" data-testid="expense-reservation" defaultValue={draft?.reservationId??""}><option value="">{t("noReservation")}</option>

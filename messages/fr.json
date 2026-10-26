@@ -92,7 +92,8 @@
     "organizationScope": "Organisation",
     "templates": "Modèles de propriétés",
     "team": "Équipe",
-    "automations": "Automatisations"
+    "automations": "Automatisations",
+    "financialAccounts": "Comptes financiers"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -2475,6 +2476,7 @@
       "POSTED": "Comptabilisée",
       "VOIDED": "Contrepassée"
     },
+    "manageAccounts": "Gérer les comptes de paiement",
     "emergencyException": "Cette dépense utilise l’exception de validation pour urgence prévue dans votre accord.",
     "postTitle": "Enregistrer le paiement de la dépense approuvée",
     "postGuidance": "Le paiement est enregistré depuis le compte sélectionné, à la date de la dépense, selon la répartition approuvée. Ajoutez la référence du paiement ou le motif.",
@@ -2487,6 +2489,48 @@
     "selectFunding": "Sélectionnez le compte de paiement",
     "unavailableFunding": "Le compte précédent est indisponible. Sélectionnez un compte autorisé.",
     "retainedReservation": "Conserver la réservation associée",
+    "backToExpense": "Retour à la dépense"
+  },
+  "FinancialAccounts": {
+    "eyebrow": "Finances",
+    "title": "Comptes financiers",
+    "description": "Lieux de détention des fonds et comptes de propriété.",
+    "back": "Espace de travail",
+    "create": "Créer un compte de paiement",
+    "name": "Nom du compte",
+    "kind": "Lieu de détention",
+    "selectKind": "Choisir un lieu",
+    "reason": "Motif",
+    "saving": "Enregistrement…",
+    "saved": "Compte de paiement créé.",
+    "forbidden": "Vous ne pouvez pas configurer les comptes financiers.",
+    "conflict": "Cette demande a déjà créé un autre compte. Vérifiez le compte enregistré avant de réessayer.",
+    "validation": "Vérifiez le nom du compte, le lieu et le motif.",
+    "error": "Le compte n’a pas pu être enregistré. Réessayez.",
+    "search": "Rechercher des comptes",
+    "chart": "Plan des comptes",
+    "separation": "Les comptes de détention indiquent où se trouvent les fonds. Les comptes de propriété indiquent à qui ils appartiennent.",
+    "empty": "Aucun compte correspondant.",
+    "code": "Code du compte",
+    "category": "Catégorie du compte",
+    "normalSide": "Solde normal",
+    "debit": "Débit",
+    "credit": "Crédit",
+    "status": "Statut",
+    "archived": "Archivé",
+    "active": "Actif",
+    "next": "Comptes suivants",
+    "kinds": {
+      "BANK": "Banque",
+      "CASH": "Espèces",
+      "OTHER": "Autre lieu de paiement"
+    },
+    "groups": {
+      "location": "Détention des fonds",
+      "ownership": "Propriété des fonds",
+      "company": "Fonds propres ALVILLAS"
+    },
+    "useForExpense": "Utiliser pour cette dépense",
     "backToExpense": "Retour à la dépense"
   }
 }

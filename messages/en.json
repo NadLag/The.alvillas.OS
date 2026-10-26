@@ -92,7 +92,8 @@
     "organizationScope": "Organization",
     "templates": "Property templates",
     "team": "Team",
-    "automations": "Automations"
+    "automations": "Automations",
+    "financialAccounts": "Financial accounts"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -2475,6 +2476,7 @@
       "POSTED": "Posted",
       "VOIDED": "Reversed"
     },
+    "manageAccounts": "Manage payment accounts",
     "emergencyException": "This expense used the emergency approval exception defined in your agreement.",
     "postTitle": "Record approved expense payment",
     "postGuidance": "This records payment from the selected account on the expense date, using the approved allocation. Add the payment reference or reason.",
@@ -2487,6 +2489,48 @@
     "selectFunding": "Select the payment account",
     "unavailableFunding": "The previous account is unavailable. Select an authorized account.",
     "retainedReservation": "Keep the linked reservation",
+    "backToExpense": "Back to expense"
+  },
+  "FinancialAccounts": {
+    "eyebrow": "Finance",
+    "title": "Financial accounts",
+    "description": "Payment locations and ownership accounts.",
+    "back": "Workspace",
+    "create": "Create payment account",
+    "name": "Account name",
+    "kind": "Payment location",
+    "selectKind": "Choose a location",
+    "reason": "Reason",
+    "saving": "Saving…",
+    "saved": "Payment account created.",
+    "forbidden": "You do not have permission to configure financial accounts.",
+    "conflict": "This request already created a different account. Review the saved account before trying again.",
+    "validation": "Check the account name, location and reason.",
+    "error": "The account could not be saved. Try again.",
+    "search": "Search accounts",
+    "chart": "Account chart",
+    "separation": "Payment locations show where money is held. Ownership accounts show whom it belongs to.",
+    "empty": "No matching accounts.",
+    "code": "Account code",
+    "category": "Account category",
+    "normalSide": "Normal balance",
+    "debit": "Debit",
+    "credit": "Credit",
+    "status": "Status",
+    "archived": "Archived",
+    "active": "Active",
+    "next": "Next accounts",
+    "kinds": {
+      "BANK": "Bank",
+      "CASH": "Cash",
+      "OTHER": "Other payment location"
+    },
+    "groups": {
+      "location": "Money location",
+      "ownership": "Money ownership",
+      "company": "ALVILLAS own"
+    },
+    "useForExpense": "Use for this expense",
     "backToExpense": "Back to expense"
   }
 }

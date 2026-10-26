@@ -7,7 +7,7 @@ import { withTenant, type TenantTransaction, type TenantTransactionRunner } from
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { Money } from "@/platform/money/money";
 import { calendarDateAt } from "@/i18n/format";
-import { expenseDraftSchema, expenseResource, viewableExpenseResource, type ExpenseDraftInput } from "../domain/expense";
+import { expenseDraftSchema, expenseResource, viewableExpenseResource, isExpenseFundingAccount, type ExpenseDraftInput } from "../domain/expense";
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import type { FinanceActorContext } from "./finance-access";
@@ -44,7 +44,7 @@ async function validateFacts(ctx: FinanceActorContext, tx: TenantTransaction, in
   if (!currency || currency.minorUnit > 2 || money.amount.decimalPlaces() > currency.minorUnit) throw new ExpenseConfigurationError("Expense currency precision is unavailable");
   if (input.reservationId && (await repository.reservation(input.reservationId))?.propertyId !== property.id) throw new ExpenseAccessError();
   const funding = await new FinanceRepository(tx, ctx.organizationId).findLedgerAccountById(input.fundingAccountId);
-  if (!funding || funding.archivedAt || !["ASSET", "ASSET_LOCATION"].includes(funding.accountType) || funding.normalSide !== "DEBIT" || funding.code.startsWith("CASH_CUSTODY_"))
+  if (!funding || !isExpenseFundingAccount(funding))
     throw new ExpenseConfigurationError("Expense funding account requires its authorized payment workflow");
   if (!authorize(ctx.authContext, "view", { ...target, id: funding.id, financialRecordId: funding.id, type: "financial_transaction" }, now)) throw new ExpenseAccessError();
   return { target, property };
@@ -149,18 +149,24 @@ export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps
   });
 }
 
-async function editorChoices(ctx:FinanceActorContext,tx:TenantTransaction,target:Resource,now:Date,selectedReservationId?:string|null){
+async function editorChoices(ctx:FinanceActorContext,tx:TenantTransaction,target:Resource,now:Date,selectedReservationId?:string|null,selectedFundingAccountId?:string|null){
   if(!target.propertyId)throw new ExpenseAccessError();
   const repository=new ExpenseRepository(tx,ctx.organizationId),sources=await repository.editorSources();
   const accounts=(await new FinanceRepository(tx,ctx.organizationId).listRevenuePostingAccounts()).filter(account=>!account.code.startsWith("CASH_CUSTODY_")&&
     authorize(ctx.authContext,"view",{...target,type:"financial_transaction",id:account.id,financialRecordId:account.id},now));
+  if(selectedFundingAccountId&&!accounts.some(account=>account.id===selectedFundingAccountId)){
+    const selected=await new FinanceRepository(tx,ctx.organizationId).findLedgerAccountById(selectedFundingAccountId);
+    if(selected&&isExpenseFundingAccount(selected)&&authorize(ctx.authContext,"view",{...target,type:"financial_transaction",id:selected.id,financialRecordId:selected.id},now))
+      accounts.push({id:selected.id,name:selected.name,code:selected.code});
+  }
   const choices=await repository.reservationChoices(target.propertyId);
   if(selectedReservationId&&!choices.some(row=>row.id===selectedReservationId)){
     const selected=await repository.reservation(selectedReservationId);if(selected?.propertyId===target.propertyId)choices.push(selected);
   }
   const reservations=choices.filter(reservation=>authorize(ctx.authContext,"view",{...target,type:"reservation",id:reservation.id,reservationId:reservation.id,
     dataClass:"operational",status:reservation.status,assignedUserAccountId:reservation.createdBy},now)).map(({id,reference})=>({id,reference}));
-  return{...sources,accounts,reservations};
+  const chart={type:"financial_transaction",organizationId:ctx.organizationId,dataClass:"financial" as const};
+  return{...sources,accounts,reservations,canConfigureAccounts:authorize(ctx.authContext,"view",chart,now)&&authorize(ctx.authContext,"configure",chart,now)};
 }
 export async function getExpenseDraftEditor(ctx:FinanceActorContext,id:string,deps:Deps={}){
   assertActor(ctx);z.uuid().parse(id);
@@ -170,20 +176,23 @@ export async function getExpenseDraftEditor(ctx:FinanceActorContext,id:string,de
     const target=resource(ctx,row.property,{...row,amount:row.amount.toString()});
     if(!authorize(ctx.authContext,"view",target,clock.now)||!authorize(ctx.authContext,"edit",target,clock.now))throw new ExpenseAccessError();
     if(row.state!=="DRAFT")throw new ExpenseConflictError();
-    const choices=await editorChoices(ctx,tx,target,clock.now,row.reservationId);
+    const choices=await editorChoices(ctx,tx,target,clock.now,row.reservationId,row.fundingAccountId);
     return{editor:{property:{id:row.property.id,name:row.property.name,timezone:row.property.timezone},...choices,today:calendarDateAt(clock.now,row.property.timezone)},
       draft:{...facts(row),idempotencyKey:row.idempotencyKey}};
   });
 }
-export async function getExpenseEditor(ctx: FinanceActorContext, propertyId: string, deps: Deps = {}) {
+export async function getExpenseEditor(ctx: FinanceActorContext, propertyId: string, deps: Deps = {}, fundingAccountId?: string) {
   assertActor(ctx); z.uuid().parse(propertyId);
+  if(fundingAccountId)z.uuid().parse(fundingAccountId);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx);
     const property = await repository.property(propertyId); if (!property) throw new ExpenseAccessError();
     const today = calendarDateAt(clock.now, property.timezone);
     const target = resource(ctx, property, { id: clock.id, amount: "0", state: "DRAFT", createdBy: ctx.actorId, occurredOn: new Date(`${today}T00:00:00Z`) });
     if (!authorize(ctx.authContext, "create", target, clock.now) || !authorize(ctx.authContext, "view", target, clock.now)) throw new ExpenseAccessError();
-    return { property: { id: property.id, name: property.name, timezone: property.timezone }, ...await editorChoices(ctx,tx,target,clock.now), today };
+    const choices=await editorChoices(ctx,tx,target,clock.now,undefined,fundingAccountId);
+    if(fundingAccountId&&!choices.accounts.some(account=>account.id===fundingAccountId))throw new ExpenseAccessError();
+    return { property: { id: property.id, name: property.name, timezone: property.timezone }, ...choices, today };
   });
 }
 export async function getExpense(ctx: FinanceActorContext, id: string, deps: Deps = {}) {

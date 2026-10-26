@@ -2523,3 +2523,13 @@ textarea:disabled {
 .field-cash button { min-block-size: 64px; white-space: normal; overflow-wrap: anywhere; }
 .field-cash-receipts { list-style: none; padding: 0; margin: 0; }
 .field-cash-receipts li { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); padding-block: var(--space-4); border-block-end: 1px solid var(--border); overflow-wrap: anywhere; }
+.financial-accounts-page code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.financial-accounts-page .resource-form fieldset { min-inline-size: 0; max-inline-size: 100%; }
+.financial-accounts-page :is(legend, .primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.financial-accounts-page { grid-template-columns: minmax(0, 1fr); }
+.financial-accounts-page > *, .financial-accounts-page :is(.resource-form, .field, .form-actions, .resource-list, .detail-grid) { min-inline-size: 0; }
+.financial-accounts-page .resource-list { list-style: none; margin: 0; padding: 0; }
+.financial-accounts-page .resource-list > li { min-inline-size: 0; overflow-wrap: anywhere; }
