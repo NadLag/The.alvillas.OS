@@ -82,8 +82,11 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: Resource
 ): AuditHistoryRow {
-  if (row.resourceType === "cash_collection" || row.resourceType === "expense") {
-    const allowed = Boolean(financialResource && financialResource.type === row.resourceType && authorize(ctx.authContext, action, financialResource) &&
+  if (["cash_collection", "expense", "financial_transaction", "ledger_account"].includes(row.resourceType)) {
+    const expectedType = row.resourceType === "ledger_account" ? "financial_transaction" : row.resourceType;
+    const requiresSourceId = ["financial_transaction", "ledger_account"].includes(row.resourceType);
+    const allowed = Boolean(financialResource && financialResource.type === expectedType &&
+      (!requiresSourceId || financialResource.id === row.resourceId) && authorize(ctx.authContext, action, financialResource) &&
       [row.before, row.after].every(value => {
         if (!value || typeof value !== "object" || Array.isArray(value) || !Object.hasOwn(value, "amount")) return true;
         return typeof value.amount === "string" && /^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u.test(value.amount) &&
@@ -173,6 +176,25 @@ export function parseAuditFilters(input: AuditFilterInput): AuditHistoryFilters 
   return auditFilterSchema.parse(input);
 }
 
+async function financialAuditResources(repository: AuditRepository, rows: AuditHistoryRow[]): Promise<Map<string, Resource>> {
+  const read = (type: string, load: (ids: string[]) => Promise<Map<string, Resource>>) => {
+    const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
+    return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
+  };
+  const [cash, expenses, transactions, accounts] = await Promise.all([
+    read("cash_collection", ids => repository.cashResources(ids)),
+    read("expense", ids => repository.expenseResources(ids)),
+    read("financial_transaction", ids => repository.transactionResources(ids)),
+    read("ledger_account", ids => repository.ledgerAccountResources(ids))
+  ]);
+  return new Map([
+    ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),
+    ...[...expenses].map(([id, resource]) => [`expense:${id}`, resource] as const),
+    ...[...transactions].map(([id, resource]) => [`financial_transaction:${id}`, resource] as const),
+    ...[...accounts].map(([id, resource]) => [`ledger_account:${id}`, resource] as const)
+  ]);
+}
+
 export async function listAuditHistory(
   ctx: AuditActorContext,
   filters: AuditHistoryFilters,
@@ -188,11 +210,8 @@ export async function listAuditHistory(
       repository.count(filters)
     ]);
 
-    const cashIds = rows.filter(row => row.resourceType === "cash_collection").flatMap(row => row.resourceId ? [row.resourceId] : []);
-    const expenseIds = rows.filter(row => row.resourceType === "expense").flatMap(row => row.resourceId ? [row.resourceId] : []);
-    const [cash, expenses] = await Promise.all([cashIds.length ? repository.cashResources(cashIds) : new Map<string, Resource>(), expenseIds.length ? repository.expenseResources(expenseIds) : new Map<string, Resource>()]);
-    const resources = new Map([...cash, ...expenses]);
-    return { rows: rows.map((row) => presentAuditHistoryRow(ctx, row, "view", row.resourceId ? resources.get(row.resourceId) : undefined)), total, limit };
+    const resources = await financialAuditResources(repository, rows);
+    return { rows: rows.map((row) => presentAuditHistoryRow(ctx, row, "view", row.resourceId ? resources.get(`${row.resourceType}:${row.resourceId}`) : undefined)), total, limit };
   });
 }
 
@@ -288,10 +307,7 @@ export async function exportAuditHistoryCsv(
       occurredAt: new Date()
     });
 
-    const cashIds = rows.filter(row => row.resourceType === "cash_collection").flatMap(row => row.resourceId ? [row.resourceId] : []);
-    const expenseIds = rows.filter(row => row.resourceType === "expense").flatMap(row => row.resourceId ? [row.resourceId] : []);
-    const [cash, expenses] = await Promise.all([cashIds.length ? repository.cashResources(cashIds) : new Map<string, Resource>(), expenseIds.length ? repository.expenseResources(expenseIds) : new Map<string, Resource>()]);
-    const resources = new Map([...cash, ...expenses]);
-    return auditHistoryCsv(rows.map((row) => presentAuditHistoryRow(ctx, row, "export", row.resourceId ? resources.get(row.resourceId) : undefined)));
+    const resources = await financialAuditResources(repository, rows);
+    return auditHistoryCsv(rows.map((row) => presentAuditHistoryRow(ctx, row, "export", row.resourceId ? resources.get(`${row.resourceType}:${row.resourceId}`) : undefined)));
   });
 }
