@@ -26,7 +26,7 @@ export function ApprovalForm({ propertyId, approval }: { propertyId?: string; ap
       event.preventDefault(); const form = new FormData(event.currentTarget); setError(false);
       key.current ??= crypto.randomUUID();
       const decision = event.nativeEvent.submitter?.getAttribute("value");
-      const input = approval ? approvalDecisionSchema.safeParse({ id: approval.id, decision, reason: form.get("reason") }) : approvalRequestSchema.safeParse({ propertyId, title: form.get("title"), details: form.get("details"), idempotencyKey: key.current });
+      const input = approval ? approvalDecisionSchema.safeParse({ id: approval.id, stageId: approval.stageId, decision, reason: form.get("reason") }) : approvalRequestSchema.safeParse({ propertyId, title: form.get("title"), details: form.get("details"), idempotencyKey: key.current });
       if (!input.success) { setError(true); return; }
       startTransition(async () => {
         try {

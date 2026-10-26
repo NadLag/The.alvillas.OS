@@ -19,6 +19,7 @@ export type ApprovalSubject = {
   periodRevenue?: Money;
   emergency?: boolean;
   evaluation?: EvaluationContext;
+  ruleKey?: string;
 };
 
 export type ConfiguredApprovalDecision = {
@@ -124,7 +125,8 @@ export function evaluateConfiguredApproval(
   subject: ApprovalSubject
 ): ConfiguredApprovalDecision {
   const config = approvalThresholdsConfigSchema.parse(value);
-  const threshold = config.thresholds.find((candidate) => thresholdMatches(candidate, subject));
+  if (subject.ruleKey && !config.thresholds.some(candidate => candidate.key === subject.ruleKey)) throw new Error("Configured approval rule key is missing");
+  const threshold = config.thresholds.find((candidate) => (!subject.ruleKey || candidate.key === subject.ruleKey) && thresholdMatches(candidate, subject));
 
   if (!threshold) {
     return {

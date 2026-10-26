@@ -10,12 +10,16 @@ import { expenseDraftSchema, type ExpenseDraftInput } from "../domain/expense";
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import type { FinanceActorContext } from "./finance-access";
+import { prepareExpenseSubmissionPolicy } from "./expense-submission-policy";
+import { ApprovalRepository } from "@/platform/approvals/approval-repository";
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 export class ExpenseAccessError extends Error {}
 export class ExpenseConflictError extends Error {}
 export class ExpenseConfigurationError extends Error {}
 const updateSchema = z.object({ id: z.uuid(), expectedVersion: z.number().int().positive(), draft: expenseDraftSchema }).strict();
+const submitSchema = z.object({ id: z.uuid(), expectedVersion: z.number().int().positive(), reason: z.string().trim().min(6).max(500) }).strict();
 
 function assertActor(ctx: FinanceActorContext) {
   if (ctx.organizationId !== ctx.authContext.organizationId || ctx.actorId !== ctx.authContext.userAccountId) throw new ExpenseAccessError();
@@ -87,5 +91,52 @@ export async function updateExpenseDraft(ctx: FinanceActorContext, raw: unknown,
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "expense.updated", resourceType: "expense", resourceId: id,
       propertyScopeId: row.propertyId, before: facts(previous), after: facts(row), reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: clock.now });
     return { id, version: row.version };
+  });
+}
+
+export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
+  assertActor(ctx); const input = submitSchema.parse(raw);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const repository = new ExpenseRepository(tx, ctx.organizationId); await repository.lock(input.id);
+    const clock = await repository.clock(); ctx = await current(ctx, tx, clock.now);
+    const row = await repository.find(input.id);
+    if (!row || row.property.archivedAt) throw new ExpenseAccessError();
+    const target = resource(ctx, row.property, { ...row, amount: row.amount.toString() });
+    if (!authorize(ctx.authContext, "view", target, clock.now) || !authorize(ctx.authContext, "edit", target, clock.now)) throw new ExpenseAccessError();
+    if (row.submission) {
+      const prior = z.object({ sourceExpenseVersion: z.number(), reason: z.string() }).safeParse(row.submission.snapshot);
+      if (!prior.success || row.submission.submittedBy !== ctx.actorId || prior.data.sourceExpenseVersion !== input.expectedVersion || prior.data.reason !== input.reason) throw new ExpenseConflictError();
+      return { id: row.id, version: row.version, state: row.state, approvalId: row.approval?.id ?? null, idempotent: true };
+    }
+    if (row.state !== "DRAFT" || row.version !== input.expectedVersion) throw new ExpenseConflictError();
+    await validateFacts(ctx, tx, expenseDraftSchema.parse({ propertyId: row.propertyId, reservationId: row.reservationId ?? undefined,
+      fundingAccountId: row.fundingAccountId, amount: row.amount.toString(), currency: row.currency, category: row.category, purpose: row.purpose,
+      occurredOn: row.occurredOn.toISOString().slice(0,10), emergency: row.emergency, idempotencyKey: row.idempotencyKey, reason: input.reason }), row.id, clock.now, "edit");
+    const plan = await prepareExpenseSubmissionPolicy(ctx, row, target, tx, clock.now);
+    const submission = await repository.submit(row.id, ctx.actorId, { ...plan.snapshot, reason: input.reason }, clock.now);
+    if ((await repository.transition(row.id, row.version, "DRAFT", "PENDING_APPROVAL", ctx.actorId)).count !== 1) throw new ExpenseConflictError();
+    let approvalId: string | null = null, state = "PENDING_APPROVAL", version = row.version + 1;
+    if (plan.stages.length) {
+      const approvals = new ApprovalRepository(tx, ctx.organizationId);
+      const approval = await approvals.createFinancial({ expenseId: row.id, propertyId: row.propertyId, requestedBy: ctx.actorId,
+        title: row.purpose.slice(0,160), details: row.purpose.length >= 6 ? row.purpose : input.reason, stages: plan.stages });
+      if (!approval) throw new ExpenseConflictError(); approvalId = approval.id;
+      await approvals.event("ApprovalRequested", approval.id, row.propertyId);
+      await new NotificationRepository(tx, ctx.organizationId).publish({ kind: "approval_requested", recipientId: ctx.actorId, targetId: approval.id }, `approval:${approval.id}:stage:${approval.financialStages[0].id}:requested`);
+    } else {
+      if ((await repository.transition(row.id, version, state, "APPROVED", ctx.actorId)).count !== 1) throw new ExpenseConflictError();
+      state = "APPROVED"; version++;
+      await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "expense.approved_by_policy", resourceType: "expense", resourceId: row.id,
+        propertyScopeId: row.propertyId, before: { state: "PENDING_APPROVAL" }, after: { state, submissionId: submission.id },
+        reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: clock.now });
+    }
+    const payload = { expenseId: row.id, propertyId: row.propertyId, ...(row.reservationId ? { reservationId: row.reservationId } : {}),
+      submissionId: submission.id, version: row.version + 1, state, ...(approvalId ? { approvalId } : {}) };
+    await repository.event("ExpenseSubmitted", row.id, payload, clock.now);
+    if (plan.overThreshold) await repository.event("ExpenseOverThreshold", row.id, payload, clock.now);
+    await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "expense.submitted", resourceType: "expense", resourceId: row.id,
+      propertyScopeId: row.propertyId, before: facts(row), after: { state, version, submissionId: submission.id, approvalId, policy: plan.snapshot },
+      reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: clock.now });
+    return { id: row.id, version, state, approvalId, idempotent: false };
   });
 }

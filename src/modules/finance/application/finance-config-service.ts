@@ -5,7 +5,8 @@ import {
   type ConfigScopeCandidate,
   type ResolvedConfigRule
 } from "@/platform/config/config-rule-repository";
-import { authorize, type AuthContext } from "@/platform/authz/authorize";
+import { authorize, type AuthContext, type Resource } from "@/platform/authz/authorize";
+import { approvalThresholdsConfigSchema, type ApprovalThresholdsConfig } from "@/platform/config/rule-registry";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
@@ -159,10 +160,11 @@ export async function evaluateExpensePolicy(
 }
 
 /** Caller authorizes the actual expense before resolving its financial policy. */
-export async function evaluateExpensePolicyInTransaction(ctx: FinanceConfigActorContext, rawInput: ExpensePolicyInput, tx: TenantTransaction): Promise<ExpensePolicyDecision> {
+export async function evaluateExpensePolicyInTransaction(ctx: FinanceConfigActorContext, rawInput: ExpensePolicyInput, tx: TenantTransaction,
+  options: { resource?: Resource; approvalAmount?: Money; resolvePeriodRevenue?: (config: ApprovalThresholdsConfig) => Promise<Money>; now?: Date } = {}): Promise<ExpensePolicyDecision> {
   const input = expensePolicyInputSchema.parse(rawInput);
   const amount = Money.of(input.amount, input.currency);
-  const periodRevenue = input.periodRevenueAmount
+  let periodRevenue = input.periodRevenueAmount
     ? Money.of(input.periodRevenueAmount, input.currency)
     : undefined;
   const asOf = input.asOf ?? new Date();
@@ -177,22 +179,24 @@ export async function evaluateExpensePolicyInTransaction(ctx: FinanceConfigActor
     }
 
     const approvalRule = snapshot.resolve("finance.approval_thresholds");
+    if (approvalRule && options.resolvePeriodRevenue) periodRevenue = await options.resolvePeriodRevenue(approvalThresholdsConfigSchema.parse(approvalRule.value));
     const references = approvalRule ? referencedConfigs(approvalRule.value).map(key => {
       const rule = snapshot.resolve(key); if (!rule) throw new FinanceConfigNotFoundError(`Missing referenced finance configuration: ${key}`); return rule;
     }) : [];
+    const subject = options.resource ?? { type: "expense", organizationId: ctx.organizationId, propertyId: input.propertyId, ownerId: input.ownerId, amount: input.amount, dataClass: "financial" as const };
+    const roles = [...new Set((ctx.authContext.assignments ?? []).filter(assignment => assignment.roleKey && authorize({ ...ctx.authContext, assignments: [assignment] }, "edit", subject, options.now ?? new Date())).map(assignment => assignment.roleKey!))];
+    const allocation = allocateConfiguredExpense(allocationRule.value, { category: input.category, amount });
     const evaluation = { fields: { expense: { propertyId: input.propertyId, ownerId: input.ownerId ?? null, category: input.category,
-      amount: amount.amount.toString(), currency: input.currency, emergency: input.emergency }, actor: { userAccountId: ctx.actorId } },
+      amount: (options.approvalAmount ?? amount).amount.toString(), allocatedAmount: amount.amount.toString(), currency: input.currency, emergency: input.emergency }, actor: { userAccountId: ctx.actorId, roles } },
       configs: Object.fromEntries(references.map(rule => [rule.key, rule.parsedValue])) };
 
     return {
-      allocation: allocateConfiguredExpense(allocationRule.value, {
-        category: input.category,
-        amount
-      }),
+      allocation,
       approval: approvalRule
         ? evaluateConfiguredApproval(approvalRule.value, {
             category: input.category,
-            amount,
+            amount: options.approvalAmount ?? amount,
+            ruleKey: allocation.approvalRuleKey ?? undefined,
             periodRevenue,
             emergency: input.emergency,
             evaluation

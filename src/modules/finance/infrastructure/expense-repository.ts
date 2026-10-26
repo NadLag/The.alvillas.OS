@@ -31,7 +31,23 @@ export class ExpenseRepository {
       rules: { path: ["owners"], array_contains: [] } }, orderBy: { version: "asc" }, select: { id: true, version: true, rules: true } }) : null;
     const owners = await this.tx.propertyOwner.findMany({ where: { organizationId: this.organizationId, propertyId, archivedAt: null, owner: { archivedAt: null } },
       select: { ownerId: true, shareBps: true, owner: { select: { displayName: true } } }, orderBy: { ownerId: "asc" } });
-    return { snapshot, owners: owners.map(row => ({ ownerId: row.ownerId, ownerName: row.owner.displayName, shareBps: row.shareBps })) };
+    const commissionSnapshots = reservationId ? await this.tx.commissionSnapshot.findMany({ where: { organizationId: this.organizationId, reservationId }, orderBy: { ownerId: "asc" } }) : [];
+    return { snapshot, commissionSnapshots, owners: owners.map(row => ({ ownerId: row.ownerId, ownerName: row.owner.displayName, shareBps: row.shareBps })) };
+  }
+  async periodRevenue(input: { propertyId: string; currency: string; startsAt?: Date; endsAt?: Date; reservationId?: string }) {
+    const [row] = await this.tx.$queryRaw<Array<{ amount: Prisma.Decimal }>>(Prisma.sql`SELECT COALESCE(SUM(CASE WHEN p.side='CREDIT' THEN p.amount ELSE -p.amount END),0) AS amount
+      FROM posting p JOIN financial_transaction t ON t.id=p.transaction_id AND t.organization_id=p.organization_id
+      WHERE p.organization_id=${this.organizationId}::uuid AND p.currency=${input.currency} AND p.bucket='OWNER_REVENUE'
+        AND p.dimensions->>'property_id'=${input.propertyId}
+        ${input.reservationId ? Prisma.sql`AND p.dimensions->>'reservation_id'=${input.reservationId}` : Prisma.empty}
+        ${input.startsAt ? Prisma.sql`AND t.occurred_at >= ${input.startsAt}` : Prisma.empty}
+        ${input.endsAt ? Prisma.sql`AND t.occurred_at < ${input.endsAt}` : Prisma.empty}`);
+    return row.amount.toString();
+  }
+  event(type: "ExpenseSubmitted" | "ExpenseOverThreshold", expenseId: string, payload: Prisma.InputJsonObject, occurredAt: Date) {
+    const idempotencyKey = `expense:${expenseId}:${type}`;
+    return this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, update: {},
+      create: { organizationId: this.organizationId, type, payload, idempotencyKey, occurredAt } });
   }
   agreement(propertyId: string, asOf: Date) {
     return this.tx.managementAgreement.findFirst({ where: { organizationId: this.organizationId, propertyId, archivedAt: null, status: { not: "DRAFT" },

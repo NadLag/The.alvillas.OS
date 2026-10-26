@@ -156,7 +156,7 @@ export const approvalThresholdsConfigSchema = z
         })
         .passthrough()
     ),
-    routing: z.record(z.enum(["manager", "owner", "finance"]), notificationRoutingSchema).optional(),
+    routing: z.partialRecord(z.enum(["manager", "owner", "finance"]), notificationRoutingSchema).optional(),
     revenue_period: z.discriminatedUnion("unit", [
       z.object({ unit: z.enum(["MONTH", "YEAR", "RESERVATION"]) }).strict(),
       z.object({ unit: z.literal("ROLLING_DAYS"), days: z.number().int().positive().safe() }).strict()

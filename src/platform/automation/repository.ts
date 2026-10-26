@@ -12,6 +12,8 @@ import {
 } from "./rule";
 import { z } from "zod";
 import { stocktakeEventDataSchema } from "@/modules/inventory/domain/events";
+import type { Resource } from "@/platform/authz/authorize";
+import { calendarDateStart } from "@/platform/time/calendar";
 
 export const json = (v: unknown) =>
   JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
@@ -154,6 +156,7 @@ export class AutomationRepository {
     >;
     evaluation: EvaluationContext;
     scopes: Awaited<ReturnType<ReservationConfigScopeRepository["scopes"]>>;
+    expense?: { resource: Resource; approvalId: string | null; submissionId: string };
   }> {
     const event = await this.event(eventId);
     if (!event) throw new Error("automation_source_missing");
@@ -184,6 +187,12 @@ export class AutomationRepository {
           },
         })
       : null;
+    const expenseId = p.expenseId ?? approval?.expenseId;
+    const expense = expenseId ? await this.tx.expense.findFirst({ where: { organizationId: this.organizationId, id: uuid.parse(expenseId) },
+      include: { submission: true, approval: { select: { id: true } } } }) : null;
+    if (expenseId && (!expense?.submission || p.submissionId && p.submissionId !== expense.submission.id) ||
+      /^Expense/u.test(event.type) && event.idempotencyKey.startsWith("expense:") && (!expense || event.idempotencyKey !== `expense:${expense.id}:${event.type}`))
+      throw new Error("automation_source_missing");
     if (
       (p.reservationId && !reservation) ||
       (p.taskId && !task) ||
@@ -195,12 +204,14 @@ export class AutomationRepository {
       reservation?.propertyId ??
       task?.propertyId ??
       approval?.propertyId ??
+      expense?.propertyId ??
       String(p.propertyId);
     for (const ref of [
       p.propertyId,
       reservation?.propertyId,
       task?.propertyId,
       approval?.propertyId,
+      expense?.propertyId,
     ])
       if (ref && ref !== id) throw new Error("automation_scope_mismatch");
     const property = await this.property(id);
@@ -276,6 +287,10 @@ export class AutomationRepository {
       ...(p.inventory ? { inventory: inventory.parse(p.inventory) } : {}),
       ...(p.stocktake ? { stocktake: stocktakeEventDataSchema.parse(p.stocktake) } : {}),
       ...(p.variance ? { variance: amounts.parse(p.variance) } : {}),
+      ...(expense?.submission ? { expense: { id: expense.id, propertyId: expense.propertyId, reservationId: expense.reservationId,
+        amount: expense.amount.toFixed(2), currency: expense.currency, category: expense.category, purpose: expense.purpose,
+        emergency: expense.emergency, occurredOn: day(expense.occurredOn), submitted_by: expense.submission.submittedBy,
+        submission_id: expense.submission.id, status: typeof p.state === "string" ? p.state : expense.state } } : {}),
     };
     const scopes = await new ReservationConfigScopeRepository(
       this.tx,
@@ -285,7 +300,12 @@ export class AutomationRepository {
       source: reservation?.source,
       asOf: event.occurredAt,
     });
-    return { event, property, evaluation: { fields, configs: {} }, scopes };
+    return { event, property, evaluation: { fields, configs: {} }, scopes,
+      ...(expense?.submission ? { expense: { approvalId: expense.approval?.id ?? null, submissionId: expense.submission.id,
+        resource: { type: "expense", id: expense.id, financialRecordId: expense.id, organizationId: this.organizationId,
+          propertyId: expense.propertyId, reservationId: expense.reservationId, city: property.cityId, region: property.regionId,
+          amount: expense.amount.toString(), status: expense.state, dataClass: "financial" as const,
+          assignedUserAccountId: expense.createdBy, occurredAt: calendarDateStart(day(expense.occurredOn), property.timezone) } } } : {}) };
   }
   property(id: string) {
     return this.tx.property.findFirst({
