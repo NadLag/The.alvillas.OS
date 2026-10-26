@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { authorize, type Resource } from "@/platform/authz/authorize";
+import { present } from "@/platform/authz/present";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { Money } from "@/platform/money/money";
 import { calendarDateStart } from "@/platform/time/calendar";
+import { calendarDateAt } from "@/i18n/format";
 import { expenseDraftSchema, type ExpenseDraftInput } from "../domain/expense";
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
@@ -112,7 +114,9 @@ export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps
     await validateFacts(ctx, tx, expenseDraftSchema.parse({ propertyId: row.propertyId, reservationId: row.reservationId ?? undefined,
       fundingAccountId: row.fundingAccountId, amount: row.amount.toString(), currency: row.currency, category: row.category, purpose: row.purpose,
       occurredOn: row.occurredOn.toISOString().slice(0,10), emergency: row.emergency, idempotencyKey: row.idempotencyKey, reason: input.reason }), row.id, clock.now, "edit");
-    const plan = await prepareExpenseSubmissionPolicy(ctx, row, target, tx, clock.now);
+    let plan: Awaited<ReturnType<typeof prepareExpenseSubmissionPolicy>>;
+    try { plan = await prepareExpenseSubmissionPolicy(ctx, row, target, tx, clock.now); }
+    catch (error) { if (error instanceof z.ZodError) throw new ExpenseConfigurationError("Expense policy is invalid or incomplete"); throw error; }
     const submission = await repository.submit(row.id, ctx.actorId, { ...plan.snapshot, reason: input.reason }, clock.now);
     if ((await repository.transition(row.id, row.version, "DRAFT", "PENDING_APPROVAL", ctx.actorId)).count !== 1) throw new ExpenseConflictError();
     let approvalId: string | null = null, state = "PENDING_APPROVAL", version = row.version + 1;
@@ -138,5 +142,35 @@ export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps
       propertyScopeId: row.propertyId, before: facts(row), after: { state, version, submissionId: submission.id, approvalId, policy: plan.snapshot },
       reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: clock.now });
     return { id: row.id, version, state, approvalId, idempotent: false };
+  });
+}
+
+export async function getExpenseEditor(ctx: FinanceActorContext, propertyId: string, deps: Deps = {}) {
+  assertActor(ctx); z.uuid().parse(propertyId);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx, clock.now);
+    const property = await repository.property(propertyId); if (!property) throw new ExpenseAccessError();
+    const today = calendarDateAt(clock.now, property.timezone);
+    const target = resource(ctx, property, { id: clock.id, amount: "0", state: "DRAFT", createdBy: ctx.actorId, occurredOn: new Date(`${today}T00:00:00Z`) });
+    if (!authorize(ctx.authContext, "create", target, clock.now) || !authorize(ctx.authContext, "view", target, clock.now)) throw new ExpenseAccessError();
+    const sources = await repository.editorSources();
+    const accounts = (await new FinanceRepository(tx, ctx.organizationId).listRevenuePostingAccounts()).filter(account => !account.code.startsWith("CASH_CUSTODY_") &&
+      authorize(ctx.authContext, "view", { ...target, type: "financial_transaction", id: account.id, financialRecordId: account.id }, clock.now));
+    const reservations = (await repository.reservationChoices(propertyId)).filter(reservation => authorize(ctx.authContext, "view", {
+      ...target, type: "reservation", id: reservation.id, reservationId: reservation.id, dataClass: "operational", status: reservation.status,
+      assignedUserAccountId: reservation.createdBy }, clock.now)).map(({ id, reference }) => ({ id, reference }));
+    return { property: { id: property.id, name: property.name, timezone: property.timezone }, ...sources, accounts, reservations, today };
+  });
+}
+export async function getExpense(ctx: FinanceActorContext, id: string, deps: Deps = {}) {
+  assertActor(ctx); z.uuid().parse(id);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx, clock.now);
+    const row = await repository.find(id); if (!row || row.property.archivedAt) throw new ExpenseAccessError();
+    const target = resource(ctx, row.property, { ...row, amount: row.amount.toString() });
+    if (!authorize(ctx.authContext, "view", target, clock.now)) throw new ExpenseAccessError();
+    const data = { ...facts(row), propertyName: row.property.name, approvalId: row.approval?.id ?? null,
+      canSubmit: row.state === "DRAFT" && authorize(ctx.authContext, "edit", target, clock.now) };
+    return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...target, data }, {}, clock.now) as typeof data;
   });
 }

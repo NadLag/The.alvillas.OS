@@ -48,6 +48,7 @@ export type Condition =
         | "<="
         | "in"
         | "not_in"
+        | "contains"
         | "exists"
         | "between";
       value?: Operand;
@@ -69,6 +70,7 @@ const condition: z.ZodType<Condition> = z.lazy(() =>
           "<=",
           "in",
           "not_in",
+          "contains",
           "exists",
           "between",
         ]),
@@ -266,6 +268,7 @@ export function evaluate(
   if (c.op === "!=") return a !== b;
   if (c.op === "in" || c.op === "not_in")
     return Array.isArray(b) && (c.op === "in" ? b.includes(a) : !b.includes(a));
+  if (c.op === "contains") return Array.isArray(a) && a.includes(b);
   if (c.op === "between")
     return (
       Array.isArray(b) &&

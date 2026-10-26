@@ -99,6 +99,7 @@ export async function getApproval(actor: NotificationActor, id: string, deps: De
     if (!await new NotificationRepository(tx, actor.organizationId).activeRecipient(actor.accountId) || !authorize(actor.authContext, "view", source)) throw new ApprovalAccessError();
     const selected = row.expenseId ? Boolean(active?.recipients.some(recipient => recipient.userAccountId === actor.accountId)) : row.recipients.some((recipient) => recipient.userAccountId === actor.accountId);
     const data = { id: row.id, propertyName: row.property.name, title: row.title, details: row.details, state: row.state, decisionReason: row.decisionReason,
+      financial: row.expense ? { amount: row.expense.amount.toFixed(2), currency: row.expense.currency, category: row.expense.category, occurredOn: row.expense.occurredOn.toISOString().slice(0,10) } : null,
       stageId: active?.id,
       canApprove: row.state === "PENDING" && selected && authorize(actor.authContext, "approve", approvalResource(row, active?.ownerId)),
       canReject: row.state === "PENDING" && selected && authorize(actor.authContext, "reject", approvalResource(row, active?.ownerId)) };

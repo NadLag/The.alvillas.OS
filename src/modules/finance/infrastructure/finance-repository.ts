@@ -6,7 +6,8 @@ import type {
   PropertyOwnerShare
 } from "@/modules/finance/domain/reservation-revenue";
 import { commissionConfigKey } from "@/modules/finance/domain/reservation-revenue";
-import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { ConfigRuleRepository, configRuleSnapshotMetadata } from "@/platform/config/config-rule-repository";
+import { referencedConfigs } from "@/platform/automation/rule";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
 type ReservationWithFinanceContext = Prisma.ReservationGetPayload<{
@@ -325,6 +326,17 @@ export class FinanceRepository {
         }
       }
     });
+  }
+  async captureExpensePolicy(input: { propertyId: string; ownerId: string; source?: string; asOf: Date; inlineApproval?: unknown }) {
+    const repository = new ConfigRuleRepository(this.tx, this.organizationId);
+    const scopes = await new ReservationConfigScopeRepository(this.tx, this.organizationId).scopes(input), snapshot = await repository.scopedSnapshot(scopes, input.asOf);
+    const allocation = snapshot.resolve("finance.expense_allocation") ?? snapshot.resolve("finance.expense_treatment"), approval = snapshot.resolve("finance.approval_thresholds");
+    const serialize = (rule: NonNullable<typeof allocation>) => ({ ...configRuleSnapshotMetadata(rule), value: rule.parsedValue });
+    const references = [], missingReferences: string[] = [];
+    for (const key of referencedConfigs(input.inlineApproval ?? approval?.parsedValue ?? {})) {
+      const rule = snapshot.resolve(key); if (rule) references.push(serialize(rule)); else missingReferences.push(key);
+    }
+    return inputJsonObject({ allocation: allocation ? serialize(allocation) : null, approval: approval ? serialize(approval) : null, references, missingReferences });
   }
 
   async createCommissionSnapshot(input: {

@@ -17,11 +17,11 @@ type ApprovalSource = { id: string; organizationId: string; propertyId: string; 
 export function approvalResource(row: ApprovalSource, ownerId?: string | null): Resource {
   if (row.expenseId) {
     if (!row.expense || !row.property.timezone) throw new ApprovalAccessError();
-    return { type: "expense", id: row.expense.id, financialRecordId: row.expense.id, organizationId: row.organizationId,
+    return { type: "expense", id: row.expense.id, financialRecordId: row.expense.id, approvalId: row.id, organizationId: row.organizationId,
       propertyId: row.propertyId, ownerId, reservationId: row.expense.reservationId, amount: row.expense.amount.toString(),
       occurredAt: calendarDateStart(row.expense.occurredOn.toISOString().slice(0,10), row.property.timezone),
       assignedUserAccountId: row.expense.createdBy, dataClass: "financial", region: row.property.regionId, city: row.property.cityId, status: row.expense.state };
   }
-  return { type: "property", id: row.id, organizationId: row.organizationId, propertyId: row.propertyId,
+  return { type: "property", id: row.id, approvalId: row.id, organizationId: row.organizationId, propertyId: row.propertyId,
     region: row.property.regionId, city: row.property.cityId, status: row.state };
 }

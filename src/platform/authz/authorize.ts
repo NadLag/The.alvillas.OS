@@ -81,6 +81,7 @@ export type Resource = {
   documentId?: string | null;
   serviceId?: string | null;
   financialRecordId?: string | null;
+  approvalId?: string | null;
   walletId?: string | null;
   fieldTeamId?: string | null;
   assignedUserAccountId?: string | null;
@@ -292,6 +293,12 @@ export function authorizeCollection(ctx: AuthContext, action: Action, resourceTy
   return assignmentCandidates(ctx).some((assignment) =>
     assignment.permissions.has(permissionKey(resourceType, action))
   );
+}
+
+export function roleKeysForResource(ctx: AuthContext, resource: Resource, effectiveAt = new Date()): string[] {
+  if (ctx.organizationId !== resource.organizationId) return [];
+  return [...new Set(assignmentCandidates(ctx).flatMap(assignment => assignment.roleKey && scopeMatchesResource(assignment.scope, resource) &&
+    conditionsMatch(ctx, assignment, resource, effectiveAt) ? [assignment.roleKey] : []))];
 }
 
 export function authorize(ctx: AuthContext, action: Action, resource: Resource, effectiveAt = new Date()): boolean {

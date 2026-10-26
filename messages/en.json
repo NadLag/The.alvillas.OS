@@ -2439,5 +2439,40 @@
     "noReceipts": "No cash receipts recorded for this job.",
     "saveBeforeComplete": "Save or resolve the cash receipt before completing this job.",
     "unsaved": "Save or resolve the cash receipt before leaving this job."
+  },
+  "Expenses": {
+    "new": "Record an expense",
+    "description": "Keep the expense, its funding and the required approvals together.",
+    "amount": "Amount",
+    "currency": "Currency",
+    "category": "Category",
+    "occurredOn": "Expense date",
+    "purpose": "What was this expense for?",
+    "fundingAccount": "Paid from",
+    "reservation": "Booking (optional)",
+    "noReservation": "Property expense",
+    "emergency": "Emergency expense",
+    "reason": "Reason for this change",
+    "saveDraft": "Save draft",
+    "saving": "Saving…",
+    "submit": "Submit for review",
+    "submitGuidance": "Your configured agreement determines the allocation and approval steps. Submission keeps the original expense details.",
+    "submittedGuidance": "The submitted details and approval history are retained. Money is posted separately after the required approval.",
+    "viewApproval": "View approval",
+    "back": "Back to property",
+    "noAccounts": "No authorized funding account is available.",
+    "validation": "Check the amount, category, date and required fields.",
+    "forbidden": "You do not have permission for this expense.",
+    "conflict": "This expense changed. Refresh before continuing.",
+    "configuration": "The expense policy or its approval recipients need configuration.",
+    "error": "The expense could not be saved. Please try again.",
+    "states": {
+      "DRAFT": "Draft",
+      "PENDING_APPROVAL": "Awaiting approval",
+      "APPROVED": "Approved",
+      "REJECTED": "Rejected",
+      "POSTED": "Posted",
+      "VOIDED": "Reversed"
+    }
   }
 }

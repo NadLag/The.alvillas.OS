@@ -25,4 +25,11 @@ describe("configured native expense approval policy", () => {
     expect(evaluateConfiguredApproval(config, subject).requiredSteps).toEqual(["owner"]);
     expect(() => evaluateConfiguredApproval(config, { ...subject, ruleKey: "absent" })).toThrow("rule key is missing");
   });
+  it("uses the shared bounded condition grammar for exact requester role membership", () => {
+    const config = { thresholds: [{ key: "requester_role", conditions: { path: "actor.roles", op: "contains", value: "property_reviewer" }, requires_approval_from: ["manager"] }] };
+    const subject = { amount: Money.of("500.25", "MAD"), category: "maintenance" };
+    expect(evaluateConfiguredApproval(config, { ...subject, evaluation: { fields: { actor: { roles: ["property_reviewer"] } }, configs: {} } }).requiredSteps).toEqual(["manager"]);
+    for (const roles of [[],["other_role"],"property_reviewer"])
+      expect(evaluateConfiguredApproval(config, { ...subject, evaluation: { fields: { actor: { roles } }, configs: {} } }).requiredSteps).toEqual([]);
+  });
 });

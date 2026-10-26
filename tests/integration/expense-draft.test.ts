@@ -14,6 +14,12 @@ import { captureReservationCommissionSnapshots } from "@/platform/reservations/f
 import type { ExpenseDraftInput } from "@/modules/finance/domain/expense";
 import { saveAutomationRule, enqueueAutomationEvent, executeAutomationRun, previewAutomation } from "@/platform/automation/service";
 import { AutomationRepository } from "@/platform/automation/repository";
+import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
+import { Money } from "@/platform/money/money";
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { resolveNotificationChannel } from "@/platform/notifications/notification-channel-service";
+import { defaultNotificationPreferences } from "@/platform/notifications/notification-preferences";
+import { authorize } from "@/platform/authz/authorize";
 import { ExpenseRepository } from "@/modules/finance/infrastructure/expense-repository";
 import { presentAuditHistoryRow } from "@/modules/audit/application/audit-service";
 import { AuditRepository } from "@/modules/audit/infrastructure/audit-repository";
@@ -67,7 +73,7 @@ async function policy(f: Fixture, approval: Prisma.InputJsonObject = { threshold
 async function approver(f: Fixture, scopeType: "property" | "owner", scopeId: string, financial = true) {
   const identity = await withTenant(db, f.org, async tx => {
     const person = await tx.person.create({ data: { organizationId: f.org, displayName: "Dedicated approval reviewer" } });
-    const account = await tx.userAccount.create({ data: { organizationId: f.org, personId: person.id } });
+    const account = await tx.userAccount.create({ data: { organizationId: f.org, personId: person.id, email: `reviewer-${randomUUID()}@example.test` } });
     const role = await tx.role.create({ data: { organizationId: f.org, key: `dedicated_approval_${randomUUID()}`, name: "Dedicated scoped reviewer" } });
     const keys = financial ? ["expense:view", "expense:approve", "expense:reject"] : ["property:view", "property:approve", "property:reject"];
     const permissions = await tx.permission.findMany({ where: { key: { in: keys } } }); expect(permissions).toHaveLength(keys.length);
@@ -120,6 +126,27 @@ describe("native expenses on real PostgreSQL", () => {
       expect(await tx.outboxEvent.count({ where: { type: "ExpenseSubmitted" } })).toBe(0); expect(await tx.expense.findFirstOrThrow()).toMatchObject({ state: "DRAFT", version: 1 });
     });
   });
+  it("uses actual owner period revenue without cancelling it against the receipt's bank debit", async () => {
+    const f = await fixture(); await policy(f); const reviewer = await approver(f, "property", f.property.id);
+    await withTenant(db, f.org, async tx => {
+      const finance = new FinanceRepository(tx, f.org), payable = await finance.ensureLedgerAccount({ code: "OWNER_PAYABLE", name: "Owner payable", accountType: "CLAIM_OWNERSHIP", normalSide: "CREDIT" });
+      await finance.createFinancialTransaction({ reference: "Dedicated source revenue", occurredAt: new Date("2026-10-15T12:00:00Z"), description: "Dedicated period revenue receipt", idempotencyKey: randomUUID(), createdBy: f.account.id,
+        postings: [{ ledgerAccountId: f.bank.id, side: "DEBIT", amount: Money.of("1000","MAD"), bucket: "OWNER_REVENUE", dimensions: { property_id: f.property.id } },
+          { ledgerAccountId: payable.id, side: "CREDIT", amount: Money.of("1000","MAD"), bucket: "OWNER_REVENUE", dimensions: { property_id: f.property.id } }] });
+      await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.approval_thresholds", scopeType: "property", scopeId: f.property.id,
+        effectiveFrom: new Date("2020-01-02"), reason: "Dedicated revenue percentage approval", value: { revenue_period: { unit: "MONTH" },
+          thresholds: [{ key: "revenue_percentage", percentage_of_revenue_bps: 6000, requires_approval_from: ["manager"] }],
+          routing: { manager: { people: [reviewer.person.id], roles: [], assigned: false, channels: ["in_app"] } } } });
+    });
+    const below = await create(f), low = await submitExpense(await actor(f), { id: below.id, expectedVersion: 1, reason: "Dedicated below revenue threshold" }, { db });
+    expect(low.state).toBe("APPROVED"); expect(low.approvalId).toBeNull();
+    const above = await create(f, { ...f.input, amount: "800", idempotencyKey: randomUUID() });
+    expect((await submitExpense(await actor(f), { id: above.id, expectedVersion: 1, reason: "Dedicated above revenue threshold" }, { db })).state).toBe("PENDING_APPROVAL");
+    await withTenant(db, f.org, async tx => {
+      const snapshot = await tx.expenseSubmission.findUniqueOrThrow({ where: { organizationId_expenseId: { organizationId: f.org, expenseId: below.id } } });
+      expect(snapshot.snapshot).toMatchObject({ policies: [{ revenueEvidence: { amount: { amount: "1000.00", currency: "MAD" } } }] });
+    });
+  });
   it("orders manager then owner decisions and rechecks financial grants independently from operational approval access", async () => {
     const f = await fixture(), configured = await policy(f), manager = await approver(f, "property", f.property.id), owner = await approver(f, "owner", configured.owner.id), operations = await approver(f, "property", f.property.id, false);
     const routing = (people: string[]) => ({ people, roles: [], assigned: false, channels: ["in_app"] });
@@ -130,6 +157,13 @@ describe("native expenses on real PostgreSQL", () => {
     expect(submitted.state).toBe("PENDING_APPROVAL"); expect(submitted.approvalId).toBeTruthy();
     const requestId = submitted.approvalId!, stages = await withTenant(db, f.org, tx => tx.approvalStage.findMany({ where: { approvalId: requestId }, orderBy: { position: "asc" } }));
     expect(stages.map(stage => stage.kind)).toEqual(["manager","owner"]);
+    const originalNotice = await withTenant(db, f.org, async tx => {
+      const notifications = new NotificationRepository(tx, f.org), defaults = defaultNotificationPreferences();
+      await notifications.savePreferences(manager.account.id, { ...defaults, email: { ...defaults.email, enabled: true, operations: true } });
+      const event = await tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: { organizationId: f.org, idempotencyKey: `approval:${requestId}:stage:${stages[0].id}:requested` } } });
+      expect((await resolveNotificationChannel(notifications, { kind: "approval_requested", channel: "email", recipientId: manager.account.id, targetId: requestId, sourceEventId: event.id })).allowed).toBe(true);
+      return event.id;
+    });
     await expect(withTenant(db, f.org, tx => tx.approvalStage.update({ where: { id: stages[1].id }, data: { state: "APPROVED", decidedBy: owner.account.id,
       decidedAt: new Date(), decisionReason: "Dedicated raw unordered decision" } }))).rejects.toThrow("ordered recipient");
     await expect(withTenant(db, f.org, tx => tx.approvalRecipient.create({ data: { organizationId: f.org, approvalId: requestId, userAccountId: operations.account.id } }))).rejects.toThrow("audience must match");
@@ -139,6 +173,9 @@ describe("native expenses on real PostgreSQL", () => {
     await expect(decideApproval(manager.actor, { id: requestId, decision: "APPROVED", reason: "Dedicated omitted stage identifier" }, { db })).rejects.toBeInstanceOf(ApprovalAccessError);
     const decision = { id: requestId, stageId: stages[0].id, decision: "APPROVED", reason: "Dedicated manager review accepted" };
     await Promise.all([decideApproval(manager.actor, decision, { db }), decideApproval(manager.actor, decision, { db })]);
+    await withTenant(db, f.org, async tx => {
+      expect((await resolveNotificationChannel(new NotificationRepository(tx, f.org), { kind: "approval_requested", channel: "email", recipientId: manager.account.id, targetId: requestId, sourceEventId: originalNotice })).allowed).toBe(false);
+    });
     expect((await getApproval(owner.actor, requestId, { db })).canApprove).toBe(true);
     await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: owner.grant.id }, data: { validTo: new Date() } }));
     await expect(decideApproval(owner.actor, { id: requestId, stageId: stages[1].id, decision: "APPROVED", reason: "Dedicated stale grant must be denied" }, { db })).rejects.toBeInstanceOf(ApprovalAccessError);
@@ -149,6 +186,10 @@ describe("native expenses on real PostgreSQL", () => {
       expect(await tx.auditLog.count({ where: { action: "expense.approval_stage_decided" } })).toBe(2);
       expect(await tx.outboxEvent.count({ where: { type: "ExpenseOverThreshold" } })).toBe(1); expect(await tx.outboxEvent.count({ where: { type: "ApprovalDecided" } })).toBe(1);
       expect(await tx.notification.count({ where: { recipientId: operations.account.id } })).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);
+      const notice = await tx.notification.findFirstOrThrow({ where: { recipientId: owner.account.id, targetId: requestId } });
+      expect(notice.resolution).toBe("APPROVED");
+      const target = (await new NotificationRepository(tx, f.org).targets([notice], owner.account.id)).get(requestId);
+      expect(target?.ownerId).toBe(configured.owner.id); expect(authorize(owner.actor.authContext, "view", target!)).toBe(true);
     });
   });
   it("uses original reservation agreement treatments after ownership and configuration change", async () => {
@@ -172,6 +213,67 @@ describe("native expenses on real PostgreSQL", () => {
     const snapshot = await withTenant(db, f.org, tx => tx.expenseSubmission.findFirstOrThrow());
     expect(snapshot.snapshot).toMatchObject({ policies: [{ ownerId: configured.owner.id, allocationRule: { version: 1 }, allocation: { treatment: "ALVILLAS_PAID" } }],
       allocation: { owner: { amount: "0.00", currency: "MAD" }, alvillas: { amount: "500.25", currency: "MAD" } } });
+  });
+  it("captures separate owner policies and condition references at confirmation without substituting later versions", async () => {
+    const f = await fixture(), configured = await policy(f);
+    const original = await withTenant(db, f.org, async tx => {
+      const rules = new ConfigRuleRepository(tx, f.org);
+      await rules.createVersion({ key: "finance.commission", scopeType: "property", scopeId: f.property.id, effectiveFrom: new Date("2020-01-01"),
+        reason: "Dedicated ordinary commission configuration", value: { rate_bps: 2000, basis: "GROSS_ACCOMMODATION", accrual_event: "ON_RECEIPT" } });
+      const treatment = await rules.createVersion({ key: "finance.expense_treatment", scopeType: "owner", scopeId: configured.owner.id, effectiveFrom: new Date("2020-01-01"),
+        reason: "Dedicated original owner expense configuration", value: { default_treatment: "ALVILLAS_PAID" } });
+      // A property policy outranks the owner fallback; retain its exact version.
+      const propertyTreatment = await rules.createVersion({ key: "finance.expense_treatment", scopeType: "property", scopeId: f.property.id, effectiveFrom: new Date("2020-01-02"),
+        reason: "Dedicated original property expense configuration", value: { default_treatment: "ALVILLAS_PAID" } });
+      const reference = await rules.createVersion({ key: "finance.payout_schedule", scopeType: "property", scopeId: f.property.id, effectiveFrom: new Date("2020-01-01"),
+        reason: "Dedicated original approval reference", value: { cadence: "MONTHLY", holdback_amount: "600", holdback_currency: "MAD" } });
+      await rules.createVersion({ key: "finance.approval_thresholds", scopeType: "property", scopeId: f.property.id, effectiveFrom: new Date("2020-01-02"),
+        reason: "Dedicated original condition policy", value: { thresholds: [{ key: "saved_reference", conditions: { path: "expense.amount", op: ">", value: { config: "finance.payout_schedule", path: "holdback_amount" } }, requires_approval_from: ["owner"] }] } });
+      const reservation = await tx.reservation.create({ data: { organizationId: f.org, propertyId: f.property.id, reference: randomUUID(), source: "DIRECT", status: "CONFIRMED",
+        guestName: "Dedicated original policy guest", checkIn: new Date("2026-10-26"), checkOut: new Date("2026-10-28"), nights: 2, idempotencyKey: randomUUID(), confirmedAt: new Date("2026-10-20") } });
+      await captureReservationCommissionSnapshots(tx, f.org, reservation.id, f.account.id);
+      const before = await tx.commissionSnapshot.findFirstOrThrow({ where: { reservationId: reservation.id } });
+      await rules.createVersion({ key: "finance.payout_schedule", scopeType: "property", scopeId: f.property.id, effectiveFrom: new Date("2026-10-21"),
+        reason: "Dedicated changed reference after confirmation", value: { cadence: "MONTHLY", holdback_amount: "100", holdback_currency: "MAD" } });
+      await rules.createVersion({ key: "finance.expense_treatment", scopeType: "property", scopeId: f.property.id, effectiveFrom: new Date("2026-10-21"),
+        reason: "Dedicated changed treatment after confirmation", value: { default_treatment: "OWNER_PAID" } });
+      return { reservation, before, reference, treatment, propertyTreatment };
+    });
+    const draft = await create(f, { ...f.input, reservationId: original.reservation.id });
+    expect((await submitExpense(await actor(f), { id: draft.id, expectedVersion: 1, reason: "Dedicated frozen reference submission" }, { db })).state).toBe("APPROVED");
+    await withTenant(db, f.org, async tx => {
+      const snapshot = await tx.expenseSubmission.findFirstOrThrow();
+      expect(snapshot.snapshot).toMatchObject({ policies: [{ allocationRule: { configRuleId: original.propertyTreatment.id, version: original.propertyTreatment.version },
+        configReferences: [{ configRuleId: original.reference.id, version: 1 }] }], allocation: { alvillas: { amount: "500.25", currency: "MAD" }, owner: { amount: "0.00", currency: "MAD" } } });
+      expect((await tx.commissionSnapshot.findUniqueOrThrow({ where: { id: original.before.id } })).snapshotValue).toEqual(original.before.snapshotValue);
+    });
+  });
+  it("does not bypass an owner approval while the required emergency notification workflow is unavailable", async () => {
+    const f = await fixture(); await policy(f, { thresholds: [{ key: "emergency", emergency_bypass_owner: true, requires_approval_from: ["owner"] }] });
+    const draft = await create(f, { ...f.input, emergency: true });
+    await expect(submitExpense(await actor(f), { id: draft.id, expectedVersion: 1, reason: "Dedicated emergency notification dependency" }, { db })).rejects.toThrow("post-hoc owner notification");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.expense.findFirstOrThrow()).toMatchObject({ state: "DRAFT", version: 1 }); expect(await tx.expenseSubmission.count()).toBe(0);
+      expect(await tx.outboxEvent.count({ where: { type: "ExpenseSubmitted" } })).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);
+    });
+  });
+  it("evaluates requester roles by current resource scope independently of the separate expense author permission", async () => {
+    const f = await fixture(); await policy(f); const reviewer = await approver(f, "property", f.property.id);
+    const trait = await withTenant(db, f.org, async tx => {
+      const role = await tx.role.create({ data: { organizationId: f.org, key: "dedicated_requester_role", name: "Dedicated scoped requester role" } });
+      const permission = await tx.permission.findFirstOrThrow({ where: { key: "property:view" } });
+      await tx.rolePermission.create({ data: { organizationId: f.org, roleId: role.id, permissionId: permission.id } });
+      const assignment = await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: f.account.id, personId: f.person.id,
+        scopeType: "property", scopeId: f.property.id, validFrom: new Date("2020-01-01") } });
+      await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.approval_thresholds", scopeType: "property", scopeId: f.property.id,
+        effectiveFrom: new Date("2020-01-02"), reason: "Dedicated scoped requester condition", value: { thresholds: [{ key: "requester_role", conditions: { path: "actor.roles", op: "contains", value: role.key }, requires_approval_from: ["manager"] }],
+          routing: { manager: { people: [reviewer.person.id], roles: [], assigned: false, channels: ["in_app"] } } } });
+      return assignment;
+    });
+    const first = await create(f); expect((await submitExpense(await actor(f), { id: first.id, expectedVersion: 1, reason: "Dedicated matching requester scope" }, { db })).state).toBe("PENDING_APPROVAL");
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: trait.id }, data: { scopeId: randomUUID() } }));
+    const second = await create(f, { ...f.input, idempotencyKey: randomUUID() });
+    expect((await submitExpense(await actor(f), { id: second.id, expectedVersion: 1, reason: "Dedicated unrelated requester scope" }, { db })).state).toBe("APPROVED");
   });
   it("drives configured actions from native expense events once and binds the canonical financial approval", async () => {
     const f = await fixture(); await policy(f); const reviewer = await approver(f, "property", f.property.id);

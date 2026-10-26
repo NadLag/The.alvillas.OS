@@ -633,7 +633,7 @@ export class ReservationRepository {
   async resolvedFinancialRules(propertyId: string, asOf: Date, source?: string) {
     const config = new ConfigRuleRepository(this.tx, this.organizationId);
     const scopes = await new ReservationConfigScopeRepository(this.tx, this.organizationId).scopes({ propertyId, asOf, source });
-    const rules = await Promise.all(["finance.commission", "finance.ota_fee", "finance.expense_treatment", "finance.approval_thresholds", "finance.payout_schedule", "finance.tax"].map(key => config.resolve({ key, asOf, scopes })));
+    const rules = await Promise.all(["finance.commission", "finance.ota_fee", "finance.expense_allocation", "finance.expense_treatment", "finance.approval_thresholds", "finance.payout_schedule", "finance.tax"].map(key => config.resolve({ key, asOf, scopes })));
     return rules.filter(rule => rule !== null).map(rule => ({ id: rule.id, key: rule.key, version: rule.version, scopeType: rule.scopeType, scopeId: rule.scopeId, effectiveFrom: rule.effectiveFrom, effectiveTo: rule.effectiveTo, value: rule.parsedValue }));
   }
   async exception(propertyId: string, reservationId: string | null, kind: string, key: string, details: unknown, actorId: string | null) {

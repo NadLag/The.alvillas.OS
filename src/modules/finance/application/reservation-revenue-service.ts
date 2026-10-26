@@ -273,6 +273,8 @@ async function snapshotForOwner(input: {
   }
 
   const parsed = parseCommissionRuleValue(rule.value);
+  const expensePolicy = await input.repository.captureExpensePolicy({ propertyId: input.reservation.propertyId, ownerId: input.ownerId,
+    source: input.reservation.source, asOf: input.reservation.createdAt, inlineApproval: parsed.approval_thresholds });
 
   const snapshot = await input.repository.createCommissionSnapshot({
     reservationId: input.reservation.id,
@@ -283,7 +285,7 @@ async function snapshotForOwner(input: {
     commissionRateBps: parsed.rate_bps,
     commissionBasis: parsed.basis,
     accrualEvent: parsed.accrual_event,
-    snapshotValue: snapshotValue(rule, parsed, input),
+    snapshotValue: { ...snapshotValue(rule, parsed, input), expense_policy_rules: expensePolicy },
     createdBy: input.actorId
   });
 

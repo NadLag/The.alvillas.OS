@@ -28,7 +28,7 @@ async function authorizedItems(notifications: NotificationRepository, recipientI
   const candidate = await notifications.channelRecipient(recipientId);
   if (!candidate || !candidate.email || securityEnrollment(candidate).setupRequired) return { candidate: null, items: [] };
   const ctx = contextForRoleAssignments(candidate.organizationId, candidate.id, candidate.roleAssignments);
-  const targets = await notifications.targets(rows);
+  const targets = await notifications.targets(rows, recipientId);
   const items = rows.filter((row) => {
     const parsed = notificationInputSchema.safeParse({ kind: row.kind, recipientId, targetId: row.targetId });
     return parsed.success && notificationDestination(ctx, parsed.data, targets.get(row.targetId) ?? null, language);

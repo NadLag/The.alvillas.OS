@@ -26,6 +26,17 @@ export class ExpenseRepository {
   }
   reservation(id: string) { return this.tx.reservation.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null }, select: { id: true, propertyId: true, source: true, reference: true } }); }
   currency(code: string) { return this.tx.currency.findUnique({ where: { code }, select: { code: true, minorUnit: true } }); }
+  async editorSources() {
+    const [organization, currencies] = await Promise.all([
+      this.tx.organization.findUniqueOrThrow({ where: { id: this.organizationId }, select: { baseCurrency: true } }),
+      this.tx.currency.findMany({ where: { minorUnit: { lte: 2 } }, select: { code: true, minorUnit: true }, orderBy: { code: "asc" } })
+    ]);
+    return { baseCurrency: organization.baseCurrency, currencies };
+  }
+  reservationChoices(propertyId: string) {
+    return this.tx.reservation.findMany({ where: { organizationId: this.organizationId, propertyId, archivedAt: null },
+      select: { id: true, reference: true, status: true, createdBy: true }, orderBy: [{ checkIn: "desc" }, { id: "desc" }], take: 100 });
+  }
   async sourceOwners(propertyId: string, reservationId: string | undefined) {
     const snapshot = reservationId ? await this.tx.reservationFinancialSnapshot.findFirst({ where: { organizationId: this.organizationId, reservationId,
       rules: { path: ["owners"], array_contains: [] } }, orderBy: { version: "asc" }, select: { id: true, version: true, rules: true } }) : null;
@@ -37,7 +48,9 @@ export class ExpenseRepository {
   async periodRevenue(input: { propertyId: string; currency: string; startsAt?: Date; endsAt?: Date; reservationId?: string }) {
     const [row] = await this.tx.$queryRaw<Array<{ amount: Prisma.Decimal }>>(Prisma.sql`SELECT COALESCE(SUM(CASE WHEN p.side='CREDIT' THEN p.amount ELSE -p.amount END),0) AS amount
       FROM posting p JOIN financial_transaction t ON t.id=p.transaction_id AND t.organization_id=p.organization_id
+      JOIN ledger_account a ON a.id=p.ledger_account_id AND a.organization_id=p.organization_id
       WHERE p.organization_id=${this.organizationId}::uuid AND p.currency=${input.currency} AND p.bucket='OWNER_REVENUE'
+        AND a.code='OWNER_PAYABLE' AND a.account_type='CLAIM_OWNERSHIP' AND a.normal_side='CREDIT'
         AND p.dimensions->>'property_id'=${input.propertyId}
         ${input.reservationId ? Prisma.sql`AND p.dimensions->>'reservation_id'=${input.reservationId}` : Prisma.empty}
         ${input.startsAt ? Prisma.sql`AND t.occurred_at >= ${input.startsAt}` : Prisma.empty}

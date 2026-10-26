@@ -5,7 +5,7 @@ import {
   type ConfigScopeCandidate,
   type ResolvedConfigRule
 } from "@/platform/config/config-rule-repository";
-import { authorize, type AuthContext, type Resource } from "@/platform/authz/authorize";
+import { authorize, roleKeysForResource, type AuthContext, type Resource } from "@/platform/authz/authorize";
 import { approvalThresholdsConfigSchema, type ApprovalThresholdsConfig } from "@/platform/config/rule-registry";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
@@ -184,7 +184,7 @@ export async function evaluateExpensePolicyInTransaction(ctx: FinanceConfigActor
       const rule = snapshot.resolve(key); if (!rule) throw new FinanceConfigNotFoundError(`Missing referenced finance configuration: ${key}`); return rule;
     }) : [];
     const subject = options.resource ?? { type: "expense", organizationId: ctx.organizationId, propertyId: input.propertyId, ownerId: input.ownerId, amount: input.amount, dataClass: "financial" as const };
-    const roles = [...new Set((ctx.authContext.assignments ?? []).filter(assignment => assignment.roleKey && authorize({ ...ctx.authContext, assignments: [assignment] }, "edit", subject, options.now ?? new Date())).map(assignment => assignment.roleKey!))];
+    const roles = roleKeysForResource(ctx.authContext, subject, options.now ?? new Date());
     const allocation = allocateConfiguredExpense(allocationRule.value, { category: input.category, amount });
     const evaluation = { fields: { expense: { propertyId: input.propertyId, ownerId: input.ownerId ?? null, category: input.category,
       amount: (options.approvalAmount ?? amount).amount.toString(), allocatedAmount: amount.amount.toString(), currency: input.currency, emergency: input.emergency }, actor: { userAccountId: ctx.actorId, roles } },
