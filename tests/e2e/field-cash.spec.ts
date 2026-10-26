@@ -12,6 +12,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Assigned employee collec
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw new Error("Cash acceptance requires local PostgreSQL");
   const f = await openFieldFixture(admin, info, "en"), origin = new URL(admin.url()).origin;
   const context = await browser.newContext({ baseURL: origin, serviceWorkers: "allow", viewport: { width: info.project.name === "field-mobile" ? 360 : 1440, height: 900 } });
+  const otherContext = await browser.newContext({ baseURL: origin, serviceWorkers: "allow", viewport: { width: info.project.name === "field-mobile" ? 360 : 1440, height: 900 } });
   const page = await context.newPage(), phone = `+21266${randomInt(1_000_000, 10_000_000)}`, pin = "368247";
   const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
   try {
@@ -33,6 +34,14 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Assigned employee collec
     });
     await page.goto(`/${locale}/app/field/${f.taskId}`);
     const cash = page.getByTestId("field-cash"); await expect(cash.getByTestId("field-cash-amount")).toBeEnabled();
+    const other = await otherContext.newPage();
+    await other.goto(`/${locale}/login?surface=field`); await other.getByTestId("login-phone").fill(phone); await other.getByTestId("login-pin").fill(pin);
+    await other.getByTestId("login-submit").click(); await expect(other).toHaveURL(new RegExp(`/${locale}/app/field$`, "u"));
+    await other.goto(`/${locale}/app/field/${f.taskId}`);
+    const otherCash = other.getByTestId("field-cash"); await expect(otherCash.getByTestId("field-cash-amount")).toBeEnabled();
+    await otherContext.setOffline(true);
+    await otherCash.getByTestId("field-cash-amount").fill("500.25"); await otherCash.getByTestId("field-cash-payer").fill("Dedicated fictional cash guest");
+    await otherCash.getByTestId("field-cash-purpose").fill("Dedicated transfer cash acceptance");
     await expect(cash.getByTestId("field-cash-receipt")).toHaveCount(0);
     expect((await page.request.get("/api/field/wallet")).status()).toBe(403);
     await cash.getByTestId("field-cash-amount").fill(locale === "ar" ? "٥٠٠٫٢٥" : "500,25");
@@ -56,12 +65,22 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Assigned employee collec
     const replay = await page.request.post("/api/sync/push", { headers: { Origin: origin }, data: { organization_id: f.organizationId, actor_user_id: user.id,
       device_id: queued[0].deviceId, op_schema_version: 1, ops: [queued[0].operation] } });
     expect(replay.status()).toBe(200); expect(await replay.json()).toMatchObject({ results: [{ status: "DUPLICATE" }] });
+    await otherCash.getByTestId("field-cash-save").click(); await expect(otherCash.getByTestId("field-cash-queued")).toBeVisible();
+    await otherContext.setOffline(false); await other.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(otherCash.getByTestId("field-cash-review-required")).toBeVisible();
+    await expect(otherCash.getByTestId("field-cash-confirm-existing")).toBeVisible();
+    await otherCash.getByTestId("field-cash-review-reason").fill("Reviewed both dedicated devices: this is the same guest cash");
+    await otherCash.getByTestId("field-cash-confirm-existing").click();
+    await expect(otherCash.getByTestId("field-cash-review-required")).toHaveCount(0);
+    await expect.poll(async () => JSON.stringify(await storedFieldData(other, "operations"))).toContain("resolvedByClientOpId");
+    expect((await new AxeBuilder({ page: other }).analyze()).violations).toEqual([]);
     await withTenant(f.db, f.organizationId, async tx => {
       const rows = await tx.cashCollection.findMany({ where: { taskId: f.taskId }, include: { transaction: { include: { postings: true } } } });
       expect(rows).toHaveLength(1); expect(rows[0].collectorUserAccountId).toBe(user.id); expect(rows[0].amount.toFixed(2)).toBe("500.25");
       expect(rows[0].transaction.postings).toHaveLength(2);
       expect(rows[0].transaction.postings.map(row => row.bucket).sort()).toEqual(["CASH_COLLECTION", "UNALLOCATED_COLLECTION"]);
       expect(await tx.outboxEvent.count({ where: { idempotencyKey: `cash:${rows[0].id}:received` } })).toBe(1);
+      expect(await tx.auditLog.count({ where: { resourceId: rows[0].id, action: "cash_collection.duplicate_confirmed" } })).toBe(1);
     });
     await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
@@ -69,5 +88,5 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Assigned employee collec
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     for (const button of await cash.getByRole("button").all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(64);
     await page.screenshot({ path: info.outputPath(`native-field-cash-${locale}.png`), fullPage: true }); expect(errors).toEqual([]);
-  } finally { await context.close(); await f.db.$disconnect(); }
+  } finally { await Promise.all([context.close(), otherContext.close()]); await f.db.$disconnect(); }
 });

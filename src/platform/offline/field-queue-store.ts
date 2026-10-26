@@ -617,11 +617,13 @@ export class FieldQueueStore extends Dexie {
       await jobs.bulkPut(tasks.map(task => ({ ...scope, cacheId: `${identity}:${task.id}`, task })));
       const removed = tombstones.map(id => `${identity}:${id}`);
       await jobs.bulkDelete(removed);
+      const removedDrafts: string[] = [];
       for (const id of removed) {
         const ownDraft = audience === "assigned" ? await this.drafts.get(id) : undefined;
         if (ownDraft?.cash) await this.drafts.put({ ...ownDraft, checklistItemIds: [], note: "" });
-        else await drafts.delete(id);
+        else removedDrafts.push(id);
       }
+      await drafts.bulkDelete(removedDrafts);
       if (audience === "assigned" && tombstones.length) await this.linenDrafts.where("[organizationId+userId]").equals([scope.organizationId, scope.userId])
         .filter(draft => tombstones.includes(draft.taskId)).delete();
       await this.cacheState.put({ ...scope, key, incarnation: revision.incarnation, generation: revision.generation + 1, cursor, snapshotAt,

@@ -9,7 +9,12 @@ import { setPropertyCity } from "./support/property-form";
 import { ensureReservationRevenuePostingSetup } from "./support/reservation-revenue";
 
 async function captureAction(page: Page, submit: Locator) {
-  const request = page.waitForRequest(value => value.method() === "POST" && Boolean(value.headers()["next-action"]) && new URL(value.url()).pathname.endsWith("/reservations"));
+  const nonce = await submit.evaluate(element => element.closest("form")?.querySelector<HTMLInputElement>('input[name="idempotencyKey"]')?.value);
+  expect(nonce).toMatch(/^[a-f0-9-]{36}$/u);
+  // Background permission checks use the same route and Next-Action header.
+  // Capture this financial form's actual nonce rather than the next route POST.
+  const request = page.waitForRequest(value => value.method() === "POST" && Boolean(value.headers()["next-action"]) &&
+    new URL(value.url()).pathname.endsWith("/reservations") && Boolean(nonce && value.postData()?.includes(nonce)));
   await submit.click(); const captured = await request, headers = captured.headers(), body = captured.postDataBuffer();
   expect(Boolean(body && headers["next-action"] && headers["content-type"])).toBe(true);
   // Only the observed public action reference and payload are reused. The
