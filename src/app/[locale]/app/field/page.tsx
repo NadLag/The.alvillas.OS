@@ -56,6 +56,7 @@ export default async function FieldTasksPage({
       <FieldLanguage locale={appLocale} path="/app/field" />
       {authorizeCollection(ctx.authContext, "validate", "task") ? <Link className="secondary-button" data-testid="field-proxy-entry"
         href={`/${appLocale}/app/field/validate`}>{(await getTranslations("FieldProxy"))("title")}</Link> : null}
+      {authorizeCollection(ctx.authContext, "view", "wallet") ? <Link className="secondary-button" data-testid="field-wallet-entry" href={`/${appLocale}/app/field/wallet`}>{(await getTranslations("FieldWallet"))("title")}</Link> : null}
       <FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} />
       <FieldJobs scope={{ organizationId: ctx.organizationId, userId: ctx.actorId }} locale={appLocale} initial={work.tasks} />
     </FieldShell>

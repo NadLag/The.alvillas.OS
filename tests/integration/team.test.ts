@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
 import { beforeAll, afterAll, describe, it, expect } from "vitest";
-import { withTenant } from "@/platform/db/tenant";
+import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { permissionCatalog } from "@/platform/authz/catalog";
 import {
   IdentityAuthorizationError,
@@ -27,6 +27,7 @@ import {
   decideTeamAvailability,
   offboardTeamMember,
   linkTeamWallet,
+  ownFieldWallet,
   TeamConflictError,
   TeamNotFoundError
 } from "@/modules/identity/application/team-service";
@@ -840,4 +841,89 @@ describe("team management on real PostgreSQL", () => {
       )
     ).toBe(1);
   });
+
+  it.skipIf(!url)("own field wallet derives every currency from immutable movements and writes only its read audit", async () => {
+    const f = await ownWalletFixture(); await f.post("DEBIT", "1500.00", "MAD", "Advance");
+    await f.post("CREDIT", "850.00", "MAD", "Property groceries"); await f.post("CREDIT", "200.00", "MAD", "Company supplies");
+    await f.post("DEBIT", "75.25", "EUR", "EUR advance");
+    const before = await withTenant(db, f.org, tx => tx.financialTransaction.count());
+    const result = await ownFieldWallet(f.reader, {}, deps());
+    expect(result.balances.sort((a, b) => a.currency.localeCompare(b.currency))).toEqual([{ amount: "75.25", currency: "EUR" }, { amount: "450.00", currency: "MAD" }]);
+    expect(result.movements).toHaveLength(4); expect(result.compensationVisible).toBe(false); expect(result.compensationTerms).toEqual([]);
+    expect(result).not.toHaveProperty("ledgerAccountId"); expect(result).not.toHaveProperty("personId");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.financialTransaction.count()).toBe(before);
+      expect(await tx.auditLog.count({ where: { action: "team.wallet.view.own", actorId: f.staffAccount.id } })).toBe(1);
+    });
+  });
+
+  it.skipIf(!url)("own field wallet denies operational permissions, another wallet scope and forged actor/person/tenant context", async () => {
+    const f = await ownWalletFixture(); await f.post("DEBIT", "250.00", "MAD", "Private own advance");
+    const operational = actor(f.org, f.staffAccount.id, f.staff.id, new Set(["task:view", "task:edit"]));
+    await expect(ownFieldWallet(operational, {}, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    const wrongScope: IdentityActorContext = { ...f.reader, authContext: { ...f.reader.authContext, scopes: [{ organizationId: f.org, scopeType: "wallet", scopeId: randomUUID() }] } };
+    await expect(ownFieldWallet(wrongScope, {}, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    for (const changed of [{ actorId: f.account.id }, { personId: f.person.id }, { organizationId: randomUUID() }])
+      await expect(ownFieldWallet({ ...f.reader, ...changed }, {}, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    await expect(ownFieldWallet(f.reader, { personId: f.person.id }, deps())).rejects.toThrow();
+    await expect(ownFieldWallet(f.reader, { page: 0 }, deps())).rejects.toThrow();
+    const other = await ownWalletFixture(); await other.post("DEBIT", "999.00", "MAD", "Another organization's cash");
+    expect((await ownFieldWallet(f.reader, {}, deps())).balances).toEqual([{ amount: "250.00", currency: "MAD" }]);
+  });
+
+  it.skipIf(!url)("own field wallet pages posted history without exposing another person's ledger", async () => {
+    const f = await ownWalletFixture(); for (let index = 0; index < 30; index++) await f.post("DEBIT", "1.01", "MAD", `Own movement ${index}`);
+    const first = await ownFieldWallet(f.reader, { page: 1 }, deps()), second = await ownFieldWallet(f.reader, { page: 2 }, deps());
+    expect(first.movements).toHaveLength(25); expect(first.hasNext).toBe(true); expect(second.movements).toHaveLength(5); expect(second.hasNext).toBe(false);
+    expect(new Set([...first.movements, ...second.movements].map(row => row.id)).size).toBe(30);
+    expect(first.balances).toEqual([{ amount: "30.30", currency: "MAD" }]); expect(second.balances).toEqual(first.balances);
+  });
+
+  it.skipIf(!url)("own field wallet keeps compensation independently permissioned and displays only effective terms", async () => {
+    const f = await ownWalletFixture(); const assigned = await assignTeamRole(f.ctx, { personId: f.staff.id, roleId: f.role.id,
+      scopeType: "property", scopeId: f.property.id, validFrom: "2020-01-01", validTo: null, assignedToMe: true, reason: "Explicit current staff assignment" }, deps());
+    await saveTeamCompensation(f.ctx, { assignmentId: assigned.id, expectedVersion: 0, mode: "PER_MONTH", amount: "3500.00", currency: "MAD",
+      effectiveFrom: "2021-01-01", reason: "Current authorized compensation terms" }, deps());
+    await saveTeamCompensation(f.ctx, { assignmentId: assigned.id, expectedVersion: 1, mode: "PER_MONTH", amount: "4000.00", currency: "MAD",
+      effectiveFrom: "2077-01-01", reason: "Future terms must not replace the current rate" }, deps());
+    const hidden = await ownFieldWallet(f.reader, {}, deps()); expect(hidden.compensationVisible).toBe(false); expect(hidden.compensationTerms).toEqual([]);
+    const finance: IdentityActorContext = { ...f.reader, authContext: { ...f.reader.authContext, permissions: new Set(["wallet:view", "staff_compensation:view"]),
+      assignments: [{ scope: f.reader.authContext.scopes[0], permissions: new Set(["wallet:view"]) },
+        { scope: { organizationId: f.org, scopeType: "property", scopeId: f.property.id }, permissions: new Set(["staff_compensation:view"]) }] } };
+    const visible = await ownFieldWallet(finance, {}, deps()); expect(visible.compensationVisible).toBe(true);
+    expect(visible.compensationTerms).toHaveLength(1); expect(visible.compensationTerms[0]).toMatchObject({ mode: "PER_MONTH", amount: "3500", currency: "MAD" });
+  });
+
+  it.skipIf(!url)("own field wallet pins balance and history to one PostgreSQL snapshot during a concurrent posting", async () => {
+    const f = await ownWalletFixture(); await f.post("DEBIT", "10.00", "MAD", "Before snapshot");
+    let release!: () => void, captured!: () => void;
+    const held = new Promise<void>(resolve => { release = resolve; }), ready = new Promise<void>(resolve => { captured = resolve; });
+    const runner: TenantTransactionRunner = { $transaction: (work, options) => db.$transaction(async tx => {
+      await tx.$queryRaw`SELECT txid_current_snapshot()::text AS snapshot`; captured(); await held; return work(tx);
+    }, options) };
+    const reading = ownFieldWallet(f.reader, {}, { db: runner });
+    try {
+      await Promise.race([ready, reading.then(() => { throw new Error("Wallet read finished before the snapshot barrier"); })]);
+      await f.post("DEBIT", "25.00", "MAD", "Concurrent posted advance"); release();
+      const snapshot = await reading; expect(snapshot.balances).toEqual([{ amount: "10.00", currency: "MAD" }]); expect(snapshot.movements).toHaveLength(1);
+      const current = await ownFieldWallet(f.reader, {}, deps()); expect(current.balances).toEqual([{ amount: "35.00", currency: "MAD" }]); expect(current.movements).toHaveLength(2);
+    } finally { release(); await reading; }
+  });
 });
+
+async function ownWalletFixture() {
+  const f = await fixture();
+  const [wallet, offset] = await withTenant(db, f.org, tx => Promise.all(["STAFF_WALLET", "WALLET_OFFSET"].map(code => tx.ledgerAccount.create({ data: {
+    organizationId: f.org, code, name: code, accountType: code === "STAFF_WALLET" ? "STAFF_WALLET" : "ASSET", normalSide: "DEBIT",
+  } }))));
+  await linkTeamWallet(f.ctx, { personId: f.staff.id, ledgerAccountId: wallet.id, reason: "Link the dedicated employee wallet" }, deps());
+  const link = await withTenant(db, f.org, tx => tx.teamWallet.findFirstOrThrow({ where: { personId: f.staff.id } }));
+  const reader = actor(f.org, f.staffAccount.id, f.staff.id, new Set(["wallet:view"]));
+  reader.authContext.scopes = [{ organizationId: f.org, scopeType: "wallet", scopeId: link.id }];
+  async function post(side: "DEBIT" | "CREDIT", amount: string, currency: string, description: string) {
+    await withTenant(db, f.org, tx => tx.financialTransaction.create({ data: { organizationId: f.org, reference: randomUUID(), occurredAt: new Date(), description,
+      postings: { create: [{ organizationId: f.org, ledgerAccountId: wallet.id, side, amount, currency },
+        { organizationId: f.org, ledgerAccountId: offset.id, side: side === "DEBIT" ? "CREDIT" : "DEBIT", amount, currency }] } } }));
+  }
+  return { ...f, reader, wallet, offset, post };
+}

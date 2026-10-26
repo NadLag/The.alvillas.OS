@@ -1225,7 +1225,7 @@ describe("PostgreSQL baseline", () => {
     });
     const actor = { organizationId: org.id, accountId: fixture.account.id,
       authContext: ownNotificationContext({ organizationId: org.id, permissions: new Set<string>(), scopes: [] }, fixture.account.id) };
-    const deps = { db: prisma as TenantTransactionRunner, requestId: randomUUID() };
+    const deps = { db: prisma as TenantTransactionRunner, requestId: randomUUID(), origin: "http://localhost:3000" };
     const defaults = defaultNotificationPreferences();
     const send = async (kind: "language_updated" | "task_assigned", key: string) => withTenant(prisma, org.id, (tx) => publishNotification(tx, org.id,
       { kind, recipientId: fixture.account.id, targetId: kind === "task_assigned" ? fixture.task.id : fixture.account.id }, key));

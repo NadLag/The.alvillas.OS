@@ -2383,5 +2383,36 @@
     "storage": "Le stockage est plein. Votre problème non enregistré est toujours ici. Libérez de l’espace et réessayez.",
     "unsaved": "Enregistrez ou abandonnez le problème avant de quitter ou de terminer cette tâche.",
     "review": "Ce problème nécessite une vérification. Le signalement et la photo restent sur cet appareil."
+  },
+  "FieldWallet": {
+    "title": "Mon portefeuille",
+    "subtitle": "Vos fonds, mouvements et rémunération",
+    "back": "Retour aux tâches",
+    "loading": "Chargement de votre portefeuille…",
+    "saved": "Hors ligne. Le portefeuille enregistré sur cet appareil est affiché.",
+    "unavailable": "Votre portefeuille est indisponible. Connectez-vous pour actualiser vos accès autorisés.",
+    "retry": "Le portefeuille n’a pas pu être actualisé. Les montants enregistrés affichent leur dernière mise à jour.",
+    "asOf": "Dernière mise à jour : {time}",
+    "balance": "Fonds détenus",
+    "heldDescription": "Ce solde provient des mouvements comptabilisés. Les fonds détenus et la rémunération sont présentés séparément.",
+    "unlinked": "Aucun portefeuille employé n’est lié à votre compte.",
+    "history": "Mouvements du portefeuille",
+    "empty": "Aucun mouvement n’a été comptabilisé sur ce portefeuille.",
+    "movement": "Mouvement du portefeuille",
+    "in": "Reçu dans le portefeuille",
+    "out": "Payé depuis le portefeuille",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "page": "Page {page}",
+    "compensation": "Conditions de rémunération",
+    "noCompensation": "Aucune condition de rémunération actuelle n’est disponible.",
+    "percentage": "{amount} %",
+    "refresh": "Actualiser le portefeuille",
+    "mode": {
+      "PER_JOB": "Par tâche",
+      "PER_MONTH": "Par mois",
+      "PER_HOUR": "Par heure",
+      "PERCENTAGE": "Pourcentage"
+    }
   }
 }

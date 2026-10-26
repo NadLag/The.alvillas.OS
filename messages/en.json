@@ -2383,5 +2383,36 @@
     "storage": "Device storage is full. Your unsaved issue is still here. Free space and try again.",
     "unsaved": "Save or discard the issue before leaving or finishing this job.",
     "review": "This issue needs review. Your report and photo remain on this device."
+  },
+  "FieldWallet": {
+    "title": "My wallet",
+    "subtitle": "Your funds, movements and compensation",
+    "back": "Back to jobs",
+    "loading": "Loading your wallet…",
+    "saved": "Offline. Showing the wallet saved on this device.",
+    "unavailable": "Your wallet is unavailable. Connect to refresh your authorized access.",
+    "retry": "Your wallet could not be refreshed. Any saved figures are shown with their last update time.",
+    "asOf": "Last updated {time}",
+    "balance": "Funds held",
+    "heldDescription": "This balance comes from posted movements. Funds held and compensation are shown separately.",
+    "unlinked": "A staff wallet has not been linked to your account.",
+    "history": "Wallet movements",
+    "empty": "No movements have been posted to this wallet.",
+    "movement": "Wallet movement",
+    "in": "Received into wallet",
+    "out": "Paid from wallet",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page {page}",
+    "compensation": "Compensation terms",
+    "noCompensation": "No current compensation terms are available.",
+    "percentage": "{amount}%",
+    "refresh": "Refresh wallet",
+    "mode": {
+      "PER_JOB": "Per job",
+      "PER_MONTH": "Per month",
+      "PER_HOUR": "Per hour",
+      "PERCENTAGE": "Percentage"
+    }
   }
 }
