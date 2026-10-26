@@ -23,6 +23,59 @@ async function setup() {
 }
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.delete())); });
 describe("cash uses the existing private draft and operation stores", () => {
+  it("queues cash behind nonterminal task evidence without blocking the financial draft", async () => {
+    const f = await setup();
+    await f.queue.enqueue(scope, { type: "field_task.evidence.attach", client_op_id: randomUUID(), payload: { taskId: f.task.id, uploadId: randomUUID() } });
+    expect(await f.queue.saveCashDraft(scope, f.draft, f.state.incarnation)).toBe(true);
+    await f.queue.enqueueCash(scope, f.draft, f.state.incarnation);
+    expect((await f.queue.entries(scope)).map(entry => entry.operation.type)).toEqual(["field_task.evidence.attach", "field_cash.collect"]);
+  });
+  it("blocks new financial intents after task completion is queued", async () => {
+    const f = await setup();
+    await f.queue.saveCashDraft(scope, f.draft, f.state.incarnation);
+    await f.queue.enqueue(scope, { type: "field_task.complete", client_op_id: randomUUID(), payload: { taskId: f.task.id, checklistItemIds: [randomUUID()] } });
+    expect(await f.queue.saveCashDraft(scope, f.draft, f.state.incarnation)).toBe(false);
+    await expect(f.queue.enqueueCash(scope, f.draft, f.state.incarnation)).rejects.toThrow("FIELD_CASH_PENDING");
+  });
+  it("allows only the original failed receipt to be confirmed behind a completion", async () => {
+    const f = await setup(); await f.queue.saveCashDraft(scope, f.draft, f.state.incarnation);
+    const original = await f.queue.enqueueCash(scope, f.draft, f.state.incarnation);
+    await f.queue.enqueue(scope, { type: "field_task.complete", client_op_id: randomUUID(), payload: { taskId: f.task.id, checklistItemIds: [randomUUID()] } });
+    await f.queue.acknowledge(scope, original, { client_op_id: f.draft.clientOpId, status: "CONFLICT", server_version: "c".repeat(43) });
+    const confirm = { taskId: f.task.id, originalDeviceId: original.deviceId, originalClientOpId: f.draft.clientOpId, receiptId: randomUUID(), reason: "Reviewed original cash receipt" };
+    await expect(f.queue.confirmCash(scope, confirm, f.state.incarnation, randomUUID())).rejects.toThrow("FIELD_CASH_REVIEW_REQUIRED");
+    await expect(f.queue.confirmCash(scope, { ...confirm, originalClientOpId: randomUUID() }, f.state.incarnation, f.draft.clientOpId)).rejects.toThrow("FIELD_CASH_REVIEW_REQUIRED");
+    const reviewed = await f.queue.confirmCash(scope, confirm, f.state.incarnation, f.draft.clientOpId);
+    await f.queue.acknowledge(scope, reviewed, { client_op_id: reviewed.operation.client_op_id, status: "APPLIED", server_version: "c".repeat(43) });
+    expect((await f.queue.entries(scope)).find(entry => entry.sequence === original.sequence)).toMatchObject({ syncStatus: "conflict", resolvedByClientOpId: reviewed.operation.client_op_id });
+    expect((await f.queue.cashSnapshot(scope, f.task.id)).completionPending).toBe(true);
+  });
+  it("restores an already submitted immutable cash nonce ahead of a queued completion", async () => {
+    const f = await setup(); await f.queue.saveCashDraft(scope, f.draft, f.state.incarnation);
+    const original = await f.queue.enqueueCash(scope, f.draft, f.state.incarnation);
+    await f.queue.enqueue(scope, { type: "field_task.complete", client_op_id: randomUUID(), payload: { taskId: f.task.id, checklistItemIds: [randomUUID()] } });
+    await f.queue.operations.delete(original.sequence!); await f.queue.restoreSubmittedCash(scope);
+    expect((await f.queue.entries(scope)).find(entry => entry.operation.type === "field_cash.collect")).toMatchObject({ deviceId: original.deviceId, operation: original.operation });
+  });
+  it("recovers a failed cash receipt while its dependent completion remains queued", async () => {
+    const f = await setup(); await f.queue.saveCashDraft(scope, f.draft, f.state.incarnation);
+    const original = await f.queue.enqueueCash(scope, f.draft, f.state.incarnation);
+    await f.queue.enqueue(scope, { type: "field_task.complete", client_op_id: randomUUID(), payload: { taskId: f.task.id, checklistItemIds: [randomUUID()] } });
+    await f.queue.acknowledge(scope, original, { client_op_id: f.draft.clientOpId, status: "CONFLICT", server_version: "c".repeat(43) });
+    await f.queue.publishCache(scope, (await f.queue.readCache(scope)).state!, [{ ...f.task, cash: { ...f.task.cash!, revision: "c".repeat(43) } }], [], "fresh", stamp);
+    const reviewed = { ...f.draft, amount: "25", clientOpId: randomUUID(), expectedRevision: "c".repeat(43), supersedesClientOpId: f.draft.clientOpId };
+    expect(await f.queue.saveCashDraft(scope, reviewed, f.state.incarnation)).toBe(true);
+    await f.queue.enqueueCash(scope, reviewed, f.state.incarnation);
+    const requests: string[] = [];
+    const send = (_url: RequestInfo | URL, init?: RequestInit) => {
+      if (typeof init?.body !== "string") throw new Error("Expected a serialized operation");
+      const body = JSON.parse(init.body) as { ops: Array<{ type: string; client_op_id: string }> }; requests.push(body.ops[0].type);
+      return Promise.resolve(Response.json({ op_schema_version: 1, results: [{ client_op_id: body.ops[0].client_op_id, status: "APPLIED", server_version: body.ops[0].type === "field_cash.collect" ? "d".repeat(43) : stamp }] }));
+    };
+    await syncFieldQueue(f.queue, scope, send); await syncFieldQueue(f.queue, scope, send);
+    expect(requests).toEqual(["field_cash.collect", "field_task.complete"]);
+    expect(await f.queue.entries(scope)).toEqual([expect.objectContaining({ operation: original.operation, syncStatus: "conflict", resolvedByClientOpId: reviewed.clientOpId })]);
+  });
   it("preserves cash, checklist and exact nonce across edits and cold reopen without adding a store", async () => {
     const f = await setup(); await f.queue.saveDraft(scope, f.task.id, [], "Existing note", f.state.incarnation);
     expect(await f.queue.saveCashDraft(scope, f.draft, f.state.incarnation)).toBe(true);

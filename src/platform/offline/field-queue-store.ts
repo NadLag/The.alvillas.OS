@@ -57,6 +57,22 @@ export function fieldStocktakeSurface(task: FieldWorkSnapshot, itemKey: string):
   return surfaces.length === 1 ? surfaces[0] : undefined;
 }
 
+function isCashOperation(entry: FieldQueueEntry) {
+  return entry.operation.type === "field_cash.collect" || entry.operation.type === "field_cash.confirm_existing";
+}
+function isCompletionPending(entries: FieldQueueEntry[]) {
+  return entries.some(entry => entry.syncStatus === "pending" &&
+    (entry.operation.type === "field_task.complete" || entry.operation.type === "field_task.proxy_validate"));
+}
+function isCashRecovery(entries: FieldQueueEntry[], clientOpId: string | undefined) {
+  return Boolean(clientOpId && entries.some(entry => isCashOperation(entry) && entry.operation.client_op_id === clientOpId &&
+    entry.syncStatus !== "pending" && !entry.resolvedByClientOpId));
+}
+function isCashWritePending(entries: FieldQueueEntry[], recoveryId?: string, restoringSubmitted = false) {
+  return entries.some(entry => isCashOperation(entry) && entry.syncStatus === "pending") ||
+    isCompletionPending(entries) && !restoringSubmitted && !isCashRecovery(entries, recoveryId);
+}
+
 export class FieldQueueStore extends Dexie {
   operations!: Table<FieldQueueEntry, number>;
   metadata!: Table<Metadata, string>;
@@ -560,9 +576,10 @@ export class FieldQueueStore extends Dexie {
   async cashSnapshot(scope: FieldQueueScope, taskId: string) {
     return this.transaction("r", [this.metadata, this.jobs, this.drafts, this.cacheState, this.operations], async () => {
       const identity = fieldIdentity(scope); if ((await this.metadata.get("identity"))?.value !== identity) throw new Error("FIELD_SESSION_CHANGED");
+      const entries = (await this.entries(scope)).filter(entry => entry.operation.payload.taskId === taskId);
       return { state: await this.cacheState.get(identity), task: (await this.jobs.get(`${identity}:${taskId}`))?.task,
         draft: (await this.drafts.get(`${identity}:${taskId}`))?.cash,
-        entries: (await this.entries(scope)).filter(entry => ["field_cash.collect", "field_cash.confirm_existing"].includes(entry.operation.type) && entry.operation.payload.taskId === taskId) };
+        completionPending: isCompletionPending(entries), entries: entries.filter(isCashOperation) };
     });
   }
   async saveCashDraft(scope: FieldQueueScope, value: FieldCashDraft, incarnation: string): Promise<boolean> {
@@ -570,7 +587,8 @@ export class FieldQueueStore extends Dexie {
       const identity = fieldIdentity(scope), cacheId = `${identity}:${value.taskId}`;
       if ((await this.metadata.get("identity"))?.value !== identity || (await this.cacheState.get(identity))?.incarnation !== incarnation) throw new Error("FIELD_SESSION_CHANGED");
       const previous = await this.drafts.get(cacheId), task = (await this.jobs.get(cacheId))?.task;
-      const pending = (await this.entries(scope)).some(entry => entry.syncStatus === "pending" && entry.operation.payload.taskId === value.taskId);
+      const entries = (await this.entries(scope)).filter(entry => entry.operation.payload.taskId === value.taskId);
+      const pending = isCashWritePending(entries, value.supersedesClientOpId);
       if (!task?.cash?.canCollect || pending || previous?.cash?.submittedDeviceId && previous.cash.clientOpId === value.clientOpId) return false;
       await this.drafts.put({ ...scope, cacheId, taskId: value.taskId, checklistItemIds: previous?.checklistItemIds ?? [], note: previous?.note ?? "",
         savedAt: new Date().toISOString(), cash: value }); return true;
@@ -598,7 +616,10 @@ export class FieldQueueStore extends Dexie {
         const payload = fieldCashPayloadSchema.parse({ taskId: cash.taskId, amount: cash.amount, currency: cash.currency, payer: cash.payer, purpose: cash.purpose, expectedRevision: cash.expectedRevision });
         if (JSON.stringify(operation.payload) !== JSON.stringify(payload) || operation.client_created_at !== cash.clientCreatedAt) throw new Error("FIELD_CASH_KEY_REUSED");
       }
-      if ((await this.entries(scope)).some(entry => entry.syncStatus === "pending" && entry.operation.payload.taskId === cash.taskId)) throw new Error("FIELD_CASH_PENDING");
+      const entries = (await this.entries(scope)).filter(entry => entry.operation.payload.taskId === cash.taskId);
+      if (supersedesClientOpId && (!isCashRecovery(entries, supersedesClientOpId) ||
+        operation.type === "field_cash.confirm_existing" && operation.payload.originalClientOpId !== supersedesClientOpId)) throw new Error("FIELD_CASH_REVIEW_REQUIRED");
+      if (isCashWritePending(entries, supersedesClientOpId, Boolean(cash.submittedDeviceId))) throw new Error("FIELD_CASH_PENDING");
       if (operation.type === "field_cash.collect" && (cash.clientOpId !== operation.client_op_id || !cash.submittedDeviceId && cash.expectedRevision !== task?.cash?.revision)) throw new Error("FIELD_CASH_REVIEW_REQUIRED");
       const entry = await this.store(scope, operation, deviceId);
       if (supersedesClientOpId) await this.operations.update(entry.sequence!, { supersedesClientOpId });
