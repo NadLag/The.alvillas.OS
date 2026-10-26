@@ -2529,6 +2529,8 @@
       "location": "Détention des fonds",
       "ownership": "Propriété des fonds",
       "company": "Fonds propres ALVILLAS"
-    }
+    },
+    "useForExpense": "Utiliser pour cette dépense",
+    "backToExpense": "Retour à la dépense"
   }
 }

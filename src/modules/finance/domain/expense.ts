@@ -31,6 +31,10 @@ export const expenseDraftSchema = z.object({
 }).strict();
 export type ExpenseDraftInput = z.infer<typeof expenseDraftSchema>;
 
+export function isExpenseFundingAccount(account: { code: string; accountType: string; normalSide: string; archivedAt: Date | null }): boolean {
+  return !account.archivedAt && ["ASSET", "ASSET_LOCATION"].includes(account.accountType) && account.normalSide === "DEBIT" && !account.code.startsWith("CASH_CUSTODY_");
+}
+
 export function expensePostings(input: {
   amount: Money; allocation: Pick<ConfiguredExpenseAllocation,"ownerAmount"|"alvillasAmount"|"guestAmount">; owners: readonly PropertyOwnerShare[]; ownerAmounts?: ReadonlyArray<{ ownerId: string; amount: Money }>;
   ownerAccounts: ReadonlyMap<string, string>; companyExpenseAccountId: string; guestReceivableAccountId: string;

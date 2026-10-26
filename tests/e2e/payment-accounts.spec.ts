@@ -75,10 +75,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native payment accounts 
     expect(await admin.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await admin.screenshot({ path: info.outputPath(`payment-accounts-${locale}.png`), fullPage: true });
 
-    await admin.goto(`/${locale}/app/properties/${setup.propertyId}/expenses/new`);
+    await admin.getByTestId("payment-account-row").filter({ hasText: `${prefix} BANK` }).getByTestId("payment-account-use").click();
+    await expect(admin.getByTestId("expense-funding-account")).toHaveValue(bank.id);
     await admin.getByTestId("expense-amount").fill("100,01"); await admin.getByTestId("expense-category").fill("maintenance");
     await admin.getByTestId("expense-purpose").fill(`${prefix} native funded expense`);
-    await admin.getByTestId("expense-funding-account").selectOption(bank.id);
     await admin.getByTestId("expense-occurred-on").fill("2026-10-26"); await admin.getByTestId("expense-reason").fill("Dedicated native account expense funding");
     await admin.getByTestId("expense-create").click(); await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
     const expenseId = new URL(admin.url()).pathname.split("/").at(-1)!;

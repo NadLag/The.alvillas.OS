@@ -2529,6 +2529,8 @@
       "location": "مكان الأموال",
       "ownership": "ملكية الأموال",
       "company": "أموال ALVILLAS الخاصة"
-    }
+    },
+    "useForExpense": "استخدام لهذا المصروف",
+    "backToExpense": "العودة إلى المصروف"
   }
 }

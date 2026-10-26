@@ -2529,6 +2529,8 @@
       "location": "Money location",
       "ownership": "Money ownership",
       "company": "ALVILLAS own"
-    }
+    },
+    "useForExpense": "Use for this expense",
+    "backToExpense": "Back to expense"
   }
 }
