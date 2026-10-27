@@ -6,6 +6,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { OutboxRepository } from "@/platform/events/outbox-repository";
 import { OperationRepository } from "@/modules/reservations/infrastructure/operation-repository";
 import { SyncRepository } from "@/modules/reservations/infrastructure/sync-repository";
+import { FieldPullRepository } from "@/modules/reservations/infrastructure/field-pull-repository";
 import { fieldTaskReadWhere } from "@/modules/reservations/infrastructure/field-task-scope";
 import { terminalTaskStates } from "@/modules/reservations/domain/operation-task";
 import { operationAllowed, requireAssignedOperationTask, taskResource } from "@/modules/reservations/application/operation-service";
@@ -33,13 +34,15 @@ export async function prepareFieldStocktakeBatch(ctx: ReservationActorContext, i
   const ids = [...new Set(inputs.map(input => input.taskId))].sort();
   for (const id of ids) await operations.lock(id);
   await new SyncRepository(tx, ctx.organizationId).lockActor(ctx.personId);
-  const tasks = await repository.tasks(ids, { AND: [fieldTaskReadWhere(ctx.authContext, at ?? new Date()),
+  const clock = new FieldPullRepository(tx, ctx.organizationId), taskAt = at ?? await clock.snapshotTime();
+  const tasks = await repository.tasks(ids, { AND: [fieldTaskReadWhere(ctx.authContext, taskAt),
     { assignedToUserAccountId: ctx.actorId, assignedToPersonId: ctx.personId, state: { notIn: [...terminalTaskStates] } }] });
   const taskMap = new Map(tasks.map(task => [task.id, task]));
   await repository.lockBatch(inputs.flatMap(input => { const task = taskMap.get(input.taskId); return task ? [{ propertyId: task.propertyId, itemKey: input.itemKey }] : []; }));
-  const now = at ?? new Date(), propertyIds = [...new Set(tasks.map(task => task.propertyId))];
+  const now = at ?? await clock.snapshotTime(), propertyIds = [...new Set(tasks.map(task => task.propertyId))];
   const scopes = await new ReservationConfigScopeRepository(tx, ctx.organizationId).propertyScopes(propertyIds, now);
-  const rules = await new ConfigRuleRepository(tx, ctx.organizationId).resolveScopeGroups(inventoryMinimumsKey, scopes, now, { recordedAt: now });
+  // Match pull cursor precision without shifting the effective business instant.
+  const rules = await new ConfigRuleRepository(tx, ctx.organizationId).resolveScopeGroups(inventoryMinimumsKey, scopes, now, { recordedBefore: new Date(now.getTime() + 1) });
   return { organizationId: ctx.organizationId, actorId: ctx.actorId, transaction: tx, now, repository, tasks: taskMap, scopes, rules, reportedRules: new Map() };
 }
 
