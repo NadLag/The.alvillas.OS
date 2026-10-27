@@ -2548,3 +2548,5 @@ textarea:disabled {
 .accounting-period-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 16px; }
 .accounting-period-summary dd { margin-inline-start: 0; overflow-wrap: anywhere; }
 .accounting-period-form fieldset { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; border: 0; padding: 0; margin: 0; }
+.accounting-period-form .field { grid-template-columns: minmax(0, 1fr); }
+.accounting-period-form :is(input, textarea), .accounting-periods-page .notification-bell { min-inline-size: 0; max-inline-size: 100%; }
