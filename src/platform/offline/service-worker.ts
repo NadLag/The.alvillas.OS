@@ -41,6 +41,10 @@ self.addEventListener("install", event => { event.waitUntil(prepareOfflineShells
 // An update waits for the user's explicit refresh; queued work remains in IndexedDB.
 self.addEventListener("message", event => {
   const data: unknown = event.data;
+  if(data&&typeof data==="object"&&"type" in data&&data.type==="ALVILLAS_CLAIM_CLIENT"){
+    // Only the active worker can claim. This never promotes a waiting update.
+    event.waitUntil(self.clients.claim());
+  }
   if (data && typeof data === "object" && "type" in data && data.type === "ALVILLAS_SKIP_WAITING") {
     event.waitUntil(self.skipWaiting().then(() => { event.ports[0]?.postMessage({ type: "ALVILLAS_UPDATE_READY" }); }));
   }

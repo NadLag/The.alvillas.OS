@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import type { FieldCacheAudience, FieldQueueEntry, FieldQueueScope } from "./field-queue-store";
 import type { FieldWorkSnapshot } from "@/modules/reservations/domain/field-pull";
 import { fieldQueueAge, type FieldQueueAge } from "./field-queue-age";
-import { refreshFieldApp, settleFieldForegroundWork } from "./field-update";
+import { claimFieldClient, refreshFieldApp, settleFieldForegroundWork } from "./field-update";
 import { liveQuery } from "dexie";
 import { fieldQueue } from "./field-queue";
 import { resolveFieldScope } from "./field-session";
@@ -41,6 +41,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     let disposed = false;
     let subscription: { unsubscribe(): void } | undefined;
     let cacheSubscription: { unsubscribe(): void } | undefined;
+    let stopClaiming: (()=>void)|undefined;
     let hadController = "serviceWorker" in navigator && Boolean(navigator.serviceWorker.controller);
     let checkedAt = 0;
     let photoRetry: ReturnType<typeof setTimeout> | undefined;
@@ -155,6 +156,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
       void navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).then(value => {
         if (disposed) return;
         registration.current = value;
+        stopClaiming=claimFieldClient(value,()=>{if(!disposed)setNotice("unavailable");});
         if (value.waiting) setUpdate(true);
         value.addEventListener("updatefound", () => {
           value.installing?.addEventListener("statechange", () => {
@@ -172,7 +174,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     window.addEventListener("alvillas-field-acknowledged", acknowledgedHere);
     return () => {
       updateEpoch.current = epoch + 1; updateRequested.current = false; syncAfterUpdate.current = false;
-      disposed = true; subscription?.unsubscribe(); cacheSubscription?.unsubscribe();
+      disposed = true; subscription?.unsubscribe(); cacheSubscription?.unsubscribe();stopClaiming?.();
       if (photoRetry) clearTimeout(photoRetry);
       if (ageTimer) clearTimeout(ageTimer);
       retrySync.current = () => undefined;

@@ -1,5 +1,18 @@
 const fieldUpdateTimeoutMs = 3000;
 
+/** A navigation can commit after activation claimed the previous document. */
+export function claimFieldClient(registration:ServiceWorkerRegistration,unavailable:()=>void):()=>void {
+  const container=navigator.serviceWorker,worker=registration.active??registration.installing;
+  if(container.controller||!worker)return()=>{};
+  let disposed=false;
+  const claim=()=>{
+    if(disposed||container.controller||registration.active!==worker||worker.state!=="activated")return;
+    try{worker.postMessage({type:"ALVILLAS_CLAIM_CLIENT"});}catch{unavailable();}
+  };
+  worker.addEventListener("statechange",claim);claim();
+  return()=>{disposed=true;worker.removeEventListener("statechange",claim);};
+}
+
 /** Retain in-flight requests and allow explicit retry when they do not settle. */
 export async function settleFieldForegroundWork(work: Iterable<Promise<unknown>>): Promise<boolean> {
   let deadline: ReturnType<typeof setTimeout> | undefined;
