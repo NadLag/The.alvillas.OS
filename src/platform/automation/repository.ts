@@ -14,7 +14,7 @@ import { z } from "zod";
 import { stocktakeEventDataSchema } from "@/modules/inventory/domain/events";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
-import { ownerPayoutResource } from "@/modules/finance/domain/owner-payout";
+import { ownerPayoutResource } from "@/platform/authz/financial-resource";
 
 export const json = (v: unknown) =>
   JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;

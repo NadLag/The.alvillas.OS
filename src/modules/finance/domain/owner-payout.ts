@@ -33,12 +33,7 @@ export const ownerPayoutDraftFormSchema=ownerPayoutDraftSchema.omit({expectedSet
 export const ownerPayoutScheduleFormSchema=ownerPayoutCommandSchema.extend({scheduledLocal:z.string().trim().min(1).max(32),occurrence:payoutClockOccurrence.default("reject")}).strict();
 export function ownerPayoutWorkspacePath(locale:string,ownerId:string,propertyId:string){return`/${locale}/app/finance/owner-ledgers/properties/${propertyId}/owners/${ownerId}/payouts`;}
 
-export function ownerPayoutResource(organizationId:string,row:{id:string;ownerId:string;propertyId:string;amount:{toString():string};state:string;createdBy:string;
-  reservationId?:string|null;createdAt?:Date;paidAt?:Date|null},property:{cityId:string|null;regionId:string|null}):Resource {
-  return {type:"financial_transaction",organizationId,id:row.id,financialRecordId:row.id,ownerId:row.ownerId,propertyId:row.propertyId,
-    reservationId:row.reservationId,amount:row.amount.toString(),status:row.state,assignedUserAccountId:row.createdBy,
-    occurredAt:row.paidAt??row.createdAt,city:property.cityId,region:property.regionId,dataClass:"financial"};
-}
+export { ownerPayoutResource } from "@/platform/authz/financial-resource";
 
 export function ownerPayoutFundingChecks(organizationId:string,funding:Parameters<typeof expenseFundingWalletResource>[1]&{id:string},amount:string,at:Date,action:"pay"|"void"):Array<{action:Action;resource:Resource}>{
   const target:Resource={type:"financial_transaction",organizationId,id:funding.id,financialRecordId:funding.id,amount,occurredAt:at,dataClass:"financial"};

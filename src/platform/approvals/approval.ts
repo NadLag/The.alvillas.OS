@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
-import { ownerPayoutResource } from "@/modules/finance/domain/owner-payout";
+import { ownerPayoutResource } from "@/platform/authz/financial-resource";
 
 export const approvalRequestSchema = z.object({
   propertyId: z.string().uuid(), title: z.string().trim().min(3).max(160),

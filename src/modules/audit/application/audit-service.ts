@@ -10,7 +10,7 @@ import { authorize, type Action, type Resource } from "@/platform/authz/authoriz
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
-import { canViewCompleteOwnerLedger } from "@/modules/finance/domain/owner-ledger";
+import { canViewCompleteOwnerLedger } from "@/platform/authz/financial-resource";
 
 export const auditLogResource = "audit_log";
 

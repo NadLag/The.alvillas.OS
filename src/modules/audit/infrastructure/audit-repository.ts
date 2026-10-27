@@ -3,7 +3,7 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { Money } from "@/platform/money/money";
-import { ownerPayoutResource } from "@/modules/finance/domain/owner-payout";
+import { ownerPayoutResource } from "@/platform/authz/financial-resource";
 
 export type AuditHistoryFilters = {
   action?: string;
