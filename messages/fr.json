@@ -2548,7 +2548,8 @@
       "company": "Fonds propres ALVILLAS"
     },
     "useForExpense": "Utiliser pour cette dépense",
-    "backToExpense": "Retour à la dépense"
+    "backToExpense": "Retour à la dépense",
+    "transfers": "Transferts financiers"
   },
   "TransactionGroups": {
     "eyebrow": "Finance",
@@ -2665,5 +2666,51 @@
       "error": "La demande n’a pas abouti. Vos saisies sont conservées ; réessayez la même demande.",
       "periodClosed": "La date appartient à une période comptable clôturée. Demandez sa vérification à un administrateur financier habilité."
     }
+  },
+  "FinancialTransfers": {
+    "eyebrow": "Finance",
+    "title": "Transferts financiers",
+    "description": "Déplacez les fonds entre les lieux de paiement et les portefeuilles du personnel liés.",
+    "back": "Comptes financiers",
+    "create": "Enregistrer le transfert",
+    "details": "Détails du transfert",
+    "separation": "Le transfert change le lieu où les fonds sont détenus. La propriété des fonds et les revenus restent inchangés.",
+    "from": "Depuis",
+    "to": "Vers",
+    "selectAccount": "Choisir un compte",
+    "kind": "Mouvement",
+    "selectKind": "Choisir un mouvement",
+    "kinds": {
+      "TRANSFER": "Transfert",
+      "ADVANCE": "Avance au personnel",
+      "RETURN": "Retour d’avance"
+    },
+    "amount": "Montant",
+    "currency": "Devise",
+    "selectCurrency": "Choisir une devise",
+    "purpose": "Objet",
+    "reason": "Motif",
+    "searchAccounts": "Rechercher un compte par nom ou code",
+    "search": "Rechercher",
+    "nextAccounts": "Autres comptes",
+    "history": "Historique des transferts",
+    "empty": "Aucun transfert pour le moment.",
+    "nextHistory": "Autres transferts",
+    "status": "Statut",
+    "posted": "Comptabilisé",
+    "reversed": "Contrepassé",
+    "recordedUtc": "Enregistré le (UTC)",
+    "void": "Contrepasser le transfert",
+    "voidReason": "Motif de la contrepassation",
+    "saving": "Enregistrement…",
+    "saved": "Transfert enregistré.",
+    "forbidden": "Vos autorisations ne permettent pas ce transfert.",
+    "conflict": "Cette demande est incompatible avec un transfert antérieur. Consultez son historique.",
+    "validation": "Vérifiez les comptes, le montant, la devise et les informations obligatoires.",
+    "unavailable": "Choisissez des lieux de paiement actifs et le type de mouvement adapté.",
+    "closed": "La période comptable est clôturée. Un administrateur autorisé doit la rouvrir avant la comptabilisation.",
+    "error": "Le transfert n’a pas pu être effectué. Les informations saisies restent disponibles pour réessayer.",
+    "loading": "Chargement des transferts…",
+    "retry": "Réessayer"
   }
 }

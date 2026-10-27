@@ -2548,7 +2548,8 @@
       "company": "ALVILLAS own"
     },
     "useForExpense": "Use for this expense",
-    "backToExpense": "Back to expense"
+    "backToExpense": "Back to expense",
+    "transfers": "Financial transfers"
   },
   "TransactionGroups": {
     "eyebrow": "Finance",
@@ -2665,5 +2666,51 @@
       "error": "The request could not be completed. Your entries are retained; retry with the same request.",
       "periodClosed": "The posting date belongs to a closed accounting period. Ask an authorized financial administrator to review it."
     }
+  },
+  "FinancialTransfers": {
+    "eyebrow": "Finance",
+    "title": "Financial transfers",
+    "description": "Move funds between payment locations and linked staff wallets.",
+    "back": "Financial accounts",
+    "create": "Record transfer",
+    "details": "Transfer details",
+    "separation": "Moving funds changes where money is held. Ownership and revenue stay unchanged.",
+    "from": "From",
+    "to": "To",
+    "selectAccount": "Select an account",
+    "kind": "Movement",
+    "selectKind": "Select a movement",
+    "kinds": {
+      "TRANSFER": "Transfer",
+      "ADVANCE": "Staff advance",
+      "RETURN": "Advance return"
+    },
+    "amount": "Amount",
+    "currency": "Currency",
+    "selectCurrency": "Select a currency",
+    "purpose": "Purpose",
+    "reason": "Reason",
+    "searchAccounts": "Find accounts by name or code",
+    "search": "Search",
+    "nextAccounts": "More accounts",
+    "history": "Transfer history",
+    "empty": "No transfers yet.",
+    "nextHistory": "More transfers",
+    "status": "Status",
+    "posted": "Posted",
+    "reversed": "Reversed",
+    "recordedUtc": "Recorded at (UTC)",
+    "void": "Reverse transfer",
+    "voidReason": "Reason for reversing this transfer",
+    "saving": "Saving…",
+    "saved": "Transfer recorded.",
+    "forbidden": "Your permissions do not allow this transfer.",
+    "conflict": "This request conflicts with an earlier transfer. Review its history.",
+    "validation": "Check the accounts, amount, currency and required details.",
+    "unavailable": "Choose active payment locations and the correct movement type.",
+    "closed": "The posting period is closed. An authorized administrator must reopen it before posting.",
+    "error": "The transfer could not be completed. Your entered details remain available to retry.",
+    "loading": "Loading transfers…",
+    "retry": "Try again"
   }
 }

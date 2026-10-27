@@ -2551,3 +2551,7 @@ textarea:disabled {
 .accounting-period-form fieldset { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; border: 0; padding: 0; margin: 0; }
 .accounting-period-form .field { grid-template-columns: minmax(0, 1fr); }
 .accounting-period-form :is(input, textarea), .accounting-periods-page .notification-bell { min-inline-size: 0; max-inline-size: 100%; }
+
+.financial-transfer-editor .field, .financial-transfer-form .field { grid-template-columns: minmax(0, 1fr); }
+.financial-transfer-editor :is(input, select, textarea), .financial-transfer-form :is(input, select, textarea), .financial-transfer-page .notification-bell { min-inline-size: 0; max-inline-size: 100%; }
+.financial-transfer-page dd { overflow-wrap: anywhere; }

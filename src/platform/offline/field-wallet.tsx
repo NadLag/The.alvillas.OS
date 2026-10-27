@@ -17,7 +17,7 @@ export function FieldWallet({ scope, locale }: { scope: FieldQueueScope; locale:
   const [notice, setNotice] = useState<"saved" | "unavailable" | "retry" | null>(null), [refresh, setRefresh] = useState(0);
   const { organizationId, userId } = scope;
   useEffect(() => {
-    let disposed = false, busy = false, cacheVersion = 0, retryOnCacheReady = false, subscription: { unsubscribe(): void } | undefined;
+    let disposed = false, busy = false, cacheVersion = 0, retryOnCacheReady = false, recoverableGeneration: number | null = null, subscription: { unsubscribe(): void } | undefined;
     const owner = { organizationId, userId }, queue = fieldQueue();
     async function load() {
       if (busy || disposed) return; busy = true; setLoading(true);
@@ -25,27 +25,38 @@ export function FieldWallet({ scope, locale }: { scope: FieldQueueScope; locale:
       try {
         const verified = await resolveFieldScope(queue, navigator.onLine, owner);
         if (disposed) return;
-        if (!verified) { setSnapshot(null); setNotice("unavailable"); return; }
+        if (!verified) { recoverableGeneration = null; setSnapshot(null); setNotice("unavailable"); return; }
         const saved = await queue.walletSnapshot(owner); if (!saved.incarnation) throw new Error("FIELD_SESSION_CHANGED");
         if (disposed) return;
-        subscription ??= liveQuery(() => queue.walletSnapshot(owner)).subscribe({ next: value => {
-          const parsed = fieldWalletSnapshotSchema.safeParse(value.wallet);
-          if (!parsed.success || parsed.data.organizationId !== organizationId || parsed.data.userId !== userId) setSnapshot(null);
-        }, error: () => setSnapshot(null) });
         const cached = fieldWalletSnapshotSchema.safeParse(saved.wallet);
-        if (cached.success && cached.data.organizationId === organizationId && cached.data.userId === userId) setSnapshot(cached.data);
+        if (cached.success && cached.data.organizationId === organizationId && cached.data.userId === userId) recoverableGeneration = saved.generation;
+        subscription ??= liveQuery(() => queue.walletSnapshot(owner)).subscribe({ next: value => {
+          if (disposed) return;
+          const parsed = fieldWalletSnapshotSchema.safeParse(value.wallet);
+          if (parsed.success && parsed.data.organizationId === organizationId && parsed.data.userId === userId) {
+            recoverableGeneration = value.generation; setSnapshot(parsed.data); return;
+          }
+          const reset = recoverableGeneration !== null && value.generation !== null && value.generation !== recoverableGeneration;
+          setSnapshot(null);
+          if (value.generation === null) recoverableGeneration = null;
+          if (reset) {
+            recoverableGeneration = null; retryOnCacheReady = true;
+            if (!busy) queueMicrotask(() => { if (!disposed) void load(); });
+          }
+        }, error: () => { if (!disposed) { recoverableGeneration = null; setSnapshot(null); } } });
         if (!navigator.onLine) { setNotice(cached.success ? "saved" : "unavailable"); return; }
         const requestId = await queue.beginWalletRead(owner, saved.incarnation);
         const response = await fetch(`/api/field/wallet?page=${page}`, { credentials: "same-origin", cache: "no-store" });
         if (disposed) return;
         if ([401, 403, 404].includes(response.status)) {
-          await queue.saveWalletSnapshot(owner, null, saved.incarnation, requestId); setSnapshot(null); setNotice("unavailable"); return;
+          recoverableGeneration = null; await queue.saveWalletSnapshot(owner, null, saved.incarnation, requestId); setNotice("unavailable"); return;
         }
         if (!response.ok) throw new Error("FIELD_WALLET_UNAVAILABLE");
         const value = fieldWalletSnapshotSchema.parse(await response.json());
         if (disposed) return;
+        recoverableGeneration = saved.generation;
         if (!await queue.saveWalletSnapshot(owner, value, saved.incarnation, requestId)) throw new Error("FIELD_SESSION_CHANGED");
-        setSnapshot(value); setNotice(null);
+        setNotice(null);
       } catch { if (!disposed) { retryOnCacheReady = true; setNotice("retry"); } }
       finally {
         busy = false;

@@ -35,6 +35,7 @@ export type FinanceLedgerAccount = {
   accountType: string;
   normalSide: string;
   archivedAt: Date | null;
+  teamWallet?: { id: string; personId: string; person: { archivedAt: Date | null } } | null;
 };
 
 export type CommissionRuleRow = {
@@ -151,7 +152,8 @@ export class FinanceRepository {
       ...(input.after ? { id: { gt: input.after } } : {}),
       ...(input.query ? { OR: [ { name: { contains: input.query, mode: "insensitive" as const } }, { code: { contains: input.query, mode: "insensitive" as const } } ] } : {}) },
       orderBy: { id: "asc" }, take: input.take,
-      select: { id: true, code: true, name: true, accountType: true, normalSide: true, archivedAt: true } });
+      select: { id: true, code: true, name: true, accountType: true, normalSide: true, archivedAt: true,
+        teamWallet: { select: { id: true, personId: true, person: { select: { archivedAt: true } } } } } });
   }
 
   async findOrganizationBaseCurrency(): Promise<string> {
@@ -227,7 +229,8 @@ export class FinanceRepository {
         name: true,
         accountType: true,
         normalSide: true,
-        archivedAt: true
+        archivedAt: true,
+        teamWallet: { select: { id: true, personId: true, person: { select: { archivedAt: true } } } }
       }
     });
   }

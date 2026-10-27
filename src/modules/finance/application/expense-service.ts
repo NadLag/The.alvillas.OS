@@ -7,7 +7,7 @@ import { withTenant, type TenantTransaction, type TenantTransactionRunner } from
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { Money } from "@/platform/money/money";
 import { calendarDateAt } from "@/i18n/format";
-import { expenseDraftSchema, expenseResource, viewableExpenseResource, isExpenseFundingAccount, type ExpenseDraftInput } from "../domain/expense";
+import { expenseDraftSchema, expenseResource, viewableExpenseResource, isExpenseFundingAccount, expenseFundingWalletResource, type ExpenseDraftInput } from "../domain/expense";
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
@@ -55,6 +55,8 @@ async function validateFacts(ctx: FinanceActorContext, tx: TenantTransaction, in
   if (!funding || !isExpenseFundingAccount(funding))
     throw new ExpenseConfigurationError("Expense funding account requires its authorized payment workflow");
   if (!authorize(ctx.authContext, "view", { ...target, id: funding.id, financialRecordId: funding.id, type: "financial_transaction" }, now)) throw new ExpenseAccessError();
+  const wallet = expenseFundingWalletResource(ctx.organizationId, funding, input.amount, target.occurredAt instanceof Date ? target.occurredAt : undefined);
+  if (wallet && !authorize(ctx.authContext, "view", wallet, now)) throw new ExpenseAccessError();
   return { target, property };
 }
 function facts(row: ExpenseRecord) {
@@ -217,7 +219,8 @@ async function editorChoices(ctx:FinanceActorContext,tx:TenantTransaction,target
     authorize(ctx.authContext,"view",{...target,type:"financial_transaction",id:account.id,financialRecordId:account.id},now));
   if(selectedFundingAccountId&&!accounts.some(account=>account.id===selectedFundingAccountId)){
     const selected=await new FinanceRepository(tx,ctx.organizationId).findLedgerAccountById(selectedFundingAccountId);
-    if(selected&&isExpenseFundingAccount(selected)&&authorize(ctx.authContext,"view",{...target,type:"financial_transaction",id:selected.id,financialRecordId:selected.id},now))
+    const wallet=selected&&expenseFundingWalletResource(ctx.organizationId,selected,String(target.amount??"0"));
+    if(selected&&isExpenseFundingAccount(selected)&&(!wallet||authorize(ctx.authContext,"view",wallet,now))&&authorize(ctx.authContext,"view",{...target,type:"financial_transaction",id:selected.id,financialRecordId:selected.id},now))
       accounts.push({id:selected.id,name:selected.name,code:selected.code});
   }
   const choices=await repository.reservationChoices(target.propertyId);
@@ -267,7 +270,10 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
     const target = viewableExpenseResource(ctx.authContext,property,sourceFacts,stored.success?stored.data.policies.map(policy=>policy.ownerId):[],clock.now);
     if (!target) throw new ExpenseAccessError();
     const postingSource=expenseResource(ctx.organizationId,property,sourceFacts),financialSource={...postingSource,type:"financial_transaction" as const};
-    const payable=row.state==="APPROVED"&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"pay",postingSource,clock.now)&&
+    const funding=await new FinanceRepository(tx,ctx.organizationId).findLedgerAccountById(row.fundingAccountId);
+    const wallet=funding&&expenseFundingWalletResource(ctx.organizationId,funding,row.amount.toString(),occurredAt);
+    const walletVisible=!wallet||authorize(ctx.authContext,"view",wallet,clock.now);
+    const payable=walletVisible&&(!wallet||authorize(ctx.authContext,"pay",wallet,clock.now))&&row.state==="APPROVED"&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"pay",postingSource,clock.now)&&
       authorize(ctx.authContext,"view",{...financialSource,id:row.fundingAccountId,financialRecordId:row.fundingAccountId},clock.now);
     const calendar=payable?await periods.postingPeriod(occurredAt):null;
     const sourcePeriodClosed=Boolean(calendar&&accountingPeriodState(calendar.events[0],clock.now)==="CLOSED");
@@ -291,7 +297,7 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
     const canPostInCurrentPeriod=payable&&correctionCanPost&&(Boolean(row.correctsExpenseId)||sourcePeriodClosed)&&authorize(ctx.authContext,"override",financialSource,clock.now)&&
       authorize(ctx.authContext,"create",{...financialSource,occurredAt:clock.now},clock.now);
     const originalJournal={...financialSource,id:row.transactionId??row.id,financialRecordId:row.transactionId??row.id,occurredAt:row.transaction?.occurredAt??occurredAt};
-    const canCorrect=row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&
+    const canCorrect=walletVisible&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&
       authorize(ctx.authContext,"view",originalJournal,clock.now)&&authorize(ctx.authContext,"override",originalJournal,clock.now)&&
       authorize(ctx.authContext,"create",{...postingSource,id:undefined,financialRecordId:undefined,status:"DRAFT",assignedUserAccountId:ctx.actorId},clock.now)&&
       authorize(ctx.authContext,"view",{...financialSource,id:row.fundingAccountId,financialRecordId:row.fundingAccountId},clock.now);
@@ -303,7 +309,7 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
       postingAdjustment:visibleAdjustment?{id:visibleAdjustment.id,sourcePeriodId:visibleAdjustment.period.id,
         sourceMonth:visibleAdjustment.period.month.toISOString().slice(0,7),sourceOccurredAt:visibleAdjustment.sourceOccurredAt.toISOString(),
         postedAt:row.transaction!.occurredAt.toISOString(),reason:visibleAdjustment.reason}:null,
-      canVoid:row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"void",postingSource,clock.now)&&
+      canVoid:walletVisible&&(!wallet||authorize(ctx.authContext,"void",wallet,clock.now))&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"void",postingSource,clock.now)&&
         authorize(ctx.authContext,"void",{...financialSource,id:row.transactionId!,financialRecordId:row.transactionId!,occurredAt:row.transaction?.occurredAt??occurredAt},clock.now) };
     return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...target, data }, {}, clock.now) as typeof data;
   });
