@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { closeAccountingPeriodSchema, reopenAccountingPeriodSchema } from "../domain/accounting-period";
 import { closeAccountingPeriodAction, reopenAccountingPeriodAction } from "../application/accounting-period-actions";
 
-type Code = "forbidden" | "conflict" | "validation" | "missingPolicy" | "earlyClose" | "invalidWindow" | "unbalanced" | "error";
+type Code = "forbidden" | "conflict" | "validation" | "missingPolicy" | "earlyClose" | "invalidWindow" | "unbalanced" | "timezoneData" | "error";
 type Common = { locale: string; requestKey: string; expectedVersion: number };
 type Props = Common & ({ kind: "close"; month?: string } | { kind: "reopen"; periodId: string; maxSeconds: number });
 const subscribeReady = () => () => {};

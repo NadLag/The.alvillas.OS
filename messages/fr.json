@@ -2604,6 +2604,7 @@
     "retryHelp": "Actualisez pour réessayer."
   },
   "AccountingPeriods": {
+    "timezoneData": "Ce calendrier comptable doit être vérifié avant la clôture d’une nouvelle période. Contactez votre administrateur.",
     "eyebrow": "Finance",
     "title": "Périodes comptables",
     "description": "Clôturez un mois rapproché et encadrez sa réouverture motivée et limitée dans le temps.",
