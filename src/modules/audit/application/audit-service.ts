@@ -10,6 +10,7 @@ import { authorize, type Action, type Resource } from "@/platform/authz/authoriz
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { canViewCompleteOwnerLedger } from "@/modules/finance/domain/owner-ledger";
 
 export const auditLogResource = "audit_log";
 
@@ -82,14 +83,15 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: Resource
 ): AuditHistoryRow {
-  if (["cash_collection", "expense", "financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType)) {
-    const expectedType = ["ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType) ? "financial_transaction" : row.resourceType;
-    const requiresSourceId = ["financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType);
+  if (["cash_collection", "expense", "owner_payout", "financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType)) {
+    const expectedType = ["owner_payout", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType) ? "financial_transaction" : row.resourceType;
+    const requiresSourceId = ["owner_payout", "financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType);
     const permissionResource = ["transaction_group", "accounting_period"].includes(row.resourceType) ?
       { type: "financial_transaction", organizationId: ctx.organizationId, dataClass: "financial" as const } : financialResource;
     const allowed = Boolean(financialResource && financialResource.type === expectedType &&
       (!requiresSourceId || financialResource.id === row.resourceId) && permissionResource && authorize(ctx.authContext, action, permissionResource) &&
       [row.before, row.after].every(value => {
+        if(row.resourceType==="owner_payout")return payoutAuditPayloadAllowed(ctx,value,permissionResource,action);
         if (!value || typeof value !== "object" || Array.isArray(value) || !Object.hasOwn(value, "amount")) return true;
         return typeof value.amount === "string" && /^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u.test(value.amount) &&
           authorize(ctx.authContext, action, { ...permissionResource, amount: value.amount });
@@ -159,6 +161,19 @@ export function presentAuditHistoryRow(
   ) as AuditHistoryRow;
 }
 
+function payoutAuditPayloadAllowed(ctx:AuditActorContext,value:unknown,source:Resource,action:"view"|"export"){
+  if(!value||typeof value!=="object"||Array.isArray(value))return true;
+  const payload=value as Record<string,unknown>,request=z.record(z.string(),z.unknown()).safeParse(payload.request);
+  const amounts=[...(Object.hasOwn(payload,"amount")?[payload.amount]:[]),...(request.success&&Object.hasOwn(request.data,"amount")?[request.data.amount]:[])];
+  if(amounts.some(value=>{
+    const money=z.object({amount:z.string(),currency:z.string().regex(/^[A-Z]{3}$/u)}).safeParse(value),amount=typeof value==="string"?value:money.success?money.data.amount:null;
+    return !amount||!/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u.test(amount)||!authorize(ctx.authContext,action,{...source,amount});
+  }))return false;
+  if(Object.hasOwn(payload,"policy"))return canViewCompleteOwnerLedger(ctx.authContext,{type:"financial_transaction",organizationId:ctx.organizationId,
+    ownerId:source.ownerId,propertyId:source.propertyId,city:source.city,region:source.region,dataClass:"financial"},new Date(),action);
+  return true;
+}
+
 function db(deps: AuditServiceDeps): TenantTransactionRunner {
   return deps.db ?? prisma;
 }
@@ -183,9 +198,10 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts, groups, periods] = await Promise.all([
+  const [cash, expenses, payouts, transactions, accounts, groups, periods] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
+    read("owner_payout",ids=>repository.payoutResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
     read("ledger_account", ids => repository.ledgerAccountResources(ids)),
     read("transaction_group", ids => repository.transactionGroupResources(ids)),
@@ -194,6 +210,7 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
   return new Map([
     ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),
     ...[...expenses].map(([id, resource]) => [`expense:${id}`, resource] as const),
+    ...[...payouts].map(([id,resource])=>[`owner_payout:${id}`,resource] as const),
     ...[...transactions].map(([id, resource]) => [`financial_transaction:${id}`, resource] as const),
     ...[...accounts].map(([id, resource]) => [`ledger_account:${id}`, resource] as const),
     ...[...groups].map(([id, resource]) => [`transaction_group:${id}`, resource] as const),

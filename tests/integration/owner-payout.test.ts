@@ -16,6 +16,15 @@ import { Money } from "@/platform/money/money";
 import { decideApproval, getApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { scheduleOwnerPayout,payOwnerPayout,reverseOwnerPayout,failOwnerPayout,cancelOwnerPayout } from "@/modules/finance/application/owner-payout-payment-service";
+import { OwnerPayoutConfigurationError } from "@/modules/finance/application/owner-payout-service";
+import { listAuditHistory,exportAuditHistoryCsv } from "@/modules/audit/application/audit-service";
+import { maskedValue } from "@/platform/authz/present";
+import { getOwnerPayoutWorkspace } from "@/modules/finance/application/owner-payout-workspace-service";
+import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
+import { AutomationAccessError,saveAutomationRule,previewAutomation,enqueueAutomationEvent,executeAutomationRun,replayAutomation } from "@/platform/automation/service";
+import { AutomationRepository } from "@/platform/automation/repository";
+import { readOwnerLedgerStatement } from "@/platform/ledger/owner-statements";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -86,6 +95,43 @@ async function reviewer(f:Fixture,financial=true){
   return{...identity,actor:{organizationId:f.org,accountId:identity.account.id,authContext:await authContextForAccount(f.org,identity.account.id,{db})}};
 }
 
+async function paymentGrant(f:Fixture){
+  await withTenant(db,f.org,async tx=>{
+    const permissions=await tx.permission.findMany({where:{organizationId:f.org,key:{in:["financial_transaction:pay","financial_transaction:void"]}}});expect(permissions).toHaveLength(2);
+    await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:f.ownerGrant.roleId,permissionId:permission.id}))});
+  });
+  return{...f.ctx,authContext:await authContextForAccount(f.org,f.account.id,{db})};
+}
+async function readyForPayment(expectedSettlementAt="2020-01-01T09:00:00Z",review=false){
+  const f=await fixture(),receiver=review?await reviewer(f):null;
+  let ctx=await submissionPolicy(f,{payout:{cadence:"OTA_SPLIT_EXPECTED_SETTLEMENT",hold_days:0},...(receiver?{approval:{thresholds:[{key:"review_before_payment",requires_approval_from:["owner"]}],
+    routing:{owner:{people:[receiver.person.id],roles:[],assigned:false,channels:["in_app"]}}}}:{})});
+  const draft=await createOwnerPayout(ctx,{...f.input,amount:"500.25",expectedSettlementAt},{db});
+  let submitted=await submitOwnerPayout(ctx,{id:draft.id,expectedVersion:1,reason:"Dedicated payment-ready source submission"},{db});
+  if(receiver){
+    const approval=await getApproval(receiver.actor,submitted.approvalId!,{db});
+    await decideApproval(receiver.actor,{id:approval.id,stageId:approval.stageId,decision:"APPROVED",reason:"Dedicated approved payment-ready source"},{db});
+    const row=await getOwnerPayout(ctx,draft.id,{db});submitted={...submitted,version:row.version,state:row.state};
+  }
+  const schedule={id:draft.id,expectedVersion:submitted.version,scheduledFor:new Date(expectedSettlementAt).toISOString(),reason:"Dedicated exact planned owner payout"};
+  const scheduled=await scheduleOwnerPayout(ctx,schedule,{db});
+  const restricted=ctx;ctx=await paymentGrant(f);
+  return{f,ctx,restricted,receiver,draft,schedule,scheduled,command:{id:draft.id,expectedVersion:scheduled.version,paymentReference:"QA-OWNER-BANK-TRANSFER",reason:"Dedicated completed manual bank transfer"}};
+}
+async function unrelatedOwnerOpening(f:Fixture){
+  const created=await withTenant(db,f.org,async tx=>{
+    const finance=new FinanceRepository(tx,f.org),claim=await tx.ledgerAccount.findFirstOrThrow({where:{organizationId:f.org,code:"OWNER_PAYABLE"}});
+    const amount=Money.of("777.77","MAD"),dimensions={owner_id:f.otherOwner.id,property_id:f.property.id};
+    return finance.createFinancialTransaction({reference:`QA-OTHER-OWNER:${randomUUID()}`,idempotencyKey:randomUUID(),createdBy:f.account.id,occurredAt:new Date("2026-01-01"),description:"Unrelated owner preserved opening",
+      postings:[{ledgerAccountId:f.bank.id,amount,side:"DEBIT",bucket:"REVENUE_RECEIPT",dimensions},{ledgerAccountId:claim.id,amount,side:"CREDIT",bucket:"OWNER_REVENUE",dimensions}]});
+  });
+  return withTenant(db,f.org,tx=>tx.financialTransaction.findUniqueOrThrow({where:{id:created.id}}));
+}
+async function closing(f:Fixture,other=false){
+  return withTenant(db,f.org,async tx=>(await readOwnerLedgerStatement(tx,f.org,{ownerId:other?f.otherOwner.id:f.owner.id,ownerName:"Dedicated acceptance owner",
+    propertyId:f.property.id,propertyName:f.property.name,currency:"MAD",startsAt:new Date("2020-01-01"),endsAt:new Date("2099-01-01")})).closingBalance.toJSON().amount);
+}
+
 describe("native owner payout persistence on real PostgreSQL", () => {
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw Error("Dedicated local PostgreSQL is required");
@@ -99,7 +145,7 @@ describe("native owner payout persistence on real PostgreSQL", () => {
   it("stores exact draft cents and attributed reads without creating a payment or disclosing bank secrets", async () => {
     const f = await fixture(), created = await createOwnerPayout(f.ctx, f.input, { db });
     const view = await getOwnerPayout(f.ctx, created.id, { db });
-    expect(view).toMatchObject({ amount: f.input.amount, currency: "MAD", state: "DRAFT", version: 1, paidAt: null });
+    expect(view).toMatchObject({ amount: f.input.amount, currency: "MAD", state: "DRAFT", version: 1, paidAt: null,canViewWorkspace:false,canViewLedger:false });
     expect(JSON.stringify(view)).not.toContain(f.encrypted);expect(JSON.stringify(view)).not.toContain("Dedicated local nonproduction bank reference");
     expect(JSON.stringify(view)).not.toContain(f.bank.id);expect(JSON.stringify(view)).not.toContain(f.bank.name);
     await withTenant(db, f.org, async tx => {
@@ -300,6 +346,7 @@ describe("native owner payout persistence on real PostgreSQL", () => {
   it("cancels a rejected payout and its later stages atomically without recording payment or changing its expected settlement",async()=>{
     const f=await fixture(),receiver=await reviewer(f),ctx=await submissionPolicy(f,{approval:{thresholds:[{key:"reject_owner_payout",requires_approval_from:["manager_owner"]}],
       routing:{manager:{people:[receiver.person.id],roles:[],assigned:false,channels:["in_app"]},owner:{people:[receiver.person.id],roles:[],assigned:false,channels:["in_app"]}}}});
+    await unrelatedOwnerOpening(f);
     const draft=await createOwnerPayout(ctx,{...f.input,amount:"500.25",expectedSettlementAt:"2026-11-02T09:00:00Z"},{db});
     const submitted=await submitOwnerPayout(ctx,{id:draft.id,expectedVersion:1,reason:"Dedicated rejected payout submission"},{db});
     const stage=await withTenant(db,f.org,tx=>tx.approvalStage.findFirstOrThrow({where:{approvalId:submitted.approvalId!,position:1}}));
@@ -309,7 +356,262 @@ describe("native owner payout persistence on real PostgreSQL", () => {
     await withTenant(db,f.org,async tx=>{
       const row=await tx.ownerPayout.findUniqueOrThrow({where:{id:draft.id}});expect(row.expectedSettlementAt?.toISOString()).toBe("2026-11-02T09:00:00.000Z");
       expect(await tx.approvalStage.count({where:{approvalId:stage.approvalId,state:"CANCELLED"}})).toBe(1);
-      expect(await tx.auditLog.count({where:{resourceId:draft.id,action:"finance.owner_payout.cancelled"}})).toBe(1);expect(await tx.financialTransaction.count()).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:draft.id,action:"finance.owner_payout.cancelled"}})).toBe(1);expect(await tx.financialTransaction.count()).toBe(2);
+    });
+    expect(await closing(f)).toBe("10000.00");expect(await closing(f,true)).toBe("777.77");
+    const payContext=await paymentGrant(f);
+    await expect(payOwnerPayout(payContext,{id:draft.id,expectedVersion:3,paymentReference:"Rejected payout must never pay",reason:"Attempt rejected source payment"},{db})).rejects.toBeInstanceOf(OwnerPayoutConflictError);
+    expect(await closing(f)).toBe("10000.00");expect(await closing(f,true)).toBe("777.77");
+  });
+
+  it("records concurrent payment retries once and reverses exact postings without changing original journals or owner balances",async()=>{
+    const p=await readyForPayment("2020-01-01T09:00:00Z",true);
+    const opening=await withTenant(db,p.f.org,tx=>tx.financialTransaction.findFirstOrThrow({include:{postings:{orderBy:{id:"asc"}}}}));
+    const unrelated=await unrelatedOwnerOpening(p.f);
+    const results=await Promise.all(Array.from({length:4},()=>payOwnerPayout(p.ctx,p.command,{db})));
+    expect(results.filter(result=>!result.idempotent)).toHaveLength(1);expect(new Set(results.map(result=>result.transactionId)).size).toBe(1);
+    const original=await withTenant(db,p.f.org,tx=>tx.financialTransaction.findUniqueOrThrow({where:{id:results[0].transactionId},include:{postings:{orderBy:{id:"asc"}}}}));
+    expect(original.postings).toHaveLength(2);
+    expect(original.postings.find(line=>line.side==="DEBIT")).toMatchObject({bucket:"PAYOUT",dimensions:{source:"OWNER_PAYOUT",payout_id:p.draft.id,owner_id:p.f.owner.id,property_id:p.f.property.id}});
+    expect(original.postings.find(line=>line.side==="CREDIT")).toMatchObject({bucket:"PAYOUT_PAYMENT",ledgerAccountId:p.f.bank.id});
+    expect(original.postings.map(line=>line.amount.toFixed(2))).toEqual(["500.25","500.25"]);
+    expect(await closing(p.f)).toBe("9499.75");expect(await closing(p.f,true)).toBe("777.77");
+    await expect(payOwnerPayout(p.ctx,{...p.command,paymentReference:"Conflicting bank reference"},{db})).rejects.toBeInstanceOf(OwnerPayoutConflictError);
+    const reverse={id:p.draft.id,expectedVersion:results[0].version,reason:"Dedicated exact owner payout reversal"};
+    const reversals=await Promise.all(Array.from({length:4},()=>reverseOwnerPayout(p.ctx,reverse,{db})));
+    expect(reversals.filter(result=>!result.idempotent)).toHaveLength(1);expect(new Set(reversals.map(result=>result.reversalTransactionId)).size).toBe(1);
+    await withTenant(db,p.f.org,async tx=>{
+      expect(await tx.financialTransaction.findUniqueOrThrow({where:{id:opening.id},include:{postings:{orderBy:{id:"asc"}}}})).toEqual(opening);
+      expect(await tx.financialTransaction.findUniqueOrThrow({where:{id:original.id},include:{postings:{orderBy:{id:"asc"}}}})).toEqual(original);
+      expect(await tx.financialTransaction.count()).toBe(4);expect(await tx.posting.count()).toBe(8);
+      expect(await tx.financialTransaction.findUniqueOrThrow({where:{id:unrelated.id}})).toEqual(unrelated);
+      const balance=await tx.$queryRaw<Array<{amount:string}>>(Prisma.sql`SELECT SUM(CASE WHEN p.side='CREDIT' THEN p.amount ELSE -p.amount END)::text AS amount
+        FROM posting p JOIN ledger_account a ON a.organization_id=p.organization_id AND a.id=p.ledger_account_id WHERE a.code='OWNER_PAYABLE' AND p.dimensions->>'owner_id'=${p.f.owner.id}`);
+      expect(Money.of(balance[0].amount,"MAD").toJSON().amount).toBe("10000.00");
+      expect(await tx.auditLog.count({where:{resourceId:p.draft.id,action:"finance.owner_payout.paid"}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:p.draft.id,action:"finance.owner_payout.reversed"}})).toBe(1);
+      const row=await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}});expect(row).toMatchObject({state:"CANCELLED",transactionId:original.id,reversalTransactionId:reversals[0].reversalTransactionId});
+      expect((await tx.approvalRequest.findFirstOrThrow({where:{payoutId:p.draft.id}})).state).toBe("APPROVED");
+    });
+    await expect(payOwnerPayout(p.ctx,p.command,{db})).resolves.toMatchObject({state:"CANCELLED",transactionId:original.id,idempotent:true});
+    expect(await closing(p.f)).toBe("10000.00");expect(await closing(p.f,true)).toBe("777.77");
+  });
+
+  it("keeps reviewer approval, posting permission and independent funding authority separate",async()=>{
+    const p=await readyForPayment("2020-01-01T09:00:00Z",true),reviewerContext={organizationId:p.f.org,actorId:p.receiver!.account.id,authContext:p.receiver!.actor.authContext};
+    await expect(payOwnerPayout(reviewerContext,p.command,{db})).rejects.toBeInstanceOf(OwnerPayoutAccessError);
+    await expect(payOwnerPayout(p.restricted,p.command,{db})).rejects.toBeInstanceOf(OwnerPayoutAccessError);
+    await withTenant(db,p.f.org,tx=>tx.roleAssignment.update({where:{id:p.f.bankGrant.id},data:{validTo:new Date("2021-01-01")}}));
+    await expect(payOwnerPayout(p.ctx,p.command,{db})).rejects.toBeInstanceOf(OwnerPayoutAccessError);
+    expect(await withTenant(db,p.f.org,tx=>tx.financialTransaction.count())).toBe(1);
+    await withTenant(db,p.f.org,tx=>tx.roleAssignment.update({where:{id:p.f.bankGrant.id},data:{validTo:null}}));
+    await expect(payOwnerPayout(p.ctx,p.command,{db})).resolves.toMatchObject({state:"PAID",idempotent:false});
+  });
+
+  it("rejects scheduling before eligibility, rejects early payment and keeps the exact schedule immutable on retries",async()=>{
+    const p=await readyForPayment("2099-01-01T09:00:00Z");
+    await expect(payOwnerPayout(p.ctx,p.command,{db})).rejects.toBeInstanceOf(OwnerPayoutConflictError);
+    await expect(scheduleOwnerPayout(p.ctx,p.schedule,{db})).resolves.toMatchObject({state:"SCHEDULED",idempotent:true});
+    await expect(scheduleOwnerPayout(p.ctx,{...p.schedule,scheduledFor:"2099-01-02T09:00:00Z"},{db})).rejects.toBeInstanceOf(OwnerPayoutConflictError);
+    const f=await fixture(),ctx=await submissionPolicy(f,{payout:{cadence:"OTA_SPLIT_EXPECTED_SETTLEMENT"}}),draft=await createOwnerPayout(ctx,{...f.input,amount:"100.00",expectedSettlementAt:"2099-01-01T09:00:00Z"},{db});
+    const submitted=await submitOwnerPayout(ctx,{id:draft.id,expectedVersion:1,reason:"Dedicated future eligibility submission"},{db});
+    await expect(scheduleOwnerPayout(ctx,{id:draft.id,expectedVersion:submitted.version,scheduledFor:"2099-01-01T08:59:59Z",reason:"Must retain configured earliest eligibility"},{db})).rejects.toBeInstanceOf(OwnerPayoutConflictError);
+    expect(await withTenant(db,f.org,tx=>tx.financialTransaction.count())).toBe(1);
+  });
+
+  it("refuses payment after approved encrypted recipient details change",async()=>{
+    const p=await readyForPayment();
+    await withTenant(db,p.f.org,tx=>tx.ownerPayoutMethod.update({where:{id:p.f.method.id},data:{detailsEncrypted:encryptSecret("Different dedicated nonproduction recipient details")}}));
+    await expect(payOwnerPayout(p.ctx,p.command,{db})).rejects.toBeInstanceOf(OwnerPayoutConfigurationError);
+    expect(await withTenant(db,p.f.org,tx=>tx.financialTransaction.count())).toBe(1);
+    expect((await getOwnerPayout(p.ctx,p.draft.id,{db})).state).toBe("SCHEDULED");
+  });
+
+  it("records one unpaid failure on concurrent retries and prevents a failed job from recording a payment",async()=>{
+    const p=await readyForPayment(),command={id:p.draft.id,expectedVersion:p.scheduled.version,reason:"Dedicated bank transfer failed before execution"};
+    await unrelatedOwnerOpening(p.f);
+    const results=await Promise.all(Array.from({length:3},()=>failOwnerPayout(p.ctx,command,{db})));
+    expect(results.filter(row=>!row.idempotent)).toHaveLength(1);
+    await expect(payOwnerPayout(p.ctx,p.command,{db})).rejects.toBeInstanceOf(OwnerPayoutConflictError);
+    await expect(failOwnerPayout(p.ctx,{...command,reason:"Conflicting failed transfer explanation"},{db})).rejects.toBeInstanceOf(OwnerPayoutConflictError);
+    expect((await getOwnerPayout(p.ctx,p.draft.id,{db})).state).toBe("FAILED");
+    expect(await withTenant(db,p.f.org,tx=>tx.financialTransaction.count())).toBe(2);
+    expect(await closing(p.f)).toBe("10000.00");expect(await closing(p.f,true)).toBe("777.77");
+    expect(await withTenant(db,p.f.org,tx=>tx.auditLog.count({where:{resourceId:p.draft.id,action:"finance.owner_payout.failed"}}))).toBe(1);
+  });
+
+  it("cancels an approved unpaid payout while preserving its completed reviewer decisions",async()=>{
+    const p=await readyForPayment("2020-01-01T09:00:00Z",true);
+    const original=await withTenant(db,p.f.org,tx=>tx.approvalRequest.findFirstOrThrow({where:{payoutId:p.draft.id},include:{financialStages:{include:{recipients:true}}}}));
+    const command={id:p.draft.id,expectedVersion:p.scheduled.version,reason:"Dedicated approved unpaid source cancellation"};
+    const results=await Promise.all(Array.from({length:3},()=>cancelOwnerPayout(p.ctx,command,{db})));
+    expect(results.filter(row=>!row.idempotent)).toHaveLength(1);
+    await withTenant(db,p.f.org,async tx=>{
+      expect(await tx.approvalRequest.findUniqueOrThrow({where:{id:original.id},include:{financialStages:{include:{recipients:true}}}})).toEqual(original);
+      expect(await tx.financialTransaction.count()).toBe(1);expect(await tx.auditLog.count({where:{resourceId:p.draft.id,action:"finance.owner_payout.cancelled"}})).toBe(1);
+    });
+    await expect(payOwnerPayout(p.ctx,p.command,{db})).rejects.toBeInstanceOf(OwnerPayoutConflictError);
+    expect((await getOwnerPayout(p.ctx,p.draft.id,{db})).state).toBe("CANCELLED");
+  });
+
+  it("masks native payout audits for operational readers and requires the actual owner scope and independent financial export",async()=>{
+    const f=await fixture(),draft=await createOwnerPayout(f.ctx,{...f.input,amount:"500.25"},{db});
+    const reader=async(ownerId?:string)=>{
+      const person=await withTenant(db,f.org,async tx=>{
+        const person=await tx.person.create({data:{organizationId:f.org,displayName:"Dedicated payout audit reader"}}),account=await tx.userAccount.create({data:{organizationId:f.org,personId:person.id}});
+        const grants:Array<{keys:string[];scopeType:"organization"|"owner";scopeId:string|null}>=[{keys:["audit_log:view","audit_log:export"],scopeType:"organization",scopeId:null}];
+        if(ownerId)grants.push({keys:["financial_transaction:view"],scopeType:"owner",scopeId:ownerId});
+        for(const {keys,scopeType,scopeId}of grants){
+          const role=await tx.role.create({data:{organizationId:f.org,key:`payout_audit_${randomUUID()}`,name:"Dedicated scoped payout audit"}});
+          const permissions=await tx.permission.findMany({where:{organizationId:f.org,key:{in:[...keys]}}});expect(permissions).toHaveLength(keys.length);
+          await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:role.id,permissionId:permission.id}))});
+          await tx.roleAssignment.create({data:{organizationId:f.org,userAccountId:account.id,personId:person.id,roleId:role.id,scopeType,scopeId,validFrom:new Date("2020-01-01")}});
+        }
+        return{person,account};
+      });
+      return{organizationId:f.org,actorId:person.account.id,personId:person.person.id,authContext:await authContextForAccount(f.org,person.account.id,{db})};
+    };
+    const auditOnly=await reader(),owner=await reader(f.owner.id),wrong=await reader(f.otherOwner.id),filters={resourceId:draft.id,resourceType:"owner_payout"};
+    for(const actor of [auditOnly,wrong]){
+      const history=await listAuditHistory(actor,filters,{db});expect(history.rows).toHaveLength(1);expect(history.rows[0].after).toBe(maskedValue);expect(history.rows[0].reason).toBe(maskedValue);
+      expect(await exportAuditHistoryCsv(actor,filters,{db})).not.toContain("500.25");
+    }
+    expect(JSON.stringify(await listAuditHistory(owner,filters,{db}))).toContain("500.25");
+    expect(await exportAuditHistoryCsv(owner,filters,{db})).not.toContain("500.25");
+    await withTenant(db,f.org,async tx=>{
+      const role=await tx.role.create({data:{organizationId:f.org,key:`payout_export_${randomUUID()}`,name:"Dedicated payout source export"}}),permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.org,key:"financial_transaction:export"}});
+      await tx.rolePermission.create({data:{organizationId:f.org,roleId:role.id,permissionId:permission.id}});
+      await tx.roleAssignment.create({data:{organizationId:f.org,personId:owner.personId,userAccountId:owner.actorId,roleId:role.id,scopeType:"owner",scopeId:f.owner.id,validFrom:new Date("2020-01-01")}});
+    });
+    const exporter={...owner,authContext:await authContextForAccount(f.org,owner.actorId,{db})};
+    expect(await exportAuditHistoryCsv(exporter,filters,{db})).toContain("500.25");
+  });
+
+  it("keeps the native workspace scoped to the real owner while hiding independently revoked funding choices",async()=>{
+    const f=await fixture(),draft=await createOwnerPayout(f.ctx,{...f.input,amount:"500.25"},{db}),input={ownerId:f.owner.id,propertyId:f.property.id};
+    const visible=await getOwnerPayoutWorkspace(f.ctx,input,{db});expect(visible.rows.map(row=>row.id)).toContain(draft.id);
+    expect(visible.accounts).toEqual([{id:f.bank.id,name:f.bank.name}]);expect(visible.methods.map(row=>row.id)).toEqual([f.method.id]);
+    await expect(getOwnerPayoutWorkspace(f.ctx,{...input,ownerId:f.otherOwner.id},{db})).rejects.toBeInstanceOf(OwnerPayoutAccessError);
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:f.bankGrant.id},data:{validTo:new Date("2021-01-01")}}));
+    const ownerOnly=await getOwnerPayoutWorkspace(f.ctx,input,{db});expect(ownerOnly.accounts).toEqual([]);expect(ownerOnly.rows.map(row=>row.id)).toContain(draft.id);
+    expect(JSON.stringify(ownerOnly)).not.toContain(f.bank.id);expect(JSON.stringify(ownerOnly)).not.toContain(f.encrypted);
+    await withTenant(db,f.org,tx=>tx.property.update({where:{id:f.property.id},data:{archivedAt:new Date()}}));
+    expect((await getOwnerPayoutWorkspace(f.ctx,input,{db})).rows.map(row=>row.id)).toContain(draft.id);
+    const other=await fixture();await expect(getOwnerPayoutWorkspace(other.ctx,input,{db})).rejects.toBeInstanceOf(OwnerPayoutAccessError);
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:f.ownerGrant.id},data:{scopeType:"financial_record",scopeId:f.owner.id}}));
+    await expect(getOwnerPayoutWorkspace(f.ctx,input,{db})).rejects.toBeInstanceOf(OwnerPayoutAccessError);
+  });
+
+  it("requires financial authority before observing a false native payout approval predicate",async()=>{
+    const p=await readyForPayment("2020-01-01T09:00:00Z",true),operator=await reviewer(p.f,false);
+    await withTenant(db,p.f.org,async tx=>{
+      const role=await tx.role.create({data:{organizationId:p.f.org,key:`operational_automation_${randomUUID()}`,name:"Dedicated operational automation author"}});
+      const permissions=await tx.permission.findMany({where:{organizationId:p.f.org,OR:[{key:{startsWith:"config_rule:"}},{key:"task:create"}]}});
+      await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:p.f.org,roleId:role.id,permissionId:permission.id}))});
+      await tx.roleAssignment.create({data:{organizationId:p.f.org,personId:operator.person.id,userAccountId:operator.account.id,roleId:role.id,scopeType:"property",scopeId:p.f.property.id,validFrom:new Date("2020-01-01")}});
+      await new ConfigRuleRepository(tx,p.f.org).createVersion({key:"ops.checklists",scopeType:"property",scopeId:p.f.property.id,effectiveFrom:new Date("2020-01-01"),
+        value:{checklists:[{key:"payout_qa_inspection",name:{en:"Dedicated inspection",fr:"Inspection",ar:"Inspection"},items:[{key:"inspect",label:{en:"Inspect",fr:"Inspecter",ar:"Inspect"}}]}]},reason:"Dedicated valid operational action"});
+    });
+    const actor={organizationId:p.f.org,actorId:operator.account.id,personId:operator.person.id,authContext:await authContextForAccount(p.f.org,operator.account.id,{db})};
+    const rule=await saveAutomationRule(actor,{key:"payout_approval_privacy",propertyId:p.f.property.id,lifecycle:"ACTIVE",effectiveFrom:new Date("2020-01-01"),reason:"Dedicated native payout privacy regression",
+      rule:{name:{en:"Payout privacy",fr:"Confidentialite",ar:"Privacy"},event:"ApprovalRequested",enabled:true,retry:{max_attempts:1,delay_seconds:1},conditions:{path:"approval.status",op:"=",value:"REJECTED"},
+        actions:[{key:"inspection",type:"create_task",task_type:"INSPECTION",title:{en:"Inspection",fr:"Inspection",ar:"Inspection"},due:{from:"event.date",offset_days:0},priority:"NORMAL",checklist_template:"payout_qa_inspection"}]}},{db});
+    const event=await withTenant(db,p.f.org,async tx=>{
+      const approval=await tx.approvalRequest.findFirstOrThrow({where:{payoutId:p.draft.id}});
+      return tx.outboxEvent.findFirstOrThrow({where:{type:"ApprovalRequested",payload:{path:["approvalId"],equals:approval.id}}});
+    });
+    await expect(previewAutomation(actor,{ruleId:rule.id,eventId:event.id},{db})).rejects.toBeInstanceOf(AutomationAccessError);
+  });
+
+  it("freezes payout agreement inputs and reuses the real approval under concurrent native event delivery",async()=>{
+    const p=await readyForPayment("2020-01-01T09:00:00Z",true);
+    const source=await withTenant(db,p.f.org,async tx=>{
+      const approval=await tx.approvalRequest.findFirstOrThrow({where:{payoutId:p.draft.id}}),row=await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}});
+      const event=await tx.outboxEvent.findFirstOrThrow({where:{type:"ApprovalRequested",payload:{path:["approvalId"],equals:approval.id}}});
+      const snapshot=z.object({payoutRule:z.object({config_rule_id:z.string(),config_rule_version:z.number()})}).parse(row.policySnapshot);
+      const permissions=await tx.permission.findMany({where:{organizationId:p.f.org,OR:[{key:{startsWith:"config_rule:"}},{key:"financial_transaction:view"}]}});
+      const role=await tx.role.create({data:{organizationId:p.f.org,key:`financial_automation_${randomUUID()}`,name:"Dedicated financial automation author"}});
+      await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:p.f.org,roleId:role.id,permissionId:permission.id}))});
+      await tx.roleAssignment.create({data:{organizationId:p.f.org,personId:p.f.account.personId,userAccountId:p.f.account.id,roleId:role.id,scopeType:"property",scopeId:p.f.property.id,validFrom:new Date("2020-01-01")}});
+      await new ConfigRuleRepository(tx,p.f.org).createVersion({key:"finance.payout_schedule",scopeType:"property",scopeId:p.f.property.id,effectiveFrom:new Date("2020-01-01"),
+        value:{cadence:"MONTHLY",schedule:{at:"09:00",month_day:"LAST"},holdback_bps:9900},reason:"Later agreement must not rewrite the submitted payout"});
+      return{approval,event,snapshot};
+    });
+    const actor={...p.ctx,personId:p.f.account.personId,authContext:await authContextForAccount(p.f.org,p.f.account.id,{db})};
+    const rule=await saveAutomationRule(actor,{key:"native_payout_approval",propertyId:p.f.property.id,lifecycle:"ACTIVE",effectiveFrom:new Date("2020-01-01"),reason:"Dedicated frozen native payout automation",
+      rule:{name:{en:"Native payout approval",fr:"Approbation du versement"},event:"ApprovalRequested",enabled:true,retry:{max_attempts:1,delay_seconds:1},
+        conditions:{path:"payout.cadence",op:"=",value:{config:"finance.payout_schedule",path:"cadence"}},
+        actions:[{key:"original_review",type:"create_approval_request",title:{en:"Original payout approval",fr:"Approbation originale"},details:{en:"Retain the ordered financial decision",fr:"Conserver la decision financiere"}}]}},{db});
+    expect(await previewAutomation(actor,{ruleId:rule.id,eventId:source.event.id},{db})).toMatchObject({matched:true,
+      configVersions:[{key:"finance.payout_schedule",id:source.snapshot.payoutRule.config_rule_id,version:source.snapshot.payoutRule.config_rule_version}]});
+    const results=await Promise.all(Array.from({length:3},()=>enqueueAutomationEvent(p.f.org,source.event.id,{db})));
+    const ids=[...new Set(results.flat())];expect(ids).toHaveLength(1);
+    expect(await Promise.all(Array.from({length:3},()=>executeAutomationRun(p.f.org,ids[0],{db})))).toEqual(["SUCCEEDED","SUCCEEDED","SUCCEEDED"]);
+    await withTenant(db,p.f.org,async tx=>{
+      expect(await tx.approvalRequest.count()).toBe(1);expect(await tx.approvalStage.count({where:{approvalId:source.approval.id}})).toBe(1);
+      const run=await tx.automationRun.findUniqueOrThrow({where:{id:ids[0]},include:{attempts:true}});expect(run.attempts).toHaveLength(1);
+      expect(JSON.stringify(run.outputs)).toContain(source.approval.id);expect(JSON.stringify(run.inputs)).not.toContain(p.f.encrypted);
+      expect(await tx.financialTransaction.count()).toBe(1);
+    });
+    const paid=await Promise.all(Array.from({length:3},()=>payOwnerPayout(p.ctx,p.command,{db})));expect(paid.filter(row=>!row.idempotent)).toHaveLength(1);
+    const events=await withTenant(db,p.f.org,tx=>tx.outboxEvent.findMany({where:{type:{in:["PayoutScheduled","PayoutPaid"]}}}));
+    expect(events.map(row=>row.type).sort()).toEqual(["PayoutPaid","PayoutScheduled"]);
+    await withTenant(db,p.f.org,async tx=>{
+      const context=await new AutomationRepository(tx,p.f.org).context(events.find(row=>row.type==="PayoutPaid")!.id);
+      expect(context.payout?.resource).toMatchObject({id:p.draft.id,ownerId:p.f.owner.id,amount:"500.25",dataClass:"financial"});
+      expect(context.evaluation.fields.payout).toMatchObject({amount:"500.25",cadence:"OTA_SPLIT_EXPECTED_SETTLEMENT",status:"PAID"});
+    });
+    const other=await fixture();await expect(withTenant(db,other.org,tx=>new AutomationRepository(tx,other.org).context(source.event.id))).rejects.toThrow("automation_source_missing");
+  });
+
+  it("denies an operational configurator replay of a failed financial payout job under its privileged author",async()=>{
+    const p=await readyForPayment("2020-01-01T09:00:00Z",true),operator=await reviewer(p.f,false);
+    await withTenant(db,p.f.org,async tx=>{
+      for(const [account,financial]of [[p.f.account,true],[operator.account,false]] as const){
+        const role=await tx.role.create({data:{organizationId:p.f.org,key:`payout_replay_${randomUUID()}`,name:"Dedicated replay authority"}});
+        const permissions=await tx.permission.findMany({where:{organizationId:p.f.org,OR:[{key:{startsWith:"config_rule:"}},...(financial?[{key:"financial_transaction:view"}]:[])]}});
+        await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:p.f.org,roleId:role.id,permissionId:permission.id}))});
+        await tx.roleAssignment.create({data:{organizationId:p.f.org,userAccountId:account.id,personId:account.personId,roleId:role.id,scopeType:"property",scopeId:p.f.property.id,validFrom:new Date("2020-01-01")}});
+      }
+    });
+    const actor={...p.ctx,personId:p.f.account.personId,authContext:await authContextForAccount(p.f.org,p.f.account.id,{db})};
+    await saveAutomationRule(actor,{key:"payout_replay_authority",propertyId:p.f.property.id,lifecycle:"ACTIVE",effectiveFrom:new Date("2020-01-01"),reason:"Dedicated financial replay authority regression",
+      rule:{name:{en:"Payout review",fr:"Approbation du versement"},event:"PayoutScheduled",enabled:true,retry:{max_attempts:1,delay_seconds:1},conditions:{all:[]},
+        actions:[{key:"original_review",type:"create_approval_request",title:{en:"Original payout review",fr:"Approbation originale"},details:{en:"Retain original approval",fr:"Conserver approbation"}}]}},{db});
+    const event=await withTenant(db,p.f.org,tx=>tx.outboxEvent.findFirstOrThrow({where:{idempotencyKey:`payout:${p.draft.id}:PayoutScheduled`}}));
+    const [id]=await enqueueAutomationEvent(p.f.org,event.id,{db});
+    await withTenant(db,p.f.org,tx=>tx.roleAssignment.update({where:{id:p.f.ownerGrant.id},data:{validTo:new Date("2021-01-01")}}));
+    expect(await executeAutomationRun(p.f.org,id,{db})).toBe("FAILED");
+    await withTenant(db,p.f.org,tx=>tx.roleAssignment.update({where:{id:p.f.ownerGrant.id},data:{validTo:null}}));
+    const operational={organizationId:p.f.org,actorId:operator.account.id,personId:operator.person.id,authContext:await authContextForAccount(p.f.org,operator.account.id,{db})};
+    await expect(replayAutomation(operational,{runId:id,reason:"Operational configuration is not financial authority"},{db})).rejects.toBeInstanceOf(AutomationAccessError);
+    await withTenant(db,p.f.org,async tx=>{
+      expect((await tx.automationRun.findUniqueOrThrow({where:{id}})).status).toBe("FAILED");
+      expect(await tx.auditLog.count({where:{resourceId:id,action:"automation.run.replayed"}})).toBe(0);expect(await tx.financialTransaction.count()).toBe(1);
+    });
+    expect(await replayAutomation(actor,{runId:id,reason:"Authorized financial source replay"},{db})).toBe("PENDING");
+    expect(await Promise.all(Array.from({length:3},()=>executeAutomationRun(p.f.org,id,{db})))).toEqual(["SUCCEEDED","SUCCEEDED","SUCCEEDED"]);
+    await expect(replayAutomation(operational,{runId:id,reason:"Operational completed-result observation must remain denied"},{db})).rejects.toBeInstanceOf(AutomationAccessError);
+    await withTenant(db,p.f.org,async tx=>{expect(await tx.approvalRequest.count()).toBe(1);expect(await tx.financialTransaction.count()).toBe(1);});
+  });
+
+  it("rechecks stored permissions after a payment waits for the shared accounting-period lock",async()=>{
+    const p=await readyForPayment();let release!:()=>void,acquired!:(pid:number)=>void;
+    const gate=new Promise<void>(resolve=>{release=resolve;}),ready=new Promise<number>(resolve=>{acquired=resolve;});
+    const blocker=withTenant(db,p.f.org,async tx=>{
+      await new AccountingPeriodRepository(tx,p.f.org).lock();const [row]=await tx.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`;acquired(row.pid);await gate;
+    });
+    const pid=await ready,attempt=payOwnerPayout(p.ctx,p.command,{db}).then(value=>({value,error:null}),(error:unknown)=>({value:null,error}));
+    try{
+      await expect.poll(()=>withTenant(db,p.f.org,async tx=>{
+        const [row]=await tx.$queryRaw<Array<{waiting:boolean}>>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${pid}::int=ANY(pg_blocking_pids(pid))) AS waiting`;return row.waiting;
+      }),{timeout:10000}).toBe(true);
+      await withTenant(db,p.f.org,tx=>tx.$executeRaw`UPDATE role_assignment SET valid_to=clock_timestamp() WHERE organization_id=${p.f.org}::uuid AND id=${p.f.ownerGrant.id}::uuid`);
+    }finally{release();await blocker;}
+    const result=await attempt;expect(result.error).toBeInstanceOf(OwnerPayoutAccessError);
+    await withTenant(db,p.f.org,async tx=>{
+      expect(await tx.financialTransaction.count()).toBe(1);expect((await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}})).state).toBe("SCHEDULED");
+      expect(await tx.auditLog.count({where:{resourceId:p.draft.id,action:"finance.owner_payout.paid"}})).toBe(0);
     });
   });
 });

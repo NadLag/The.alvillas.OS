@@ -48,7 +48,7 @@ export class ApprovalRepository {
     await this.tx.approvalRecipient.createMany({ data: recipients.map((userAccountId) => ({ organizationId: this.organizationId, approvalId: row.id, userAccountId })) });
     return row;
   }
-  decide(id: string, state: "APPROVED" | "REJECTED", decidedBy: string, decisionReason: string, decidedAt: Date) {
+  decide(id: string, state: "APPROVED" | "REJECTED" | "CANCELLED", decidedBy: string, decisionReason: string, decidedAt: Date) {
     return this.tx.approvalRequest.update({ where: { id, organizationId: this.organizationId }, data: { state, decidedBy, decisionReason, decidedAt } });
   }
   event(type: "ApprovalRequested" | "ApprovalDecided", approvalId: string, propertyId: string) {

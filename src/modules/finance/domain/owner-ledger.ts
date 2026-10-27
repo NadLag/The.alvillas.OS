@@ -11,8 +11,8 @@ export {ownerStatementBuckets as ownerLedgerBuckets} from "@/platform/ledger/own
 export function ownerLedgerPath(locale:string,ownerId:string,propertyId?:string){return propertyId?`/${locale}/app/finance/owner-ledgers/properties/${propertyId}/owners/${ownerId}`:`/${locale}/app/finance/owner-ledgers/owners/${ownerId}`}
 
 /** Complete balances cannot include movements hidden by conditional grants. */
-export function canViewCompleteOwnerLedger(ctx:AuthContext,resource:Resource,now:Date):boolean{
-  if(!ctx.assignments)return authorize(ctx,"view",resource,now);
+export function canViewCompleteOwnerLedger(ctx:AuthContext,resource:Resource,now:Date,action:"view"|"export"="view"):boolean{
+  if(!ctx.assignments)return authorize(ctx,action,resource,now);
   const assignments=ctx.assignments.filter(assignment=>!assignment.conditions||Object.keys(assignment.conditions).length===0);
-  return authorize({...ctx,assignments,permissions:new Set(assignments.flatMap(assignment=>[...assignment.permissions])),scopes:assignments.map(assignment=>assignment.scope)},"view",resource,now);
+  return authorize({...ctx,assignments,permissions:new Set(assignments.flatMap(assignment=>[...assignment.permissions])),scopes:assignments.map(assignment=>assignment.scope)},action,resource,now);
 }

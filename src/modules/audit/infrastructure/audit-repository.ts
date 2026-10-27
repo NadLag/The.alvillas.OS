@@ -3,6 +3,7 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { Money } from "@/platform/money/money";
+import { ownerPayoutResource } from "@/modules/finance/domain/owner-payout";
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -151,5 +152,12 @@ export class AuditRepository {
       propertyId: row.propertyId, reservationId: row.reservationId, amount: row.amount.toString(), occurredAt: calendarDateStart(row.occurredOn.toISOString().slice(0,10), row.property.timezone),
       assignedUserAccountId: row.createdBy, city: row.property.cityId ?? row.property.city, region: row.property.regionId ?? row.property.region,
       status: row.state, dataClass: "financial" }]));
+  }
+  async payoutResources(ids:string[]):Promise<Map<string,Resource>>{
+    if(!ids.length)return new Map();
+    const rows=await this.tx.ownerPayout.findMany({where:{organizationId:this.organizationId,id:{in:ids}},
+      select:{id:true,ownerId:true,propertyId:true,reservationId:true,amount:true,state:true,createdBy:true,createdAt:true,paidAt:true,
+        property:{select:{cityId:true,regionId:true}}}});
+    return new Map(rows.map(row=>[row.id,ownerPayoutResource(this.organizationId,row,row.property)]));
   }
 }
