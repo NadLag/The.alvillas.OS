@@ -30,9 +30,10 @@ export function payoutScheduleSlot(at: Date, timezone: string): string {
 }
 
 export function payoutEligibility(config: PayoutScheduleConfig, subject: PayoutScheduleTiming): { eligibleOn: Date; timezone: string } {
+  if (config.cadence === "PER_BOOKING" && !subject.completedAt) throw new PayoutScheduleConfigurationError("Per-booking payout requires recorded completion and reconciliation");
   const timezone = config.schedule?.timezone ?? subject.timezone;
   const base = config.cadence === "AFTER_CHECKOUT" ? subject.checkoutDate ?? subject.triggeredAt
-    : config.cadence === "PER_BOOKING" ? subject.completedAt ?? subject.checkoutDate ?? subject.triggeredAt
+    : config.cadence === "PER_BOOKING" ? subject.completedAt!
     : config.cadence === "OTA_SPLIT_EXPECTED_SETTLEMENT" ? subject.settlementAt ?? subject.triggeredAt : subject.triggeredAt;
   let minimum: Date;
   if (timezone) {

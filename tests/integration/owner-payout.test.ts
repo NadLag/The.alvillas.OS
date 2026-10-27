@@ -25,6 +25,7 @@ import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/acc
 import { AutomationAccessError,saveAutomationRule,previewAutomation,enqueueAutomationEvent,executeAutomationRun,replayAutomation } from "@/platform/automation/service";
 import { AutomationRepository } from "@/platform/automation/repository";
 import { readOwnerLedgerStatement } from "@/platform/ledger/owner-statements";
+import { changeReservation } from "@/modules/reservations/application/reservation-management-service";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -325,6 +326,67 @@ describe("native owner payout persistence on real PostgreSQL", () => {
       expect(row.policySnapshot).toMatchObject({ownershipSnapshotId:source.snapshot.id,payout:{cadence:"AFTER_CHECKOUT",holdbackAmount:{amount:"1000.00"}},
         payoutRule:{commissionSnapshotId:source.snapshot.id,config_rule_scope_type:"reservation_snapshot"}});
       expect(await tx.commissionSnapshot.findUniqueOrThrow({where:{id:source.snapshot.id}})).toEqual(source.snapshot);
+    });
+  });
+
+  it("requires native booking completion before freezing a per-booking payout and its configured hold",async()=>{
+    const f=await fixture();await submissionPolicy(f,{payout:{cadence:"MONTHLY",schedule:{at:"09:00",month_day:"LAST"}}});
+    const source=await withTenant(db,f.org,async tx=>{
+      const rule=await new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.commission",scopeType:"property",scopeId:f.property.id,effectiveFrom:new Date("2020-01-01"),
+        value:{rate_bps:2000,basis:"GROSS_ACCOMMODATION",accrual_event:"ON_CONFIRMATION"},reason:"Dedicated per-booking completion policy"});
+      const reservation=await tx.reservation.create({data:{organizationId:f.org,propertyId:f.property.id,reference:`PAYOUT-COMPLETION-${randomUUID()}`,source:"MANUAL",guestName:"Dedicated fictional completion guest",
+        checkIn:new Date("2020-03-01"),checkOut:new Date("2020-03-08"),nights:7,idempotencyKey:randomUUID(),createdBy:f.account.id}});
+      const snapshot=await new FinanceRepository(tx,f.org).createCommissionSnapshot({reservationId:reservation.id,propertyId:f.property.id,ownerId:f.owner.id,configRuleId:rule.id,
+        shareBps:10000,commissionRateBps:2000,commissionBasis:"GROSS_ACCOMMODATION",accrualEvent:"ON_CONFIRMATION",createdBy:f.account.id,
+        snapshotValue:{config_rule_version:rule.version,payout_rule:{cadence:"PER_BOOKING",hold_days:2},approval_thresholds:{thresholds:[]}}});
+      const role=await tx.role.create({data:{organizationId:f.org,key:`payout_completion_${randomUUID()}`,name:"Dedicated native booking completion"}});
+      const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.org,key:"reservation:edit"}});
+      await tx.rolePermission.create({data:{organizationId:f.org,roleId:role.id,permissionId:permission.id}});
+      await tx.roleAssignment.create({data:{organizationId:f.org,roleId:role.id,personId:f.account.personId,userAccountId:f.account.id,scopeType:"property",scopeId:f.property.id,validFrom:new Date("2020-01-01")}});
+      return{reservation,snapshot};
+    });
+    const ctx={...f.ctx,authContext:await authContextForAccount(f.org,f.account.id,{db})};
+    const draft=await createOwnerPayout(ctx,{...f.input,reservationId:source.reservation.id,amount:"500.25"},{db});
+    const command={id:draft.id,expectedVersion:1,reason:"Dedicated per-booking completion submission"};
+    await expect(submitOwnerPayout(ctx,command,{db})).rejects.toThrow();
+    expect((await getOwnerPayout(ctx,draft.id,{db})).state).toBe("DRAFT");
+    let booking=source.reservation;
+    for(const status of ["GUEST_PREPARATION","CHECKED_IN","CHECKED_OUT","FINANCIAL_RECONCILIATION","CLOSED"] as const){
+      booking=await changeReservation({...ctx,personId:f.account.personId},{reservationId:booking.id,expectedVersion:booking.version,operation:"TRANSITION",status,
+        reason:"Dedicated native completed and reconciled booking",idempotencyKey:randomUUID()},{db,requestId:randomUUID()});
+      if(status!=="CLOSED")await expect(submitOwnerPayout(ctx,command,{db})).rejects.toThrow();
+    }
+    await submitOwnerPayout(ctx,command,{db});await submitOwnerPayout(ctx,command,{db});
+    await withTenant(db,f.org,async tx=>{
+      const completion=await tx.reservationRevision.findFirstOrThrow({where:{organizationId:f.org,reservationId:booking.id,version:booking.version}});
+      const row=await tx.ownerPayout.findUniqueOrThrow({where:{id:draft.id}});
+      const eligible=new Date(completion.createdAt);eligible.setUTCDate(eligible.getUTCDate()+2);
+      expect(row.eligibleAt).toEqual(eligible);
+      expect(row.policySnapshot).toMatchObject({bookingCompletion:{revisionId:completion.id,reservationVersion:completion.version,completedAt:completion.createdAt.toISOString()},payout:{cadence:"PER_BOOKING"}});
+      expect(await tx.commissionSnapshot.findUniqueOrThrow({where:{id:source.snapshot.id}})).toEqual(source.snapshot);
+      expect(await tx.auditLog.count({where:{resourceId:draft.id,action:"finance.owner_payout.submitted"}})).toBe(1);
+      expect(await tx.financialTransaction.count()).toBe(1);expect(await tx.posting.count()).toBe(2);
+    });
+  });
+
+  it("rejects a closed booking without its native reconciliation revision",async()=>{
+    const f=await fixture(),ctx=await submissionPolicy(f);
+    const booking=await withTenant(db,f.org,async tx=>{
+      const rule=await new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.commission",scopeType:"property",scopeId:f.property.id,effectiveFrom:new Date("2020-01-01"),
+        value:{rate_bps:2000,basis:"GROSS_ACCOMMODATION",accrual_event:"ON_CONFIRMATION"},reason:"Dedicated unproven completion policy"});
+      const reservation=await tx.reservation.create({data:{organizationId:f.org,propertyId:f.property.id,reference:`PAYOUT-UNPROVEN-${randomUUID()}`,source:"MANUAL",guestName:"Dedicated fictional imported guest",
+        status:"CLOSED",checkIn:new Date("2020-03-01"),checkOut:new Date("2020-03-08"),nights:7,idempotencyKey:randomUUID(),createdBy:f.account.id}});
+      await new FinanceRepository(tx,f.org).createCommissionSnapshot({reservationId:reservation.id,propertyId:f.property.id,ownerId:f.owner.id,configRuleId:rule.id,
+        shareBps:10000,commissionRateBps:2000,commissionBasis:"GROSS_ACCOMMODATION",accrualEvent:"ON_CONFIRMATION",createdBy:f.account.id,
+        snapshotValue:{config_rule_version:rule.version,payout_rule:{cadence:"PER_BOOKING"},approval_thresholds:{thresholds:[]}}});
+      return reservation;
+    });
+    const draft=await createOwnerPayout(ctx,{...f.input,reservationId:booking.id,amount:"500.25"},{db});
+    await expect(submitOwnerPayout(ctx,{id:draft.id,expectedVersion:1,reason:"Reject status-only completion evidence"},{db})).rejects.toThrow();
+    await withTenant(db,f.org,async tx=>{
+      expect((await tx.ownerPayout.findUniqueOrThrow({where:{id:draft.id}})).state).toBe("DRAFT");
+      expect(await tx.auditLog.count({where:{resourceId:draft.id,action:"finance.owner_payout.submitted"}})).toBe(0);
+      expect(await tx.financialTransaction.count()).toBe(1);expect(await tx.posting.count()).toBe(2);
     });
   });
 

@@ -27,6 +27,12 @@ describe("configured owner payout calendars", () => {
     expect(planConfiguredPayout({ cadence: "OTA_SPLIT_EXPECTED_SETTLEMENT", hold_days: 2 }, input).eligibleOn.toISOString()).toBe("2026-10-28T11:00:00.000Z");
   });
 
+  it("refuses to substitute planned checkout or the request clock for per-booking completion", () => {
+    const input = { ...subject("2026-10-27T12:00:00Z"), checkoutDate: new Date("2020-03-08T00:00:00Z") };
+    expect(() => planConfiguredPayout({ cadence: "PER_BOOKING" }, input)).toThrow(PayoutScheduleConfigurationError);
+    expect(() => planConfiguredPayout({ cadence: "PER_BOOKING" }, subject("2026-10-27T12:00:00Z"))).toThrow(PayoutScheduleConfigurationError);
+  });
+
   it("uses the configured weekday and property timezone without inventing a weekly time", () => {
     const result = planConfiguredPayout({ cadence: "WEEKLY", schedule: { at: "09:00", weekday: 1 } }, subject("2026-10-27T12:00:00Z", "Africa/Casablanca"));
     expect(result.eligibleOn.toISOString()).toBe("2026-11-02T09:00:00.000Z");expect(result.timezone).toBe("Africa/Casablanca");

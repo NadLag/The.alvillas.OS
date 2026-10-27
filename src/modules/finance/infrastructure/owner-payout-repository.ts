@@ -39,6 +39,11 @@ export class OwnerPayoutRepository {
     return this.tx.reservation.findFirst({ where: { organizationId: this.organizationId, id },
       include: { commissionSnapshots: true, reverseReservationFinancialSnapshotreservationIdLink: { orderBy: { version: "asc" } } } });
   }
+  bookingCompletion(reservationId: string) {
+    return this.tx.reservationRevision.findFirst({ where: { organizationId: this.organizationId, reservationId, operation: "TRANSITION",
+      before: { path: ["status"], equals: "FINANCIAL_RECONCILIATION" }, after: { path: ["status"], equals: "CLOSED" } },
+      orderBy: { version: "desc" }, select: { id: true, version: true, createdAt: true } });
+  }
   async committedAmount(ownerId: string, propertyId: string, currency: string, excludeId: string) {
     const value = await this.tx.ownerPayout.aggregate({ where: { organizationId: this.organizationId, ownerId, propertyId, currency,
       id: { not: excludeId }, state: { in: ["APPROVED", "SCHEDULED"] } }, _sum: { amount: true } });

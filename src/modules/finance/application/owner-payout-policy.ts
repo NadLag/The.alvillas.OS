@@ -48,6 +48,7 @@ export async function prepareOwnerPayoutPolicy(ctx: FinanceActorContext, row: Ow
   let payoutRule: Evidence, approvalRule: Evidence;
   let resolveReference: (key: string) => Evidence | null;
   let checkoutDate: Date | undefined;
+  let bookingCompletion: { revisionId: string; reservationVersion: number; completedAt: Date } | null = null;
   let ownershipSnapshotId: string | null = null;
   if (row.reservationId) {
     const reservation = await repository.reservation(row.reservationId);
@@ -74,6 +75,10 @@ export async function prepareOwnerPayoutPolicy(ctx: FinanceActorContext, row: Ow
     if (!payout || !approval) throw new OwnerPayoutPolicyUnavailableError("Original booking payout and approval terms are required");
     payoutRule = payout; approvalRule = approval;
     checkoutDate = calendarDateStart(reservation.checkOut.toISOString().slice(0,10), row.property.timezone);
+    if (reservation.status === "CLOSED") {
+      const completion = await repository.bookingCompletion(reservation.id);
+      if (completion) bookingCompletion = { revisionId: completion.id, reservationVersion: completion.version, completedAt: completion.createdAt };
+    }
   } else {
     const scopes = await new ReservationConfigScopeRepository(tx, ctx.organizationId).scopes({ propertyId: row.propertyId, ownerId: row.ownerId, asOf: now });
     const snapshot = await new ConfigRuleRepository(tx, ctx.organizationId).scopedSnapshot(scopes, now);
@@ -94,7 +99,7 @@ export async function prepareOwnerPayoutPolicy(ctx: FinanceActorContext, row: Ow
     amount: amount.toJSON().amount, currency: row.currency, availableBalance: capacity.balance.toJSON().amount }, actor: { userAccountId: ctx.actorId, roles } },
     configs: Object.fromEntries(references.map(rule => [String(rule.key), rule.value])) };
   const payout = planConfiguredPayout(payoutConfig, { availableBalance: capacity.balance, requestedAmount: amount, triggeredAt: now,
-    checkoutDate, settlementAt:row.expectedSettlementAt??undefined, timezone: row.property.timezone,
+    checkoutDate, completedAt:bookingCompletion?.completedAt, settlementAt:row.expectedSettlementAt??undefined, timezone: row.property.timezone,
     hashSeed: [ctx.organizationId,row.ownerId,row.propertyId,payoutRule.config_rule_id].join(":"), evaluation });
   if (["AFTER_CHECKOUT", "PER_BOOKING"].includes(payout.cadence) && !checkoutDate) throw new OwnerPayoutPolicyUnavailableError("Event payout requires its source booking");
   if (payout.cadence === "OTA_SPLIT_EXPECTED_SETTLEMENT" && !row.expectedSettlementAt) throw new OwnerPayoutPolicyUnavailableError("OTA payout requires an attributed expected-settlement instant");
@@ -122,6 +127,6 @@ export async function prepareOwnerPayoutPolicy(ctx: FinanceActorContext, row: Ow
   const methodSnapshotHash = ownerPayoutMethodHash(method);
   return { stages, eligibleAt:payout.eligibleOn, methodSnapshotHash, snapshot:json({schemaVersion:1,payoutId:row.id,sourceVersion:row.version,
     ownerId:row.ownerId,propertyId:row.propertyId,reservationId:row.reservationId,fundingAccountId:row.fundingAccountId,payoutMethodId:row.payoutMethodId,
-    amount:amount.toJSON(),expectedSettlementAt:row.expectedSettlementAt,methodSnapshotHash,submittedBy:ctx.actorId,submittedAt:now,timezone:row.property.timezone,ownershipSnapshotId,
+    amount:amount.toJSON(),expectedSettlementAt:row.expectedSettlementAt,methodSnapshotHash,submittedBy:ctx.actorId,submittedAt:now,timezone:row.property.timezone,ownershipSnapshotId,bookingCompletion,
     payout,approval,stages,payoutRule,approvalRule,configReferences:references,revenueEvidence,availableBalance:capacity.balance.toJSON(),committedAmount:capacity.committed.toJSON()}) };
 }
