@@ -2346,6 +2346,7 @@ textarea:disabled {
 .whatsapp-preview textarea { resize: vertical; min-block-size: 160px; }
 
 .notification-settings, .notification-routing-settings { max-inline-size: 800px; }
+.expense-page { overflow-wrap: anywhere; }
 .expense-page .resource-form fieldset { min-inline-size: 0; max-inline-size: 100%; }
 .expense-page :is(legend, .primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
 .notification-routing-settings { margin-block-start: var(--space-8); padding-block-start: var(--space-6); border-block-start: 1px solid var(--border-subtle); }
