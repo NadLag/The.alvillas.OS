@@ -34,11 +34,15 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Assigned employee collec
     });
     await page.goto(`/${locale}/app/field/${f.taskId}`);
     const cash = page.getByTestId("field-cash"); await expect(cash.getByTestId("field-cash-amount")).toBeEnabled();
+    await expect.poll(() => page.evaluate(() => navigator.serviceWorker.ready.then(() => Boolean(navigator.serviceWorker.controller))), { timeout: 30000 }).toBe(true);
+    await expect.poll(() => page.evaluate(async () => Boolean(await caches.match(`/${document.documentElement.lang}/offline/field`)))).toBe(true);
     const other = await otherContext.newPage();
     await other.goto(`/${locale}/login?surface=field`); await other.getByTestId("login-phone").fill(phone); await other.getByTestId("login-pin").fill(pin);
     await other.getByTestId("login-submit").click(); await expect(other).toHaveURL(new RegExp(`/${locale}/app/field$`, "u"));
     await other.goto(`/${locale}/app/field/${f.taskId}`);
     const otherCash = other.getByTestId("field-cash"); await expect(otherCash.getByTestId("field-cash-amount")).toBeEnabled();
+    await expect.poll(() => other.evaluate(() => navigator.serviceWorker.ready.then(() => Boolean(navigator.serviceWorker.controller))), { timeout: 30000 }).toBe(true);
+    await expect.poll(() => other.evaluate(async () => Boolean(await caches.match(`/${document.documentElement.lang}/offline/field`)))).toBe(true);
     await otherContext.setOffline(true);
     await otherCash.getByTestId("field-cash-amount").fill("500.25"); await otherCash.getByTestId("field-cash-payer").fill("Dedicated fictional cash guest");
     await otherCash.getByTestId("field-cash-purpose").fill("Dedicated transfer cash acceptance");

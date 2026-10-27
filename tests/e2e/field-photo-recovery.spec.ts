@@ -29,8 +29,11 @@ for (const locale of ["en", "fr", "ar"] as const) test(`An expired photo transpo
       if (!value) throw new Error("Capture fixture encoding unavailable"); return value;
     }), "base64");
     await expect.poll(() => page.evaluate(async () => (await Promise.all(["en", "fr", "ar"].map(language => caches.match(`/${language}/offline/field`)))).every(Boolean))).toBe(true);
-    await native.context.setOffline(true);
     const capture = page.getByTestId("field-photo");
+    // Public shell installation does not establish the employee's private task cache.
+    await expect(capture.getByTestId("field-photo-file")).toBeEnabled();
+    await expect(capture.getByTestId("field-photo-note")).toBeEnabled();
+    await native.context.setOffline(true);
     await capture.getByTestId("field-photo-file").setInputFiles({ name: "retained.png", mimeType: "image/png", buffer: bytes });
     await capture.getByTestId("field-photo-note").fill("Retain the original capture after transport expiry"); await capture.getByTestId("field-photo-save").click();
     await expect(capture.getByTestId("field-photo-queued")).toBeVisible();
