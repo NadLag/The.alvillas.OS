@@ -162,6 +162,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await expect(admin.getByTestId("expense-void-form")).toBeVisible();
     await admin.locator("main").evaluate(element=>{(element as HTMLElement).style.fontSize="200%";});
     expect(await admin.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
+    await admin.evaluate(()=>document.documentElement.style.setProperty("--font-sans","monospace"));
+    await admin.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
+    expect(await admin.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
+    await admin.evaluate(()=>document.documentElement.style.removeProperty("--font-sans"));
     await admin.screenshot({path:info.outputPath(`native-expense-reversal-zoom-${locale}.png`),fullPage:true});
     await admin.locator("main").evaluate(element=>{(element as HTMLElement).style.fontSize="";});
     await admin.getByTestId("expense-void-reason").fill("Dedicated reversal retains original payment history");
