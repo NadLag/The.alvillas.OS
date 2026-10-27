@@ -47,7 +47,9 @@ for(const locale of ["en","fr","ar"] as const)test(`Native owner payout review, 
       await tx.roleAssignment.updateMany({where:{organizationId:org,userAccountId:recipient.id,archivedAt:null},data:{archivedAt:new Date()}});
       await tx.roleAssignment.create({data:{organizationId:org,userAccountId:recipient.id,personId:recipient.personId,roleId:role.id,scopeType:"owner",scopeId:owner.id,validFrom:new Date("2020-01-01")}});
       const rules=new ConfigRuleRepository(tx,org);
-      await rules.createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),reason:"Dedicated explicit native payout ledger calendar",
+      await rules.lockVersion("finance.accounting_periods","organization");
+      const calendar=await rules.resolve({key:"finance.accounting_periods",scopes:[{scopeType:"organization",scopeId:null}]});
+      if(!calendar)await rules.createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2000-01-01"),reason:"Dedicated explicit native payout ledger calendar",
         value:{timezone:"UTC",allow_early_close:false,max_reopen_seconds:60}});
       await rules.createVersion({key:"finance.payout_schedule",scopeType:"property",scopeId:property.id,effectiveFrom:new Date("2020-01-01"),reason:"Dedicated native payout agreement",
         value:{cadence:"OTA_SPLIT_EXPECTED_SETTLEMENT",hold_days:0,holdback_bps:1000}});
@@ -62,6 +64,9 @@ for(const locale of ["en","fr","ar"] as const)test(`Native owner payout review, 
     const workspace=ownerPayoutWorkspacePath(locale,source.ownerId,source.propertyId),purpose=`Dedicated reviewed payout ${suffix}`;
     await operator.goto(`${origin}${ownerLedgerPath(locale,source.ownerId,source.propertyId)}`);await operator.getByTestId("owner-ledger-payouts").click();
     await expect(operator.getByTestId("payout-workspace-page")).toBeVisible();await expect(operator.getByTestId("payout-empty")).toBeVisible();
+    const search=operator.getByTestId("payout-source-search");await search.locator('input[name="fundingQuery"]').fill(source.bankName);
+    await search.getByRole("button").click();await expect(operator).toHaveURL(url=>url.searchParams.get("fundingQuery")===source.bankName);
+    await expect(operator.getByTestId("payout-funding").locator(`option[value="${source.bankId}"]`)).toHaveCount(1);
     await operator.getByTestId("payout-funding").selectOption(source.bankId);await expect(operator.getByTestId("payout-funding")).toHaveValue(source.bankId);
     await operator.getByTestId("payout-amount").fill(locale==="ar"?"\u0665\u0660\u0660\u066b\u0662\u0665":"500,25");
     await operator.getByTestId("payout-method").selectOption(source.methodId);await operator.getByTestId("payout-purpose").fill(purpose);
