@@ -114,6 +114,30 @@ describe("native expenses on real PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it("rechecks financial grants after waiting for the accounting-period writer lock", async () => {
+    const f = await fixture(); await policy(f); await postingGrant(f);
+    const draft = await create(f), submitted = await submitExpense(await actor(f), { id: draft.id, expectedVersion: 1, reason: "Dedicated period wait source" }, { db });
+    const ctx = await actor(f); let release!: () => void, acquired!: (pid: number) => void;
+    const gate = new Promise<void>(resolve => { release = resolve; }), ready = new Promise<number>(resolve => { acquired = resolve; });
+    const blocker = withTenant(db, f.org, async tx => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${f.org + ":accounting-period"},0))::text`;
+      const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; acquired(row.pid); await gate;
+    });
+    const pid = await ready;
+    const attempt = postExpense(ctx, { id: draft.id, expectedVersion: submitted.version, reason: "Dedicated pending financial authorization" }, { db })
+      .then(value => ({ value, error: null }), (error: unknown) => ({ value: null, error }));
+    try {
+      await expect.poll(() => withTenant(db, f.org, async tx => {
+        const [row] = await tx.$queryRaw<Array<{ waiting: boolean }>>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${pid}::int=ANY(pg_blocking_pids(pid))) AS waiting`;
+        return row.waiting;
+      })).toBe(true);
+      await withTenant(db, f.org, tx => tx.$executeRaw`UPDATE role_assignment SET valid_to=clock_timestamp() WHERE organization_id=${f.org}::uuid AND id=${f.grant.id}::uuid`);
+    } finally { release(); await blocker; }
+    const outcome = await attempt;
+    expect(await withTenant(db, f.org, async tx => ({ denied: outcome.error instanceof ExpenseAccessError,
+      journals: await tx.financialTransaction.count(), postedAudits: await tx.auditLog.count({ where: { action: "expense.posted" } }) })))
+      .toEqual({ denied: true, journals: 0, postedAudits: 0 });
+  });
   it("posts the approved retained owner allocation exactly once across concurrent retries",async()=>{
     const f=await fixture(),configured=await policy(f);await postingGrant(f);
     const draft=await create(f),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated posting approval"},{db});

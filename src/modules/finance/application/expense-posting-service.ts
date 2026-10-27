@@ -8,7 +8,7 @@ import { Money } from "@/platform/money/money";
 import { expensePostings,expenseResource,isExpenseFundingAccount } from "../domain/expense";
 import { ExpenseRepository } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
-import type { FinanceActorContext } from "./finance-access";
+import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
 import { ExpenseAccessError,ExpenseConflictError,ExpenseConfigurationError } from "./expense-service";
 
 const inputSchema=z.object({id:z.uuid(),expectedVersion:z.number().int().positive(),reason:z.string().trim().min(6).max(500)}).strict();
@@ -54,7 +54,12 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const postings=expensePostings({amount,allocation,owners:frozen.data.policies,ownerAmounts:frozen.data.policies.map(policy=>({ownerId:policy.ownerId,amount:money(policy.allocation.owner)})),
       ownerAccounts:new Map(frozen.data.policies.map(policy=>[policy.ownerId,ownerAccount])),companyExpenseAccountId:companyAccount,guestReceivableAccountId:guestAccount,fundingAccountId:funding.id,dimensions});
     const journal=await finance.createFinancialTransaction({reference:`EXPENSE:${row.id}`,description:row.purpose,occurredAt:new Date(target.occurredAt!),
-      idempotencyKey:`expense:${row.id}:posted`,createdBy:ctx.actorId,postings});
+      idempotencyKey:`expense:${row.id}:posted`,createdBy:ctx.actorId,postings,
+      recheckAuthorization: at => recheckFinanceAuthorization(ctx, tx, at, [
+        { action: "view", resource: target }, { action: "pay", resource: target },
+        { action: "create", resource: { ...target, type: "financial_transaction" } },
+        { action: "view", resource: { ...target, type: "financial_transaction", id: row.fundingAccountId, financialRecordId: row.fundingAccountId } }
+      ], new ExpenseAccessError()) });
     if((await expenses.transition(row.id,row.version,"APPROVED","POSTED",ctx.actorId,journal.id)).count!==1)throw new ExpenseConflictError();
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"expense.posted",resourceType:"expense",resourceId:row.id,propertyScopeId:row.propertyId,
       before:{state:row.state,version:row.version},after:{state:"POSTED",version:row.version+1,transactionId:journal.id,submissionId:row.submission.id,amount:amount.toJSON()},
@@ -87,7 +92,10 @@ export async function voidExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
       idempotencyKey:`expense:${row.id}:voided`,reversesTransactionId:original.id,createdBy:ctx.actorId,postings:original.postings.map(posting=>({
         ledgerAccountId:posting.ledgerAccountId,side:posting.side==="DEBIT"?"CREDIT" as const:"DEBIT" as const,
         amount:Money.of(posting.amount.toString(),posting.currency),bucket:z.string().parse(posting.bucket),dimensions:z.record(z.string(),z.unknown()).parse(posting.dimensions)
-      }))});
+      })), recheckAuthorization: at => recheckFinanceAuthorization(ctx, tx, at, [
+        { action: "view", resource: target }, { action: "void", resource: target },
+        { action: "void", resource: { ...target, type: "financial_transaction", id: original.id, financialRecordId: original.id } }
+      ], new ExpenseAccessError()) });
     if((await expenses.transition(row.id,row.version,"POSTED","VOIDED",ctx.actorId)).count!==1)throw new ExpenseConflictError();
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"expense.voided",resourceType:"expense",resourceId:row.id,propertyScopeId:row.propertyId,
       before:{state:row.state,version:row.version},after:{state:"VOIDED",version:row.version+1,transactionId:original.id,reversalTransactionId:reverse.id},

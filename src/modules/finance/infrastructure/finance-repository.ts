@@ -660,8 +660,10 @@ export class FinanceRepository {
     reversesTransactionId?: string;
     createdBy: string;
     postings: readonly FinancePostingDraft[];
+    recheckAuthorization?: (now: Date) => Promise<void>;
   }): Promise<PostingTransaction> {
     await new AccountingPeriodRepository(this.tx, this.organizationId).assertPostingOpen(input.occurredAt);
+    if (input.recheckAuthorization) await input.recheckAuthorization(await this.clock());
     return this.tx.financialTransaction.create({
       data: {
         organizationId: this.organizationId,

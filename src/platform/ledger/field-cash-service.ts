@@ -6,6 +6,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { OutboxRepository } from "@/platform/events/outbox-repository";
 import { CashCustodyRepository } from "@/modules/finance/infrastructure/cash-custody-repository";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
+import { recheckFinanceAuthorization } from "@/modules/finance/application/finance-access";
 import { cashCollectionPostings, cashCollectionRevision } from "@/modules/finance/domain/cash-custody";
 import { OperationRepository } from "@/modules/reservations/infrastructure/operation-repository";
 import { SyncRepository } from "@/modules/reservations/infrastructure/sync-repository";
@@ -56,7 +57,10 @@ export async function recordFieldCashInTransaction(ctx: ReservationActorContext,
     collectorUserAccountId: ctx.actorId, collectorPersonId: ctx.personId, source: "CASH", purpose: input.purpose };
   const journal = await finance.createFinancialTransaction({ reference: `CASH:${clock.id}`, occurredAt: clock.now, description: input.purpose,
     idempotencyKey: `field-cash:${transport.deviceId}:${transport.clientOpId}`, createdBy: ctx.actorId,
-    postings: cashCollectionPostings({ amount, custodyAccountId: custody.id, unallocatedAccountId: unallocated.id, dimensions }) });
+    postings: cashCollectionPostings({ amount, custodyAccountId: custody.id, unallocatedAccountId: unallocated.id, dimensions }),
+    recheckAuthorization: at => recheckFinanceAuthorization(ctx, tx, at, [
+      { action: "view", resource: taskResource(task) }, { action: "create", resource }
+    ], new ReservationAuthorizationError()) });
   const recorded = await repository.record({ id: clock.id, taskId: task.id, propertyId: task.propertyId, reservationId: task.reservationId,
     collectorUserAccountId: ctx.actorId, collectorPersonId: ctx.personId, custodyAccountId: custody.id, transactionId: journal.id,
     amount: amount.toJSON().amount, currency: input.currency, payer: input.payer, purpose: input.purpose,

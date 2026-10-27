@@ -72,6 +72,26 @@ describe("native cash sync on real PostgreSQL", () => {
     db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it("rejects queued cash when its grant is revoked during a period-lock wait", async () => {
+    const f = await fixture(), request = await input(f), ctx = await actor(f);
+    let release!: () => void, acquired!: (pid: number) => void;
+    const gate = new Promise<void>(resolve => { release = resolve; }), ready = new Promise<number>(resolve => { acquired = resolve; });
+    const blocker = withTenant(db, f.org, async tx => {
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${f.org + ":accounting-period"},0))::text`;
+      const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; acquired(row.pid); await gate;
+    });
+    const pid = await ready;
+    const attempt = push(f, request, ctx);
+    try {
+      await expect.poll(() => withTenant(db, f.org, async tx => {
+        const [row] = await tx.$queryRaw<Array<{ waiting: boolean }>>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${pid}::int=ANY(pg_blocking_pids(pid))) AS waiting`;
+        return row.waiting;
+      })).toBe(true);
+      await withTenant(db, f.org, tx => tx.$executeRaw`UPDATE role_assignment SET valid_to=clock_timestamp() WHERE organization_id=${f.org}::uuid AND id=${f.cashGrant}::uuid`);
+    } finally { release(); await blocker; }
+    expect((await attempt).results[0].status).toBe("REJECTED");
+    expect(await counts(f)).toEqual({ collections: 0, transactions: 0, audits: 0, events: 0 });
+  });
   it("atomically records exact custody, provenance, audit and one payment event without accruing revenue", async () => {
     const f = await fixture(), request = await input(f), result = await push(f, request);
     expect(result.results[0].status).toBe("APPLIED");

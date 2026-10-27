@@ -27,6 +27,7 @@ import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { matchesFinancialReversalAttempt } from "../domain/financial-reversal";
+import { recheckFinanceAuthorization } from "./finance-access";
 import { reverseAirbnbSettlementInputSchema } from "../domain/airbnb-settlement";
 
 const airbnbSettlementSourceType = "AIRBNB_SETTLEMENT";
@@ -437,13 +438,20 @@ export async function importAirbnbSettlementCsv(
         expectedPayout: amounts.expectedPayout,
         dimensions: postingDimensions
       });
+      const financeTarget = { type: "financial_transaction" as const, organizationId: ctx.organizationId,
+        propertyId: reservation.propertyId, reservationId: reservation.id, dataClass: "financial" as const };
+      const recheckPosting = (at: Date) => recheckFinanceAuthorization(ctx, tx, at, [
+        { action: "view", resource: { ...financeTarget, type: "reservation", dataClass: "operational" } },
+        { action: "view", resource: financeTarget }, { action: "create", resource: financeTarget }, { action: "reconcile", resource: financeTarget }
+      ], new AirbnbSettlementAuthorizationError());
       const expectedTransaction = await repository.createFinancialTransaction({
         reference: `${reservation.reference}:AIRBNB_EXPECTED:${row.sourceTransactionId}`,
         occurredAt: new Date(),
         description: `Airbnb expected payout for ${reservation.reference}`,
         idempotencyKey: keys.expectedKey,
         createdBy: ctx.actorId,
-        postings: expectedPostings
+        postings: expectedPostings,
+        recheckAuthorization: recheckPosting
       });
       const receiptPostings = buildActualAirbnbReceiptPostings({
         receivedAccountId: receivedAccount.id,
@@ -459,7 +467,8 @@ export async function importAirbnbSettlementCsv(
         description: `Airbnb actual receipt for ${reservation.reference}`,
         idempotencyKey: keys.receiptKey,
         createdBy: ctx.actorId,
-        postings: receiptPostings
+        postings: receiptPostings,
+        recheckAuthorization: recheckPosting
       });
 
       let varianceId: string | null = null;
@@ -618,7 +627,10 @@ export async function reverseAirbnbSettlement(
         reversesTransactionId: original.id,
         idempotencyKey: `${input.idempotencyKey}:reverse:${original.id}`,
         createdBy: ctx.actorId,
-        postings
+        postings,
+        recheckAuthorization: at => recheckFinanceAuthorization(ctx, tx, at, [
+          { action: "view", resource: target }, { action: "void", resource: target }, { action: "reconcile", resource: target }
+        ], new AirbnbSettlementAuthorizationError())
       });
       reversalTransactions.push(reversal);
     }
