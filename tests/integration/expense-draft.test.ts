@@ -142,6 +142,42 @@ describe("native expenses on real PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it("rejects a backdated correction even when its journal is inserted before the revised expense draft",async()=>{
+    const {f,original,posted}=await correctionFixture(),ctx=await actor(f),reason="Dedicated insertion-order correction integrity";
+    for(const direction of[-1,1])await expect(withTenant(db,f.org,async tx=>{
+      const expenses=new ExpenseRepository(tx,f.org),clock=await expenses.clock(),amount=Money.of("600.25","MAD");
+      const source=await tx.financialTransaction.findUniqueOrThrow({where:{id:posted.transactionId},include:{postings:true}});
+      const wrongDate=new Date(clock.now);wrongDate.setUTCMonth(wrongDate.getUTCMonth()+direction*2,1);
+      const journal=await new FinanceRepository(tx,f.org).createFinancialTransaction({reference:`EXPENSE:${clock.id}`,occurredAt:wrongDate,
+        description:f.input.purpose,idempotencyKey:`expense:${clock.id}:posted`,createdBy:f.account.id,
+        postings:source.postings.map(line=>({ledgerAccountId:line.ledgerAccountId,side:z.enum(["DEBIT","CREDIT"]).parse(line.side),
+          amount,bucket:line.bucket,dimensions:{...z.record(z.string(),z.unknown()).parse(line.dimensions),expense_id:clock.id}}))});
+      const revised=await expenses.create(clock.id,{...f.input,amount:"600.25",idempotencyKey:randomUUID(),reason},f.account.id,
+        {correctsExpenseId:original.id,correctsExpenseVersion:original.version});
+      await writeAuditEvent(tx,{organizationId:f.org,actorId:f.account.id,action:"expense.created",resourceType:"expense",resourceId:revised.id,
+        propertyScopeId:f.property.id,after:{id:revised.id,correctsExpenseId:original.id,correctsExpenseVersion:original.version},reason,requestId:randomUUID(),occurredAt:clock.now});
+      await writeAuditEvent(tx,{organizationId:f.org,actorId:f.account.id,action:"finance.expense.correction_requested",resourceType:"financial_transaction",resourceId:source.id,
+        propertyScopeId:f.property.id,after:{originalExpenseId:original.id,originalExpenseVersion:original.version,correctionExpenseId:revised.id,amount:amount.toJSON()},reason,requestId:randomUUID(),occurredAt:clock.now});
+      const runner:TenantTransactionRunner={$transaction:work=>work(tx)};
+      const submitted=await submitExpense(ctx,{id:revised.id,expectedVersion:1,reason},{db:runner});expect(submitted.state).toBe("APPROVED");
+      const reversed=await voidExpense(ctx,{id:original.id,expectedVersion:original.version,reason},{db:runner});
+      const row=await expenses.find(revised.id);expect(row?.submission).not.toBeNull();
+      expect((await expenses.transition(revised.id,submitted.version,"APPROVED","POSTED",f.account.id,journal.id)).count).toBe(1);
+      await writeAuditEvent(tx,{organizationId:f.org,actorId:f.account.id,action:"expense.posted",resourceType:"expense",resourceId:revised.id,
+        propertyScopeId:f.property.id,before:{state:"APPROVED",version:submitted.version},
+        after:{state:"POSTED",version:submitted.version+1,transactionId:journal.id,submissionId:row!.submission!.id,amount:amount.toJSON(),postingDateMode:"CURRENT_OPEN_PERIOD"},reason,requestId:randomUUID(),occurredAt:clock.now});
+      await writeAuditEvent(tx,{organizationId:f.org,actorId:f.account.id,action:"finance.expense.correction_posted",resourceType:"financial_transaction",resourceId:journal.id,
+        propertyScopeId:f.property.id,after:{originalExpenseId:original.id,originalExpenseVersion:original.version,originalTransactionId:source.id,
+          reversalTransactionId:reversed.reversalTransactionId,correctionExpenseId:revised.id,transactionId:journal.id,submissionId:row!.submission!.id,
+          originalAmount:Money.of(original.amount,original.currency).toJSON(),correctedAmount:amount.toJSON()},reason,requestId:randomUUID(),occurredAt:clock.now});
+      await tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");
+      throw new Error("Roll back an unexpectedly permitted backdated correction");
+    })).rejects.toThrow("expense correction must create a new journal in the current open period");
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.financialTransaction.count()).toBe(1);expect((await tx.expense.findUniqueOrThrow({where:{id:original.id}})).state).toBe("POSTED");
+      expect(await tx.auditLog.count({where:{action:"finance.expense.correction_posted"}})).toBe(0);
+    });
+  });
   it("rolls back both journals when correction override is revoked during a real period-lock wait",async()=>{
     const {f,override,original,posted,command}=await correctionFixture(),ctx=await actor(f);
     let announce!:()=>void,release!:()=>void;
