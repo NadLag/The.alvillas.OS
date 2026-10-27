@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   ConfigRuleRepository,
   configRuleSnapshotMetadata,
+  type ConfigScopeCandidate,
   type ResolvedConfigRule
 } from "@/platform/config/config-rule-repository";
 import { authorize, roleKeysForResource, type AuthContext, type Resource } from "@/platform/authz/authorize";
