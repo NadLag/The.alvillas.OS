@@ -9,6 +9,7 @@ import { getOwnerLedger,OwnerLedgerAccessError,OwnerLedgerConfigurationError } f
 import { ownerLedgerBuckets,ownerLedgerPath } from "../domain/owner-ledger";
 import { ownerLedgerActor } from "./owner-ledger-access";
 import { OwnerLedgerFilters } from "./owner-ledger-filters";
+import { ownerPayoutWorkspacePath } from "../domain/owner-payout";
 
 export type OwnerLedgerSearch={fromOn?:string;toOn?:string;currency?:string;timezone?:string;after?:string};
 export async function OwnerLedgerView({locale,ownerId,propertyId,query}:{locale:AppLocale;ownerId:string;propertyId?:string;query:OwnerLedgerSearch}){
@@ -23,7 +24,9 @@ export async function OwnerLedgerView({locale,ownerId,propertyId,query}:{locale:
   const next=new URLSearchParams({fromOn:ledger.fromOn,toOn:ledger.toOn,currency:ledger.currency,timezone:ledger.timezone});if(ledger.next)next.set("after",ledger.next);
   const bucketName=(bucket:string|null)=>{const known=ownerLedgerBuckets.find(value=>value===bucket);return known?t(`buckets.${known}`):t("otherMovement")};
   return <AdminShell className="resource-page owner-ledger-page" testId="owner-ledger-page">
-    <ShellHeader eyebrow={t("eyebrow")} title={ledger.owner.name} subtitle={ledger.property?.name??t("allProperties")} actions={<Link className="secondary-button" href={`/${locale}/app/finance/owner-ledgers`}>{t("back")}</Link>}/>
+    <ShellHeader eyebrow={t("eyebrow")} title={ledger.owner.name} subtitle={ledger.property?.name??t("allProperties")} actions={<div className="form-actions">
+      {ledger.property?<Link className="secondary-button" data-testid="owner-ledger-payouts" href={ownerPayoutWorkspacePath(locale,ownerId,ledger.property.id)}>{t("payouts")}</Link>:null}
+      <Link className="secondary-button" href={`/${locale}/app/finance/owner-ledgers`}>{t("back")}</Link></div>}/>
     {ledger.owner.archived?<p className="status-badge">{t("archivedOwner")}</p>:null}
     <section className="owner-ledger-summary" aria-label={t("summary")}><h2>{t("closing")}</h2><p className="owner-ledger-closing money-value" data-testid="owner-ledger-closing" dir="auto">{money(ledger.closingBalance)}</p>
       <dl className="detail-grid"><div><dt>{t("opening")}</dt><dd data-testid="owner-ledger-opening" dir="auto">{money(ledger.openingBalance)}</dd></div>

@@ -12,6 +12,7 @@ import { safeLocale } from "@/i18n/routing";
 export function ApprovalForm({ propertyId, approval }: { propertyId?: string; approval?: Awaited<ReturnType<typeof getApproval>> }) {
   const t = useTranslations("Approvals"); const locale = useLocale(); const router = useRouter();
   const expenseText = useTranslations("Expenses");
+  const payoutText = useTranslations("OwnerPayouts");
   const [pending, startTransition] = useTransition(); const [offline, setOffline] = useState(false); const [error, setError] = useState(false);
   const [ready, setReady] = useState(false);
   const key = useRef<string | null>(null);
@@ -25,7 +26,7 @@ export function ApprovalForm({ propertyId, approval }: { propertyId?: string; ap
     {error ? <p role="alert">{t("error")}</p> : null}
     {approval ? <><h2>{approval.title}</h2><p>{approval.details}</p><p data-testid="approval-state" role="status">{t(`states.${approval.state}`)}</p>
       {approval.financial ? <dl className="detail-grid" data-testid="approval-financial-summary"><div><dt>{expenseText("amount")}</dt><dd>{formatCurrencyAmount(safeLocale(locale), approval.financial.amount, approval.financial.currency)}</dd></div>
-        <div><dt>{expenseText("category")}</dt><dd>{approval.financial.category}</dd></div><div><dt>{expenseText("occurredOn")}</dt><dd>{formatDate(safeLocale(locale), new Date(`${approval.financial.occurredOn}T00:00:00Z`), { timeZone: "UTC" })}</dd></div></dl> : null}
+        <div><dt>{expenseText("category")}</dt><dd>{approval.financial.category==="owner_payout"?payoutText("kind"):approval.financial.category}</dd></div><div><dt>{approval.financial.category==="owner_payout"?payoutText("createdAt"):expenseText("occurredOn")}</dt><dd>{formatDate(safeLocale(locale), new Date(`${approval.financial.occurredOn}T00:00:00Z`), { timeZone: "UTC" })}</dd></div></dl> : null}
       {approval.decisionReason ? <p>{approval.decisionReason}</p> : null}</> : <p>{t("description")}</p>}
     {!approval || approval.canApprove || approval.canReject ? <form onSubmit={(event) => {
       event.preventDefault(); const form = new FormData(event.currentTarget); setError(false);

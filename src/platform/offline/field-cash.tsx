@@ -1,5 +1,7 @@
 "use client";
 
+import { normalizeMoneyInput } from "@/i18n/money-input";
+
 import { useEffect, useId, useRef, useState } from "react";
 import { liveQuery } from "dexie";
 import Decimal from "decimal.js";
@@ -17,10 +19,6 @@ function fresh(snapshot: Snapshot, taskId: string, locale: AppLocale): FieldCash
   return { taskId, amount: "", currency: snapshot.task.cash.baseCurrency, payer: snapshot.task.guestName ?? "",
     purpose: localizedTaskTitle(snapshot.task.title, locale).slice(0, 500), expectedRevision: snapshot.task.cash.revision,
     clientOpId: crypto.randomUUID(), clientCreatedAt: new Date().toISOString() };
-}
-function normalizeAmount(value: string) {
-  return value.replace(/[٠-٩۰-۹]/gu, digit => String(digit.charCodeAt(0) - (digit >= "۰" ? 0x6f0 : 0x660)))
-    .replace(/[٫,]/gu, ".").replace(/^0+(?=\d)/u, "");
 }
 export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; taskId: string; locale: AppLocale }) {
   const t = useTranslations("FieldCash"), id = useId(), { organizationId, userId } = scope;
@@ -137,7 +135,7 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
     <h2>{t("title")}</h2><p>{t("guidance")}</p>
     {value ? <>
       <label htmlFor={`${id}-amount`}>{t("amount")}</label><input id={`${id}-amount`} type="text" inputMode="decimal" dir="ltr" autoComplete="off"
-        maxLength={19} value={value.amount} disabled={locked} data-testid="field-cash-amount" onChange={event => edit({ amount: normalizeAmount(event.target.value) })} />
+        maxLength={19} value={value.amount} disabled={locked} data-testid="field-cash-amount" onChange={event => edit({ amount: normalizeMoneyInput(event.target.value) })} />
       <label htmlFor={`${id}-currency`}>{t("currency")}</label><select id={`${id}-currency`} value={value.currency} disabled={locked} data-testid="field-cash-currency" onChange={event => edit({ currency: event.target.value })}>
         {cash?.currencies.map(currency => <option key={currency.code} value={currency.code}>{currency.code}</option>)}
       </select>
