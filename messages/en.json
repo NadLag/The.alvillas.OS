@@ -2498,7 +2498,15 @@
     "currentPeriodGuidance": "The expense date and its approval stay unchanged. The accounting entry is dated when it is recorded.",
     "adjustmentTitle": "Adjustment in the current period",
     "adjustmentSourcePeriod": "Adjustment for closed accounting month {month}",
-    "adjustmentPostedAt": "Recorded on {date} ({timezone})."
+    "adjustmentPostedAt": "Recorded on {date} ({timezone}).",
+    "correctionTitle": "Correct invoice amount",
+    "correctionGuidance": "Prepare a revised invoice with its own approval. The posted invoice stays unchanged until the approved replacement is recorded; posting then adds an exact reversal and the corrected payment together.",
+    "correctedAmount": "Corrected invoice total ({currency})",
+    "prepareCorrection": "Prepare correction draft",
+    "correctionSource": "This invoice corrects a posted invoice.",
+    "viewOriginalExpense": "View original invoice",
+    "correctionDraftGuidance": "Revise the amount and supply a reason. Source currency, funding, category, invoice date and agreement versions are retained. The revised invoice requires its own approval.",
+    "correctionPostingGuidance": "After approval, explicitly record the correction in the current open period. The original payment is reversed exactly and the approved replacement is posted in one transaction; the original invoice and its audit history are retained."
   },
   "FinancialAccounts": {
     "eyebrow": "Finance",

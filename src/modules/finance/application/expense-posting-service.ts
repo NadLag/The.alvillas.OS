@@ -25,7 +25,9 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
   const input=postInputSchema.parse(raw);
   if(ctx.organizationId!==ctx.authContext.organizationId||ctx.actorId!==ctx.authContext.userAccountId)throw new ExpenseAccessError();
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
-    const expenses=new ExpenseRepository(tx,ctx.organizationId);await expenses.lock(input.id);
+    const expenses=new ExpenseRepository(tx,ctx.organizationId),hint=await expenses.find(input.id);
+    if(!hint)throw new ExpenseAccessError();
+    for(const id of [...new Set([input.id,...(hint.correctsExpenseId?[hint.correctsExpenseId]:[])])].sort())await expenses.lock(id);
     let clock=await expenses.clock();
     const row=await expenses.find(input.id);if(!row||row.property.archivedAt)throw new ExpenseAccessError();
     const periods=new AccountingPeriodRepository(tx,ctx.organizationId);
@@ -33,17 +35,30 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const sourceOccurredAt=await periods.sourceInstant(row.occurredOn,timezone.success?timezone.data.timezone:row.property.timezone);
     const target=expenseResource(ctx.organizationId,row.property,{...row,amount:row.amount.toString(),occurredAt:sourceOccurredAt});
     const postingTarget={...target,type:"financial_transaction" as const,occurredAt:row.transaction?.occurredAt??(input.currentPeriod?clock.now:sourceOccurredAt)};
+    const original=row.correctsExpenseId?await expenses.find(row.correctsExpenseId):null;
+    const correctionChecks:Array<{action:Action;resource:Resource}>=[];
+    if(row.correctsExpenseId){
+      if(!original?.transactionId||!original.submission||original.property.archivedAt)throw new ExpenseAccessError();
+      const oldTimezone=z.object({timezone:z.string().min(1)}).safeParse(original.submission.snapshot);
+      if(!oldTimezone.success)throw new ExpenseConfigurationError("Original expense policy is unavailable");
+      const oldAt=await periods.sourceInstant(original.occurredOn,oldTimezone.data.timezone);
+      const oldExpense=expenseResource(ctx.organizationId,original.property,{...original,amount:original.amount.toString(),occurredAt:oldAt});
+      const oldJournal={...oldExpense,type:"financial_transaction" as const,id:original.transactionId,financialRecordId:original.transactionId,occurredAt:original.transaction!.occurredAt};
+      correctionChecks.push({action:"view",resource:oldExpense},{action:"void",resource:oldExpense},{action:"view",resource:oldJournal},
+        {action:"void",resource:oldJournal},{action:"override",resource:oldJournal});
+    }
     const checks:ReadonlyArray<{action:Action;resource:Resource}>=[
       {action:"view",resource:target},{action:"pay",resource:target},{action:"create",resource:postingTarget},
       {action:"view",resource:{...target,type:"financial_transaction",id:row.fundingAccountId,financialRecordId:row.fundingAccountId}},
-      ...(input.currentPeriod?[{action:"override" as const,resource:{...target,type:"financial_transaction" as const}}]:[])
+      ...(input.currentPeriod?[{action:"override" as const,resource:{...target,type:"financial_transaction" as const}}]:[]),...correctionChecks
     ];
     await recheckFinanceAuthorization(ctx,tx,clock.now,checks,new ExpenseAccessError());
+    if(row.correctsExpenseId&&!input.currentPeriod)throw new ExpenseConflictError();
     if(row.transactionId){
       const audit=await expenses.lifecycleAudit(row.id,"expense.posted"),before=z.object({version:z.number()}).safeParse(audit?.before);
       const after=z.object({postingDateMode:z.enum(["SOURCE_DATE","CURRENT_OPEN_PERIOD"]).default("SOURCE_DATE")}).safeParse(audit?.after);
       if(!audit||audit.actorId!==ctx.actorId||audit.reason!==input.reason||!before.success||before.data.version!==input.expectedVersion||!after.success||
-        after.data.postingDateMode!==(input.currentPeriod?"CURRENT_OPEN_PERIOD":"SOURCE_DATE")||Boolean(row.periodAdjustment)!==input.currentPeriod)throw new ExpenseConflictError();
+        after.data.postingDateMode!==(input.currentPeriod?"CURRENT_OPEN_PERIOD":"SOURCE_DATE")||Boolean(row.periodAdjustment||row.correctsExpenseId)!==input.currentPeriod)throw new ExpenseConflictError();
       return{id:row.id,version:row.version,transactionId:row.transactionId,idempotent:true,...(row.periodAdjustment?{accountingPeriodAdjustmentId:row.periodAdjustment.id}:{})};
     }
     if(row.state!=="APPROVED"||row.version!==input.expectedVersion||!row.submission||
@@ -51,9 +66,17 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const frozen=snapshotSchema.safeParse(row.submission.snapshot);if(!frozen.success)throw new ExpenseConfigurationError("Submitted expense allocation is unavailable");
     let sourcePeriod:Awaited<ReturnType<AccountingPeriodRepository["postingPeriod"]>>=null;
     if(input.currentPeriod){
-      if(await periods.postingOpen(sourceOccurredAt))throw new ExpenseConflictError();
-      sourcePeriod=await periods.postingPeriod(sourceOccurredAt);if(!sourcePeriod?.events[0])throw new ExpenseConflictError();
+      const sourceOpen=await periods.postingOpen(sourceOccurredAt);
+      if(sourceOpen&&!original)throw new ExpenseConflictError();
+      if(!sourceOpen){sourcePeriod=await periods.postingPeriod(sourceOccurredAt);if(!sourcePeriod?.events[0])throw new ExpenseConflictError();}
       clock=await expenses.clock();postingTarget.occurredAt=clock.now;
+    }
+    let correctionReversal:string|null=null;
+    if(original){
+      if(original.state!=="POSTED"||original.version!==row.correctsExpenseVersion)throw new ExpenseConflictError();
+      const reversed=await voidExpense(ctx,{id:original.id,expectedVersion:row.correctsExpenseVersion,reason:input.reason},
+        {db:{$transaction:work=>work(tx)},requestId:deps.requestId});
+      correctionReversal=reversed.reversalTransactionId;
     }
     const amount=Money.of(row.amount.toString(),row.currency),money=(value:z.infer<typeof moneySchema>)=>Money.of(value.amount,value.currency);
     const allocation={ownerAmount:money(frozen.data.allocation.owner),alvillasAmount:money(frozen.data.allocation.alvillas),guestAmount:money(frozen.data.allocation.guest)};
@@ -85,6 +108,12 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
       resourceType:"financial_transaction",resourceId:journal.id,propertyScopeId:row.propertyId,
       after:{adjustmentId:adjustment.id,expenseId:row.id,transactionId:journal.id,sourcePeriodId:sourcePeriod.id,sourcePeriodEventId:sourcePeriod.events[0].id,
         sourceOccurredAt:sourceOccurredAt.toISOString(),postedAt:postingTarget.occurredAt.toISOString(),sourceSubmissionId:row.submission.id},
+      reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:clock.now});
+    if(original&&correctionReversal)await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.expense.correction_posted",
+      resourceType:"financial_transaction",resourceId:journal.id,propertyScopeId:row.propertyId,
+      after:{originalExpenseId:original.id,originalExpenseVersion:row.correctsExpenseVersion,originalTransactionId:original.transactionId,
+        reversalTransactionId:correctionReversal,correctionExpenseId:row.id,transactionId:journal.id,submissionId:row.submission.id,
+        originalAmount:Money.of(original.amount.toString(),original.currency).toJSON(),correctedAmount:amount.toJSON()},
       reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:clock.now});
     return{id:row.id,version:row.version+1,transactionId:journal.id,idempotent:false,...(adjustment?{accountingPeriodAdjustmentId:adjustment.id}:{})};
   });

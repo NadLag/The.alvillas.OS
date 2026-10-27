@@ -4,10 +4,10 @@ import { PrismaClient, type Prisma } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { provisionIntegrationRole } from "./support/database-role";
-import { withTenant } from "@/platform/db/tenant";
+import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
-import { createExpenseDraft, updateExpenseDraft, submitExpense,getExpense,getExpenseDraftEditor,getExpenseEditor, ExpenseAccessError, ExpenseConflictError,ExpenseConfigurationError } from "@/modules/finance/application/expense-service";
+import { createExpenseDraft,createExpenseCorrectionDraft, updateExpenseDraft, submitExpense,getExpense,getExpenseDraftEditor,getExpenseEditor, ExpenseAccessError, ExpenseConflictError,ExpenseConfigurationError } from "@/modules/finance/application/expense-service";
 import { getApproval, decideApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
 import { captureReservationCommissionSnapshots } from "@/platform/reservations/finance";
@@ -123,6 +123,16 @@ async function accountingPolicy(f:Fixture){
   return withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.accounting_periods",scopeType:"organization",scopeId:null,
     effectiveFrom:new Date("2020-01-01"),reason:"Dedicated explicit accounting calendar",value:{timezone:"Europe/Paris",allow_early_close:false,max_reopen_seconds:60}}));
 }
+async function correctionFixture(){
+  const f=await fixture();await policy(f);await postingGrant(f,true);
+  const override=await accountingGrant(f,["financial_transaction:override"],"property"),draft=await create(f);
+  const submission=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated original correction source"},{db});
+  const posted=await postExpense(await actor(f),{id:draft.id,expectedVersion:submission.version,reason:"Dedicated original correction payment"},{db});
+  const original=await getExpense(await actor(f),draft.id,{db});
+  const revised=await createExpenseCorrectionDraft(await actor(f),{id:original.id,expectedVersion:original.version,amount:"600.25",idempotencyKey:randomUUID(),reason:"Dedicated revised invoice preparation"},{db});
+  const approved=await submitExpense(await actor(f),{id:revised.id,expectedVersion:1,reason:"Dedicated separate corrected invoice policy"},{db});
+  return{f,override,original,posted,command:{id:revised.id,expectedVersion:approved.version,currentPeriod:true,reason:"Dedicated atomic invoice correction payment"}};
+}
 
 describe("native expenses on real PostgreSQL", () => {
   beforeAll(async () => {
@@ -132,6 +142,148 @@ describe("native expenses on real PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it("rolls back both journals when correction override is revoked during a real period-lock wait",async()=>{
+    const {f,override,original,posted,command}=await correctionFixture(),ctx=await actor(f);
+    let announce!:()=>void,release!:()=>void;
+    const acquired=new Promise<void>(resolve=>{announce=resolve}),gate=new Promise<void>(resolve=>{release=resolve});
+    const holder=admin.$transaction(async tx=>{await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${f.org+":accounting-period"},0))::text`;announce();await gate;},{timeout:30000});
+    await acquired;const pending=postExpense(ctx,command,{db}).then(value=>({ok:true as const,value}),error=>({ok:false as const,error: error as unknown}));
+    try{
+      await vi.waitFor(async()=>{
+        const waiting=await admin.$queryRaw<Array<{count:bigint}>>`SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory' AND query LIKE '%app_financial_period_is_open%'`;
+        expect(Number(waiting[0].count)).toBeGreaterThan(0);
+      },{timeout:5000});
+      await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:override.id},data:{archivedAt:new Date()}}));
+    }finally{release();await holder;}
+    const result=await pending;expect(result.ok).toBe(false);if(!result.ok)expect(result.error).toBeInstanceOf(ExpenseAccessError);
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.financialTransaction.count()).toBe(1);expect(await tx.financialTransaction.count({where:{reversesTransactionId:posted.transactionId}})).toBe(0);
+      expect(await tx.auditLog.count({where:{action:{in:["expense.voided","finance.expense.correction_posted"]}}})).toBe(0);
+      expect((await tx.expense.findUniqueOrThrow({where:{id:original.id}})).state).toBe("POSTED");
+      expect((await tx.expense.findUniqueOrThrow({where:{id:command.id}})).state).toBe("APPROVED");
+    });
+  });
+  it("rejects an otherwise balanced correction without its linked financial audit and retains the original payment",async()=>{
+    const {f,original,command}=await correctionFixture();
+    const fault:TenantTransactionRunner={$transaction:(work,options)=>db.$transaction(async tx=>{
+      const audit=new Proxy(tx.auditLog,{get(target,key){
+        if(key==="create")return(args:Prisma.AuditLogCreateArgs)=>tx.auditLog.create({...args,data:args.data.action==="finance.expense.correction_posted"?
+          {...args.data,action:"integration.intentionally_missing_correction_audit"}:args.data});
+        return Reflect.get(target,key) as unknown;
+      }});
+      return work(new Proxy(tx,{get(target,key){return key==="auditLog"?audit:Reflect.get(target,key) as unknown;}}));
+    },options)};
+    await expect(postExpense(await actor(f),command,{db:fault})).rejects.toThrow("expense correction requires one atomic exact reversal, approved replacement and reasoned audit");
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.financialTransaction.count()).toBe(1);expect(await tx.auditLog.count({where:{action:{in:["expense.voided","integration.intentionally_missing_correction_audit"]}}})).toBe(0);
+      expect((await tx.expense.findUniqueOrThrow({where:{id:original.id}})).state).toBe("POSTED");
+      expect((await tx.expense.findUniqueOrThrow({where:{id:command.id}})).state).toBe("APPROVED");
+    });
+  });
+  it("allows only one separately approved correction of the same posted source and supports an open source period",async()=>{
+    const {f,original,posted,command}=await correctionFixture();
+    const alternative=await createExpenseCorrectionDraft(await actor(f),{id:original.id,expectedVersion:original.version,amount:"700.25",idempotencyKey:randomUUID(),reason:"Dedicated alternative invoice correction"},{db});
+    const approved=await submitExpense(await actor(f),{id:alternative.id,expectedVersion:1,reason:"Dedicated alternative corrected invoice review"},{db});
+    const visible=await getExpense(await actor(f),command.id,{db});expect(visible.sourcePeriodClosed).toBe(false);expect(visible.canPostOriginalDate).toBe(false);expect(visible.canPostInCurrentPeriod).toBe(true);
+    const ctx=await actor(f),results=await Promise.allSettled([postExpense(ctx,command,{db}),postExpense(ctx,{...command,id:alternative.id,expectedVersion:approved.version},{db})]);
+    expect(results.filter(row=>row.status==="fulfilled")).toHaveLength(1);
+    const failed=results.find(row=>row.status==="rejected");expect(failed?.status==="rejected"&&failed.reason instanceof ExpenseConflictError).toBe(true);
+    const winner=results.find(row=>row.status==="fulfilled");if(winner?.status!=="fulfilled")throw new Error("One correction must be committed");
+    const replay=await postExpense(ctx,{...command,id:winner.value.id,expectedVersion:winner.value.id===command.id?command.expectedVersion:approved.version},{db});
+    expect(replay).toMatchObject({id:winner.value.id,transactionId:winner.value.transactionId,idempotent:true});
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.financialTransaction.count()).toBe(3);expect(await tx.financialTransaction.count({where:{reversesTransactionId:posted.transactionId}})).toBe(1);
+      expect(await tx.auditLog.count({where:{action:"finance.expense.correction_posted"}})).toBe(1);expect(await tx.accountingPeriodAdjustment.count()).toBe(0);
+      expect(await tx.expense.count({where:{correctsExpenseId:original.id,state:"POSTED"}})).toBe(1);
+      expect(await tx.expense.count({where:{correctsExpenseId:original.id,state:"APPROVED",transactionId:null}})).toBe(1);
+    });
+    const losing=await withTenant(db,f.org,tx=>tx.expense.findFirstOrThrow({where:{correctsExpenseId:original.id,state:"APPROVED"}}));
+    expect((await getExpense(ctx,losing.id,{db})).canPost).toBe(false);
+  });
+  it("corrects a posted historical amount only after fresh owner approval with an atomic exact reversal and frozen agreement",async()=>{
+    const f=await fixture(),configured=await policy(f);await postingGrant(f,true);
+    const owner=await approver(f,"owner",configured.owner.id);
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated mandatory invoice approval",value:{thresholds:[{key:"required_owner",amount:"100",currency:"MAD",requires_approval_from:["owner"]}],
+        routing:{owner:{people:[owner.person.id],roles:[],assigned:false,channels:["in_app"]}}}}));
+    const original=await create(f,{...f.input,occurredOn:"2024-10-15"});
+    const requested=await submitExpense(await actor(f),{id:original.id,expectedVersion:1,reason:"Dedicated original invoice review"},{db});
+    const firstApproval=await getApproval(owner.actor,requested.approvalId!,{db});
+    await decideApproval(owner.actor,{id:requested.approvalId!,stageId:firstApproval.stageId,decision:"APPROVED",reason:"Owner approves the original invoice"},{db});
+    const approved=await getExpense(await actor(f),original.id,{db});
+    const payment=await postExpense(await actor(f),{id:original.id,expectedVersion:approved.version,reason:"Dedicated original approved payment"},{db});
+    const source=await withTenant(db,f.org,async tx=>({expense:await tx.expense.findUniqueOrThrow({where:{id:original.id}}),
+      submission:await tx.expenseSubmission.findUniqueOrThrow({where:{organizationId_expenseId:{organizationId:f.org,expenseId:original.id}}}),
+      journal:await tx.financialTransaction.findUniqueOrThrow({where:{id:payment.transactionId},include:{postings:{orderBy:{id:"asc"}}}})}));
+    await accountingGrant(f,["financial_transaction:view","financial_transaction:configure"]);await accountingPolicy(f);
+    const closed=await closeAccountingPeriod(await actor(f),{month:"2024-10",expectedVersion:0,reason:"Dedicated reconciled original invoice month",idempotencyKey:randomUUID()},{db});
+    const snapshot=(await getAccountingPeriod(await actor(f),closed.id,undefined,{db})).snapshot;
+    const prepare={id:original.id,expectedVersion:source.expense.version,amount:"600.25",idempotencyKey:randomUUID(),reason:"Dedicated corrected supplier invoice total"};
+    await expect(createExpenseCorrectionDraft(await actor(f),prepare,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    expect((await getExpense(await actor(f),original.id,{db})).canCorrect).toBe(false);
+    await accountingGrant(f,["financial_transaction:override"],"property");
+    expect((await getExpense(await actor(f),original.id,{db})).canCorrect).toBe(true);
+    const copies=await Promise.all(Array.from({length:4},async(_,index)=>createExpenseCorrectionDraft(await actor(f),{...prepare,
+      id:index?prepare.id:prepare.id.toUpperCase(),idempotencyKey:index?prepare.idempotencyKey:prepare.idempotencyKey.toUpperCase()},{db})));
+    expect(copies.filter(row=>!row.idempotent)).toHaveLength(1);expect(new Set(copies.map(row=>row.id)).size).toBe(1);
+    const replacementId=copies[0].id;
+    await expect(createExpenseDraft(await actor(f),{...f.input,occurredOn:"2024-10-15",amount:"600.25",idempotencyKey:prepare.idempotencyKey},{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+    await expect(withTenant(db,f.org,async tx=>{
+      await tx.expense.update({where:{id:replacementId},data:{correctsExpenseVersion:source.expense.version+1}});
+      throw new Error("Roll back an unexpectedly permitted source rewrite");
+    })).rejects.toThrow("expense correction source is immutable");
+    await withTenant(db,f.org,async tx=>{
+      expect((await tx.expense.findUniqueOrThrow({where:{id:original.id}})).state).toBe("POSTED");
+      expect(await tx.financialTransaction.count()).toBe(1);
+      await tx.property.update({where:{id:f.property.id},data:{timezone:"Asia/Tokyo"}});
+      const rules=new ConfigRuleRepository(tx,f.org);
+      await rules.createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,effectiveFrom:new Date("2020-01-03"),
+        reason:"Later treatment cannot replace original correction agreement",value:{default_treatment:"ALVILLAS_PAID"}});
+      await rules.createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:f.property.id,effectiveFrom:new Date("2020-01-03"),
+        reason:"Later approval waiver cannot bypass original invoice approval",value:{thresholds:[]}});
+    });
+    const editor=await getExpenseDraftEditor(await actor(f),replacementId,{db});
+    await updateExpenseDraft(await actor(f),{id:replacementId,expectedVersion:1,draft:{...f.input,idempotencyKey:prepare.idempotencyKey,
+      occurredOn:"2024-10-15",amount:"650.25",reason:"Dedicated revised correction draft"}},{db});
+    expect(editor.draft.correctsExpenseId).toBe(original.id);
+    const submitted=await submitExpense(await actor(f),{id:replacementId,expectedVersion:2,reason:"Dedicated independent corrected invoice review"},{db});
+    expect(submitted.state).toBe("PENDING_APPROVAL");expect(submitted.approvalId).not.toBe(requested.approvalId);
+    await expect(postExpense(await actor(f),{id:replacementId,expectedVersion:submitted.version,currentPeriod:true,reason:"Owner decision still required for corrected total"},{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+    await withTenant(db,f.org,async tx=>{expect(await tx.financialTransaction.count()).toBe(1);expect((await tx.expense.findUniqueOrThrow({where:{id:original.id}})).state).toBe("POSTED");});
+    const secondApproval=await getApproval(owner.actor,submitted.approvalId!,{db});
+    await decideApproval(owner.actor,{id:submitted.approvalId!,stageId:secondApproval.stageId,decision:"APPROVED",reason:"Owner explicitly approves revised invoice total"},{db});
+    const replacement=await getExpense(await actor(f),replacementId,{db});expect(replacement.canPostOriginalDate).toBe(false);expect(replacement.canPostInCurrentPeriod).toBe(true);
+    const ctx=await actor(f),command={id:replacementId,expectedVersion:replacement.version,currentPeriod:true,reason:"Dedicated accepted invoice amount correction"};
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("1990-01-01T00:00:00Z"));
+    let results:Awaited<ReturnType<typeof postExpense>>[];
+    try{results=await Promise.all(Array.from({length:4},(_,index)=>postExpense(ctx,{...command,id:index?replacementId:replacementId.toUpperCase()},{db})));}
+    finally{vi.useRealTimers();}
+    expect(results.filter(row=>!row.idempotent)).toHaveLength(1);expect(new Set(results.map(row=>row.transactionId)).size).toBe(1);
+    await expect(postExpense(ctx,{...command,currentPeriod:false},{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+    await expect(postExpense(ctx,{...command,reason:"Different correction intent must be rejected"},{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.financialTransaction.count()).toBe(3);
+      expect(await tx.financialTransaction.findUniqueOrThrow({where:{id:source.journal.id},include:{postings:{orderBy:{id:"asc"}}}})).toEqual(source.journal);
+      expect(await tx.expenseSubmission.findUniqueOrThrow({where:{id:source.submission.id}})).toEqual(source.submission);
+      const old=await tx.expense.findUniqueOrThrow({where:{id:original.id}}),corrected=await tx.expense.findUniqueOrThrow({where:{id:replacementId}});
+      expect(old).toMatchObject({state:"VOIDED",version:source.expense.version+1,amount:source.expense.amount,transactionId:source.journal.id});
+      expect(corrected).toMatchObject({state:"POSTED",correctsExpenseId:original.id,correctsExpenseVersion:source.expense.version});
+      const journal=await tx.financialTransaction.findUniqueOrThrow({where:{id:corrected.transactionId!},include:{postings:true}});
+      expect(journal.postings.map(row=>row.amount.toFixed(2))).toEqual(["650.25","650.25"]);
+      expect(journal.postings.find(row=>row.side==="DEBIT")?.dimensions).toMatchObject({owner_id:configured.owner.id});
+      expect(journal.occurredAt.getUTCFullYear()).toBeGreaterThan(2024);
+      const bank=await tx.posting.findMany({where:{ledgerAccountId:f.bank.id}});
+      expect(bank.reduce((sum,row)=>row.side==="DEBIT"?sum.add(Money.of(row.amount.toString(),row.currency)):sum.subtract(Money.of(row.amount.toString(),row.currency)),Money.zero("MAD")).toJSON().amount).toBe("-650.25");
+      expect(await tx.auditLog.count({where:{action:"finance.expense.correction_posted"}})).toBe(1);
+      expect(await tx.auditLog.count({where:{action:"expense.voided",resourceId:original.id,reason:command.reason}})).toBe(1);
+      expect(await tx.accountingPeriodAdjustment.count({where:{expenseId:replacementId}})).toBe(1);
+    });
+    expect((await getAccountingPeriod(await actor(f),closed.id,undefined,{db})).snapshot).toEqual(snapshot);
+    const foreign=await fixture();await expect(createExpenseCorrectionDraft(await actor(foreign),prepare,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    const after=await getExpense(await actor(f),replacementId,{db});
+    await voidExpense(await actor(f),{id:replacementId,expectedVersion:after.version,reason:"Dedicated later approved correction cancellation"},{db});
+    expect((await getAccountingPeriod(await actor(f),closed.id,undefined,{db})).snapshot).toEqual(snapshot);
+  });
   it("posts an approved historic expense in the current open period without changing its closed source or agreement",async()=>{
     const f=await fixture(),configured=await policy(f);await postingGrant(f,true);
     await accountingGrant(f,["financial_transaction:view","financial_transaction:configure"]);await accountingPolicy(f);

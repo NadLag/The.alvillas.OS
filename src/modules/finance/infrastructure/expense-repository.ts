@@ -3,6 +3,7 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import type { ExpenseDraftInput } from "../domain/expense";
 
 const include = { property: { select: { id: true, name: true, city: true, cityId: true, region: true, regionId: true, timezone: true, archivedAt: true } },
+  correctsExpense: { include: { submission: true, transaction: { select: { occurredAt: true } } } },
   submission: true, transaction: { select: { occurredAt: true } }, approval: { include: { financialStages: { orderBy: { position: "asc" as const }, include: { recipients: true } } } },
   periodAdjustment: { select: { id: true, reason: true, createdAt: true, sourceOccurredAt: true,
     period: { select: { id: true, month: true, timezone: true } }, periodEvent: { select: { id: true, version: true } } } } } satisfies Prisma.ExpenseInclude;
@@ -69,9 +70,9 @@ export class ExpenseRepository {
       effectiveFrom: { lte: asOf }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: asOf } }] }, orderBy: [{ effectiveFrom: "desc" }, { id: "desc" }],
       select: { id: true, reference: true, effectiveFrom: true, effectiveTo: true, createdAt: true, updatedAt: true } });
   }
-  create(id: string, input: ExpenseDraftInput, actorId: string) {
+  create(id: string, input: ExpenseDraftInput, actorId: string, correction?: { correctsExpenseId: string; correctsExpenseVersion: number }) {
     return this.tx.expense.create({ data: { ...draftFacts(input), idempotencyKey: input.idempotencyKey, organizationId: this.organizationId, id,
-      createdBy: actorId, updatedBy: actorId }, include });
+      createdBy: actorId, updatedBy: actorId, ...correction }, include });
   }
   updateDraft(id: string, version: number, input: ExpenseDraftInput, actorId: string) {
     return this.tx.expense.updateMany({ where: { organizationId: this.organizationId, id, version, state: "DRAFT" },

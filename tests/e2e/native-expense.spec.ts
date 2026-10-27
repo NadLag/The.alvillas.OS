@@ -245,6 +245,64 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       expect((await tx.expenseSubmission.findFirstOrThrow({where:{expenseId:customId}})).snapshot).toMatchObject({policies:[{allocationRule:{configRuleId:customRule.id,version:customRule.version}}]});
       expect(await tx.auditLog.count({where:{resourceId:customId,action:"expense.updated"}})).toBe(1);
     });
+    const correctionSource=await withTenant(f.db,f.organizationId,async tx=>{
+      const expense=await tx.expense.findUniqueOrThrow({where:{id:customId}});
+      return{expense,journal:await tx.financialTransaction.findUniqueOrThrow({where:{id:expense.transactionId!},include:{postings:{orderBy:{id:"asc"}}}}),
+        submission:await tx.expenseSubmission.findUniqueOrThrow({where:{organizationId_expenseId:{organizationId:f.organizationId,expenseId:customId}}})};
+    });
+    await expect(admin.getByTestId("expense-correction-form")).toBeVisible();
+    await admin.getByTestId("expense-corrected-amount").fill("180,00");await admin.getByTestId("expense-correction-reason").fill("Dedicated corrected supplier invoice amount");
+    const prepareCapture=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&Boolean(request.postData()?.includes(customId)));
+    await admin.getByTestId("expense-correction-create").click();const prepareRequest=await prepareCapture;
+    await admin.waitForURL(url=>url.pathname.endsWith("/expenses/"+url.pathname.split("/").at(-1))&&!url.pathname.endsWith("/"+customId));
+    await expect(admin.getByTestId("expense-correction-source")).toBeVisible();const correctedId=new URL(admin.url()).pathname.split("/").at(-1)!;
+    const prepareHeaders={"content-type":prepareRequest.headers()["content-type"],"next-action":prepareRequest.headers()["next-action"],accept:"text/x-component",origin};
+    for(const response of await Promise.all(Array.from({length:4},()=>admin.request.post(prepareRequest.url(),{data:prepareRequest.postDataBuffer()!,headers:prepareHeaders}))))expect(await response.text()).toContain('"idempotent":true');
+    for(const restricted of[fieldPage,ownerPage])expect(await(await restricted.request.post(prepareRequest.url(),{data:prepareRequest.postDataBuffer()!,headers:prepareHeaders})).text()).toContain('"code":"forbidden"');
+    await admin.getByTestId("expense-edit").click();await expect(admin.getByTestId("expense-currency")).toBeDisabled();await expect(admin.getByTestId("expense-funding-account")).toBeDisabled();
+    await expect(admin.getByTestId("expense-occurred-on")).toHaveAttribute("readonly","");await expect(admin.getByTestId("expense-category")).toHaveAttribute("readonly","");
+    await admin.getByTestId("expense-amount").fill("200,00");await admin.getByTestId("expense-reason").fill("Dedicated corrected total before independent approval");
+    expect((await new AxeBuilder({page:admin}).analyze()).violations).toEqual([]);await admin.getByTestId("expense-create").click();
+    await expect(admin.getByTestId("expense-total")).toHaveText(formatCurrencyAmount(locale,"200.00","MAD"));
+    await withTenant(f.db,f.organizationId,async tx=>{
+      expect((await tx.expense.findUniqueOrThrow({where:{id:customId}})).state).toBe("POSTED");
+      expect(await tx.financialTransaction.count({where:{reversesTransactionId:correctionSource.journal.id}})).toBe(0);
+      const config=new ConfigRuleRepository(tx,f.organizationId);
+      await config.createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:setup.propertyId,effectiveFrom:new Date("2020-01-03"),
+        reason:"Later allocation does not replace the corrected invoice agreement",value:{default_treatment:"ALVILLAS_PAID"}});
+      await config.createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:setup.propertyId,effectiveFrom:new Date("2020-01-03"),
+        reason:"Later waiver does not remove original corrected invoice approval",value:{thresholds:[]}});
+    });
+    await admin.getByTestId("expense-submit-reason").fill("Dedicated separate corrected invoice approval");await admin.getByTestId("expense-submit").click();
+    await expect(admin.getByTestId("expense-approval-link")).toBeVisible();await expect(admin.getByTestId("expense-post-form")).toHaveCount(0);
+    await ownerPage.goto((await admin.getByTestId("expense-approval-link").getAttribute("href"))!);await expect(ownerPage.getByTestId("approval-approve")).toBeEnabled();
+    await expect(ownerPage.getByTestId("approval-financial-summary")).toContainText(formatCurrencyAmount(locale,"200.00","MAD"));
+    await ownerPage.getByTestId("approval-reason").fill("Owner approves the revised invoice independently");await ownerPage.getByTestId("approval-approve").click();
+    await expect(ownerPage.getByTestId("approval-approve")).toHaveCount(0);await admin.reload();await expect(admin.getByTestId("expense-current-period")).not.toBeChecked();
+    await expect(admin.getByTestId("expense-current-period")).toHaveAttribute("required","");await admin.getByTestId("expense-current-period").check();
+    await admin.getByTestId("expense-post-reason").fill("Dedicated approved atomic invoice correction");
+    const correctionCapture=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&Boolean(request.postData()?.includes(correctedId)));
+    await admin.getByTestId("expense-post").click();const correctionRequest=await correctionCapture;await expect(admin.getByTestId("expense-post-form")).toHaveCount(0);
+    const correctionHeaders={"content-type":correctionRequest.headers()["content-type"],"next-action":correctionRequest.headers()["next-action"],accept:"text/x-component",origin};
+    for(const response of await Promise.all(Array.from({length:4},()=>admin.request.post(correctionRequest.url(),{data:correctionRequest.postDataBuffer()!,headers:correctionHeaders}))))expect(await response.text()).toContain('"idempotent":true');
+    for(const restricted of[fieldPage,ownerPage])expect(await(await restricted.request.post(correctionRequest.url(),{data:correctionRequest.postDataBuffer()!,headers:correctionHeaders})).text()).toContain('"code":"forbidden"');
+    expect((await fieldPage.request.get(`/${locale}/app/expenses/${correctedId}`)).status()).toBe(404);
+    await withTenant(f.db,f.organizationId,async tx=>{
+      const original=await tx.expense.findUniqueOrThrow({where:{id:customId}}),corrected=await tx.expense.findUniqueOrThrow({where:{id:correctedId}});
+      expect(original).toMatchObject({state:"VOIDED",amount:correctionSource.expense.amount,transactionId:correctionSource.journal.id});
+      expect(corrected).toMatchObject({state:"POSTED",correctsExpenseId:customId,correctsExpenseVersion:correctionSource.expense.version,emergency:false});
+      expect(await tx.expense.count({where:{correctsExpenseId:customId}})).toBe(1);
+      expect(await tx.financialTransaction.findUniqueOrThrow({where:{id:correctionSource.journal.id},include:{postings:{orderBy:{id:"asc"}}}})).toEqual(correctionSource.journal);
+      expect(await tx.expenseSubmission.findUniqueOrThrow({where:{id:correctionSource.submission.id}})).toEqual(correctionSource.submission);
+      const reverse=await tx.financialTransaction.findMany({where:{reversesTransactionId:original.transactionId!},include:{postings:true}});expect(reverse).toHaveLength(1);
+      expect(reverse[0].postings.map(line=>({account:line.ledgerAccountId,side:line.side,amount:line.amount.toString(),bucket:line.bucket,dimensions:line.dimensions}))).toEqual(expect.arrayContaining(
+        correctionSource.journal.postings.map(line=>({account:line.ledgerAccountId,side:line.side==="DEBIT"?"CREDIT":"DEBIT",amount:line.amount.toString(),bucket:line.bucket,dimensions:line.dimensions}))));
+      const lines=await tx.posting.findMany({where:{transactionId:corrected.transactionId!}});expect(lines).toHaveLength(4);
+      expect(Object.fromEntries(lines.filter(line=>line.side==="DEBIT").map(line=>[line.bucket,line.amount.toString()]))).toEqual({OWNER_EXPENSE:"50",ALVILLAS_EXPENSE:"50",GUEST_EXPENSE:"100"});
+      expect(lines.find(line=>line.side==="CREDIT")?.amount.toString()).toBe("200");
+      expect((await tx.expenseSubmission.findUniqueOrThrow({where:{organizationId_expenseId:{organizationId:f.organizationId,expenseId:correctedId}}})).snapshot).toMatchObject({policies:[{allocationRule:{configRuleId:customRule.id,version:customRule.version}}]});
+      expect(await tx.auditLog.count({where:{action:"finance.expense.correction_posted",resourceId:corrected.transactionId!}})).toBe(1);
+    });
     await expect(admin.locator("html")).toHaveAttribute("dir",locale === "ar" ? "rtl" : "ltr");
     expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);
     await admin.locator("main").evaluate(element => { (element as HTMLElement).style.fontSize="200%"; });

@@ -2498,7 +2498,15 @@
     "currentPeriodGuidance": "La date de la dépense et sa validation sont conservées. L’écriture est datée lors de son enregistrement.",
     "adjustmentTitle": "Régularisation dans la période actuelle",
     "adjustmentSourcePeriod": "Régularisation du mois comptable clôturé {month}",
-    "adjustmentPostedAt": "Enregistré le {date} ({timezone})."
+    "adjustmentPostedAt": "Enregistré le {date} ({timezone}).",
+    "correctionTitle": "Corriger le montant de la facture",
+    "correctionGuidance": "Préparez une facture révisée avec sa propre approbation. La facture comptabilisée reste inchangée jusqu’à l’enregistrement du remplacement approuvé ; cette opération ajoute ensemble une extourne exacte et le paiement corrigé.",
+    "correctedAmount": "Total corrigé de la facture ({currency})",
+    "prepareCorrection": "Préparer le brouillon de correction",
+    "correctionSource": "Cette facture corrige une facture déjà comptabilisée.",
+    "viewOriginalExpense": "Voir la facture d’origine",
+    "correctionDraftGuidance": "Révisez le montant et indiquez un motif. La devise, le compte de financement, la catégorie, la date de facture et les versions des accords sont conservés. La facture révisée nécessite sa propre approbation.",
+    "correctionPostingGuidance": "Après approbation, enregistrez explicitement la correction dans la période ouverte en cours. Le paiement d’origine est extourné exactement et le remplacement approuvé est comptabilisé dans une seule transaction ; la facture d’origine et son historique sont conservés."
   },
   "FinancialAccounts": {
     "eyebrow": "Finances",

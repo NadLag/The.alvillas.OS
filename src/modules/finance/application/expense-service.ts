@@ -10,7 +10,7 @@ import { calendarDateAt } from "@/i18n/format";
 import { expenseDraftSchema, expenseResource, viewableExpenseResource, isExpenseFundingAccount, type ExpenseDraftInput } from "../domain/expense";
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
-import type { FinanceActorContext } from "./finance-access";
+import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
 import { prepareExpenseSubmissionPolicy } from "./expense-submission-policy";
 import { ExpenseAllocationConfigurationError } from "../domain/configured-finance-rules";
 import { ApprovalRepository } from "@/platform/approvals/approval-repository";
@@ -24,6 +24,8 @@ export class ExpenseConflictError extends Error {}
 export class ExpenseConfigurationError extends Error {}
 const updateSchema = z.object({ id: z.uuid(), expectedVersion: z.number().int().positive(), draft: expenseDraftSchema }).strict();
 const submitSchema = z.object({ id: z.uuid(), expectedVersion: z.number().int().positive(), reason: z.string().trim().min(6).max(500) }).strict();
+const correctionDraftSchema = z.object({ id: z.uuid().transform(value => value.toLowerCase()), expectedVersion: z.number().int().positive(),
+  amount: expenseDraftSchema.shape.amount, idempotencyKey: z.uuid().transform(value => value.toLowerCase()), reason: z.string().trim().min(6).max(500) }).strict();
 
 function assertActor(ctx: FinanceActorContext) {
   if (ctx.organizationId !== ctx.authContext.organizationId || ctx.actorId !== ctx.authContext.userAccountId) throw new ExpenseAccessError();
@@ -35,15 +37,19 @@ function resource(ctx: FinanceActorContext, property: Property, facts: { id: str
 async function current(ctx: FinanceActorContext, tx: TenantTransaction): Promise<FinanceActorContext> {
   return { ...ctx, authContext: { ...await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId), personId: ctx.authContext.personId } };
 }
-async function validateFacts(ctx: FinanceActorContext, tx: TenantTransaction, input: ExpenseDraftInput, id: string, now: Date, action: "create" | "edit") {
+async function validateAmount(repository: ExpenseRepository, amount: string, currencyCode: string) {
+  const currency = await repository.currency(currencyCode), money = Money.of(amount, currencyCode);
+  if (!currency || currency.minorUnit > 2 || money.amount.decimalPlaces() > currency.minorUnit) throw new ExpenseConfigurationError("Expense currency precision is unavailable");
+  return money;
+}
+async function validateFacts(ctx: FinanceActorContext, tx: TenantTransaction, input: ExpenseDraftInput, id: string, now: Date, action: "create" | "edit", sourceTimezone?: string) {
   const repository = new ExpenseRepository(tx, ctx.organizationId), property = await repository.property(input.propertyId);
   if (!property) throw new ExpenseAccessError();
-  const target = resource(ctx, property, { id, amount: input.amount, reservationId: input.reservationId, state: "DRAFT",
+  const target = resource(ctx, sourceTimezone ? { ...property, timezone: sourceTimezone } : property, { id, amount: input.amount, reservationId: input.reservationId, state: "DRAFT",
     occurredOn: new Date(`${input.occurredOn}T00:00:00.000Z`), createdBy: ctx.actorId });
   if (!authorize(ctx.authContext, action, target, now) || !authorize(ctx.authContext, "view",
     { ...target, id: input.fundingAccountId, financialRecordId: input.fundingAccountId, type: "financial_transaction" }, now)) throw new ExpenseAccessError();
-  const currency = await repository.currency(input.currency), money = Money.of(input.amount, input.currency);
-  if (!currency || currency.minorUnit > 2 || money.amount.decimalPlaces() > currency.minorUnit) throw new ExpenseConfigurationError("Expense currency precision is unavailable");
+  await validateAmount(repository, input.amount, input.currency);
   if (input.reservationId && (await repository.reservation(input.reservationId))?.propertyId !== property.id) throw new ExpenseAccessError();
   const funding = await new FinanceRepository(tx, ctx.organizationId).findLedgerAccountById(input.fundingAccountId);
   if (!funding || !isExpenseFundingAccount(funding))
@@ -54,7 +60,12 @@ async function validateFacts(ctx: FinanceActorContext, tx: TenantTransaction, in
 function facts(row: ExpenseRecord) {
   return { id: row.id, propertyId: row.propertyId, reservationId: row.reservationId, fundingAccountId: row.fundingAccountId,
     amount: row.amount.toFixed(2), currency: row.currency, category: row.category, purpose: row.purpose,
-    occurredOn: row.occurredOn.toISOString().slice(0,10), emergency: row.emergency, version: row.version, state: row.state };
+    occurredOn: row.occurredOn.toISOString().slice(0,10), emergency: row.emergency, version: row.version, state: row.state,
+    ...(row.correctsExpenseId ? { correctsExpenseId: row.correctsExpenseId, correctsExpenseVersion: row.correctsExpenseVersion } : {}) };
+}
+function sourceProperty(row: ExpenseRecord) {
+  const frozen = z.object({ timezone: z.string().min(1) }).safeParse(row.submission?.snapshot ?? row.correctsExpense?.submission?.snapshot);
+  return frozen.success ? { ...row.property, timezone: frozen.data.timezone } : row.property;
 }
 function sameDraft(row: ExpenseRecord, input: ExpenseDraftInput) {
   return row.propertyId === input.propertyId && row.reservationId === (input.reservationId ?? null) && row.fundingAccountId === input.fundingAccountId &&
@@ -69,12 +80,56 @@ export async function createExpenseDraft(ctx: FinanceActorContext, raw: unknown,
     await validateFacts(ctx, tx, input, clock.id, clock.now, "create");
     const previous = await repository.byKey(input.idempotencyKey);
     if (previous) {
-      if (previous.createdBy !== ctx.actorId || !sameDraft(previous, input)) throw new ExpenseConflictError();
+      if (previous.correctsExpenseId || previous.createdBy !== ctx.actorId || !sameDraft(previous, input)) throw new ExpenseConflictError();
       return { id: previous.id, version: previous.version, idempotent: true };
     }
     const row = await repository.create(clock.id, input, ctx.actorId);
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "expense.created", resourceType: "expense",
       resourceId: row.id, propertyScopeId: row.propertyId, after: facts(row), reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: clock.now });
+    return { id: row.id, version: row.version, idempotent: false };
+  });
+}
+
+/** Prepare a revised invoice for its own approval; the posted source remains unchanged. */
+export async function createExpenseCorrectionDraft(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
+  assertActor(ctx); const input = correctionDraftSchema.parse(raw);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const repository = new ExpenseRepository(tx, ctx.organizationId);
+    await repository.lock(`draft:${input.idempotencyKey}`); await repository.lock(input.id);
+    const clock = await repository.clock(), original = await repository.find(input.id);
+    if (!original || original.property.archivedAt || !original.transactionId || !original.submission) throw new ExpenseAccessError();
+    const frozen = z.object({ timezone: z.string().min(1) }).safeParse(original.submission.snapshot);
+    if (!frozen.success) throw new ExpenseConfigurationError("Original expense policy is unavailable");
+    const occurredAt = await new AccountingPeriodRepository(tx, ctx.organizationId).sourceInstant(original.occurredOn, frozen.data.timezone);
+    const source = expenseResource(ctx.organizationId, original.property, { ...original, amount: original.amount.toString(), occurredAt });
+    const financial = { ...source, type: "financial_transaction" as const, id: original.transactionId, financialRecordId: original.transactionId,
+      occurredAt: original.transaction!.occurredAt };
+    await recheckFinanceAuthorization(ctx, tx, clock.now, [{ action: "view", resource: source }, { action: "view", resource: financial },
+      { action: "view", resource: { ...financial, id: original.fundingAccountId, financialRecordId: original.fundingAccountId, occurredAt } },
+      { action: "override", resource: financial }, { action: "create", resource: { ...source, id: clock.id, financialRecordId: clock.id,
+        status: "DRAFT", assignedUserAccountId: ctx.actorId, amount: input.amount } }], new ExpenseAccessError());
+    const previous = await repository.byKey(input.idempotencyKey);
+    if (previous) {
+      const audit = await repository.lifecycleAudit(previous.id, "expense.created");
+      if (previous.createdBy !== ctx.actorId || previous.correctsExpenseId !== original.id || previous.correctsExpenseVersion !== input.expectedVersion ||
+        !previous.amount.eq(input.amount) || audit?.actorId !== ctx.actorId || audit.reason !== input.reason) throw new ExpenseConflictError();
+      return { id: previous.id, version: previous.version, idempotent: true };
+    }
+    if (original.state !== "POSTED" || original.version !== input.expectedVersion || original.amount.eq(input.amount)) throw new ExpenseConflictError();
+    await validateAmount(repository, input.amount, original.currency);
+    const funding = await new FinanceRepository(tx, ctx.organizationId).findLedgerAccountById(original.fundingAccountId);
+    if (!funding || !isExpenseFundingAccount(funding)) throw new ExpenseConfigurationError("Expense funding account is unavailable");
+    const draft = expenseDraftSchema.parse({ propertyId: original.propertyId, reservationId: original.reservationId ?? undefined,
+      fundingAccountId: original.fundingAccountId, amount: input.amount, currency: original.currency, category: original.category, purpose: original.purpose,
+      occurredOn: original.occurredOn.toISOString().slice(0,10), emergency: false, idempotencyKey: input.idempotencyKey, reason: input.reason });
+    const row = await repository.create(clock.id, draft, ctx.actorId, { correctsExpenseId: original.id, correctsExpenseVersion: original.version });
+    await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "expense.created", resourceType: "expense", resourceId: row.id,
+      propertyScopeId: row.propertyId, after: { ...facts(row), correctsExpenseId: original.id, correctsExpenseVersion: original.version }, reason: input.reason,
+      requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: clock.now });
+    await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.expense.correction_requested",
+      resourceType: "financial_transaction", resourceId: original.transactionId, propertyScopeId: row.propertyId,
+      after: { originalExpenseId: original.id, originalExpenseVersion: original.version, correctionExpenseId: row.id, amount: Money.of(input.amount, row.currency).toJSON() },
+      reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: clock.now });
     return { id: row.id, version: row.version, idempotent: false };
   });
 }
@@ -84,9 +139,13 @@ export async function updateExpenseDraft(ctx: FinanceActorContext, raw: unknown,
     const repository = new ExpenseRepository(tx, ctx.organizationId); await repository.lock(id);
     const clock = await repository.clock(); ctx = await current(ctx, tx);
     const previous = await repository.find(id);
-    if (!previous || previous.property.archivedAt || !authorize(ctx.authContext, "edit", resource(ctx, previous.property,
+    if (!previous || previous.property.archivedAt || !authorize(ctx.authContext, "edit", resource(ctx, sourceProperty(previous),
       { ...previous, amount: previous.amount.toString() }), clock.now)) throw new ExpenseAccessError();
-    await validateFacts(ctx, tx, input, id, clock.now, "edit");
+    if (previous.correctsExpenseId && (!previous.correctsExpense || input.propertyId !== previous.propertyId ||
+      (input.reservationId ?? null) !== previous.reservationId || input.fundingAccountId !== previous.fundingAccountId || input.currency !== previous.currency ||
+      input.category !== previous.category || input.purpose !== previous.purpose || input.occurredOn !== previous.occurredOn.toISOString().slice(0,10) || input.emergency ||
+      previous.correctsExpense.amount.eq(input.amount))) throw new ExpenseConflictError();
+    await validateFacts(ctx, tx, input, id, clock.now, "edit", sourceProperty(previous).timezone);
     if (previous.idempotencyKey !== input.idempotencyKey || previous.version !== expectedVersion || previous.state !== "DRAFT") throw new ExpenseConflictError();
     if ((await repository.updateDraft(id, expectedVersion, input, ctx.actorId)).count !== 1) throw new ExpenseConflictError();
     const row = await repository.find(id); if (!row) throw new ExpenseConflictError();
@@ -103,7 +162,7 @@ export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps
     const clock = await repository.clock(); ctx = await current(ctx, tx);
     const row = await repository.find(input.id);
     if (!row || row.property.archivedAt) throw new ExpenseAccessError();
-    const target = resource(ctx, row.property, { ...row, amount: row.amount.toString() });
+    const target = resource(ctx, sourceProperty(row), { ...row, amount: row.amount.toString() });
     if (!authorize(ctx.authContext, "view", target, clock.now) || !authorize(ctx.authContext, "edit", target, clock.now)) throw new ExpenseAccessError();
     if (row.submission) {
       const prior = z.object({ sourceExpenseVersion: z.number(), reason: z.string() }).safeParse(row.submission.snapshot);
@@ -113,7 +172,7 @@ export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps
     if (row.state !== "DRAFT" || row.version !== input.expectedVersion) throw new ExpenseConflictError();
     await validateFacts(ctx, tx, expenseDraftSchema.parse({ propertyId: row.propertyId, reservationId: row.reservationId ?? undefined,
       fundingAccountId: row.fundingAccountId, amount: row.amount.toString(), currency: row.currency, category: row.category, purpose: row.purpose,
-      occurredOn: row.occurredOn.toISOString().slice(0,10), emergency: row.emergency, idempotencyKey: row.idempotencyKey, reason: input.reason }), row.id, clock.now, "edit");
+      occurredOn: row.occurredOn.toISOString().slice(0,10), emergency: row.emergency, idempotencyKey: row.idempotencyKey, reason: input.reason }), row.id, clock.now, "edit", sourceProperty(row).timezone);
     let plan: Awaited<ReturnType<typeof prepareExpenseSubmissionPolicy>>;
     try { plan = await prepareExpenseSubmissionPolicy(ctx, row, target, tx, clock.now); }
     catch (error) { if (error instanceof z.ZodError||error instanceof ExpenseAllocationConfigurationError) throw new ExpenseConfigurationError("Expense policy is invalid or incomplete"); throw error; }
@@ -175,7 +234,7 @@ export async function getExpenseDraftEditor(ctx:FinanceActorContext,id:string,de
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     const repository=new ExpenseRepository(tx,ctx.organizationId),clock=await repository.clock();ctx=await current(ctx,tx);
     const row=await repository.find(id);if(!row||row.property.archivedAt)throw new ExpenseAccessError();
-    const target=resource(ctx,row.property,{...row,amount:row.amount.toString()});
+    const target=resource(ctx,sourceProperty(row),{...row,amount:row.amount.toString()});
     if(!authorize(ctx.authContext,"view",target,clock.now)||!authorize(ctx.authContext,"edit",target,clock.now))throw new ExpenseAccessError();
     if(row.state!=="DRAFT")throw new ExpenseConflictError();
     const choices=await editorChoices(ctx,tx,target,clock.now,row.reservationId,row.fundingAccountId);
@@ -202,7 +261,7 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx);
     const row = await repository.find(id); if (!row || row.property.archivedAt) throw new ExpenseAccessError();
-    const stored = z.object({ policies:z.array(z.object({ownerId:z.uuid()})),timezone:z.string().optional(),postHocOwnerNotificationRequired:z.boolean().optional() }).safeParse(row.submission?.snapshot);
+    const stored = z.object({ policies:z.array(z.object({ownerId:z.uuid()})),timezone:z.string().optional(),postHocOwnerNotificationRequired:z.boolean().optional() }).safeParse(row.submission?.snapshot ?? row.correctsExpense?.submission?.snapshot);
     const periods=new AccountingPeriodRepository(tx,ctx.organizationId),property={...row.property,timezone:stored.success&&stored.data.timezone?stored.data.timezone:row.property.timezone};
     const occurredAt=await periods.sourceInstant(row.occurredOn,property.timezone),sourceFacts={...row,amount:row.amount.toString(),occurredAt};
     const target = viewableExpenseResource(ctx.authContext,property,sourceFacts,stored.success?stored.data.policies.map(policy=>policy.ownerId):[],clock.now);
@@ -212,14 +271,35 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
       authorize(ctx.authContext,"view",{...financialSource,id:row.fundingAccountId,financialRecordId:row.fundingAccountId},clock.now);
     const calendar=payable?await periods.postingPeriod(occurredAt):null;
     const sourcePeriodClosed=Boolean(calendar&&accountingPeriodState(calendar.events[0],clock.now)==="CLOSED");
-    const canPostOriginalDate=payable&&!sourcePeriodClosed&&authorize(ctx.authContext,"create",financialSource,clock.now);
-    const canPostInCurrentPeriod=payable&&sourcePeriodClosed&&authorize(ctx.authContext,"override",financialSource,clock.now)&&
+    let correctionCanPost=true;
+    if(row.correctsExpenseId){
+      const original=row.correctsExpense;
+      correctionCanPost=Boolean(original?.transactionId&&original.state==="POSTED"&&original.version===row.correctsExpenseVersion);
+      if(original?.transactionId&&original.transaction){
+        const originalTimezone=z.object({timezone:z.string().min(1)}).safeParse(original.submission?.snapshot);
+        if(!originalTimezone.success)correctionCanPost=false;
+        else{
+          const originalAt=await periods.sourceInstant(original.occurredOn,originalTimezone.data.timezone);
+          const source=expenseResource(ctx.organizationId,property,{...original,amount:original.amount.toString(),occurredAt:originalAt});
+          const journal={...source,type:"financial_transaction" as const,id:original.transactionId,financialRecordId:original.transactionId,occurredAt:original.transaction.occurredAt};
+          correctionCanPost&&=authorize(ctx.authContext,"view",source,clock.now)&&authorize(ctx.authContext,"void",source,clock.now)&&
+            authorize(ctx.authContext,"view",journal,clock.now)&&authorize(ctx.authContext,"void",journal,clock.now)&&authorize(ctx.authContext,"override",journal,clock.now);
+        }
+      }
+    }
+    const canPostOriginalDate=payable&&!row.correctsExpenseId&&!sourcePeriodClosed&&authorize(ctx.authContext,"create",financialSource,clock.now);
+    const canPostInCurrentPeriod=payable&&correctionCanPost&&(Boolean(row.correctsExpenseId)||sourcePeriodClosed)&&authorize(ctx.authContext,"override",financialSource,clock.now)&&
       authorize(ctx.authContext,"create",{...financialSource,occurredAt:clock.now},clock.now);
+    const originalJournal={...financialSource,id:row.transactionId??row.id,financialRecordId:row.transactionId??row.id,occurredAt:row.transaction?.occurredAt??occurredAt};
+    const canCorrect=row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&
+      authorize(ctx.authContext,"view",originalJournal,clock.now)&&authorize(ctx.authContext,"override",originalJournal,clock.now)&&
+      authorize(ctx.authContext,"create",{...postingSource,id:undefined,financialRecordId:undefined,status:"DRAFT",assignedUserAccountId:ctx.actorId},clock.now)&&
+      authorize(ctx.authContext,"view",{...financialSource,id:row.fundingAccountId,financialRecordId:row.fundingAccountId},clock.now);
     const visibleAdjustment=row.periodAdjustment&&row.transactionId&&row.transaction&&authorize(ctx.authContext,"view",{...target,type:"financial_transaction",
       id:row.transactionId,financialRecordId:row.transactionId,occurredAt:row.transaction.occurredAt},clock.now)?row.periodAdjustment:null;
     const data = { ...facts(row), propertyName: row.property.name, approvalId: row.approval?.id ?? null,
       emergencyException:stored.success&&Boolean(stored.data.postHocOwnerNotificationRequired),canSubmit: row.state === "DRAFT" && authorize(ctx.authContext, "edit", target, clock.now),
-      canPost:canPostOriginalDate||canPostInCurrentPeriod,canPostOriginalDate,canPostInCurrentPeriod,sourcePeriodClosed,
+      canPost:canPostOriginalDate||canPostInCurrentPeriod,canPostOriginalDate,canPostInCurrentPeriod,sourcePeriodClosed,canCorrect,
       postingAdjustment:visibleAdjustment?{id:visibleAdjustment.id,sourcePeriodId:visibleAdjustment.period.id,
         sourceMonth:visibleAdjustment.period.month.toISOString().slice(0,7),sourceOccurredAt:visibleAdjustment.sourceOccurredAt.toISOString(),
         postedAt:row.transaction!.occurredAt.toISOString(),reason:visibleAdjustment.reason}:null,
