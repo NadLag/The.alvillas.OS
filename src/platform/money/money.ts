@@ -42,7 +42,10 @@ export class Money {
   }
 
   multiply(rate: MoneyInput): Money {
-    return Money.of(this.amount.mul(new Decimal(rate)), this.currency);
+    const multiplier = new Decimal(rate);
+    if (!multiplier.isFinite()) throw new Error("Money rate must be finite");
+    const ProductDecimal = Decimal.clone({ precision: Math.max(Decimal.precision, this.amount.precision() + multiplier.precision() + 2) });
+    return Money.of(new ProductDecimal(this.amount.toFixed()).mul(multiplier.toFixed()).toFixed(), this.currency);
   }
 
   splitByRate(rate: MoneyInput): { allocated: Money; remainder: Money } {
