@@ -92,7 +92,18 @@ export async function listFinancialTransfers(ctx:FinanceActorContext,raw:unknown
     const chart:Resource={type:"financial_transaction",organizationId:ctx.organizationId,dataClass:"financial"};
     await recheckFinanceAuthorization(ctx,tx,clock,[{action:"view",resource:chart}],new FinancialTransferAccessError());
     const current=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);
-    const rows=await new FinancialTransferRepository(tx,ctx.organizationId).list(input.after);
+    const repository=new FinancialTransferRepository(tx,ctx.organizationId);
+    const rows:Awaited<ReturnType<typeof repository.list>>=[];let cursor=input.after;
+    while(rows.length<51){
+      const batch=await repository.list(cursor);if(!batch.length)break;
+      for(const row of batch){
+        const amount=row.postings[0]?.amount.toString()??"0",resource={...chart,id:row.id,financialRecordId:row.id,amount,occurredAt:row.occurredAt};
+        const checks:Check[]=[{action:"view",resource},...accountChecks(ctx,row.postings.map(posting=>posting.ledgerAccount),amount,row.occurredAt,"void").filter(check=>check.action==="view")];
+        if(checks.every(check=>[ctx.authContext,current].every(authority=>authorize(authority,check.action,check.resource,clock))))rows.push(row);
+        if(rows.length===51)break;
+      }
+      if(batch.length<51)break;cursor=batch.at(-1)!.id;
+    }
     return{rows:rows.slice(0,50).map(row=>{
       const amount=row.postings[0]?.amount.toString()??"0",resource={...chart,id:row.id,financialRecordId:row.id,amount,occurredAt:row.occurredAt};
       const checks:Check[]=[{action:"view",resource},{action:"void",resource},...accountChecks(ctx,row.postings.map(posting=>posting.ledgerAccount),amount,row.occurredAt,"void")];

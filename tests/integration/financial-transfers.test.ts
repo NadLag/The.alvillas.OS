@@ -56,6 +56,26 @@ describe("native financial transfers on real PostgreSQL",()=>{
     for(const changed of[{amount:"1501"},{reason:"Different financial intent"},{purpose:"Different stated purpose"},{toAccountId:f.otherBank.id,kind:"TRANSFER"}])await expect(postFinancialTransfer(ctx,{...f.input,...changed},{db})).rejects.toBeInstanceOf(FinancialTransferConflictError);
     expect((await listFinancialTransfers(ctx,{}, {db})).rows).toHaveLength(1);
   });
+  it("requires independent caller and current stored wallet read authority for transfer history",async()=>{
+    const f=await fixture(true),ctx=await actor(f),advance=await postFinancialTransfer(ctx,f.input,{db});
+    const bank=await postFinancialTransfer(ctx,{...f.input,toAccountId:f.otherBank.id,kind:"TRANSFER",idempotencyKey:randomUUID(),purpose:"Dedicated visible bank movement"},{db});
+    expect(new Set((await listFinancialTransfers(ctx,{}, {db})).rows.map(row=>row.id))).toEqual(new Set([advance.id,bank.id]));
+    const withoutWallet={...ctx,authContext:{...ctx.authContext,permissions:new Set([...ctx.authContext.permissions].filter(key=>key!=="wallet:view")),
+      assignments:ctx.authContext.assignments?.map(assignment=>({...assignment,permissions:new Set([...assignment.permissions].filter(key=>key!=="wallet:view"))}))}};
+    expect((await listFinancialTransfers(withoutWallet,{}, {db})).rows.map(row=>row.id)).toEqual([bank.id]);
+    await withTenant(db,f.org,tx=>tx.roleAssignment.updateMany({where:{scopeType:"wallet",scopeId:f.link.id},data:{validTo:new Date("2020-01-02")}}));
+    const current=await listFinancialTransfers(ctx,{}, {db});expect(current.rows.map(row=>row.id)).toEqual([bank.id]);
+    expect(JSON.stringify(current)).not.toContain(f.wallet.id);expect(JSON.stringify(current)).not.toContain(f.wallet.name);
+    expect(await withTenant(db,f.org,tx=>tx.financialTransaction.count())).toBe(2);
+  });
+  it("finds authorized transfer history beyond a full page of independently denied wallets",async()=>{
+    const f=await fixture(true),ctx=await actor(f);
+    for(let index=0;index<53;index++)await postFinancialTransfer(ctx,{...f.input,idempotencyKey:randomUUID(),purpose:`Dedicated private wallet advance ${index}`},{db});
+    const bank=await postFinancialTransfer(ctx,{...f.input,toAccountId:f.otherBank.id,kind:"TRANSFER",idempotencyKey:randomUUID(),purpose:"Dedicated bank transfer beyond private wallet page"},{db});
+    await withTenant(db,f.org,tx=>tx.roleAssignment.updateMany({where:{scopeType:"wallet",scopeId:f.link.id},data:{validTo:new Date("2020-01-02")}}));
+    const result=await listFinancialTransfers(ctx,{}, {db});expect(result.rows.map(row=>row.id)).toEqual([bank.id]);expect(result.next).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain(f.wallet.id);expect(JSON.stringify(result)).not.toContain(f.wallet.name);
+  });
   it("returns custody to the bank and adds one reasoned exact reversal on concurrent retries",async()=>{
     const f=await fixture(),ctx=await actor(f),advance=await postFinancialTransfer(ctx,f.input,{db});
     const returned=await postFinancialTransfer(ctx,{...f.input,fromAccountId:f.wallet.id,toAccountId:f.bank.id,kind:"RETURN",amount:"450",purpose:"Dedicated remaining advance return",idempotencyKey:randomUUID()},{db});
