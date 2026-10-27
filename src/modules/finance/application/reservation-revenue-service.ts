@@ -22,6 +22,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type AuthContext } from "@/platform/authz/authorize";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { matchesFinancialReversalAttempt } from "../domain/financial-reversal";
+import { recheckFinanceAuthorization } from "./finance-access";
 import { configRuleSnapshotMetadata } from "@/platform/config/config-rule-repository";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
@@ -667,13 +668,20 @@ export async function recordReservationAccommodationRevenue(
       allocations
     });
     assertFinancePostingsBalanced(revenuePostings);
+    const financeTarget = { type: "financial_transaction" as const, organizationId: ctx.organizationId,
+      propertyId: reservation.propertyId, reservationId: reservation.id, dataClass: "financial" as const };
+    const recheckPosting = (at: Date) => recheckFinanceAuthorization(ctx, tx, at, [
+      { action: "view", resource: { ...financeTarget, type: "reservation", id: reservation.id, dataClass: "operational" } },
+      { action: "create", resource: financeTarget }
+    ], new ReservationRevenueAuthorizationError());
     const revenueTransaction = await repository.createFinancialTransaction({
       reference: `${reservation.reference}:ACCOMMODATION_REVENUE`,
       occurredAt: new Date(),
       description: `Accommodation revenue for ${reservation.reference}`,
       idempotencyKey: keys.revenueKey,
       createdBy: ctx.actorId,
-      postings: revenuePostings
+      postings: revenuePostings,
+      recheckAuthorization: recheckPosting
     });
 
     let commissionTransaction: PostingTransaction | null = null;
@@ -692,7 +700,8 @@ export async function recordReservationAccommodationRevenue(
         description: `ALVILLAS commission for ${reservation.reference}`,
         idempotencyKey: keys.commissionKey,
         createdBy: ctx.actorId,
-        postings: commissionPostings
+        postings: commissionPostings,
+        recheckAuthorization: recheckPosting
       });
     }
 
@@ -805,7 +814,14 @@ export async function reverseReservationAccommodationRevenue(
         reversesTransactionId: original.id,
         idempotencyKey: `${input.idempotencyKey}:reverse:${original.id}`,
         createdBy: ctx.actorId,
-        postings
+        postings,
+        recheckAuthorization: at => recheckFinanceAuthorization(ctx, tx, at, [
+          { action: "view", resource: { ...target, type: "reservation", id: reservation.id } },
+          { action: "view", resource: { ...target, type: "financial_transaction", dataClass: "financial" } },
+          { action: "void", resource: { ...target, type: "financial_transaction", dataClass: "financial" } },
+          ...(originals.some(row => row.postings.some(posting => jsonObject(posting.dimensions).airbnb_settlement_id)) ?
+            [{ action: "reconcile" as const, resource: { ...target, type: "financial_transaction" as const, dataClass: "financial" as const } }] : [])
+        ], new ReservationRevenueAuthorizationError())
       });
       reversalTransactions.push(reversal);
     }

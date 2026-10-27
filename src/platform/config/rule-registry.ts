@@ -14,6 +14,7 @@ import { fieldDevicePolicyKey, fieldDevicePolicySchema } from "./field-device-po
 import { fieldUploadLifecycleKey, fieldUploadLifecycleSchema } from "./field-upload-lifecycle-policy";
 import { configSlugSchema } from "./identifiers";
 import { inventoryMinimumsSchema } from "./inventory-policy";
+import { accountingPeriodPolicyKey, accountingPeriodPolicySchema } from "@/modules/finance/domain/accounting-period";
 export { inventoryMinimumsSchema } from "./inventory-policy";
 
 const moneyAmountSchema = z
@@ -348,6 +349,7 @@ export const configRuleSchemas = {
   "finance.expense_allocation": expenseTreatmentConfigSchema,
   "finance.approval_thresholds": approvalThresholdsConfigSchema,
   "finance.payout_schedule": payoutScheduleConfigSchema,
+  [accountingPeriodPolicyKey]: accountingPeriodPolicySchema,
   [agreementResponsibilitiesConfigKey]: agreementResponsibilitiesConfigSchema,
   [agreementNoticeConfigKey]: agreementNoticeConfigSchema,
   [agreementSpecialConditionsConfigKey]: agreementSpecialConditionsConfigSchema,

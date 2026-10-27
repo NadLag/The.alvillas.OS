@@ -282,7 +282,7 @@ async function activeReservationActor(organizationId: string, permissions?: Set<
 }
 
 async function assertFinancialRevocationWhileWaiting(ctx: ReservationActorContext, reservationId: string,
-  command: () => Promise<unknown>, errorType: new (message?: string) => Error) {
+  command: () => Promise<unknown>, errorType: new (message?: string) => Error, lock: "source" | "period" = "source") {
   const grants = await withTenant(prisma, ctx.organizationId, tx => tx.roleAssignment.findMany({
     where: { organizationId: ctx.organizationId, userAccountId: ctx.actorId }, select: { id: true, validTo: true } }));
   const before = await withTenant(prisma, ctx.organizationId, tx => tx.financialTransaction.count());
@@ -290,7 +290,8 @@ async function assertFinancialRevocationWhileWaiting(ctx: ReservationActorContex
   const gate = new Promise<void>(resolve => { release = resolve; });
   const ready = new Promise<number>(resolve => { acquired = resolve; });
   const holder = withTenant(prisma, ctx.organizationId, async tx => {
-    await new FinanceRepository(tx, ctx.organizationId).lockReservationFinancialCorrection(reservationId);
+    if (lock === "period") await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${ctx.organizationId + ":accounting-period"},0))::text`;
+    else await new FinanceRepository(tx, ctx.organizationId).lockReservationFinancialCorrection(reservationId);
     const [connection] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
     acquired(connection.pid); await gate;
   });
@@ -7195,6 +7196,9 @@ describe("PostgreSQL baseline", () => {
     await assertFinancialRevocationWhileWaiting(ctx, reservation.reservation.id, () => reverseReservationAccommodationRevenue(ctx, reversalInput, {
       db: prisma, requestId: "integration-s6-reversal-revoked-after-wait", ipAddress: "127.0.0.1"
     }), ReservationRevenueAuthorizationError);
+    await assertFinancialRevocationWhileWaiting(ctx, reservation.reservation.id, () => reverseReservationAccommodationRevenue(ctx, reversalInput, {
+      db: prisma, requestId: "integration-s6-reversal-revoked-during-period-wait", ipAddress: "127.0.0.1"
+    }), ReservationRevenueAuthorizationError, "period");
     const reversalAttempts = await Promise.all(Array.from({ length: 4 }, (_, index) => reverseReservationAccommodationRevenue(ctx, {
       ...reversalInput, idempotencyKey: index ? reversalInput.idempotencyKey : reversalInput.idempotencyKey.toUpperCase()
     }, {
@@ -7615,6 +7619,9 @@ describe("PostgreSQL baseline", () => {
     await assertFinancialRevocationWhileWaiting(ctx, reservation.reservation.id, () => reverseAirbnbSettlement(ctx, reversalInput, {
       db: prisma, requestId: "integration-s7-reversal-revoked-after-wait", ipAddress: "127.0.0.1"
     }), AirbnbSettlementAuthorizationError);
+    await assertFinancialRevocationWhileWaiting(ctx, reservation.reservation.id, () => reverseAirbnbSettlement(ctx, reversalInput, {
+      db: prisma, requestId: "integration-s7-reversal-revoked-during-period-wait", ipAddress: "127.0.0.1"
+    }), AirbnbSettlementAuthorizationError, "period");
     const reversalAttempts = await Promise.all(Array.from({ length: 4 }, (_, index) => reverseAirbnbSettlement(ctx, {
       ...reversalInput, idempotencyKey: index ? reversalInput.idempotencyKey : reversalInput.idempotencyKey.toUpperCase()
     }, {

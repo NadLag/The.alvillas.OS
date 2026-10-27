@@ -260,6 +260,7 @@ export function ConfigRuleAdmin({
           data-testid="config-rule-create-form"
           onSubmit={validateSubmit}
         >
+          <fieldset className="config-create-fields" disabled={!form.formState.isReady || pending} aria-labelledby="config-create-title">
           <label className="field">
             <span>{labels.key}</span>
             <select
@@ -376,6 +377,7 @@ export function ConfigRuleAdmin({
           >
             {pending ? labels.saving : labels.createVersion}
           </button>
+          </fieldset>
         </form>
       </section>
 

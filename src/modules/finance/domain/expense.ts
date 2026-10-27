@@ -10,11 +10,11 @@ import { notificationRoutingSchema } from "@/platform/notifications/notification
 export const expenseEmergencyNoticeSchema = z.object({ ownerId: z.uuid(), routing: notificationRoutingSchema, recipients: z.array(z.uuid()).min(1) }).strict();
 export type ExpenseEmergencyNotice = z.infer<typeof expenseEmergencyNoticeSchema>;
 type ExpenseProperty = { id: string; cityId?: string | null; city?: string | null; regionId?: string | null; region?: string | null; timezone: string };
-type ExpenseFacts = { id: string; amount: string; reservationId?: string | null; state: string; occurredOn: Date; createdBy: string };
+type ExpenseFacts = { id: string; amount: string; reservationId?: string | null; state: string; occurredOn: Date; occurredAt?: Date; createdBy: string };
 export function expenseResource(organizationId: string, property: ExpenseProperty, facts: ExpenseFacts, ownerId?: string | null): Resource {
   return { type: "expense", organizationId, id: facts.id, financialRecordId: facts.id, ownerId, propertyId: property.id,
     reservationId: facts.reservationId, city: property.cityId ?? property.city, region: property.regionId ?? property.region, status: facts.state,
-    amount: facts.amount, occurredAt: calendarDateStart(facts.occurredOn.toISOString().slice(0,10),property.timezone), assignedUserAccountId: facts.createdBy, dataClass: "financial" };
+    amount: facts.amount, occurredAt: facts.occurredAt ?? calendarDateStart(facts.occurredOn.toISOString().slice(0,10),property.timezone), assignedUserAccountId: facts.createdBy, dataClass: "financial" };
 }
 export function viewableExpenseResource(ctx: AuthContext, property: ExpenseProperty, facts: ExpenseFacts, ownerIds: readonly string[], at = new Date()): Resource | null {
   const base = expenseResource(ctx.organizationId,property,facts);

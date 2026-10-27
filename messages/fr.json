@@ -94,7 +94,8 @@
     "team": "Équipe",
     "automations": "Automatisations",
     "financialAccounts": "Comptes financiers",
-    "transactionGroups": "Groupes de transactions"
+    "transactionGroups": "Groupes de transactions",
+    "accountingPeriods": "Périodes comptables"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -2490,7 +2491,22 @@
     "selectFunding": "Sélectionnez le compte de paiement",
     "unavailableFunding": "Le compte précédent est indisponible. Sélectionnez un compte autorisé.",
     "retainedReservation": "Conserver la réservation associée",
-    "backToExpense": "Retour à la dépense"
+    "backToExpense": "Retour à la dépense",
+    "periodClosed": "La date appartient à une période comptable clôturée. Demandez sa vérification à un administrateur financier habilité.",
+    "sourcePeriodClosed": "La date initiale de la dépense appartient à une période comptable clôturée.",
+    "currentPeriodChoice": "Enregistrer ce paiement approuvé dans la période ouverte actuelle",
+    "currentPeriodGuidance": "La date de la dépense et sa validation sont conservées. L’écriture est datée lors de son enregistrement.",
+    "adjustmentTitle": "Régularisation dans la période actuelle",
+    "adjustmentSourcePeriod": "Régularisation du mois comptable clôturé {month}",
+    "adjustmentPostedAt": "Enregistré le {date} ({timezone}).",
+    "correctionTitle": "Corriger le montant de la facture",
+    "correctionGuidance": "Préparez une facture révisée avec sa propre approbation. La facture comptabilisée reste inchangée jusqu’à l’enregistrement du remplacement approuvé ; cette opération ajoute ensemble une extourne exacte et le paiement corrigé.",
+    "correctedAmount": "Total corrigé de la facture ({currency})",
+    "prepareCorrection": "Préparer le brouillon de correction",
+    "correctionSource": "Cette facture corrige une facture déjà comptabilisée.",
+    "viewOriginalExpense": "Voir la facture d’origine",
+    "correctionDraftGuidance": "Révisez le montant et indiquez un motif. La devise, le compte de financement, la catégorie, la date de facture et les versions des accords sont conservés. La facture révisée nécessite sa propre approbation.",
+    "correctionPostingGuidance": "Après approbation, enregistrez explicitement la correction dans la période ouverte en cours. Le paiement d’origine est extourné exactement et le remplacement approuvé est comptabilisé dans une seule transaction ; la facture d’origine et son historique sont conservés."
   },
   "FinancialAccounts": {
     "eyebrow": "Finances",
@@ -2585,5 +2601,69 @@
     "loading": "Chargement des groupes de transactions…",
     "loadError": "Impossible de charger les groupes de transactions",
     "retryHelp": "Actualisez pour réessayer."
+  },
+  "AccountingPeriods": {
+    "eyebrow": "Finance",
+    "title": "Périodes comptables",
+    "description": "Clôturez un mois rapproché et encadrez sa réouverture motivée et limitée dans le temps.",
+    "accounts": "Plan des comptes",
+    "configure": "Configurer les règles comptables",
+    "policyTitle": "Règle de clôture actuelle",
+    "timezone": "Fuseau comptable",
+    "earlyClose": "Clôturer un mois avant sa fin",
+    "allowed": "Autorisé par la règle",
+    "notAllowed": "Non autorisé par la règle",
+    "maxWindow": "Durée maximale de réouverture : {seconds, number} secondes",
+    "policyVersion": "Version de règle {version, number}",
+    "missingPolicy": "Définissez le fuseau comptable et la durée de réouverture dans Configuration avant de clôturer un mois.",
+    "close": "Clôturer le mois",
+    "reopen": "Rouvrir pour correction",
+    "month": "Mois",
+    "duration": "Durée de réouverture (secondes)",
+    "durationLimit": "Jusqu’à {seconds, number} secondes. L’échéance est fixée à l’acceptation de la demande.",
+    "reason": "Motif",
+    "saving": "Enregistrement…",
+    "loading": "Chargement des périodes comptables…",
+    "retry": "Réessayer",
+    "empty": "Aucun mois comptable n’a été clôturé.",
+    "periods": "Historique mensuel",
+    "more": "Mois précédents",
+    "back": "Toutes les périodes comptables",
+    "detailTitle": "Mois comptable {month}",
+    "periodRange": "Du {start} au {end} (fin exclue)",
+    "state": "État de la période",
+    "deadline": "Réouverture jusqu’au {date}",
+    "expired": "La précédente fenêtre de réouverture est terminée.",
+    "totals": "Totaux du journal",
+    "totalsHint": "Débits et crédits de ce mois comptable, présentés séparément par devise.",
+    "debit": "Débits",
+    "credit": "Crédits",
+    "transactionCount": "{count, plural, one {# transaction} other {# transactions}}",
+    "postingCount": "{count, plural, one {# ligne comptable} other {# lignes comptables}}",
+    "history": "Historique des clôtures et réouvertures",
+    "moreHistory": "Décisions précédentes",
+    "version": "Décision {version, number}",
+    "by": "Par {name}",
+    "readOnly": "Vos droits actuels permettent de consulter cette période.",
+    "closedPostingHint": "Les dates de comptabilisation d’une période clôturée sont refusées. Une correction peut être passée sur la période ouverte sans modifier le journal d’origine.",
+    "states": {
+      "CLOSED": "Clôturée",
+      "REOPENED": "Rouverte"
+    },
+    "kinds": {
+      "CLOSE": "Mois clôturé",
+      "REOPEN": "Fenêtre de correction ouverte"
+    },
+    "errors": {
+      "forbidden": "Vos droits actuels ne permettent pas cette action.",
+      "conflict": "La période ou la demande a changé. Rechargez la page avant de réessayer.",
+      "validation": "Vérifiez le mois, la durée et le motif.",
+      "missingPolicy": "Une règle de période comptable valide est requise. Consultez Configuration.",
+      "earlyClose": "La règle configurée ne permet pas de clôturer un mois avant sa fin.",
+      "invalidWindow": "La durée de réouverture dépasse la règle actuelle.",
+      "unbalanced": "Le journal complet doit être équilibré et finalisé avant la clôture.",
+      "error": "La demande n’a pas abouti. Vos saisies sont conservées ; réessayez la même demande.",
+      "periodClosed": "La date appartient à une période comptable clôturée. Demandez sa vérification à un administrateur financier habilité."
+    }
   }
 }
