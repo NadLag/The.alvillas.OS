@@ -24,7 +24,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native monthly close and
   try {
     const month = await withTenant(f.db, f.organizationId, async tx => {
       const reference = await nextReferenceNumber(tx, f.organizationId, "PERIOD_QA"), slot = Number(reference.split("-").at(-1));
-      const date = new Date(Date.UTC(1900, -slot, 1)), value = date.toISOString().slice(0, 7);
+      const date = new Date(Date.UTC(1900 - slot, 8, 1)), value = date.toISOString().slice(0, 7);
       const bounds = await new AccountingPeriodRepository(tx, f.organizationId).bounds(value, "Europe/Paris");
       expect(await tx.financialTransaction.count({ where: { occurredAt: { gte: bounds.startsAt, lt: bounds.endsAt } } })).toBe(0);
       return value;
@@ -85,9 +85,15 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native monthly close and
     await expect(admin.getByTestId("accounting-period-history")).toHaveCount(2);
     await expect(admin.getByTestId("accounting-period-detail")).toBeVisible();
     await expect(admin.getByTestId("accounting-period-detail").getByRole("heading", { level: 1 })).toBeVisible();
+    await expect(admin.getByTestId("accounting-period-month")).toBeEnabled();
+    await expect(admin.getByTestId("accounting-period-duration")).toBeEnabled();
     await expect(admin.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
     await admin.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
     expect(await admin.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await admin.evaluate(() => document.documentElement.style.setProperty("--font-sans", "monospace"));
+    await admin.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(await admin.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await admin.evaluate(() => document.documentElement.style.removeProperty("--font-sans"));
     expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);
     await admin.screenshot({ path: info.outputPath(`accounting-period-${locale}.png`), fullPage: true });
     await admin.evaluate(() => { document.documentElement.style.fontSize = ""; });
