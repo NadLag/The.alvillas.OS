@@ -4,11 +4,13 @@ import { expect, test } from "@playwright/test";
 import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { nextReferenceNumber } from "@/platform/references/reference-number";
+import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { openFieldFixture } from "./support/field-fixture";
 import { ensureE2EAdmin, e2eEmail, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 
-test.use({ serviceWorkers: "allow", actionTimeout: 30000, navigationTimeout: 60000 });
+test.use({ timezoneId: "America/Denver", serviceWorkers: "allow", actionTimeout: 30000, navigationTimeout: 60000 });
 for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval, posting, reversal and transaction groups in ${locale}`, async ({ page: admin, browser }, info) => {
   test.skip(!process.env.DATABASE_URL, "Real local PostgreSQL is required"); test.setTimeout(420000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw new Error("Native expense acceptance requires local PostgreSQL");
@@ -37,7 +39,23 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       await config.createVersion({ key: "finance.approval_thresholds", scopeType: "property", scopeId: task.propertyId, effectiveFrom: new Date("2020-01-01"),
         reason: "Dedicated scoped owner approval", value: { thresholds: [{ key: "native_expense", amount: "100", currency: "MAD", requires_approval_from: ["owner"] }],
           routing: { owner: { roles: [role.id], people: [], assigned: false, channels: ["in_app"] } } } });
-      return { propertyId: task.propertyId, bankId: bank.id, ownerAccountId: account.id, ownerRoleId: role.id };
+      await config.createVersion({key:"finance.accounting_periods",scopeType:"organization",scopeId:null,effectiveFrom:new Date("2000-01-01"),
+        reason:"Dedicated native historical accounting calendar",value:{timezone:"Europe/Paris",allow_early_close:false,max_reopen_seconds:60}});
+      const periods = new AccountingPeriodRepository(tx, f.organizationId);
+      let sourceMonth = "", occupied = 1;
+      for (let attempt = 0; attempt < 36 && occupied; attempt++) {
+        const reference = await nextReferenceNumber(tx, f.organizationId, "EXP_ADJ_QA");
+        const slot = Number(reference.split("-").at(-1));
+        sourceMonth = new Date(Date.UTC(2025, -slot, 1)).toISOString().slice(0, 7);
+        if (sourceMonth < "2020-01") throw new Error("Historical expense acceptance calendar is exhausted; preserve all existing records");
+        const bounds = await periods.bounds(sourceMonth, "Europe/Paris");
+        occupied = await tx.financialTransaction.count({ where: { occurredAt: { gte: bounds.startsAt, lt: bounds.endsAt } } }) +
+          Number(Boolean(await periods.byMonth(sourceMonth)));
+      }
+      expect(occupied).toBe(0);
+      const bounds = await periods.bounds(sourceMonth, "Europe/Paris");
+      expect(await tx.financialTransaction.count({where:{occurredAt:{gte:bounds.startsAt,lt:bounds.endsAt}}})).toBe(0);
+      return { propertyId: task.propertyId, bankId: bank.id, ownerAccountId: account.id, ownerRoleId: role.id,sourceMonth,sourceOn:sourceMonth+"-15" };
     });
     await admin.goto("/en/app/identity"); await admin.getByTestId("invite-display-name").fill(`Dedicated expense field ${suffix}`);
     await admin.getByTestId("invite-phone").fill(phone); await admin.getByTestId("invite-role").selectOption("field_staff");
@@ -53,7 +71,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await expect(admin.getByTestId("expense-new-page")).toBeVisible();
     const form = admin.getByTestId("expense-draft-form"); await form.getByTestId("expense-amount").fill("500,25");
     await form.getByTestId("expense-category").fill("maintenance"); await form.getByTestId("expense-purpose").fill(purpose);
-    await form.getByTestId("expense-funding-account").selectOption(setup.bankId); await form.getByTestId("expense-occurred-on").fill("2026-10-26");
+    await form.getByTestId("expense-funding-account").selectOption(setup.bankId); await form.getByTestId("expense-occurred-on").fill(setup.sourceOn);
     await form.getByTestId("expense-reason").fill("Dedicated native expense entry");
     expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);
     await form.getByTestId("expense-create").click(); await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
@@ -100,6 +118,18 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     });
     await ownerPage.goto(`/${locale}/app/expenses/${expenseId}`);await expect(ownerPage.getByTestId("expense-detail-page")).toBeVisible();
     await expect(ownerPage.getByTestId("expense-post-form")).toHaveCount(0);
+    await admin.goto(`/${locale}/app/finance/periods`);
+    await admin.getByTestId("accounting-period-month").fill(setup.sourceMonth);await admin.getByTestId("accounting-period-reason").fill("Dedicated reconciled historical expense month");
+    await admin.getByTestId("accounting-period-close").getByRole("button").click();
+    await admin.waitForURL(new RegExp(`/${locale}/app/finance/periods/[0-9a-f-]+$`, "u"));
+    await expect(admin.getByTestId("accounting-period-state")).toHaveAttribute("data-state","CLOSED");
+    const closedPeriodId=new URL(admin.url()).pathname.split("/").at(-1)!;
+    const sourceSnapshot=await withTenant(f.db,f.organizationId,tx=>tx.accountingPeriodEvent.findFirstOrThrow({where:{periodId:closedPeriodId},orderBy:{version:"desc"}}));
+    await admin.goto(`/${locale}/app/expenses/${expenseId}`);
+    await expect(admin.getByTestId("expense-source-period-closed")).toBeVisible();
+    await expect(admin.getByTestId("expense-current-period")).not.toBeChecked();
+    await expect(admin.getByTestId("expense-current-period")).toHaveAttribute("required","");
+    await admin.getByTestId("expense-current-period").check();
     await expect(admin.getByTestId("expense-post-form")).toBeVisible();await admin.getByTestId("expense-post-reason").fill("Dedicated accepted bank payment reference");
     const postingRequest=admin.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&
       new URL(request.url()).pathname.endsWith(`/expenses/${expenseId}`)&&Boolean(request.postData()?.includes(expenseId)));
@@ -118,7 +148,16 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
         {side:"DEBIT",amount:"500.25",bucket:"OWNER_EXPENSE"},{side:"CREDIT",amount:"500.25",bucket:"EXPENSE_PAYMENT"}]));
       expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.posted"}})).toBe(1);
       expect(await tx.auditLog.count({where:{resourceId:expenseId,action:"expense.posted",actorId:setup.ownerAccountId}})).toBe(0);
+      const adjustment=await tx.accountingPeriodAdjustment.findFirstOrThrow({where:{expenseId}});
+      expect(adjustment).toMatchObject({periodId:closedPeriodId,periodEventId:sourceSnapshot.id,transactionId:expense.transactionId});
+      expect(expense.occurredOn.toISOString().slice(0,10)).toBe(setup.sourceOn);
+      expect((await tx.financialTransaction.findUniqueOrThrow({where:{id:expense.transactionId!}})).occurredAt.toISOString().slice(0,7)).not.toBe(setup.sourceMonth);
+      expect(await tx.auditLog.count({where:{action:"finance.period.adjustment_posted",resourceId:expense.transactionId!}})).toBe(1);
+      const calendar=await tx.accountingPeriod.findUniqueOrThrow({where:{id:closedPeriodId}});
+      expect(await new AccountingPeriodRepository(tx,f.organizationId).snapshot(calendar.startsAt,calendar.endsAt)).toEqual(sourceSnapshot.snapshot);
     });
+    await expect(admin.getByTestId("expense-period-adjustment")).toBeVisible();
+    await expect(admin.getByRole("heading",{level:1})).toBeVisible();expect((await new AxeBuilder({page:admin}).analyze()).violations).toEqual([]);
     await ownerPage.reload();await expect(ownerPage.getByTestId("expense-void-form")).toHaveCount(0);
     await expect(admin.getByTestId("expense-void-form")).toBeVisible();
     await admin.locator("main").evaluate(element=>{(element as HTMLElement).style.fontSize="200%";});

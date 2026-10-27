@@ -73,6 +73,7 @@ model AutomationSuggestion {
 model Organization {
   accountingPeriods                              AccountingPeriod[]
   accountingPeriodEvents                         AccountingPeriodEvent[]
+  accountingPeriodAdjustments                    AccountingPeriodAdjustment[]
   expenses                                       Expense[]
   expenseSubmissions                             ExpenseSubmission[]
   financialApprovalStages                        ApprovalStage[]
@@ -349,6 +350,7 @@ model Person {
 model UserAccount {
   accountingPeriods             AccountingPeriod[]      @relation("AccountingPeriodCreator")
   accountingPeriodEvents        AccountingPeriodEvent[] @relation("AccountingPeriodActor")
+  accountingPeriodAdjustments   AccountingPeriodAdjustment[] @relation("AccountingPeriodAdjustmentCreator")
   createdTransactionGroups    TransactionGroup[]
   transactionGroupEntries     TransactionGroupEntry[]
   createdExpenses             Expense[]                    @relation("ExpenseCreator")
@@ -1304,6 +1306,7 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  periodAdjustment       AccountingPeriodAdjustment?
   groupEntries           TransactionGroupEntry[]
   expense                Expense?
   cashCollection         CashCollection?
@@ -1331,6 +1334,7 @@ model FinancialTransaction {
 }
 
 model AccountingPeriod {
+  adjustments  AccountingPeriodAdjustment[]
   id           String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String                @map("organization_id") @db.Uuid
   month        DateTime                @db.Date
@@ -1352,6 +1356,7 @@ model AccountingPeriod {
 }
 
 model AccountingPeriodEvent {
+  adjustments  AccountingPeriodAdjustment[]
   id           String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String                @map("organization_id") @db.Uuid
   periodId     String                  @map("period_id") @db.Uuid
@@ -2259,7 +2264,33 @@ model CashCollection {
   @@map("cash_collection")
 }
 
+model AccountingPeriodAdjustment {
+  id               String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId   String               @map("organization_id") @db.Uuid
+  expenseId        String               @map("expense_id") @db.Uuid
+  transactionId    String               @map("transaction_id") @db.Uuid
+  periodId         String               @map("period_id") @db.Uuid
+  periodEventId    String               @map("period_event_id") @db.Uuid
+  sourceOccurredAt DateTime             @map("source_occurred_at") @db.Timestamptz(6)
+  reason           String               @db.VarChar(500)
+  createdBy        String               @map("created_by") @db.Uuid
+  createdAt        DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization     Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  expense          Expense              @relation(fields: [organizationId, expenseId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  transaction      FinancialTransaction @relation(fields: [organizationId, transactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  period           AccountingPeriod     @relation(fields: [organizationId, periodId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  periodEvent      AccountingPeriodEvent @relation(fields: [organizationId, periodEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator          UserAccount          @relation("AccountingPeriodAdjustmentCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, expenseId])
+  @@unique([organizationId, transactionId])
+  @@index([organizationId, periodId, createdAt])
+  @@map("accounting_period_adjustment")
+}
+
 model Expense {
+  periodAdjustment AccountingPeriodAdjustment?
   id               String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId   String                @map("organization_id") @db.Uuid
   propertyId       String                @map("property_id") @db.Uuid

@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { safeLocale } from "@/i18n/routing";
-import { formatCurrencyAmount, formatDate } from "@/i18n/format";
+import { formatCurrencyAmount, formatDate, formatDateTime } from "@/i18n/format";
 import { auth } from "@/platform/auth/session";
 import { financeActorContextFromSession } from "@/modules/finance/application/finance-access";
 import { ExpenseAccessError, getExpense } from "@/modules/finance/application/expense-service";
@@ -24,6 +24,11 @@ export default async function ExpensePage({ params }: { params: Promise<{ locale
       <dl className="detail-grid"><div><dt>{t("amount")}</dt><dd data-testid="expense-total" dir="auto">{formatCurrencyAmount(locale, expense.amount, expense.currency)}</dd></div>
         <div><dt>{t("category")}</dt><dd>{expense.category}</dd></div><div><dt>{t("occurredOn")}</dt><dd>{formatDate(locale, new Date(`${expense.occurredOn}T00:00:00Z`), { timeZone: "UTC" })}</dd></div></dl>
       {expense.approvalId ? <Link className="secondary-button" data-testid="expense-approval-link" href={`/${locale}/app/approvals/${expense.approvalId}`}>{t("viewApproval")}</Link> : null}
+      {expense.postingAdjustment?<section aria-label={t("adjustmentTitle")} data-testid="expense-period-adjustment"><h2>{t("adjustmentTitle")}</h2>
+        <p>{t("adjustmentSourcePeriod",{month:formatDate(locale,new Date(`${expense.postingAdjustment.sourceMonth}-01T00:00:00Z`),{dateStyle:undefined,month:"long",year:"numeric",timeZone:"UTC"})})}</p>
+        <p>{t("adjustmentPostedAt",{date:formatDateTime(locale,new Date(expense.postingAdjustment.postedAt),{timeZone:"UTC"}),timezone:"UTC"})}</p>
+        <p dir="auto">{expense.postingAdjustment.reason}</p></section>:null}
+      {expense.sourcePeriodClosed&&!expense.canPost?<p role="status" data-testid="expense-source-period-closed">{t("periodClosed")}</p>:null}
       {expense.canSubmit ? <ExpenseSubmissionForm expense={expense} /> :expense.canPost?<ExpensePostingForm expense={expense}/>:expense.canVoid?<ExpenseVoidForm expense={expense}/>:<p>{t(expense.state==="VOIDED"?"voidedGuidance":"submittedGuidance")}</p>}
     </section>
   </AdminShell>;

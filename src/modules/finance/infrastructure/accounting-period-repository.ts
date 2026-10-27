@@ -11,9 +11,21 @@ export class AccountingPeriodRepository {
   async lock() {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":accounting-period"},0))::text`);
   }
-  async assertPostingOpen(occurredAt: Date) {
+  async postingOpen(occurredAt: Date) {
     const [row] = await this.tx.$queryRaw<Array<{ open: boolean }>>(Prisma.sql`SELECT app_financial_period_is_open(${this.organizationId}::uuid,${occurredAt}::timestamptz) AS open`);
-    if (!row.open) throw new AccountingPeriodClosedError();
+    return row.open;
+  }
+  async assertPostingOpen(occurredAt: Date) {
+    if (!await this.postingOpen(occurredAt)) throw new AccountingPeriodClosedError();
+  }
+  async sourceInstant(occurredOn: Date, timezone: string) {
+    const [row] = await this.tx.$queryRaw<Array<{ at: Date }>>(Prisma.sql`SELECT ${occurredOn.toISOString().slice(0,10)}::date::timestamp AT TIME ZONE ${timezone} AS at`);
+    return row.at;
+  }
+  postingPeriod(occurredAt: Date) {
+    return this.tx.accountingPeriod.findFirst({ where: { organizationId: this.organizationId, startsAt: { lte: occurredAt }, endsAt: { gt: occurredAt } },
+      select: { id: true, month: true, timezone: true, events: { orderBy: { version: "desc" }, take: 1,
+        select: { id: true, version: true, kind: true, reopensUntil: true } } } });
   }
   async policy(now: Date) {
     try {

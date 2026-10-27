@@ -15,6 +15,8 @@ import { prepareExpenseSubmissionPolicy } from "./expense-submission-policy";
 import { ExpenseAllocationConfigurationError } from "../domain/configured-finance-rules";
 import { ApprovalRepository } from "@/platform/approvals/approval-repository";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { AccountingPeriodRepository } from "../infrastructure/accounting-period-repository";
+import { accountingPeriodState } from "../domain/accounting-period";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 export class ExpenseAccessError extends Error {}
@@ -200,15 +202,29 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx);
     const row = await repository.find(id); if (!row || row.property.archivedAt) throw new ExpenseAccessError();
-    const stored = z.object({ policies:z.array(z.object({ownerId:z.uuid()})),postHocOwnerNotificationRequired:z.boolean().optional() }).safeParse(row.submission?.snapshot);
-    const target = viewableExpenseResource(ctx.authContext,row.property,{...row,amount:row.amount.toString()},stored.success?stored.data.policies.map(policy=>policy.ownerId):[],clock.now);
+    const stored = z.object({ policies:z.array(z.object({ownerId:z.uuid()})),timezone:z.string().optional(),postHocOwnerNotificationRequired:z.boolean().optional() }).safeParse(row.submission?.snapshot);
+    const periods=new AccountingPeriodRepository(tx,ctx.organizationId),property={...row.property,timezone:stored.success&&stored.data.timezone?stored.data.timezone:row.property.timezone};
+    const occurredAt=await periods.sourceInstant(row.occurredOn,property.timezone),sourceFacts={...row,amount:row.amount.toString(),occurredAt};
+    const target = viewableExpenseResource(ctx.authContext,property,sourceFacts,stored.success?stored.data.policies.map(policy=>policy.ownerId):[],clock.now);
     if (!target) throw new ExpenseAccessError();
+    const postingSource=expenseResource(ctx.organizationId,property,sourceFacts),financialSource={...postingSource,type:"financial_transaction" as const};
+    const payable=row.state==="APPROVED"&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"pay",postingSource,clock.now)&&
+      authorize(ctx.authContext,"view",{...financialSource,id:row.fundingAccountId,financialRecordId:row.fundingAccountId},clock.now);
+    const calendar=payable?await periods.postingPeriod(occurredAt):null;
+    const sourcePeriodClosed=Boolean(calendar&&accountingPeriodState(calendar.events[0],clock.now)==="CLOSED");
+    const canPostOriginalDate=payable&&!sourcePeriodClosed&&authorize(ctx.authContext,"create",financialSource,clock.now);
+    const canPostInCurrentPeriod=payable&&sourcePeriodClosed&&authorize(ctx.authContext,"override",financialSource,clock.now)&&
+      authorize(ctx.authContext,"create",{...financialSource,occurredAt:clock.now},clock.now);
+    const visibleAdjustment=row.periodAdjustment&&row.transactionId&&row.transaction&&authorize(ctx.authContext,"view",{...target,type:"financial_transaction",
+      id:row.transactionId,financialRecordId:row.transactionId,occurredAt:row.transaction.occurredAt},clock.now)?row.periodAdjustment:null;
     const data = { ...facts(row), propertyName: row.property.name, approvalId: row.approval?.id ?? null,
       emergencyException:stored.success&&Boolean(stored.data.postHocOwnerNotificationRequired),canSubmit: row.state === "DRAFT" && authorize(ctx.authContext, "edit", target, clock.now),
-      canPost:row.state==="APPROVED"&&authorize(ctx.authContext,"pay",target,clock.now)&&authorize(ctx.authContext,"create",{...target,type:"financial_transaction"},clock.now)&&
-        authorize(ctx.authContext,"view",{...target,type:"financial_transaction",id:row.fundingAccountId,financialRecordId:row.fundingAccountId},clock.now),
-      canVoid:row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"void",target,clock.now)&&
-        authorize(ctx.authContext,"void",{...target,type:"financial_transaction",id:row.transactionId!,financialRecordId:row.transactionId!},clock.now) };
+      canPost:canPostOriginalDate||canPostInCurrentPeriod,canPostOriginalDate,canPostInCurrentPeriod,sourcePeriodClosed,
+      postingAdjustment:visibleAdjustment?{id:visibleAdjustment.id,sourcePeriodId:visibleAdjustment.period.id,
+        sourceMonth:visibleAdjustment.period.month.toISOString().slice(0,7),sourceOccurredAt:visibleAdjustment.sourceOccurredAt.toISOString(),
+        postedAt:row.transaction!.occurredAt.toISOString(),reason:visibleAdjustment.reason}:null,
+      canVoid:row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"void",postingSource,clock.now)&&
+        authorize(ctx.authContext,"void",{...financialSource,id:row.transactionId!,financialRecordId:row.transactionId!,occurredAt:row.transaction?.occurredAt??occurredAt},clock.now) };
     return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...target, data }, {}, clock.now) as typeof data;
   });
 }

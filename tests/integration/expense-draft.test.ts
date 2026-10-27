@@ -30,6 +30,9 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { evaluateExpensePolicy } from "@/modules/finance/application/finance-config-service";
 import { postExpense,voidExpense } from "@/modules/finance/application/expense-posting-service";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { closeAccountingPeriod, getAccountingPeriod, reopenAccountingPeriod } from "@/modules/finance/application/accounting-period-service";
+import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
+import { AccountingPeriodClosedError } from "@/modules/finance/domain/accounting-period";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -106,6 +109,21 @@ async function postingGrant(f:Fixture,voiding=false){
   });
 }
 
+async function accountingGrant(f:Fixture,keys:string[],scope:"organization"|"property"="organization"){
+  return withTenant(db,f.org,async tx=>{
+    const role=await tx.role.create({data:{organizationId:f.org,key:`period_${randomUUID()}`,name:"Dedicated accounting authority"}});
+    const permissions=await tx.permission.findMany({where:{organizationId:f.org,key:{in:keys}}});expect(permissions).toHaveLength(keys.length);
+    await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:role.id,permissionId:permission.id}))});
+    return tx.roleAssignment.create({data:{organizationId:f.org,roleId:role.id,userAccountId:f.account.id,personId:f.person.id,
+      scopeType:scope,scopeId:scope==="organization"?null:f.property.id,validFrom:new Date("2020-01-01")}});
+  });
+}
+
+async function accountingPolicy(f:Fixture){
+  return withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.accounting_periods",scopeType:"organization",scopeId:null,
+    effectiveFrom:new Date("2020-01-01"),reason:"Dedicated explicit accounting calendar",value:{timezone:"Europe/Paris",allow_early_close:false,max_reopen_seconds:60}}));
+}
+
 describe("native expenses on real PostgreSQL", () => {
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw new Error("Local PostgreSQL is required");
@@ -114,6 +132,133 @@ describe("native expenses on real PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it("posts an approved historic expense in the current open period without changing its closed source or agreement",async()=>{
+    const f=await fixture(),configured=await policy(f);await postingGrant(f,true);
+    await accountingGrant(f,["financial_transaction:view","financial_transaction:configure"]);await accountingPolicy(f);
+    const draft=await create(f,{...f.input,occurredOn:"2024-10-15"});
+    const submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated original historical approval"},{db});
+    const source=await withTenant(db,f.org,async tx=>({expense:await tx.expense.findUniqueOrThrow({where:{id:draft.id}}),submission:await tx.expenseSubmission.findFirstOrThrow()}));
+    const closed=await closeAccountingPeriod(await actor(f),{month:"2024-10",expectedVersion:0,reason:"Dedicated closed historical source",idempotencyKey:randomUUID()},{db});
+    const previous=(await getAccountingPeriod(await actor(f),closed.id,undefined,{db})).snapshot;
+    const input={id:draft.id,expectedVersion:submitted.version,reason:"Dedicated approved current-period payment"};
+    await expect(postExpense(await actor(f),input,{db})).rejects.toBeInstanceOf(AccountingPeriodClosedError);
+    await expect(postExpense(await actor(f),{...input,currentPeriod:true},{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    await accountingGrant(f,["financial_transaction:override"],"property");
+    await withTenant(db,f.org,async tx=>{
+      await tx.property.update({where:{id:f.property.id},data:{timezone:"Asia/Tokyo"}});
+      await new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+        effectiveFrom:new Date("2020-01-02"),reason:"Later company treatment cannot alter the approved historical allocation",value:{default_treatment:"ALVILLAS_PAID"}});
+    });
+    const ctx=await actor(f),before=await withTenant(db,f.org,tx=>new FinanceRepository(tx,f.org).clock());
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(new Date("1990-01-01T00:00:00Z"));
+    let results:Awaited<ReturnType<typeof postExpense>>[];
+    try{results=await Promise.all(Array.from({length:4},(_,index)=>postExpense(ctx,{...input,id:index?input.id:input.id.toUpperCase(),currentPeriod:true},{db})));}
+    finally{vi.useRealTimers();}
+    expect(results.filter(row=>!row.idempotent)).toHaveLength(1);expect(new Set(results.map(row=>row.transactionId)).size).toBe(1);
+    await expect(postExpense(ctx,input,{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+    await expect(postExpense(ctx,{...input,currentPeriod:true,reason:"Different current-period intent"},{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+    const saved=await withTenant(db,f.org,async tx=>{
+      const adjustment=await tx.accountingPeriodAdjustment.findFirstOrThrow(),expense=await tx.expense.findUniqueOrThrow({where:{id:draft.id}});
+      const journal=await tx.financialTransaction.findUniqueOrThrow({where:{id:expense.transactionId!},include:{postings:true}});
+      expect(await tx.accountingPeriodAdjustment.count()).toBe(1);expect(await tx.financialTransaction.count()).toBe(1);
+      expect(await tx.auditLog.count({where:{action:"expense.posted"}})).toBe(1);expect(await tx.auditLog.count({where:{action:"finance.period.adjustment_posted"}})).toBe(1);
+      expect(expense.occurredOn).toEqual(source.expense.occurredOn);expect((await tx.expenseSubmission.findFirstOrThrow()).snapshot).toEqual(source.submission.snapshot);
+      expect(journal.occurredAt.getTime()).toBeGreaterThanOrEqual(before.getTime());expect(journal.occurredAt.getUTCFullYear()).toBe(before.getUTCFullYear());
+      expect(journal.postings.find(row=>row.side==="DEBIT")?.dimensions).toMatchObject({owner_id:configured.owner.id});
+      expect(journal.postings.map(row=>row.amount.toFixed(2))).toEqual(["500.25","500.25"]);
+      const frozenTimezone=z.object({timezone:z.string()}).parse(source.submission.snapshot).timezone;
+      expect(adjustment.sourceOccurredAt).toEqual(await new AccountingPeriodRepository(tx,f.org).sourceInstant(source.expense.occurredOn,frozenTimezone));
+      expect(adjustment).toMatchObject({periodId:closed.id,periodEventId:closed.eventId,createdBy:f.account.id,reason:input.reason});
+      return{adjustment,expense,journal};
+    });
+    expect((await getAccountingPeriod(await actor(f),closed.id,undefined,{db})).snapshot).toEqual(previous);
+    expect((await getExpense(ctx,draft.id,{db})).postingAdjustment?.sourcePeriodId).toBe(closed.id);
+    const reader=await approver(f,"property",f.property.id,"view");
+    const readerContext={organizationId:f.org,actorId:reader.account.id,authContext:{...await authContextForAccount(f.org,reader.account.id,{db}),personId:reader.person.id}};
+    expect((await getExpense(readerContext,draft.id,{db})).postingAdjustment).toBeNull();
+    const foreign=await fixture();expect(await withTenant(db,foreign.org,tx=>tx.accountingPeriodAdjustment.count())).toBe(0);
+    for(const action of["update","delete"] as const)await expect(withTenant(db,f.org,async tx=>{
+      if(action==="update")await tx.accountingPeriodAdjustment.update({where:{id:saved.adjustment.id},data:{reason:"Forbidden evidence rewrite"}});
+      else await tx.accountingPeriodAdjustment.delete({where:{id:saved.adjustment.id}});
+      throw new Error("Roll back an unexpectedly permitted evidence mutation");
+    })).rejects.toThrow("ledger rows are append-only");
+    await accountingGrant(f,["financial_transaction:override"]);
+    await reopenAccountingPeriod(await actor(f),{periodId:closed.id,expectedVersion:1,durationSeconds:30,reason:"Dedicated later period review",idempotencyKey:randomUUID()},{db});
+    await voidExpense(ctx,{id:draft.id,expectedVersion:saved.expense.version,reason:"Dedicated later exact void of the current-period payment"},{db});
+    expect((await getAccountingPeriod(await actor(f),closed.id,undefined,{db})).snapshot).toEqual(previous);
+    expect(await withTenant(db,f.org,tx=>tx.accountingPeriodAdjustment.count())).toBe(1);
+  });
+  it("cannot use a period override to bypass the expense owner's required approval",async()=>{
+    const f=await fixture(),configured=await policy(f);await postingGrant(f);
+    await accountingGrant(f,["financial_transaction:view","financial_transaction:configure","financial_transaction:override"]);await accountingPolicy(f);
+    const owner=await approver(f,"owner",configured.owner.id);
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:f.property.id,
+      effectiveFrom:new Date("2020-01-02"),reason:"Dedicated required owner decision",value:{thresholds:[{key:"owner_required",amount:"100.00",currency:"MAD",requires_approval_from:["owner"]}],
+        routing:{owner:{people:[owner.person.id],roles:[],assigned:false,channels:["in_app"]}}}}));
+    const draft=await create(f,{...f.input,occurredOn:"2024-10-15"}),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated historical owner request"},{db});
+    expect(submitted.state).toBe("PENDING_APPROVAL");
+    await closeAccountingPeriod(await actor(f),{month:"2024-10",expectedVersion:0,reason:"Dedicated closed owner-approval source",idempotencyKey:randomUUID()},{db});
+    const command={id:draft.id,expectedVersion:submitted.version,reason:"Dedicated authorized current-period attempt",currentPeriod:true};
+    await expect(postExpense(await actor(f),command,{db})).rejects.toBeInstanceOf(ExpenseConflictError);
+    expect((await getExpense(await actor(f),draft.id,{db})).canPost).toBe(false);
+    await withTenant(db,f.org,async tx=>{expect(await tx.financialTransaction.count()).toBe(0);expect(await tx.accountingPeriodAdjustment.count()).toBe(0);
+      expect((await tx.approvalRequest.findUniqueOrThrow({where:{id:submitted.approvalId!}})).state).toBe("PENDING");});
+    const request=await getApproval(owner.actor,submitted.approvalId!,{db});
+    await decideApproval(owner.actor,{id:submitted.approvalId!,stageId:request.stageId,decision:"APPROVED",reason:"Dedicated actual owner authorization"},{db});
+    const approved=await getExpense(await actor(f),draft.id,{db});expect(approved.canPostOriginalDate).toBe(false);expect(approved.canPostInCurrentPeriod).toBe(true);
+    await postExpense(await actor(f),{...command,expectedVersion:approved.version},{db});
+    expect(await withTenant(db,f.org,tx=>tx.accountingPeriodAdjustment.count())).toBe(1);
+  });
+  it("denies a current-period override revoked during the source period-lock wait",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f);
+    await accountingGrant(f,["financial_transaction:view","financial_transaction:configure"]);await accountingPolicy(f);
+    const override=await accountingGrant(f,["financial_transaction:override"],"property");
+    const draft=await create(f,{...f.input,occurredOn:"2024-10-15"}),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated scoped override source"},{db});
+    await closeAccountingPeriod(await actor(f),{month:"2024-10",expectedVersion:0,reason:"Dedicated closed override source",idempotencyKey:randomUUID()},{db});
+    const ctx=await actor(f);let release!:()=>void,acquired!:(pid:number)=>void;
+    const gate=new Promise<void>(resolve=>{release=resolve;}),ready=new Promise<number>(resolve=>{acquired=resolve;});
+    const blocker=withTenant(db,f.org,async tx=>{
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${f.org+":accounting-period"},0))::text`;
+      const[row]=await tx.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`;acquired(row.pid);await gate;
+    });
+    const pid=await ready,attempt=postExpense(ctx,{id:draft.id,expectedVersion:submitted.version,reason:"Dedicated waiting override",currentPeriod:true},{db})
+      .then(value=>({value,error:null}),(error:unknown)=>({value:null,error}));
+    try{
+      await expect.poll(()=>withTenant(db,f.org,async tx=>{
+        const[row]=await tx.$queryRaw<Array<{waiting:boolean}>>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${pid}::int=ANY(pg_blocking_pids(pid))) AS waiting`;
+        return row.waiting;
+      })).toBe(true);
+      await withTenant(db,f.org,tx=>tx.$executeRaw`UPDATE role_assignment SET valid_to=clock_timestamp() WHERE organization_id=${f.org}::uuid AND id=${override.id}::uuid`);
+    }finally{release();await blocker;}
+    expect((await attempt).error).toBeInstanceOf(ExpenseAccessError);
+    await withTenant(db,f.org,async tx=>{expect(await tx.financialTransaction.count()).toBe(0);expect(await tx.accountingPeriodAdjustment.count()).toBe(0);
+      expect((await tx.expense.findUniqueOrThrow({where:{id:draft.id}})).state).toBe("APPROVED");});
+  });
+  it("rejects an otherwise complete current-period posting when its financial adjustment audit is missing",async()=>{
+    const f=await fixture(),configured=await policy(f);await postingGrant(f);
+    await accountingGrant(f,["financial_transaction:view","financial_transaction:configure","financial_transaction:override"]);await accountingPolicy(f);
+    const draft=await create(f,{...f.input,occurredOn:"2024-10-15"}),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated atomic accounting source"},{db});
+    const closed=await closeAccountingPeriod(await actor(f),{month:"2024-10",expectedVersion:0,reason:"Dedicated closed atomic source",idempotencyKey:randomUUID()},{db});
+    await expect(withTenant(db,f.org,async tx=>{
+      const finance=new FinanceRepository(tx,f.org),expenses=new ExpenseRepository(tx,f.org),now=await finance.clock();
+      const source=await expenses.find(draft.id),timezone=z.object({timezone:z.string()}).parse(source!.submission!.snapshot).timezone;
+      const sourceAt=await new AccountingPeriodRepository(tx,f.org).sourceInstant(source!.occurredOn,timezone);
+      const payable=await finance.ensureLedgerAccount({code:"OWNER_PAYABLE",name:"Owner payable",accountType:"CLAIM_OWNERSHIP",normalSide:"CREDIT"});
+      const dimensions={expense_id:draft.id,property_id:f.property.id,category:f.input.category,source:"EXPENSE"};
+      const journal=await finance.createFinancialTransaction({reference:`EXPENSE:${draft.id}`,description:f.input.purpose,occurredAt:now,idempotencyKey:`expense:${draft.id}:posted`,createdBy:f.account.id,
+        postings:[{ledgerAccountId:payable.id,side:"DEBIT",amount:Money.of(f.input.amount,"MAD"),bucket:"OWNER_EXPENSE",dimensions:{...dimensions,owner_id:configured.owner.id}},
+          {ledgerAccountId:f.bank.id,side:"CREDIT",amount:Money.of(f.input.amount,"MAD"),bucket:"EXPENSE_PAYMENT",dimensions}]});
+      const adjustment=await tx.accountingPeriodAdjustment.create({data:{organizationId:f.org,expenseId:draft.id,transactionId:journal.id,periodId:closed.id,
+        periodEventId:closed.eventId,sourceOccurredAt:sourceAt,createdBy:f.account.id,reason:"Dedicated missing financial audit"}});
+      await expenses.transition(draft.id,submitted.version,"APPROVED","POSTED",f.account.id,journal.id);
+      await writeAuditEvent(tx,{organizationId:f.org,actorId:f.account.id,action:"expense.posted",resourceType:"expense",resourceId:draft.id,
+        before:{state:"APPROVED",version:submitted.version},after:{state:"POSTED",version:submitted.version+1,transactionId:journal.id,submissionId:source!.submission!.id,
+          amount:Money.of(f.input.amount,"MAD").toJSON(),postingDateMode:"CURRENT_OPEN_PERIOD",accountingPeriodAdjustmentId:adjustment.id},
+        reason:"Dedicated missing financial audit",requestId:randomUUID(),occurredAt:now});
+    })).rejects.toThrow("period adjustment requires its complete atomic source and reasoned audits");
+    await withTenant(db,f.org,async tx=>{expect(await tx.financialTransaction.count()).toBe(0);expect(await tx.accountingPeriodAdjustment.count()).toBe(0);
+      expect((await tx.expense.findUniqueOrThrow({where:{id:draft.id}})).state).toBe("APPROVED");});
+  });
   it("rechecks financial grants after waiting for the accounting-period writer lock", async () => {
     const f = await fixture(); await policy(f); await postingGrant(f);
     const draft = await create(f), submitted = await submitExpense(await actor(f), { id: draft.id, expectedVersion: 1, reason: "Dedicated period wait source" }, { db });

@@ -2492,7 +2492,13 @@
     "unavailableFunding": "الحساب السابق غير متاح. اختر حسابًا مصرحًا به.",
     "retainedReservation": "الاحتفاظ بالحجز المرتبط",
     "backToExpense": "العودة إلى المصروف",
-    "periodClosed": "يقع تاريخ الترحيل ضمن فترة محاسبية مقفلة. اطلب مراجعته من مسؤول مالي مخول."
+    "periodClosed": "يقع تاريخ الترحيل ضمن فترة محاسبية مقفلة. اطلب مراجعته من مسؤول مالي مخول.",
+    "sourcePeriodClosed": "يقع تاريخ المصروف الأصلي ضمن فترة محاسبية مقفلة.",
+    "currentPeriodChoice": "تسجيل هذا الدفع المعتمد في الفترة المحاسبية المفتوحة الحالية",
+    "currentPeriodGuidance": "يبقى تاريخ المصروف واعتماده كما هما، ويؤرخ القيد عند تسجيله.",
+    "adjustmentTitle": "تسوية في الفترة الحالية",
+    "adjustmentSourcePeriod": "تسوية للشهر المحاسبي المقفل {month}",
+    "adjustmentPostedAt": "سُجل في {date} ({timezone})."
   },
   "FinancialAccounts": {
     "eyebrow": "المالية",

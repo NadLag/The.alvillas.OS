@@ -65,16 +65,22 @@ export function ExpenseSubmissionForm({ expense }: { expense: Awaited<ReturnType
 
 export function ExpensePostingForm({expense}:{expense:Awaited<ReturnType<typeof getExpense>>}){
   const t=useTranslations("Expenses"),router=useRouter(),[pending,startTransition]=useTransition(),[error,setError]=useState<ErrorCode|null>(null);
+  const [ready,setReady]=useState(false);
+  useEffect(()=>{queueMicrotask(()=>setReady(true));},[]);
   return <form className="resource-form" data-testid="expense-post-form" aria-busy={pending} onSubmit={event=>{
     event.preventDefault();if(pending)return;const form=new FormData(event.currentTarget);setError(null);
     startTransition(async()=>{
-      try{const result=await postExpenseAction({id:expense.id,expectedVersion:expense.version,reason:form.get("reason")});if(!result.ok)setError(result.code);else router.refresh();}
+      try{const result=await postExpenseAction({id:expense.id,expectedVersion:expense.version,reason:form.get("reason"),...(form.get("currentPeriod")==="on"?{currentPeriod:true}:{})});
+        if(!result.ok){setError(result.code);if(result.code==="periodClosed")router.refresh();}else router.refresh();}
       catch{setError("error");}
     });
   }}>
     {error?<p role="alert" data-testid="expense-error">{t(error)}</p>:null}
-    <fieldset disabled={pending}><legend>{t("postTitle")}</legend><p>{t("postGuidance")}</p>
+    <fieldset disabled={!ready||pending}><legend>{t("postTitle")}</legend><p>{t("postGuidance")}</p>
       <label className="field"><span>{t("reason")}</span><textarea name="reason" data-testid="expense-post-reason" minLength={6} maxLength={500} required /></label>
+      {expense.sourcePeriodClosed?<p data-testid="expense-source-period-closed">{t("sourcePeriodClosed")}</p>:null}
+      {expense.canPostInCurrentPeriod?<label className="checkbox-field"><input type="checkbox" name="currentPeriod" data-testid="expense-current-period" required={!expense.canPostOriginalDate}/>
+        <span className="field"><span>{t("currentPeriodChoice")}</span><small>{t("currentPeriodGuidance")}</small></span></label>:null}
       <div className="form-actions"><button type="submit" className="primary-button" data-testid="expense-post">{t(pending?"saving":"recordPayment")}</button></div>
     </fieldset>
   </form>;

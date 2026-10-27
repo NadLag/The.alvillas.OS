@@ -2492,7 +2492,13 @@
     "unavailableFunding": "Le compte précédent est indisponible. Sélectionnez un compte autorisé.",
     "retainedReservation": "Conserver la réservation associée",
     "backToExpense": "Retour à la dépense",
-    "periodClosed": "La date appartient à une période comptable clôturée. Demandez sa vérification à un administrateur financier habilité."
+    "periodClosed": "La date appartient à une période comptable clôturée. Demandez sa vérification à un administrateur financier habilité.",
+    "sourcePeriodClosed": "La date initiale de la dépense appartient à une période comptable clôturée.",
+    "currentPeriodChoice": "Enregistrer ce paiement approuvé dans la période ouverte actuelle",
+    "currentPeriodGuidance": "La date de la dépense et sa validation sont conservées. L’écriture est datée lors de son enregistrement.",
+    "adjustmentTitle": "Régularisation dans la période actuelle",
+    "adjustmentSourcePeriod": "Régularisation du mois comptable clôturé {month}",
+    "adjustmentPostedAt": "Enregistré le {date} ({timezone})."
   },
   "FinancialAccounts": {
     "eyebrow": "Finances",

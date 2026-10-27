@@ -2492,7 +2492,13 @@
     "unavailableFunding": "The previous account is unavailable. Select an authorized account.",
     "retainedReservation": "Keep the linked reservation",
     "backToExpense": "Back to expense",
-    "periodClosed": "The posting date belongs to a closed accounting period. Ask an authorized financial administrator to review it."
+    "periodClosed": "The posting date belongs to a closed accounting period. Ask an authorized financial administrator to review it.",
+    "sourcePeriodClosed": "The original expense date is in a closed accounting period.",
+    "currentPeriodChoice": "Record this approved payment in the current open period",
+    "currentPeriodGuidance": "The expense date and its approval stay unchanged. The accounting entry is dated when it is recorded.",
+    "adjustmentTitle": "Adjustment in the current period",
+    "adjustmentSourcePeriod": "Adjustment for closed accounting month {month}",
+    "adjustmentPostedAt": "Recorded on {date} ({timezone})."
   },
   "FinancialAccounts": {
     "eyebrow": "Finance",
