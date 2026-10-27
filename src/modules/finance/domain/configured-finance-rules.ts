@@ -3,12 +3,14 @@ import {
   approvalThresholdsConfigSchema,
   expenseTreatmentConfigSchema,
   payoutScheduleConfigSchema,
+  payoutScheduleOverrideSchema,
   type ApprovalThresholdsConfig,
   type ExpenseTreatmentConfig,
   type PayoutScheduleConfig
 } from "@/platform/config/rule-registry";
 import { Money } from "@/platform/money/money";
 import { evaluate, type EvaluationContext } from "@/platform/automation/rule";
+import { payoutEligibility, PayoutScheduleConfigurationError, type PayoutScheduleTiming } from "./payout-schedule";
 
 type ApprovalThreshold = ApprovalThresholdsConfig["thresholds"][number];
 type ExpenseCategoryRule = NonNullable<ExpenseTreatmentConfig["categories"]>[string];
@@ -45,10 +47,10 @@ export type ConfiguredExpenseAllocation = {
   guestAmount: Money;
 };
 
-export type PayoutScheduleSubject = {
+export type PayoutScheduleSubject = PayoutScheduleTiming & {
   availableBalance: Money;
-  checkoutDate?: Date;
-  triggeredAt: Date;
+  requestedAmount?: Money;
+  evaluation?: EvaluationContext;
 };
 
 export type ConfiguredPayoutPlan = {
@@ -57,6 +59,8 @@ export type ConfiguredPayoutPlan = {
   holdbackAmount: Money;
   payableAmount: Money;
   cron: string | null;
+  matchedRuleKey: string | null;
+  timezone: string;
 };
 
 function uniqueSteps(steps: readonly string[]): string[] {
@@ -230,13 +234,10 @@ export function allocateConfiguredExpense(
   };
 }
 
-function addDays(date: Date, days: number): Date {
-  const output = new Date(date.getTime());
-  output.setUTCDate(output.getUTCDate() + days);
-  return output;
-}
-
 function holdbackAmount(config: PayoutScheduleConfig, balance: Money): Money {
+  if (config.holdback_amount !== undefined && config.holdback_currency !== balance.currency) {
+    throw new PayoutScheduleConfigurationError("Fixed payout holdback requires the balance currency");
+  }
   const byAmount =
     config.holdback_amount && config.holdback_currency === balance.currency
       ? Money.of(config.holdback_amount, balance.currency)
@@ -244,7 +245,7 @@ function holdbackAmount(config: PayoutScheduleConfig, balance: Money): Money {
   const byRate =
     config.holdback_bps === undefined
       ? Money.zero(balance.currency)
-      : balance.multiply(new Decimal(config.holdback_bps).div(10000));
+      : balance.amount.gt(0) ? balance.multiply(new Decimal(config.holdback_bps).div(10000)) : Money.zero(balance.currency);
 
   return byAmount.add(byRate);
 }
@@ -253,8 +254,13 @@ export function planConfiguredPayout(
   value: unknown,
   subject: PayoutScheduleSubject
 ): ConfiguredPayoutPlan {
-  const config = payoutScheduleConfigSchema.parse(value);
-  const baseDate = config.cadence === "AFTER_CHECKOUT" ? subject.checkoutDate ?? subject.triggeredAt : subject.triggeredAt;
+  const base = payoutScheduleConfigSchema.parse(value);
+  if (subject.requestedAmount && subject.requestedAmount.currency !== subject.availableBalance.currency) throw new PayoutScheduleConfigurationError("Payout amounts cannot mix currencies");
+  const evaluation = subject.evaluation ?? { fields: { payout: { amount: (subject.requestedAmount ?? subject.availableBalance).toJSON().amount,
+    availableBalance: subject.availableBalance.toJSON().amount, currency: subject.availableBalance.currency } }, configs: {} };
+  const matched = (base.rules ?? []).map(rule => payoutScheduleOverrideSchema.parse(rule)).find(rule => evaluate(rule.conditions, evaluation));
+  const config = matched ? payoutScheduleConfigSchema.parse({ ...base, ...matched.value, schedule: { ...base.schedule, ...matched.value.schedule }, rules: undefined }) : base;
+  const timing = payoutEligibility(config, subject);
   const holdback = holdbackAmount(config, subject.availableBalance);
   const payableAmount = holdback.amount.gte(subject.availableBalance.amount)
     ? Money.zero(subject.availableBalance.currency)
@@ -262,9 +268,11 @@ export function planConfiguredPayout(
 
   return {
     cadence: config.cadence,
-    eligibleOn: addDays(baseDate, config.hold_days ?? 0),
+    eligibleOn: timing.eligibleOn,
     holdbackAmount: holdback,
     payableAmount,
-    cron: config.cron ?? null
+    cron: config.cron ?? null,
+    matchedRuleKey: matched?.key ?? null,
+    timezone: timing.timezone
   };
 }
