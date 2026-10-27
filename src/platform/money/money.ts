@@ -33,12 +33,12 @@ export class Money {
 
   add(other: Money): Money {
     this.assertSameCurrency(other);
-    return Money.of(this.amount.plus(other.amount), this.currency);
+    return Money.fromMinorUnits(this.minorUnits() + other.minorUnits(), this.currency);
   }
 
   subtract(other: Money): Money {
     this.assertSameCurrency(other);
-    return Money.of(this.amount.minus(other.amount), this.currency);
+    return Money.fromMinorUnits(this.minorUnits() - other.minorUnits(), this.currency);
   }
 
   multiply(rate: MoneyInput): Money {
@@ -72,5 +72,15 @@ export class Money {
     if (this.currency !== other.currency) {
       throw new Error(`Cannot mix ${this.currency} and ${other.currency}`);
     }
+  }
+
+  private minorUnits(): bigint {
+    return BigInt(this.amount.toFixed(2).replace(".", ""));
+  }
+
+  private static fromMinorUnits(units: bigint, currency: string): Money {
+    const negative = units < 0n;
+    const digits = (negative ? -units : units).toString().padStart(3, "0");
+    return Money.of(`${negative ? "-" : ""}${digits.slice(0, -2)}.${digits.slice(-2)}`, currency);
   }
 }
