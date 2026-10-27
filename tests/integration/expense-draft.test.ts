@@ -135,6 +135,85 @@ async function correctionFixture(){
 }
 
 describe("native expenses on real PostgreSQL", () => {
+  it("posts an approved expense from a linked staff wallet through the existing expense ledger",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f);
+    await accountingGrant(f,["wallet:view","wallet:pay"]);
+    const wallet=await withTenant(db,f.org,async tx=>{
+      const account=await tx.ledgerAccount.create({data:{organizationId:f.org,code:`STAFF_WALLET_${f.person.id.replaceAll("-","").toUpperCase()}`,name:"Dedicated linked employee wallet",accountType:"STAFF_WALLET",normalSide:"DEBIT"}});
+      await tx.teamWallet.create({data:{organizationId:f.org,personId:f.person.id,ledgerAccountId:account.id,createdBy:f.account.id}});return account;
+    });
+    const input={...f.input,fundingAccountId:wallet.id};
+    const editor=await getExpenseEditor(await actor(f),f.property.id,{db},wallet.id);
+    expect(editor.accounts.some(account=>account.id===wallet.id)).toBe(true);
+    const draft=await create(f,input),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated wallet expense approval"},{db});
+    const posted=await postExpense(await actor(f),{id:draft.id,expectedVersion:submitted.version,reason:"Dedicated approved wallet payment"},{db});
+    await withTenant(db,f.org,async tx=>{
+      const lines=await tx.posting.findMany({where:{transactionId:posted.transactionId}});
+      expect(lines).toHaveLength(2);expect(lines.find(line=>line.ledgerAccountId===wallet.id)).toMatchObject({side:"CREDIT",currency:"MAD"});
+      expect(lines.find(line=>line.ledgerAccountId===wallet.id)?.amount.toString()).toBe("500.25");
+      expect(await tx.expenseSubmission.count({where:{expenseId:draft.id}})).toBe(1);
+      expect(await tx.auditLog.count({where:{resourceId:draft.id,action:"expense.posted"}})).toBe(1);
+    });
+  });
+  it("requires independent wallet spending and reversal authority beyond property finance access",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f,true);
+    const wallet=await withTenant(db,f.org,async tx=>{
+      const account=await tx.ledgerAccount.create({data:{organizationId:f.org,code:`STAFF_WALLET_${f.person.id.replaceAll("-","").toUpperCase()}`,name:"Dedicated protected employee wallet",accountType:"STAFF_WALLET",normalSide:"DEBIT"}});
+      const link=await tx.teamWallet.create({data:{organizationId:f.org,personId:f.person.id,ledgerAccountId:account.id,createdBy:f.account.id}});return{account,link};
+    });
+    const input={...f.input,fundingAccountId:wallet.account.id};
+    await expect(create(f,input)).rejects.toBeInstanceOf(ExpenseAccessError);
+    await accountingGrant(f,["wallet:view"]);
+    const draft=await create(f,input),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated wallet authorization approval"},{db});
+    const command={id:draft.id,expectedVersion:submitted.version,reason:"Dedicated protected wallet payment"};
+    expect((await getExpense(await actor(f),draft.id,{db})).canPost).toBe(false);
+    await expect(postExpense(await actor(f),command,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    const pay=await accountingGrant(f,["wallet:pay"]);
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:pay.id},data:{scopeType:"wallet",scopeId:randomUUID()}}));
+    await expect(postExpense(await actor(f),command,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:pay.id},data:{scopeId:wallet.link.id,conditions:{maxAmount:"100"}}}));
+    await expect(postExpense(await actor(f),command,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.financialTransaction.count()).toBe(0);expect(await tx.auditLog.count({where:{action:"expense.posted"}})).toBe(0);
+      await tx.roleAssignment.update({where:{id:pay.id},data:{conditions:{}}});
+    });
+    const paid=await postExpense(await actor(f),command,{db}),undo={id:draft.id,expectedVersion:paid.version,reason:"Dedicated wallet payment reversal"};
+    expect((await getExpense(await actor(f),draft.id,{db})).canVoid).toBe(false);
+    await expect(voidExpense(await actor(f),undo,{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    await accountingGrant(f,["wallet:void"]);
+    const reversed=await voidExpense(await actor(f),undo,{db});
+    await withTenant(db,f.org,async tx=>{
+      const lines=await tx.posting.findMany({where:{ledgerAccountId:wallet.account.id},orderBy:{createdAt:"asc"}});
+      expect(lines.map(line=>({side:line.side,amount:line.amount.toString()}))).toEqual([{side:"CREDIT",amount:"500.25"},{side:"DEBIT",amount:"500.25"}]);
+      expect((await tx.financialTransaction.findUniqueOrThrow({where:{id:reversed.reversalTransactionId}})).reversesTransactionId).toBe(paid.transactionId);
+    });
+  });
+  it("rechecks independent wallet spending after waiting for the accounting-period lock",async()=>{
+    const f=await fixture();await policy(f);await postingGrant(f);const grant=await accountingGrant(f,["wallet:view","wallet:pay"]);
+    const wallet=await withTenant(db,f.org,async tx=>{
+      const account=await tx.ledgerAccount.create({data:{organizationId:f.org,code:`STAFF_WALLET_${f.person.id.replaceAll("-","").toUpperCase()}`,name:"Dedicated wait-protected wallet",accountType:"STAFF_WALLET",normalSide:"DEBIT"}});
+      await tx.teamWallet.create({data:{organizationId:f.org,personId:f.person.id,ledgerAccountId:account.id,createdBy:f.account.id}});return account;
+    });
+    const draft=await create(f,{...f.input,fundingAccountId:wallet.id}),submitted=await submitExpense(await actor(f),{id:draft.id,expectedVersion:1,reason:"Dedicated wallet period-wait approval"},{db});
+    const ctx=await actor(f);let release!:()=>void,acquired!:(pid:number)=>void;
+    const gate=new Promise<void>(resolve=>{release=resolve}),ready=new Promise<number>(resolve=>{acquired=resolve});
+    const blocker=withTenant(db,f.org,async tx=>{
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${f.org+":accounting-period"},0))::text`;
+      const [row]=await tx.$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`;acquired(row.pid);await gate;
+    });
+    const pid=await ready,observe=vi.spyOn(AccountingPeriodRepository.prototype,"assertPostingOpen");
+    const attempt=postExpense(ctx,{id:draft.id,expectedVersion:submitted.version,reason:"Dedicated wallet pending authorization"},{db})
+      .then(value=>({value,error:null}),(error:unknown)=>({value:null,error}));
+    try{
+      await Promise.race([expect.poll(()=>observe.mock.calls.length,{timeout:10000}).toBe(1),attempt.then(outcome=>{throw Error("Posting settled before the held period lock",{cause:outcome.error})})]);
+      await expect.poll(()=>withTenant(db,f.org,async tx=>{
+        const [row]=await tx.$queryRaw<Array<{waiting:boolean}>>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${pid}::int=ANY(pg_blocking_pids(pid))) AS waiting`;return row.waiting;
+      })).toBe(true);
+      await withTenant(db,f.org,tx=>tx.$executeRaw`UPDATE role_assignment SET valid_to=clock_timestamp() WHERE organization_id=${f.org}::uuid AND id=${grant.id}::uuid`);
+    }finally{release();await blocker;observe.mockRestore()}
+    expect((await attempt).error).toBeInstanceOf(ExpenseAccessError);
+    await withTenant(db,f.org,async tx=>{expect(await tx.financialTransaction.count()).toBe(0);expect(await tx.auditLog.count({where:{action:"expense.posted"}})).toBe(0);expect((await tx.expense.findUniqueOrThrow({where:{id:draft.id}})).state).toBe("APPROVED")});
+  });
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw new Error("Local PostgreSQL is required");
     execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"], { env: { ...process.env, DATABASE_URL: url }, stdio: "pipe" });

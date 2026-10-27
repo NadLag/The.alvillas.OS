@@ -140,7 +140,7 @@ export class FieldQueueStore extends Dexie {
       const key = fieldIdentity(scope);
       if ((await this.metadata.get("identity"))?.value !== key) throw new Error("FIELD_SESSION_CHANGED");
       const state = await this.cacheState.get(key);
-      return { incarnation: state?.incarnation ?? null, wallet: state?.wallet ?? null };
+      return { incarnation: state?.incarnation ?? null, generation: state?.generation ?? null, wallet: state?.wallet ?? null };
     });
   }
 

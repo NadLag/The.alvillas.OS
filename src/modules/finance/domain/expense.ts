@@ -31,8 +31,17 @@ export const expenseDraftSchema = z.object({
 }).strict();
 export type ExpenseDraftInput = z.infer<typeof expenseDraftSchema>;
 
-export function isExpenseFundingAccount(account: { code: string; accountType: string; normalSide: string; archivedAt: Date | null }): boolean {
-  return !account.archivedAt && ["ASSET", "ASSET_LOCATION"].includes(account.accountType) && account.normalSide === "DEBIT" && !account.code.startsWith("CASH_CUSTODY_");
+type ExpenseFundingAccount = { id?: string; code: string; accountType: string; normalSide: string; archivedAt: Date | null;
+  teamWallet?: { id: string; personId: string; person: { archivedAt: Date | null } } | null };
+export function isExpenseFundingAccount(account: ExpenseFundingAccount): boolean {
+  const location = ["ASSET", "ASSET_LOCATION"].includes(account.accountType) ||
+    account.accountType === "STAFF_WALLET" && account.teamWallet?.person.archivedAt === null;
+  return !account.archivedAt && location && account.normalSide === "DEBIT" && !account.code.startsWith("CASH_CUSTODY_");
+}
+export function expenseFundingWalletResource(organizationId: string, account: ExpenseFundingAccount, amount: string, occurredAt?: Date): Resource | null {
+  const link = account.accountType === "STAFF_WALLET" ? account.teamWallet : null;
+  return link ? { type: "wallet", organizationId, id: link.id, walletId: link.id, financialRecordId: account.id,
+    assignedPersonId: link.personId, dataClass: "financial", amount, occurredAt } : null;
 }
 
 export function expensePostings(input: {

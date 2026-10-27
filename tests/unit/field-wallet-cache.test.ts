@@ -16,6 +16,17 @@ async function setup() {
 }
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.delete())); });
 describe("wallet cache reuses existing account-scoped private state", () => {
+  it("distinguishes a completed read cleared by a scope reset from an explicit financial denial",async()=>{
+    const f=await setup();await f.queue.saveWalletSnapshot(owner,f.snapshot,f.state.incarnation,f.readId);
+    const completed=await f.queue.walletSnapshot(owner);expect(completed.wallet).toEqual(f.snapshot);
+    await f.queue.invalidateCache(owner);const reset=await f.queue.walletSnapshot(owner);
+    expect(reset.incarnation).toBe(completed.incarnation);expect(reset.generation).toBeGreaterThan(completed.generation!);expect(reset.wallet).toBeNull();
+    await f.queue.publishCache(owner,(await f.queue.readCache(owner)).state!,[],[],"fresh-scope",new Date().toISOString());
+    await f.queue.saveWalletSnapshot(owner,f.snapshot,f.state.incarnation,await f.queue.beginWalletRead(owner,f.state.incarnation));
+    const fresh=await f.queue.walletSnapshot(owner);
+    await f.queue.saveWalletSnapshot(owner,null,f.state.incarnation,await f.queue.beginWalletRead(owner,f.state.incarnation));
+    const denied=await f.queue.walletSnapshot(owner);expect(denied.generation).toBe(fresh.generation);expect(denied.wallet).toBeNull();
+  });
   it("retains exact own-currency figures across reopening and ordinary work pulls", async () => {
     const f = await setup(); expect(await f.queue.saveWalletSnapshot(owner, f.snapshot, f.state.incarnation, f.readId)).toBe(true);
     f.queue.close(); await f.queue.open(); expect((await f.queue.walletSnapshot(owner)).wallet).toEqual(f.snapshot);

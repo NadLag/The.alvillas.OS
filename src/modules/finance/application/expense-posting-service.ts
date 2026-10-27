@@ -4,8 +4,9 @@ import { authContextForAccountInTransaction } from "@/platform/authz/account-con
 import { prisma } from "@/platform/db/client";
 import { withTenant,type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { lockWalletHolders } from "@/platform/ledger/wallet-lock";
 import { Money } from "@/platform/money/money";
-import { expensePostings,expenseResource,isExpenseFundingAccount } from "../domain/expense";
+import { expensePostings,expenseResource,isExpenseFundingAccount,expenseFundingWalletResource } from "../domain/expense";
 import { ExpenseRepository } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { AccountingPeriodRepository } from "../infrastructure/accounting-period-repository";
@@ -34,6 +35,14 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const timezone=z.object({timezone:z.string().min(1)}).safeParse(row.submission?.snapshot);
     const sourceOccurredAt=await periods.sourceInstant(row.occurredOn,timezone.success?timezone.data.timezone:row.property.timezone);
     const target=expenseResource(ctx.organizationId,row.property,{...row,amount:row.amount.toString(),occurredAt:sourceOccurredAt});
+    const finance=new FinanceRepository(tx,ctx.organizationId);let funding=await finance.findLedgerAccountById(row.fundingAccountId);
+    if(!funding)throw new ExpenseConfigurationError("Expense funding account is unavailable");
+    if(funding.teamWallet){
+      await lockWalletHolders(tx,ctx.organizationId,[funding.teamWallet.personId]);
+      funding=await finance.findLedgerAccountById(row.fundingAccountId);if(!funding)throw new ExpenseConfigurationError("Expense funding account is unavailable");
+      clock=await expenses.clock();
+    }
+    const wallet=expenseFundingWalletResource(ctx.organizationId,funding,row.amount.toString(),sourceOccurredAt);
     const postingTarget={...target,type:"financial_transaction" as const,occurredAt:row.transaction?.occurredAt??(input.currentPeriod?clock.now:sourceOccurredAt)};
     const original=row.correctsExpenseId?await expenses.find(row.correctsExpenseId):null;
     const correctionChecks:Array<{action:Action;resource:Resource}>=[];
@@ -50,6 +59,7 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const checks:ReadonlyArray<{action:Action;resource:Resource}>=[
       {action:"view",resource:target},{action:"pay",resource:target},{action:"create",resource:postingTarget},
       {action:"view",resource:{...target,type:"financial_transaction",id:row.fundingAccountId,financialRecordId:row.fundingAccountId}},
+      ...(wallet?[{action:"view" as const,resource:wallet},{action:"pay" as const,resource:wallet}]:[]),
       ...(input.currentPeriod?[{action:"override" as const,resource:{...target,type:"financial_transaction" as const}}]:[]),...correctionChecks
     ];
     await recheckFinanceAuthorization(ctx,tx,clock.now,checks,new ExpenseAccessError());
@@ -61,6 +71,7 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
         after.data.postingDateMode!==(input.currentPeriod?"CURRENT_OPEN_PERIOD":"SOURCE_DATE")||Boolean(row.periodAdjustment||row.correctsExpenseId)!==input.currentPeriod)throw new ExpenseConflictError();
       return{id:row.id,version:row.version,transactionId:row.transactionId,idempotent:true,...(row.periodAdjustment?{accountingPeriodAdjustmentId:row.periodAdjustment.id}:{})};
     }
+    if(!isExpenseFundingAccount(funding))throw new ExpenseConfigurationError("Expense funding account is unavailable");
     if(row.state!=="APPROVED"||row.version!==input.expectedVersion||!row.submission||
       row.approval&&row.approval.state!=="APPROVED"||row.approval?.financialStages.some(stage=>stage.state!=="APPROVED"))throw new ExpenseConflictError();
     const frozen=snapshotSchema.safeParse(row.submission.snapshot);if(!frozen.success)throw new ExpenseConfigurationError("Submitted expense allocation is unavailable");
@@ -80,8 +91,6 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     }
     const amount=Money.of(row.amount.toString(),row.currency),money=(value:z.infer<typeof moneySchema>)=>Money.of(value.amount,value.currency);
     const allocation={ownerAmount:money(frozen.data.allocation.owner),alvillasAmount:money(frozen.data.allocation.alvillas),guestAmount:money(frozen.data.allocation.guest)};
-    const finance=new FinanceRepository(tx,ctx.organizationId),funding=await finance.findLedgerAccountById(row.fundingAccountId);
-    if(!funding||!isExpenseFundingAccount(funding))throw new ExpenseConfigurationError("Expense funding account is unavailable");
     async function account(code:string,name:string,accountType:string,normalSide:"DEBIT"|"CREDIT",needed:boolean){
       if(!needed)return "";
       const result=await finance.ensureLedgerAccount({code,name,accountType,normalSide});
@@ -125,14 +134,18 @@ export async function voidExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
   if(ctx.organizationId!==ctx.authContext.organizationId||ctx.actorId!==ctx.authContext.userAccountId)throw new ExpenseAccessError();
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     const expenses=new ExpenseRepository(tx,ctx.organizationId);await expenses.lock(input.id);
-    const clock=await expenses.clock(),auth=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);
     const row=await expenses.find(input.id);if(!row||row.property.archivedAt)throw new ExpenseAccessError();
     const timezone=z.object({timezone:z.string().min(1)}).safeParse(row.submission?.snapshot);
     const occurredAt=await new AccountingPeriodRepository(tx,ctx.organizationId).sourceInstant(row.occurredOn,timezone.success?timezone.data.timezone:row.property.timezone);
     const target=expenseResource(ctx.organizationId,row.property,{...row,amount:row.amount.toString(),occurredAt});
     const financialTarget={...target,type:"financial_transaction" as const,id:row.transactionId??row.id,financialRecordId:row.transactionId??row.id,occurredAt:row.transaction?.occurredAt??occurredAt};
+    const sourceFunding=await new FinanceRepository(tx,ctx.organizationId).findLedgerAccountById(row.fundingAccountId);
+    if(sourceFunding?.teamWallet)await lockWalletHolders(tx,ctx.organizationId,[sourceFunding.teamWallet.personId]);
+    const clock=await expenses.clock(),auth=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);
+    const wallet=sourceFunding&&expenseFundingWalletResource(ctx.organizationId,sourceFunding,row.amount.toString(),occurredAt);
+    const walletChecks:ReadonlyArray<{action:Action;resource:Resource}>=wallet?[{action:"view",resource:wallet},{action:"void",resource:wallet}]:[];
     if(!authorize(auth,"view",target,clock.now)||!authorize(auth,"void",target,clock.now)||
-      !authorize(auth,"void",financialTarget,clock.now))throw new ExpenseAccessError();
+      !authorize(auth,"void",financialTarget,clock.now)||walletChecks.some(({action,resource})=>[auth,ctx.authContext].some(authority=>!authorize(authority,action,resource,clock.now))))throw new ExpenseAccessError();
     const finance=new FinanceRepository(tx,ctx.organizationId),journals=await finance.findTransactionsByIdempotencyKeys([`expense:${row.id}:posted`,`expense:${row.id}:voided`]);
     const original=journals.find(journal=>journal.id===row.transactionId),reversal=journals.find(journal=>journal.reversesTransactionId===row.transactionId);
     if(!original)throw new ExpenseConflictError();
@@ -148,6 +161,7 @@ export async function voidExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
         amount:Money.of(posting.amount.toString(),posting.currency),bucket:z.string().parse(posting.bucket),dimensions:z.record(z.string(),z.unknown()).parse(posting.dimensions)
       })), recheckAuthorization: at => recheckFinanceAuthorization(ctx, tx, at, [
         { action: "view", resource: target }, { action: "void", resource: target },
+        ...walletChecks,
         { action: "void", resource: { ...financialTarget, id: original.id, financialRecordId: original.id, occurredAt: original.occurredAt } }
       ], new ExpenseAccessError()) });
     if((await expenses.transition(row.id,row.version,"POSTED","VOIDED",ctx.actorId)).count!==1)throw new ExpenseConflictError();

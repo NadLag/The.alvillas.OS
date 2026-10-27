@@ -28,6 +28,7 @@ export default async function FinancialAccountsPage({ params, searchParams }: {
   return <AdminShell className="resource-page financial-accounts-page" testId="financial-accounts-page">
     <ShellHeader eyebrow={t("eyebrow")} title={t("title")} subtitle={t("description")}
       actions={<Link className="secondary-button" href={query.propertyId ? `/${locale}/app/properties/${query.propertyId}/expenses/new` : `/${locale}/app`}>{t(query.propertyId ? "backToExpense" : "back")}</Link>} />
+    <Link className="secondary-button" data-testid="financial-transfers-entry" href={`/${locale}/app/finance/transfers`}>{t("transfers")}</Link>
     <form className="resource-form" method="get" data-testid="payment-account-search-form">
       {query.propertyId ? <input type="hidden" name="propertyId" value={query.propertyId} /> : null}
       <label className="field"><span>{t("search")}</span><input name="q" data-testid="payment-account-search" defaultValue={query.q ?? ""} maxLength={120} /></label>
@@ -38,7 +39,7 @@ export default async function FinancialAccountsPage({ params, searchParams }: {
       <h2>{t("chart")}</h2><p>{t("separation")}</p>
       {!result.accounts.length ? <p data-testid="payment-account-empty">{t("empty")}</p> : <ul className="resource-list">
         {result.accounts.map(account => {
-          const group = ["ASSET_LOCATION", "ASSET"].includes(account.accountType) ? "location" :
+          const group = ["ASSET_LOCATION", "ASSET", "STAFF_WALLET"].includes(account.accountType) ? "location" :
             ["CLAIM_OWNERSHIP", "CLAIM", "LIABILITY"].includes(account.accountType) ? "ownership" : "company";
           return <li className="resource-card" data-testid="payment-account-row" key={account.id}>
             <h3>{account.name}</h3><dl className="detail-grid">
