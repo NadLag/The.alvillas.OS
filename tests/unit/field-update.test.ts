@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { refreshFieldApp, settleFieldForegroundWork } from "@/platform/offline/field-update";
+import { claimFieldClient, refreshFieldApp, settleFieldForegroundWork } from "@/platform/offline/field-update";
 
 class UpdateChannel {
   static latest: UpdateChannel;
@@ -28,6 +28,37 @@ beforeEach(() => {
   vi.stubGlobal("navigator", { serviceWorker: serviceWorkers });
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+describe("uncontrolled Field document after worker activation",()=>{
+  it("requests the existing active worker to claim without promoting a waiting update",()=>{
+    const active=waitingWorker(),waiting=waitingWorker(),unavailable=vi.fn();active.state("activated");
+    claimFieldClient({active:active.worker,waiting:waiting.worker} as ServiceWorkerRegistration,unavailable);
+    expect(active.postMessage.mock.calls).toEqual([[{type:"ALVILLAS_CLAIM_CLIENT"}]]);expect(waiting.postMessage).not.toHaveBeenCalled();expect(unavailable).not.toHaveBeenCalled();
+  });
+  it("waits for the installing worker to become active before requesting control",()=>{
+    const first=waitingWorker(),unavailable=vi.fn();first.state("installing");
+    const current={active:null as ServiceWorker|null,installing:first.worker} as ServiceWorkerRegistration;
+    claimFieldClient(current,unavailable);first.state("installed");expect(first.postMessage).not.toHaveBeenCalled();
+    Object.assign(current,{active:first.worker,installing:null});first.state("activating");expect(first.postMessage).not.toHaveBeenCalled();
+    first.state("activated");expect(first.postMessage.mock.calls).toEqual([[{type:"ALVILLAS_CLAIM_CLIENT"}]]);
+  });
+  it("preserves an existing controller and waiting update",()=>{
+    const active=waitingWorker(),waiting=waitingWorker();active.state("activated");controller=active.worker;
+    claimFieldClient({active:active.worker,waiting:waiting.worker} as ServiceWorkerRegistration,vi.fn());
+    expect(active.postMessage).not.toHaveBeenCalled();expect(waiting.postMessage).not.toHaveBeenCalled();
+  });
+  it("never claims through a waiting-only worker",()=>{
+    const waiting=waitingWorker();claimFieldClient(registration(waiting.worker),vi.fn());expect(waiting.postMessage).not.toHaveBeenCalled();
+  });
+  it("removes lifecycle listeners when the document is disposed",()=>{
+    const active=waitingWorker(),current={active:active.worker} as ServiceWorkerRegistration;
+    const stop=claimFieldClient(current,vi.fn());stop();active.state("activated");expect(active.postMessage).not.toHaveBeenCalled();
+  });
+  it("reports a failed native message without changing controller ownership",()=>{
+    const active=waitingWorker(),unavailable=vi.fn();active.state("activated");active.postMessage.mockImplementation(()=>{throw Error("Worker stopped");});
+    claimFieldClient({active:active.worker} as ServiceWorkerRegistration,unavailable);expect(unavailable).toHaveBeenCalledTimes(1);expect(controller).toBeNull();
+  });
+});
 
 describe("foreground work before explicit worker promotion", () => {
   it("waits for every concurrent foreground request", async () => {

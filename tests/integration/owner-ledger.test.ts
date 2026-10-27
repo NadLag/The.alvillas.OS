@@ -121,6 +121,19 @@ describe("derived owner ledger on real PostgreSQL",()=>{
     const f=await fixture(),{ctx}=await reader(f);await withTenant(db,f.org,tx=>tx.owner.createMany({data:Array.from({length:500},()=>({id:`00000000-${randomUUID().slice(9)}`,organizationId:f.org,displayName:"Restricted unrelated owner metadata"}))}));
     const result=await listOwnerLedgerChoices(ctx,{}, {db});expect(result.owners).toEqual([{id:f.owner.id,name:f.owner.displayName}]);expect(result.next).toBeUndefined();expect(JSON.stringify(result)).not.toContain("Restricted unrelated owner metadata");
   });
+  it("uses the current Moroccan calendar at midnight even when PostgreSQL carries older timezone data",async()=>{
+    const f=await fixture(),{ctx}=await reader(f);
+    await journal(f,"2026-11-01T23:30:00Z","777.77");await journal(f,"2026-11-02T00:00:00Z","100.25");
+    await journal(f,"2026-11-02T23:59:59.999999Z","0.01");await journal(f,"2026-11-03T00:00:00Z","999.99");
+    const result=await getOwnerLedger(ctx,{ownerId:f.owner.id,fromOn:"2026-11-02",toOn:"2026-11-02",timezone:"Africa/Casablanca",currency:"MAD"},{db});
+    expect(result.openingBalance).toBe("777.77");expect(result.periodCredits).toBe("100.26");expect(result.closingBalance).toBe("878.03");expect(result.lines).toHaveLength(2);
+    await withTenant(db,f.org,async tx=>{
+      const repository=new OwnerLedgerRepository(tx,f.org);
+      expect(await repository.range("2026-11-02","2026-11-02","Africa/Casablanca")).toEqual({startsAt:new Date("2026-11-02T00:00:00Z"),endsAt:new Date("2026-11-03T00:00:00Z")});
+      expect(await repository.defaults(new Date("2026-10-31T23:30:00Z"),"Africa/Casablanca")).toEqual({fromOn:"2026-10-01",toOn:"2026-10-31"});
+    });
+  });
+
   it("uses one PostgreSQL snapshot while another real journal commits between scope and posting reads",async()=>{
     const f=await fixture(),{ctx}=await reader(f);await journal(f,"2026-03-08T07:00:00Z","1");let observed!:()=>void,release!:()=>void;
     const reached=new Promise<void>(resolve=>observed=resolve),gate=new Promise<void>(resolve=>release=resolve);
