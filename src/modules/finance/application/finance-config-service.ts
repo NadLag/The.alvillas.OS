@@ -2,7 +2,6 @@ import { z } from "zod";
 import {
   ConfigRuleRepository,
   configRuleSnapshotMetadata,
-  type ConfigScopeCandidate,
   type ResolvedConfigRule
 } from "@/platform/config/config-rule-repository";
 import { authorize, roleKeysForResource, type AuthContext, type Resource } from "@/platform/authz/authorize";
@@ -113,14 +112,6 @@ function assertAllowed(ctx: FinanceConfigActorContext): void {
   }
 }
 
-function scopesFor(input: { propertyId: string; ownerId?: string }): ConfigScopeCandidate[] {
-  return [
-    { scopeType: "property", scopeId: input.propertyId },
-    ...(input.ownerId ? [{ scopeType: "owner", scopeId: input.ownerId }] : []),
-    { scopeType: "organization", scopeId: null }
-  ];
-}
-
 function evidence(rule: ResolvedConfigRule): ConfigDecisionEvidence {
   return {
     configRuleId: rule.id,
@@ -223,10 +214,13 @@ export async function planOwnerPayout(
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
+    const scopes = await new ReservationConfigScopeRepository(tx, ctx.organizationId).scopes({
+      propertyId: input.propertyId, ownerId: input.ownerId, asOf
+    });
     const payoutRule = await resolveRequired(
       repository,
       "finance.payout_schedule",
-      scopesFor(input),
+      scopes,
       asOf
     );
 
