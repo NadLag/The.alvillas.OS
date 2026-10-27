@@ -46,6 +46,7 @@ describe("config rule registry", () => {
       "feature_flag",
       "field.device_hygiene",
       "field.upload_lifecycle",
+      "finance.accounting_periods",
       "finance.approval_thresholds",
       "finance.commission",
       "finance.expense_allocation",
@@ -85,6 +86,10 @@ describe("config rule registry", () => {
   });
 
   it("parses known config values and rejects unregistered keys", () => {
+    expect(parseConfigRuleValue("finance.accounting_periods", {
+      timezone: "Europe/Paris", allow_early_close: false, max_reopen_seconds: 120
+    })).toEqual({ timezone: "Europe/Paris", allow_early_close: false, max_reopen_seconds: 120 });
+    expect(() => parseConfigRuleValue("finance.accounting_periods", { timezone: "Europe/Paris" })).toThrow();
     expect(parseConfigRuleValue(commissionConfigKey, {
       rate_bps: 2000,
       basis: "GROSS_ACCOMMODATION",
