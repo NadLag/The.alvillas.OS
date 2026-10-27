@@ -75,7 +75,7 @@ export class NotificationRepository {
     const approval = input.kind === "approval_requested" ? await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: input.targetId },
       include: { recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } }) : null;
     const stage = approval?.financialStages.find(stage => stage.state === "PENDING");
-    if (approval?.expenseId && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
+    if ((approval?.expenseId || approval?.payoutId) && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
     const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
     let routing:NotificationRouting;
@@ -303,7 +303,7 @@ export class NotificationRepository {
     for (const row of reservations) targets.set(row.id, { type: "reservation", organizationId: this.organizationId, id: row.id, reservationId: row.id, propertyId: row.propertyId, region: row.property.regionId, city: row.property.cityId, status: row.status });
     const approvalIds = rows.filter((row) => row.kind === "approval_requested" || row.kind === "approval_decided").map((row) => row.targetId);
     const approvals = approvalIds.length ? await this.tx.approvalRequest.findMany({ where: { organizationId: this.organizationId, id: { in: approvalIds }, property: { archivedAt: null } },
-      include: { property: true, expense: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } }) : [];
+      include: { property: true, expense: true, payout: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } }) : [];
     for (const row of approvals) {
       const ownStage = readerId ? row.financialStages.find(stage => stage.recipients.some(recipient => recipient.userAccountId === readerId)) : undefined;
       targets.set(row.id, { ...approvalResource(row, ownStage?.ownerId ?? row.financialStages.find(stage => stage.state === "PENDING")?.ownerId), assignedUserAccountId: row.requestedBy });
@@ -324,7 +324,7 @@ export class NotificationRepository {
     const row = await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: approvalId },
       include: { recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } });
     if (!row || row.state !== "PENDING") return false;
-    if (!row.expenseId) return row.recipients.some(recipient => recipient.userAccountId === recipientId);
+    if (!row.expenseId && !row.payoutId) return row.recipients.some(recipient => recipient.userAccountId === recipientId);
     const stage = row.financialStages.find(stage => stage.state === "PENDING");
     if (!stage || !sourceEventId || !stage.recipients.some(recipient => recipient.userAccountId === recipientId)) return false;
     const event = await this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id: sourceEventId, type: notificationEventType } });

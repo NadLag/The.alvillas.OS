@@ -33,6 +33,15 @@ export class OwnerPayoutRepository {
   find(id: string) { return this.tx.ownerPayout.findFirst({ where: { organizationId: this.organizationId, id }, include }); }
   byKey(idempotencyKey: string) { return this.tx.ownerPayout.findUnique({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, include }); }
   method(id: string) { return this.tx.ownerPayoutMethod.findFirst({ where: { organizationId: this.organizationId, id } }); }
+  reservation(id: string) {
+    return this.tx.reservation.findFirst({ where: { organizationId: this.organizationId, id },
+      include: { commissionSnapshots: true, reverseReservationFinancialSnapshotreservationIdLink: { orderBy: { version: "asc" } } } });
+  }
+  async committedAmount(ownerId: string, propertyId: string, currency: string, excludeId: string) {
+    const value = await this.tx.ownerPayout.aggregate({ where: { organizationId: this.organizationId, ownerId, propertyId, currency,
+      id: { not: excludeId }, state: { in: ["APPROVED", "SCHEDULED"] } }, _sum: { amount: true } });
+    return value._sum.amount?.toString() ?? "0";
+  }
   async lock(id: string) { await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":owner-payout:" + id},0))::text`); }
   async lockKey(key: string) { await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":owner-payout-create:" + key},0))::text`); }
   async lockOwner(ownerId: string, propertyId: string, currency: string) {
@@ -42,6 +51,7 @@ export class OwnerPayoutRepository {
   create(input: z.infer<typeof ownerPayoutDraftSchema>, actorId: string) {
     return this.tx.ownerPayout.create({ data: { organizationId: this.organizationId, propertyId: input.propertyId, ownerId: input.ownerId,
       reservationId: input.reservationId, payoutMethodId: input.payoutMethodId, fundingAccountId: input.fundingAccountId,
+      expectedSettlementAt: input.expectedSettlementAt,
       amount: input.amount, currency: input.currency, purpose: input.purpose, idempotencyKey: input.idempotencyKey,
       createdBy: actorId, updatedBy: actorId }, include });
   }

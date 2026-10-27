@@ -2354,6 +2354,7 @@ model OwnerPayout {
   propertyId String @map("property_id") @db.Uuid
   ownerId String @map("owner_id") @db.Uuid
   reservationId String? @map("reservation_id") @db.Uuid
+  expectedSettlementAt DateTime? @map("expected_settlement_at") @db.Timestamptz(6)
   payoutMethodId String @map("payout_method_id") @db.Uuid
   fundingAccountId String @map("funding_account_id") @db.Uuid
   amount Decimal @db.Decimal(18, 2)

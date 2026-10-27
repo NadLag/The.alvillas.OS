@@ -6,25 +6,21 @@ import { authContextForAccountInTransaction } from "@/platform/authz/account-con
 import { present } from "@/platform/authz/present";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { Money } from "@/platform/money/money";
-import { ownerPayoutDraftSchema } from "../domain/owner-payout";
+import { ownerPayoutCommandSchema, ownerPayoutDraftSchema, ownerPayoutResource } from "../domain/owner-payout";
 import { isExpenseFundingAccount, expenseFundingWalletResource } from "../domain/expense";
-import { OwnerPayoutRepository, type OwnerPayoutRecord } from "../infrastructure/owner-payout-repository";
+import { OwnerPayoutRepository } from "../infrastructure/owner-payout-repository";
 import { OwnerLedgerRepository } from "../infrastructure/owner-ledger-repository";
 import { ExpenseRepository } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
+import { prepareOwnerPayoutPolicy } from "./owner-payout-policy";
+import { ApprovalRepository } from "@/platform/approvals/approval-repository";
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 export class OwnerPayoutAccessError extends Error {}
 export class OwnerPayoutConflictError extends Error {}
 export class OwnerPayoutConfigurationError extends Error {}
-
-function payoutResource(ctx: FinanceActorContext, row: Pick<OwnerPayoutRecord,"id"|"ownerId"|"propertyId"|"amount"|"state"|"createdBy">,
-  property: { cityId: string | null; regionId: string | null }): Resource {
-  return { type: "financial_transaction", organizationId: ctx.organizationId, id: row.id, financialRecordId: row.id,
-    ownerId: row.ownerId, propertyId: row.propertyId, amount: row.amount.toString(), status: row.state,
-    assignedUserAccountId: row.createdBy, city: property.cityId, region: property.regionId, dataClass: "financial" };
-}
 
 export async function createOwnerPayout(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
   const input = ownerPayoutDraftSchema.parse(raw);
@@ -39,7 +35,7 @@ export async function createOwnerPayout(ctx: FinanceActorContext, raw: unknown, 
     await recheckFinanceAuthorization(ctx, tx, now, [{ action: "view", resource: target }, { action: "create", resource: target }], new OwnerPayoutAccessError());
     const existing = await repository.byKey(input.idempotencyKey);
     if (existing) {
-      await recheckFinanceAuthorization(ctx, tx, now, [{ action: "view", resource: payoutResource(ctx, existing, existing.property) }], new OwnerPayoutAccessError());
+      await recheckFinanceAuthorization(ctx, tx, now, [{ action: "view", resource: ownerPayoutResource(ctx.organizationId, existing, existing.property) }], new OwnerPayoutAccessError());
       const audit = await repository.audit(existing.id, "finance.owner_payout.created");
       const saved = z.object({ request: ownerPayoutDraftSchema }).safeParse(audit?.after);
       if (!audit || audit.actorId !== ctx.actorId || !saved.success || JSON.stringify(saved.data.request) !== JSON.stringify(input)) throw new OwnerPayoutConflictError();
@@ -67,16 +63,65 @@ export async function getOwnerPayout(ctx: FinanceActorContext, rawId: string, de
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new OwnerPayoutRepository(tx, ctx.organizationId), row = await repository.find(id);
     if (!row) throw new OwnerPayoutAccessError();
-    const now = await new FinanceRepository(tx, ctx.organizationId).clock(), target = payoutResource(ctx, row, row.property);
+    const now = await new FinanceRepository(tx, ctx.organizationId).clock(), target = ownerPayoutResource(ctx.organizationId, row, row.property);
     await recheckFinanceAuthorization(ctx, tx, now, [{ action: "view", resource: target }], new OwnerPayoutAccessError());
     const current = await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId);
     const data = { id: row.id, ownerName: row.owner.displayName, propertyName: row.property.name, state: row.state, version: row.version,
       amount: row.amount.toFixed(2), currency: row.currency, purpose: row.purpose, payoutMethodLabel: row.payoutMethod.label,
+      expectedSettlementAt: row.expectedSettlementAt?.toISOString() ?? null,
       eligibleAt: row.eligibleAt?.toISOString() ?? null, scheduledFor: row.scheduledFor?.toISOString() ?? null, paidAt: row.paidAt?.toISOString() ?? null,
       paymentReference: row.paymentReference, canEdit: row.state === "DRAFT" && [ctx.authContext,current].every(authority => authorize(authority,"edit",target,now)) };
     const result = present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...target, data }, {}) as typeof data;
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.owner_payout.viewed", resourceType: "owner_payout", resourceId: row.id,
       propertyScopeId: row.propertyId, after: { payoutId: row.id, state: row.state }, reason: "Viewed the authorized owner payout", requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now });
     return result;
+  });
+}
+
+export async function submitOwnerPayout(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
+  const input = ownerPayoutCommandSchema.parse(raw);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const repository = new OwnerPayoutRepository(tx,ctx.organizationId), initial = await repository.find(input.id);
+    if (!initial) throw new OwnerPayoutAccessError();
+    await repository.lockOwner(initial.ownerId,initial.propertyId,initial.currency);
+    await repository.lock(initial.id);
+    const row = await repository.find(initial.id);
+    if (!row || row.ownerId!==initial.ownerId || row.propertyId!==initial.propertyId || row.currency!==initial.currency) throw new OwnerPayoutConflictError();
+    const now = await new FinanceRepository(tx,ctx.organizationId).clock(), target = ownerPayoutResource(ctx.organizationId,row,row.property);
+    await recheckFinanceAuthorization(ctx,tx,now,[{action:"view",resource:target},{action:"edit",resource:target}],new OwnerPayoutAccessError());
+    if (row.state!=="DRAFT") {
+      const audit = await repository.audit(row.id,"finance.owner_payout.submitted");
+      if (!audit || audit.actorId!==ctx.actorId || audit.reason!==input.reason ||
+        !z.object({version:z.literal(input.expectedVersion)}).safeParse(audit.before).success) throw new OwnerPayoutConflictError();
+      return {id:row.id,version:row.version,state:row.state,approvalId:row.approvals[0]?.id??null,idempotent:true};
+    }
+    if (row.version!==input.expectedVersion) throw new OwnerPayoutConflictError();
+    const funding = await new FinanceRepository(tx,ctx.organizationId).findLedgerAccountById(row.fundingAccountId);
+    if (!funding || !isExpenseFundingAccount(funding)) throw new OwnerPayoutConfigurationError();
+    const wallet = expenseFundingWalletResource(ctx.organizationId,funding,row.amount.toString(),now);
+    await recheckFinanceAuthorization(ctx,tx,now,[{action:"view",resource:{type:"financial_transaction",organizationId:ctx.organizationId,
+      id:funding.id,financialRecordId:funding.id,dataClass:"financial"}},...(wallet?[{action:"view" as const,resource:wallet}]:[])],new OwnerPayoutAccessError());
+    const policy = await prepareOwnerPayoutPolicy(ctx,row,target,tx,now);
+    if ((await repository.transition(row.id,row.version,"DRAFT","PENDING_APPROVAL",ctx.actorId,{policySnapshot:policy.snapshot,
+      methodSnapshotHash:policy.methodSnapshotHash,eligibleAt:policy.eligibleAt})).count!==1) throw new OwnerPayoutConflictError();
+    let state="PENDING_APPROVAL", version=row.version+1, approvalId:string|null=null;
+    await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.owner_payout.submitted",resourceType:"owner_payout",resourceId:row.id,
+      propertyScopeId:row.propertyId,before:{version:row.version,state:row.state},after:{payoutId:row.id,version,state,policy:policy.snapshot},
+      reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:now});
+    if (policy.stages.length) {
+      const approvals = new ApprovalRepository(tx,ctx.organizationId), approval = await approvals.createFinancial({payoutId:row.id,propertyId:row.propertyId,
+        requestedBy:ctx.actorId,title:row.purpose.slice(0,160),details:row.purpose.length>=6?row.purpose:input.reason,stages:policy.stages});
+      if (!approval) throw new OwnerPayoutConflictError();approvalId=approval.id;
+      await approvals.event("ApprovalRequested",approval.id,row.propertyId);
+      await new NotificationRepository(tx,ctx.organizationId).publish({kind:"approval_requested",recipientId:ctx.actorId,targetId:approval.id},
+        `approval:${approval.id}:stage:${approval.financialStages[0].id}:requested`);
+    } else {
+      if ((await repository.transition(row.id,version,"PENDING_APPROVAL","APPROVED",ctx.actorId,{approvedAt:now})).count!==1) throw new OwnerPayoutConflictError();
+      await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.owner_payout.approved",resourceType:"owner_payout",resourceId:row.id,
+        propertyScopeId:row.propertyId,before:{version,state},after:{payoutId:row.id,version:version+1,state:"APPROVED",approvalByPolicy:true},
+        reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:now});
+      state="APPROVED";version++;
+    }
+    return {id:row.id,version,state,approvalId,idempotent:false};
   });
 }

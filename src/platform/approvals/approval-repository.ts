@@ -3,7 +3,7 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import type { z } from "zod";
 import type { approvalRequestSchema } from "./approval";
 
-const include = { property: true, recipients: true, expense: true,
+const include = { property: true, recipients: true, expense: true, payout: true,
   financialStages: { orderBy: { position: "asc" as const }, include: { recipients: true } } } satisfies Prisma.ApprovalRequestInclude;
 
 export class ApprovalRepository {
@@ -25,11 +25,11 @@ export class ApprovalRepository {
   async lockExpense(id: string) {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":expense:" + id},0))::text`);
   }
-  async createFinancial(input: { expenseId: string; propertyId: string; requestedBy: string; title: string; details: string; stages: Array<{
+  async createFinancial(input: ({ expenseId: string; payoutId?: never } | { payoutId: string; expenseId?: never }) & { propertyId: string; requestedBy: string; title: string; details: string; stages: Array<{
     kind: string; ownerId: string | null; amount: string; currency: string; routing: Prisma.InputJsonObject; recipients: string[] }> }) {
-    const row = await this.tx.approvalRequest.create({ data: { organizationId: this.organizationId, expenseId: input.expenseId,
+    const row = await this.tx.approvalRequest.create({ data: { organizationId: this.organizationId, expenseId: input.expenseId, payoutId: input.payoutId,
       propertyId: input.propertyId, requestedBy: input.requestedBy, title: input.title, details: input.details,
-      idempotencyKey: `expense:${input.expenseId}:approval`, routingSnapshot: input.stages[0].routing } });
+      idempotencyKey: input.payoutId ? `payout:${input.payoutId}:approval` : `expense:${input.expenseId}:approval`, routingSnapshot: input.stages[0].routing } });
     await this.tx.approvalRecipient.createMany({ data: [...new Set(input.stages.flatMap(stage => stage.recipients))].map(userAccountId =>
       ({ organizationId: this.organizationId, approvalId: row.id, userAccountId })) });
     for (const [index, stage] of input.stages.entries()) {

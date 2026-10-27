@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Money } from "@/platform/money/money";
 import { financialTransferSchema } from "./financial-transfer";
 import { assertFinancePostingsBalanced, type FinancePostingDraft } from "./reservation-revenue";
+import type { Resource } from "@/platform/authz/authorize";
 
 export const ownerPayoutStates = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SCHEDULED", "PAID", "RECONCILED", "FAILED", "CANCELLED"] as const;
 export type OwnerPayoutState = (typeof ownerPayoutStates)[number];
@@ -12,6 +13,7 @@ export const ownerPayoutDraftSchema = z.object({
   propertyId: id,
   ownerId: id,
   reservationId: id.optional(),
+  expectedSettlementAt: z.iso.datetime({ offset: true }).transform(value => new Date(value).toISOString()).optional(),
   payoutMethodId: id,
   fundingAccountId: id,
   amount: financialTransferSchema.shape.amount,
@@ -20,6 +22,15 @@ export const ownerPayoutDraftSchema = z.object({
   reason: financialTransferSchema.shape.reason,
   idempotencyKey: financialTransferSchema.shape.idempotencyKey
 }).strict();
+
+export const ownerPayoutCommandSchema = z.object({ id, expectedVersion: z.number().int().positive(), reason: financialTransferSchema.shape.reason }).strict();
+
+export function ownerPayoutResource(organizationId:string,row:{id:string;ownerId:string;propertyId:string;amount:{toString():string};state:string;createdBy:string;
+  reservationId?:string|null;createdAt?:Date;paidAt?:Date|null},property:{cityId:string|null;regionId:string|null}):Resource {
+  return {type:"financial_transaction",organizationId,id:row.id,financialRecordId:row.id,ownerId:row.ownerId,propertyId:row.propertyId,
+    reservationId:row.reservationId,amount:row.amount.toString(),status:row.state,assignedUserAccountId:row.createdBy,
+    occurredAt:row.paidAt??row.createdAt,city:property.cityId,region:property.regionId,dataClass:"financial"};
+}
 
 const transitions: Record<OwnerPayoutState, Partial<Record<OwnerPayoutCommand, OwnerPayoutState>>> = {
   DRAFT: { submit: "PENDING_APPROVAL", cancel: "CANCELLED" },
