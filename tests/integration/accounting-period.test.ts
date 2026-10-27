@@ -97,6 +97,16 @@ describe("monthly accounting locks on real PostgreSQL", () => {
     const other = await fixture(); await expect(getAccountingPeriod(other.ctx, closed.id, undefined, { db })).rejects.toBeInstanceOf(AccountingPeriodAccessError);
     expect(await withTenant(db, other.org, tx => tx.accountingPeriod.count())).toBe(0);
     expect(await db.accountingPeriod.count()).toBe(0);
+    const rollback = new Error("Retain policies after the isolated permissive-policy regression");
+    await expect(admin.$transaction(async tx => {
+      await tx.$executeRawUnsafe("CREATE POLICY accounting_period_test_permissive ON accounting_period USING (true) WITH CHECK (true)");
+      await tx.$executeRawUnsafe("CREATE POLICY accounting_period_event_test_permissive ON accounting_period_event USING (true) WITH CHECK (true)");
+      await tx.$executeRawUnsafe("SET LOCAL ROLE alvillas_ops_tests");
+      await tx.$queryRaw`SELECT set_config('app.current_organization_id', ${other.org}, true)`;
+      expect(await tx.accountingPeriod.count({ where: { id: closed.id } })).toBe(0);
+      expect(await tx.accountingPeriodEvent.count({ where: { periodId: closed.id } })).toBe(0);
+      throw rollback;
+    })).rejects.toBe(rollback);
   });
 
   it("expires a configured reopening window and never extends it on a late duplicate", async () => {
