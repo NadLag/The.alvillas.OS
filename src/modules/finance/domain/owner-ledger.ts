@@ -9,4 +9,3 @@ export const ownerLedgerFilters=z.object({ownerId:id,propertyId:id.optional(),fr
 export const ownerLedgerChoiceFilters=z.object({query:z.string().trim().max(120).optional(),after:id.optional()}).strict();
 export {ownerStatementBuckets as ownerLedgerBuckets} from "@/platform/ledger/owner-statement";
 export function ownerLedgerPath(locale:string,ownerId:string,propertyId?:string){return propertyId?`/${locale}/app/finance/owner-ledgers/properties/${propertyId}/owners/${ownerId}`:`/${locale}/app/finance/owner-ledgers/owners/${ownerId}`}
-
