@@ -7,6 +7,7 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { nextReferenceNumber } from "@/platform/references/reference-number";
 import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
 import { formatCurrencyAmount } from "@/i18n/format";
+import { ownerLedgerPath } from "@/modules/finance/domain/owner-ledger";
 import { openFieldFixture } from "./support/field-fixture";
 import { ensureE2EAdmin, e2eEmail, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 
@@ -55,7 +56,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       expect(occupied).toBe(0);
       const bounds = await periods.bounds(sourceMonth, "Europe/Paris");
       expect(await tx.financialTransaction.count({where:{occurredAt:{gte:bounds.startsAt,lt:bounds.endsAt}}})).toBe(0);
-      return { propertyId: task.propertyId, bankId: bank.id, ownerAccountId: account.id, ownerRoleId: role.id,sourceMonth,sourceOn:sourceMonth+"-15" };
+      const unrelatedOwner=await tx.owner.create({data:{organizationId:f.organizationId,displayName:`Unrelated private ledger owner ${suffix}`}});
+      return { ownerId:owner.id,ownerName:owner.displayName,unrelatedOwnerId:unrelatedOwner.id,propertyId: task.propertyId, bankId: bank.id, ownerAccountId: account.id, ownerRoleId: role.id,sourceMonth,sourceOn:sourceMonth+"-15" };
     });
     await admin.goto("/en/app/identity"); await admin.getByTestId("invite-display-name").fill(`Dedicated expense field ${suffix}`);
     await admin.getByTestId("invite-phone").fill(phone); await admin.getByTestId("invite-role").selectOption("field_staff");
@@ -160,6 +162,24 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await expect(admin.getByRole("heading",{level:1})).toBeVisible();expect((await new AxeBuilder({page:admin}).analyze()).violations).toEqual([]);
     await ownerPage.reload();await expect(ownerPage.getByTestId("expense-void-form")).toHaveCount(0);
     await expect(admin.getByTestId("expense-void-form")).toBeVisible();
+    const expenseReturnUrl=admin.url();
+    await admin.goto(`/${locale}/app/finance/accounts`);await admin.getByTestId("owner-ledger-entry").click();await expect(admin.getByTestId("owner-ledger-index")).toBeVisible();
+    await admin.getByTestId("owner-ledger-search").fill(setup.ownerName);await admin.getByTestId("owner-ledger-search").press("Enter");
+    await expect.poll(()=>new URL(admin.url()).searchParams.get("q")).toBe(setup.ownerName);
+    const ownerCard=admin.getByRole("heading",{name:setup.ownerName,exact:true}).locator("..");await ownerCard.getByTestId("owner-ledger-open").click();
+    await expect(admin.getByTestId("owner-ledger-closing")).toHaveText(formatCurrencyAmount(locale,"-500.25","MAD"));await expect(admin.getByTestId("owner-ledger-debits")).toHaveText(formatCurrencyAmount(locale,"500.25","MAD"));
+    const ledgerPath=ownerLedgerPath(locale,setup.ownerId),propertyLedgerPath=ownerLedgerPath(locale,setup.ownerId,setup.propertyId);
+    await ownerPage.goto(ledgerPath);await expect(ownerPage.getByTestId("owner-ledger-line")).toHaveCount(1);await expect(ownerPage.getByTestId("owner-ledger-closing")).toHaveText(formatCurrencyAmount(locale,"-500.25","MAD"));
+    expect(await ownerPage.content()).not.toContain(setup.bankId);expect((await fieldPage.request.get(ledgerPath)).status()).toBe(404);
+    expect((await ownerPage.request.get(ownerLedgerPath(locale,setup.unrelatedOwnerId))).status()).toBe(404);
+    await ownerPage.getByTestId("owner-ledger-property").selectOption(propertyLedgerPath);await ownerPage.getByTestId("owner-ledger-apply").click();await expect.poll(()=>new URL(ownerPage.url()).pathname).toBe(propertyLedgerPath);
+    await expect(ownerPage.getByTestId("owner-ledger-filters")).toHaveAttribute("aria-busy","false");
+    await expect(ownerPage.getByTestId("owner-ledger-property")).toHaveValue(propertyLedgerPath);await expect(ownerPage.getByTestId("owner-ledger-closing")).toHaveText(formatCurrencyAmount(locale,"-500.25","MAD"));
+    expect((await new AxeBuilder({page:ownerPage}).analyze()).violations).toEqual([]);await ownerPage.evaluate(()=>document.documentElement.style.fontSize="200%");
+    expect(await ownerPage.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);await ownerPage.evaluate(()=>document.documentElement.style.setProperty("--font-sans","monospace"));
+    await ownerPage.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));expect(await ownerPage.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
+    await ownerPage.evaluate(()=>document.documentElement.style.removeProperty("--font-sans"));await ownerPage.screenshot({path:info.outputPath(`native-owner-ledger-${locale}.png`),fullPage:true});await ownerPage.evaluate(()=>document.documentElement.style.fontSize="");
+    await expect(ownerPage.locator("html")).toHaveAttribute("dir",locale==="ar"?"rtl":"ltr");await admin.goto(expenseReturnUrl);
     await admin.locator("main").evaluate(element=>{(element as HTMLElement).style.fontSize="200%";});
     expect(await admin.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);
     await admin.evaluate(()=>document.documentElement.style.setProperty("--font-sans","monospace"));
@@ -176,6 +196,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     const voidHeaders={"content-type":reversal.headers()["content-type"],"next-action":reversal.headers()["next-action"],accept:"text/x-component",origin};
     const deniedVoid=await ownerPage.request.post(reversal.url(),{data:reversal.postDataBuffer()!,headers:voidHeaders});expect(await deniedVoid.text()).toContain('"code":"forbidden"');
     const repeatedVoid=await admin.request.post(reversal.url(),{data:reversal.postDataBuffer()!,headers:voidHeaders});expect(await repeatedVoid.text()).toContain('"idempotent":true');
+    await ownerPage.reload();await expect(ownerPage.getByTestId("owner-ledger-closing")).toHaveText(formatCurrencyAmount(locale,"0.00","MAD"));await expect(ownerPage.getByTestId("owner-ledger-line")).toHaveCount(2);
     await withTenant(f.db,f.organizationId,async tx=>{
       const expense=await tx.expense.findUniqueOrThrow({where:{id:expenseId}});expect(expense.state).toBe("VOIDED");
       const original=await tx.financialTransaction.findUniqueOrThrow({where:{id:expense.transactionId!},include:{postings:true,reversedByTransactions:{include:{postings:true}}}});

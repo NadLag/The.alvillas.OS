@@ -2555,3 +2555,16 @@ textarea:disabled {
 .financial-transfer-editor .field, .financial-transfer-form .field { grid-template-columns: minmax(0, 1fr); }
 .financial-transfer-editor :is(input, select, textarea), .financial-transfer-form :is(input, select, textarea), .financial-transfer-page .notification-bell { min-inline-size: 0; max-inline-size: 100%; }
 .financial-transfer-page dd { overflow-wrap: anywhere; }
+
+.owner-ledger-page { min-inline-size: 0; overflow-wrap: anywhere; }
+.owner-ledger-page > *, .owner-ledger-page fieldset, .owner-ledger-form .field { min-inline-size: 0; }
+.owner-ledger-form fieldset { border: 0; margin: 0; padding: 0; }
+.owner-ledger-form .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.owner-ledger-form :is(input,select) { min-inline-size: 0; max-inline-size: 100%; inline-size: 100%; }
+.owner-ledger-page :is(.primary-button,.secondary-button,.notification-bell) { min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.owner-ledger-closing { font-size: var(--font-size-2xl); font-weight: var(--font-weight-bold); }
+.owner-ledger-buckets { list-style: none; padding: 0; }
+.owner-ledger-buckets li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3); padding-block: var(--space-3); border-block-end: 1px solid var(--border); }
+.owner-ledger-lines { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); list-style: none; padding: 0; }
+.owner-ledger-lines li { min-inline-size: 0; }
+@media (max-width: 600px) { .owner-ledger-form .form-grid { grid-template-columns: minmax(0, 1fr); } }

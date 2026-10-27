@@ -17,7 +17,7 @@ export default async function FinancialAccountsPage({ params, searchParams }: {
 }) {
   const { locale: value } = await params, locale = safeLocale(value); setRequestLocale(locale);
   const actor = await financeActorContextFromSession(await auth()); if (!actor) redirect(`/${locale}/login`);
-  const query = await searchParams, t = await getTranslations("FinancialAccounts");
+  const query = await searchParams, [t,ledgerT] = await Promise.all([getTranslations("FinancialAccounts"),getTranslations("OwnerLedger")]);
   let result;
   try {
     result = await listPaymentAccounts(actor, { query: query.q, after: query.after });
@@ -28,7 +28,8 @@ export default async function FinancialAccountsPage({ params, searchParams }: {
   return <AdminShell className="resource-page financial-accounts-page" testId="financial-accounts-page">
     <ShellHeader eyebrow={t("eyebrow")} title={t("title")} subtitle={t("description")}
       actions={<Link className="secondary-button" href={query.propertyId ? `/${locale}/app/properties/${query.propertyId}/expenses/new` : `/${locale}/app`}>{t(query.propertyId ? "backToExpense" : "back")}</Link>} />
-    <Link className="secondary-button" data-testid="financial-transfers-entry" href={`/${locale}/app/finance/transfers`}>{t("transfers")}</Link>
+    <div className="form-actions"><Link className="secondary-button" data-testid="financial-transfers-entry" href={`/${locale}/app/finance/transfers`}>{t("transfers")}</Link>
+      {actor.authContext.permissions.has("owner_statement:view")?<Link className="secondary-button" data-testid="owner-ledger-entry" href={`/${locale}/app/finance/owner-ledgers`} prefetch={false}>{ledgerT("entry")}</Link>:null}</div>
     <form className="resource-form" method="get" data-testid="payment-account-search-form">
       {query.propertyId ? <input type="hidden" name="propertyId" value={query.propertyId} /> : null}
       <label className="field"><span>{t("search")}</span><input name="q" data-testid="payment-account-search" defaultValue={query.q ?? ""} maxLength={120} /></label>

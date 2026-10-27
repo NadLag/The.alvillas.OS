@@ -341,6 +341,7 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
+  ...(["openingBalance","periodCredits","periodDebits","bucketTotals"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"owner_statement",field,dataClass:"financial",requiredPermission:permissionKey("owner_statement","view"),mask:"placeholder"})),
   { resource: "staff_compensation", field: "amount", dataClass: "financial", requiredPermission: permissionKey("staff_compensation", "view"), mask: "placeholder" },
   { resource: "wallet", field: "balances", dataClass: "financial", requiredPermission: permissionKey("wallet", "view"), mask: "placeholder" },
   {
