@@ -3,6 +3,12 @@ import Decimal from "decimal.js";
 import { Money } from "@/platform/money/money";
 
 describe("Money", () => {
+  it("retains every cent across 500 property balances beyond an individual Decimal operation precision",()=>{
+    const amount=Money.of("9999999999999999.99","MAD");let total=Money.zero("MAD");for(let index=0;index<500;index++)total=total.add(amount);
+    expect(total.toJSON().amount).toBe("4999999999999999995.00");
+    expect(total.add(Money.of("0.01","MAD")).subtract(Money.of("0.02","MAD")).toJSON().amount).toBe("4999999999999999994.99");
+    expect(Money.zero("MAD").subtract(total).add(Money.of("0.01","MAD")).toJSON().amount).toBe("-4999999999999999994.99");
+  });
   it("rounds half-up to two decimals", () => {
     expect(Money.of("10.005", "MAD").toJSON()).toEqual({
       amount: "10.01",

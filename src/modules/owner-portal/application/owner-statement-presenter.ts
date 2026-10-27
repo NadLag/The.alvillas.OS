@@ -28,6 +28,7 @@ export type OwnerStatementView = {
   periodDebitTotal: Money;
   closingBalance: Money;
   bucketTotals: Record<OwnerStatementBucket, Money>;
+  bucketMovements: OwnerStatement["bucketMovements"];
   heldBreakdown: OwnerHeldBreakdownView[];
   lines: OwnerStatementLineView[];
   internalLocationCode?: string | null;
@@ -39,6 +40,7 @@ const ownerStatementFieldPolicy: FieldPolicy<OwnerStatementView> = {
   periodDebitTotal: { dataClass: "financial" },
   closingBalance: { dataClass: "financial" },
   bucketTotals: { dataClass: "financial" },
+  bucketMovements: { dataClass: "financial" },
   heldBreakdown: { dataClass: "financial" },
   lines: { dataClass: "financial" },
   internalLocationCode: { dataClass: "sensitive", mask: "omit" }

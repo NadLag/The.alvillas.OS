@@ -31,7 +31,11 @@ export async function openFieldFixture(page: Page, info: TestInfo, locale: strin
     await create.locator('[name="type"]').selectOption("INSPECTION");
     await create.locator('[name="titleEn"]').fill("Inspect villa"); await create.locator('[name="titleFr"]').fill("Inspecter la villa");
     await create.locator('[name="dueDate"]').fill("2027-04-10"); await create.locator('[name="checklistTemplateKey"]').selectOption("inspection");
-    await create.locator('[name="reason"]').fill("Field PWA acceptance"); await create.locator('button[type="submit"]').click();
+    await create.locator('[name="reason"]').fill("Field PWA acceptance");
+    await Promise.all([
+      page.waitForURL(/\/en\/app\/operations\/[a-f0-9-]{36}$/u),
+      create.locator('button[type="submit"]').click(),
+    ]);
     await expect(page.getByTestId("operation-detail-page")).toBeVisible();
     const taskId = new URL(page.url()).pathname.split("/").at(-1)!;
     await withTenant(db, organizationId, tx => tx.operationTask.update({ where: { id: taskId }, data: {
