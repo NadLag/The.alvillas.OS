@@ -35,9 +35,9 @@ export const recordReservationRevenueInputSchema = z.object({
 });
 
 export const reverseReservationRevenueInputSchema = z.object({
-  reservationId: z.string().uuid(),
+  reservationId: z.string().uuid().transform(value => value.toLowerCase()),
   reason: z.string().trim().min(1).max(1000),
-  idempotencyKey: z.string().uuid()
+  idempotencyKey: z.string().uuid().transform(value => value.toLowerCase())
 });
 
 export type { CommissionRuleValue };
@@ -64,7 +64,7 @@ export type FinancePostingDraft = {
   ledgerAccountId: string;
   side: LedgerSide;
   amount: Money;
-  bucket: string;
+  bucket: string | null;
   dimensions: Record<string, unknown>;
 };
 

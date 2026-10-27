@@ -1,0 +1,2 @@
+CREATE INDEX financial_transaction_org_reversal_idx
+ ON financial_transaction(organization_id,reverses_transaction_id);

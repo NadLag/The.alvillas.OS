@@ -125,6 +125,16 @@ export class FinanceRepository {
     return clock.now;
   }
 
+  async lockReservationFinancialCorrection(reservationId: string): Promise<Date> {
+    await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":reservation-financial-correction:" + reservationId},0))::text`);
+    return this.clock();
+  }
+
+  financialReversalAudit(action: string, resourceType: string, resourceIds: string[]) {
+    return this.tx.auditLog.findFirst({ where: { organizationId: this.organizationId, action, resourceType,
+      resourceId: { in: resourceIds } }, orderBy: { createdAt: "asc" } });
+  }
+
   paymentAccountsByKey(idempotencyKey: string) {
     return this.tx.ledgerAccount.findMany({ where: { organizationId: this.organizationId,
       code: { in: paymentAccountKinds.map(kind => paymentAccountCode({ kind, idempotencyKey })) } }, take: 2 });

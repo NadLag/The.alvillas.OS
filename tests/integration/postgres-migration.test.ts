@@ -22,12 +22,14 @@ import { readdirSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
 import Decimal from "decimal.js";
 import type { Session } from "next-auth";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { IntegrationAuthenticator } from "./support/authenticator";
 import { beginPasskeyRegistration, finishPasskeyRegistration, startTotpEnrollment, confirmTotpEnrollment, beginPasskeyAuthentication, verifyPasskeyAuthentication } from "@/modules/identity/application/identity-service";
 import { authenticatePassword, authenticateMfaChallenge, beginVerifiedPasskeyLogin, validateAuthSession } from "@/platform/auth/identity-auth";
 import { identityActorContextFromSession } from "@/modules/identity/application/identity-access";
 import { financeActorContextFromSession } from "@/modules/finance/application/finance-access";
+import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
+import { ReservationConflictError } from "@/modules/reservations/application/reservation-service";
 import { totpCode } from "@/platform/auth/totp";
 import { ResendEmailProvider, type HttpTransport } from "@/platform/providers/real";
 import { createInngestOutboxHandlers } from "@/platform/events/inngest";
@@ -277,6 +279,41 @@ async function activeReservationActor(organizationId: string, permissions?: Set<
   const ctx = actorForOrganization(organizationId, permissions);
   return { ...ctx, actorId: identity.account.id, personId: identity.person.id,
     authContext: { ...ctx.authContext, userAccountId: identity.account.id, personId: identity.person.id } };
+}
+
+async function assertFinancialRevocationWhileWaiting(ctx: ReservationActorContext, reservationId: string,
+  command: () => Promise<unknown>, errorType: new (message?: string) => Error) {
+  const grants = await withTenant(prisma, ctx.organizationId, tx => tx.roleAssignment.findMany({
+    where: { organizationId: ctx.organizationId, userAccountId: ctx.actorId }, select: { id: true, validTo: true } }));
+  const before = await withTenant(prisma, ctx.organizationId, tx => tx.financialTransaction.count());
+  let release!: () => void, acquired!: (pid: number) => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const ready = new Promise<number>(resolve => { acquired = resolve; });
+  const holder = withTenant(prisma, ctx.organizationId, async tx => {
+    await new FinanceRepository(tx, ctx.organizationId).lockReservationFinancialCorrection(reservationId);
+    const [connection] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+    acquired(connection.pid); await gate;
+  });
+  const holderPid = await ready;
+  const pending = command().then(value => ({ value }), error => ({ error: error as unknown }));
+  try {
+    await expect.poll(() => withTenant(prisma, ctx.organizationId, async tx => {
+      const [row] = await tx.$queryRaw<Array<{ waiting: boolean }>>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+        WHERE datname=current_database() AND ${holderPid}::int=ANY(pg_blocking_pids(pid))) AS waiting`;
+      return row.waiting;
+    })).toBe(true);
+    await withTenant(prisma, ctx.organizationId, tx => tx.roleAssignment.updateMany({
+      where: { id: { in: grants.map(row => row.id) } }, data: { validTo: new Date("2025-01-01") } }));
+    release(); await holder;
+    const outcome = await pending;
+    expect("error" in outcome ? outcome.error : null).toBeInstanceOf(errorType);
+    expect(await withTenant(prisma, ctx.organizationId, tx => tx.financialTransaction.count())).toBe(before);
+  } finally {
+    release(); await holder; await pending;
+    await withTenant(prisma, ctx.organizationId, async tx => {
+      for (const grant of grants) await tx.roleAssignment.update({ where: { id: grant.id }, data: { validTo: grant.validTo } });
+    });
+  }
 }
 
 function sessionForOwnerPortal(input: {
@@ -7155,11 +7192,19 @@ describe("PostgreSQL baseline", () => {
       reason: "Integration S6 reversal",
       idempotencyKey: randomUUID()
     };
-    const reversed = await reverseReservationAccommodationRevenue(ctx, reversalInput, {
+    await assertFinancialRevocationWhileWaiting(ctx, reservation.reservation.id, () => reverseReservationAccommodationRevenue(ctx, reversalInput, {
+      db: prisma, requestId: "integration-s6-reversal-revoked-after-wait", ipAddress: "127.0.0.1"
+    }), ReservationRevenueAuthorizationError);
+    const reversalAttempts = await Promise.all(Array.from({ length: 4 }, (_, index) => reverseReservationAccommodationRevenue(ctx, {
+      ...reversalInput, idempotencyKey: index ? reversalInput.idempotencyKey : reversalInput.idempotencyKey.toUpperCase()
+    }, {
       db: prisma as unknown as TenantTransactionRunner,
       requestId: "integration-s6-reversal",
       ipAddress: "127.0.0.1"
-    });
+    })));
+    expect(reversalAttempts.filter(result => !result.idempotent)).toHaveLength(1);
+    expect(new Set(reversalAttempts.map(result => result.reversalTransactionIds.join(","))).size).toBe(1);
+    const reversed = reversalAttempts.find(result => !result.idempotent)!;
     const transactionCountAfterReverse = await withTenant(
       prisma as unknown as TenantTransactionRunner,
       orgA.id,
@@ -7195,6 +7240,16 @@ describe("PostgreSQL baseline", () => {
 
     expect(reversalReplay.idempotent).toBe(true);
     expect(transactionCountAfterReversalReplay).toBe(4);
+    try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      for (const date of ["1990-01-01", "2099-01-01"]) {
+        vi.setSystemTime(new Date(date));
+        expect((await reverseReservationAccommodationRevenue(ctx, reversalInput, { db: prisma, requestId: "s6-clock-proof", ipAddress: "127.0.0.1" })).idempotent).toBe(true);
+      }
+    } finally { vi.useRealTimers(); }
+    await expect(reverseReservationAccommodationRevenue(ctx, { ...reversalInput, reason: "Changed reversal intent" }, {
+      db: prisma as unknown as TenantTransactionRunner, requestId: "integration-s6-reversal-changed-reason", ipAddress: "127.0.0.1"
+    })).rejects.toBeInstanceOf(ReservationRevenueConflictError);
     await expect(
       reverseReservationAccommodationRevenue(
         ctx,
@@ -7557,11 +7612,19 @@ describe("PostgreSQL baseline", () => {
       )
     ).rejects.toThrow();
 
-    const reversed = await reverseAirbnbSettlement(ctx, reversalInput, {
+    await assertFinancialRevocationWhileWaiting(ctx, reservation.reservation.id, () => reverseAirbnbSettlement(ctx, reversalInput, {
+      db: prisma, requestId: "integration-s7-reversal-revoked-after-wait", ipAddress: "127.0.0.1"
+    }), AirbnbSettlementAuthorizationError);
+    const reversalAttempts = await Promise.all(Array.from({ length: 4 }, (_, index) => reverseAirbnbSettlement(ctx, {
+      ...reversalInput, idempotencyKey: index ? reversalInput.idempotencyKey : reversalInput.idempotencyKey.toUpperCase()
+    }, {
       db: prisma as unknown as TenantTransactionRunner,
       requestId: "integration-s7-reversal",
       ipAddress: "127.0.0.1"
-    });
+    })));
+    expect(reversalAttempts.filter(result => !result.idempotent)).toHaveLength(1);
+    expect(new Set(reversalAttempts.map(result => result.reversalTransactionIds.join(","))).size).toBe(1);
+    const reversed = reversalAttempts.find(result => !result.idempotent)!;
     const transactionCountAfterReverse = await withTenant(
       prisma as unknown as TenantTransactionRunner,
       orgA.id,
@@ -7585,6 +7648,16 @@ describe("PostgreSQL baseline", () => {
 
     expect(reversalReplay.idempotent).toBe(true);
     expect(transactionCountAfterReversalReplay).toBe(4);
+    try {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      for (const date of ["1990-01-01", "2099-01-01"]) {
+        vi.setSystemTime(new Date(date));
+        expect((await reverseAirbnbSettlement(ctx, reversalInput, { db: prisma, requestId: "s7-clock-proof", ipAddress: "127.0.0.1" })).idempotent).toBe(true);
+      }
+    } finally { vi.useRealTimers(); }
+    await expect(reverseAirbnbSettlement(ctx, { ...reversalInput, reason: "Changed settlement reversal intent" }, {
+      db: prisma as unknown as TenantTransactionRunner, requestId: "integration-s7-reversal-changed-reason", ipAddress: "127.0.0.1"
+    })).rejects.toBeInstanceOf(AirbnbSettlementConflictError);
     await expect(
       reverseAirbnbSettlement(
         ctx,
@@ -8006,7 +8079,8 @@ describe("PostgreSQL baseline", () => {
     await changeReservation(f.ctx, { reservationId: created.reservation.id, operation: "TRANSITION", status: "CANCELLED", expectedVersion: 1, reason: "Guest cancels paid booking", idempotencyKey: randomUUID() }, f.deps);
     const key = randomUUID();
     const refund = { reservationId: created.reservation.id, operation: "REFUND", expectedVersion: 2, reason: "Full accommodation refund approved", idempotencyKey: key };
-    await changeReservation(f.ctx, refund, f.deps); await changeReservation(f.ctx, refund, f.deps);
+    await changeReservation(f.ctx, refund, f.deps); await changeReservation(f.ctx, { ...refund, idempotencyKey: refund.idempotencyKey.toUpperCase() }, f.deps);
+    await expect(changeReservation(f.ctx, { ...refund, reason: "Changed financial refund intent" }, f.deps)).rejects.toBeInstanceOf(ReservationConflictError);
     const current = await withTenant(prisma, f.organization.id, async tx => ({ original: await tx.posting.findMany({ where: { transactionId: { in: [posted.revenueTransactionId, posted.commissionTransactionId!] } }, orderBy: { id: "asc" } }), reversals: await tx.financialTransaction.findMany({ where: { reversesTransactionId: { in: [posted.revenueTransactionId, posted.commissionTransactionId!] } }, include: { postings: true } }), revision: await tx.reservation.findUniqueOrThrow({ where: { id: created.reservation.id } }) }));
     expect(current.original).toEqual(originalPostings); expect(current.reversals).toHaveLength(2); expect(current.revision.version).toBe(3);
     const sums = new Map<string, Decimal>();

@@ -2426,7 +2426,8 @@ textarea:disabled {
 .reservation-day-block { background: #6d7371; }
 .reservation-day-imported { background: #9f3f1b; }
 .reservation-management-form { margin-block: 16px; }
-.reservation-management-form fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; display: grid; gap: 12px; }
+.reservation-management-form fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.reservation-management-form .secondary-button { min-inline-size: 0; white-space: normal; overflow-wrap: anywhere; }
 .reservation-management-form textarea { inline-size: 100%; resize: vertical; }
 .reservation-management-form input, .reservation-management-form select { min-inline-size: 0; max-inline-size: 100%; }
 .reservation-management-layout .workspace-side details, .reservation-detail-page details { padding-block: 16px; }

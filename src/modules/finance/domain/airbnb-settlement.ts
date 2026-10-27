@@ -32,9 +32,9 @@ export const importAirbnbSettlementCsvInputSchema = z.object({
 });
 
 export const reverseAirbnbSettlementInputSchema = z.object({
-  settlementId: z.string().uuid(),
+  settlementId: z.string().uuid().transform(value => value.toLowerCase()),
   reason: requiredText(1000),
-  idempotencyKey: z.string().uuid()
+  idempotencyKey: z.string().uuid().transform(value => value.toLowerCase())
 });
 
 const airbnbSettlementCsvRowSchema = z

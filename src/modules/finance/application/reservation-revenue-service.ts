@@ -6,6 +6,7 @@ import {
   parseCommissionRuleValue,
   parseRecordReservationRevenueInput,
   parseReverseReservationRevenueInput,
+  reverseReservationRevenueInputSchema,
   withCommissionAllocations,
   type FinancePostingDraft,
   type RecordReservationRevenueInput,
@@ -19,6 +20,8 @@ import {
 } from "@/modules/finance/infrastructure/finance-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type AuthContext } from "@/platform/authz/authorize";
+import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
+import { matchesFinancialReversalAttempt } from "../domain/financial-reversal";
 import { configRuleSnapshotMetadata } from "@/platform/config/config-rule-repository";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
@@ -494,30 +497,16 @@ function buildCommissionPostings(input: {
   ];
 }
 
-function mirrorPostings(
-  original: PostingTransaction,
-  reservation: {
-    id: string;
-    reference: string;
-    propertyId: string;
-    source: string;
-  }
-): FinancePostingDraft[] {
+function mirrorPostings(original: PostingTransaction): FinancePostingDraft[] {
   return original.postings.map((posting) => ({
     ledgerAccountId: posting.ledgerAccountId,
     side: posting.side === "DEBIT" ? "CREDIT" : "DEBIT",
     amount: Money.of(posting.amount.toString(), posting.currency),
-    bucket: posting.bucket ?? "ADJUSTMENT",
+    bucket: posting.bucket,
     dimensions: {
       ...jsonObject(posting.dimensions),
-      ...dimensions({
-        reservationId: reservation.id,
-        reservationReference: reservation.reference,
-        propertyId: reservation.propertyId,
-        source: reservation.source,
-        postingKind: "reservation_revenue_reversal",
-        reversalOfTransactionId: original.id
-      })
+      posting_kind: "reservation_revenue_reversal",
+      reversal_of_transaction_id: original.id
     }
   }));
 }
@@ -757,20 +746,33 @@ export async function reverseReservationAccommodationRevenue(
   input: ReverseReservationRevenueInput,
   deps: ReservationRevenueServiceDeps = {}
 ): Promise<ReservationRevenueReversalResult> {
-  assertAllowed(ctx, "view", "reservation", input.reservationId);
-  assertAllowed(ctx, "void", "financial_transaction");
+  input = reverseReservationRevenueInputSchema.parse(input);
+  // Fail fast for absent authority; stored grants, scope and time are checked
+  // with authorize() after the source lock, before any financial read or write.
+  if (!ctx.authContext.permissions.has("financial_transaction:void")) throw new ReservationRevenueAuthorizationError();
+  if (ctx.actorId !== ctx.authContext.userAccountId || ctx.organizationId !== ctx.authContext.organizationId) throw new ReservationRevenueAuthorizationError();
   const meta = await auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new FinanceRepository(tx, ctx.organizationId);
+    const now = await repository.lockReservationFinancialCorrection(input.reservationId);
+    const current = { ...ctx, authContext: await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId) };
     const reservation = await repository.findReservation(input.reservationId);
 
     if (!reservation) {
       throw new ReservationRevenueNotFoundError("Reservation does not exist in this tenant");
     }
 
+    const target = { organizationId: ctx.organizationId, propertyId: reservation.propertyId, reservationId: reservation.id };
+    for (const authority of [ctx.authContext, current.authContext]) {
+      if (!authorize(authority, "view", { ...target, type: "reservation", id: reservation.id }, now) ||
+        !authorize(authority, "view", { ...target, type: "financial_transaction", dataClass: "financial" }, now) ||
+        !authorize(authority, "void", { ...target, type: "financial_transaction", dataClass: "financial" }, now)) throw new ReservationRevenueAuthorizationError();
+    }
+
     const originals = await repository.findPostingTransactionsForReservation(input.reservationId, true);
-    if (originals.some(transaction => transaction.postings.some(posting => jsonObject(posting.dimensions).airbnb_settlement_id)) && !authorize(ctx.authContext, "reconcile", { type: "financial_transaction", organizationId: ctx.organizationId, propertyId: reservation.propertyId, reservationId: reservation.id, dataClass: "financial" })) throw new ReservationRevenueAuthorizationError();
+    if (originals.some(transaction => transaction.postings.some(posting => jsonObject(posting.dimensions).airbnb_settlement_id)) &&
+      [ctx.authContext, current.authContext].some(authority => !authorize(authority, "reconcile", { type: "financial_transaction", ...target, dataClass: "financial" }, now))) throw new ReservationRevenueAuthorizationError();
     if (originals.length === 0) {
       throw new ReservationRevenueNotFoundError("Reservation revenue has not been posted");
     }
@@ -778,6 +780,8 @@ export async function reverseReservationAccommodationRevenue(
     const reversalKeys = originals.map((transaction) => `${input.idempotencyKey}:reverse:${transaction.id}`);
     const existingReversals = await repository.findTransactionsByIdempotencyKeys(reversalKeys);
     if (existingReversals.length === originals.length) {
+      const audit = await repository.financialReversalAudit("reservation.revenue.reversed", "financial_transaction", existingReversals.map(row => row.id));
+      if (!matchesFinancialReversalAttempt({ actorId: ctx.actorId, reason: input.reason, originalIds: originals.map(row => row.id), reversals: existingReversals, audit })) throw new ReservationRevenueConflictError();
       return {
         reservationId: reservation.id,
         propertyId: reservation.propertyId,
@@ -792,11 +796,11 @@ export async function reverseReservationAccommodationRevenue(
 
     const reversalTransactions: PostingTransaction[] = [];
     for (const original of originals) {
-      const postings = mirrorPostings(original, reservation);
+      const postings = mirrorPostings(original);
       assertFinancePostingsBalanced(postings);
       const reversal = await repository.createFinancialTransaction({
         reference: `${original.reference}:REV:${input.idempotencyKey.slice(0, 8)}`,
-        occurredAt: new Date(),
+        occurredAt: now,
         description: `Reversal of ${original.reference}`,
         reversesTransactionId: original.id,
         idempotencyKey: `${input.idempotencyKey}:reverse:${original.id}`,
@@ -822,7 +826,7 @@ export async function reverseReservationAccommodationRevenue(
       }),
       reason: input.reason,
       requestId: meta.requestId,
-      occurredAt: new Date()
+      occurredAt: now
     });
 
     return {

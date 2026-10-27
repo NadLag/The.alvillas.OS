@@ -89,7 +89,17 @@ async function appendChange(tx: TenantTransaction, ctx: ReservationActorContext,
   await repository.lockProperty(original.propertyId);
   const before = (await repository.reservation(original.id))!;
   const replay = await repository.revision(input.idempotencyKey);
-  if (replay) { if (replay.reservationId !== before.id) throw new ReservationConflictError(); return before; }
+  if (replay) {
+    if (replay.reservationId !== before.id) throw new ReservationConflictError();
+    if (replay.operation === "REFUND" || input.operation === "REFUND") {
+      if (replay.operation !== input.operation || replay.createdBy !== ctx.actorId || replay.reason !== input.reason ||
+        replay.version !== input.expectedVersion + 1) throw new ReservationConflictError();
+      financialAllowed(ctx, "void", before.propertyId, before.id, before.property);
+      await reverseReservationAccommodationRevenue(ctx, { reservationId: before.id, reason: input.reason, idempotencyKey: input.idempotencyKey },
+        { db: { $transaction: work => work(tx) }, ...metadata });
+    }
+    return before;
+  }
   if (before.version !== input.expectedVersion) throw new ReservationConflictError("reservation_version_changed");
   if (input.quote) financialAllowed(ctx, "create", before.propertyId, before.id, before.property);
   if (input.operation === "REFUND") {
@@ -166,6 +176,10 @@ async function appendChange(tx: TenantTransaction, ctx: ReservationActorContext,
 export async function changeReservation(ctx: ReservationActorContext, input: unknown, deps: Deps = {}) {
   allowed(ctx, "edit");
   const parsed = changeReservationSchema.parse(input), metadata = await meta(deps);
+  if (parsed.operation === "REFUND") {
+    parsed.idempotencyKey = z.uuid().parse(parsed.idempotencyKey).toLowerCase();
+    parsed.reservationId = parsed.reservationId.toLowerCase();
+  }
   return withTenant(database(deps), ctx.organizationId, tx => appendChange(tx, ctx, parsed, metadata));
 }
 
