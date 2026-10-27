@@ -7,7 +7,7 @@ import { expenseDraftSchema } from "../domain/expense";
 import { createExpenseDraftAction,updateExpenseDraftAction, submitExpenseAction,postExpenseAction,voidExpenseAction } from "../application/expense-actions";
 import type { getExpenseEditor,getExpenseDraftEditor, getExpense } from "../application/expense-service";
 
-type ErrorCode = "forbidden" | "conflict" | "configuration" | "validation" | "error";
+type ErrorCode = "forbidden" | "conflict" | "configuration" | "validation" | "periodClosed" | "error";
 export function ExpenseDraftForm({ editor,draft,fundingAccountId }: { editor: Awaited<ReturnType<typeof getExpenseEditor>>;draft?:Awaited<ReturnType<typeof getExpenseDraftEditor>>["draft"];fundingAccountId?:string }) {
   const t = useTranslations("Expenses"), locale = useLocale(), router = useRouter(), key = useRef<string | null>(null);
   const [ready, setReady] = useState(false), [pending, startTransition] = useTransition(), [error, setError] = useState<ErrorCode | null>(null);

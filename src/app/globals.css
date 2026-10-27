@@ -1716,6 +1716,15 @@ textarea:disabled {
   gap: var(--space-7);
 }
 
+.config-create-fields {
+  display: grid;
+  gap: var(--space-6);
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .config-admin-grid > *,
 .config-admin-grid .field,
 .config-preview .field {
@@ -2535,3 +2544,7 @@ textarea:disabled {
 .financial-accounts-page .resource-list { list-style: none; margin: 0; padding: 0; }
 .financial-accounts-page .resource-list > li { min-inline-size: 0; overflow-wrap: anywhere; }
 .transaction-groups-page { overflow-wrap: anywhere; }
+.accounting-periods-page { overflow-wrap: anywhere; }
+.accounting-period-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: 16px; }
+.accounting-period-summary dd { margin-inline-start: 0; overflow-wrap: anywhere; }
+.accounting-period-form fieldset { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; border: 0; padding: 0; margin: 0; }

@@ -82,10 +82,10 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: Resource
 ): AuditHistoryRow {
-  if (["cash_collection", "expense", "financial_transaction", "ledger_account", "transaction_group"].includes(row.resourceType)) {
-    const expectedType = ["ledger_account", "transaction_group"].includes(row.resourceType) ? "financial_transaction" : row.resourceType;
-    const requiresSourceId = ["financial_transaction", "ledger_account", "transaction_group"].includes(row.resourceType);
-    const permissionResource = row.resourceType === "transaction_group" ?
+  if (["cash_collection", "expense", "financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType)) {
+    const expectedType = ["ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType) ? "financial_transaction" : row.resourceType;
+    const requiresSourceId = ["financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType);
+    const permissionResource = ["transaction_group", "accounting_period"].includes(row.resourceType) ?
       { type: "financial_transaction", organizationId: ctx.organizationId, dataClass: "financial" as const } : financialResource;
     const allowed = Boolean(financialResource && financialResource.type === expectedType &&
       (!requiresSourceId || financialResource.id === row.resourceId) && permissionResource && authorize(ctx.authContext, action, permissionResource) &&
@@ -183,19 +183,21 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts, groups] = await Promise.all([
+  const [cash, expenses, transactions, accounts, groups, periods] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
     read("ledger_account", ids => repository.ledgerAccountResources(ids)),
-    read("transaction_group", ids => repository.transactionGroupResources(ids))
+    read("transaction_group", ids => repository.transactionGroupResources(ids)),
+    read("accounting_period", ids => repository.accountingPeriodResources(ids))
   ]);
   return new Map([
     ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),
     ...[...expenses].map(([id, resource]) => [`expense:${id}`, resource] as const),
     ...[...transactions].map(([id, resource]) => [`financial_transaction:${id}`, resource] as const),
     ...[...accounts].map(([id, resource]) => [`ledger_account:${id}`, resource] as const),
-    ...[...groups].map(([id, resource]) => [`transaction_group:${id}`, resource] as const)
+    ...[...groups].map(([id, resource]) => [`transaction_group:${id}`, resource] as const),
+    ...[...periods].map(([id, resource]) => [`accounting_period:${id}`, resource] as const)
   ]);
 }
 

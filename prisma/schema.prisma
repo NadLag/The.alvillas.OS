@@ -71,6 +71,8 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  accountingPeriods                              AccountingPeriod[]
+  accountingPeriodEvents                         AccountingPeriodEvent[]
   expenses                                       Expense[]
   expenseSubmissions                             ExpenseSubmission[]
   financialApprovalStages                        ApprovalStage[]
@@ -345,6 +347,8 @@ model Person {
 }
 
 model UserAccount {
+  accountingPeriods             AccountingPeriod[]      @relation("AccountingPeriodCreator")
+  accountingPeriodEvents        AccountingPeriodEvent[] @relation("AccountingPeriodActor")
   createdTransactionGroups    TransactionGroup[]
   transactionGroupEntries     TransactionGroupEntry[]
   createdExpenses             Expense[]                    @relation("ExpenseCreator")
@@ -1326,6 +1330,57 @@ model FinancialTransaction {
   @@map("financial_transaction")
 }
 
+model AccountingPeriod {
+  id           String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                @map("organization_id") @db.Uuid
+  month        DateTime                @db.Date
+  timezone     String                  @db.VarChar(120)
+  startsAt     DateTime                @map("starts_at") @db.Timestamptz(6)
+  endsAt       DateTime                @map("ends_at") @db.Timestamptz(6)
+  policyRuleId String                  @map("policy_rule_id") @db.Uuid
+  createdBy    String                  @map("created_by") @db.Uuid
+  createdAt    DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  policy       ConfigRule              @relation("AccountingPeriodCalendarPolicy", fields: [organizationId, policyRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator      UserAccount             @relation("AccountingPeriodCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  events       AccountingPeriodEvent[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, month])
+  @@index([organizationId, startsAt, endsAt])
+  @@map("accounting_period")
+}
+
+model AccountingPeriodEvent {
+  id           String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                @map("organization_id") @db.Uuid
+  periodId     String                  @map("period_id") @db.Uuid
+  version      Int
+  kind         String                  @db.VarChar(20)
+  reason       String                  @db.VarChar(1000)
+  idempotencyKey String                @map("idempotency_key") @db.Uuid
+  previousEventId String?              @map("previous_event_id") @db.Uuid
+  reopensUntil DateTime?               @map("reopens_until") @db.Timestamptz(6)
+  reopenSeconds Int?                  @map("reopen_seconds")
+  policyRuleId String                  @map("policy_rule_id") @db.Uuid
+  snapshot     Json
+  createdBy    String                  @map("created_by") @db.Uuid
+  createdAt    DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  period       AccountingPeriod        @relation(fields: [organizationId, periodId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  previous     AccountingPeriodEvent?  @relation("AccountingPeriodEventChain", fields: [organizationId, previousEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  next         AccountingPeriodEvent?  @relation("AccountingPeriodEventChain")
+  policy       ConfigRule              @relation("AccountingPeriodEventPolicy", fields: [organizationId, policyRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator      UserAccount             @relation("AccountingPeriodActor", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, idempotencyKey])
+  @@unique([organizationId, periodId, version])
+  @@unique([organizationId, previousEventId])
+  @@index([organizationId, periodId, createdAt, id])
+  @@map("accounting_period_event")
+}
+
 model TransactionGroup {
   id             String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String                  @map("organization_id") @db.Uuid
@@ -1457,6 +1512,8 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  accountingPeriods       AccountingPeriod[]      @relation("AccountingPeriodCalendarPolicy")
+  accountingPeriodEvents  AccountingPeriodEvent[] @relation("AccountingPeriodEventPolicy")
   automationRuns       AutomationRun[]
   teamCompensations    TeamCompensation[]
   id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid

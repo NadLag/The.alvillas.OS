@@ -75,6 +75,8 @@ export default async function AppPage({
             <Link className="secondary-button" data-testid="financial-accounts-link" href={`/${appLocale}/app/finance/accounts`}>{t("financialAccounts")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?
             <Link className="secondary-button" data-testid="transaction-groups-link" href={`/${appLocale}/app/finance/groups`}>{t("transactionGroups")}</Link> : null}
+          {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?
+            <Link className="secondary-button" data-testid="accounting-periods-link" href={`/${appLocale}/app/finance/periods`}>{t("accountingPeriods")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/configuration`}>
             {t("configuration")}
           </Link>

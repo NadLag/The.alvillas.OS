@@ -94,7 +94,8 @@
     "team": "Team",
     "automations": "Automations",
     "financialAccounts": "Financial accounts",
-    "transactionGroups": "Transaction groups"
+    "transactionGroups": "Transaction groups",
+    "accountingPeriods": "Accounting periods"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -2490,7 +2491,8 @@
     "selectFunding": "Select the payment account",
     "unavailableFunding": "The previous account is unavailable. Select an authorized account.",
     "retainedReservation": "Keep the linked reservation",
-    "backToExpense": "Back to expense"
+    "backToExpense": "Back to expense",
+    "periodClosed": "The posting date belongs to a closed accounting period. Ask an authorized financial administrator to review it."
   },
   "FinancialAccounts": {
     "eyebrow": "Finance",
@@ -2585,5 +2587,69 @@
     "loading": "Loading transaction groups…",
     "loadError": "Transaction groups could not be loaded",
     "retryHelp": "Refresh to try again."
+  },
+  "AccountingPeriods": {
+    "eyebrow": "Finance",
+    "title": "Accounting periods",
+    "description": "Close a reconciled month and control a reasoned, time-limited reopening.",
+    "accounts": "Account chart",
+    "configure": "Configure accounting rules",
+    "policyTitle": "Current closing policy",
+    "timezone": "Accounting timezone",
+    "earlyClose": "Close a month before it ends",
+    "allowed": "Allowed by policy",
+    "notAllowed": "Not allowed by policy",
+    "maxWindow": "Maximum reopening window: {seconds, number} seconds",
+    "policyVersion": "Policy version {version, number}",
+    "missingPolicy": "Choose the accounting timezone and reopening limit in Configuration before closing a month.",
+    "close": "Close month",
+    "reopen": "Reopen for correction",
+    "month": "Month",
+    "duration": "Reopening duration (seconds)",
+    "durationLimit": "Up to {seconds, number} seconds. The deadline is set when the request is accepted.",
+    "reason": "Reason",
+    "saving": "Saving…",
+    "loading": "Loading accounting periods…",
+    "retry": "Try again",
+    "empty": "No accounting months have been closed.",
+    "periods": "Monthly history",
+    "more": "Earlier months",
+    "back": "All accounting periods",
+    "detailTitle": "Accounting month {month}",
+    "periodRange": "From {start} to {end} (end excluded)",
+    "state": "Period status",
+    "deadline": "Reopened until {date}",
+    "expired": "The previous reopening window has ended.",
+    "totals": "Journal totals",
+    "totalsHint": "Debits and credits for this accounting month, kept separate by currency.",
+    "debit": "Debits",
+    "credit": "Credits",
+    "transactionCount": "{count, plural, one {# transaction} other {# transactions}}",
+    "postingCount": "{count, plural, one {# posting line} other {# posting lines}}",
+    "history": "Closing and reopening history",
+    "moreHistory": "Earlier decisions",
+    "version": "Decision {version, number}",
+    "by": "By {name}",
+    "readOnly": "Your current access allows viewing this period.",
+    "closedPostingHint": "Posting dates inside a closed period are rejected. A correction can use the current open period without changing the original journal.",
+    "states": {
+      "CLOSED": "Closed",
+      "REOPENED": "Reopened"
+    },
+    "kinds": {
+      "CLOSE": "Month closed",
+      "REOPEN": "Correction window opened"
+    },
+    "errors": {
+      "forbidden": "Your current permissions do not allow this action.",
+      "conflict": "This period or request has changed. Reload the page before trying again.",
+      "validation": "Check the month, duration and reason.",
+      "missingPolicy": "A valid accounting-period policy is required. Review Configuration.",
+      "earlyClose": "The configured policy does not allow closing a month before it ends.",
+      "invalidWindow": "The requested reopening duration exceeds the current policy.",
+      "unbalanced": "The complete journal must be balanced and finalized before closing.",
+      "error": "The request could not be completed. Your entries are retained; retry with the same request.",
+      "periodClosed": "The posting date belongs to a closed accounting period. Ask an authorized financial administrator to review it."
+    }
   }
 }

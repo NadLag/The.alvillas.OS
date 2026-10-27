@@ -10,6 +10,7 @@ import { ConfigRuleRepository, configRuleSnapshotMetadata } from "@/platform/con
 import { referencedConfigs } from "@/platform/automation/rule";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { paymentAccountCode, paymentAccountKinds } from "../domain/payment-account";
+import { AccountingPeriodRepository } from "./accounting-period-repository";
 
 type ReservationWithFinanceContext = Prisma.ReservationGetPayload<{
   include: {
@@ -660,6 +661,7 @@ export class FinanceRepository {
     createdBy: string;
     postings: readonly FinancePostingDraft[];
   }): Promise<PostingTransaction> {
+    await new AccountingPeriodRepository(this.tx, this.organizationId).assertPostingOpen(input.occurredAt);
     return this.tx.financialTransaction.create({
       data: {
         organizationId: this.organizationId,
