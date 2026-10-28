@@ -1029,7 +1029,15 @@ describe("native expenses on real PostgreSQL", () => {
     const f = await fixture(), other = await fixture();
     await expect(create(f, { ...f.input, propertyId: other.property.id })).rejects.toBeInstanceOf(ExpenseAccessError);
     await expect(create(f, { ...f.input, fundingAccountId: other.bank.id })).rejects.toThrow();
-    const stale = await actor(f); await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { validTo: new Date() } }));
+    const stale = await actor(f);
+    await withTenant(db, f.org, async tx => {
+      // The application clock can lead PostgreSQL within the same millisecond.
+      const point = await new ExpenseRepository(tx, f.org).clock();
+      await tx.roleAssignment.update({ where: { id: f.grant.id }, data: { validTo: point.now } });
+      const [state] = await tx.$queryRaw<Array<{ expired: boolean }>>`SELECT valid_to<=clock_timestamp() AS expired
+        FROM role_assignment WHERE organization_id=${f.org}::uuid AND id=${f.grant.id}::uuid`;
+      expect(state.expired).toBe(true);
+    });
     await expect(createExpenseDraft(stale, f.input, { db })).rejects.toBeInstanceOf(ExpenseAccessError);
     expect(await withTenant(db, f.org, tx => tx.expense.count())).toBe(0);
   });

@@ -7,6 +7,7 @@ import {
 import type { AuditActorContext } from "@/modules/audit/application/audit-access";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
+import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
@@ -83,6 +84,12 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: Resource
 ): AuditHistoryRow {
+  if (row.resourceType === "supplier") {
+    const allowed = authorizeOrganizationSource(ctx.authContext, action, { type: "supplier", organizationId: ctx.organizationId, dataClass: "personal" }, new Date());
+    return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["sensitive"] : []) }, action,
+      { type: auditLogResource, organizationId: ctx.organizationId, data: row },
+      { before: { dataClass: "sensitive" }, after: { dataClass: "sensitive" }, reason: { dataClass: "sensitive" } }) as AuditHistoryRow;
+  }
   if (["cash_collection", "expense", "owner_payout", "financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType)) {
     const expectedType = ["owner_payout", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType) ? "financial_transaction" : row.resourceType;
     const requiresSourceId = ["owner_payout", "financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType);
