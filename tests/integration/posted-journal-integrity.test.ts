@@ -6,6 +6,7 @@ import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant, type TenantTransaction } from "@/platform/db/tenant";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { Money } from "@/platform/money/money";
+import { assertBalancedPostings } from "@/platform/ledger/ledger";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 
 const url = process.env.TEST_DATABASE_URL;
@@ -65,6 +66,30 @@ describe("posted journal boundaries on real PostgreSQL", () => {
     db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+
+  it("agrees with the exact database guard for 500 maximum-sized debits and credits and rejects a missing cent", async () => {
+    const f = await fixture(), amount = Money.of("9999999999999999.99", "MAD");
+    const postings = [
+      ...Array.from({ length: 500 }, () => ({ ledgerAccountId: f.bank.id, side: "DEBIT" as const, amount, bucket: "JOURNAL_INTEGRITY", dimensions: {} })),
+      ...Array.from({ length: 500 }, () => ({ ledgerAccountId: f.claim.id, side: "CREDIT" as const, amount, bucket: "JOURNAL_INTEGRITY", dimensions: {} }))
+    ];
+    expect(() => assertBalancedPostings(postings)).not.toThrow();
+    const journal = await withTenant(db, f.org, async tx => {
+      const row = await new FinanceRepository(tx, f.org).createFinancialTransaction({ reference: `Exact large journal ${randomUUID()}`, description: "Dedicated exact large journal acceptance", occurredAt: new Date(), idempotencyKey: randomUUID(), createdBy: f.account.id, postings });
+      await writeAuditEvent(tx, { organizationId: f.org, actorId: f.account.id, action: "local.journal.integrity.created", resourceType: "financial_transaction", resourceId: row.id,
+        after: { postingCount: 1000, currency: "MAD" }, reason: "Dedicated exact journal acceptance", requestId: randomUUID(), occurredAt: new Date() });
+      return row;
+    });
+    await withTenant(db, f.org, async tx => {
+      expect((await tx.financialTransaction.findUniqueOrThrow({ where: { id: journal.id } })).sealed).toBe(true);
+      const totals = await tx.$queryRaw<Array<{ side: string; total: string }>>(Prisma.sql`SELECT side, SUM(amount)::text AS total FROM posting WHERE organization_id=${f.org}::uuid AND transaction_id=${journal.id}::uuid GROUP BY side ORDER BY side`);
+      expect(totals).toEqual([{ side: "CREDIT", total: "4999999999999999995.00" }, { side: "DEBIT", total: "4999999999999999995.00" }]);
+    });
+    const corrupt = postings.map((row, index) => index === postings.length - 1 ? { ...row, amount: Money.of("9999999999999999.98", "MAD") } : row);
+    expect(() => assertBalancedPostings(corrupt)).toThrow("Ledger transaction is not balanced for MAD");
+    await expect(withTenant(db, f.org, tx => new FinanceRepository(tx, f.org).createFinancialTransaction({ reference: `Rejected large journal ${randomUUID()}`, description: "Dedicated missing-cent rejection", occurredAt: new Date(), idempotencyKey: randomUUID(), createdBy: f.account.id, postings: corrupt }))).rejects.toThrow(/balanced/iu);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+  });
 
   it("writes a balanced header and all lines atomically, then seals the committed journal", async () => {
     const f = await fixture(); expect(f.beforeCommit.sealed).toBe(false);
