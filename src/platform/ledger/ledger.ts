@@ -1,5 +1,4 @@
-import Decimal from "decimal.js";
-import type { Money } from "@/platform/money/money";
+import { Money } from "@/platform/money/money";
 
 export type LedgerSide = "DEBIT" | "CREDIT";
 
@@ -13,17 +12,17 @@ export function assertBalancedPostings(postings: readonly LedgerPostingDraft[]):
     throw new Error("A ledger transaction must have at least two postings");
   }
 
-  const balances = new Map<string, Decimal>();
+  const balances = new Map<string, Money>();
 
   for (const posting of postings) {
-    const signedAmount =
-      posting.side === "DEBIT" ? posting.amount.amount : posting.amount.amount.negated();
-    const current = balances.get(posting.amount.currency) ?? new Decimal(0);
-    balances.set(posting.amount.currency, current.plus(signedAmount));
+    const current = balances.get(posting.amount.currency) ?? Money.zero(posting.amount.currency);
+    balances.set(posting.amount.currency, posting.side === "DEBIT"
+      ? current.add(posting.amount)
+      : current.subtract(posting.amount));
   }
 
   for (const [currency, balance] of balances) {
-    if (!balance.eq(0)) {
+    if (!balance.equals(Money.zero(currency))) {
       throw new Error(`Ledger transaction is not balanced for ${currency}`);
     }
   }
