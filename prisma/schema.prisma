@@ -71,6 +71,7 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  suppliers                                      Supplier[]
   accountingPeriods                              AccountingPeriod[]
   accountingPeriodEvents                         AccountingPeriodEvent[]
   accountingPeriodAdjustments                    AccountingPeriodAdjustment[]
@@ -348,6 +349,7 @@ model Person {
 }
 
 model UserAccount {
+  createdSuppliers            Supplier[]                   @relation("SupplierCreatedBy")
   accountingPeriods           AccountingPeriod[]           @relation("AccountingPeriodCreator")
   accountingPeriodEvents      AccountingPeriodEvent[]      @relation("AccountingPeriodActor")
   accountingPeriodAdjustments AccountingPeriodAdjustment[] @relation("AccountingPeriodAdjustmentCreator")
@@ -2386,4 +2388,33 @@ model ApprovalStageRecipient {
 
   @@unique([organizationId, stageId, userAccountId])
   @@map("approval_stage_recipient")
+}
+
+model Supplier {
+  id                 String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String       @map("organization_id") @db.Uuid
+  reference          String
+  displayName        String       @map("display_name")
+  category           String
+  contactName        String?      @map("contact_name")
+  email              String?
+  phone              String?
+  address            String?
+  externalReference  String?      @map("external_reference")
+  idempotencyKey     String       @map("idempotency_key") @db.Uuid
+  requestFingerprint String       @map("request_fingerprint")
+  version            Int          @default(0)
+  archivedAt         DateTime?    @map("archived_at") @db.Timestamptz(6)
+  createdBy          String       @map("created_by") @db.Uuid
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  creator            UserAccount  @relation("SupplierCreatedBy", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, reference])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, archivedAt, id])
+  @@index([organizationId, category, archivedAt, id])
+  @@map("supplier")
 }

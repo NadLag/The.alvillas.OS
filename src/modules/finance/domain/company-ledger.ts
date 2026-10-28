@@ -1,7 +1,7 @@
 import { Money } from "@/platform/money/money";
 import { z } from "zod";
-import { canViewCompleteOwnerLedger } from "./owner-ledger";
-import type { AuthContext, Resource, Scope } from "@/platform/authz/authorize";
+import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
+import type { AuthContext, Resource } from "@/platform/authz/authorize";
 
 export const companyLedgerFilters = z.object({
   fromOn: z.iso.date().optional(), toOn: z.iso.date().optional(),
@@ -11,13 +11,7 @@ export const companyLedgerFilters = z.object({
 }).strict().refine(value => !value.fromOn || !value.toOn || value.fromOn <= value.toOn, { path: ["toOn"], message: "End must follow start" });
 
 export function canViewCompleteCompanyLedger(ctx: AuthContext, resource: Resource, now: Date) {
-  const organizationScope = (scope: Scope) => (scope.scopeType ?? scope.resourceType) === "organization";
-  if (ctx.assignments) {
-    const assignments = ctx.assignments.filter(assignment => organizationScope(assignment.scope));
-    return assignments.length > 0 && canViewCompleteOwnerLedger({ ...ctx, assignments }, resource, now);
-  }
-  const scopes = ctx.scopes.filter(organizationScope);
-  return scopes.length > 0 && canViewCompleteOwnerLedger({ ...ctx, scopes }, resource, now);
+  return authorizeOrganizationSource(ctx, "view", resource, now);
 }
 
 export type CompanyLedgerAccountTotals = {

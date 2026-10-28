@@ -14,6 +14,7 @@ import {
 } from "@/modules/identity/application/session-actions";
 import { resolveFeatureFlag } from "@/platform/config/feature-flags";
 import { authorize } from "@/platform/authz/authorize";
+import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,8 @@ export default async function AppPage({
           <Link className="secondary-button" href={`/${appLocale}/app/audit`}>
             {t("audit")}
           </Link>
+          {reservationContext && authorizeOrganizationSource(reservationContext.authContext, "view", { type: "supplier", organizationId: session.user.organizationId, dataClass: "personal" }, new Date()) ?
+            <Link className="secondary-button" data-testid="suppliers-link" href={`/${appLocale}/app/finance/suppliers`}>{t("suppliers")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "company_ledger", organizationId: session.user.organizationId, dataClass: "financial" }) ?
             <Link className="secondary-button" data-testid="company-ledger-link" href={`/${appLocale}/app/finance/company-ledger`}>{t("companyLedger")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?

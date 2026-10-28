@@ -96,7 +96,8 @@
     "financialAccounts": "Comptes financiers",
     "transactionGroups": "Groupes de transactions",
     "accountingPeriods": "Périodes comptables",
-    "companyLedger": "Grand livre ALVILLAS"
+    "companyLedger": "Grand livre ALVILLAS",
+    "suppliers": "Fournisseurs"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -2802,5 +2803,18 @@
     "errorDescription": "Le grand livre n’a pas pu être chargé. Vérifiez votre connexion et réessayez.",
     "tryAgain": "Réessayer",
     "snapshotAt": "Consulté le {date}"
+  },
+  "Suppliers": {
+    "title": "Fournisseurs", "eyebrow": "Finance", "description": "Retrouvez les coordonnées et les catégories de vos fournisseurs.",
+    "create": "Ajouter un fournisseur", "edit": "Modifier le fournisseur", "save": "Enregistrer", "saving": "Enregistrement…",
+    "displayName": "Nom du fournisseur", "category": "Catégorie", "contactName": "Nom du contact", "email": "E-mail",
+    "phone": "Téléphone", "phoneHint": "Indiquez + et l’indicatif du pays.", "address": "Adresse", "externalReference": "Référence externe",
+    "reason": "Motif de la modification", "archive": "Archiver le fournisseur", "restore": "Restaurer le fournisseur", "archived": "Archivé",
+    "archiveGuidance": "L’archivage conserve le fournisseur et son historique financier.", "search": "Rechercher un fournisseur", "searchAction": "Rechercher",
+    "includeArchived": "Inclure les fournisseurs archivés", "empty": "Aucun fournisseur ne correspond à ces filtres.", "view": "Voir le fournisseur", "next": "Fournisseurs suivants",
+    "back": "Retour aux fournisseurs", "backWorkspace": "Retour à l’espace de travail", "notProvided": "Non renseigné", "loading": "Chargement des fournisseurs…",
+    "forbidden": "Vous n’avez plus l’autorisation de modifier ce fournisseur.", "conflict": "Ce fournisseur a été modifié. Rechargez-le avant de réessayer.",
+    "validation": "Vérifiez les coordonnées du fournisseur et indiquez le motif de la modification.", "error": "Impossible d’enregistrer ou de charger le fournisseur. Vérifiez votre connexion et réessayez.",
+    "errorTitle": "Fournisseurs indisponibles", "tryAgain": "Réessayer", "reload": "Recharger le fournisseur"
   }
 }

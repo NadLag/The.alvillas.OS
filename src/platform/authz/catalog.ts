@@ -28,6 +28,7 @@ export const permissionResources = [
   "region",
   "city",
   "owner",
+  "supplier",
   "property",
   "reservation",
   "guest",
@@ -242,6 +243,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
       permissionKey("owner", "view"),
       permissionKey("property", "view"),
       permissionKey("reservation", "view"),
+      ...permissionsFor(["supplier"], ["view", "create", "edit", "export"]),
       ...financeFull
     ],
     mfaRequired: true
@@ -251,7 +253,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     name: "Accountant",
     description: "Audited read/export financial access for accounting review.",
     permissions: permissionsFor(
-      ["financial_transaction", "owner_statement", "company_ledger", "report"],
+      ["financial_transaction", "owner_statement", "company_ledger", "supplier", "report"],
       ["view", "export"]
     ),
     mfaRequired: true
@@ -261,6 +263,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     name: "Procurement",
     description: "Supplier, inventory and purchase visibility without owner ledgers.",
     permissions: [
+      ...permissionsFor(["supplier"], ["view", "create", "edit"]),
       permissionKey("property", "view"),
       permissionKey("task", "view"),
       permissionKey("service", "view"),
@@ -342,6 +345,7 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
+  ...(["contactName", "email", "phone", "address", "externalReference"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "supplier", field, dataClass: "personal", requiredPermission: permissionKey("supplier", "view"), mask: "placeholder" })),
   ...(["openingBalance", "periodCredits", "periodDebits", "periodResult", "closingBalance", "accounts", "lines"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "company_ledger", field, dataClass: "financial", requiredPermission: permissionKey("company_ledger", "view"), mask: "placeholder" })),
   ...(["openingBalance","periodCredits","periodDebits","bucketTotals"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"owner_statement",field,dataClass:"financial",requiredPermission:permissionKey("owner_statement","view"),mask:"placeholder"})),
   { resource: "staff_compensation", field: "amount", dataClass: "financial", requiredPermission: permissionKey("staff_compensation", "view"), mask: "placeholder" },
