@@ -6,6 +6,7 @@ import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { nextReferenceNumber } from "@/platform/references/reference-number";
 import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
+import { accountingPeriodPolicySchema } from "@/modules/finance/domain/accounting-period";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { ownerLedgerPath } from "@/modules/finance/domain/owner-ledger";
 import { openFieldFixture } from "./support/field-fixture";
@@ -40,8 +41,13 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       await config.createVersion({ key: "finance.approval_thresholds", scopeType: "property", scopeId: task.propertyId, effectiveFrom: new Date("2020-01-01"),
         reason: "Dedicated scoped owner approval", value: { thresholds: [{ key: "native_expense", amount: "100", currency: "MAD", requires_approval_from: ["owner"] }],
           routing: { owner: { roles: [role.id], people: [], assigned: false, channels: ["in_app"] } } } });
-      await config.createVersion({key:"finance.accounting_periods",scopeType:"organization",scopeId:null,effectiveFrom:new Date("2000-01-01"),
-        reason:"Dedicated native historical accounting calendar",value:{timezone:"Europe/Paris",allow_early_close:false,max_reopen_seconds:60}});
+      await config.lockVersion("finance.accounting_periods","organization");
+      const calendar=await config.resolve({key:"finance.accounting_periods",scopes:[{scopeType:"organization",scopeId:null}]}),
+        currentCalendar=calendar?accountingPeriodPolicySchema.parse(calendar.value):null;
+      if(!currentCalendar||currentCalendar.timezone!=="Europe/Paris"||currentCalendar.allow_early_close||currentCalendar.max_reopen_seconds!==60){
+        await config.createVersion({key:"finance.accounting_periods",scopeType:"organization",scopeId:null,effectiveFrom:new Date("2000-01-01"),
+          reason:"Dedicated native historical accounting calendar",value:{timezone:"Europe/Paris",allow_early_close:false,max_reopen_seconds:60}});
+      }
       const periods = new AccountingPeriodRepository(tx, f.organizationId);
       let sourceMonth = "", occupied = 1;
       for (let attempt = 0; attempt < 36 && occupied; attempt++) {

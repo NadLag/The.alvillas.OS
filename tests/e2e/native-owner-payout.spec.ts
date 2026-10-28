@@ -76,7 +76,10 @@ for(const locale of ["en","fr","ar"] as const)test(`Native owner payout review, 
     await operator.getByTestId("payout-create").click();await expect(operator.getByTestId("payout-detail-page")).toBeVisible();
     const id=new URL(operator.url()).pathname.split("/").at(-1)!;
     await expect(operator.getByTestId("payout-total")).toHaveText(formatCurrencyAmount(locale,"500.25","MAD"));
-    await operator.getByTestId("payout-submit-reason").fill("Dedicated agreed owner payout review");await operator.getByTestId("payout-submit").click();await expect(operator.getByTestId("payout-approval-link")).toBeVisible();
+    await operator.getByTestId("payout-submit-reason").fill("Dedicated agreed owner payout review");
+    const submitted=operator.waitForResponse(response=>response.request().method()==="POST"&&Boolean(response.request().headers()["next-action"])&&
+      new URL(response.url()).pathname.endsWith(`/payouts/${id}`)&&Boolean(response.request().postData()?.includes(id)));
+    await operator.getByTestId("payout-submit").click();expect((await submitted).ok()).toBe(true);await expect(operator.getByTestId("payout-approval-link")).toBeVisible();
     const approval=await operator.getByTestId("payout-approval-link").getAttribute("href");expect(approval).toBeTruthy();
     await reviewer.goto(`${origin}${approval}`);await expect(reviewer.getByTestId("approval-financial-summary")).toBeVisible();
     expect(await reviewer.locator("body").innerText()).not.toContain(source.bankName);
