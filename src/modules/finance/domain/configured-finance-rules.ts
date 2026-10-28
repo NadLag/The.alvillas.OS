@@ -84,8 +84,7 @@ function thresholdMatches(threshold: ApprovalThreshold, subject: ApprovalSubject
   if (threshold.percentage_of_revenue_bps !== undefined && subject.periodRevenue) {
     hasCondition = true;
     if (subject.periodRevenue.currency === subject.amount.currency) {
-      const limit = subject.periodRevenue.amount.mul(threshold.percentage_of_revenue_bps).div(10000);
-      matched = matched || subject.amount.amount.gte(limit);
+      matched = matched || subject.amount.isAtLeastBasisPointsOf(subject.periodRevenue, threshold.percentage_of_revenue_bps);
     }
   }
 
