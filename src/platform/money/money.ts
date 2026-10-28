@@ -60,6 +60,14 @@ export class Money {
     return this.currency === other.currency && this.amount.eq(other.amount);
   }
 
+  isAtLeastBasisPointsOf(other: Money, basisPoints: number): boolean {
+    this.assertSameCurrency(other);
+    if (!Number.isSafeInteger(basisPoints) || basisPoints < 0) {
+      throw new Error("Money basis points must be a nonnegative safe integer");
+    }
+    return this.minorUnits() * 10000n >= other.minorUnits() * BigInt(basisPoints);
+  }
+
   toJSON(): { amount: string; currency: string } {
     return {
       amount: this.amount.toFixed(2),
