@@ -33,6 +33,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { closeAccountingPeriod, getAccountingPeriod, reopenAccountingPeriod } from "@/modules/finance/application/accounting-period-service";
 import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
 import { AccountingPeriodClosedError } from "@/modules/finance/domain/accounting-period";
+import { ApprovalRepository } from "@/platform/approvals/approval-repository";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -91,6 +92,16 @@ async function approver(f: Fixture, scopeType: "property" | "owner", scopeId: st
   });
   return { ...identity, actor: { organizationId: f.org, accountId: identity.account.id, authContext: await authContextForAccount(f.org, identity.account.id, { db }) } };
 }
+async function pendingFinancialApproval() {
+  const f = await fixture(), configured = await policy(f), reviewer = await approver(f, "owner", configured.owner.id);
+  await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.approval_thresholds", scopeType: "property", scopeId: f.property.id,
+    effectiveFrom: new Date("2020-01-02"), reason: "Dedicated authority regression approval policy", value: {
+      thresholds: [{ key: "required_owner", requires_approval_from: ["owner"] }],
+      routing: { owner: { people: [reviewer.person.id], roles: [], assigned: false, channels: ["in_app"] } } } }));
+  const draft = await create(f), submitted = await submitExpense(await actor(f), { id: draft.id, expectedVersion: 1, reason: "Dedicated authority regression submission" }, { db });
+  const approval = await getApproval(reviewer.actor, submitted.approvalId!, { db });
+  return { f, reviewer, draft, approval };
+}
 async function emergencyFixture(){
   const f=await fixture(),configured=await policy(f),receiver=await approver(f,"owner",configured.owner.id,"view");
   await withTenant(db,f.org,async tx=>{
@@ -135,6 +146,53 @@ async function correctionFixture(){
 }
 
 describe("native expenses on real PostgreSQL", () => {
+  it.each(["view", "approve", "reject", "scope", "condition"] as const)("preserves caller financial approval restrictions for %s", async restriction => {
+    const { f, reviewer, draft, approval } = await pendingFinancialApproval(), original = reviewer.actor.authContext;
+    const authContext = restriction === "scope" ? { ...original, assignments: original.assignments?.map(assignment => ({ ...assignment,
+      scope: { organizationId: f.org, scopeType: "property" as const, scopeId: randomUUID() } })) } : restriction === "condition" ?
+      { ...original, assignments: original.assignments?.map(assignment => ({ ...assignment, conditions: { maxAmount: "1.00" } })) } :
+      { ...original, permissions: new Set([...original.permissions].filter(permission => permission !== `expense:${restriction}`)) };
+    const caller = { ...reviewer.actor, authContext };
+    if (["view", "scope", "condition"].includes(restriction)) await expect(getApproval(caller, approval.id, { db })).rejects.toBeInstanceOf(ApprovalAccessError);
+    else expect((await getApproval(caller, approval.id, { db }))[restriction === "approve" ? "canApprove" : "canReject"]).toBe(false);
+    await expect(decideApproval(caller, { id: approval.id, stageId: approval.stageId, decision: restriction === "reject" ? "REJECTED" : "APPROVED",
+      reason: "A restricted caller cannot decide financial work" }, { db })).rejects.toBeInstanceOf(ApprovalAccessError);
+    await withTenant(db, f.org, async tx => {
+      expect((await tx.approvalRequest.findUniqueOrThrow({ where: { id: approval.id } })).state).toBe("PENDING");
+      expect((await tx.expense.findUniqueOrThrow({ where: { id: draft.id } })).state).toBe("PENDING_APPROVAL");
+      expect(await tx.auditLog.count({ where: { action: "expense.approval_stage_decided" } })).toBe(0);
+    });
+  });
+  it.each([["APPROVED", "stage"], ["REJECTED", "stage"], ["APPROVED", "expense"], ["REJECTED", "expense"]] as const)("rolls back %s when financial authority expires during the actual %s row wait", async (decision, source) => {
+    const { f, reviewer, draft, approval } = await pendingFinancialApproval();
+    let acquired!: (pid: number) => void, release!: () => void;
+    const ready = new Promise<number>(resolve => { acquired = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+    const blocker = withTenant(db, f.org, async tx => {
+      if (source === "stage") await tx.$queryRaw`SELECT id FROM approval_stage WHERE organization_id=${f.org}::uuid AND id=${approval.stageId}::uuid FOR UPDATE`;
+      else await tx.$queryRaw`SELECT id FROM expense WHERE organization_id=${f.org}::uuid AND id=${draft.id}::uuid FOR UPDATE`;
+      const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; acquired(row.pid); await gate;
+    });
+    const pid = await ready, observe = source === "stage" ? vi.spyOn(ApprovalRepository.prototype, "decideStage") : vi.spyOn(ExpenseRepository.prototype, "transition");
+    const attempt = decideApproval(reviewer.actor, { id: approval.id, stageId: approval.stageId, decision,
+      reason: "A decision waiting on its actual source row" }, { db }).then(value => ({ value, error: null }), (error: unknown) => ({ value: null, error }));
+    try {
+      await Promise.race([expect.poll(() => observe.mock.calls.length, { timeout: 10000 }).toBe(1),
+        attempt.then(result => { throw Error("Decision settled before its source row wait", { cause: result.error }); })]);
+      await expect.poll(() => withTenant(db, f.org, async tx => {
+        const [row] = await tx.$queryRaw<Array<{ waiting: boolean }>>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${pid}::int=ANY(pg_blocking_pids(pid))) AS waiting`;
+        return row.waiting;
+      })).toBe(true);
+      await withTenant(db, f.org, tx => tx.$executeRaw`UPDATE role_assignment SET valid_to=clock_timestamp() WHERE organization_id=${f.org}::uuid AND id=${reviewer.grant.id}::uuid`);
+    } finally { release(); await blocker; observe.mockRestore(); }
+    expect((await attempt).error).toBeInstanceOf(ApprovalAccessError);
+    await withTenant(db, f.org, async tx => {
+      expect((await tx.approvalStage.findUniqueOrThrow({ where: { id: approval.stageId } })).state).toBe("PENDING");
+      expect((await tx.approvalRequest.findUniqueOrThrow({ where: { id: approval.id } })).state).toBe("PENDING");
+      expect((await tx.expense.findUniqueOrThrow({ where: { id: draft.id } })).state).toBe("PENDING_APPROVAL");
+      expect(await tx.auditLog.count({ where: { action: { in: ["expense.approval_stage_decided", "expense.approved", "expense.rejected"] } } })).toBe(0);
+      expect(await tx.outboxEvent.count({ where: { type: "ApprovalDecided" } })).toBe(0);
+    });
+  });
   it("posts an approved expense from a linked staff wallet through the existing expense ledger",async()=>{
     const f=await fixture();await policy(f);await postingGrant(f);
     await accountingGrant(f,["wallet:view","wallet:pay"]);
