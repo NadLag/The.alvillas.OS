@@ -293,6 +293,33 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
       expect(new Date(snapshot.snapshot_at).getTime()).toBeGreaterThan(applicationTime.getTime() + 30_000);
     } finally { vi.useRealTimers(); }
   });
+  it.skipIf(!url)("uses the database receipt clock for stocktake writes when the application clock lags", async () => {
+    const f=await inventoryFixture("CONSUMABLE"),lagging=new Date(Date.now()-60_000);
+    vi.useFakeTimers({toFake:["Date"]});vi.setSystemTime(lagging);
+    try{
+      const result=await record(f);
+      await withTenant(db,f.org,async tx=>{
+        const row=await tx.inventoryStocktake.findUniqueOrThrow({where:{id:result.stocktakeId}});
+        expect(row.configRuleId).toBe(f.rule.id);
+        expect(row.receivedAt.getTime()).toBeGreaterThan(lagging.getTime()+30_000);
+        expect(await tx.inventoryMovement.count()).toBe(1);
+      });
+    }finally{vi.useRealTimers();}
+  });
+  it.skipIf(!url)("selects the write receipt's complete recorded millisecond without admitting the next catalog millisecond",async()=>{
+    const f=await inventoryFixture("CONSUMABLE"),at=new Date("2030-01-01T00:00:00.123Z"),currentId=randomUUID();
+    await withTenant(db,f.org,async tx=>{
+      for(const[offset,id,createdAt,unit]of[[1,currentId,"2030-01-01T00:00:00.123456Z","pieces"],[2,randomUUID(),"2030-01-01T00:00:00.124000Z","sets"]]as const){
+        await tx.$executeRaw`INSERT INTO config_rule(id,organization_id,key,scope_type,scope_id,value,version,effective_from,created_at,created_by,reason)
+          VALUES(${id}::uuid,${f.org}::uuid,'inventory.minimums','property',${f.property.id}::uuid,
+          ${JSON.stringify({minimums:[{...f.value.minimums[0],unit}]})}::jsonb,${f.rule.version+offset},
+          '2022-01-01'::timestamptz,${createdAt}::timestamptz,${f.account.id}::uuid,'Exact receipt precision fixture')`;
+      }
+      const batch=await prepareFieldStocktakeBatch(f.ctx,[f.input],tx,at);
+      expect(batch.now).toEqual(at);expect(batch.rules.get(f.property.id)?.id).toBe(currentId);
+      expect(await tx.inventoryStocktake.count()).toBe(0);expect(await tx.inventoryMovement.count()).toBe(0);
+    });
+  });
   it.skipIf(!url)("includes the cursor millisecond's recorded catalog and excludes the next millisecond without shifting business time", async () => {
     const f = await inventoryFixture("CONSUMABLE"), at = new Date("2030-01-01T00:00:00.123Z"), currentId = randomUUID();
     await withTenant(db, f.org, async tx => {
