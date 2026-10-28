@@ -84,6 +84,22 @@ for (const locale of ["en", "fr", "ar"] as const) test(`ALVILLAS company ledger 
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.evaluate(() => {
+      for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".owner-ledger-page input,.owner-ledger-page select")) {
+        control.style.fontFamily = "monospace";
+        control.style.fontSize = "2em";
+      }
+    });
+    const reflow = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth,
+      controls: [...document.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".owner-ledger-page input,.owner-ledger-page select")].map(control => ({ name: control.name, width: control.getBoundingClientRect().width })) }));
+    await info.attach("company-ledger-control-reflow.json", { body: JSON.stringify(reflow), contentType: "application/json" });
+    expect(reflow.scroll <= reflow.viewport).toBe(true);
+    await page.evaluate(() => {
+      for (const control of document.querySelectorAll<HTMLInputElement | HTMLSelectElement>(".owner-ledger-page input,.owner-ledger-page select")) {
+        control.style.fontFamily = "";
+        control.style.fontSize = "";
+      }
+    });
     await page.screenshot({ path: info.outputPath(`company-ledger-${locale}.png`), fullPage: true });
     await page.evaluate(() => document.documentElement.style.fontSize = "");
     await page.getByTestId("company-ledger-currency").selectOption("EUR"); await page.getByTestId("company-ledger-currency").focus();

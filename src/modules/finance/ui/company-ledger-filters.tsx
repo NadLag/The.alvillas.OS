@@ -6,7 +6,7 @@ import { companyLedgerFilters } from "../domain/company-ledger";
 
 export function CompanyLedgerFilters(props: { path: string; fromOn: string; toOn: string; currency: string; currencies: Array<{ code: string }>; timezone: string }) {
   const t = useTranslations("CompanyLedger"), router = useRouter(), [pending, startTransition] = useTransition(), [error, setError] = useState(false);
-  return <form className="resource-form" aria-busy={pending} onSubmit={event => {
+  return <form className="resource-form owner-ledger-form" aria-busy={pending} onSubmit={event => {
     event.preventDefault();
     if (pending) return;
     const data = new FormData(event.currentTarget);
