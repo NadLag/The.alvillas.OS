@@ -7,6 +7,17 @@ import {
 import { Money } from "@/platform/money/money";
 
 describe("configured finance rule consumers", () => {
+  it("compares large percentage approval thresholds exactly without rounding a fractional cent", () => {
+    const policy={thresholds:[{key:"portfolio-boundary",category:"owner_payout",percentage_of_revenue_bps:321,requires_approval_from:["owner"]}],revenue_period:{unit:"YEAR"}};
+    const subject={category:"owner_payout",periodRevenue:Money.of("10000000000000040.81","MAD")};
+    // The exact configured threshold is 321000000000001.310001 MAD.
+    expect(evaluateConfiguredApproval(policy,{...subject,amount:Money.of("321000000000001.31","MAD")})).toMatchObject({matchedThresholdKey:null,requiredSteps:[]});
+    expect(evaluateConfiguredApproval(policy,{...subject,amount:Money.of("321000000000001.32","MAD")})).toMatchObject({matchedThresholdKey:"portfolio-boundary",requiredSteps:["owner"]});
+    const exact={...subject,periodRevenue:Money.of("10000000000000000.00","MAD")};
+    expect(evaluateConfiguredApproval(policy,{...exact,amount:Money.of("321000000000000.00","MAD")})).toMatchObject({requiredSteps:["owner"]});
+    expect(evaluateConfiguredApproval(policy,{...exact,amount:Money.of("320999999999999.99","MAD")})).toMatchObject({requiredSteps:[]});
+  });
+
   it("evaluates approval thresholds, emergency bypass, expense allocation and payout holds", () => {
     const approval = {
       thresholds: [

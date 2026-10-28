@@ -229,10 +229,11 @@ describe("field photo uploads on real PostgreSQL", () => {
   });
   it.skipIf(!url)("does not retroactively apply an idle policy recorded after the maintenance snapshot", async () => {
     const f = await fixture(); await startFieldUpload(f.ctx, f.input, { ...deps(), now: new Date(Date.now() - 3_600_000) });
-    const asOf = new Date(); await new Promise(resolve => setTimeout(resolve, 5));
-    await idlePolicy(f, 0);
+    const policy = await idlePolicy(f, 0), recordedAt = policy.createdAt;
+    if (!recordedAt) throw new Error("Recorded policy fixture timestamp is required");
+    const asOf = new Date(recordedAt.getTime() - 1), afterPolicy = new Date(recordedAt.getTime() + 1);
     expect(await expireInactiveFieldUploads(f.org, { db, now: asOf })).toEqual({ expired: 0 });
-    expect(await expireInactiveFieldUploads(f.org, { db, now: new Date() })).toEqual({ expired: 1 });
+    expect(await expireInactiveFieldUploads(f.org, { db, now: afterPolicy })).toEqual({ expired: 1 });
   });
   it.skipIf(!url)("serializes duplicate starts and rejects actor, device and payload reuse", async () => {
     const f = await fixture(), results = await Promise.all([startFieldUpload(f.ctx, f.input, deps()), startFieldUpload(f.ctx, f.input, deps())]);
