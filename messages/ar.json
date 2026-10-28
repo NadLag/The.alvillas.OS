@@ -95,7 +95,8 @@
     "automations": "الأتمتة",
     "financialAccounts": "الحسابات المالية",
     "transactionGroups": "مجموعات المعاملات",
-    "accountingPeriods": "الفترات المحاسبية"
+    "accountingPeriods": "الفترات المحاسبية",
+    "companyLedger": "دفتر ALVILLAS"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -2768,5 +2769,38 @@
       "PAYOUT": "دفعة للمالك",
       "ADJUSTMENT": "تسوية"
     }
+  },
+  "CompanyLedger": {
+    "title": "دفتر ALVILLAS",
+    "eyebrow": "المالية",
+    "description": "إيرادات ومصروفات ALVILLAS محسوبة من القيود المرحلة. تُحتسب أرصدة المالكين والأموال المحتفظ بها في البنوك بشكل منفصل.",
+    "summary": "وضع الشركة",
+    "openingBalance": "الرصيد الافتتاحي",
+    "periodCredits": "الدائن",
+    "periodDebits": "المدين",
+    "periodResult": "نتيجة الفترة",
+    "closing": "الرصيد الختامي",
+    "accounts": "حسابات الشركة",
+    "movements": "الحركات",
+    "movementCount": "{count} حركة",
+    "empty": "لا توجد حركات للشركة في هذه الفترة.",
+    "recordedAt": "التاريخ والوقت",
+    "reference": "المرجع",
+    "runningBalance": "الرصيد بعد الحركة",
+    "next": "الحركات التالية",
+    "back": "العودة إلى مساحة العمل",
+    "filters": "الفترة والعملة",
+    "currency": "العملة",
+    "fromOn": "من",
+    "toOn": "إلى",
+    "timezone": "المنطقة الزمنية",
+    "apply": "تطبيق المرشحات",
+    "loading": "جارٍ تحميل الدفتر…",
+    "invalidRange": "تحقق من التواريخ والعملة قبل المتابعة.",
+    "unavailable": "اختر عملة ومنطقة زمنية محاسبية مهيأتين.",
+    "errorTitle": "الدفتر غير متاح",
+    "errorDescription": "تعذر تحميل الدفتر. تحقق من اتصالك وأعد المحاولة.",
+    "tryAgain": "إعادة المحاولة",
+    "snapshotAt": "تمت القراءة في {date}"
   }
 }

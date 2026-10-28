@@ -95,7 +95,8 @@
     "automations": "Automatisations",
     "financialAccounts": "Comptes financiers",
     "transactionGroups": "Groupes de transactions",
-    "accountingPeriods": "Périodes comptables"
+    "accountingPeriods": "Périodes comptables",
+    "companyLedger": "Grand livre ALVILLAS"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -2768,5 +2769,38 @@
       "PAYOUT": "Versement au propriétaire",
       "ADJUSTMENT": "Régularisation"
     }
+  },
+  "CompanyLedger": {
+    "title": "Grand livre ALVILLAS",
+    "eyebrow": "Finance",
+    "description": "Revenus et dépenses ALVILLAS, calculés à partir des écritures comptabilisées. Les soldes propriétaires et les fonds en banque sont comptabilisés séparément.",
+    "summary": "Position de la société",
+    "openingBalance": "Position initiale",
+    "periodCredits": "Crédits",
+    "periodDebits": "Débits",
+    "periodResult": "Résultat de la période",
+    "closing": "Position finale",
+    "accounts": "Comptes de la société",
+    "movements": "Mouvements",
+    "movementCount": "{count} mouvements",
+    "empty": "Aucun mouvement de la société sur cette période.",
+    "recordedAt": "Date et heure",
+    "reference": "Référence",
+    "runningBalance": "Position après mouvement",
+    "next": "Mouvements suivants",
+    "back": "Retour à l’espace de travail",
+    "filters": "Période et devise",
+    "currency": "Devise",
+    "fromOn": "Du",
+    "toOn": "Au",
+    "timezone": "Fuseau horaire",
+    "apply": "Appliquer les filtres",
+    "loading": "Chargement du grand livre…",
+    "invalidRange": "Vérifiez les dates et la devise avant de continuer.",
+    "unavailable": "Choisissez une devise et un fuseau comptable configurés.",
+    "errorTitle": "Grand livre indisponible",
+    "errorDescription": "Le grand livre n’a pas pu être chargé. Vérifiez votre connexion et réessayez.",
+    "tryAgain": "Réessayer",
+    "snapshotAt": "Consulté le {date}"
   }
 }

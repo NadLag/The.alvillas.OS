@@ -95,7 +95,8 @@
     "automations": "Automations",
     "financialAccounts": "Financial accounts",
     "transactionGroups": "Transaction groups",
-    "accountingPeriods": "Accounting periods"
+    "accountingPeriods": "Accounting periods",
+    "companyLedger": "ALVILLAS ledger"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -2768,5 +2769,38 @@
       "PAYOUT": "Owner payout",
       "ADJUSTMENT": "Adjustment"
     }
+  },
+  "CompanyLedger": {
+    "title": "ALVILLAS ledger",
+    "eyebrow": "Finance",
+    "description": "ALVILLAS revenue and expenses, derived from posted movements. Owner balances and money held in bank accounts are accounted for separately.",
+    "summary": "Company position",
+    "openingBalance": "Opening position",
+    "periodCredits": "Credits",
+    "periodDebits": "Debits",
+    "periodResult": "Period result",
+    "closing": "Closing position",
+    "accounts": "Company accounts",
+    "movements": "Movements",
+    "movementCount": "{count} movements",
+    "empty": "No company movements in this period.",
+    "recordedAt": "Date and time",
+    "reference": "Reference",
+    "runningBalance": "Running position",
+    "next": "Next movements",
+    "back": "Back to workspace",
+    "filters": "Period and currency",
+    "currency": "Currency",
+    "fromOn": "From",
+    "toOn": "To",
+    "timezone": "Timezone",
+    "apply": "Apply filters",
+    "loading": "Loading ledger…",
+    "invalidRange": "Check the dates and currency before continuing.",
+    "unavailable": "Choose a configured currency and accounting timezone.",
+    "errorTitle": "Ledger unavailable",
+    "errorDescription": "We could not load the ledger. Check your connection and try again.",
+    "tryAgain": "Try again",
+    "snapshotAt": "Read at {date}"
   }
 }
