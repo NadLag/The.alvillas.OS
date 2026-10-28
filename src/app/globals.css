@@ -2568,3 +2568,9 @@ textarea:disabled {
 .owner-ledger-lines { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); list-style: none; padding: 0; }
 .owner-ledger-lines li { min-inline-size: 0; }
 @media (max-width: 600px) { .owner-ledger-form .form-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.supplier-page { min-inline-size: 0; overflow-wrap: anywhere; }
+.supplier-page :is(fieldset,.resource-card,.field,.form-grid) { min-inline-size: 0; }
+.supplier-page :is(input,select,textarea) { min-inline-size: 0; max-inline-size: 100%; inline-size: 100%; }
+.supplier-page :is(input[type="checkbox"],input[type="radio"]) { inline-size: auto; }
+.supplier-page :is(.primary-button,.secondary-button) { min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }

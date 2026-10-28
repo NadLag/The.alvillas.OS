@@ -96,7 +96,8 @@
     "financialAccounts": "الحسابات المالية",
     "transactionGroups": "مجموعات المعاملات",
     "accountingPeriods": "الفترات المحاسبية",
-    "companyLedger": "دفتر ALVILLAS"
+    "companyLedger": "دفتر ALVILLAS",
+    "suppliers": "الموردون"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -2802,5 +2803,18 @@
     "errorDescription": "تعذر تحميل الدفتر. تحقق من اتصالك وأعد المحاولة.",
     "tryAgain": "إعادة المحاولة",
     "snapshotAt": "تمت القراءة في {date}"
+  },
+  "Suppliers": {
+    "title": "الموردون", "eyebrow": "المالية", "description": "احتفظ ببيانات الاتصال بالموردين وفئاتهم في مكان واحد.",
+    "create": "إضافة مورد", "edit": "تعديل المورد", "save": "حفظ المورد", "saving": "جارٍ الحفظ…",
+    "displayName": "اسم المورد", "category": "الفئة", "contactName": "اسم جهة الاتصال", "email": "البريد الإلكتروني",
+    "phone": "الهاتف", "phoneHint": "أدخل علامة + ورمز الدولة.", "address": "العنوان", "externalReference": "المرجع الخارجي",
+    "reason": "سبب التغيير", "archive": "أرشفة المورد", "restore": "استعادة المورد", "archived": "مؤرشف",
+    "archiveGuidance": "تحتفظ الأرشفة ببيانات المورد وسجله المالي.", "search": "البحث عن مورد", "searchAction": "بحث",
+    "includeArchived": "تضمين الموردين المؤرشفين", "empty": "لا يوجد موردون مطابقون لهذه المرشحات.", "view": "عرض المورد", "next": "الموردون التاليون",
+    "back": "العودة إلى الموردين", "backWorkspace": "العودة إلى مساحة العمل", "notProvided": "غير محدد", "loading": "جارٍ تحميل الموردين…",
+    "forbidden": "لم يعد لديك إذن لتعديل هذا المورد.", "conflict": "تم تعديل هذا المورد. أعد تحميله قبل المحاولة مجدداً.",
+    "validation": "تحقق من بيانات المورد وأدخل سبب التغيير.", "error": "تعذر حفظ المورد أو تحميله. تحقق من اتصالك وأعد المحاولة.",
+    "errorTitle": "الموردون غير متاحين", "tryAgain": "إعادة المحاولة", "reload": "إعادة تحميل المورد"
   }
 }
