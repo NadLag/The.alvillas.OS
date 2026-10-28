@@ -16,7 +16,7 @@ describe("ledger invariants", () => {
     const credit: LedgerPostingDraft = { ...debit, side: "CREDIT" };
     const rows = [...Array<LedgerPostingDraft>(count).fill(debit), ...Array<LedgerPostingDraft>(count).fill(credit)];
     expect(() => assertBalancedPostings(rows)).not.toThrow();
-    expect(() => assertBalancedPostings(rows.toReversed())).not.toThrow();
+    expect(() => assertBalancedPostings([...rows].reverse())).not.toThrow();
   });
 
   it("agrees with an independent integer oracle for large multi-currency journals and one-cent errors", () => {
@@ -24,7 +24,7 @@ describe("ledger invariants", () => {
     fc.assert(fc.property(fc.array(fc.bigInt({ min: 900000000000000000n, max: 999999999999999999n }), { minLength: 150, maxLength: 500 }), amounts => {
       const debits: LedgerPostingDraft[] = amounts.map((cents, index) => ({ side: "DEBIT", amount: Money.of(fromCents(cents), index % 2 ? "MAD" : "EUR") }));
       const credits: LedgerPostingDraft[] = debits.map(row => ({ ...row, side: "CREDIT" }));
-      const journal = [...debits, ...credits.toReversed()];
+      const journal = [...debits, ...[...credits].reverse()];
       const oracle = new Map<string, bigint>();
       for (const row of journal) {
         const cents = BigInt(row.amount.toJSON().amount.replace(".", ""));
