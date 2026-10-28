@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
-import { authorize, roleKeysForResource, type Resource } from "@/platform/authz/authorize";
+import { authorize, type AuthContext, type Resource } from "@/platform/authz/authorize";
 import { referencedConfigs } from "@/platform/automation/rule";
 import { approvalThresholdsConfigSchema, type ApprovalThresholdsConfig } from "@/platform/config/rule-registry";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
@@ -11,7 +11,7 @@ import { Money } from "@/platform/money/money";
 import { allocateConfiguredExpense, evaluateConfiguredApproval } from "../domain/configured-finance-rules";
 import { allocateGrossRevenueByOwnerShare, type PropertyOwnerShare } from "../domain/reservation-revenue";
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
-import { evaluateExpensePolicyInTransaction, type ExpensePolicyDecision, type ConfigDecisionEvidence } from "./finance-config-service";
+import { evaluateExpensePolicyInTransaction, financePolicyRoleKeys, type ExpensePolicyDecision, type ConfigDecisionEvidence } from "./finance-config-service";
 import type { FinanceActorContext } from "./finance-access";
 import type { ExpenseEmergencyNotice } from "../domain/expense";
 
@@ -29,7 +29,12 @@ function frozenEvidence(rule: z.infer<typeof storedRuleSchema>): ConfigDecisionE
   return { configRuleId: rule.config_rule_id, key: rule.key, version: rule.config_rule_version, scopeType: rule.config_rule_scope_type,
     scopeId: rule.config_rule_scope_id, snapshotValue: rule };
 }
-type Stage = { kind: string; ownerId: string | null; amount: string; currency: string; routing: Prisma.InputJsonObject; recipients: string[] };
+export type FinancialPolicyStage = { kind: string; ownerId: string | null; amount: string; currency: string; routing: Prisma.InputJsonObject; recipients: string[] };
+export type PropertyCostPolicySource = Pick<ExpenseRecord, "id" | "propertyId" | "reservationId" | "amount" | "currency" | "category" | "occurredOn" | "emergency" | "purpose"> & {
+  property: Pick<ExpenseRecord["property"], "timezone">;
+  correctsExpenseId?: ExpenseRecord["correctsExpenseId"];
+  correctsExpense?: ExpenseRecord["correctsExpense"];
+};
 
 /** Business windows are configured; boundaries follow the property's IANA calendar. */
 export function expenseRevenueWindow(config: ApprovalThresholdsConfig, occurredOn: string, timezone: string, reservationId: string | null) {
@@ -48,6 +53,13 @@ export function expenseRevenueWindow(config: ApprovalThresholdsConfig, occurredO
 }
 
 export async function prepareExpenseSubmissionPolicy(ctx: FinanceActorContext, row: ExpenseRecord, target: Resource, tx: TenantTransaction, now: Date) {
+  return preparePropertyCostSubmissionPolicy(ctx, row, target, tx, now, { sourceExpenseVersion: row.version, fundingAccountId: row.fundingAccountId });
+}
+
+/** One property-cost engine serves paid expenses and actual unpaid invoice lines. */
+export async function preparePropertyCostSubmissionPolicy(ctx: FinanceActorContext, row: PropertyCostPolicySource, target: Resource,
+  tx: TenantTransaction, now: Date, sourceEvidence: Prisma.InputJsonObject,
+  options: { approvalAmount?: Money; discloseOwnerSlice?: boolean; authorities?: readonly AuthContext[] } = {}) {
   const repository = new ExpenseRepository(tx, ctx.organizationId), source = await repository.sourceOwners(row.propertyId, row.reservationId ?? undefined);
   const correction = row.correctsExpenseId ? correctionPolicySchema.safeParse(row.correctsExpense?.submission?.snapshot) : null;
   if (correction && !correction.success) throw new ExpensePolicyUnavailableError("Original expense agreement policy is unavailable");
@@ -64,7 +76,9 @@ export async function prepareExpenseSubmissionPolicy(ctx: FinanceActorContext, r
     if (!owners.length) throw new ExpensePolicyUnavailableError("Original reservation ownership snapshot is required");
   } else owners = source.owners;
   if (!owners.length) throw new ExpensePolicyUnavailableError("Expense property ownership is not configured");
-  const amount = Money.of(row.amount.toString(), row.currency), slices = allocateGrossRevenueByOwnerShare(amount, owners), policies = [], stages: Stage[] = [];
+  const amount = Money.of(row.amount.toString(), row.currency), approvalAmount = options.approvalAmount ?? amount;
+  if (approvalAmount.currency !== amount.currency || approvalAmount.amount.lt(amount.amount)) throw new ExpensePolicyUnavailableError("Approval source must cover its exact cost in the same currency");
+  const slices = allocateGrossRevenueByOwnerShare(amount, owners), policies = [], stages: FinancialPolicyStage[] = [];
   const postHocNotices: ExpenseEmergencyNotice[] = [];
   let ownerTotal = Money.zero(row.currency), companyTotal = Money.zero(row.currency), guestTotal = Money.zero(row.currency), postHocOwnerNotificationRequired = false, overThreshold = false;
   const notifications = new NotificationRepository(tx, ctx.organizationId);
@@ -72,21 +86,24 @@ export async function prepareExpenseSubmissionPolicy(ctx: FinanceActorContext, r
     let revenueEvidence: Record<string, unknown> | null = null;
     const periodRevenue = async (config: ApprovalThresholdsConfig) => {
       if (!config.thresholds.some(threshold => threshold.percentage_of_revenue_bps !== undefined)) return Money.zero(row.currency);
+      if (config.revenue_source && config.revenue_source.basis !== "OWNER_GROSS") throw new ExpensePolicyUnavailableError("Property approval requires its owner revenue source");
       const window = expenseRevenueWindow(config, row.occurredOn.toISOString().slice(0,10), timezone, row.reservationId);
+      const revenueSource = options.authorities ? { ...target, id: undefined, financialRecordId: undefined, reservationId: row.reservationId, type: "financial_transaction" } : { ...target, type: "financial_transaction" };
+      if (options.authorities?.some(authority => !authorize(authority, "view", revenueSource, now))) throw new ExpensePolicyUnavailableError("Revenue policy source is not authorized");
       const value = await repository.periodRevenue({ ...window, propertyId: row.propertyId, currency: row.currency });
       const revenue = Money.of(value, row.currency);
       if (revenue.amount.lt(0)) throw new ExpensePolicyUnavailableError("Configured revenue period has a negative net revenue");
-      if (!authorize(ctx.authContext, "view", { ...target, type: "financial_transaction", amount: value }, now)) throw new ExpensePolicyUnavailableError("Revenue policy source is not authorized");
+      if ((options.authorities ?? [ctx.authContext]).some(authority => !authorize(authority, "view", { ...revenueSource, amount: value }, now))) throw new ExpensePolicyUnavailableError("Revenue policy source is not authorized");
       revenueEvidence = { period: config.revenue_period, ...window, amount: revenue.toJSON() }; return revenue;
     };
     const fromEvidence = async (allocationRule: ConfigDecisionEvidence, approvalRule: ConfigDecisionEvidence, references: ConfigDecisionEvidence[]): Promise<ExpensePolicyDecision> => {
       const approvalConfig = approvalThresholdsConfigSchema.parse(approvalRule.snapshotValue.value);
       const allocation = allocateConfiguredExpense(allocationRule.snapshotValue.value, { amount: slice.grossAmount, category: row.category });
-      const roles = roleKeysForResource(ctx.authContext, target, now);
-      const approval = evaluateConfiguredApproval(approvalConfig, { amount, category: row.category, emergency: row.emergency,
+      const roles = financePolicyRoleKeys(ctx, target, now, options.authorities);
+      const approval = evaluateConfiguredApproval(approvalConfig, { amount: approvalAmount, category: row.category, emergency: row.emergency,
         ruleKey: allocation.approvalRuleKey ?? undefined, periodRevenue: await periodRevenue(approvalConfig),
         evaluation: { fields: { expense: { id: row.id, propertyId: row.propertyId, reservationId: row.reservationId, ownerId: slice.ownerId,
-          amount: amount.amount.toString(), allocatedAmount: slice.grossAmount.amount.toString(), currency: row.currency, category: row.category, emergency: row.emergency },
+          amount: approvalAmount.amount.toString(), allocatedAmount: slice.grossAmount.amount.toString(), currency: row.currency, category: row.category, emergency: row.emergency },
           actor: { userAccountId: ctx.actorId, roles } }, configs: Object.fromEntries(references.map(rule => [rule.key, rule.snapshotValue.value])) } });
       return { allocation, approval, allocationRule, approvalRule, configReferences: references };
     };
@@ -117,7 +134,7 @@ export async function prepareExpenseSubmissionPolicy(ctx: FinanceActorContext, r
     } else {
       policy = await evaluateExpensePolicyInTransaction(ctx, { propertyId: row.propertyId, ownerId: slice.ownerId, amount: slice.grossAmount.amount.toString(), currency: row.currency,
         category: row.category, emergency: row.emergency, asOf: calendarDateStart(row.occurredOn.toISOString().slice(0,10), timezone) }, tx,
-        { resource: target, approvalAmount: amount, resolvePeriodRevenue: periodRevenue, now });
+        { resource: target, approvalAmount, resolvePeriodRevenue: periodRevenue, now, authorities: options.authorities });
       if (!policy.approvalRule) throw new ExpensePolicyUnavailableError("Explicit approval policy is required");
     }
     ownerTotal = ownerTotal.add(policy.allocation.ownerAmount); companyTotal = companyTotal.add(policy.allocation.alvillasAmount); guestTotal = guestTotal.add(policy.allocation.guestAmount);
@@ -125,19 +142,21 @@ export async function prepareExpenseSubmissionPolicy(ctx: FinanceActorContext, r
     const matched = configured.thresholds.find(threshold => threshold.key === policy.approval.matchedThresholdKey);
     overThreshold ||= Boolean(matched && (matched.amount !== undefined || matched.percentage_of_revenue_bps !== undefined));
     const requiredSteps = policy.approval.requiredSteps.flatMap(step => step === "manager_owner" ? ["manager", "owner"] : [step]);
+    const stageAmount = options.discloseOwnerSlice ? slice.grossAmount : amount;
+    const stageTarget = { ...target, ownerId: slice.ownerId, amount: stageAmount.amount.toString(), status: "PENDING_APPROVAL" };
     for (const kind of requiredSteps) {
       const routing = notificationRoutingSchema.parse(configured.routing?.[kind as "manager" | "owner" | "finance"]);
       await notifications.validateRoutingReferences(routing, row.propertyId);
-      const recipients = await notifications.approvers(routing, { ...target, ownerId: slice.ownerId, status: "PENDING_APPROVAL" });
+      const recipients = await notifications.approvers(routing, stageTarget);
       if (!recipients.length) throw new ExpensePolicyUnavailableError("Configured financial approval has no authorized recipient");
-      stages.push({ kind, ownerId: slice.ownerId, amount: amount.amount.toString(), currency: row.currency, routing: json(routing), recipients });
+      stages.push({ kind, ownerId: slice.ownerId, amount: stageAmount.amount.toString(), currency: row.currency, routing: json(routing), recipients });
     }
     postHocOwnerNotificationRequired ||= policy.approval.postHocOwnerNotificationRequired;
     if (policy.approval.postHocOwnerNotificationRequired) {
       const routing=notificationRoutingSchema.parse(configured.routing?.owner);
       await notifications.validateRoutingReferences(routing,row.propertyId);
       if (!routing.channels.includes("in_app")) throw new ExpensePolicyUnavailableError("Emergency approval requires a durable owner inbox notice");
-      const recipients=await notifications.viewers(routing,{...target,ownerId:slice.ownerId,status:"PENDING_APPROVAL"});
+      const recipients=await notifications.viewers(routing,stageTarget);
       if (!recipients.length) throw new ExpensePolicyUnavailableError("Emergency approval has no authorized owner notice recipient");
       postHocNotices.push({ownerId:slice.ownerId,routing,recipients});
     }
@@ -146,9 +165,9 @@ export async function prepareExpenseSubmissionPolicy(ctx: FinanceActorContext, r
       approval: policy.approval, allocationRule: policy.allocationRule, approvalRule: policy.approvalRule, configReferences: policy.configReferences, revenueEvidence });
   }
   if (!ownerTotal.add(companyTotal).add(guestTotal).amount.eq(amount.amount)) throw new ExpensePolicyUnavailableError("Owner expense policies do not conserve the invoice total");
-  return { stages, overThreshold,postHocNotices, snapshot: json({ schemaVersion: 1, sourceExpenseVersion: row.version, propertyId: row.propertyId, reservationId: row.reservationId,
+  return { stages, overThreshold,postHocNotices, snapshot: json({ schemaVersion: 1, ...sourceEvidence, propertyId: row.propertyId, reservationId: row.reservationId,
     occurredOn: row.occurredOn.toISOString().slice(0,10), timezone, amount: amount.toJSON(), category: row.category, purpose: row.purpose,
-    fundingAccountId: row.fundingAccountId, emergency: row.emergency, ownershipSnapshotId: prior ? prior.ownershipSnapshotId : source.snapshot?.id ?? null, policies,
+    emergency: row.emergency, ownershipSnapshotId: prior ? prior.ownershipSnapshotId : source.snapshot?.id ?? null, policies,
     ...(prior ? { correctsExpenseId: row.correctsExpenseId, originalSubmissionId: row.correctsExpense?.submission?.id } : {}),
     allocation: { owner: ownerTotal.toJSON(), alvillas: companyTotal.toJSON(), guest: guestTotal.toJSON() }, stages,postHocNotices, postHocOwnerNotificationRequired }) };
 }
