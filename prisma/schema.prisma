@@ -71,6 +71,9 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  supplierInvoices                               SupplierInvoice[]
+  supplierInvoiceRevisions                       SupplierInvoiceRevision[]
+  supplierInvoiceLines                           SupplierInvoiceLine[]
   suppliers                                      Supplier[]
   accountingPeriods                              AccountingPeriod[]
   accountingPeriodEvents                         AccountingPeriodEvent[]
@@ -349,6 +352,10 @@ model Person {
 }
 
 model UserAccount {
+  createdSupplierInvoices     SupplierInvoice[]            @relation("SupplierInvoiceCreator")
+  updatedSupplierInvoices     SupplierInvoice[]            @relation("SupplierInvoiceUpdater")
+  supplierInvoiceRevisions    SupplierInvoiceRevision[]
+  supplierInvoiceLines        SupplierInvoiceLine[]
   createdSuppliers            Supplier[]                   @relation("SupplierCreatedBy")
   accountingPeriods           AccountingPeriod[]           @relation("AccountingPeriodCreator")
   accountingPeriodEvents      AccountingPeriodEvent[]      @relation("AccountingPeriodActor")
@@ -721,6 +728,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  supplierInvoiceLines SupplierInvoiceLine[]
   expenses             Expense[]
   cashCollections      CashCollection[]
   templateVersions     PropertyTemplateVersion[]
@@ -968,6 +976,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  supplierInvoiceLines                                 SupplierInvoiceLine[]
   expenses                                             Expense[]
   cashCollections                                      CashCollection[]
   id                                                   String                         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -2391,25 +2400,26 @@ model ApprovalStageRecipient {
 }
 
 model Supplier {
-  id                 String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId     String       @map("organization_id") @db.Uuid
+  invoices           SupplierInvoice[]
+  id                 String            @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String            @map("organization_id") @db.Uuid
   reference          String
-  displayName        String       @map("display_name")
+  displayName        String            @map("display_name")
   category           String
-  contactName        String?      @map("contact_name")
+  contactName        String?           @map("contact_name")
   email              String?
   phone              String?
   address            String?
-  externalReference  String?      @map("external_reference")
-  idempotencyKey     String       @map("idempotency_key") @db.Uuid
-  requestFingerprint String       @map("request_fingerprint")
-  version            Int          @default(0)
-  archivedAt         DateTime?    @map("archived_at") @db.Timestamptz(6)
-  createdBy          String       @map("created_by") @db.Uuid
-  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  creator            UserAccount  @relation("SupplierCreatedBy", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  externalReference  String?           @map("external_reference")
+  idempotencyKey     String            @map("idempotency_key") @db.Uuid
+  requestFingerprint String            @map("request_fingerprint")
+  version            Int               @default(0)
+  archivedAt         DateTime?         @map("archived_at") @db.Timestamptz(6)
+  createdBy          String            @map("created_by") @db.Uuid
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  creator            UserAccount       @relation("SupplierCreatedBy", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organizationId, id])
   @@unique([organizationId, reference])
@@ -2417,4 +2427,90 @@ model Supplier {
   @@index([organizationId, archivedAt, id])
   @@index([organizationId, category, archivedAt, id])
   @@map("supplier")
+}
+
+model SupplierInvoice {
+  id                 String                    @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String                    @map("organization_id") @db.Uuid
+  supplierId         String                    @map("supplier_id") @db.Uuid
+  reference          String
+  invoiceNumber      String                    @map("invoice_number")
+  state              String                    @default("DRAFT")
+  version            Int                       @default(0)
+  currentRevisionId  String?                   @map("current_revision_id") @db.Uuid
+  idempotencyKey     String                    @map("idempotency_key") @db.Uuid
+  requestFingerprint String                    @map("request_fingerprint")
+  archivedAt         DateTime?                 @map("archived_at") @db.Timestamptz(6)
+  createdBy          String                    @map("created_by") @db.Uuid
+  updatedBy          String                    @map("updated_by") @db.Uuid
+  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  supplier           Supplier                  @relation(fields: [organizationId, supplierId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator            UserAccount               @relation("SupplierInvoiceCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  updater            UserAccount               @relation("SupplierInvoiceUpdater", fields: [organizationId, updatedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  currentRevision    SupplierInvoiceRevision?  @relation("CurrentSupplierInvoiceRevision", fields: [organizationId, currentRevisionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  revisions          SupplierInvoiceRevision[] @relation("SupplierInvoiceRevisions")
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, reference])
+  @@unique([organizationId, supplierId, invoiceNumber])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, archivedAt, id])
+  @@index([organizationId, supplierId, state, id])
+  @@map("supplier_invoice")
+}
+
+model SupplierInvoiceRevision {
+  id             String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                @map("organization_id") @db.Uuid
+  invoiceId      String                @map("invoice_id") @db.Uuid
+  version        Int
+  invoiceNumber  String                @map("invoice_number")
+  issuedOn       DateTime              @map("issued_on") @db.Date
+  dueOn          DateTime?             @map("due_on") @db.Date
+  amount         Decimal               @db.Decimal(18, 2)
+  currency       String                @db.Char(3)
+  purpose        String
+  reason         String
+  createdBy      String                @map("created_by") @db.Uuid
+  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime              @default(now()) @map("updated_at") @db.Timestamptz(6)
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice        SupplierInvoice       @relation("SupplierInvoiceRevisions", fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  selectedBy     SupplierInvoice[]     @relation("CurrentSupplierInvoiceRevision")
+  creator        UserAccount           @relation(fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  lines          SupplierInvoiceLine[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, invoiceId, version])
+  @@index([organizationId, dueOn, id])
+  @@map("supplier_invoice_revision")
+}
+
+model SupplierInvoiceLine {
+  id             String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                  @map("organization_id") @db.Uuid
+  revisionId     String                  @map("revision_id") @db.Uuid
+  position       Int
+  propertyId     String?                 @map("property_id") @db.Uuid
+  reservationId  String?                 @map("reservation_id") @db.Uuid
+  category       String
+  costCenter     String?                 @map("cost_center")
+  amount         Decimal                 @db.Decimal(18, 2)
+  currency       String                  @db.Char(3)
+  createdBy      String                  @map("created_by") @db.Uuid
+  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  revision       SupplierInvoiceRevision @relation(fields: [organizationId, revisionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  property       Property?               @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reservation    Reservation?            @relation(fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator        UserAccount             @relation(fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, revisionId, position])
+  @@index([organizationId, propertyId, revisionId])
+  @@index([organizationId, reservationId])
+  @@map("supplier_invoice_line")
 }

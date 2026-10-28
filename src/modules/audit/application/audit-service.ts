@@ -83,6 +83,14 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: Resource
 ): AuditHistoryRow {
+  if (row.resourceType === "supplier_invoice") {
+    const now = new Date();
+    const allowed = authorizeOrganizationSource(ctx.authContext, action, { type: "supplier_invoice", organizationId: ctx.organizationId, dataClass: "financial" }, now) &&
+      authorizeOrganizationSource(ctx.authContext, "view", { type: "supplier", organizationId: ctx.organizationId, dataClass: "personal" }, now);
+    return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,
+      { type: auditLogResource, organizationId: ctx.organizationId, data: row },
+      { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
+  }
   if (row.resourceType === "supplier") {
     const allowed = authorizeOrganizationSource(ctx.authContext, action, { type: "supplier", organizationId: ctx.organizationId, dataClass: "personal" }, new Date());
     return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["sensitive"] : []) }, action,
