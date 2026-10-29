@@ -28,6 +28,7 @@ type DeliveryBatch = {
   candidates: Map<string, Awaited<ReturnType<NotificationRepository["candidates"]>>>;
   inbox: Prisma.NotificationCreateManyInput[];
   finished: string[];
+  observations: Map<string, Awaited<ReturnType<IdentityRepository["authorizationObservation"]>>>;
 };
 
 export class NotificationRepository {
@@ -94,8 +95,12 @@ export class NotificationRepository {
     const recipientIds = financialNotice?[input.recipientId]:approvalRecipients?.map((row) => row.userAccountId);
     const selectedId = (mandatory || routing.assigned) ? assignedId : null;
     const candidateKey = JSON.stringify([routing, selectedId, recipientIds]);
-    const candidates = batch?.candidates.get(candidateKey) ?? await this.candidates(financialNotice?{...routing,roles:[],people:[],assigned:false}:routing, selectedId, recipientIds,Boolean(financialNotice));
+    const candidates = batch?.candidates.get(candidateKey) ?? await this.candidates(financialNotice?{...routing,roles:[],people:[],assigned:false}:routing, selectedId, recipientIds,true);
     if (batch) batch.candidates.set(candidateKey, candidates);
+    if (!candidates.length) return this.finish(event.id, batch);
+    const observation = financialNotice ? null : batch?.observations.get(candidateKey) ??
+      await new IdentityRepository(this.tx, this.organizationId).authorizationObservation(candidates.map(candidate => candidate.id));
+    if (batch && observation) batch.observations.set(candidateKey, observation);
     const data = [];
     for (const candidate of candidates) {
       // Account notices never reveal one person's security/account activity to another.
@@ -104,13 +109,14 @@ export class NotificationRepository {
       if (approval && !approvalRecipients?.some((row) => row.userAccountId === candidate.id)) continue;
       const selected = (mandatory || routing.assigned) && candidate.id === assignedId;
       const explicit = routing.people.includes(candidate.personId);
-      const roleAssignments = candidate.roleAssignments.filter((assignment) => routing.roles.includes(assignment.role.id));
+      const assignments = observation ? candidate.roleAssignments.filter(assignment => observation.ids.includes(assignment.id)) : candidate.roleAssignments;
+      const roleAssignments = assignments.filter(assignment => routing.roles.includes(assignment.role.id));
       const current=financialNotice?await new IdentityRepository(this.tx,this.organizationId).authorizationState(candidate.id):null;
-      const ctx = contextForRoleAssignments(this.organizationId, candidate.id, current?current.assignments:explicit || selected || approval ? candidate.roleAssignments : roleAssignments);
+      const ctx = contextForRoleAssignments(this.organizationId, candidate.id, current?current.assignments:explicit || selected || approval ? assignments : roleAssignments);
       if(current&&(!current.account||securityEnrollment(current.account,current.now).setupRequired))continue;
-      if (!identity && !current&&securityEnrollment(candidate).setupRequired) continue;
-      if (!identity && !authorize(ctx, "view", target,current?.now)) continue;
-      if (approval && !authorize(ctx, "approve", target) && !authorize(ctx, "reject", target)) continue;
+      if (!identity && !current&&securityEnrollment({ ...candidate, roleAssignments: assignments }, observation!.now).setupRequired) continue;
+      if (!identity && !authorize(ctx, "view", target,current?.now ?? observation?.now)) continue;
+      if (approval && !authorize(ctx, "approve", target, current?.now ?? observation?.now) && !authorize(ctx, "reject", target, current?.now ?? observation?.now)) continue;
       for (const channel of ["email", "push"] as const) {
         if ((!mandatory && !routing.channels.includes(channel)) || !shouldDeliverNotification(input.kind, channel, this.preferenceValue(candidate.notificationPreference))) continue;
         await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } }, update: {},
@@ -330,7 +336,7 @@ export class NotificationRepository {
       for (const [id, target] of await this.targets(inputs.filter(input => input.kind === kind)))
         targets.set(`${kind}:${id}`, target);
     }
-    const batch: DeliveryBatch = { targets, routing: new Map(), candidates: new Map(), inbox: [], finished: [] };
+    const batch: DeliveryBatch = { targets, routing: new Map(), candidates: new Map(), inbox: [], finished: [], observations: new Map() };
     for (const event of pending) await this.deliverLocked(event, batch);
     if (batch.inbox.length) await this.tx.notification.createMany({ data: batch.inbox, skipDuplicates: true });
     if (batch.finished.length) await this.tx.outboxEvent.updateMany({
