@@ -1,0 +1,177 @@
+import { z } from "zod";
+import type { Action, Resource } from "@/platform/authz/authorize";
+import { present, catalogFieldPolicy } from "@/platform/authz/present";
+import { prisma } from "@/platform/db/client";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { lockWalletHolders } from "@/platform/ledger/wallet-lock";
+import { Money } from "@/platform/money/money";
+import { AccountingPeriodRepository } from "../infrastructure/accounting-period-repository";
+import { FinancialTransferRepository } from "../infrastructure/financial-transfer-repository";
+import { SupplierPayableRepository } from "../infrastructure/supplier-payable-repository";
+import { expenseFundingWalletResource, isExpenseFundingAccount } from "../domain/expense";
+import { supplierInvoiceCostResource } from "../domain/supplier-invoice";
+import { supplierPaymentPostings } from "../domain/supplier-payable";
+import { supplierPaymentInput, supplierPaymentVoidInput, supplierSettlementQuery } from "../domain/supplier-payment";
+import { matchesFinancialReversalAttempt } from "../domain/financial-reversal";
+import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
+import { inspectSupplierInvoiceRecognitionSource } from "./supplier-invoice-recognition";
+import { assertSupplierInvoiceAuthority, supplierInvoiceOrganizationResource, SupplierInvoiceAccessError, SupplierInvoiceConflictError } from "./supplier-invoice-access";
+import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
+import type { FinanceLedgerAccount } from "../infrastructure/finance-repository";
+
+type Deps = { db?: TenantTransactionRunner; requestId?: string };
+type Source = Awaited<ReturnType<typeof inspectSupplierInvoiceRecognitionSource>>;
+type Check = { action: Action; resource: Resource; organizationOnly?: boolean };
+const receipt = z.object({ input: supplierPaymentInput, recognitionId: z.uuid(), transactionId: z.uuid(),
+  sourcePeriodId: z.uuid().nullable(), sourcePeriodEventId: z.uuid().nullable(), postedAt: z.iso.datetime() }).strict();
+
+function paymentResource(ctx: FinanceActorContext, source: Source, amount: string, at: Date, id?: string): Resource {
+  const properties = new Set(source.costs.map(cost => cost.propertyId));
+  const line = properties.size === 1 && source.costs[0].propertyId ? source.revision.lines.find(line => line.id === source.costs[0].id) : null;
+  return { type: "financial_transaction", organizationId: ctx.organizationId, id, financialRecordId: id, dataClass: "financial", amount, occurredAt: at,
+    ...(line ? { propertyId: line.propertyId, city: line.property?.cityId, region: line.property?.regionId } : {}) };
+}
+function fundingChecks(ctx: FinanceActorContext, account: FinanceLedgerAccount, amount: string, at: Date, action: "view" | "pay" | "void"): Check[] {
+  const target: Resource = { type: "financial_transaction", organizationId: ctx.organizationId, id: account.id, financialRecordId: account.id, dataClass: "financial", amount, occurredAt: at };
+  const wallet = expenseFundingWalletResource(ctx.organizationId, account, amount, at);
+  return [{ action: "view", resource: target }, { action, resource: target }, ...(wallet ? [{ action: "view" as const, resource: wallet }, { action, resource: wallet }] : [])];
+}
+async function prepareSettlement(ctx: FinanceActorContext, id: string, tx: TenantTransaction, action: "view" | "pay" | "void") {
+  const source = await inspectSupplierInvoiceRecognitionSource(ctx, id, tx), payables = new SupplierPayableRepository(tx, ctx.organizationId);
+  if (!source.existing) throw new SupplierInvoiceConflictError();
+  const recheck = async (at: Date, extra: Check[] = []) => {
+    await source.recheck(at);
+    await assertSupplierInvoiceAuthority(ctx, tx, action, at);
+    const checks: Check[] = [...extra];
+    for (const cost of source.costs) {
+      const line = source.revision.lines.find(line => line.id === cost.id)!, link = source.existing!.lines.find(link => link.invoiceLineId === cost.id)!;
+      const invoice = supplierInvoiceCostResource(ctx.organizationId, source.row, line, Money.of(source.revision.amount.toString(), source.revision.currency),
+        source.source.occurredOn.toISOString().slice(0, 10), cost.timezone, cost.sourceOccurredAt);
+      if (action !== "view") checks.push({ action, resource: invoice, organizationOnly: !line.propertyId },
+        { action, resource: { ...invoice, type: "financial_transaction", id: link.transactionId, financialRecordId: link.transactionId, occurredAt: link.transaction.occurredAt }, organizationOnly: !line.propertyId });
+    }
+    const journals = await payables.movementJournals(id);
+    const paymentIds = journals.filter(journal => !journal.reversesTransactionId && journal.postings.some(posting => posting.bucket === "SUPPLIER_PAYMENT")).map(journal => journal.id);
+    const receipts = new Map((paymentIds.length ? await payables.paymentAudits(paymentIds) : []).map(audit => [audit.resourceId, receipt.parse(audit.after)]));
+    for (const journal of journals) {
+      const payment = journal.postings.find(posting => posting.bucket === "SUPPLIER_PAYMENT");
+      if (!payment) continue;
+      const target = paymentResource(ctx, source, payment.amount.toString(), journal.occurredAt, journal.id);
+      checks.push({ action: "view", resource: target, organizationOnly: !target.propertyId });
+      const saved = receipts.get(journal.reversesTransactionId ?? journal.id); if (!saved) throw new SupplierInvoiceConflictError();
+      const paidAt = new Date(saved.input.paidAt);
+      checks.push({ action: "view", resource: { ...target, occurredAt: paidAt }, organizationOnly: !target.propertyId });
+      for (const posting of journal.postings) if (posting.ledgerAccount.code !== "SUPPLIER_PAYABLE") {
+        checks.push(...fundingChecks(ctx, posting.ledgerAccount, payment.amount.toString(), journal.occurredAt, "view"));
+        checks.push(...fundingChecks(ctx, posting.ledgerAccount, payment.amount.toString(), paidAt, "view"));
+      }
+    }
+    await recheckFinanceAuthorization(ctx, tx, at, checks, new SupplierInvoiceAccessError());
+    return journals;
+  };
+  const journals = await recheck(await source.finance.clock());
+  return { ...source, payables, journals, recheckSettlement: recheck };
+}
+
+/** Record an actual supplier disbursement against its existing claim, without recognizing another expense. */
+export async function postSupplierPayment(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
+  const input = supplierPaymentInput.parse(raw);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const payables = new SupplierPayableRepository(tx, ctx.organizationId); await payables.lockPaymentKey(input.idempotencyKey);
+    const source = await prepareSettlement(ctx, input.id, tx, "pay"), finance = source.finance;
+    const hint = await finance.findLedgerAccountById(input.fundingAccountId); if (!hint) throw new SupplierInvoiceAccessError();
+    await lockWalletHolders(tx, ctx.organizationId, hint.teamWallet ? [hint.teamWallet.personId] : []);
+    await new FinancialTransferRepository(tx, ctx.organizationId).lockAccounts([input.fundingAccountId]);
+    const funding = await finance.findLedgerAccountById(input.fundingAccountId); if (!funding) throw new SupplierInvoiceAccessError();
+    const existing = (await finance.findTransactionsByIdempotencyKeys([`supplier-payment:${input.idempotencyKey}`]))[0];
+    const saved = existing ? await payables.paymentAudit(existing.id) : null;
+    const savedReceipt = receipt.safeParse(saved?.after), paidAt = new Date(input.paidAt), now = await finance.clock();
+    const postedAt = existing?.occurredAt ?? (input.currentPeriod ? now : paidAt);
+    const target = paymentResource(ctx, source, input.amount, paidAt, existing?.id);
+    const checks: Check[] = [{ action: "view", resource: target, organizationOnly: !target.propertyId },
+      { action: "pay", resource: target, organizationOnly: !target.propertyId },
+      { action: "create", resource: { ...target, occurredAt: postedAt }, organizationOnly: !target.propertyId },
+      ...fundingChecks(ctx, funding, input.amount, paidAt, "pay"), ...fundingChecks(ctx, funding, input.amount, postedAt, "pay")];
+    if (input.currentPeriod) checks.push({ action: "override", resource: target, organizationOnly: !target.propertyId });
+    await source.recheckSettlement(now, checks);
+    if (existing) {
+      if (!savedReceipt.success || saved?.actorId !== ctx.actorId || saved.reason !== input.reason || existing.createdBy !== ctx.actorId ||
+        JSON.stringify(savedReceipt.data.input) !== JSON.stringify(input) || savedReceipt.data.recognitionId !== source.existing!.id || savedReceipt.data.transactionId !== existing.id)
+        throw new SupplierInvoiceConflictError();
+      await source.recheckSettlement(await finance.clock(), checks);
+      return { id: input.id, paymentId: existing.id, idempotent: true };
+    }
+    if (source.row.version !== input.expectedVersion || source.journals.some(journal => source.existing!.lines.some(line => line.transactionId === journal.id) && journal.reversedByTransactions.length))
+      throw new SupplierInvoiceConflictError();
+    const currency = await source.invoices.currency(input.currency), amount = Money.of(input.amount, input.currency);
+    if (input.currency !== source.revision.currency || !currency || amount.amount.decimalPlaces() > currency.minorUnit || !isExpenseFundingAccount(funding)) throw new ExpensePolicyUnavailableError();
+    if (paidAt > now) throw new SupplierInvoiceConflictError();
+    const periods = new AccountingPeriodRepository(tx, ctx.organizationId);
+    const closed = input.currentPeriod ? await periods.postingPeriod(paidAt) : null;
+    if (input.currentPeriod && (await periods.postingOpen(paidAt) || !closed?.events[0])) throw new SupplierInvoiceConflictError();
+    const claim = source.journals.flatMap(journal => journal.postings).find(posting => posting.ledgerAccount.code === "SUPPLIER_PAYABLE")?.ledgerAccount;
+    if (!claim || claim.archivedAt || claim.accountType !== "CLAIM_OWNERSHIP" || claim.normalSide !== "CREDIT") throw new ExpensePolicyUnavailableError();
+    const outstanding = await payables.outstanding({ supplierId: source.row.supplierId, invoiceId: input.id, currency: input.currency });
+    if (amount.amount.gt(outstanding.amount)) throw new SupplierInvoiceConflictError();
+    const journal = await finance.createFinancialTransaction({ reference: `SUPPLIER-PAYMENT:${input.idempotencyKey}`, description: input.reason, occurredAt: postedAt,
+      idempotencyKey: `supplier-payment:${input.idempotencyKey}`, createdBy: ctx.actorId,
+      postings: supplierPaymentPostings({ invoiceId: input.id, supplierId: source.row.supplierId, paymentId: input.idempotencyKey,
+        liabilityAccountId: claim.id, amount, outstanding, funding }), recheckAuthorization: at => source.recheckSettlement(at, checks).then(() => undefined) });
+    await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.supplier_payment.posted", resourceType: "financial_transaction", resourceId: journal.id,
+      after: { input, recognitionId: source.existing!.id, transactionId: journal.id, sourcePeriodId: closed?.id ?? null,
+        sourcePeriodEventId: closed?.events[0].id ?? null, postedAt: postedAt.toISOString() }, reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now });
+    await source.recognitions.flushGuards();
+    await source.recheckSettlement(await finance.clock(), checks);
+    return { id: input.id, paymentId: journal.id, idempotent: false };
+  }, { timeout: 120000 });
+}
+
+/** Append an exact opposite payment journal; the claim, payment, audit and physical-account history remain intact. */
+export async function voidSupplierPayment(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
+  const input = supplierPaymentVoidInput.parse(raw);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const source = await prepareSettlement(ctx, input.id, tx, "void"), finance = source.finance;
+    const original = source.journals.find(journal => journal.id === input.paymentId), audit = original && await source.payables.paymentAudit(original.id);
+    const saved = receipt.safeParse(audit?.after);
+    if (!original || !saved.success || saved.data.input.id !== input.id || original.reversesTransactionId || saved.data.transactionId !== original.id) throw new SupplierInvoiceAccessError();
+    const hint = await finance.findLedgerAccountById(saved.data.input.fundingAccountId); if (!hint) throw new SupplierInvoiceAccessError();
+    await lockWalletHolders(tx, ctx.organizationId, hint.teamWallet ? [hint.teamWallet.personId] : []);
+    await new FinancialTransferRepository(tx, ctx.organizationId).lockAccounts([hint.id]);
+    const funding = await finance.findLedgerAccountById(hint.id); if (!funding) throw new SupplierInvoiceAccessError();
+    const now = await finance.clock(), target = paymentResource(ctx, source, saved.data.input.amount, original.occurredAt, original.id);
+    const checks: Check[] = [{ action: "void", resource: target, organizationOnly: !target.propertyId },
+      { action: "create", resource: { ...target, id: undefined, financialRecordId: undefined, occurredAt: now }, organizationOnly: !target.propertyId },
+      ...fundingChecks(ctx, funding, saved.data.input.amount, original.occurredAt, "void"), ...fundingChecks(ctx, funding, saved.data.input.amount, now, "void")];
+    await source.recheckSettlement(now, checks);
+    if (original.reversedByTransactions.length) {
+      const reversalAudit = await finance.financialReversalAudit("finance.supplier_payment.reversed", "financial_transaction", [original.id]);
+      if (!matchesFinancialReversalAttempt({ actorId: ctx.actorId, reason: input.reason, originalIds: [original.id], reversals: original.reversedByTransactions, audit: reversalAudit })) throw new SupplierInvoiceConflictError();
+      return { id: input.id, paymentId: original.id, reversalTransactionId: original.reversedByTransactions[0].id, idempotent: true };
+    }
+    const reversed = await finance.createFinancialTransaction({ reference: `${original.reference}:VOID`, description: input.reason, occurredAt: now,
+      idempotencyKey: `${original.idempotencyKey}:void`, reversesTransactionId: original.id, createdBy: ctx.actorId,
+      postings: original.postings.map(posting => ({ ledgerAccountId: posting.ledgerAccountId, side: posting.side === "DEBIT" ? "CREDIT" as const : "DEBIT" as const,
+        amount: Money.of(posting.amount.toString(), posting.currency), bucket: z.string().parse(posting.bucket), dimensions: z.record(z.string(), z.unknown()).parse(posting.dimensions) })),
+      recheckAuthorization: at => source.recheckSettlement(at, checks).then(() => undefined) });
+    await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.supplier_payment.reversed", resourceType: "financial_transaction", resourceId: original.id,
+      after: { invoiceId: input.id, originalTransactionIds: [original.id], reversalTransactionIds: [reversed.id] }, reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now });
+    await source.recognitions.flushGuards(); await source.recheckSettlement(await finance.clock(), checks);
+    return { id: input.id, paymentId: original.id, reversalTransactionId: reversed.id, idempotent: false };
+  }, { timeout: 120000 });
+}
+
+export async function getSupplierSettlement(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
+  const input = supplierSettlementQuery.parse(raw);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const source = await prepareSettlement(ctx, input.id, tx, "view");
+    const outstanding = await source.payables.outstanding({ supplierId: source.row.supplierId, invoiceId: input.id, currency: source.revision.currency });
+    const payments = source.journals.filter(journal => !journal.reversesTransactionId && journal.postings.some(posting => posting.bucket === "SUPPLIER_PAYMENT") && (!input.before || journal.id < input.before));
+    const result = { id: input.id, outstanding: outstanding.toJSON(), payments: payments.slice(0, 50).map(journal => ({ id: journal.id,
+      amount: Money.of(journal.postings[0].amount.toString(), source.revision.currency).toJSON(), occurredAt: journal.occurredAt.toISOString(), reversed: Boolean(journal.reversedByTransactions.length) })),
+      next: payments.length > 50 ? payments[49].id : null };
+    await source.recheckSettlement(await source.finance.clock());
+    return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...supplierInvoiceOrganizationResource(ctx.organizationId), data: result },
+      catalogFieldPolicy<typeof result>("supplier_invoice"), await source.finance.clock()) as typeof result;
+  }, { timeout: 120000 });
+}

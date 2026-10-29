@@ -10,13 +10,12 @@ import { createSupplier, getSupplier, listSuppliers, setSupplierArchived, update
 import { presentAuditHistoryRow } from "@/modules/audit/application/audit-service";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { SupplierPayableRepository } from "@/modules/finance/infrastructure/supplier-payable-repository";
-import { supplierPaymentPostings } from "@/modules/finance/domain/supplier-payable";
+import { postSupplierPayment, voidSupplierPayment } from "@/modules/finance/application/supplier-payment-service";
+import { SupplierInvoiceConflictError } from "@/modules/finance/application/supplier-invoice-access";
 import { createSupplierInvoice, getSupplierInvoice } from "@/modules/finance/application/supplier-invoice-service";
 import { submitSupplierInvoice } from "@/modules/finance/application/supplier-invoice-submission";
 import { recognizeSupplierInvoice } from "@/modules/finance/application/supplier-invoice-recognition";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
-import { Money } from "@/platform/money/money";
-import { writeAuditEvent } from "@/platform/audit/audit-writer";
 
 const url = process.env.TEST_DATABASE_URL;
 const loggedClient = (datasourceUrl: string) => new PrismaClient({ datasourceUrl, log: [{ emit: "event", level: "query" }] });
@@ -51,7 +50,7 @@ describe("canonical supplier source on real PostgreSQL", () => {
 
   it("recognizes an actual supplier claim and serializes partial settlements without duplicating the expense", async () => {
     const f = await fixture(["supplier:view", "supplier:create", "supplier:edit", "supplier_invoice:view", "supplier_invoice:create", "supplier_invoice:edit", "supplier_invoice:pay",
-      "property:view", "financial_transaction:view", "financial_transaction:create"]), supplier = await createSupplier(f.ctx, creation(), { db });
+      "supplier_invoice:void", "property:view", "financial_transaction:view", "financial_transaction:create", "financial_transaction:pay", "financial_transaction:void"]), supplier = await createSupplier(f.ctx, creation(), { db });
     const funding = await withTenant(db, f.org, async tx => {
       await tx.currency.upsert({ where: { code: "MAD" }, update: {}, create: { code: "MAD", name: "Dirham", minorUnit: 2 } });
       const property = await tx.property.create({ data: { organizationId: f.org, name: "Supplier liability villa", addressLine1: "Local acceptance", city: "Marrakech", timezone: "UTC", propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [], photoUrls: [] } });
@@ -76,19 +75,15 @@ describe("canonical supplier source on real PostgreSQL", () => {
     const recognized = await recognizeSupplierInvoice(f.ctx, { id: invoice.id, expectedVersion: submitted.version, idempotencyKey: randomUUID(), reason: "Dedicated supplier claim kernel acceptance" }, { db });
     const journal = await withTenant(db, f.org, tx => tx.financialTransaction.findUniqueOrThrow({ where: { id: recognized.transactionIds[0] }, include: { postings: true, reversedByTransactions: true } }));
     const source = { ...funding, journal };
-    const settle = async (value: string) => withTenant(db, f.org, async tx => {
-      const payables = new SupplierPayableRepository(tx, f.org); await payables.lockInvoice(invoiceId);
-      const outstanding = await payables.outstanding({ supplierId: supplier.id, invoiceId, currency: "MAD" });
-      const postings = supplierPaymentPostings({ invoiceId, supplierId: supplier.id, paymentId: randomUUID(), liabilityAccountId: source.claim.id, amount: Money.of(value, "MAD"), outstanding, funding: source.bank });
-      const journal = await new FinanceRepository(tx, f.org).createFinancialTransaction({ reference: `Supplier payment ${randomUUID()}`, description: "Dedicated partial supplier settlement", occurredAt: new Date(), idempotencyKey: randomUUID(), createdBy: f.account.id, postings });
-      await writeAuditEvent(tx, { organizationId: f.org, actorId: f.account.id, action: "local.supplier.claim.paid", resourceType: "financial_transaction", resourceId: journal.id,
-        after: { supplierId: supplier.id, invoiceId, amount: value }, reason: "Dedicated supplier settlement kernel acceptance", requestId: randomUUID(), occurredAt: new Date() });
-      return journal;
-    });
+    const settle = async (value: string) => {
+      const result = await postSupplierPayment(f.ctx, { id: invoiceId, expectedVersion: submitted.version, fundingAccountId: source.bank.id,
+        amount: value, currency: "MAD", paidAt: new Date().toISOString(), idempotencyKey: randomUUID(), reason: "Dedicated actual supplier settlement acceptance" }, { db });
+      return withTenant(db, f.org, tx => tx.financialTransaction.findUniqueOrThrow({ where: { id: result.paymentId }, include: { postings: true, reversedByTransactions: true } }));
+    };
     await settle("1500.00");
     const results = await Promise.allSettled([settle("800.00"), settle("800.00")]);
     expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
-    expect(results.filter(result => result.status === "rejected" && /outstanding/u.test(String(result.reason)))).toHaveLength(1);
+    expect(results.filter(result => result.status === "rejected" && result.reason instanceof SupplierInvoiceConflictError)).toHaveLength(1);
     await withTenant(db, f.org, async tx => {
       const payable = new SupplierPayableRepository(tx, f.org);
       expect((await payable.outstanding({ supplierId: supplier.id, invoiceId, currency: "MAD" })).toJSON().amount).toBe("100.00");
@@ -101,13 +96,9 @@ describe("canonical supplier source on real PostgreSQL", () => {
     });
     const accepted = results.find(result => result.status === "fulfilled");
     if (accepted?.status !== "fulfilled") throw Error("An actual settlement is required for reversal acceptance");
+    await voidSupplierPayment(f.ctx, { id: invoiceId, paymentId: accepted.value.id, reason: "Dedicated actual supplier settlement reversal" }, { db });
     await withTenant(db, f.org, async tx => {
-      const payables = new SupplierPayableRepository(tx, f.org); await payables.lockInvoice(invoiceId);
-      const original = accepted.value;
-      const reversed = await new FinanceRepository(tx, f.org).createFinancialTransaction({ reference: `Supplier payment reversal ${randomUUID()}`, description: "Dedicated reasoned supplier settlement reversal", occurredAt: new Date(), idempotencyKey: randomUUID(), createdBy: f.account.id, reversesTransactionId: original.id,
-        postings: original.postings.map(row => ({ ledgerAccountId: row.ledgerAccountId, side: row.side === "CREDIT" ? "DEBIT" : "CREDIT", amount: Money.of(row.amount.toString(), row.currency), bucket: row.bucket!, dimensions: row.dimensions as Record<string, unknown> })) });
-      await writeAuditEvent(tx, { organizationId: f.org, actorId: f.account.id, action: "local.supplier.claim.reversed", resourceType: "financial_transaction", resourceId: reversed.id,
-        after: { originalTransactionIds: [original.id], reversalTransactionIds: [reversed.id] }, reason: "Dedicated reasoned supplier settlement reversal", requestId: randomUUID(), occurredAt: new Date() });
+      const payables = new SupplierPayableRepository(tx, f.org);
       expect((await payables.outstanding({ supplierId: supplier.id, invoiceId, currency: "MAD" })).toJSON().amount).toBe("900.00");
     });
     await settle("900.00");
