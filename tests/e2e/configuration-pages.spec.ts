@@ -26,6 +26,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`scoped configuration his
     expect(Math.abs(defaultInstant - Date.now())).toBeLessThan(120000);
     await expect(page.getByTestId("config-rule-create-form").getByText({ en, fr, ar }[locale].Configuration.form.effectiveFrom, { exact: true })).toContainText("UTC");
     await filter.locator('[name="ruleKey"]').fill(key); await filter.locator('[name="ruleScopeType"]').selectOption("property");
+    await filter.getByTestId("config-history-scope-id-search").fill(propertyId);
     await filter.locator('[name="ruleScopeId"]').selectOption(propertyId); await filter.locator('button[type="submit"]').click();
     const rows = page.getByTestId("config-rule-row"), versions: number[] = [];
     for (let index = 0; index < 5; index += 1) {

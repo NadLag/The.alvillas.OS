@@ -83,6 +83,7 @@ export async function operationScope(
 ) {
   const groups: Prisma.OperationTaskWhereInput[] = [];
   const visible = new Set<string>();
+  const propertyStates = new Map<string, { all: Set<string>; own: Set<string> }>();
   const grants = ctx.authContext.assignments?.length
     ? ctx.authContext.assignments
     : ctx.authContext.scopes.map((scope) => ({
@@ -115,26 +116,30 @@ export async function operationScope(
       );
       if (states.length) {
         visible.add(p.id);
-        groups.push({
-          propertyId: p.id,
-          state: { in: states },
-          ...(own
-            ? {
-                OR: [
-                  { assignedToPersonId: ctx.personId },
-                  { assignedToUserAccountId: ctx.actorId },
-                ],
-              }
-            : {}),
-        });
+        const allowed = propertyStates.get(p.id) ?? { all: new Set<string>(), own: new Set<string>() };
+        for (const state of states) (own ? allowed.own : allowed.all).add(state);
+        propertyStates.set(p.id, allowed);
       }
     }
   }
-  for (const task of await repo.scoped(ids))
+  // Permission unions are reduced per property before equivalent predicates are
+  // grouped. An unrestricted state never removes assignment limits on another.
+  const equivalent = new Map<string, { propertyIds: string[]; states: (typeof taskStates)[number][]; own: boolean }>();
+  for (const [propertyId, allowed] of propertyStates) for (const own of [false, true]) {
+    const states = taskStates.filter(state => own ? allowed.own.has(state) && !allowed.all.has(state) : allowed.all.has(state));
+    if (!states.length) continue;
+    const key = JSON.stringify([own, states]), group = equivalent.get(key) ?? { propertyIds: [], states, own };
+    group.propertyIds.push(propertyId); equivalent.set(key, group);
+  }
+  for (const { propertyIds, states, own } of equivalent.values()) groups.push({ propertyId: { in: propertyIds }, state: { in: states },
+    ...(own ? { OR: [{ assignedToPersonId: ctx.personId }, { assignedToUserAccountId: ctx.actorId }] } : {}) });
+  const authorizedJobs: string[] = [];
+  for (const task of await repo.scoped([...new Set(ids)]))
     if (authorize(ctx.authContext, action, taskResource(task))) {
-      groups.push({ id: task.id });
+      authorizedJobs.push(task.id);
       visible.add(task.propertyId);
     }
+  if (authorizedJobs.length) groups.push({ id: { in: authorizedJobs } });
   return { groups, visible };
 }
 export async function operationMeta(deps: OperationDeps) {
