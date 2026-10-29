@@ -5,6 +5,10 @@ import { auth } from "@/platform/auth/session";
 import { captureException } from "@/platform/observability/sentry";
 import { financeActorContextFromSession } from "./finance-access";
 import { createSupplierInvoice, updateSupplierInvoice, setSupplierInvoiceArchived, getSupplierInvoiceChoices, SupplierInvoiceAccessError, SupplierInvoiceConflictError } from "./supplier-invoice-service";
+import { submitSupplierInvoice } from "./supplier-invoice-submission";
+import { getSupplierInvoiceSubmissionPreview } from "./supplier-invoice-policy";
+import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
+import { FinancePolicyContextChangedError } from "./finance-config-service";
 
 async function run<T>(work: (actor: NonNullable<Awaited<ReturnType<typeof financeActorContextFromSession>>>, requestId: string) => Promise<T>, mutate = true) {
   const requestId = crypto.randomUUID();
@@ -14,7 +18,9 @@ async function run<T>(work: (actor: NonNullable<Awaited<ReturnType<typeof financ
     if (mutate) revalidatePath("/[locale]/app/finance/supplier-invoices", "layout");
     return { ok: true as const, data };
   } catch (error) {
-    const code: "forbidden" | "conflict" | "validation" | "error" = error instanceof SupplierInvoiceAccessError ? "forbidden" : error instanceof SupplierInvoiceConflictError ? "conflict" : error instanceof z.ZodError ? "validation" : "error";
+    const code: "forbidden" | "conflict" | "validation" | "policy" | "error" = error instanceof SupplierInvoiceAccessError ? "forbidden" :
+      error instanceof SupplierInvoiceConflictError || error instanceof FinancePolicyContextChangedError ? "conflict" :
+      error instanceof ExpensePolicyUnavailableError ? "policy" : error instanceof z.ZodError ? "validation" : "error";
     if (code === "error") await captureException(error, { source: "api", requestId, tags: { feature: "supplier-invoice-authoring" } });
     return { ok: false as const, code };
   }
@@ -23,3 +29,5 @@ export async function createSupplierInvoiceAction(input: unknown) { return run((
 export async function updateSupplierInvoiceAction(input: unknown) { return run((actor, requestId) => updateSupplierInvoice(actor, input, { requestId })); }
 export async function setSupplierInvoiceArchivedAction(input: unknown) { return run((actor, requestId) => setSupplierInvoiceArchived(actor, input, { requestId })); }
 export async function getSupplierInvoiceChoicesAction(input: unknown) { return run(actor => getSupplierInvoiceChoices(actor, input), false); }
+export async function getSupplierInvoiceSubmissionPreviewAction(input: unknown) { return run(actor => getSupplierInvoiceSubmissionPreview(actor, input), false); }
+export async function submitSupplierInvoiceAction(input: unknown) { return run((actor, requestId) => submitSupplierInvoice(actor, input, { requestId })); }

@@ -11,17 +11,32 @@ export const approvalDecisionSchema = z.object({
 }).strict();
 export class ApprovalAccessError extends Error {}
 export class ApprovalConflictError extends Error {}
-type ApprovalSource = { id: string; organizationId: string; propertyId: string; state: string;
-  property: { regionId: string | null; cityId: string | null; timezone?: string }; expenseId?: string | null;
+export const invoiceApprovalSourceSnapshotSchema = z.object({ lineId: z.uuid(), note: z.string().trim().min(6).max(1000), category: z.string(),
+  occurredOn: z.iso.date(), timezone: z.string().min(1), createdBy: z.uuid() }).strict();
+export type InvoiceApprovalStageSource = { invoiceLineId: string | null; propertyId: string | null; reservationId: string | null; ownerId: string | null;
+  amount: { toString(): string }; currency: string; sourceSnapshot: unknown; property?: { cityId: string | null; regionId: string | null } | null };
+type ApprovalSource = { id: string; organizationId: string; propertyId: string | null; state: string;
+  property: { regionId: string | null; cityId: string | null; timezone?: string } | null; expenseId?: string | null;
+  invoiceSubmissionId?: string | null; invoiceSubmission?: { id: string; invoice: { id: string; state: string; currentSubmissionId: string | null } } | null;
   expense?: { id: string; state: string; amount: { toString(): string }; reservationId: string | null; occurredOn: Date; createdBy: string } | null };
-export function approvalResource(row: ApprovalSource, ownerId?: string | null): Resource {
+export function approvalResource(row: ApprovalSource, ownerId?: string | null, stage?: InvoiceApprovalStageSource): Resource {
+  if (row.invoiceSubmissionId) {
+    const source = stage && invoiceApprovalSourceSnapshotSchema.safeParse(stage.sourceSnapshot);
+    if (!row.invoiceSubmission || !stage?.invoiceLineId || !source || !source.success || source.data.lineId !== stage.invoiceLineId) throw new ApprovalAccessError();
+    return { type: "supplier_invoice", organizationId: row.organizationId, id: row.invoiceSubmission.invoice.id, financialRecordId: row.invoiceSubmission.invoice.id,
+      approvalId: row.id, propertyId: stage.propertyId, reservationId: stage.reservationId, ownerId: stage.ownerId,
+      amount: stage.amount.toString(), occurredAt: calendarDateStart(source.data.occurredOn, source.data.timezone), assignedUserAccountId: source.data.createdBy,
+      dataClass: "financial", city: stage.property?.cityId, region: stage.property?.regionId,
+      status: row.invoiceSubmission.invoice.currentSubmissionId === row.invoiceSubmissionId ? row.invoiceSubmission.invoice.state : row.state };
+  }
   if (row.expenseId) {
-    if (!row.expense || !row.property.timezone) throw new ApprovalAccessError();
+    if (!row.expense || !row.property?.timezone || !row.propertyId) throw new ApprovalAccessError();
     return { type: "expense", id: row.expense.id, financialRecordId: row.expense.id, approvalId: row.id, organizationId: row.organizationId,
       propertyId: row.propertyId, ownerId, reservationId: row.expense.reservationId, amount: row.expense.amount.toString(),
       occurredAt: calendarDateStart(row.expense.occurredOn.toISOString().slice(0,10), row.property.timezone),
       assignedUserAccountId: row.expense.createdBy, dataClass: "financial", region: row.property.regionId, city: row.property.cityId, status: row.expense.state };
   }
+  if (!row.property || !row.propertyId) throw new ApprovalAccessError();
   return { type: "property", id: row.id, approvalId: row.id, organizationId: row.organizationId, propertyId: row.propertyId,
     region: row.property.regionId, city: row.property.cityId, status: row.state };
 }

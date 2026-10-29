@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import webpush from "web-push";
 
 // Browser-vendor subscription/transport is isolated in tests. Service-worker
@@ -6,7 +6,9 @@ import webpush from "web-push";
 export async function installTestPushSubscription(page: Page, token: string) {
   const subscription = { endpoint: `https://fcm.googleapis.com/fcm/send/${token}`, expirationTime: null,
     keys: { p256dh: webpush.generateVAPIDKeys().publicKey, auth: Buffer.alloc(16, 9).toString("base64url") } };
-  await page.context().grantPermissions(["notifications"], { origin: "http://127.0.0.1:3000" });
+  const baseURL = test.info().project.use.baseURL;
+  if (!baseURL) throw Error("Native push verification requires its configured browser origin");
+  await page.context().grantPermissions(["notifications"], { origin: new URL(baseURL).origin });
   await page.addInitScript((value) => {
     let active = localStorage.getItem("test-push-active") === "yes";
     const create = () => ({ ...value, toJSON: () => value, unsubscribe: () => { active = false; localStorage.removeItem("test-push-active"); return Promise.resolve(true); } });
@@ -16,8 +18,9 @@ export async function installTestPushSubscription(page: Page, token: string) {
 }
 export async function displayAndClickPush(page: Page, deliveryId: string) {
   const client = await page.context().newCDPSession(page);
+  const origin = new URL(page.url()).origin;
   let registrationId: string | undefined;
-  client.on("ServiceWorker.workerRegistrationUpdated", (event) => { registrationId = event.registrations.find((row) => row.scopeURL === "http://127.0.0.1:3000/" && !row.isDeleted)?.registrationId ?? registrationId; });
+  client.on("ServiceWorker.workerRegistrationUpdated", (event) => { registrationId = event.registrations.find((row) => row.scopeURL === `${origin}/` && !row.isDeleted)?.registrationId ?? registrationId; });
   await client.send("ServiceWorker.enable");
   await expect.poll(() => registrationId).toBeTruthy();
   const worker = page.context().serviceWorkers().find((item) => item.url().endsWith("/sw.js"))!;
@@ -34,7 +37,7 @@ export async function displayAndClickPush(page: Page, deliveryId: string) {
       if (this.type === 'push') self.testPushWork.push(Promise.resolve(work)); return result;
     };
   })();`);
-  await client.send("ServiceWorker.deliverPushMessage", { origin: "http://127.0.0.1:3000", registrationId: registrationId!, data: JSON.stringify({ deliveryId }) });
+  await client.send("ServiceWorker.deliverPushMessage", { origin, registrationId: registrationId!, data: JSON.stringify({ deliveryId }) });
   await expect.poll(() => worker.evaluate("({text:self.testPushText,error:self.testPushError})")).toEqual({ text: JSON.stringify({ deliveryId }), error: undefined });
   await expect.poll(() => worker.evaluate("self.testPushWork.length")).toBeGreaterThan(0);
   await worker.evaluate("Promise.all(self.testPushWork)");

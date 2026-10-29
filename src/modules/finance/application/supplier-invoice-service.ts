@@ -14,11 +14,10 @@ import { ExpenseRepository } from "../infrastructure/expense-repository";
 import { SupplierInvoiceRepository, type SupplierInvoiceRecord } from "../infrastructure/supplier-invoice-repository";
 import { createSupplierInvoiceInput, updateSupplierInvoiceInput, archiveSupplierInvoiceInput, supplierInvoiceFilters, supplierInvoiceHistoryInput, canonicalSupplierInvoiceFields, type SupplierInvoiceFields } from "../domain/supplier-invoice";
 import type { FinanceActorContext } from "./finance-access";
-import { SupplierInvoiceAccessError, assertSupplierInvoiceAuthority as authority, supplierInvoiceOrganizationResource as resource } from "./supplier-invoice-access";
-export { SupplierInvoiceAccessError } from "./supplier-invoice-access";
+import { SupplierInvoiceAccessError, SupplierInvoiceConflictError, assertSupplierInvoiceAuthority as authority, supplierInvoiceOrganizationResource as resource } from "./supplier-invoice-access";
+export { SupplierInvoiceAccessError, SupplierInvoiceConflictError } from "./supplier-invoice-access";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
-export class SupplierInvoiceConflictError extends Error {}
 export async function assertSupplierInvoiceAccess(ctx: FinanceActorContext, action: Action = "view", deps: Deps = {}) {
   await withTenant(deps.db ?? prisma, ctx.organizationId, async tx => authority(ctx, tx, action, await new FinanceRepository(tx, ctx.organizationId).clock()));
 }
@@ -98,12 +97,14 @@ export async function getSupplierInvoice(ctx: FinanceActorContext, id: string, r
     const data = { ...summary(ctx, row, now), currentRevisionId: row.currentRevision.id, revisionId: selected.id, revisionVersion: selected.version,
       invoiceNumber: selected.invoiceNumber, amount: selected.amount.toFixed(2), currency: selected.currency, purpose: selected.purpose,
       issuedOn: selected.issuedOn.toISOString().slice(0, 10), dueOn: selected.dueOn?.toISOString().slice(0, 10) ?? null,
-      lines: selected.lines.map(line => ({ propertyId: line.propertyId, reservationId: line.reservationId, propertyName: line.property && [ctx.authContext, current].every(auth => authorize(auth, "view", { type: "property", organizationId: ctx.organizationId, propertyId: line.property!.id, city: line.property!.cityId, region: line.property!.regionId }, now)) ? line.property.name : null,
+      approvalId: row.currentSubmission?.approval?.id ?? null,
+      canSubmit: row.state === "DRAFT" && !row.archivedAt && !row.supplier.archivedAt && can(ctx, current, "edit", now),
+      lines: selected.lines.map(line => ({ id: line.id, propertyId: line.propertyId, reservationId: line.reservationId, propertyName: line.property && [ctx.authContext, current].every(auth => authorize(auth, "view", { type: "property", organizationId: ctx.organizationId, propertyId: line.property!.id, city: line.property!.cityId, region: line.property!.regionId }, now)) ? line.property.name : null,
         reservationReference: line.reservation && [ctx.authContext, current].every(auth => authorize(auth, "view", { type: "reservation", organizationId: ctx.organizationId, propertyId: line.propertyId, id: line.reservationId ?? undefined, reservationId: line.reservationId, status: line.reservation!.status, assignedUserAccountId: line.reservation!.createdBy, city: line.property?.cityId, region: line.property?.regionId }, now)) ? line.reservation.reference : null,
         category: line.category, costCenter: line.costCenter, amount: line.amount.toFixed(2) })),
       history: history.slice(0, 50).map(revision => ({ id: revision.id, version: revision.version, invoiceNumber: revision.invoiceNumber, amount: revision.amount.toFixed(2), currency: revision.currency,
         createdAt: revision.createdAt.toISOString(), createdBy: revision.createdBy, reason: revision.reason })),
-      historyNext: history.length > 50 ? history[49].version : undefined, canEdit: row.state === "DRAFT" && !row.archivedAt && !row.supplier.archivedAt && can(ctx, current, "edit", now),
+      historyNext: history.length > 50 ? history[49].version : undefined, canEdit: ["DRAFT", "REJECTED"].includes(row.state) && !row.archivedAt && !row.supplier.archivedAt && can(ctx, current, "edit", now),
       canArchive: row.state === "DRAFT" && can(ctx, current, "edit", now) };
     return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...resource(ctx.organizationId), data }, catalogFieldPolicy<typeof data>("supplier_invoice"), now) as typeof data;
   }, { isolationLevel: "RepeatableRead" });
@@ -134,7 +135,7 @@ export async function updateSupplierInvoice(ctx: FinanceActorContext, raw: unkno
     const repository = new SupplierInvoiceRepository(tx, ctx.organizationId), finance = new FinanceRepository(tx, ctx.organizationId);
     await repository.lock(id); const row = await repository.find(id);
     let now = await finance.clock(); await authority(ctx, tx, "edit", now);
-    if (!row || row.archivedAt || row.supplier.archivedAt || row.state !== "DRAFT") throw new SupplierInvoiceAccessError();
+    if (!row || row.archivedAt || row.supplier.archivedAt || !["DRAFT", "REJECTED"].includes(row.state)) throw new SupplierInvoiceAccessError();
     if (row.version !== expectedVersion) throw new SupplierInvoiceConflictError();
     const suppliers = new SupplierRepository(tx, ctx.organizationId); await suppliers.lock(row.supplierId);
     const supplier = await suppliers.find(row.supplierId); if (!supplier || supplier.archivedAt) throw new SupplierInvoiceAccessError();

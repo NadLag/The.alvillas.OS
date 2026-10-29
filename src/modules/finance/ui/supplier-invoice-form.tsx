@@ -9,7 +9,7 @@ import { InvoiceSourcePicker, type InvoiceSourceOption } from "./supplier-invoic
 
 type Invoice = Awaited<ReturnType<typeof getSupplierInvoice>>;
 type Editor = Awaited<ReturnType<typeof getSupplierInvoiceEditor>>;
-type ErrorCode = "forbidden" | "conflict" | "validation" | "error";
+type ErrorCode = "forbidden" | "conflict" | "validation" | "policy" | "error";
 export function SupplierInvoiceForm({ locale, editor, invoice }: { locale: string; editor: Editor; invoice?: Invoice }) {
   const t = useTranslations("SupplierInvoices"), router = useRouter(), mode = invoice ? "edit" : "create";
   const [pending, startTransition] = useTransition(), [error, setError] = useState<ErrorCode | null>(null), [idempotencyKey] = useState(() => crypto.randomUUID());
