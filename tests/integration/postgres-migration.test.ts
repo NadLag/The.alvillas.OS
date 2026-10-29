@@ -827,6 +827,25 @@ describe("PostgreSQL baseline", () => {
       expect(JSON.stringify({ page, next, logs, rest })).not.toMatch(/private-provider|example.test|payloadEncrypted/u);
     } finally { await measured.$disconnect(); }
   });
+  it("uses database-current notification grants when the application clock lags, without reviving expired grants", async () => {
+    for (const expired of [false, true]) {
+      const f = await digestFixture();
+      const task = await withTenant(prisma, f.organization.id, async tx => {
+        const [clock] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+        await tx.roleAssignment.updateMany({ where: { userAccountId: f.account.id }, data: {
+          validFrom: expired ? new Date("2000-01-01") : clock.now, validTo: expired ? new Date(clock.now.getTime() - 1000) : null } });
+        return tx.operationTask.create({ data: { organizationId: f.organization.id, propertyId: f.property.id, assignedToUserAccountId: f.account.id,
+          assignedToPersonId: f.person.id, titleTranslations: { en: "Actual current grant notification" }, type: "INSPECTION", dueDate: new Date("2030-01-07Z"), idempotencyKey: randomUUID() } });
+      });
+      const [clock] = await prisma.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
+      try {
+        vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(clock.now.getTime() - 60000));
+        await withTenant(prisma, f.organization.id, tx => publishNotification(tx, f.organization.id,
+          { kind: "task_assigned", targetId: task.id, recipientId: f.account.id }, "actual-database-clock-notice"));
+      } finally { vi.useRealTimers(); }
+      expect(await withTenant(prisma, f.organization.id, tx => tx.notification.count({ where: { recipientId: f.account.id, targetId: task.id } }))).toBe(expired ? 0 : 1);
+    }
+  });
   it("schedules one localized authorized unread digest across concurrent cron runs and masks every recipient and record field", async () => {
     const f = await digestFixture();
     const results = await Promise.all([scheduleDigests(f.organization.id, f.deps), scheduleDigests(f.organization.id, f.deps)]);
