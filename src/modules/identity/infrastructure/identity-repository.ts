@@ -288,7 +288,7 @@ export class IdentityRepository {
     return {account:state?.account??null,assignments:state?.assignments??[],now:batch.now};
   }
 
-  async authorizationStates(ids:readonly string[]) {
+  async authorizationObservation(ids:readonly string[]) {
     const [clock] = await this.tx.$queryRaw<Array<{ now: Date; ids: string[] }>>(Prisma.sql`
       WITH checked AS MATERIALIZED (SELECT clock_timestamp() AS at)
       SELECT date_trunc('milliseconds',checked.at) AS now, ARRAY(
@@ -296,6 +296,11 @@ export class IdentityRepository {
         WHERE a.organization_id=${this.organizationId}::uuid AND ${ids.length?Prisma.sql`a.user_account_id IN (${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))})`:Prisma.sql`FALSE`}
           AND a.archived_at IS NULL AND r.archived_at IS NULL AND a.valid_from<=checked.at AND (a.valid_to IS NULL OR a.valid_to>checked.at)
       ) AS ids FROM checked`);
+    return clock;
+  }
+
+  async authorizationStates(ids:readonly string[]) {
+    const clock = await this.authorizationObservation(ids);
     const [accounts, assignments] = await Promise.all([
       this.tx.userAccount.findMany({where:{organizationId:this.organizationId,id:{in:[...ids]},status:"ACTIVE"},select:securityAccountSelect(clock.now,clock.ids)}),
       this.tx.roleAssignment.findMany({ where: { organizationId: this.organizationId, userAccountId: {in:[...ids]}, id: { in: clock.ids }, archivedAt: null, role: { archivedAt: null } },

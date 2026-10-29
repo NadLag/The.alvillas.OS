@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { ApprovalRepository } from "@/platform/approvals/approval-repository";
 import { Money } from "@/platform/money/money";
@@ -21,71 +21,79 @@ import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
 export const supplierInvoiceRecognitionInput = z.object({ id: z.uuid().transform(value => value.toLowerCase()), expectedVersion: z.number().int().positive(),
   idempotencyKey: z.uuid().transform(value => value.toLowerCase()), reason: z.string().trim().min(6).max(500), currentPeriod: z.boolean().default(false) }).strict();
 
+/** Shared admission and execution checks; this prepares actual source costs without posting money. */
+export async function prepareSupplierInvoiceRecognition(ctx: FinanceActorContext, raw: unknown, tx: TenantTransaction) {
+  const input = supplierInvoiceRecognitionInput.parse(raw);
+  const fingerprint = createHash("sha256").update(JSON.stringify({ actorId: ctx.actorId, ...input })).digest("hex");
+  const finance = new FinanceRepository(tx, ctx.organizationId), invoices = new SupplierInvoiceRepository(tx, ctx.organizationId),
+    recognitions = new SupplierInvoiceRecognitionRepository(tx, ctx.organizationId), periods = new AccountingPeriodRepository(tx, ctx.organizationId);
+  await assertSupplierInvoiceAuthority(ctx, tx, "pay", await finance.clock());
+  await invoices.lock(input.id);
+  const row = await invoices.find(input.id);
+  if (!row?.currentRevision || !row.currentSubmission || row.state !== "APPROVED" || row.archivedAt || row.supplier.archivedAt ||
+    row.currentSubmission.revisionId !== row.currentRevision.id) throw new SupplierInvoiceAccessError();
+  const supplier = new SupplierRepository(tx, ctx.organizationId); await supplier.lock(row.supplierId);
+  const source = row.currentSubmission, revision = row.currentRevision;
+  const costs = supplierInvoiceRecognitionCosts({ organizationId: ctx.organizationId, invoiceId: row.id, revisionId: revision.id, supplierId: row.supplierId,
+    sourceInvoiceVersion: source.sourceInvoiceVersion, occurredOn: source.occurredOn.toISOString().slice(0,10), amount: revision.amount.toString(), currency: revision.currency,
+    lines: revision.lines.map(line => ({ ...line, amount: line.amount.toString() })) }, source.snapshot);
+  const existing = await recognitions.byInvoice(row.id), sameKey = await recognitions.byKey(input.idempotencyKey);
+  const postAt = new Map<string, Date>(), adjustments = new Map<string, NonNullable<Awaited<ReturnType<AccountingPeriodRepository["postingPeriod"]>>>>();
+  const closedCosts = new Set<string>(), unavailablePeriods = new Set<string>();
+  const current = await finance.clock();
+  if (existing) for (const line of existing.lines) postAt.set(line.invoiceLineId, line.transaction.occurredAt);
+  else for (const cost of costs) {
+    if (input.currentPeriod && !await periods.postingOpen(cost.sourceOccurredAt)) {
+      closedCosts.add(cost.id); postAt.set(cost.id, current);
+      const closed = await periods.postingPeriod(cost.sourceOccurredAt);
+      if (!closed?.events[0]) unavailablePeriods.add(cost.id);
+      else adjustments.set(cost.id, closed);
+    } else postAt.set(cost.id, cost.sourceOccurredAt);
+  }
+  const recheck = async (at: Date, checkedCosts = costs) => {
+    await assertSupplierInvoiceAuthority(ctx, tx, "pay", at);
+    const actual = await invoices.recognitionSource(row.id, checkedCosts.map(cost => cost.id)), actualSupplier = await supplier.find(row.supplierId);
+    if (!actual || actual.version !== row.version || actual.currentSubmissionId !== source.id || actual.currentRevisionId !== revision.id || actual.state !== "APPROVED" ||
+      actual.archivedAt || !actualSupplier || actualSupplier.archivedAt || !actual.currentRevision) throw new SupplierInvoiceAccessError();
+    if (actual.currentSubmission?.approval) {
+      const approval = await new ApprovalRepository(tx, ctx.organizationId).find(actual.currentSubmission.approval.id);
+      if (!approval || approval.state !== "APPROVED" || approval.financialStages.some(stage => stage.state !== "APPROVED")) throw new SupplierInvoiceConflictError();
+    }
+    const reservations = await invoices.reservations([...new Set(checkedCosts.flatMap(cost => cost.reservationId ? [cost.reservationId] : []))]);
+    const checks: Parameters<typeof recheckFinanceAuthorization>[3][number][] = [];
+    for (const cost of checkedCosts) {
+      const line = actual.currentRevision.lines.find(line => line.id === cost.id), postingAt = postAt.get(cost.id);
+      if (!line || line.propertyId && (!line.property || line.property.archivedAt) || !postingAt) throw new SupplierInvoiceAccessError();
+      const invoice = supplierInvoiceCostResource(ctx.organizationId, actual, line, Money.of(revision.amount.toString(), revision.currency), source.occurredOn.toISOString().slice(0,10), cost.timezone, cost.sourceOccurredAt);
+      const financial = { ...invoice, type: "financial_transaction", id: undefined, financialRecordId: undefined, amount: cost.amount.toJSON().amount };
+      checks.push({ action: "view", resource: invoice, organizationOnly: !line.propertyId }, { action: "pay", resource: invoice, organizationOnly: !line.propertyId },
+        { action: "view", resource: financial, organizationOnly: !line.propertyId },
+        { action: "create", resource: { ...financial, occurredAt: postingAt }, organizationOnly: !line.propertyId });
+      const adjustment = existing?.lines.find(link => link.invoiceLineId === cost.id)?.periodAdjustment;
+      if (closedCosts.has(cost.id) || adjustment) checks.push({ action: "override", resource: financial, organizationOnly: !line.propertyId });
+      if (line.reservationId) {
+        const reservation = reservations.find(reservation => reservation.id === line.reservationId);
+        if (!reservation || reservation.propertyId !== line.propertyId) throw new SupplierInvoiceAccessError();
+        checks.push({ action: "view", resource: { ...invoice, type: "reservation", id: reservation.id, financialRecordId: undefined,
+          status: reservation.status, assignedUserAccountId: reservation.createdBy } });
+      }
+    }
+    await recheckFinanceAuthorization(ctx, tx, at, checks, new SupplierInvoiceAccessError());
+  };
+  await recheck(await finance.clock());
+  if (existing || sameKey) {
+    if (!existing || sameKey?.id !== existing.id || existing.requestFingerprint !== fingerprint || existing.createdBy !== ctx.actorId) throw new SupplierInvoiceConflictError();
+  } else if (row.version !== input.expectedVersion) throw new SupplierInvoiceConflictError();
+  if (!existing && input.currentPeriod && (!adjustments.size || unavailablePeriods.size)) throw new SupplierInvoiceConflictError();
+  return { input, fingerprint, finance, invoices, recognitions, row, source, revision, costs, existing, postAt, adjustments, recheck };
+}
+
 /** All actual approved costs become supplier claims atomically, without moving physical money. */
 export async function recognizeSupplierInvoice(ctx: FinanceActorContext, raw: unknown, deps: { db?: TenantTransactionRunner; requestId?: string } = {}) {
-  const input = supplierInvoiceRecognitionInput.parse(raw), requestId = deps.requestId ?? crypto.randomUUID();
-  const fingerprint = createHash("sha256").update(JSON.stringify({ actorId: ctx.actorId, ...input })).digest("hex");
+  const requestId = deps.requestId ?? crypto.randomUUID();
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
-    const finance = new FinanceRepository(tx, ctx.organizationId), invoices = new SupplierInvoiceRepository(tx, ctx.organizationId),
-      recognitions = new SupplierInvoiceRecognitionRepository(tx, ctx.organizationId), periods = new AccountingPeriodRepository(tx, ctx.organizationId);
-    await assertSupplierInvoiceAuthority(ctx, tx, "pay", await finance.clock());
-    await invoices.lock(input.id);
-    const row = await invoices.find(input.id);
-    if (!row?.currentRevision || !row.currentSubmission || row.state !== "APPROVED" || row.archivedAt || row.supplier.archivedAt ||
-      row.currentSubmission.revisionId !== row.currentRevision.id) throw new SupplierInvoiceAccessError();
-    const supplier = new SupplierRepository(tx, ctx.organizationId); await supplier.lock(row.supplierId);
-    const source = row.currentSubmission, revision = row.currentRevision;
-    const costs = supplierInvoiceRecognitionCosts({ organizationId: ctx.organizationId, invoiceId: row.id, revisionId: revision.id, supplierId: row.supplierId,
-      sourceInvoiceVersion: source.sourceInvoiceVersion, occurredOn: source.occurredOn.toISOString().slice(0,10), amount: revision.amount.toString(), currency: revision.currency,
-      lines: revision.lines.map(line => ({ ...line, amount: line.amount.toString() })) }, source.snapshot);
-    const existing = await recognitions.byInvoice(row.id), sameKey = await recognitions.byKey(input.idempotencyKey);
-    const postAt = new Map<string, Date>(), adjustments = new Map<string, NonNullable<Awaited<ReturnType<AccountingPeriodRepository["postingPeriod"]>>>>();
-    const closedCosts = new Set<string>(), unavailablePeriods = new Set<string>();
-    const current = await finance.clock();
-    if (existing) for (const line of existing.lines) postAt.set(line.invoiceLineId, line.transaction.occurredAt);
-    else for (const cost of costs) {
-      if (input.currentPeriod && !await periods.postingOpen(cost.sourceOccurredAt)) {
-        closedCosts.add(cost.id); postAt.set(cost.id, current);
-        const closed = await periods.postingPeriod(cost.sourceOccurredAt);
-        if (!closed?.events[0]) unavailablePeriods.add(cost.id);
-        else adjustments.set(cost.id, closed);
-      } else postAt.set(cost.id, cost.sourceOccurredAt);
-    }
-    const recheck = async (at: Date, checkedCosts = costs) => {
-      await assertSupplierInvoiceAuthority(ctx, tx, "pay", at);
-      const actual = await invoices.recognitionSource(row.id, checkedCosts.map(cost => cost.id)), actualSupplier = await supplier.find(row.supplierId);
-      if (!actual || actual.version !== row.version || actual.currentSubmissionId !== source.id || actual.currentRevisionId !== revision.id || actual.state !== "APPROVED" ||
-        actual.archivedAt || !actualSupplier || actualSupplier.archivedAt || !actual.currentRevision) throw new SupplierInvoiceAccessError();
-      if (actual.currentSubmission?.approval) {
-        const approval = await new ApprovalRepository(tx, ctx.organizationId).find(actual.currentSubmission.approval.id);
-        if (!approval || approval.state !== "APPROVED" || approval.financialStages.some(stage => stage.state !== "APPROVED")) throw new SupplierInvoiceConflictError();
-      }
-      const reservations = await invoices.reservations([...new Set(checkedCosts.flatMap(cost => cost.reservationId ? [cost.reservationId] : []))]);
-      const checks: Parameters<typeof recheckFinanceAuthorization>[3][number][] = [];
-      for (const cost of checkedCosts) {
-        const line = actual.currentRevision.lines.find(line => line.id === cost.id), postingAt = postAt.get(cost.id);
-        if (!line || line.propertyId && (!line.property || line.property.archivedAt) || !postingAt) throw new SupplierInvoiceAccessError();
-        const invoice = supplierInvoiceCostResource(ctx.organizationId, actual, line, Money.of(revision.amount.toString(), revision.currency), source.occurredOn.toISOString().slice(0,10), cost.timezone);
-        const financial = { ...invoice, type: "financial_transaction", id: undefined, financialRecordId: undefined, amount: cost.amount.toJSON().amount };
-        checks.push({ action: "view", resource: invoice, organizationOnly: !line.propertyId }, { action: "pay", resource: invoice, organizationOnly: !line.propertyId },
-          { action: "view", resource: financial, organizationOnly: !line.propertyId },
-          { action: "create", resource: { ...financial, occurredAt: postingAt }, organizationOnly: !line.propertyId });
-        const adjustment = existing?.lines.find(link => link.invoiceLineId === cost.id)?.periodAdjustment;
-        if (closedCosts.has(cost.id) || adjustment) checks.push({ action: "override", resource: financial, organizationOnly: !line.propertyId });
-        if (line.reservationId) {
-          const reservation = reservations.find(reservation => reservation.id === line.reservationId);
-          if (!reservation || reservation.propertyId !== line.propertyId) throw new SupplierInvoiceAccessError();
-          checks.push({ action: "view", resource: { ...invoice, type: "reservation", id: reservation.id, financialRecordId: undefined,
-            status: reservation.status, assignedUserAccountId: reservation.createdBy } });
-        }
-      }
-      await recheckFinanceAuthorization(ctx, tx, at, checks, new SupplierInvoiceAccessError());
-    };
-    await recheck(await finance.clock());
-    if (existing || sameKey) {
-      if (!existing || sameKey?.id !== existing.id || existing.requestFingerprint !== fingerprint || existing.createdBy !== ctx.actorId) throw new SupplierInvoiceConflictError();
-    } else if (row.version !== input.expectedVersion) throw new SupplierInvoiceConflictError();
-    if (!existing && input.currentPeriod && (!adjustments.size || unavailablePeriods.size)) throw new SupplierInvoiceConflictError();
+    const { input, fingerprint, finance, invoices, recognitions, row, source, revision, costs, existing, postAt, adjustments, recheck } =
+      await prepareSupplierInvoiceRecognition(ctx, raw, tx);
     if (existing) {
       const identities = new Map(existing.lines.map(line => [line.invoiceLineId, line.transactionId]));
       const transactionIds = costs.map(cost => { const id = identities.get(cost.id); if (!id) throw new SupplierInvoiceConflictError(); return id; });

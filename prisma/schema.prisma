@@ -71,6 +71,8 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
+  supplierInvoiceRecognitionOutcomes SupplierInvoiceRecognitionOutcome[]
   supplierInvoiceRecognitions                    SupplierInvoiceRecognition[]
   supplierInvoiceRecognitionLines                SupplierInvoiceRecognitionLine[]
   supplierInvoiceSubmissions                     SupplierInvoiceSubmission[]
@@ -355,6 +357,7 @@ model Person {
 }
 
 model UserAccount {
+  supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
   supplierInvoiceRecognitions SupplierInvoiceRecognition[] @relation("SupplierInvoiceRecognitionCreator")
   submittedSupplierInvoices   SupplierInvoiceSubmission[]
   createdSupplierInvoices     SupplierInvoice[]            @relation("SupplierInvoiceCreator")
@@ -2451,6 +2454,7 @@ model Supplier {
 }
 
 model SupplierInvoice {
+  recognitionRequests SupplierInvoiceRecognitionRequest[]
   recognition         SupplierInvoiceRecognition?
   currentSubmissionId String?                     @map("current_submission_id") @db.Uuid
   currentSubmission   SupplierInvoiceSubmission?  @relation("CurrentSupplierInvoiceSubmission", fields: [organizationId, currentSubmissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
@@ -2544,6 +2548,7 @@ model SupplierInvoiceLine {
 }
 
 model SupplierInvoiceSubmission {
+  recognitionRequests SupplierInvoiceRecognitionRequest[]
   recognition          SupplierInvoiceRecognition?
   id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId       String                      @map("organization_id") @db.Uuid
@@ -2574,6 +2579,7 @@ model SupplierInvoiceSubmission {
 }
 
 model SupplierInvoiceRecognition {
+  requestOutcomes SupplierInvoiceRecognitionOutcome[]
   id                 String                           @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId     String                           @map("organization_id") @db.Uuid
   invoiceId          String                           @map("invoice_id") @db.Uuid
@@ -2618,4 +2624,49 @@ model SupplierInvoiceRecognitionLine {
   @@unique([organizationId, transactionId])
   @@index([organizationId, recognitionId, id])
   @@map("supplier_invoice_recognition_line")
+}
+
+model SupplierInvoiceRecognitionRequest {
+  id                 String                             @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String                             @map("organization_id") @db.Uuid
+  invoiceId          String                             @map("invoice_id") @db.Uuid
+  submissionId       String                             @map("submission_id") @db.Uuid
+  invoiceVersion     Int                                @map("invoice_version")
+  currentPeriod      Boolean                            @default(false) @map("current_period")
+  idempotencyKey     String                             @map("idempotency_key") @db.Uuid
+  requestFingerprint String                             @map("request_fingerprint")
+  reason             String                             @db.VarChar(500)
+  authorizationCap   Json                               @map("authorization_cap")
+  requestedBy        String                             @map("requested_by") @db.Uuid
+  requestedAt        DateTime                           @default(now()) @map("requested_at") @db.Timestamptz(6)
+  organization       Organization                       @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice            SupplierInvoice                    @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  submission         SupplierInvoiceSubmission          @relation(fields: [organizationId, submissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  requester          UserAccount                        @relation(fields: [organizationId, requestedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  outcome            SupplierInvoiceRecognitionOutcome?
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, invoiceId, requestedAt, id])
+  @@index([organizationId, requestedBy, requestedAt, id])
+  @@map("supplier_invoice_recognition_request")
+}
+
+model SupplierInvoiceRecognitionOutcome {
+  id             String                            @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                            @map("organization_id") @db.Uuid
+  requestId      String                            @map("request_id") @db.Uuid
+  state          String
+  recognitionId  String?                           @map("recognition_id") @db.Uuid
+  failureCode    String?                           @map("failure_code")
+  occurredAt     DateTime                          @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  organization   Organization                      @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  request        SupplierInvoiceRecognitionRequest @relation(fields: [organizationId, requestId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  recognition    SupplierInvoiceRecognition?       @relation(fields: [organizationId, recognitionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, requestId])
+  @@index([organizationId, occurredAt, id])
+  @@index([organizationId, recognitionId])
+  @@map("supplier_invoice_recognition_outcome")
 }
