@@ -13,13 +13,21 @@ export class SupplierInvoiceRecognitionRequestRepository {
   }
   find(id: string) { return this.tx.supplierInvoiceRecognitionRequest.findFirst({ where: { organizationId: this.organizationId, id }, include: { outcome: true } }); }
   byKey(idempotencyKey: string) { return this.tx.supplierInvoiceRecognitionRequest.findFirst({ where: { organizationId: this.organizationId, idempotencyKey }, include: { outcome: true } }); }
+  history(invoiceId: string, before?: string) {
+    return this.tx.supplierInvoiceRecognitionRequest.findMany({ where: { organizationId: this.organizationId, invoiceId, ...(before ? { id: { lt: before } } : {}) },
+      orderBy: { id: "desc" }, take: 51, select: { id: true, reason: true, requestedAt: true, currentPeriod: true,
+        outcome: { select: { state: true, occurredAt: true, failureCode: true } } } });
+  }
+  pending(invoiceId: string) {
+    return this.tx.supplierInvoiceRecognitionRequest.findFirst({ where: { organizationId: this.organizationId, invoiceId, outcome: null }, select: { id: true } });
+  }
   create(input: { invoiceId: string; submissionId: string; invoiceVersion: number; currentPeriod: boolean; idempotencyKey: string;
     requestFingerprint: string; reason: string; authorizationCap: AuthorizationCap; requestedBy: string }) {
     return this.tx.supplierInvoiceRecognitionRequest.create({ data: { organizationId: this.organizationId, ...input,
       authorizationCap: input.authorizationCap } });
   }
-  outcome(input: { id: string; requestId: string; state: RecognitionOutcomeState; recognitionId: string | null; failureCode: string | null }) {
-    return this.tx.supplierInvoiceRecognitionOutcome.create({ data: { organizationId: this.organizationId, ...input } });
+  async outcome(input: { id: string; requestId: string; state: RecognitionOutcomeState; recognitionId: string | null; failureCode: string | null }) {
+    return await this.tx.supplierInvoiceRecognitionOutcome.create({ data: { organizationId: this.organizationId, ...input } });
   }
   async flushGuards() { await this.tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE"); }
 }

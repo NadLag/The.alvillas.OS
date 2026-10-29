@@ -2906,6 +2906,36 @@
     "forbidden": "Vous n’avez plus accès à cette facture.",
     "conflict": "La facture a changé ou ce numéro de facture est déjà utilisé pour ce fournisseur. Rechargez avant d’enregistrer.",
     "error": "L’action sur la facture a échoué. Réessayez.",
-    "reload": "Recharger la facture"
+    "reload": "Recharger la facture",
+    "recognition": {
+      "title": "Dette fournisseur",
+      "description": "Enregistrez la dette fournisseur à partir des coûts d’origine approuvés.",
+      "recorded": "Dette fournisseur enregistrée",
+      "pending": "Enregistrement de la dette fournisseur approuvée…",
+      "notRecorded": "La dette fournisseur n’a pas été enregistrée",
+      "costs": "{count, plural, one {# coût d’origine} other {# coûts d’origine}}",
+      "record": "Enregistrer la dette fournisseur",
+      "currentPeriod": "Je confirme l’enregistrement des coûts des périodes clôturées comme ajustement motivé dans la période ouverte actuelle.",
+      "unavailable": "L’enregistrement est indisponible selon vos droits actuels ou les règles des périodes comptables.",
+      "history": "Historique des enregistrements",
+      "empty": "Aucune demande d’enregistrement.",
+      "older": "Demandes antérieures",
+      "refresh": "Actualiser le statut",
+      "offline": "Vous êtes hors ligne. Reconnectez-vous pour enregistrer la dette ou actualiser son statut.",
+      "states": {
+        "PENDING": "En cours",
+        "SUCCEEDED": "Enregistrée",
+        "DENIED": "Accès devenu indisponible",
+        "CONFLICT": "Vérification nécessaire",
+        "FAILED": "Enregistrement impossible"
+      },
+      "failures": {
+        "ACCESS_DENIED": "Les droits nécessaires ont expiré ou changé avant l’enregistrement. Un responsable financier autorisé peut vérifier la facture.",
+        "SOURCE_CHANGED": "La source approuvée ou la demande a changé. Actualisez et vérifiez la facture avant de réessayer.",
+        "PERIOD_CLOSED": "Une période comptable d’origine est clôturée. Vérifiez l’ajustement disponible dans la période actuelle.",
+        "POLICY_UNAVAILABLE": "Une règle comptable nécessaire est indisponible. Vérifiez la configuration financière avant de réessayer.",
+        "EXECUTION_UNAVAILABLE": "L’enregistrement n’a pas pu aboutir. Actualisez le statut avant d’envoyer une nouvelle demande."
+      }
+    }
   }
 }

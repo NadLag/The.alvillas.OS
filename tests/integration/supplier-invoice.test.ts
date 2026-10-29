@@ -12,6 +12,7 @@ import { SupplierRepository } from "@/modules/finance/infrastructure/supplier-re
 import { SupplierInvoiceRepository } from "@/modules/finance/infrastructure/supplier-invoice-repository";
 import { supplierInvoiceFields } from "@/modules/finance/domain/supplier-invoice";
 import { recognizeSupplierInvoice } from "@/modules/finance/application/supplier-invoice-recognition";
+import { getSupplierInvoiceRecognitionStatus } from "@/modules/finance/application/supplier-invoice-recognition-status";
 import { requestSupplierInvoiceRecognition, executeSupplierInvoiceRecognitionReference, failSupplierInvoiceRecognitionReference } from "@/modules/finance/application/supplier-invoice-recognition-requests";
 import { SupplierInvoiceRecognitionRequestRepository } from "@/modules/finance/infrastructure/supplier-invoice-recognition-request-repository";
 import { SupplierInvoiceRecognitionRepository } from "@/modules/finance/infrastructure/supplier-invoice-recognition-repository";
@@ -213,6 +214,80 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it("reads actual queued and recorded financial status without exposing captured permissions or private execution keys", async () => {
+    const f = await invoiceRecognitionFixture();
+    expect(await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db })).toMatchObject({ recognized: false, pending: false, canRequest: true, history: [] });
+    const requested = await requestSupplierInvoiceRecognition(f.ctx, f.command, { db });
+    const pending = await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db });
+    expect(pending).toMatchObject({ recognized: false, pending: true, canRequest: false, amount: "3320.02", currency: "MAD" });
+    expect(pending.history[0]).toMatchObject({ id: requested.requestId, state: "PENDING", reason: f.command.reason });
+    expect(Object.hasOwn(pending.history[0], "authorizationCap")).toBe(false); expect(Object.hasOwn(pending.history[0], "requestFingerprint")).toBe(false);
+    const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: "SupplierInvoiceRecognitionRequested" } }));
+    await executeSupplierInvoiceRecognitionReference({ organizationId: f.org, outboxEventId: event.id }, { db });
+    const recorded = await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db });
+    expect(recorded).toMatchObject({ recognized: true, pending: false, canRequest: false, sourceCosts: 2 });
+    expect(recorded.history[0]).toMatchObject({ state: "SUCCEEDED", failureCode: null });
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+  });
+  it("allows an independent financial viewer to read recognition status without granting recording authority", async () => {
+    const f = await invoiceRecognitionFixture(); await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    const caller = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => !["supplier_invoice:pay", "financial_transaction:create", "financial_transaction:override"].includes(key))) } };
+    expect(await getSupplierInvoiceRecognitionStatus(caller, { id: f.invoice.id }, { db })).toMatchObject({ recognized: true, canRequest: false });
+    await expect(requestSupplierInvoiceRecognition(caller, f.command, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+  });
+  it("denies invoice-header-only, narrowed financial and foreign-tenant recognition status reads before disclosing state", async () => {
+    const f = await invoiceRecognitionFixture();
+    const caller = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => !key.startsWith("financial_transaction:"))) } };
+    await expect(getSupplierInvoiceRecognitionStatus(caller, { id: f.invoice.id }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    await expect(getSupplierInvoiceRecognitionStatus(caller, { id: f.invoice.id }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    await expect(getSupplierInvoiceRecognitionStatus({ ...f.ctx, organizationId: randomUUID() }, { id: f.invoice.id }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { validTo: new Date() } }));
+    await expect(getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+  });
+  it("rechecks financial viewer authority after an actual source-lock wait", async () => {
+    const f = await invoiceRecognitionFixture(); let locked!: () => void, release!: () => void, blocker = 0;
+    const ready = new Promise<void>(resolve => locked = resolve), gate = new Promise<void>(resolve => release = resolve);
+    const holder = withTenant(admin, f.org, async tx => { await new SupplierInvoiceRepository(tx, f.org).lock(f.invoice.id);
+      const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; blocker = row.pid; locked(); await gate; });
+    await ready;
+    const reading = getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db }).then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error: error as unknown }));
+    try { await vi.waitFor(async () => { const [row] = await admin.$queryRaw<Array<{ waiting: boolean }>>(Prisma.sql`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${blocker}=ANY(pg_blocking_pids(pid))) AS waiting`); expect(row.waiting).toBe(true); }, { timeout: 10000 });
+      await withTenant(admin, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { archivedAt: new Date() } }));
+    } finally { release(); await holder; }
+    const result = await reading; expect(result.ok).toBe(false); if (!result.ok) expect(result.error).toBeInstanceOf(SupplierInvoiceAccessError);
+  });
+  it("pages complete actual recognition request history without fetching private caps or adding a query per request", async () => {
+    const f = await invoiceRecognitionFixture(), scoped = new URL(url!); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests";
+    const measured = new PrismaClient({ datasourceUrl: scoped.toString(), log: [{ emit: "event", level: "query" }] }), queries: string[] = [];
+    measured.$on("query", query => queries.push(query.query));
+    try {
+      const recordFailedRequest = async (index: number) => {
+        const request = await requestSupplierInvoiceRecognition(f.ctx, { ...f.command, idempotencyKey: randomUUID(), reason: "Actual authorized recording request " + index }, { db });
+        const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: "SupplierInvoiceRecognitionRequested", payload: { path: ["requestId"], equals: request.requestId } } }));
+        await failSupplierInvoiceRecognitionReference({ organizationId: f.org, outboxEventId: event.id }, { db });
+      };
+      await recordFailedRequest(0);
+      await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db: measured }); const initialCount = queries.length;
+      for (let index = 1; index < 52; index++) await recordFailedRequest(index);
+      queries.length = 0; const first = await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db: measured });
+      expect(queries.length).toBe(initialCount); expect(first.history).toHaveLength(50); expect(first.next).not.toBeNull();
+      const second = await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id, before: first.next! }, { db: measured });
+      expect(second.history).toHaveLength(2); expect(new Set([...first.history, ...second.history].map(request => request.id)).size).toBe(52);
+      expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(0);
+    } finally { await measured.$disconnect(); }
+  });
+  it("offers a closed-period adjustment only to a current independently authorized financial operator", async () => {
+    const f = await invoiceRecognitionFixture({ occurredOn: "2026-09-15" });
+    await closeAccountingPeriod(f.ctx, { month: "2026-09", expectedVersion: 0, idempotencyKey: randomUUID(), reason: "Close actual original recognition status period" }, { db });
+    expect(await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db })).toMatchObject({ currentPeriod: true, canRequest: true });
+    const caller = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => key !== "financial_transaction:override")) } };
+    expect(await getSupplierInvoiceRecognitionStatus(caller, { id: f.invoice.id }, { db })).toMatchObject({ currentPeriod: true, canRequest: false });
+    const requested = await requestSupplierInvoiceRecognition(f.ctx, { ...f.command, currentPeriod: true }, { db });
+    const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: "SupplierInvoiceRecognitionRequested", payload: { path: ["requestId"], equals: requested.requestId } } }));
+    expect(await executeSupplierInvoiceRecognitionReference({ organizationId: f.org, outboxEventId: event.id }, { db })).toMatchObject({ state: "SUCCEEDED" });
+    expect(await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db })).toMatchObject({ recognized: true, canRequest: false });
+  });
   it("durably queues recognition with an immutable caller restriction and no financial movement", async () => {
     const f = await invoiceRecognitionFixture(), requested = await requestSupplierInvoiceRecognition(f.ctx, f.command, { db });
     expect(z.uuid().parse(requested.requestId)).toBe(requested.requestId);

@@ -1,0 +1,13 @@
+# 0102 — Authorized supplier recognition controls
+
+Status: Accepted
+
+Approved invoice details expose recognition controls only after independent organization invoice, supplier and every original financial source permission passes for both the caller and current stored grants. Inspection and recording share one source loader and current authorization path. Inspection never grants `pay`, `create` or `override`; it checks an existing journal's identity and actual posting date as well as the original economic date. Financial authority is rechecked after actual source waits and after status/history reads. Header-only viewers retain their authorized invoice header and receive no recognition status.
+
+The authenticated server action enqueues the immutable request from ADR 0100. The native EN/FR/AR panel shows pending and actual recorded state, reconnect/error/retry behavior, the exact recognized amount and original cost count, and paginated request history. Original caller caps and execution fingerprints never enter that DTO. A viewer without recording permission can inspect the financial record without gaining a posting action. Historical invoice revisions do not display current recording controls.
+
+The reader derives pending state from the absence of a terminal outcome and recorded state from the actual immutable recognition. History selects at most 51 safe records with an indexed tenant/invoice cursor. Its query count is constant between one and 52 actual failed requests; it does not fetch each request's captured permissions. Closed original periods expose the existing privileged adjustment mode only to a currently authorized operator and require explicit confirmation and a reason. No legal or accounting rule is invented.
+
+The client retains its nonce and reason after a lost response; retry reaches the same durable request. Polling reads current status and does not create financial rows. Out-of-order reads cannot replace a newer denial. Offline controls disable submission and status refresh. Required server authorization remains independent of those controls.
+
+Six real browser journeys cover EN/FR/AR desktop/mobile, real MFA and server actions, a committed request with a lost acknowledgement, retry and worker redelivery, real claim journals, independent header-only privacy, anonymous and revoked action replay, RTL, axe and 200% text. Six PostgreSQL reader cases cover current/caller permission separation, real row-wait revocation, safe history pagination and closed-period authority. Recording still creates only supplier claims; exact reversal, settlement, submission foreground performance and staging acceptance remain part of F-FIN-23.
