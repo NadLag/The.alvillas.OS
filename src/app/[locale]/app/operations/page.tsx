@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { Suspense } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import {
@@ -11,7 +12,7 @@ import { safeLocale } from "@/i18n/routing";
 import { localizedText } from "@/i18n/content";
 import { auth } from "@/platform/auth/session";
 import { authorizeCollection } from "@/platform/authz/authorize";
-import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
+import { reservationActorContextFromSession, type ReservationActorContext } from "@/modules/reservations/application/reservation-access";
 import { operationManagement } from "@/modules/reservations/application/operation-management";
 import { operationReadiness } from "@/modules/reservations/application/operation-automation";
 import {
@@ -24,6 +25,18 @@ import { taskTypeSchema } from "@/platform/config/rule-registry";
 import { OperationForm } from "@/modules/reservations/ui/operation-form";
 import { whatsappComposerPath } from "@/platform/notifications/whatsapp-path";
 export const dynamic = "force-dynamic";
+async function OperationReadinessPanel({ ctx, locale, propertyId, href }: { ctx: ReservationActorContext; locale: string; propertyId?: string;
+  href: (change: Record<string, string | number | undefined>) => string }) {
+  const [t, readiness] = await Promise.all([getTranslations({ locale, namespace: "Operations" }), operationReadiness(ctx)]);
+  return <details className="panel" data-testid="operation-readiness-panel"><summary>{t("manage.readinessTitle")}</summary>
+    {readiness.filter(row => !propertyId || row.propertyId === propertyId).map(row => <div className="resource-row" key={row.propertyId}>
+      <strong>{row.name}</strong>{row.generationFailed ? <p role="alert">{t("manage.generationFailed")}</p> : null}
+      <span>{t(`manage.readiness.${row.readiness}`)}</span>
+      <Link href={href({ propertyId: row.propertyId, state: "OVERDUE", view: "LIST", page: 1 })}>{t("manage.overdueCount", { count: row.overdue })}</Link>
+      <span>{t("manage.unassignedCount", { count: row.unassigned })}</span>
+    </div>)}
+  </details>;
+}
 export default async function OperationsPage({
   params,
   searchParams,
@@ -38,11 +51,10 @@ export default async function OperationsPage({
   const input = Object.fromEntries(
     Object.entries(await searchParams).filter(([, v]) => typeof v === "string"),
   );
-  const [t, f, m, readiness, whatsapp] = await Promise.all([
+  const [t, f, m, whatsapp] = await Promise.all([
       getTranslations({ locale, namespace: "Operations" }),
       getFormatter({ locale }),
       operationManagement(ctx, input),
-      operationReadiness(ctx),
       getTranslations({locale,namespace:"Whatsapp"}),
     ]),
     q = m.query,
@@ -366,33 +378,9 @@ export default async function OperationsPage({
             <Link href={href({ page: q.page + 1 })}>{t("manage.next")}</Link>
           ) : null}
         </nav>
-        <details className="panel">
-          <summary>{t("manage.readinessTitle")}</summary>
-          {readiness
-            .filter((r) => !q.propertyId || r.propertyId === q.propertyId)
-            .map((r) => (
-              <div className="resource-row" key={r.propertyId}>
-                <strong>{r.name}</strong>
-                {r.generationFailed ? (
-                  <p role="alert">{t("manage.generationFailed")}</p>
-                ) : null}
-                <span>{t(`manage.readiness.${r.readiness}`)}</span>
-                <Link
-                  href={href({
-                    propertyId: r.propertyId,
-                    state: "OVERDUE",
-                    view: "LIST",
-                    page: 1,
-                  })}
-                >
-                  {t("manage.overdueCount", { count: r.overdue })}
-                </Link>
-                <span>
-                  {t("manage.unassignedCount", { count: r.unassigned })}
-                </span>
-              </div>
-            ))}
-        </details>
+        <Suspense fallback={<p role="status">{t("manage.loadingReadiness")}</p>}>
+          <OperationReadinessPanel ctx={ctx} locale={locale} propertyId={q.propertyId} href={href} />
+        </Suspense>
         {canCreate ? (
           <details className="panel">
             <summary>{t("manage.recurringTitle")}</summary>

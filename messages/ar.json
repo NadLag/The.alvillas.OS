@@ -365,6 +365,8 @@
     "form": {
       "key": "Rule key",
       "customFeatureFlagKey": "Feature flag suffix",
+      "propertySearch": "البحث عن عقارات",
+      "moreProperties": "المزيد من العقارات",
       "scopeType": "Scope",
       "scopeOrganization": "Organization",
       "scopeProperty": "Property",
@@ -1095,6 +1097,7 @@
       "next": "التالي",
       "page": "الصفحة {page}",
       "readinessTitle": "جاهزية العقارات والاستثناءات",
+      "loadingReadiness": "جارٍ تحميل جاهزية العقارات…",
       "overdueCount": "{count} متأخرة",
       "unassignedCount": "{count} غير مسندة",
       "recurringTitle": "العمل المتكرر",

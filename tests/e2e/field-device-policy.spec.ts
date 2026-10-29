@@ -51,6 +51,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
         }).catch(() => ({ unavailable: true }));
         await info.attach("config-scope-hit-target", { body: JSON.stringify(geometry), contentType: "application/json" }); throw error;
       }
+      expect(await form.getByTestId("config-rule-scope-id").locator("option").count()).toBeLessThanOrEqual(52);
+      await form.getByTestId("config-rule-scope-id-search").fill(jobs.propertyId);
       await form.getByTestId("config-rule-scope-id").selectOption(jobs.propertyId);
       await form.getByTestId("config-rule-key").selectOption(fieldDevicePolicyKey); await expect(form.getByTestId("config-rule-key")).toHaveValue(fieldDevicePolicyKey);
       await form.getByTestId("config-rule-lifecycle").selectOption("ACTIVE");
