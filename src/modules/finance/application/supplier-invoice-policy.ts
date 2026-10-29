@@ -12,6 +12,7 @@ import { NotificationRepository } from "@/platform/notifications/notification-re
 import { CompanyLedgerRepository } from "../infrastructure/company-ledger-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { SupplierInvoiceRepository, type SupplierInvoiceRecord } from "../infrastructure/supplier-invoice-repository";
+import { supplierInvoiceCostResource } from "../domain/supplier-invoice";
 import { assertSupplierInvoiceAuthority, SupplierInvoiceAccessError } from "./supplier-invoice-access";
 import { evaluateCompanyCostPolicyInTransaction, financePolicyRoleKeys, FinancePolicyContextChangedError } from "./finance-config-service";
 import { ExpensePolicyUnavailableError, expenseRevenueWindow, preparePropertyCostSubmissionPolicy, type FinancialPolicyStage } from "./expense-submission-policy";
@@ -23,12 +24,6 @@ type PolicyInput = z.infer<typeof supplierInvoicePolicyInput>;
 type Line = NonNullable<SupplierInvoiceRecord["currentRevision"]>["lines"][number];
 type Stage = FinancialPolicyStage & { lineId: string; propertyId: string | null; reservationId: string | null };
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
-
-function financialSource(ctx: FinanceActorContext, row: SupplierInvoiceRecord, line: Line, amount: Money, occurredOn: string, timezone: string): Resource {
-  return { type: "supplier_invoice", organizationId: ctx.organizationId, id: row.id, financialRecordId: row.id, propertyId: line.propertyId,
-    reservationId: line.reservationId, region: line.property?.regionId, city: line.property?.cityId, amount: amount.toJSON().amount,
-    assignedUserAccountId: row.createdBy, occurredAt: calendarDateStart(occurredOn, timezone), dataClass: "financial", status: row.state };
-}
 
 async function companyLinePolicy(ctx: FinanceActorContext, row: SupplierInvoiceRecord, line: Line, input: PolicyInput, target: Resource,
   timezone: string, authorities: readonly AuthContext[], tx: TenantTransaction, now: Date) {
@@ -85,7 +80,7 @@ export async function prepareSupplierInvoicePolicy(ctx: FinanceActorContext, row
   for (const line of revision.lines) {
     const timezone = line.propertyId ? line.property?.timezone : companyTimezone;
     if (!timezone || line.property?.archivedAt || (line.propertyId && !line.property)) throw new ExpensePolicyUnavailableError("Invoice cost calendar and active property source are required");
-    const target = financialSource(ctx, row, line, Money.of(line.amount.toString(), line.currency), input.occurredOn, timezone);
+    const target = supplierInvoiceCostResource(ctx.organizationId, row, line, Money.of(line.amount.toString(), line.currency), input.occurredOn, timezone);
     const actorRoles = financePolicyRoleKeys(ctx, target, now, authorities); roleChecks.push({ resource: target, roles: actorRoles });
     const source = { ...target, type: "financial_transaction", id: undefined, financialRecordId: undefined };
     requireSource(source, !line.propertyId);
@@ -104,13 +99,16 @@ export async function prepareSupplierInvoicePolicy(ctx: FinanceActorContext, row
     lines.push({ id: line.id, position: line.position, propertyId: line.propertyId, reservationId: line.reservationId, amount: Money.of(line.amount.toString(), line.currency).toJSON(),
       category: line.category, costCenter: line.costCenter, policy: plan.snapshot });
   }
-  const at = await new FinanceRepository(tx, ctx.organizationId).clock(), renewed = await assertSupplierInvoiceAuthority(ctx, tx, "edit", at);
-  for (const { resource, organizationOnly } of checks) if ([ctx.authContext, renewed].some(authority => organizationOnly ?
-    !authorizeOrganizationSource(authority, "view", resource, at) : !authorize(authority, "view", resource, at))) throw new SupplierInvoiceAccessError();
-  for (const { resource, roles } of roleChecks) if (JSON.stringify(financePolicyRoleKeys(ctx, resource, at, [ctx.authContext, renewed])) !== JSON.stringify(roles))
-    throw new FinancePolicyContextChangedError("Financial policy actor roles changed during preparation");
+  const recheckAuthorization = async () => {
+    const at = await new FinanceRepository(tx, ctx.organizationId).clock(), renewed = await assertSupplierInvoiceAuthority(ctx, tx, "edit", at);
+    for (const { resource, organizationOnly } of checks) if ([ctx.authContext, renewed].some(authority => organizationOnly ?
+      !authorizeOrganizationSource(authority, "view", resource, at) : !authorize(authority, "view", resource, at))) throw new SupplierInvoiceAccessError();
+    for (const { resource, roles } of roleChecks) if (JSON.stringify(financePolicyRoleKeys(ctx, resource, at, [ctx.authContext, renewed])) !== JSON.stringify(roles))
+      throw new FinancePolicyContextChangedError("Financial policy actor roles changed during preparation");
+  };
+  await recheckAuthorization();
   return { stages, postHocNotices, snapshot: json({ schemaVersion: 1, invoiceId: row.id, sourceInvoiceVersion: row.version, revisionId: revision.id,
-    supplierId: row.supplierId, amount: invoiceAmount.toJSON(), occurredOn: input.occurredOn, emergency: input.emergency, lines, stages, postHocNotices }) };
+    supplierId: row.supplierId, amount: invoiceAmount.toJSON(), occurredOn: input.occurredOn, emergency: input.emergency, lines, stages, postHocNotices }), recheckAuthorization };
 }
 
 export async function getSupplierInvoicePolicyPreview(ctx: FinanceActorContext, raw: unknown, deps: { db?: TenantTransactionRunner } = {}) {
@@ -121,6 +119,15 @@ export async function getSupplierInvoicePolicyPreview(ctx: FinanceActorContext, 
     if (!row) throw new SupplierInvoiceAccessError();
     const plan = await prepareSupplierInvoicePolicy(ctx, row, input, tx, now);
     const at = await finance.clock(); await assertSupplierInvoiceAuthority(ctx, tx, "edit", at);
-    return plan;
+    return { stages: plan.stages, postHocNotices: plan.postHocNotices, snapshot: plan.snapshot };
   }, { timeout: 120000 });
+}
+
+export async function getSupplierInvoiceSubmissionPreview(ctx: FinanceActorContext, raw: unknown, deps: { db?: TenantTransactionRunner } = {}) {
+  const plan = await getSupplierInvoicePolicyPreview(ctx, raw, deps);
+  const snapshot = z.object({ lines: z.array(z.object({ id: z.uuid(), policy: z.object({ allocation: z.object({
+    owner: z.object({ amount: z.string(), currency: z.string() }), alvillas: z.object({ amount: z.string(), currency: z.string() }),
+    guest: z.object({ amount: z.string(), currency: z.string() }) }) }) })) }).parse(plan.snapshot);
+  return { requiredStages: plan.stages.length, emergencyNotices: plan.postHocNotices.length,
+    lines: snapshot.lines.map(line => ({ id: line.id, ...line.policy.allocation })) };
 }

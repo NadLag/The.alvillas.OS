@@ -1,5 +1,15 @@
 import { z } from "zod";
 import { Money } from "@/platform/money/money";
+import { calendarDateStart } from "@/platform/time/calendar";
+import type { Resource } from "@/platform/authz/authorize";
+
+export function supplierInvoiceCostResource(organizationId: string, invoice: { id: string; state: string; createdBy: string },
+  line: { propertyId: string | null; reservationId: string | null; property?: { cityId: string | null; regionId: string | null } | null },
+  amount: Money, occurredOn: string, timezone: string): Resource {
+  return { type: "supplier_invoice", organizationId, id: invoice.id, financialRecordId: invoice.id, propertyId: line.propertyId,
+    reservationId: line.reservationId, region: line.property?.regionId, city: line.property?.cityId, amount: amount.toJSON().amount,
+    assignedUserAccountId: invoice.createdBy, occurredAt: calendarDateStart(occurredOn, timezone), dataClass: "financial", status: invoice.state };
+}
 
 const id = z.uuid().transform(value => value.toLowerCase());
 const moneyText = z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u).refine(value => /[1-9]/u.test(value));

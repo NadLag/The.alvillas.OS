@@ -5,10 +5,29 @@ import { supplierInvoiceTotal, type SupplierInvoiceFields } from "../domain/supp
 import { SupplierPayableRepository } from "./supplier-payable-repository";
 
 const revision = { lines: { orderBy: { position: "asc" as const }, include: { property: { select: { id: true, name: true, cityId: true, regionId: true, timezone: true, archivedAt: true } }, reservation: { select: { reference: true, status: true, createdBy: true } } } } } satisfies Prisma.SupplierInvoiceRevisionInclude;
-const include = { supplier: { select: { id: true, reference: true, displayName: true, archivedAt: true } }, currentRevision: { include: revision } } satisfies Prisma.SupplierInvoiceInclude;
+const include = { supplier: { select: { id: true, reference: true, displayName: true, archivedAt: true } }, currentRevision: { include: revision },
+  currentSubmission: { include: { approval: { select: { id: true, state: true } } } } } satisfies Prisma.SupplierInvoiceInclude;
 export class SupplierInvoiceRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
   lock(id: string) { return new SupplierPayableRepository(this.tx, this.organizationId).lockInvoice(id); }
+  submissionByKey(idempotencyKey: string) { return this.tx.supplierInvoiceSubmission.findFirst({ where: { organizationId: this.organizationId, idempotencyKey }, include: { approval: { select: { id: true, state: true } } } }); }
+  submit(input: { invoiceId: string; revisionId: string; sourceInvoiceVersion: number; occurredOn: string; emergency: boolean; reason: string; snapshot: Prisma.InputJsonObject;
+    idempotencyKey: string; requestFingerprint: string; submittedBy: string; submittedAt: Date }) {
+    return this.tx.supplierInvoiceSubmission.create({ data: { organizationId: this.organizationId, ...input, occurredOn: new Date(input.occurredOn + "T00:00:00.000Z") } });
+  }
+  startSubmission(id: string, expectedVersion: number, submissionId: string, actorId: string) {
+    return this.tx.supplierInvoice.updateMany({ where: { organizationId: this.organizationId, id, version: expectedVersion, state: "DRAFT", archivedAt: null },
+      data: { state: "PENDING_APPROVAL", currentSubmissionId: submissionId, updatedBy: actorId, version: { increment: 1 } } });
+  }
+  async event(type: "SupplierInvoiceSubmitted", invoiceId: string, submissionId: string, occurredAt: Date) {
+    const key = `supplier-invoice:${submissionId}:${type}`;
+    return this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: key } }, update: {},
+      create: { organizationId: this.organizationId, type, payload: { invoiceId, submissionId }, idempotencyKey: key, occurredAt } });
+  }
+  transitionReview(id: string, expectedVersion: number, state: "APPROVED" | "REJECTED", actorId: string) {
+    return this.tx.supplierInvoice.updateMany({ where: { organizationId: this.organizationId, id, version: expectedVersion, state: "PENDING_APPROVAL" },
+      data: { state, updatedBy: actorId, version: { increment: 1 } } });
+  }
   find(id: string) { return this.tx.supplierInvoice.findFirst({ where: { organizationId: this.organizationId, id }, include }); }
   byKey(idempotencyKey: string) { return this.tx.supplierInvoice.findFirst({ where: { organizationId: this.organizationId, idempotencyKey }, include }); }
   currency(code: string) { return this.tx.currency.findUnique({ where: { code }, select: { code: true, minorUnit: true } }); }
@@ -44,8 +63,8 @@ export class SupplierInvoiceRepository {
       lines: { create: lines.map((line, index) => ({ ...line, position: index + 1, currency: fields.currency, createdBy: input.actorId })) } }, include: revision });
   }
   pointToRevision(input: { id: string; expectedVersion: number; revisionId: string; invoiceNumber: string; actorId: string }) {
-    return this.tx.supplierInvoice.updateMany({ where: { organizationId: this.organizationId, id: input.id, version: input.expectedVersion, state: "DRAFT", archivedAt: null },
-      data: { invoiceNumber: input.invoiceNumber, currentRevisionId: input.revisionId, version: { increment: 1 }, updatedBy: input.actorId } });
+    return this.tx.supplierInvoice.updateMany({ where: { organizationId: this.organizationId, id: input.id, version: input.expectedVersion, state: { in: ["DRAFT", "REJECTED"] }, archivedAt: null },
+      data: { invoiceNumber: input.invoiceNumber, currentRevisionId: input.revisionId, state: "DRAFT", currentSubmissionId: null, version: { increment: 1 }, updatedBy: input.actorId } });
   }
   archive(id: string, expectedVersion: number, archivedAt: Date | null, actorId: string) {
     return this.tx.supplierInvoice.updateMany({ where: { organizationId: this.organizationId, id, version: expectedVersion, state: "DRAFT" }, data: { archivedAt, version: { increment: 1 }, updatedBy: actorId } });

@@ -82,6 +82,7 @@ export type Resource = {
   serviceId?: string | null;
   financialRecordId?: string | null;
   approvalId?: string | null;
+  notificationEventId?: string | null;
   walletId?: string | null;
   fieldTeamId?: string | null;
   assignedUserAccountId?: string | null;

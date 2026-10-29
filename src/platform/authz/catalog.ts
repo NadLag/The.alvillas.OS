@@ -95,7 +95,8 @@ const ownerPortalPermissions = [
   permissionKey("owner_portal_property", "view"),
   permissionKey("owner_statement", "view"),
   permissionKey("owner_statement", "export"),
-  permissionKey("expense", "view"), permissionKey("expense", "approve"), permissionKey("expense", "reject")
+  permissionKey("expense", "view"), permissionKey("expense", "approve"), permissionKey("expense", "reject"),
+  permissionKey("supplier_invoice", "view"), permissionKey("supplier_invoice", "approve"), permissionKey("supplier_invoice", "reject")
 ];
 
 export type StandardRoleKey =
