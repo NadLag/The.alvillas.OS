@@ -74,6 +74,8 @@ export default async function AppPage({
           </Link>
           {reservationContext && authorizeOrganizationSource(reservationContext.authContext, "view", { type: "supplier", organizationId: session.user.organizationId, dataClass: "personal" }, new Date()) ?
             <Link className="secondary-button" data-testid="suppliers-link" href={`/${appLocale}/app/finance/suppliers`}>{t("suppliers")}</Link> : null}
+          {reservationContext && authorizeOrganizationSource(reservationContext.authContext, "view", { type: "supplier_invoice", organizationId: session.user.organizationId, dataClass: "financial" }, new Date()) && authorizeOrganizationSource(reservationContext.authContext, "view", { type: "supplier", organizationId: session.user.organizationId, dataClass: "personal" }, new Date()) ?
+            <Link className="secondary-button" data-testid="supplier-invoices-link" href={`/${appLocale}/app/finance/supplier-invoices`}>{t("supplierInvoices")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "company_ledger", organizationId: session.user.organizationId, dataClass: "financial" }) ?
             <Link className="secondary-button" data-testid="company-ledger-link" href={`/${appLocale}/app/finance/company-ledger`}>{t("companyLedger")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?
