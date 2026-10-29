@@ -3,6 +3,8 @@ import { authorize, type AuthContext, type Resource } from "@/platform/authz/aut
 
 export const notificationEventType = "notification.requested";
 export const notificationInputSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("supplier_invoice_emergency"), recipientId: z.uuid(), targetId: z.uuid(),
+    invoiceNotice: z.object({ submissionId: z.uuid(), lineId: z.uuid(), ownerId: z.uuid() }).strict().optional() }).strict(),
   z.object({ kind:z.literal("expense_emergency"),recipientId:z.uuid(),targetId:z.uuid() }).strict(),
   z.object({ kind: z.literal("staff_document_expiring"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("approval_requested"), recipientId: z.string().uuid(), targetId: z.string().uuid() }).strict(),
@@ -44,7 +46,7 @@ export function ownNotificationContext(ctx: AuthContext, accountId: string): Aut
 export function notificationDestination(
   ctx: AuthContext, input: NotificationInput, target: Resource | null, locale: "en" | "fr" | "ar"
 ): string | null {
-  const referenceId = input.kind === "staff_document_expiring" ? target?.documentId :
+  const referenceId = input.kind === "supplier_invoice_emergency" ? target?.notificationEventId : input.kind === "staff_document_expiring" ? target?.documentId :
     input.kind === "approval_requested" || input.kind === "approval_decided" ? target?.approvalId ?? target?.id : target?.id;
   if (input.recipientId !== ctx.userAccountId || !target || referenceId !== input.targetId) return null;
   if (input.kind === "language_updated" || input.kind === "security_session_revoked") {
@@ -57,8 +59,9 @@ export function notificationDestination(
   }
   if (!authorize(ctx, "view", target)) return null;
   if (input.kind === "expense_emergency") return target.type === "expense" ? `/${locale}/app/expenses/${target.id}` : null;
+  if (input.kind === "supplier_invoice_emergency") return target.type === "supplier_invoice" ? `/${locale}/app/finance/supplier-invoice-notices/${input.targetId}` : null;
   if (input.kind === "staff_document_expiring") return target.type === "staff_document" && target.assignedPersonId && target.id === target.assignedPersonId ? `/${locale}/app/team/${target.assignedPersonId}` : null;
-  if (input.kind === "approval_requested" || input.kind === "approval_decided") return target.type === "property" || target.type === "expense" && target.approvalId ? `/${locale}/app/approvals/${referenceId}` : null;
+  if (input.kind === "approval_requested" || input.kind === "approval_decided") return target.type === "property" || (target.type === "expense" || target.type === "supplier_invoice") && target.approvalId ? `/${locale}/app/approvals/${referenceId}` : null;
   if (input.kind === "reservation_created") return target.type === "reservation" ? `/${locale}/app/reservations` : null;
   if (target.type !== "task") return null;
   return target.assignedUserAccountId === ctx.userAccountId ? `/${locale}/app/field/${target.id}` : `/${locale}/app/operations`;

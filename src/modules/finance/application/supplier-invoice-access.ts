@@ -5,6 +5,7 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import type { FinanceActorContext } from "./finance-access";
 
 export class SupplierInvoiceAccessError extends Error {}
+export class SupplierInvoiceConflictError extends Error {}
 export const supplierInvoiceOrganizationResource = (organizationId: string) => ({ type: "supplier_invoice", organizationId, dataClass: "financial" as const });
 export async function assertSupplierInvoiceAuthority(ctx: FinanceActorContext, tx: TenantTransaction, action: Action, now: Date) {
   if (ctx.actorId !== ctx.authContext.userAccountId || ctx.organizationId !== ctx.authContext.organizationId) throw new SupplierInvoiceAccessError();

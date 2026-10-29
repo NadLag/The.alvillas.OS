@@ -26,6 +26,7 @@ import { AutomationAccessError,saveAutomationRule,previewAutomation,enqueueAutom
 import { AutomationRepository } from "@/platform/automation/repository";
 import { readOwnerLedgerStatement } from "@/platform/ledger/owner-statements";
 import { changeReservation } from "@/modules/reservations/application/reservation-management-service";
+import { createExpenseDraft, submitExpense } from "@/modules/finance/application/expense-service";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -142,6 +143,44 @@ describe("native owner payout persistence on real PostgreSQL", () => {
     db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect();await admin?.$disconnect(); });
+
+  it("preserves one actual financial approval source and append-only payout recipients after invoice integration", async () => {
+    const f = await fixture(), receiver = await reviewer(f);
+    const ctx = await submissionPolicy(f, { approval: { thresholds: [{ key: "composed_source_review", requires_approval_from: ["owner"] }],
+      routing: { owner: { people: [receiver.person.id], roles: [], assigned: false, channels: ["in_app"] } } } });
+    const draft = await createOwnerPayout(ctx, { ...f.input, amount: "500.25" }, { db });
+    const submitted = await submitOwnerPayout(ctx, { id: draft.id, expectedVersion: 1, reason: "Actual composed financial approval source" }, { db });
+    const original = await withTenant(db, f.org, tx => tx.approvalRequest.findUniqueOrThrow({ where: { id: submitted.approvalId! }, include: { recipients: true } }));
+    await withTenant(db, f.org, async tx => {
+      const role = await tx.role.create({ data: { organizationId: f.org, key: "composed_expense_author", name: "Actual composed expense source author" } });
+      const permissions = await tx.permission.findMany({ where: { organizationId: f.org } });
+      await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: role.id, permissionId: permission.id })) });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, personId: f.account.personId, userAccountId: f.account.id, scopeType: "organization", validFrom: new Date("2000-01-01") } });
+      const expenseReview = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: ["expense:view", "expense:approve", "expense:reject"] } } });
+      expect(expenseReview).toHaveLength(3);
+      await tx.rolePermission.createMany({ data: expenseReview.map(permission => ({ organizationId: f.org, roleId: receiver.grant.roleId, permissionId: permission.id })) });
+      await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.expense_treatment", scopeType: "property", scopeId: f.property.id,
+        effectiveFrom: new Date("2020-01-01"), reason: "Actual second submitted financial source", value: { default_treatment: "OWNER_PAID" } });
+    });
+    const expenseActor = { ...ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
+    const expense = await createExpenseDraft(expenseActor, { propertyId: f.property.id, fundingAccountId: f.bank.id, amount: "1.00", currency: "MAD", category: "maintenance",
+      purpose: "Actual second financial approval source", occurredOn: "2026-10-28", idempotencyKey: randomUUID(), reason: "Create actual submitted expense source" }, { db });
+    const expenseSubmitted = await submitExpense(expenseActor, { id: expense.id, expectedVersion: expense.version, reason: "Submit actual second financial source" }, { db });
+    expect(expenseSubmitted.state).toBe("PENDING_APPROVAL");
+    await expect(withTenant(db, f.org, tx => tx.approvalRequest.create({ data: { organizationId: f.org, payoutId: draft.id, expenseId: expense.id, propertyId: f.property.id,
+      requestedBy: original.requestedBy, title: original.title, details: original.details, routingSnapshot: original.routingSnapshot as Prisma.InputJsonObject,
+      idempotencyKey: "composed-source-forgery:" + randomUUID() } }))).rejects.toThrow(/approval_request_one_financial_source/iu);
+    await expect(withTenant(db, f.org, tx => tx.approvalRecipient.update({ where: { id: original.recipients[0].id }, data: { userAccountId: f.account.id } }))).rejects.toThrow(/approval recipients are immutable/iu);
+    await expect(withTenant(db, f.org, async tx => {
+      await tx.approvalRecipient.delete({ where: { id: original.recipients[0].id } });
+      throw Error("Controlled rollback if the append-only guard is absent");
+    })).rejects.toThrow(/approval history cannot be deleted/iu);
+    const retained = await withTenant(db, f.org, tx => tx.approvalRequest.findUniqueOrThrow({ where: { id: original.id }, include: { recipients: true } }));
+    expect(retained).toEqual(original);
+    const review = await getApproval(receiver.actor, original.id, { db }); expect(review.canApprove).toBe(true);
+    await decideApproval(receiver.actor, { id: review.id, stageId: review.stageId, decision: "APPROVED", reason: "Approve the retained actual payout source" }, { db });
+    expect((await getOwnerPayout(ctx, draft.id, { db })).state).toBe("APPROVED");
+  });
 
   it("stores exact draft cents and attributed reads without creating a payment or disclosing bank secrets", async () => {
     const f = await fixture(), created = await createOwnerPayout(f.ctx, f.input, { db });

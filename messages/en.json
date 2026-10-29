@@ -1281,7 +1281,8 @@
       "approval_decided": "An approval decision was recorded.",
       "staff_document_expiring": "A staff document is expiring.",
       "task_overdue": "An assigned task is overdue.",
-      "expense_emergency": "Emergency expense approval exception"
+      "expense_emergency": "Emergency expense approval exception",
+      "supplier_invoice_emergency": "Emergency invoice cost submitted"
     },
     "settings": {
       "eyebrow": "Your account",
@@ -1551,6 +1552,10 @@
     }
   },
   "Approvals": {
+    "reviewHistory": "Your available review steps",
+    "openReview": "Open review step",
+    "moreReviews": "More review steps",
+    "companySource": "Company expense",
     "title": "Approval",
     "request": "Request approval",
     "description": "Describe the operational decision for this property. Configured approvers will be notified.",
@@ -1568,7 +1573,8 @@
     "states": {
       "PENDING": "Awaiting decision",
       "APPROVED": "Approved",
-      "REJECTED": "Rejected"
+      "REJECTED": "Rejected",
+      "CANCELLED": "Cancelled"
     }
   },
   "Whatsapp": {
@@ -2149,6 +2155,9 @@
     "blockCount": "{count} availability blocks"
   },
   "Automation": {
+    "organization": "Organization",
+    "restrictedOutcome": "Restricted outcome",
+    "invoiceSubmittedEvent": "Supplier invoice submitted",
     "allProperties": "All properties",
     "filter": "Filter",
     "olderVersions": "Older rule versions",
@@ -2934,6 +2943,25 @@
     "kind": "Owner payout"
   },
   "SupplierInvoices": {
+    "submissionTitle": "Submit invoice",
+    "submissionDescription": "Review the configured cost allocation before submitting. Approval does not record payment.",
+    "emergency": "Emergency exception requested",
+    "previewPolicy": "Review allocation and approvals",
+    "allocationPreview": "Configured allocation",
+    "requiredStages": "Required approval steps: {count}",
+    "requiredEmergencyNotices": "Required emergency owner notices: {count}",
+    "lineReviewNote": "Review note for this line (shared only with its reviewers)",
+    "submitForReview": "Submit for configured review",
+    "viewApproval": "View approval",
+    "policy": "Configure an applicable cost allocation, approval policy and eligible reviewers before submitting.",
+    "allocation": { "owner": "Owner allocation", "alvillas": "ALVILLAS allocation", "guest": "Guest allocation" },
+    "states": { "DRAFT": "Draft", "PENDING_APPROVAL": "Awaiting approval", "APPROVED": "Approved", "REJECTED": "Rejected" },
+    "emergencyNoticeTitle": "Emergency supplier invoice notice",
+    "emergencyNoticeDescription": "Your allocation was submitted under the configured emergency exception. Approval does not record payment.",
+    "backToInbox": "Notifications",
+    "ownerGrossShare": "Your share of this invoice line",
+    "ownerCostAllocation": "Cost allocated to you",
+    "occurredOn": "Economic date",
     "title": "Supplier invoices",
     "eyebrow": "Finance",
     "description": "Draft invoices and their original source history.",

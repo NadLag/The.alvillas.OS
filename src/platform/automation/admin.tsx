@@ -85,11 +85,13 @@ function Editor({
   properties,
   version,
   effectiveDefault,
+  canConfigureOrganization,
 }: {
   locale: string;
   properties: Model["properties"];
   version?: Model["versions"][number];
   effectiveDefault: string;
+  canConfigureOrganization: boolean;
 }) {
   const t = useTranslations("Automation"),
     [state, action, pending] = useActionState(
@@ -179,10 +181,10 @@ function Editor({
             {t("property")}
             <select
               name="propertyId"
-              required
-              defaultValue={version?.scopeId ?? properties[0]?.id}
+              defaultValue={version ? version.scopeId ?? "" : properties[0]?.id ?? ""}
               disabled={pending}
             >
+              {canConfigureOrganization ? <option value="">{t("organization")}</option> : null}
               {properties.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -238,7 +240,7 @@ function Editor({
               disabled={pending}
             >
               {automationEvents.map((event) => (
-                <option key={event}>{event}</option>
+                <option key={event} value={event}>{event === "SupplierInvoiceSubmitted" ? t("invoiceSubmittedEvent") : event}</option>
               ))}
             </select>
           </label>
@@ -532,12 +534,12 @@ export function AutomationAdmin({
                     </span>
                   </div>
                   <p>
-                    {v.key} · {rule.event}
+                    {v.key} · {rule.event === "SupplierInvoiceSubmitted" ? t("invoiceSubmittedEvent") : rule.event}
                   </p>
                   <p>
                     {v.scopeType === "property"
                       ? model.properties.find((p) => p.id === v.scopeId)?.name
-                      : t("allProperties")}
+                      : t("organization")}
                   </p>
                   <button
                     className="quiet-button"
@@ -572,7 +574,7 @@ export function AutomationAdmin({
                         <option value="">{t("chooseEvent")}</option>
                         {model.sources.map((s) => (
                           <option key={s.id} value={s.id}>
-                            {s.type} ·{" "}
+                            {s.type === "SupplierInvoiceSubmitted" ? t("invoiceSubmittedEvent") : s.type} ·{" "}
                             {formatDateTime(
                               activeLocale as AppLocale,
                               new Date(s.occurredAt),
@@ -627,6 +629,7 @@ export function AutomationAdmin({
         properties={model.properties}
         version={editing}
         effectiveDefault={model.effectiveDefault}
+          canConfigureOrganization={model.canConfigureOrganization}
       />
       <section className="workspace-main automation-history">
         <h2>{t("history")}</h2>
@@ -639,7 +642,7 @@ export function AutomationAdmin({
                 <div className="automation-rule-heading">
                   <h3>{run.ruleKey}</h3>
                   <span className="status-badge">
-                    {t(`statuses.${run.status}`)}
+                    {run.status ? t(`statuses.${run.status}`) : t("restrictedOutcome")}
                   </span>
                 </div>
                 <p>
@@ -649,7 +652,7 @@ export function AutomationAdmin({
                         new Date(run.createdAt),
                       )
                     : ""}{" "}
-                  · {t("attemptCount", { count: run.attemptCount ?? 0 })}
+                  {run.attemptCount !== undefined ? <>· {t("attemptCount", { count: run.attemptCount })}</> : null}
                 </p>
                 {run.errorCode ? (
                   <p role="status">
@@ -670,7 +673,7 @@ export function AutomationAdmin({
                     )}
                   </pre>
                 </details>
-                {run.id &&
+                {run.id && run.status &&
                 !["SUCCEEDED", "SKIPPED"].includes(run.status ?? "") ? (
                   <Command
                     locale={locale}

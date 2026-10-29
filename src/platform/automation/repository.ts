@@ -15,6 +15,8 @@ import { stocktakeEventDataSchema } from "@/modules/inventory/domain/events";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { ownerPayoutResource } from "@/platform/authz/financial-resource";
+import { SupplierInvoiceRepository } from "@/modules/finance/infrastructure/supplier-invoice-repository";
+import { invoiceAutomationSource, type InvoiceAutomationSource } from "./invoice-source";
 
 export const json = (v: unknown) =>
   JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
@@ -151,16 +153,17 @@ export class AutomationRepository {
   }
   async context(
     eventId: string,
-    propertyOverride?: string,
+    propertyOverride?: string | null,
   ): Promise<{
     event: NonNullable<Awaited<ReturnType<AutomationRepository["event"]>>>;
     property: NonNullable<
       Awaited<ReturnType<AutomationRepository["property"]>>
-    >;
+    > | null;
     evaluation: EvaluationContext;
     scopes: Awaited<ReturnType<ReservationConfigScopeRepository["scopes"]>>;
     expense?: { resource: Resource; approvalId: string | null; submissionId: string };
     payout?: {resource:Resource;approvalId:string|null;configs:Array<{key:string;id:string;version:number;value:unknown}>};
+    invoice?: InvoiceAutomationSource;
   }> {
     const event = await this.event(eventId);
     if (!event) throw new Error("automation_source_missing");
@@ -191,6 +194,18 @@ export class AutomationRepository {
           },
         })
       : null;
+    const invoiceSubmissionId = event.type === "SupplierInvoiceSubmitted" ? uuid.parse(p.submissionId) : approval?.invoiceSubmissionId;
+    if (invoiceSubmissionId) {
+      const source = await new SupplierInvoiceRepository(this.tx, this.organizationId).submission(invoiceSubmissionId);
+      if (!source || propertyOverride || p.propertyId || p.expenseId || reservation || task ||
+        (event.type === "SupplierInvoiceSubmitted" && (p.invoiceId !== source.invoiceId || event.idempotencyKey !== `supplier-invoice:${source.id}:SupplierInvoiceSubmitted`)) ||
+        (event.type !== "SupplierInvoiceSubmitted" && (!approval || source.approval?.id !== approval.id || !["ApprovalRequested", "ApprovalDecided"].includes(event.type) ||
+          event.idempotencyKey !== `approval:${approval.id}:${event.type}`))) throw Error("automation_source_missing");
+      const value = invoiceAutomationSource(event, source);
+      const eventDate = source.occurredOn.toISOString().slice(0,10);
+      return { event, property: null, scopes: [{ scopeType: "organization", scopeId: null }], invoice: value.invoice,
+        evaluation: { fields: { event: { id: event.id, type: event.type, date: eventDate, occurred_at: event.occurredAt.toISOString() }, ...value.fields }, configs: {} } };
+    }
     const expenseId = p.expenseId ?? approval?.expenseId;
     const expense = expenseId ? await this.tx.expense.findFirst({ where: { organizationId: this.organizationId, id: uuid.parse(expenseId) },
       include: { submission: true, approval: { select: { id: true } } } }) : null;
@@ -391,17 +406,8 @@ export class AutomationRepository {
       data: { ...data, organizationId: this.organizationId },
     });
   }
-  byKey(ruleKey: string, eventKey: string, propertyId: string) {
-    return this.tx.automationRun.findUnique({
-      where: {
-        organizationId_ruleKey_eventKey_propertyId: {
-          organizationId: this.organizationId,
-          ruleKey,
-          eventKey,
-          propertyId,
-        },
-      },
-    });
+  byKey(ruleKey: string, eventKey: string, propertyId: string | null) {
+    return this.tx.automationRun.findFirst({ where: { organizationId: this.organizationId, ruleKey, eventKey, propertyId } });
   }
   update(id: string, data: Prisma.AutomationRunUpdateInput) {
     return this.tx.automationRun.update({
@@ -439,11 +445,11 @@ export class AutomationRepository {
       select: { id: true },
     });
   }
-  history(propertyIds: string[], before?: { createdAt: Date; id: string }) {
+  history(propertyIds: string[], before?: { createdAt: Date; id: string }, includeOrganization = false) {
     return this.tx.automationRun.findMany({
       where: {
         organizationId: this.organizationId,
-        propertyId: { in: propertyIds },
+        AND: [{ OR: [{ propertyId: { in: propertyIds } }, ...(includeOrganization ? [{ propertyId: null }] : [])] }],
         ...(before
           ? {
               OR: [
@@ -484,18 +490,17 @@ export class AutomationRepository {
       take: 100,
     });
   }
-  sources(propertyIds: string[]) {
-    return this.tx.outboxEvent.findMany({
-      where: {
-        organizationId: this.organizationId,
-        OR: propertyIds.map((id) => ({
-          payload: { path: ["propertyId"], equals: id },
-        })),
-      },
-      orderBy: { occurredAt: "desc" },
-      take: 50,
-      select: { id: true, type: true, occurredAt: true },
-    });
+  sources(propertyIds: string[], includeOrganization = false) {
+    return this.tx.$queryRaw<Array<{ id: string; type: string; occurredAt: Date }>>(Prisma.sql`
+      SELECT e.id,e.type,e.occurred_at AS "occurredAt" FROM outbox_event e
+      WHERE e.organization_id=${this.organizationId}::uuid AND (
+        e.payload->>'propertyId' IN (${Prisma.join(propertyIds.length ? propertyIds : [""])}) OR
+        (${includeOrganization} AND (
+          (e.type='SupplierInvoiceSubmitted' AND EXISTS(SELECT 1 FROM supplier_invoice_submission s
+            WHERE s.organization_id=e.organization_id AND s.id::text=e.payload->>'submissionId')) OR
+          (e.type IN ('ApprovalRequested','ApprovalDecided') AND EXISTS(SELECT 1 FROM approval_request a
+            WHERE a.organization_id=e.organization_id AND a.id::text=e.payload->>'approvalId' AND a.invoice_submission_id IS NOT NULL)))))
+      ORDER BY e.occurred_at DESC,e.id DESC LIMIT 50`);
   }
   async suggestion(data: {
     propertyId: string;

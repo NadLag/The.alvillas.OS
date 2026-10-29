@@ -1281,7 +1281,8 @@
       "approval_decided": "Une décision d’approbation a été enregistrée.",
       "staff_document_expiring": "Un document du personnel arrive à expiration.",
       "task_overdue": "Une tâche attribuée est en retard.",
-      "expense_emergency": "Exception de validation pour une dépense urgente"
+      "expense_emergency": "Exception de validation pour une dépense urgente",
+      "supplier_invoice_emergency": "Coût de facture urgente soumis"
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -1551,6 +1552,10 @@
     }
   },
   "Approvals": {
+    "reviewHistory": "Vos étapes d’examen accessibles",
+    "openReview": "Ouvrir l’étape d’examen",
+    "moreReviews": "Autres étapes d’examen",
+    "companySource": "Dépense de l’entreprise",
     "title": "Approbation",
     "request": "Demander une approbation",
     "description": "Décrivez la décision opérationnelle pour cette propriété. Les approbateurs configurés seront informés.",
@@ -1568,7 +1573,8 @@
     "states": {
       "PENDING": "En attente de décision",
       "APPROVED": "Approuvée",
-      "REJECTED": "Refusée"
+      "REJECTED": "Refusée",
+      "CANCELLED": "Annulée"
     }
   },
   "Whatsapp": {
@@ -2149,6 +2155,9 @@
     "blockCount": "{count} blocages de disponibilité"
   },
   "Automation": {
+    "organization": "Organisation",
+    "restrictedOutcome": "Résultat à accès restreint",
+    "invoiceSubmittedEvent": "Facture fournisseur soumise",
     "allProperties": "Toutes les propriétés",
     "filter": "Filtrer",
     "olderVersions": "Versions précédentes des règles",
@@ -2934,6 +2943,25 @@
     "kind": "Versement au propriétaire"
   },
   "SupplierInvoices": {
+    "submissionTitle": "Soumettre la facture",
+    "submissionDescription": "Vérifiez la répartition configurée avant de soumettre. L’approbation n’enregistre aucun paiement.",
+    "emergency": "Exception d’urgence demandée",
+    "previewPolicy": "Vérifier la répartition et les approbations",
+    "allocationPreview": "Répartition configurée",
+    "requiredStages": "Étapes d’approbation requises : {count}",
+    "requiredEmergencyNotices": "Avis d’urgence aux propriétaires requis : {count}",
+    "lineReviewNote": "Note de cette ligne (partagée uniquement avec ses approbateurs)",
+    "submitForReview": "Soumettre pour examen configuré",
+    "viewApproval": "Voir l’approbation",
+    "policy": "Configurez une répartition applicable, une règle d’approbation et des approbateurs habilités avant de soumettre.",
+    "allocation": { "owner": "Part du propriétaire", "alvillas": "Part d’ALVILLAS", "guest": "Part du voyageur" },
+    "states": { "DRAFT": "Brouillon", "PENDING_APPROVAL": "En attente d’approbation", "APPROVED": "Approuvée", "REJECTED": "Rejetée" },
+    "emergencyNoticeTitle": "Avis de facture fournisseur urgente",
+    "emergencyNoticeDescription": "Votre répartition a été soumise selon l’exception d’urgence configurée. L’approbation n’enregistre aucun paiement.",
+    "backToInbox": "Notifications",
+    "ownerGrossShare": "Votre quote-part de cette ligne",
+    "ownerCostAllocation": "Coût qui vous est attribué",
+    "occurredOn": "Date économique",
     "title": "Factures fournisseurs",
     "eyebrow": "Finance",
     "description": "Brouillons de factures et historique de leurs versions.",

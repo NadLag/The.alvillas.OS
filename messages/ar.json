@@ -1281,7 +1281,8 @@
       "approval_decided": "تم تسجيل قرار الموافقة.",
       "staff_document_expiring": "وثيقة موظف تقترب من انتهاء الصلاحية.",
       "task_overdue": "تأخرت مهمة مسندة.",
-      "expense_emergency": "استثناء موافقة لمصروف طارئ"
+      "expense_emergency": "استثناء موافقة لمصروف طارئ",
+      "supplier_invoice_emergency": "تقديم تكلفة فاتورة طارئة"
     },
     "settings": {
       "eyebrow": "حسابك",
@@ -1551,6 +1552,10 @@
     }
   },
   "Approvals": {
+    "reviewHistory": "خطوات المراجعة المتاحة لك",
+    "openReview": "فتح خطوة المراجعة",
+    "moreReviews": "المزيد من خطوات المراجعة",
+    "companySource": "مصروفات الشركة",
     "title": "الموافقة",
     "request": "طلب موافقة",
     "description": "صِف القرار التشغيلي لهذا العقار. سيتم إشعار الموافقين المحددين.",
@@ -1568,7 +1573,8 @@
     "states": {
       "PENDING": "بانتظار القرار",
       "APPROVED": "تمت الموافقة",
-      "REJECTED": "مرفوض"
+      "REJECTED": "مرفوض",
+      "CANCELLED": "أُلغي الطلب"
     }
   },
   "Whatsapp": {
@@ -2149,6 +2155,9 @@
     "blockCount": "{count} حجب توافر"
   },
   "Automation": {
+    "organization": "المؤسسة",
+    "restrictedOutcome": "نتيجة مقيدة الوصول",
+    "invoiceSubmittedEvent": "إرسال فاتورة المورد",
     "allProperties": "جميع العقارات",
     "filter": "تصفية",
     "olderVersions": "إصدارات القواعد السابقة",
@@ -2934,6 +2943,25 @@
     "kind": "دفعة للمالك"
   },
   "SupplierInvoices": {
+    "submissionTitle": "تقديم الفاتورة",
+    "submissionDescription": "راجع توزيع التكلفة المُعدّ قبل التقديم. لا تسجّل الموافقة أي دفعة.",
+    "emergency": "طلب استثناء طارئ",
+    "previewPolicy": "مراجعة التوزيع والموافقات",
+    "allocationPreview": "التوزيع المُعدّ",
+    "requiredStages": "خطوات الموافقة المطلوبة: {count}",
+    "requiredEmergencyNotices": "إشعارات الطوارئ المطلوبة للمالكين: {count}",
+    "lineReviewNote": "ملاحظة هذا البند (تُشارك مع مراجعيه فقط)",
+    "submitForReview": "التقديم للمراجعة المُعدّة",
+    "viewApproval": "عرض الموافقة",
+    "policy": "أعدّ توزيعاً مناسباً للتكلفة وقاعدة للموافقة ومراجعين مخوّلين قبل التقديم.",
+    "allocation": { "owner": "حصة المالك", "alvillas": "حصة ALVILLAS", "guest": "حصة الضيف" },
+    "states": { "DRAFT": "مسودة", "PENDING_APPROVAL": "بانتظار الموافقة", "APPROVED": "موافق عليها", "REJECTED": "مرفوضة" },
+    "emergencyNoticeTitle": "إشعار فاتورة مورد طارئة",
+    "emergencyNoticeDescription": "قُدمت حصتك وفق استثناء الطوارئ المُعدّ. لا تسجّل الموافقة أي دفعة.",
+    "backToInbox": "الإشعارات",
+    "ownerGrossShare": "حصتك من بند الفاتورة",
+    "ownerCostAllocation": "التكلفة المخصصة لك",
+    "occurredOn": "التاريخ الاقتصادي",
     "title": "فواتير الموردين",
     "eyebrow": "المالية",
     "description": "مسودات الفواتير وسجل إصداراتها الأصلية.",

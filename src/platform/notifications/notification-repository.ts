@@ -15,6 +15,12 @@ import { z } from "zod";
 import { IdentityRepository } from "@/modules/identity/infrastructure/identity-repository";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { initialNotificationRouting, notificationRoutingKey, notificationRoutingSchema, type NotificationRouting, type RoutedNotificationKind } from "./notification-routing";
+import { Money } from "@/platform/money/money";
+import { supplierInvoiceCostResource } from "@/modules/finance/domain/supplier-invoice";
+
+type InvoiceEmergencyNotice = ExpenseEmergencyNotice & { lineId: string; propertyId: string | null };
+const invoiceEmergencyNoticeSchema = expenseEmergencyNoticeSchema.extend({ lineId: z.uuid(), propertyId: z.uuid().nullable() });
+type CurrentAuthorizationStates = Awaited<ReturnType<IdentityRepository["authorizationStates"]>>;
 
 type DeliveryBatch = {
   targets: Map<string, Resource>;
@@ -65,10 +71,11 @@ export class NotificationRepository {
 
   private async deliverLocked(event: OutboxEvent, batch?: DeliveryBatch): Promise<void> {
     const input = notificationInputSchema.parse(event.payload);
-    const financialNotice=input.kind==="expense_emergency"?await this.expenseEmergencySource(event,input):null;
+    const financialNotice=input.kind==="expense_emergency"?await this.expenseEmergencySource(event,input):
+      input.kind==="supplier_invoice_emergency"?await this.invoiceEmergencySource(event,input):null;
     const target = financialNotice?.target ?? (batch ? batch.targets.get(`${input.kind}:${input.targetId}`) :
       (await this.targets([{ kind: input.kind, targetId: input.targetId }])).get(input.targetId));
-    if(input.kind==="expense_emergency"&&!financialNotice)return this.finish(event.id,batch);
+    if((input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency")&&!financialNotice)return this.finish(event.id,batch);
     if (!target) return this.finish(event.id, batch);
     if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id, batch);
     const identity = target.type === "identity";
@@ -76,11 +83,11 @@ export class NotificationRepository {
     const approval = input.kind === "approval_requested" ? await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: input.targetId },
       include: { recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } }) : null;
     const stage = approval?.financialStages.find(stage => stage.state === "PENDING");
-    if ((approval?.expenseId || approval?.payoutId) && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
+    if ((approval?.expenseId||approval?.payoutId||approval?.invoiceSubmissionId) && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
     const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
     let routing:NotificationRouting;
-    if(input.kind==="expense_emergency")routing=financialNotice!.notice.routing;
+    if(input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency")routing=financialNotice!.notice.routing;
     else routing=approval?notificationRoutingSchema.parse(stage?.routingSnapshot??approval.routingSnapshot):batch?.routing.get(routingKey)??await this.routing(input.kind,target.propertyId??null,event.occurredAt);
     if (batch && !approval&&!financialNotice) batch.routing.set(routingKey, routing);
     const mandatory = input.kind === "security_session_revoked";
@@ -132,6 +139,61 @@ export class NotificationRepository {
     return notice&&notice.routing.channels.includes("in_app")?{notice,target:expenseResource(this.organizationId,expense.property,{...expense,amount:expense.amount.toString()},notice.ownerId)}:null;
   }
 
+  private async invoiceEmergencySource(event: OutboxEvent, input: Extract<NotificationInput, { kind: "supplier_invoice_emergency" }>) {
+    if (event.id !== input.targetId || !input.invoiceNotice) return null;
+    const metadata = input.invoiceNotice;
+    const submission = await this.tx.supplierInvoiceSubmission.findFirst({ where: { organizationId: this.organizationId, id: metadata.submissionId },
+      include: { invoice: true, revision: { include: { lines: { include: { property: { select: { name: true, cityId: true, regionId: true } } } } } } } });
+    const snapshot = z.object({ postHocNotices: z.array(invoiceEmergencyNoticeSchema), lines: z.array(z.object({ id: z.uuid(), approvalNote: z.string().min(6).max(1000),
+      policy: z.object({ timezone: z.string(), policies: z.array(z.object({ ownerId: z.uuid().optional(), sourceAmount: z.unknown().optional(), allocation: z.unknown().optional() }).passthrough()) }) })) }).safeParse(submission?.snapshot);
+    if (!submission || !snapshot.success) return null;
+    const notice = snapshot.data.postHocNotices.find(notice => notice.lineId === metadata.lineId && notice.ownerId === metadata.ownerId && notice.recipients.includes(input.recipientId));
+    const line = submission.revision.lines.find(line => line.id === metadata.lineId), source = snapshot.data.lines.find(line => line.id === metadata.lineId);
+    const owner = source?.policy.policies.find(policy => policy.ownerId === metadata.ownerId);
+    const amounts = z.object({ gross: z.object({ amount: z.string(), currency: z.string() }), allocation: z.object({ owner: z.object({ amount: z.string(), currency: z.string() }) }) })
+      .safeParse({ gross: owner?.sourceAmount, allocation: owner?.allocation });
+    if (!notice || !line || !source || !amounts.success || !notice.routing.channels.includes("in_app") ||
+      event.idempotencyKey !== `supplier-invoice:${submission.id}:emergency:${line.id}:${notice.ownerId}:${input.recipientId}`) return null;
+    const amount = Money.of(amounts.data.gross.amount, amounts.data.gross.currency), ownerAmount = Money.of(amounts.data.allocation.owner.amount, amounts.data.allocation.owner.currency);
+    if (amount.currency !== submission.revision.currency || ownerAmount.currency !== amount.currency) return null;
+    const target = { ...supplierInvoiceCostResource(this.organizationId, submission.invoice, line, amount,
+      submission.occurredOn.toISOString().slice(0,10), source.policy.timezone), ownerId: notice.ownerId, notificationEventId: event.id };
+    return { notice, target, data: { id: event.id, propertyName: line.property?.name ?? null, purpose: source.approvalNote,
+      category: line.category, amount: amount.toJSON().amount, ownerAmount: ownerAmount.toJSON().amount, currency: amount.currency,
+      occurredOn: submission.occurredOn.toISOString().slice(0,10) } };
+  }
+
+  async invoiceEmergencyNotice(id: string, readerId: string) {
+    const event = await this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id, type: notificationEventType } });
+    const input = notificationInputSchema.safeParse(event?.payload);
+    if (!event || !input.success || input.data.kind !== "supplier_invoice_emergency" || input.data.recipientId !== readerId ||
+      !await this.tx.notification.findFirst({ where: { organizationId: this.organizationId, recipientId: readerId, eventId: id, targetId: id, kind: "supplier_invoice_emergency" } })) return null;
+    return this.invoiceEmergencySource(event, input.data);
+  }
+
+  async publishInvoiceEmergencyNotices(submissionId: string, notices: InvoiceEmergencyNotice[]) {
+    const receipts: Array<{ lineId: string; ownerId: string; recipientId: string; target: Resource }> = [];
+    for (const notice of notices) for (const recipientId of notice.recipients) {
+      const key = `supplier-invoice:${submissionId}:emergency:${notice.lineId}:${notice.ownerId}:${recipientId}`;
+      const [identity] = await this.tx.$queryRaw<Array<{ id: string }>>`SELECT app_uuid_v7()::text AS id`;
+      const input = { kind: "supplier_invoice_emergency" as const, recipientId, targetId: identity.id,
+        invoiceNotice: { submissionId, lineId: notice.lineId, ownerId: notice.ownerId } };
+      const event = await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: key } }, update: {},
+        create: { id: identity.id, organizationId: this.organizationId, type: notificationEventType, payload: input, idempotencyKey: key } });
+      await this.deliver(event);
+      const source = await this.invoiceEmergencyNotice(event.id, recipientId);
+      if (source) receipts.push({ lineId: notice.lineId, ownerId: notice.ownerId, recipientId, target: source.target });
+    }
+    const states = await new IdentityRepository(this.tx, this.organizationId).authorizationStates([...new Set(receipts.map(receipt => receipt.recipientId))]);
+    for (const notice of notices) if (!receipts.some(receipt => {
+      if (receipt.lineId !== notice.lineId || receipt.ownerId !== notice.ownerId) return false;
+      const state = states.states.get(receipt.recipientId);
+      return state?.account && !securityEnrollment(state.account, states.now).setupRequired &&
+        authorize(contextForRoleAssignments(this.organizationId, receipt.recipientId, state.assignments), "view", receipt.target, states.now);
+    })) throw Error("Required invoice owner notice has no current authorized inbox receipt");
+    return { count: receipts.length };
+  }
+
   async publishExpenseEmergencyNotices(expenseId:string,notices:ExpenseEmergencyNotice[]) {
     const entries=notices.flatMap(notice=>notice.recipients.map(recipientId=>({input:{kind:"expense_emergency" as const,recipientId,targetId:expenseId},key:`expense:${expenseId}:emergency:${notice.ownerId}:${recipientId}`})));
     await this.publishMany(entries);
@@ -154,12 +216,22 @@ export class NotificationRepository {
   }
 
   async approvers(routing: NotificationRouting, resource: Resource): Promise<string[]> {
-    const candidates = await this.candidates(routing);
-    return candidates.filter((candidate) => {
-      const assignments = routing.people.includes(candidate.personId) ? candidate.roleAssignments : candidate.roleAssignments.filter((assignment) => routing.roles.includes(assignment.role.id));
-      const ctx = contextForRoleAssignments(this.organizationId, candidate.id, assignments);
-      return !securityEnrollment(candidate).setupRequired && authorize(ctx, "view", resource) && (authorize(ctx, "approve", resource) || authorize(ctx, "reject", resource));
-    }).map((candidate) => candidate.id);
+    const candidates = await this.candidates(routing, undefined, undefined, true);
+    const current = await new IdentityRepository(this.tx, this.organizationId).authorizationStates(candidates.map(candidate => candidate.id));
+    return candidates.filter(candidate => this.currentApprover(candidate, routing, resource, current)).map(candidate => candidate.id);
+  }
+  private currentApprover(candidate: { id: string; personId: string }, routing: NotificationRouting, resource: Resource, current: CurrentAuthorizationStates) {
+    const state = current.states.get(candidate.id);
+    if (!state?.account || securityEnrollment(state.account, current.now).setupRequired) return false;
+    const assignments = routing.people.includes(candidate.personId) ? state.assignments : state.assignments.filter(assignment => routing.roles.includes(assignment.role.id));
+    const context = contextForRoleAssignments(this.organizationId, candidate.id, assignments);
+    return authorize(context, "view", resource, current.now) && (authorize(context, "approve", resource, current.now) || authorize(context, "reject", resource, current.now));
+  }
+  async financialApprovalAudiencesAvailable(entries: Array<{ routing: NotificationRouting; resource: Resource; recipients: string[] }>) {
+    const ids = [...new Set(entries.flatMap(entry => entry.recipients))];
+    const candidates = ids.length ? await this.candidates({ people: [], roles: [], assigned: false, channels: ["in_app"] }, undefined, ids, true) : [];
+    const current = await new IdentityRepository(this.tx, this.organizationId).authorizationStates(ids);
+    return entries.every(entry => candidates.some(candidate => entry.recipients.includes(candidate.id) && this.currentApprover(candidate, entry.routing, entry.resource, current)));
   }
   async viewers(routing:NotificationRouting,resource:Resource):Promise<string[]> {
     const candidates=await this.candidates(routing,undefined,undefined,true),current=await new IdentityRepository(this.tx,this.organizationId).authorizationStates(candidates.map(candidate=>candidate.id));
@@ -260,7 +332,7 @@ export class NotificationRepository {
     const inputs = pending.map(event => notificationInputSchema.parse(event.payload));
     const targets = new Map<string, Resource>();
     for (const kind of new Set(inputs.map(input => input.kind))) {
-      if(kind==="expense_emergency")continue;
+      if(kind==="expense_emergency"||kind==="supplier_invoice_emergency")continue;
       for (const [id, target] of await this.targets(inputs.filter(input => input.kind === kind)))
         targets.set(`${kind}:${id}`, target);
     }
@@ -308,11 +380,34 @@ export class NotificationRepository {
     const reservations = reservationIds.length ? await this.tx.reservation.findMany({ where: { organizationId: this.organizationId, id: { in: reservationIds }, archivedAt: null }, select: { id: true, propertyId: true, status: true, property: { select: { regionId: true, cityId: true } } } }) : [];
     for (const row of reservations) targets.set(row.id, { type: "reservation", organizationId: this.organizationId, id: row.id, reservationId: row.id, propertyId: row.propertyId, region: row.property.regionId, city: row.property.cityId, status: row.status });
     const approvalIds = rows.filter((row) => row.kind === "approval_requested" || row.kind === "approval_decided").map((row) => row.targetId);
-    const approvals = approvalIds.length ? await this.tx.approvalRequest.findMany({ where: { organizationId: this.organizationId, id: { in: approvalIds }, property: { archivedAt: null } },
-      include: { property: true, expense: true, payout: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } }) : [];
+    const approvals = approvalIds.length ? await this.tx.approvalRequest.findMany({ where: { organizationId: this.organizationId, id: { in: approvalIds },
+      OR: [{ invoiceSubmissionId: { not: null } }, { invoiceSubmissionId: null, property: { archivedAt: null } }] },
+      include: { property: true, expense: true, payout: true, invoiceSubmission: { include: { invoice: true } },
+        financialStages: { orderBy: { position: "asc" }, include: { recipients: true, property: { select: { name: true, cityId: true, regionId: true } } } } } }) : [];
+    const approvalReader = readerId && approvals.some(row => row.invoiceSubmissionId) ? await authContextForAccountInTransaction(this.tx, this.organizationId, readerId) : null;
     for (const row of approvals) {
-      const ownStage = readerId ? row.financialStages.find(stage => stage.recipients.some(recipient => recipient.userAccountId === readerId)) : undefined;
-      targets.set(row.id, { ...approvalResource(row, ownStage?.ownerId ?? row.financialStages.find(stage => stage.state === "PENDING")?.ownerId), assignedUserAccountId: row.requestedBy });
+      const active = row.financialStages.find(stage => stage.state === "PENDING");
+      const owned = readerId ? row.financialStages.filter(stage => stage.recipients.some(recipient => recipient.userAccountId === readerId) &&
+        (!row.invoiceSubmissionId || approvalReader && authorize(approvalReader, "view", approvalResource(row, stage.ownerId, stage)))) : [];
+      const ownStage = row.invoiceSubmissionId ? owned.find(stage => stage.id === active?.id) ?? owned.find(stage => stage.state === "PENDING") ?? owned.at(-1) : owned[0];
+      const shown = ownStage ?? active ?? row.financialStages.at(-1);
+      if (row.invoiceSubmissionId && !shown) continue;
+      const resource = approvalResource(row, shown?.ownerId, shown);
+      targets.set(row.id, row.invoiceSubmissionId ? resource : { ...resource, assignedUserAccountId: row.requestedBy });
+    }
+    const invoiceNoticeIds = rows.filter(row => row.kind === "supplier_invoice_emergency").map(row => row.targetId);
+    const invoiceNoticeEvents = invoiceNoticeIds.length ? await this.tx.outboxEvent.findMany({ where: { organizationId: this.organizationId, id: { in: invoiceNoticeIds }, type: notificationEventType } }) : [];
+    const invoiceNoticeReader = readerId && invoiceNoticeEvents.length ? await new IdentityRepository(this.tx, this.organizationId).authorizationStates([readerId]) : null;
+    for (const event of invoiceNoticeEvents) {
+      const input = notificationInputSchema.safeParse(event.payload);
+      if (!input.success || input.data.kind !== "supplier_invoice_emergency" || readerId && input.data.recipientId !== readerId) continue;
+      const source = readerId ? await this.invoiceEmergencyNotice(event.id, readerId) : await this.invoiceEmergencySource(event, input.data);
+      if (readerId) {
+        const state = invoiceNoticeReader?.states.get(readerId);
+        if (!source || !state?.account || securityEnrollment(state.account, invoiceNoticeReader!.now).setupRequired ||
+          !authorize(contextForRoleAssignments(this.organizationId, readerId, state.assignments), "view", source.target, invoiceNoticeReader!.now)) continue;
+      }
+      if (source) targets.set(event.id, source.target);
     }
     const expenseIds=rows.filter(row=>row.kind==="expense_emergency").map(row=>row.targetId);
     const expenses=expenseIds.length?await this.tx.expense.findMany({where:{organizationId:this.organizationId,id:{in:expenseIds},property:{archivedAt:null}},include:{property:true,submission:true}}):[];
@@ -330,7 +425,7 @@ export class NotificationRepository {
     const row = await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: approvalId },
       include: { recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } });
     if (!row || row.state !== "PENDING") return false;
-    if (!row.expenseId && !row.payoutId) return row.recipients.some(recipient => recipient.userAccountId === recipientId);
+    if (!row.expenseId && !row.payoutId && !row.invoiceSubmissionId) return row.recipients.some(recipient => recipient.userAccountId === recipientId);
     const stage = row.financialStages.find(stage => stage.state === "PENDING");
     if (!stage || !sourceEventId || !stage.recipients.some(recipient => recipient.userAccountId === recipientId)) return false;
     const event = await this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id: sourceEventId, type: notificationEventType } });

@@ -14,7 +14,7 @@ model AutomationRun {
   ruleKey        String              @map("rule_key")
   eventId        String              @map("event_id") @db.Uuid
   eventKey       String              @map("event_key")
-  propertyId     String              @map("property_id") @db.Uuid
+  propertyId     String?             @map("property_id") @db.Uuid
   actorId        String              @map("actor_id") @db.Uuid
   status         String              @default("PENDING")
   attemptCount   Int                 @default(0) @map("attempt_count")
@@ -72,6 +72,7 @@ model AutomationSuggestion {
 
 model Organization {
   ownerPayouts                                   OwnerPayout[]
+  supplierInvoiceSubmissions                     SupplierInvoiceSubmission[]
   supplierInvoices                               SupplierInvoice[]
   supplierInvoiceRevisions                       SupplierInvoiceRevision[]
   supplierInvoiceLines                           SupplierInvoiceLine[]
@@ -355,6 +356,7 @@ model Person {
 model UserAccount {
   createdOwnerPayouts         OwnerPayout[]                @relation("OwnerPayoutCreator")
   updatedOwnerPayouts         OwnerPayout[]                @relation("OwnerPayoutUpdater")
+  submittedSupplierInvoices   SupplierInvoiceSubmission[]
   createdSupplierInvoices     SupplierInvoice[]            @relation("SupplierInvoiceCreator")
   updatedSupplierInvoices     SupplierInvoice[]            @relation("SupplierInvoiceUpdater")
   supplierInvoiceRevisions    SupplierInvoiceRevision[]
@@ -734,54 +736,55 @@ model OwnerPortalAccess {
 }
 
 model Property {
-  ownerPayouts         OwnerPayout[]
-  supplierInvoiceLines SupplierInvoiceLine[]
-  expenses             Expense[]
-  cashCollections      CashCollection[]
-  templateVersions     PropertyTemplateVersion[]
-  templateRevisions    PropertyTemplateRevision[]
-  approvalRequests     ApprovalRequest[]
-  id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId       String                      @map("organization_id") @db.Uuid
-  regionId             String?                     @map("region_id") @db.Uuid
-  cityId               String?                     @map("city_id") @db.Uuid
-  name                 String
-  addressLine1         String                      @map("address_line_1")
-  addressLine2         String?                     @map("address_line_2")
-  city                 String
-  region               String?
-  countryCode          String                      @default("MA") @map("country_code") @db.Char(2)
-  propertyType         String                      @map("property_type")
-  bedrooms             Int
-  bathrooms            Int
-  livingSpaces         Int                         @default(1) @map("living_spaces")
-  hasPool              Boolean                     @default(false) @map("has_pool")
-  hasGarden            Boolean                     @default(false) @map("has_garden")
-  parkingSpaces        Int                         @default(0) @map("parking_spaces")
-  maxGuests            Int                         @map("max_guests")
-  timezone             String                      @default("Africa/Casablanca")
-  amenities            Json
-  photoUrls            Json                        @map("photo_urls")
-  status               String                      @default("DRAFT")
-  archivedAt           DateTime?                   @map("archived_at") @db.Timestamptz(6)
-  createdBy            String?                     @map("created_by") @db.Uuid
-  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization         Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  regionRef            Region?                     @relation(fields: [regionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  cityRef              City?                       @relation(fields: [cityId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  propertyOwners       PropertyOwner[]
-  Reservation          Reservation[]
-  ReservationConflict  ReservationConflict[]
-  OperationTask        OperationTask[]
-  commissionSnapshots  CommissionSnapshot[]
-  configSnapshots      ReservationConfigSnapshot[]
-  airbnbSettlements    AirbnbSettlement[]
-  variances            Variance[]
-  onboardingProfile    PropertyOnboardingProfile?
-  operatingProfile     PropertyOperatingProfile?
-  bookingChannels      BookingChannel[]
-  managementAgreements ManagementAgreement[]
+  ownerPayouts          OwnerPayout[]
+  invoiceApprovalStages ApprovalStage[]             @relation("InvoiceApprovalProperty")
+  supplierInvoiceLines  SupplierInvoiceLine[]
+  expenses              Expense[]
+  cashCollections       CashCollection[]
+  templateVersions      PropertyTemplateVersion[]
+  templateRevisions     PropertyTemplateRevision[]
+  approvalRequests      ApprovalRequest[]
+  id                    String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId        String                      @map("organization_id") @db.Uuid
+  regionId              String?                     @map("region_id") @db.Uuid
+  cityId                String?                     @map("city_id") @db.Uuid
+  name                  String
+  addressLine1          String                      @map("address_line_1")
+  addressLine2          String?                     @map("address_line_2")
+  city                  String
+  region                String?
+  countryCode           String                      @default("MA") @map("country_code") @db.Char(2)
+  propertyType          String                      @map("property_type")
+  bedrooms              Int
+  bathrooms             Int
+  livingSpaces          Int                         @default(1) @map("living_spaces")
+  hasPool               Boolean                     @default(false) @map("has_pool")
+  hasGarden             Boolean                     @default(false) @map("has_garden")
+  parkingSpaces         Int                         @default(0) @map("parking_spaces")
+  maxGuests             Int                         @map("max_guests")
+  timezone              String                      @default("Africa/Casablanca")
+  amenities             Json
+  photoUrls             Json                        @map("photo_urls")
+  status                String                      @default("DRAFT")
+  archivedAt            DateTime?                   @map("archived_at") @db.Timestamptz(6)
+  createdBy             String?                     @map("created_by") @db.Uuid
+  createdAt             DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  regionRef             Region?                     @relation(fields: [regionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  cityRef               City?                       @relation(fields: [cityId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  propertyOwners        PropertyOwner[]
+  Reservation           Reservation[]
+  ReservationConflict   ReservationConflict[]
+  OperationTask         OperationTask[]
+  commissionSnapshots   CommissionSnapshot[]
+  configSnapshots       ReservationConfigSnapshot[]
+  airbnbSettlements     AirbnbSettlement[]
+  variances             Variance[]
+  onboardingProfile     PropertyOnboardingProfile?
+  operatingProfile      PropertyOperatingProfile?
+  bookingChannels       BookingChannel[]
+  managementAgreements  ManagementAgreement[]
 
   reverseReservationFeedpropertyIdLink        ReservationFeed[]        @relation("ReservationFeedpropertyIdLink")
   reverseCalendarBlockpropertyIdLink          CalendarBlock[]          @relation("CalendarBlockpropertyIdLink")
@@ -984,6 +987,7 @@ model BookingChannel {
 
 model Reservation {
   ownerPayouts                                         OwnerPayout[]
+  invoiceApprovalStages                                ApprovalStage[]                @relation("InvoiceApprovalReservation")
   supplierInvoiceLines                                 SupplierInvoiceLine[]
   expenses                                             Expense[]
   cashCollections                                      CashCollection[]
@@ -1849,31 +1853,34 @@ model AuditLog {
 }
 
 model ApprovalRequest {
-  payoutId        String?             @map("payout_id") @db.Uuid
-  payout          OwnerPayout?        @relation(fields: [organizationId, payoutId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  expenseId       String?             @map("expense_id") @db.Uuid
-  expense         Expense?            @relation(fields: [organizationId, expenseId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  financialStages ApprovalStage[]
-  id              String              @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId  String              @map("organization_id") @db.Uuid
-  propertyId      String              @map("property_id") @db.Uuid
-  requestedBy     String              @map("requested_by") @db.Uuid
-  title           String
-  details         String
-  state           String              @default("PENDING")
-  routingSnapshot Json                @map("routing_snapshot")
-  idempotencyKey  String              @map("idempotency_key")
-  decidedBy       String?             @map("decided_by") @db.Uuid
-  decisionReason  String?             @map("decision_reason")
-  decidedAt       DateTime?           @map("decided_at") @db.Timestamptz(6)
-  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  property        Property            @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  requester       UserAccount         @relation("ApprovalRequester", fields: [organizationId, requestedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "approval_request_requester_tenant_fk")
-  decider         UserAccount?        @relation("ApprovalDecider", fields: [organizationId, decidedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "approval_request_decider_tenant_fk")
-  recipients      ApprovalRecipient[]
+  payoutId            String?                    @map("payout_id") @db.Uuid
+  payout              OwnerPayout?               @relation(fields: [organizationId, payoutId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  invoiceSubmissionId String?                    @map("invoice_submission_id") @db.Uuid
+  invoiceSubmission   SupplierInvoiceSubmission? @relation(fields: [organizationId, invoiceSubmissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  expenseId           String?                    @map("expense_id") @db.Uuid
+  expense             Expense?                   @relation(fields: [organizationId, expenseId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  financialStages     ApprovalStage[]
+  id                  String                     @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String                     @map("organization_id") @db.Uuid
+  propertyId          String?                    @map("property_id") @db.Uuid
+  requestedBy         String                     @map("requested_by") @db.Uuid
+  title               String
+  details             String
+  state               String                     @default("PENDING")
+  routingSnapshot     Json                       @map("routing_snapshot")
+  idempotencyKey      String                     @map("idempotency_key")
+  decidedBy           String?                    @map("decided_by") @db.Uuid
+  decisionReason      String?                    @map("decision_reason")
+  decidedAt           DateTime?                  @map("decided_at") @db.Timestamptz(6)
+  createdAt           DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization        Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property            Property?                  @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  requester           UserAccount                @relation("ApprovalRequester", fields: [organizationId, requestedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "approval_request_requester_tenant_fk")
+  decider             UserAccount?               @relation("ApprovalDecider", fields: [organizationId, decidedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "approval_request_decider_tenant_fk")
+  recipients          ApprovalRecipient[]
 
   @@unique([organizationId, expenseId], map: "approval_request_org_expense_unique")
+  @@unique([organizationId, invoiceSubmissionId], map: "approval_request_org_invoice_submission_unique")
   @@unique([organizationId, payoutId], map: "approval_request_org_payout_unique")
   @@unique([organizationId, id])
   @@unique([organizationId, idempotencyKey])
@@ -2428,6 +2435,13 @@ model ExpenseSubmission {
 }
 
 model ApprovalStage {
+  invoiceLineId   String?                  @map("invoice_line_id") @db.Uuid
+  propertyId      String?                  @map("property_id") @db.Uuid
+  reservationId   String?                  @map("reservation_id") @db.Uuid
+  sourceSnapshot  Json?                    @map("source_snapshot")
+  invoiceLine     SupplierInvoiceLine?     @relation(fields: [organizationId, invoiceLineId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  property        Property?                @relation("InvoiceApprovalProperty", fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reservation     Reservation?             @relation("InvoiceApprovalReservation", fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   id              String                   @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId  String                   @map("organization_id") @db.Uuid
   approvalId      String                   @map("approval_id") @db.Uuid
@@ -2497,27 +2511,30 @@ model Supplier {
 }
 
 model SupplierInvoice {
-  id                 String                    @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId     String                    @map("organization_id") @db.Uuid
-  supplierId         String                    @map("supplier_id") @db.Uuid
-  reference          String
-  invoiceNumber      String                    @map("invoice_number")
-  state              String                    @default("DRAFT")
-  version            Int                       @default(0)
-  currentRevisionId  String?                   @map("current_revision_id") @db.Uuid
-  idempotencyKey     String                    @map("idempotency_key") @db.Uuid
-  requestFingerprint String                    @map("request_fingerprint")
-  archivedAt         DateTime?                 @map("archived_at") @db.Timestamptz(6)
-  createdBy          String                    @map("created_by") @db.Uuid
-  updatedBy          String                    @map("updated_by") @db.Uuid
-  createdAt          DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization       Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  supplier           Supplier                  @relation(fields: [organizationId, supplierId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  creator            UserAccount               @relation("SupplierInvoiceCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  updater            UserAccount               @relation("SupplierInvoiceUpdater", fields: [organizationId, updatedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  currentRevision    SupplierInvoiceRevision?  @relation("CurrentSupplierInvoiceRevision", fields: [organizationId, currentRevisionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  revisions          SupplierInvoiceRevision[] @relation("SupplierInvoiceRevisions")
+  currentSubmissionId String?                     @map("current_submission_id") @db.Uuid
+  currentSubmission   SupplierInvoiceSubmission?  @relation("CurrentSupplierInvoiceSubmission", fields: [organizationId, currentSubmissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  submissions         SupplierInvoiceSubmission[] @relation("SupplierInvoiceSubmissions")
+  id                  String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId      String                      @map("organization_id") @db.Uuid
+  supplierId          String                      @map("supplier_id") @db.Uuid
+  reference           String
+  invoiceNumber       String                      @map("invoice_number")
+  state               String                      @default("DRAFT")
+  version             Int                         @default(0)
+  currentRevisionId   String?                     @map("current_revision_id") @db.Uuid
+  idempotencyKey      String                      @map("idempotency_key") @db.Uuid
+  requestFingerprint  String                      @map("request_fingerprint")
+  archivedAt          DateTime?                   @map("archived_at") @db.Timestamptz(6)
+  createdBy           String                      @map("created_by") @db.Uuid
+  updatedBy           String                      @map("updated_by") @db.Uuid
+  createdAt           DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization        Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  supplier            Supplier                    @relation(fields: [organizationId, supplierId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator             UserAccount                 @relation("SupplierInvoiceCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  updater             UserAccount                 @relation("SupplierInvoiceUpdater", fields: [organizationId, updatedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  currentRevision     SupplierInvoiceRevision?    @relation("CurrentSupplierInvoiceRevision", fields: [organizationId, currentRevisionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  revisions           SupplierInvoiceRevision[]   @relation("SupplierInvoiceRevisions")
 
   @@unique([organizationId, id])
   @@unique([organizationId, reference])
@@ -2529,24 +2546,25 @@ model SupplierInvoice {
 }
 
 model SupplierInvoiceRevision {
-  id             String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String                @map("organization_id") @db.Uuid
-  invoiceId      String                @map("invoice_id") @db.Uuid
+  submissions    SupplierInvoiceSubmission[]
+  id             String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                      @map("organization_id") @db.Uuid
+  invoiceId      String                      @map("invoice_id") @db.Uuid
   version        Int
-  invoiceNumber  String                @map("invoice_number")
-  issuedOn       DateTime              @map("issued_on") @db.Date
-  dueOn          DateTime?             @map("due_on") @db.Date
-  amount         Decimal               @db.Decimal(18, 2)
-  currency       String                @db.Char(3)
+  invoiceNumber  String                      @map("invoice_number")
+  issuedOn       DateTime                    @map("issued_on") @db.Date
+  dueOn          DateTime?                   @map("due_on") @db.Date
+  amount         Decimal                     @db.Decimal(18, 2)
+  currency       String                      @db.Char(3)
   purpose        String
   reason         String
-  createdBy      String                @map("created_by") @db.Uuid
-  createdAt      DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime              @default(now()) @map("updated_at") @db.Timestamptz(6)
-  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  invoice        SupplierInvoice       @relation("SupplierInvoiceRevisions", fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  selectedBy     SupplierInvoice[]     @relation("CurrentSupplierInvoiceRevision")
-  creator        UserAccount           @relation(fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  createdBy      String                      @map("created_by") @db.Uuid
+  createdAt      DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
+  organization   Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice        SupplierInvoice             @relation("SupplierInvoiceRevisions", fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  selectedBy     SupplierInvoice[]           @relation("CurrentSupplierInvoiceRevision")
+  creator        UserAccount                 @relation(fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   lines          SupplierInvoiceLine[]
 
   @@unique([organizationId, id])
@@ -2556,6 +2574,7 @@ model SupplierInvoiceRevision {
 }
 
 model SupplierInvoiceLine {
+  approvalStages ApprovalStage[]
   id             String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String                  @map("organization_id") @db.Uuid
   revisionId     String                  @map("revision_id") @db.Uuid
@@ -2580,4 +2599,33 @@ model SupplierInvoiceLine {
   @@index([organizationId, propertyId, revisionId])
   @@index([organizationId, reservationId])
   @@map("supplier_invoice_line")
+}
+
+model SupplierInvoiceSubmission {
+  id                   String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId       String                  @map("organization_id") @db.Uuid
+  invoiceId            String                  @map("invoice_id") @db.Uuid
+  revisionId           String                  @map("revision_id") @db.Uuid
+  sourceInvoiceVersion Int                     @map("source_invoice_version")
+  occurredOn           DateTime                @map("occurred_on") @db.Date
+  emergency            Boolean
+  reason               String                  @db.VarChar(500)
+  snapshot             Json
+  idempotencyKey       String                  @map("idempotency_key") @db.Uuid
+  requestFingerprint   String                  @map("request_fingerprint")
+  submittedBy          String                  @map("submitted_by") @db.Uuid
+  submittedAt          DateTime                @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  organization         Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice              SupplierInvoice         @relation("SupplierInvoiceSubmissions", fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  revision             SupplierInvoiceRevision @relation(fields: [organizationId, revisionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  submitter            UserAccount             @relation(fields: [organizationId, submittedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  selectedBy           SupplierInvoice[]       @relation("CurrentSupplierInvoiceSubmission")
+  approval             ApprovalRequest?
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, invoiceId, revisionId])
+  @@unique([organizationId, invoiceId, sourceInvoiceVersion])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, invoiceId, submittedAt, id])
+  @@map("supplier_invoice_submission")
 }

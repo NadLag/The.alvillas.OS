@@ -96,7 +96,7 @@ export function NotificationCenter() {
         {!page && pending ? <><p role="status">{t("loading")}</p><SkeletonBlock /></> : null}
         {page?.items.length === 0 ? <EmptyState tone="motif">{t("empty")}</EmptyState> : null}
         {page ? <ul className="notification-list" aria-label={t("title")}>
-          {page.items.map((item) => <li key={item.id} className="notification-item" data-testid="notification-item" data-read={Boolean(item.readAt)}>
+          {page.items.map((item) => <li key={item.id} className="notification-item" data-testid="notification-item" data-notification-id={item.id} data-read={Boolean(item.readAt)}>
             <div>
               <p className="notification-title">{t(`kinds.${item.kind}`)}</p>
               <time dateTime={item.createdAt}>{new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.createdAt))}</time>
