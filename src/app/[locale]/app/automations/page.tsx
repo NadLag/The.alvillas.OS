@@ -68,7 +68,7 @@ export default async function AutomationsPage({
     if (!(error instanceof AutomationAccessError)) throw error;
   }
   return (
-    <AdminShell className="resource-page" testId="automation-page">
+    <AdminShell className="resource-page automation-page" testId="automation-page">
       <ShellHeader
         eyebrow={t("eyebrow")}
         title={t("title")}

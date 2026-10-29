@@ -20,6 +20,7 @@ export const automationEvents = [
   "LaundryInvoiced",
   "ExpenseSubmitted",
   "ExpenseOverThreshold",
+  "SupplierInvoiceSubmitted",
   "ApprovalRequested",
   "ApprovalDecided",
   "PaymentReceived",

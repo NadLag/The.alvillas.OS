@@ -2155,6 +2155,9 @@
     "blockCount": "{count} blocages de disponibilité"
   },
   "Automation": {
+    "organization": "Organisation",
+    "restrictedOutcome": "Résultat à accès restreint",
+    "invoiceSubmittedEvent": "Facture fournisseur soumise",
     "allProperties": "Toutes les propriétés",
     "filter": "Filtrer",
     "olderVersions": "Versions précédentes des règles",

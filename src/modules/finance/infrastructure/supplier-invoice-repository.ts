@@ -11,6 +11,11 @@ export class SupplierInvoiceRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
   lock(id: string) { return new SupplierPayableRepository(this.tx, this.organizationId).lockInvoice(id); }
   submissionByKey(idempotencyKey: string) { return this.tx.supplierInvoiceSubmission.findFirst({ where: { organizationId: this.organizationId, idempotencyKey }, include: { approval: { select: { id: true, state: true } } } }); }
+  submission(id: string) {
+    return this.tx.supplierInvoiceSubmission.findFirst({ where: { organizationId: this.organizationId, id }, include: {
+      invoice: { include: { supplier: { select: { id: true, createdAt: true } } } }, revision: { include: revision },
+      approval: { select: { id: true, state: true, requestedBy: true } } } });
+  }
   submit(input: { invoiceId: string; revisionId: string; sourceInvoiceVersion: number; occurredOn: string; emergency: boolean; reason: string; snapshot: Prisma.InputJsonObject;
     idempotencyKey: string; requestFingerprint: string; submittedBy: string; submittedAt: Date }) {
     return this.tx.supplierInvoiceSubmission.create({ data: { organizationId: this.organizationId, ...input, occurredOn: new Date(input.occurredOn + "T00:00:00.000Z") } });

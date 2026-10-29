@@ -16,6 +16,10 @@ import { getSupplierInvoiceNotice } from "@/modules/finance/application/supplier
 import { getApproval, decideApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError, ApprovalConflictError } from "@/platform/approvals/approval";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { AutomationRepository } from "@/platform/automation/repository";
+import { automationAdmin, enqueueAutomationEvent, executeAutomationRun, previewAutomation, replayAutomation, saveAutomationRule, AutomationAccessError } from "@/platform/automation/service";
+import type { AutomationRule } from "@/platform/automation/rule";
+import { consumeAutomationReference } from "@/platform/events/inngest-functions";
 import { defaultNotificationPreferences } from "@/platform/notifications/notification-preferences";
 import { ownNotificationContext } from "@/platform/notifications/notification";
 import { getNotificationPage, openNotification, NotificationAccessError } from "@/platform/notifications/notification-service";
@@ -144,6 +148,32 @@ async function invoiceOwnerReviewers(f: Awaited<ReturnType<typeof invoicePolicyF
     actor: { organizationId: f.org, accountId: reviewer.account.id, authContext: await authContextForAccount(f.org, reviewer.account.id, { db }) } })));
 }
 
+async function invoiceAutomationFixture(extra: Partial<AutomationRule> = {}, review = true, mixed = false, propertyOnly = false) {
+  const f = await invoicePolicyFixture();
+  await withTenant(db, f.org, async tx => {
+    const permissions = await tx.permission.findMany({ where: { key: { in: ["config_rule:view", "config_rule:configure"] } } });
+    expect(permissions).toHaveLength(2);
+    await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: f.assignment.roleId, permissionId: permission.id })) });
+    if (review) await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.approval_thresholds", scopeType: "organization", effectiveFrom: new Date("2020-01-02"),
+      reason: "Actual configured invoice automation review", value: { thresholds: [{ key: "actual_review", requires_approval_from: ["finance"] }],
+        routing: { finance: { people: [f.account.personId], roles: [], assigned: false, channels: ["in_app"] } } } });
+  });
+  const actor = { ...f.ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
+  const rule: AutomationRule = { name: { en: "Actual supplier invoice review", fr: "Revue de facture fournisseur" }, event: "SupplierInvoiceSubmitted", enabled: true,
+    conditions: { all: [] }, actions: [{ key: "review", type: "create_approval_request", title: { en: "Review actual invoice", fr: "Vérifier la facture" },
+      details: { en: "Use the actual configured review", fr: "Utiliser la validation configurée" } }], retry: { max_attempts: 2, delay_seconds: 1 }, ...extra };
+  const config = await saveAutomationRule(actor, { key: "actual_invoice", lifecycle: "ACTIVE", effectiveFrom: new Date("2020-01-01"),
+    rule, reason: "Configured actual organization invoice automation" }, { db });
+  const invoice = await createSupplierInvoice(actor, { ...input(f.supplier.id), lines: [{ amount: "2400.00", category: "maintenance", ...(propertyOnly ? { propertyId: f.property.id } : {}) },
+    ...(mixed ? [{ amount: "1000.00", category: "maintenance", propertyId: f.property.id }] : [])] }, { db });
+  const draft = await getSupplierInvoice(actor, invoice.id, {}, { db });
+  const submitted = await submitSupplierInvoice(actor, { id: invoice.id, expectedVersion: 0, occurredOn: "2026-10-28", emergency: false, idempotencyKey: randomUUID(),
+    reason: "Actual organization invoice automation source", lineNotes: Object.fromEntries(draft.lines.map(line => [line.id, "Actual individual invoice review context"])) }, { db });
+  const event = await withTenant(db, f.org, tx => tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: {
+    organizationId: f.org, idempotencyKey: `supplier-invoice:${submitted.submissionId}:SupplierInvoiceSubmitted` } } }));
+  return { ...f, actor, config, invoice, draft, submitted, event };
+}
+
 describe("immutable supplier invoice authoring on PostgreSQL", () => {
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw Error("Dedicated local PostgreSQL required");
@@ -152,6 +182,170 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it.each([false, true])("executes organization invoice automation once for company or mixed lines without inventing approvals, expenses or money (%s)", async mixed => {
+    const f = await invoiceAutomationFixture({}, true, mixed);
+    await expect(previewAutomation(f.actor, { ruleId: f.config.id, eventId: f.event.id }, { db })).resolves.toMatchObject({ matched: true, plans: [{ type: "create_approval_request" }] });
+    const admissions = await Promise.all(Array.from({ length: 4 }, () => enqueueAutomationEvent(f.org, f.event.id, { db })));
+    expect(admissions.every(ids => ids.length === 1 && ids[0] === admissions[0][0])).toBe(true);
+    const runId = admissions[0][0];
+    expect(await consumeAutomationReference({ organizationId: f.org, outboxEventId: f.event.id }, "SupplierInvoiceSubmitted", db)).toBeDefined();
+    expect(await executeAutomationRun(f.org, runId, { db })).toBe("SUCCEEDED");
+    const approval = await getApproval({ organizationId: f.org, accountId: f.account.id, authContext: f.actor.authContext }, f.submitted.approvalId!, { db });
+    await decideApproval({ organizationId: f.org, accountId: f.account.id, authContext: f.actor.authContext },
+      { id: approval.id, stageId: approval.stageId, decision: "REJECTED", reason: "Reject this actual source for retained automation replay" }, { db });
+    expect(await enqueueAutomationEvent(f.org, f.event.id, { db })).toEqual([runId]);
+    expect(await replayAutomation(f.actor, { runId, reason: "Retain the original completed source outcome" }, { db })).toBe("SUCCEEDED");
+    const model = await automationAdmin(f.actor, undefined, { db });
+    expect(model.runs.find(run => run.id === runId)).toMatchObject({ propertyId: null, status: "SUCCEEDED", outputs: [{ producedIds: [f.submitted.approvalId] }] });
+    expect(model.sources.some(source => source.id === f.event.id)).toBe(true);
+    await withTenant(db, f.org, async tx => {
+      const run = await tx.automationRun.findUniqueOrThrow({ where: { id: runId } });
+      expect(run.propertyId).toBeNull(); expect(run.inputs).toMatchObject({ fields: { invoice: { status: "PENDING_APPROVAL" } } });
+      expect(await tx.automationAttempt.count({ where: { runId } })).toBe(1);
+      expect(await tx.approvalRequest.count()).toBe(1); expect(await tx.expense.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);
+    });
+  });
+  it("denies organization invoice automation before private key admission and false predicate inference after current authority revocation", async () => {
+    const f = await invoiceAutomationFixture({ idempotency_key: "invoice:{{invoice.amount}}:{{invoice.invoice_number}}", conditions: { path: "invoice.amount", op: "=", value: "0.00" } });
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { validTo: new Date("2020-01-01") } }));
+    await expect(previewAutomation(f.actor, { ruleId: f.config.id, eventId: f.event.id }, { db })).rejects.toBeInstanceOf(AutomationAccessError);
+    const [runId] = await enqueueAutomationEvent(f.org, f.event.id, { db });
+    const run = await withTenant(db, f.org, tx => tx.automationRun.findUniqueOrThrow({ where: { id: runId } }));
+    expect(run).toMatchObject({ status: "FAILED", errorCode: "automation_forbidden", inputs: { eventId: f.event.id, configRuleId: f.config.id, version: 1 } });
+    expect(run.eventKey).toBe(`forbidden:${f.event.id}`); expect(JSON.stringify(run.inputs)).not.toContain("2400");
+    const model = await automationAdmin(f.actor, undefined, { db });
+    expect(model.sources.some(source => source.id === f.event.id)).toBe(false);
+    expect(JSON.stringify(model.runs)).not.toContain(f.draft.invoiceNumber);
+    await expect(replayAutomation(f.actor, { runId, reason: "A stale caller cannot replay denied financial source" }, { db })).rejects.toBeInstanceOf(AutomationAccessError);
+  });
+  it("refuses to create an approval through organization invoice automation when the frozen policy required none", async () => {
+    const f = await invoiceAutomationFixture({}, false);
+    await expect(previewAutomation(f.actor, { ruleId: f.config.id, eventId: f.event.id }, { db })).rejects.toThrow("automation_invoice_approval_not_required");
+    const [runId] = await enqueueAutomationEvent(f.org, f.event.id, { db });
+    expect(await executeAutomationRun(f.org, runId, { db })).toBe("RETRY");
+    expect(await executeAutomationRun(f.org, runId, { db, now: new Date(Date.now() + 3000) })).toBe("FAILED");
+    await withTenant(db, f.org, async tx => { expect(await tx.approvalRequest.count()).toBe(0); expect(await tx.expense.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0); });
+  });
+  it("protects organization invoice automation preview, history and replay from narrowed caller source grants", async () => {
+    const f = await invoiceAutomationFixture(), [runId] = await enqueueAutomationEvent(f.org, f.event.id, { db });
+    for (const permission of ["supplier:view", "supplier_invoice:view", "financial_transaction:view", "config_rule:configure"]) {
+      const actor = { ...f.actor, authContext: { ...f.actor.authContext, permissions: new Set([...f.actor.authContext.permissions].filter(key => key !== permission)),
+        assignments: f.actor.authContext.assignments?.map(assignment => ({ ...assignment, permissions: new Set([...assignment.permissions].filter(key => key !== permission)) })) } };
+      await expect(previewAutomation(actor, { ruleId: f.config.id, eventId: f.event.id }, { db })).rejects.toBeInstanceOf(AutomationAccessError);
+      await expect(replayAutomation(actor, { runId, reason: "Caller restrictions remain narrower than stored source authority" }, { db })).rejects.toBeInstanceOf(AutomationAccessError);
+      const model = await automationAdmin(actor, undefined, { db });
+      expect(model.sources.some(source => source.id === f.event.id)).toBe(false);
+      expect(JSON.stringify(model.runs)).not.toContain(f.draft.invoiceNumber);
+    }
+    const records = { ...f.actor, authContext: { ...f.actor.authContext, assignments: f.actor.authContext.assignments?.map(assignment =>
+      assignment.permissions.has("financial_transaction:view") ? { ...assignment, scope: { organizationId: f.org, scopeType: "financial_record" as const, scopeId: f.invoice.id } } : assignment) } };
+    await expect(previewAutomation(records, { ruleId: f.config.id, eventId: f.event.id }, { db })).rejects.toBeInstanceOf(AutomationAccessError);
+  });
+  it("rolls back organization invoice automation action and completion audits after current finance authority expires during the actual run-row write wait", async () => {
+    const f = await invoiceAutomationFixture(), [runId] = await enqueueAutomationEvent(f.org, f.event.id, { db });
+    let release!: () => void, locked!: () => void, blocker = 0;
+    const ready = new Promise<void>(resolve => locked = resolve), gate = new Promise<void>(resolve => release = resolve);
+    const holder = withTenant(admin, f.org, async tx => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM automation_run WHERE organization_id=${f.org}::uuid AND id=${runId}::uuid FOR UPDATE`);
+      const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; blocker = row.pid; locked(); await gate;
+    });
+    await ready;
+    const running = executeAutomationRun(f.org, runId, { db });
+    try {
+      await vi.waitFor(async () => { const [row] = await admin.$queryRaw<Array<{ waiting: boolean }>>(Prisma.sql`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${blocker}=ANY(pg_blocking_pids(pid))) AS waiting`); expect(row.waiting).toBe(true); }, { timeout: 10000 });
+      await withTenant(admin, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { validTo: new Date() } }));
+    } finally { release(); await holder; }
+    expect(await running).toBe("FAILED");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.auditLog.count({ where: { action: { in: ["automation.action.executed", "automation.run.completed"] } } })).toBe(0);
+      expect(await tx.automationAttempt.findFirstOrThrow({ where: { runId } })).toMatchObject({ status: "FAILED", errorCode: "automation_forbidden", outputs: [] });
+      expect(await tx.automationRun.findUniqueOrThrow({ where: { id: runId } })).toMatchObject({ outputs: [], inputs: { eventId: f.event.id, configRuleId: f.config.id, version: 1 } });
+      expect(await tx.approvalRequest.count()).toBe(1); expect(await tx.expense.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);
+    });
+  });
+  it("protects canonical organization invoice automation events, tenant references and frozen inputs at the database and execution boundaries", async () => {
+    const f = await invoiceAutomationFixture(), [runId] = await enqueueAutomationEvent(f.org, f.event.id, { db });
+    const other = await invoiceAutomationFixture();
+    for (const data of [{ type: "TaskCreated" }, { payload: { invoiceId: other.invoice.id, submissionId: f.submitted.submissionId } },
+      { occurredAt: new Date("2020-01-01") }, { idempotencyKey: randomUUID() }]) {
+      await expect(withTenant(db, f.org, tx => tx.outboxEvent.update({ where: { id: f.event.id }, data }))).rejects.toThrow(/immutable/iu);
+    }
+    await expect(withTenant(db, f.org, tx => tx.outboxEvent.delete({ where: { id: f.event.id } }))).rejects.toThrow(/immutable/iu);
+    await expect(withTenant(db, f.org, tx => new AutomationRepository(tx, f.org).context(f.event.id, f.property.id))).rejects.toThrow("automation_source_missing");
+    await expect(withTenant(db, f.org, tx => tx.outboxEvent.create({ data: { organizationId: f.org, type: "SupplierInvoiceSubmitted", payload: {
+      invoiceId: other.invoice.id, submissionId: other.submitted.submissionId }, idempotencyKey: randomUUID() } }))).rejects.toThrow(/canonical/iu);
+    await expect(withTenant(db, f.org, tx => tx.automationRun.create({ data: { organizationId: f.org, configRuleId: f.config.id, ruleKey: "automation.rule.actual_invoice",
+      actorId: f.account.id, eventId: other.event.id, propertyId: null, eventKey: randomUUID(), inputs: {} } }))).rejects.toThrow(/tenant/iu);
+    await expect(withTenant(db, f.org, tx => tx.automationRun.create({ data: { organizationId: f.org, configRuleId: f.config.id, ruleKey: "automation.rule.actual_invoice",
+      actorId: f.account.id, eventId: f.event.id, propertyId: null, eventKey: f.event.idempotencyKey, inputs: {} } }))).rejects.toThrow();
+    await expect(withTenant(db, f.org, async tx => {
+      const unrelated = await tx.outboxEvent.create({ data: { organizationId: f.org, type: "TaskCreated", payload: { propertyId: f.property.id }, idempotencyKey: randomUUID() } });
+      return tx.automationRun.create({ data: { organizationId: f.org, configRuleId: f.config.id, ruleKey: "automation.rule.actual_invoice", actorId: f.account.id,
+        eventId: unrelated.id, propertyId: null, eventKey: randomUUID(), inputs: {} } });
+    })).rejects.toThrow(/actual invoice event/iu);
+    await withTenant(db, f.org, async tx => {
+      const delivered = await tx.outboxEvent.update({ where: { id: f.event.id }, data: { status: "PROCESSED", attemptCount: { increment: 1 }, processedAt: new Date() } });
+      expect(delivered).toMatchObject({ payload: f.event.payload, type: f.event.type, idempotencyKey: f.event.idempotencyKey, occurredAt: f.event.occurredAt });
+    });
+    await withTenant(db, f.org, async tx => {
+      const run = await tx.automationRun.findUniqueOrThrow({ where: { id: runId } });
+      const source = z.object({ fields: z.record(z.string(), z.unknown()), configs: z.record(z.string(), z.unknown()) }).passthrough().parse(run.inputs);
+      source.fields.invoice = { ...(source.fields.invoice as Record<string, unknown>), amount: "0.01" };
+      await tx.automationRun.update({ where: { id: runId }, data: { inputs: source as Prisma.InputJsonObject } });
+    });
+    expect(await executeAutomationRun(f.org, runId, { db })).toBe("RETRY");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.automationRun.findUniqueOrThrow({ where: { id: runId } })).toMatchObject({ errorCode: "automation_source_snapshot_mismatch", outputs: [] });
+      expect(await tx.auditLog.count({ where: { action: "automation.action.executed" } })).toBe(0);
+    });
+  });
+  it("uses actual propertyless requested and decided invoice approval events in organization invoice automation notifications", async () => {
+    const f = await invoiceAutomationFixture({ event: "ApprovalRequested" });
+    const requested = await withTenant(db, f.org, tx => tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: {
+      organizationId: f.org, idempotencyKey: `approval:${f.submitted.approvalId}:ApprovalRequested` } } }));
+    const [requestedRun] = await enqueueAutomationEvent(f.org, requested.id, { db });
+    expect(await executeAutomationRun(f.org, requestedRun, { db })).toBe("SUCCEEDED");
+    await saveAutomationRule(f.actor, { key: "actual_invoice_decided", lifecycle: "ACTIVE", effectiveFrom: new Date("2020-01-01"),
+      reason: "Actual invoice decision notification automation", rule: { name: { en: "Notify invoice submitter", fr: "Notifier le demandeur" }, event: "ApprovalDecided", enabled: true,
+        conditions: { all: [] }, actions: [{ key: "notify", type: "notify", kind: "approval_decided", target: "approval.id", recipient: "invoice.submitted_by" }],
+        retry: { max_attempts: 2, delay_seconds: 1 } } }, { db });
+    const actor = { organizationId: f.org, accountId: f.account.id, authContext: f.actor.authContext };
+    const approval = await getApproval(actor, f.submitted.approvalId!, { db });
+    await decideApproval(actor, { id: approval.id, stageId: approval.stageId, decision: "APPROVED", reason: "Actual company invoice review is complete" }, { db });
+    const decided = await withTenant(db, f.org, tx => tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: {
+      organizationId: f.org, idempotencyKey: `approval:${f.submitted.approvalId}:ApprovalDecided` } } }));
+    const context = await withTenant(db, f.org, tx => new AutomationRepository(tx, f.org).context(decided.id));
+    expect(context.property).toBeNull(); expect(context).not.toHaveProperty("expense");
+    expect(context.evaluation.fields).toMatchObject({ invoice: { id: f.invoice.id, status: "APPROVED" }, approval: { id: approval.id, status: "APPROVED" } });
+    const [decidedRun] = await enqueueAutomationEvent(f.org, decided.id, { db });
+    expect(await executeAutomationRun(f.org, decidedRun, { db })).toBe("SUCCEEDED");
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.outboxEvent.count({ where: { idempotencyKey: `${decidedRun}:notify`, type: "notification.requested" } })).toBe(1);
+      expect(await tx.approvalRequest.count()).toBe(1); expect(await tx.expense.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);
+    });
+  });
+  it("requires an independent organization financial grant for a finance-config predicate in organization invoice automation", async () => {
+    const f = await invoiceAutomationFixture({ conditions: { path: "invoice.currency", op: "=", value: { config: "finance.accounting_periods", path: "timezone" } } }, true, false, true);
+    const [completedRun] = await enqueueAutomationEvent(f.org, f.event.id, { db });
+    expect(await executeAutomationRun(f.org, completedRun, { db })).toBe("SKIPPED");
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { scopeType: "property", scopeId: f.property.id } }));
+    const actor = { ...f.actor, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
+    await expect(replayAutomation(actor, { runId: completedRun, reason: "A completed finance-config predicate remains private after organization rights are removed" }, { db })).rejects.toBeInstanceOf(AutomationAccessError);
+    await expect(previewAutomation(actor, { ruleId: f.config.id, eventId: f.event.id }, { db })).rejects.toBeInstanceOf(AutomationAccessError);
+    const [runId] = await enqueueAutomationEvent(f.org, f.event.id, { db });
+    expect(await withTenant(db, f.org, tx => tx.automationRun.findUniqueOrThrow({ where: { id: runId } }))).toMatchObject({ status: "FAILED", errorCode: "automation_forbidden",
+      inputs: { eventId: f.event.id, configRuleId: f.config.id, version: 1 } });
+  });
+  it("hides completed predicate outcomes and source references in organization invoice automation history after finance revocation", async () => {
+    const f = await invoiceAutomationFixture({ conditions: { path: "invoice.amount", op: "=", value: "0.00" } });
+    const [runId] = await enqueueAutomationEvent(f.org, f.event.id, { db }); expect(await executeAutomationRun(f.org, runId, { db })).toBe("SKIPPED");
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { validTo: new Date("2020-01-01") } }));
+    const model = await automationAdmin(f.actor, undefined, { db }), row = model.runs.find(run => run.id === runId);
+    expect(row).toBeDefined();
+    for (const key of ["status", "eventId", "attempts", "attemptCount", "completedAt", "errorCode"]) expect(row).not.toHaveProperty(key);
+    expect(JSON.stringify(model.runs)).not.toContain(f.draft.invoiceNumber);
+    expect(JSON.stringify(model.runs)).not.toContain(f.event.id);
+  });
   it("freezes and retries one actual company invoice submission without recognizing or paying it", async () => {
     const f = await invoicePolicyFixture(), invoice = await createSupplierInvoice(f.ctx, input(f.supplier.id), { db });
     const current = await getSupplierInvoice(f.ctx, invoice.id, {}, { db }), notes = Object.fromEntries(current.lines.map(line => [line.id, "Actual company invoice line review"]));
@@ -168,6 +362,21 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     });
     await expect(withTenant(db, f.org, tx => tx.supplierInvoiceSubmission.update({ where: { id: original.id }, data: { reason: "An immutable submission cannot be rewritten" } }))).rejects.toThrow();
     expect(await withTenant(db, f.org, tx => tx.supplierInvoiceSubmission.findUniqueOrThrow({ where: { id: original.id } }))).toEqual(original);
+  });
+  it("loads the actual propertyless invoice event into organization automation without inventing an expense or property", async () => {
+    const f = await invoicePolicyFixture(), invoice = await createSupplierInvoice(f.ctx, input(f.supplier.id), { db });
+    const draft = await getSupplierInvoice(f.ctx, invoice.id, {}, { db });
+    const source = await submitSupplierInvoice(f.ctx, { id: invoice.id, expectedVersion: 0, occurredOn: "2026-10-28", emergency: false, idempotencyKey: randomUUID(),
+      reason: "Actual organization invoice automation source", lineNotes: { [draft.lines[0].id]: "Actual company invoice cost review context" } }, { db });
+    const event = await withTenant(db, f.org, tx => tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: {
+      organizationId: f.org, idempotencyKey: `supplier-invoice:${source.submissionId}:SupplierInvoiceSubmitted` } } }));
+    const context = await withTenant(db, f.org, tx => new AutomationRepository(tx, f.org).context(event.id));
+    expect(context.property).toBeNull(); expect(context).not.toHaveProperty("expense");
+    expect(context.scopes).toEqual([{ scopeType: "organization", scopeId: null }]);
+    expect(context.evaluation.fields).not.toHaveProperty("property");
+    expect(context.evaluation.fields).toMatchObject({ organization: { id: f.org }, invoice: { id: invoice.id, submission_id: source.submissionId,
+      revision_id: draft.revisionId, amount: "2400.00", currency: "MAD", status: "APPROVED" } });
+    await withTenant(db, f.org, async tx => { expect(await tx.expense.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0); });
   });
   it("uses the shared financial approval engine for a real propertyless invoice and records a reasoned decision atomically", async () => {
     const f = await invoicePolicyFixture();

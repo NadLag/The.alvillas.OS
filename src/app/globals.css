@@ -2481,11 +2481,15 @@ textarea:disabled {
 .operation-calendar-day .secondary-button { max-inline-size:100%;white-space:normal;overflow-wrap:anywhere; }
 .operation-timeline { padding-inline-start:1.5rem; }.operation-timeline li { padding-block:1rem; }
 @media(max-width:600px){.operation-calendar{grid-template-columns:repeat(2,minmax(0,1fr));}.operation-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));}.operation-filters label{inline-size:100%;}.operation-filters input,.operation-filters select{inline-size:100%;}}
+.automation-page { min-inline-size: 0; overflow-wrap: anywhere; }
+.automation-page :is(.primary-button, .secondary-button) { min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.automation-page .shell-header > * { min-inline-size: 0; max-inline-size: 100%; }
 .automation-workspace { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: var(--space-6); }
 .automation-workspace > *, .automation-fields > * { min-inline-size: 0; }
-.automation-workspace label { display: grid; gap: var(--space-2); margin-block: var(--space-3); font-weight: var(--font-weight-semibold); }
-.automation-workspace input, .automation-workspace select, .automation-workspace textarea { inline-size: 100%; min-block-size: var(--target-min); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2); background: var(--surface-panel); color: var(--text-primary); font: inherit; }
+.automation-workspace label { display: grid; min-inline-size: 0; overflow-wrap: anywhere; gap: var(--space-2); margin-block: var(--space-3); font-weight: var(--font-weight-semibold); }
+.automation-workspace input, .automation-workspace select, .automation-workspace textarea { inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; min-block-size: var(--target-min); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-2); background: var(--surface-panel); color: var(--text-primary); font: inherit; }
 .automation-workspace textarea { font-family: var(--font-mono); font-size: var(--font-size-sm); }
+.automation-workspace :is(.primary-button, .secondary-button) { min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
 .automation-workspace pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-size-sm); }
 .automation-workspace p, .automation-workspace h3 { overflow-wrap: anywhere; }
 .automation-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: var(--space-3); }
