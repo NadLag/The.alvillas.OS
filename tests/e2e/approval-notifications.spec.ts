@@ -50,11 +50,11 @@ test.describe("approval notification lifecycle", () => {
         await page.context().setOffline(true); await expect(page.getByTestId("approval-request")).toBeDisabled(); await page.context().setOffline(false);
         await page.getByTestId("approval-request").click(); await expect(page).toHaveURL(/\/en\/app\/approvals\/[a-f0-9-]+$/u);
         const id = page.url().split("/").at(-1)!; await expect(page.getByTestId("approval-approve")).toHaveCount(0);
+        const digestLinkNotice = await withTenant(client, approver.organizationId, (tx) => tx.notification.findFirstOrThrow({ where: { recipientId: approver.id, targetId: id, kind: "approval_requested" } }));
         await reviewer.reload(); await reviewer.getByTestId("notification-bell").click();
-        const notice = reviewer.getByTestId("notification-item").filter({ hasText: "An approval needs your decision." }).filter({ has: reviewer.getByText("Unread", { exact: true }) });
+        const notice = reviewer.locator(`[data-notification-id="${digestLinkNotice.id}"]`).filter({ hasText: "An approval needs your decision." }).filter({ has: reviewer.getByText("Unread", { exact: true }) });
         await expect(notice).toHaveCount(1); await notice.getByRole("button", { name: "Open record", exact: true }).click();
         await expect(reviewer).toHaveURL(new RegExp(`/en/app/approvals/${id}$`, "u"));
-        const digestLinkNotice = await withTenant(client, approver.organizationId, (tx) => tx.notification.findFirstOrThrow({ where: { recipientId: approver.id, targetId: id, kind: "approval_requested" } }));
         await reviewer.goto(`/fr/app/notifications/open/${digestLinkNotice.id}`);
         await expect(reviewer).toHaveURL(new RegExp(`/fr/app/approvals/${id}$`, "u"));
         // Another authorized operator still cannot open this recipient's inbox link.
