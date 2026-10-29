@@ -84,7 +84,11 @@ export async function recognizeSupplierInvoice(ctx: FinanceActorContext, raw: un
       await recheckFinanceAuthorization(ctx, tx, at, checks, new SupplierInvoiceAccessError());
     };
     await recheck(await finance.clock());
-    if (existing) return { id: row.id, recognitionId: existing.id, transactionIds: existing.lines.map(line => line.transactionId), idempotent: true };
+    if (existing) {
+      const identities = new Map(existing.lines.map(line => [line.invoiceLineId, line.transactionId]));
+      const transactionIds = costs.map(cost => { const id = identities.get(cost.id); if (!id) throw new SupplierInvoiceConflictError(); return id; });
+      return { id: row.id, recognitionId: existing.id, transactionIds, idempotent: true };
+    }
     const currency = await invoices.currency(revision.currency);
     if (!currency || costs.some(cost => cost.amount.amount.decimalPlaces() > currency.minorUnit)) throw new ExpensePolicyUnavailableError("Invoice currency precision is unavailable");
     const accounts = new Map<string, string>();

@@ -233,6 +233,15 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     expect(results.filter(result => !result.idempotent)).toHaveLength(1); expect(new Set(results.map(result => result.recognitionId)).size).toBe(1);
     expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
   });
+  it("retains the original cost order in an actual recognition retry regardless of generated UUID order", async () => {
+    const f = await invoiceRecognitionFixture({ companyLines: 50 }), first = await recognizeSupplierInvoice(f.ctx, f.command, { db }),
+      again = await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    expect(again.idempotent).toBe(true); expect(again.transactionIds).toEqual(first.transactionIds);
+    await withTenant(db, f.org, async tx => {
+      const original = await tx.supplierInvoiceRecognitionLine.findMany({ where: { recognitionId: first.recognitionId }, orderBy: { invoiceLine: { position: "asc" } } });
+      expect(again.transactionIds).toEqual(original.map(line => line.transactionId)); expect(await tx.financialTransaction.count()).toBe(50);
+    });
+  });
   it.each(["reason", "expectedVersion", "idempotencyKey", "currentPeriod"] as const)("binds recognition retry to the complete %s intent", async key => {
     const f = await invoiceRecognitionFixture(); await recognizeSupplierInvoice(f.ctx, f.command, { db });
     const changed = { ...f.command, [key]: key === "reason" ? "A different actual recognition reason" : key === "expectedVersion" ? f.command.expectedVersion + 1 : key === "currentPeriod" ? true : randomUUID() };
