@@ -34,6 +34,11 @@ export class SupplierInvoiceRepository {
       data: { state, updatedBy: actorId, version: { increment: 1 } } });
   }
   find(id: string) { return this.tx.supplierInvoice.findFirst({ where: { organizationId: this.organizationId, id }, include }); }
+  recognitionSource(id: string, lineIds: string[]) {
+    return this.tx.supplierInvoice.findFirst({ where: { organizationId: this.organizationId, id }, include: { ...include,
+      currentSubmission: { select: { id: true, approval: { select: { id: true, state: true } } } },
+      currentRevision: { select: { id: true, lines: { ...revision.lines, where: { id: { in: lineIds } } } } } } });
+  }
   byKey(idempotencyKey: string) { return this.tx.supplierInvoice.findFirst({ where: { organizationId: this.organizationId, idempotencyKey }, include }); }
   currency(code: string) { return this.tx.currency.findUnique({ where: { code }, select: { code: true, minorUnit: true } }); }
   properties(ids: string[]) { return this.tx.property.findMany({ where: { organizationId: this.organizationId, id: { in: ids }, archivedAt: null }, select: { id: true, name: true, cityId: true, regionId: true } }); }

@@ -10,6 +10,11 @@ import { createSupplier, setSupplierArchived } from "@/modules/finance/applicati
 import { SupplierRepository } from "@/modules/finance/infrastructure/supplier-repository";
 import { SupplierInvoiceRepository } from "@/modules/finance/infrastructure/supplier-invoice-repository";
 import { supplierInvoiceFields } from "@/modules/finance/domain/supplier-invoice";
+import { recognizeSupplierInvoice } from "@/modules/finance/application/supplier-invoice-recognition";
+import { SupplierInvoiceRecognitionRepository } from "@/modules/finance/infrastructure/supplier-invoice-recognition-repository";
+import { SupplierPayableRepository } from "@/modules/finance/infrastructure/supplier-payable-repository";
+import { closeAccountingPeriod } from "@/modules/finance/application/accounting-period-service";
+import { AccountingPeriodClosedError } from "@/modules/finance/domain/accounting-period";
 import { getSupplierInvoicePolicyPreview } from "@/modules/finance/application/supplier-invoice-policy";
 import { submitSupplierInvoice } from "@/modules/finance/application/supplier-invoice-submission";
 import { getSupplierInvoiceNotice } from "@/modules/finance/application/supplier-invoice-notice";
@@ -174,6 +179,29 @@ async function invoiceAutomationFixture(extra: Partial<AutomationRule> = {}, rev
   return { ...f, actor, config, invoice, draft, submitted, event };
 }
 
+async function invoiceRecognitionFixture({ occurredOn = "2026-10-28", companyLines }: { occurredOn?: string; companyLines?: number } = {}) {
+  const f = await invoicePolicyFixture();
+  const second = await withTenant(db, f.org, async tx => {
+    for (const [roleId, keys] of [[f.assignment.roleId, ["supplier_invoice:pay"]], [f.financialGrant.roleId, ["financial_transaction:create", "financial_transaction:override", "financial_transaction:configure"]]] as const) {
+      const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: [...keys] } } }); expect(permissions).toHaveLength(keys.length);
+      await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId, permissionId: permission.id })) });
+    }
+    await tx.property.update({ where: { id: f.property.id }, data: { timezone: "America/Los_Angeles" } });
+    await tx.propertyOwner.updateMany({ where: { propertyId: f.property.id }, data: { shareBps: 5000 } });
+    const second = await tx.owner.create({ data: { organizationId: f.org, displayName: "Other original recognition co-owner" } });
+    await tx.propertyOwner.create({ data: { organizationId: f.org, propertyId: f.property.id, ownerId: second.id, shareBps: 5000, isPrimary: false } }); return second;
+  });
+  const ctx = { ...f.ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
+  const creation = { ...input(f.supplier.id), issuedOn: occurredOn, lines: companyLines === undefined ? [
+    { category: "software", costCenter: "office", amount: "920.01" }, { propertyId: f.property.id, category: "maintenance", amount: "2400.01" }
+  ] : Array.from({ length: companyLines }, (_, index) => ({ category: "software", costCenter: "source_" + index, amount: "0.01" })) };
+  const invoice = await createSupplierInvoice(ctx, creation, { db }), draft = await getSupplierInvoice(ctx, invoice.id, {}, { db });
+  const submitted = await submitSupplierInvoice(ctx, { id: invoice.id, expectedVersion: 0, occurredOn, emergency: false, idempotencyKey: randomUUID(),
+    reason: "Freeze actual claim recognition costs", lineNotes: Object.fromEntries(draft.lines.map(line => [line.id, "Retain this actual original financial cost"])) }, { db });
+  expect(submitted.state).toBe("APPROVED");
+  return { ...f, ctx, second, invoice, submitted, draft, command: { id: invoice.id, expectedVersion: submitted.version, idempotencyKey: randomUUID(), reason: "Recognize the actual approved supplier claim" } };
+}
+
 describe("immutable supplier invoice authoring on PostgreSQL", () => {
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw Error("Dedicated local PostgreSQL required");
@@ -182,6 +210,179 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+  it("recognizes original co-owner cents and company costs once without physical funding or replacement policy", async () => {
+    const f = await invoiceRecognitionFixture();
+    await withTenant(db, f.org, async tx => {
+      await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.expense_treatment", scopeType: "property", scopeId: f.property.id,
+        effectiveFrom: new Date("2026-10-01"), reason: "Replacement policy must not rewrite original costs", value: { default_treatment: "ALVILLAS_PAID" } });
+      await tx.propertyOwner.updateMany({ where: { propertyId: f.property.id, ownerId: f.owner.id }, data: { shareBps: 7500 } });
+      await tx.propertyOwner.updateMany({ where: { propertyId: f.property.id, ownerId: f.second.id }, data: { shareBps: 2500 } });
+    });
+    const result = await recognizeSupplierInvoice(f.ctx, f.command, { db }); expect(result.idempotent).toBe(false); expect(result.transactionIds).toHaveLength(2);
+    await withTenant(db, f.org, async tx => {
+      const postings = await tx.posting.findMany({ where: { transactionId: { in: result.transactionIds } }, include: { ledgerAccount: true } });
+      expect(postings).toHaveLength(5); expect(postings.some(posting => ["ASSET", "ASSET_LOCATION", "STAFF_WALLET"].includes(posting.ledgerAccount.accountType))).toBe(false);
+      expect(postings.filter(posting => posting.bucket === "OWNER_EXPENSE").map(posting => posting.amount.toFixed(2)).sort()).toEqual(["1200.00", "1200.01"]);
+      expect(postings.filter(posting => posting.bucket === "ALVILLAS_EXPENSE").map(posting => posting.amount.toFixed(2))).toEqual(["920.01"]);
+      expect((await new SupplierPayableRepository(tx, f.org).outstanding({ supplierId: f.supplier.id, invoiceId: f.invoice.id, currency: "MAD" })).toJSON().amount).toBe("3320.02");
+      expect(await tx.expense.count()).toBe(0); expect(await tx.auditLog.count({ where: { action: "finance.supplier_invoice.recognized" } })).toBe(1);
+    });
+  });
+  it("serializes concurrent actual recognition retries without a second claim", async () => {
+    const f = await invoiceRecognitionFixture(), results = await Promise.all(Array.from({ length: 4 }, () => recognizeSupplierInvoice(f.ctx, f.command, { db })));
+    expect(results.filter(result => !result.idempotent)).toHaveLength(1); expect(new Set(results.map(result => result.recognitionId)).size).toBe(1);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+  });
+  it("retains the original cost order in an actual recognition retry regardless of generated UUID order", async () => {
+    const f = await invoiceRecognitionFixture({ companyLines: 50 }), first = await recognizeSupplierInvoice(f.ctx, f.command, { db }),
+      again = await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    expect(again.idempotent).toBe(true); expect(again.transactionIds).toEqual(first.transactionIds);
+    await withTenant(db, f.org, async tx => {
+      const original = await tx.supplierInvoiceRecognitionLine.findMany({ where: { recognitionId: first.recognitionId }, orderBy: { invoiceLine: { position: "asc" } } });
+      expect(again.transactionIds).toEqual(original.map(line => line.transactionId)); expect(await tx.financialTransaction.count()).toBe(50);
+    });
+  });
+  it.each(["reason", "expectedVersion", "idempotencyKey", "currentPeriod"] as const)("binds recognition retry to the complete %s intent", async key => {
+    const f = await invoiceRecognitionFixture(); await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    const changed = { ...f.command, [key]: key === "reason" ? "A different actual recognition reason" : key === "expectedVersion" ? f.command.expectedVersion + 1 : key === "currentPeriod" ? true : randomUUID() };
+    await expect(recognizeSupplierInvoice(f.ctx, changed, { db })).rejects.toBeInstanceOf(SupplierInvoiceConflictError);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+  });
+  it("keeps caller restrictions independent of wider stored recognition grants", async () => {
+    const f = await invoiceRecognitionFixture(), caller = { ...f.ctx, authContext: { ...f.ctx.authContext,
+      permissions: new Set([...f.ctx.authContext.permissions].filter(key => key !== "financial_transaction:create")) } };
+    await expect(recognizeSupplierInvoice(caller, f.command, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    expect(await withTenant(db, f.org, tx => tx.supplierInvoiceRecognition.count())).toBe(0);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(0);
+  });
+  it("denies narrowed financial source access before disclosing recognition retry conflicts", async () => {
+    const f = await invoiceRecognitionFixture(); await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    const caller = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => !key.startsWith("financial_transaction:"))) } };
+    for (const input of [{ ...f.command, reason: "Different intent must not disclose its private recognition" }, { ...f.command, idempotencyKey: randomUUID() },
+      { ...f.command, expectedVersion: f.command.expectedVersion + 1 }, { ...f.command, currentPeriod: true }])
+      await expect(recognizeSupplierInvoice(caller, input, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+  });
+  it("rolls back actual recognition lines and journals after stored financial authority expires during their write", async () => {
+    const f = await invoiceRecognitionFixture(), original = Reflect.get(SupplierInvoiceRecognitionRepository.prototype, "lines");
+    const expire = vi.spyOn(SupplierInvoiceRecognitionRepository.prototype, "lines").mockImplementationOnce(async function (this: SupplierInvoiceRecognitionRepository, value) {
+      const result = await original.call(this, value);
+      await withTenant(admin, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { validTo: new Date("2020-01-01") } })); return result;
+    });
+    try { await expect(recognizeSupplierInvoice(f.ctx, f.command, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError); expect(expire).toHaveBeenCalledOnce(); }
+    finally { expire.mockRestore(); }
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.supplierInvoiceRecognition.count()).toBe(0); expect(await tx.supplierInvoiceRecognitionLine.count()).toBe(0);
+      expect(await tx.financialTransaction.count()).toBe(0); expect(await tx.posting.count()).toBe(0);
+      expect(await tx.auditLog.count({ where: { action: "finance.supplier_invoice.recognized" } })).toBe(0);
+    });
+  });
+  it("refreshes financial authority after the real canonical invoice lock wait", async () => {
+    const f = await invoiceRecognitionFixture(); let locked!: () => void, release!: () => void, blocker = 0;
+    const ready = new Promise<void>(resolve => locked = resolve), gate = new Promise<void>(resolve => release = resolve);
+    const holder = withTenant(admin, f.org, async tx => {
+      await new SupplierPayableRepository(tx, f.org).lockInvoice(f.invoice.id);
+      const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; blocker = row.pid; locked(); await gate;
+    });
+    await ready;
+    const posting = recognizeSupplierInvoice(f.ctx, f.command, { db }).then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error: error as unknown }));
+    try {
+      await vi.waitFor(async () => { const [row] = await admin.$queryRaw<Array<{ waiting: boolean }>>(Prisma.sql`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${blocker}=ANY(pg_blocking_pids(pid))) AS waiting`); expect(row.waiting).toBe(true); }, { timeout: 10000 });
+      await withTenant(admin, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { archivedAt: new Date() } }));
+    } finally { release(); await holder; }
+    const result = await posting; expect(result.ok).toBe(false); if (!result.ok) expect(result.error).toBeInstanceOf(SupplierInvoiceAccessError);
+    expect(await withTenant(db, f.org, tx => tx.supplierInvoiceRecognition.count())).toBe(0);
+  });
+  it("refreshes authority after a real journal-batch account-row wait", async () => {
+    const f = await invoiceRecognitionFixture();
+    const claim = await withTenant(db, f.org, tx => new FinanceRepository(tx, f.org).ensureLedgerAccount({ code: "SUPPLIER_PAYABLE", name: "Actual supplier claim", accountType: "CLAIM_OWNERSHIP", normalSide: "CREDIT" }));
+    let locked!: () => void, release!: () => void, blocker = 0;
+    const ready = new Promise<void>(resolve => locked = resolve), gate = new Promise<void>(resolve => release = resolve);
+    const holder = withTenant(admin, f.org, async tx => {
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM ledger_account WHERE organization_id=${f.org}::uuid AND id=${claim.id}::uuid FOR UPDATE`);
+      const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; blocker = row.pid; locked(); await gate;
+    });
+    await ready;
+    const posting = recognizeSupplierInvoice(f.ctx, f.command, { db }).then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error: error as unknown }));
+    try {
+      await vi.waitFor(async () => { const [row] = await admin.$queryRaw<Array<{ waiting: boolean }>>(Prisma.sql`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${blocker}=ANY(pg_blocking_pids(pid))) AS waiting`); expect(row.waiting).toBe(true); }, { timeout: 10000 });
+      await withTenant(admin, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { archivedAt: new Date() } }));
+    } finally { release(); await holder; }
+    const result = await posting; expect(result.ok).toBe(false); if (!result.ok) expect(result.error).toBeInstanceOf(SupplierInvoiceAccessError);
+    await withTenant(db, f.org, async tx => { expect(await tx.supplierInvoiceRecognition.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0); });
+  });
+  it("checks fresh authority after actual deferred journal and source guards complete", async () => {
+    const f = await invoiceRecognitionFixture(), original = Reflect.get(SupplierInvoiceRecognitionRepository.prototype, "flushGuards");
+    const expire = vi.spyOn(SupplierInvoiceRecognitionRepository.prototype, "flushGuards").mockImplementationOnce(async function (this: SupplierInvoiceRecognitionRepository) {
+      await original.call(this);
+      await withTenant(admin, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { archivedAt: new Date() } }));
+    });
+    try { await expect(recognizeSupplierInvoice(f.ctx, f.command, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError); expect(expire).toHaveBeenCalledOnce(); }
+    finally { expire.mockRestore(); }
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.supplierInvoiceRecognition.count()).toBe(0); expect(await tx.supplierInvoiceRecognitionLine.count()).toBe(0);
+      expect(await tx.financialTransaction.count()).toBe(0); expect(await tx.posting.count()).toBe(0);
+      expect(await tx.auditLog.count({ where: { action: "finance.supplier_invoice.recognized" } })).toBe(0);
+    });
+  });
+  it("rejects a new invoice journal without its actual recognized cost link", async () => {
+    const f = await invoiceRecognitionFixture(), result = await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    const original = await withTenant(db, f.org, tx => tx.financialTransaction.findUniqueOrThrow({ where: { id: result.transactionIds[0] }, include: { postings: true } }));
+    await expect(withTenant(db, f.org, tx => new FinanceRepository(tx, f.org).createFinancialTransaction({ reference: "ORPHAN-INVOICE-CLAIM", description: "An unattached source journal must be rejected",
+      occurredAt: new Date(), idempotencyKey: randomUUID(), createdBy: f.account.id, postings: original.postings.map(posting => ({ ledgerAccountId: posting.ledgerAccountId,
+        side: posting.side as "DEBIT" | "CREDIT", amount: Money.of(posting.amount.toString(), posting.currency), bucket: posting.bucket!, dimensions: posting.dimensions as Record<string, unknown> })) }))).rejects.toThrow(/actual atomic recognized cost source/iu);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+  });
+  it("shifts only the closed calendar source with an actual period adjustment and no duplicate expense", async () => {
+    const f = await invoiceRecognitionFixture({ occurredOn: "2026-10-01" });
+    await closeAccountingPeriod(f.ctx, { month: "2026-09", expectedVersion: 0, idempotencyKey: randomUUID(), reason: "Close the actual original company cost period" }, { db });
+    await expect(recognizeSupplierInvoice(f.ctx, f.command, { db })).rejects.toBeInstanceOf(AccountingPeriodClosedError);
+    expect(await withTenant(db, f.org, tx => tx.supplierInvoiceRecognition.count())).toBe(0);
+    const result = await recognizeSupplierInvoice(f.ctx, { ...f.command, currentPeriod: true }, { db });
+    await withTenant(db, f.org, async tx => {
+      const links = await tx.supplierInvoiceRecognitionLine.findMany({ where: { recognitionId: result.recognitionId }, include: { invoiceLine: true, transaction: true, periodAdjustment: true } });
+      const company = links.find(link => !link.invoiceLine.propertyId)!, property = links.find(link => link.invoiceLine.propertyId)!;
+      expect(company.sourceOccurredAt.toISOString()).toBe("2026-09-30T22:00:00.000Z"); expect(company.periodAdjustment?.invoiceRecognitionLineId).toBe(company.id);
+      expect(company.periodAdjustment?.expenseId).toBeNull(); expect(company.transaction.occurredAt.getUTCMonth()).toBe(new Date().getUTCMonth());
+      expect(property.sourceOccurredAt.toISOString()).toBe("2026-10-01T07:00:00.000Z"); expect(property.transaction.occurredAt).toEqual(property.sourceOccurredAt);
+      expect(property.periodAdjustment).toBeNull(); expect(await tx.expense.count()).toBe(0);
+    });
+  });
+  it("requires a genuine closed source for a current-period override", async () => {
+    const f = await invoiceRecognitionFixture();
+    await expect(recognizeSupplierInvoice(f.ctx, { ...f.command, currentPeriod: true }, { db })).rejects.toBeInstanceOf(SupplierInvoiceConflictError);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(0);
+  });
+  it("isolates actual recognition sources and claim history by tenant", async () => {
+    const f = await invoiceRecognitionFixture(), other = await invoiceRecognitionFixture();
+    await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    await expect(recognizeSupplierInvoice(other.ctx, f.command, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    expect(await withTenant(db, other.org, tx => tx.supplierInvoiceRecognition.findMany({ where: { organizationId: f.org } }))).toEqual([]);
+    expect(await withTenant(db, other.org, tx => tx.supplierInvoiceRecognitionLine.findMany({ where: { organizationId: f.org } }))).toEqual([]);
+  });
+  it("enforces complete atomic recognition and append-only source-to-journal links in PostgreSQL", async () => {
+    const f = await invoiceRecognitionFixture();
+    await expect(withTenant(db, f.org, tx => tx.supplierInvoiceRecognition.create({ data: { organizationId: f.org, invoiceId: f.invoice.id, submissionId: f.submitted.submissionId,
+      invoiceVersion: f.submitted.version, idempotencyKey: randomUUID(), requestFingerprint: "a".repeat(64), reason: "No journal or source audit must fail", createdBy: f.account.id } }))).rejects.toThrow(/atomically|audit/iu);
+    const result = await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    const link = await withTenant(db, f.org, tx => tx.supplierInvoiceRecognitionLine.findFirstOrThrow({ where: { recognitionId: result.recognitionId } }));
+    for (const mutate of [
+      () => withTenant(db, f.org, tx => tx.supplierInvoiceRecognition.update({ where: { id: result.recognitionId }, data: { reason: "Rewrite the original reason" } })),
+      () => withTenant(db, f.org, tx => tx.supplierInvoiceRecognition.delete({ where: { id: result.recognitionId } })),
+      () => withTenant(db, f.org, tx => tx.supplierInvoiceRecognitionLine.update({ where: { id: link.id }, data: { sourceOccurredAt: new Date() } })),
+      () => withTenant(db, f.org, tx => tx.supplierInvoiceRecognitionLine.delete({ where: { id: link.id } }))
+    ]) await expect(mutate()).rejects.toThrow(/immutable|append|modif|delet/iu);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+  });
+  it("recognizes all 500 actual cent-sized cost lines without truncation or physical money", async () => {
+    const f = await invoiceRecognitionFixture({ companyLines: 500 }), result = await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    expect(result.transactionIds).toHaveLength(500);
+    await withTenant(db, f.org, async tx => {
+      expect(await tx.supplierInvoiceRecognitionLine.count()).toBe(500); expect(await tx.financialTransaction.count()).toBe(500); expect(await tx.posting.count()).toBe(1000);
+      expect((await new SupplierPayableRepository(tx, f.org).outstanding({ supplierId: f.supplier.id, invoiceId: f.invoice.id, currency: "MAD" })).toJSON().amount).toBe("5.00");
+      expect(await tx.ledgerAccount.count({ where: { accountType: { in: ["ASSET", "ASSET_LOCATION", "STAFF_WALLET"] } } })).toBe(0);
+    });
+  });
   it.each([false, true])("executes organization invoice automation once for company or mixed lines without inventing approvals, expenses or money (%s)", async mixed => {
     const f = await invoiceAutomationFixture({}, true, mixed);
     await expect(previewAutomation(f.actor, { ruleId: f.config.id, eventId: f.event.id }, { db })).resolves.toMatchObject({ matched: true, plans: [{ type: "create_approval_request" }] });
