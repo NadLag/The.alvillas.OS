@@ -260,7 +260,15 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
   it("pages complete actual recognition request history without fetching private caps or adding a query per request", async () => {
     const f = await invoiceRecognitionFixture(), scoped = new URL(url!); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests";
     const measured = new PrismaClient({ datasourceUrl: scoped.toString(), log: [{ emit: "event", level: "query" }] }), queries: string[] = [];
-    measured.$on("query", query => queries.push(query.query));
+    let onCommit: (() => void) | undefined;
+    measured.$on("query", query => { queries.push(query.query); if (query.query.trim() === "COMMIT") onCommit?.(); });
+    const readStatus = async (before?: string) => {
+      queries.length = 0;
+      const committed = new Promise<void>(resolve => { onCommit = resolve; });
+      const result = await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id, ...(before ? { before } : {}) }, { db: measured });
+      // Prisma query events can follow its returned transaction promise. Include the actual COMMIT in both measurements.
+      await committed; onCommit = undefined; return result;
+    };
     try {
       const recordFailedRequest = async (index: number) => {
         const request = await requestSupplierInvoiceRecognition(f.ctx, { ...f.command, idempotencyKey: randomUUID(), reason: "Actual authorized recording request " + index }, { db });
@@ -268,11 +276,11 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
         await failSupplierInvoiceRecognitionReference({ organizationId: f.org, outboxEventId: event.id }, { db });
       };
       await recordFailedRequest(0);
-      await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db: measured }); const initialCount = queries.length;
+      await readStatus(); const initialCount = queries.length;
       for (let index = 1; index < 52; index++) await recordFailedRequest(index);
-      queries.length = 0; const first = await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id }, { db: measured });
+      const first = await readStatus();
       expect(queries.length).toBe(initialCount); expect(first.history).toHaveLength(50); expect(first.next).not.toBeNull();
-      const second = await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id, before: first.next! }, { db: measured });
+      const second = await readStatus(first.next!);
       expect(second.history).toHaveLength(2); expect(new Set([...first.history, ...second.history].map(request => request.id)).size).toBe(52);
       expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(0);
     } finally { await measured.$disconnect(); }
