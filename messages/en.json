@@ -2906,6 +2906,36 @@
     "forbidden": "You no longer have access to this invoice.",
     "conflict": "The invoice changed or this supplier invoice number is already in use. Reload before saving.",
     "error": "Invoice action failed. Try again.",
-    "reload": "Reload invoice"
+    "reload": "Reload invoice",
+    "recognition": {
+      "title": "Supplier payable",
+      "description": "Record the supplier payable from the approved original costs.",
+      "recorded": "Supplier payable recorded",
+      "pending": "Recording the approved supplier payable…",
+      "notRecorded": "Supplier payable has not been recorded",
+      "costs": "{count, plural, one {# original cost} other {# original costs}}",
+      "record": "Record supplier payable",
+      "currentPeriod": "I confirm recording the closed-period costs as a reasoned adjustment in the current open period.",
+      "unavailable": "Recording is unavailable under your current permissions or accounting-period rules.",
+      "history": "Recording history",
+      "empty": "No recording requests yet.",
+      "older": "Older requests",
+      "refresh": "Refresh status",
+      "offline": "You are offline. Reconnect to record the payable or refresh its status.",
+      "states": {
+        "PENDING": "Processing",
+        "SUCCEEDED": "Recorded",
+        "DENIED": "Access no longer available",
+        "CONFLICT": "Review required",
+        "FAILED": "Could not complete"
+      },
+      "failures": {
+        "ACCESS_DENIED": "The required access expired or changed before recording. An authorized finance operator can review the invoice.",
+        "SOURCE_CHANGED": "The approved source or request changed. Refresh and review the invoice before trying again.",
+        "PERIOD_CLOSED": "An original posting period is closed. Review the available current-period adjustment.",
+        "POLICY_UNAVAILABLE": "A required accounting rule is unavailable. Review the finance configuration before trying again.",
+        "EXECUTION_UNAVAILABLE": "Recording could not complete. Refresh the status before submitting a new request."
+      }
+    }
   }
 }

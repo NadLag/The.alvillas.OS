@@ -8,6 +8,7 @@ import {
 } from "@/modules/owner-portal/domain/owner-statement";
 import { hashPassword } from "@/platform/auth/password";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
+import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
 
 type OwnerPortalScenario = {
   ownerEmail: string;
@@ -45,7 +46,7 @@ export async function ensureOwnerPortalScenario(input: {
   const passwordHash = await hashPassword(input.password);
   const period = defaultStatementPeriod();
   const periodStart = dateOnlyToUtc(period.from);
-  const openingDate = addUtcDays(periodStart, -2);
+  let openingDate = addUtcDays(periodStart, -2);
   const revenueDate = addUtcDays(periodStart, 1);
   const serviceDate = addUtcDays(periodStart, 2);
   const commissionDate = addUtcDays(periodStart, 3);
@@ -61,6 +62,13 @@ export async function ensureOwnerPortalScenario(input: {
 
   try {
     return await prisma.$transaction(async (tx) => {
+      const periods = new AccountingPeriodRepository(tx, bootstrapOrganizationId);
+      while (!await periods.postingOpen(openingDate)) {
+        const closed = await periods.postingPeriod(openingDate);
+        const historical = closed ? await periods.period(closed.id) : null;
+        if (!historical) throw new Error("Owner statement fixture requires an open historical period");
+        openingDate = addUtcDays(historical.startsAt, -1);
+      }
       const ownerPerson = await tx.person.create({
         data: {
           organizationId: bootstrapOrganizationId,

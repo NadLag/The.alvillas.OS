@@ -21,15 +21,16 @@ import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
 export const supplierInvoiceRecognitionInput = z.object({ id: z.uuid().transform(value => value.toLowerCase()), expectedVersion: z.number().int().positive(),
   idempotencyKey: z.uuid().transform(value => value.toLowerCase()), reason: z.string().trim().min(6).max(500), currentPeriod: z.boolean().default(false) }).strict();
 
-/** Shared admission and execution checks; this prepares actual source costs without posting money. */
-export async function prepareSupplierInvoiceRecognition(ctx: FinanceActorContext, raw: unknown, tx: TenantTransaction) {
-  const input = supplierInvoiceRecognitionInput.parse(raw);
-  const fingerprint = createHash("sha256").update(JSON.stringify({ actorId: ctx.actorId, ...input })).digest("hex");
+type RecognitionIntent = { kind: "recognize"; input: z.infer<typeof supplierInvoiceRecognitionInput>; fingerprint: string } | { kind: "inspect"; id: string };
+async function prepareRecognitionSource(ctx: FinanceActorContext, intent: RecognitionIntent, tx: TenantTransaction) {
+  const input = intent.kind === "recognize" ? intent.input : undefined;
+  const fingerprint = intent.kind === "recognize" ? intent.fingerprint : null;
+  const invoiceId = intent.kind === "recognize" ? intent.input.id : intent.id;
   const finance = new FinanceRepository(tx, ctx.organizationId), invoices = new SupplierInvoiceRepository(tx, ctx.organizationId),
     recognitions = new SupplierInvoiceRecognitionRepository(tx, ctx.organizationId), periods = new AccountingPeriodRepository(tx, ctx.organizationId);
-  await assertSupplierInvoiceAuthority(ctx, tx, "pay", await finance.clock());
-  await invoices.lock(input.id);
-  const row = await invoices.find(input.id);
+  await assertSupplierInvoiceAuthority(ctx, tx, input ? "pay" : "view", await finance.clock());
+  await invoices.lock(invoiceId);
+  const row = await invoices.find(invoiceId);
   if (!row?.currentRevision || !row.currentSubmission || row.state !== "APPROVED" || row.archivedAt || row.supplier.archivedAt ||
     row.currentSubmission.revisionId !== row.currentRevision.id) throw new SupplierInvoiceAccessError();
   const supplier = new SupplierRepository(tx, ctx.organizationId); await supplier.lock(row.supplierId);
@@ -37,13 +38,13 @@ export async function prepareSupplierInvoiceRecognition(ctx: FinanceActorContext
   const costs = supplierInvoiceRecognitionCosts({ organizationId: ctx.organizationId, invoiceId: row.id, revisionId: revision.id, supplierId: row.supplierId,
     sourceInvoiceVersion: source.sourceInvoiceVersion, occurredOn: source.occurredOn.toISOString().slice(0,10), amount: revision.amount.toString(), currency: revision.currency,
     lines: revision.lines.map(line => ({ ...line, amount: line.amount.toString() })) }, source.snapshot);
-  const existing = await recognitions.byInvoice(row.id), sameKey = await recognitions.byKey(input.idempotencyKey);
+  const existing = await recognitions.byInvoice(row.id), sameKey = input ? await recognitions.byKey(input.idempotencyKey) : null;
   const postAt = new Map<string, Date>(), adjustments = new Map<string, NonNullable<Awaited<ReturnType<AccountingPeriodRepository["postingPeriod"]>>>>();
   const closedCosts = new Set<string>(), unavailablePeriods = new Set<string>();
   const current = await finance.clock();
   if (existing) for (const line of existing.lines) postAt.set(line.invoiceLineId, line.transaction.occurredAt);
   else for (const cost of costs) {
-    if (input.currentPeriod && !await periods.postingOpen(cost.sourceOccurredAt)) {
+    if (input?.currentPeriod && !await periods.postingOpen(cost.sourceOccurredAt)) {
       closedCosts.add(cost.id); postAt.set(cost.id, current);
       const closed = await periods.postingPeriod(cost.sourceOccurredAt);
       if (!closed?.events[0]) unavailablePeriods.add(cost.id);
@@ -51,13 +52,14 @@ export async function prepareSupplierInvoiceRecognition(ctx: FinanceActorContext
     } else postAt.set(cost.id, cost.sourceOccurredAt);
   }
   const recheck = async (at: Date, checkedCosts = costs) => {
-    await assertSupplierInvoiceAuthority(ctx, tx, "pay", at);
+    await assertSupplierInvoiceAuthority(ctx, tx, input ? "pay" : "view", at);
     const actual = await invoices.recognitionSource(row.id, checkedCosts.map(cost => cost.id)), actualSupplier = await supplier.find(row.supplierId);
     if (!actual || actual.version !== row.version || actual.currentSubmissionId !== source.id || actual.currentRevisionId !== revision.id || actual.state !== "APPROVED" ||
       actual.archivedAt || !actualSupplier || actualSupplier.archivedAt || !actual.currentRevision) throw new SupplierInvoiceAccessError();
+    let reviewApproved = true;
     if (actual.currentSubmission?.approval) {
       const approval = await new ApprovalRepository(tx, ctx.organizationId).find(actual.currentSubmission.approval.id);
-      if (!approval || approval.state !== "APPROVED" || approval.financialStages.some(stage => stage.state !== "APPROVED")) throw new SupplierInvoiceConflictError();
+      reviewApproved = Boolean(approval && approval.state === "APPROVED" && approval.financialStages.every(stage => stage.state === "APPROVED"));
     }
     const reservations = await invoices.reservations([...new Set(checkedCosts.flatMap(cost => cost.reservationId ? [cost.reservationId] : []))]);
     const checks: Parameters<typeof recheckFinanceAuthorization>[3][number][] = [];
@@ -65,12 +67,16 @@ export async function prepareSupplierInvoiceRecognition(ctx: FinanceActorContext
       const line = actual.currentRevision.lines.find(line => line.id === cost.id), postingAt = postAt.get(cost.id);
       if (!line || line.propertyId && (!line.property || line.property.archivedAt) || !postingAt) throw new SupplierInvoiceAccessError();
       const invoice = supplierInvoiceCostResource(ctx.organizationId, actual, line, Money.of(revision.amount.toString(), revision.currency), source.occurredOn.toISOString().slice(0,10), cost.timezone, cost.sourceOccurredAt);
-      const financial = { ...invoice, type: "financial_transaction", id: undefined, financialRecordId: undefined, amount: cost.amount.toJSON().amount };
-      checks.push({ action: "view", resource: invoice, organizationOnly: !line.propertyId }, { action: "pay", resource: invoice, organizationOnly: !line.propertyId },
-        { action: "view", resource: financial, organizationOnly: !line.propertyId },
+      const recognized = existing?.lines.find(link => link.invoiceLineId === cost.id);
+      const identity = input ? undefined : recognized?.transactionId;
+      const financial = { ...invoice, type: "financial_transaction", id: identity, financialRecordId: identity, amount: cost.amount.toJSON().amount };
+      checks.push({ action: "view", resource: invoice, organizationOnly: !line.propertyId }, { action: "view", resource: financial, organizationOnly: !line.propertyId });
+      if (input) checks.push({ action: "pay", resource: invoice, organizationOnly: !line.propertyId },
         { action: "create", resource: { ...financial, occurredAt: postingAt }, organizationOnly: !line.propertyId });
+      else if (recognized && postingAt.getTime() !== cost.sourceOccurredAt.getTime())
+        checks.push({ action: "view", resource: { ...financial, occurredAt: postingAt }, organizationOnly: !line.propertyId });
       const adjustment = existing?.lines.find(link => link.invoiceLineId === cost.id)?.periodAdjustment;
-      if (closedCosts.has(cost.id) || adjustment) checks.push({ action: "override", resource: financial, organizationOnly: !line.propertyId });
+      if (input && (closedCosts.has(cost.id) || adjustment)) checks.push({ action: "override", resource: financial, organizationOnly: !line.propertyId });
       if (line.reservationId) {
         const reservation = reservations.find(reservation => reservation.id === line.reservationId);
         if (!reservation || reservation.propertyId !== line.propertyId) throw new SupplierInvoiceAccessError();
@@ -79,13 +85,24 @@ export async function prepareSupplierInvoiceRecognition(ctx: FinanceActorContext
       }
     }
     await recheckFinanceAuthorization(ctx, tx, at, checks, new SupplierInvoiceAccessError());
+    if (!reviewApproved) throw new SupplierInvoiceConflictError();
   };
   await recheck(await finance.clock());
-  if (existing || sameKey) {
+  if (input && (existing || sameKey)) {
     if (!existing || sameKey?.id !== existing.id || existing.requestFingerprint !== fingerprint || existing.createdBy !== ctx.actorId) throw new SupplierInvoiceConflictError();
-  } else if (row.version !== input.expectedVersion) throw new SupplierInvoiceConflictError();
-  if (!existing && input.currentPeriod && (!adjustments.size || unavailablePeriods.size)) throw new SupplierInvoiceConflictError();
-  return { input, fingerprint, finance, invoices, recognitions, row, source, revision, costs, existing, postAt, adjustments, recheck };
+  } else if (input && row.version !== input.expectedVersion) throw new SupplierInvoiceConflictError();
+  if (!existing && input?.currentPeriod && (!adjustments.size || unavailablePeriods.size)) throw new SupplierInvoiceConflictError();
+  return { finance, invoices, recognitions, row, source, revision, costs, existing, postAt, adjustments, recheck };
+}
+
+/** Shared command checks; inspecting a source never grants posting authority. */
+export async function prepareSupplierInvoiceRecognition(ctx: FinanceActorContext, raw: unknown, tx: TenantTransaction) {
+  const input = supplierInvoiceRecognitionInput.parse(raw);
+  const fingerprint = createHash("sha256").update(JSON.stringify({ actorId: ctx.actorId, ...input })).digest("hex");
+  return { ...await prepareRecognitionSource(ctx, { kind: "recognize", input, fingerprint }, tx), input, fingerprint };
+}
+export async function inspectSupplierInvoiceRecognitionSource(ctx: FinanceActorContext, id: string, tx: TenantTransaction) {
+  return prepareRecognitionSource(ctx, { kind: "inspect", id: z.uuid().parse(id) }, tx);
 }
 
 /** All actual approved costs become supplier claims atomically, without moving physical money. */

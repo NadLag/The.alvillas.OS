@@ -9,11 +9,18 @@ import { getSupplierInvoice, SupplierInvoiceAccessError } from "@/modules/financ
 import { requireSupplierInvoiceAccess } from "@/modules/finance/ui/supplier-invoice-access";
 import { SupplierInvoiceArchiveForm } from "@/modules/finance/ui/supplier-invoice-form";
 import { SupplierInvoiceSubmissionForm } from "@/modules/finance/ui/supplier-invoice-submission-form";
+import { SupplierInvoiceRecognitionPanel } from "@/modules/finance/ui/supplier-invoice-recognition-panel";
+import { getSupplierInvoiceRecognitionStatus } from "@/modules/finance/application/supplier-invoice-recognition-status";
 export default async function Page({ params, searchParams }: { params: Promise<{ locale: string; invoiceId: string }>; searchParams: Promise<{ revision?: string; before?: string }> }) {
   const values = await params, locale = safeLocale(values.locale); setRequestLocale(locale); const t = await getTranslations("SupplierInvoices"), query = await searchParams, actor = await requireSupplierInvoiceAccess(locale); let invoice;
   try { invoice = await getSupplierInvoice(actor, values.invoiceId, { revisionId: query.revision, beforeVersion: query.before === undefined ? undefined : z.coerce.number().int().nonnegative().parse(query.before) }); }
   catch (error) { if (error instanceof SupplierInvoiceAccessError || error instanceof z.ZodError) notFound(); throw error; }
   const path = `/${locale}/app/finance/supplier-invoices/${invoice.id}`, historical = invoice.revisionId !== invoice.currentRevisionId;
+  let recognition = null;
+  if (!historical && invoice.state === "APPROVED") {
+    try { recognition = await getSupplierInvoiceRecognitionStatus(actor, { id: invoice.id }); }
+    catch (error) { if (!(error instanceof SupplierInvoiceAccessError)) throw error; }
+  }
   const date = (value: string) => formatDate(locale, new Date(value + "T00:00:00.000Z"), { timeZone: "UTC" });
   return <AdminShell className="resource-page supplier-page invoice-page" testId="supplier-invoice-detail"><ShellHeader eyebrow={invoice.reference} title={invoice.invoiceNumber} subtitle={invoice.supplierName} actions={<>{invoice.canEdit && !historical ? <Link className="primary-button" data-testid="invoice-edit" href={path + "/edit"}>{t("edit")}</Link> : null}<Link className="secondary-button" href={`/${locale}/app/finance/supplier-invoices`}>{t("backList")}</Link></>} />
     <span className="status-badge" data-testid="invoice-state">{invoice.archived ? t("archived") : t(`states.${invoice.state}`)}</span>{historical ? <p data-testid="invoice-historical">{t("historical")} <Link href={path} prefetch={false}>{t("returnCurrent")}</Link></p> : null}
@@ -23,6 +30,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
     {invoice.historyNext !== undefined ? <Link href={path + "?before=" + invoice.historyNext + (historical ? "&revision=" + invoice.revisionId : "")} prefetch={false}>{t("previousHistory")}</Link> : null}
     {invoice.approvalId && !historical ? <Link className="secondary-button" data-testid="invoice-approval-link" href={`/${locale}/app/approvals/${invoice.approvalId}`}>{t("viewApproval")}</Link> : null}
     {invoice.canSubmit && !historical ? <SupplierInvoiceSubmissionForm key={`submission-${invoice.version}`} invoice={invoice} locale={locale} /> : null}
+    {recognition ? <SupplierInvoiceRecognitionPanel key={invoice.id} initial={recognition} locale={locale} /> : null}
     {invoice.canArchive && !historical ? <SupplierInvoiceArchiveForm key={invoice.version} invoice={invoice} /> : null}
   </AdminShell>;
 }
