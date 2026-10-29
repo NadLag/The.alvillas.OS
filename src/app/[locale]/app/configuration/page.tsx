@@ -10,6 +10,7 @@ import {
   getConfigAdminModel
 } from "@/modules/config/application/config-service";
 import { ConfigHistoryFilter, ConfigRuleAdmin } from "@/modules/config/ui/config-rule-admin";
+import { ConfigPropertySelect } from "@/modules/config/ui/config-property-select";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -119,17 +120,8 @@ export default async function ConfigurationPage({
                 <option value="property">{t("form.scopeProperty")}</option>
               </select>
             </label>
-            <label className="field">
-              <span>{t("form.scopeId")}</span>
-              <select name="scopeId" defaultValue={searchValue(query.scopeId) ?? ""}>
-                <option value="">{t("form.scopeOrganization")}</option>
-                {model.properties.map((property) => (
-                  <option key={property.id} value={property.id}>
-                    {property.name} - {property.city}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ConfigPropertySelect properties={model.properties} name="scopeId" label={t("form.scopeId")} initialValue={searchValue(query.scopeId) ?? ""}
+              emptyLabel={t("form.scopeOrganization")} testId="config-preview-scope-id" />
             <label className="field">
               <span>{t("form.asOf")}</span>
               <input name="asOf" type="datetime-local" defaultValue={searchValue(query.asOf) ?? ""} />

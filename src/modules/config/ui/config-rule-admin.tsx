@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useMemo, useState } from "react";
+import { memo, useActionState, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { z } from "zod";
 import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import { StatusBadge } from "@/design-system/shells";
@@ -13,6 +14,7 @@ import {
 import type { ConfigAdminModel, ConfigRuleView } from "@/modules/config/application/config-service";
 import { formatDateTime } from "@/i18n/format";
 import { safeLocale } from "@/i18n/routing";
+import { ConfigPropertySelect } from "./config-property-select";
 
 type ConfigLabels = {
   createTitle: string;
@@ -66,9 +68,8 @@ export function ConfigHistoryFilter({ properties, keys, initial, labels }: {
     <label className="field"><span>{labels.scope}</span><select name="ruleScopeType" value={scope} onChange={event => setScope(event.target.value)}>
       <option value="">{labels.allScopes}</option><option value="organization">{labels.organization}</option><option value="property">{labels.property}</option>
     </select></label>
-    <label className="field"><span>{labels.property}</span><select name="ruleScopeId" disabled={scope !== "property"} defaultValue={initial.scopeId}>
-      <option value="">{labels.allProperties}</option>{properties.map(property => <option key={property.id} value={property.id}>{property.name} - {property.city}</option>)}
-    </select></label><button className="secondary-button" type="submit">{labels.find}</button>
+    <ConfigPropertySelect properties={properties} name="ruleScopeId" label={labels.property} disabled={scope !== "property"} initialValue={initial.scopeId}
+      emptyLabel={labels.allProperties} testId="config-history-scope-id" /><button className="secondary-button" type="submit">{labels.find}</button>
   </form>;
 }
 
@@ -159,7 +160,7 @@ function LifecycleActionForm({
   );
 }
 
-function RuleRow({
+const RuleRow = memo(function RuleRow({
   rule,
   locale,
   labels
@@ -207,7 +208,7 @@ function RuleRow({
       ) : null}
     </article>
   );
-}
+});
 
 export function ConfigRuleAdmin({
   locale,
@@ -218,10 +219,14 @@ export function ConfigRuleAdmin({
   model: ConfigAdminModel;
   labels: ConfigLabels;
 }) {
+  const router = useRouter();
   const [state, formAction, pending] = useActionState(
     createConfigRuleAction.bind(null, locale),
     initialState
   );
+  useEffect(() => {
+    if (state.status === "success") router.refresh();
+  }, [state, router]);
   const defaultKey = model.catalogKeys[0] ?? "finance.commission";
   const [selectedKey, setSelectedKey] = useState(defaultKey);
   const [scopeType, setScopeType] = useState("organization");
@@ -307,24 +312,12 @@ export function ConfigRuleAdmin({
             </label>
           </div>
           {scopeType === "property" ? (
-            <label className="field">
-              <span>{labels.scopeId}</span>
-              <select
-                data-testid="config-rule-scope-id"
-                disabled={!hasProperties}
-                name="scopeId"
-                required={scopeType === "property"}
-                defaultValue={model.properties[0]?.id ?? ""}
-              >
-                {model.properties.map((property) => (
-                  <option key={property.id} value={property.id}>
-                    {property.name} - {property.city}
-                  </option>
-                ))}
-              </select>
+            <div className="field">
+              <ConfigPropertySelect properties={model.properties} name="scopeId" label={labels.scopeId} disabled={!hasProperties}
+                required initialValue={model.properties[0]?.id ?? ""} testId="config-rule-scope-id" />
               {!hasProperties ? <p className="field-hint">{labels.noProperties}</p> : null}
               <FieldError state={state} name="scopeId" />
-            </label>
+            </div>
           ) : null}
           <label className="field">
             <span>{labels.lifecycle}</span>

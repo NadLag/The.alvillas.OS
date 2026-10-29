@@ -63,11 +63,10 @@ function actionErrorState(error: unknown): ConfigFormState {
 }
 
 export async function createConfigRuleAction(
-  locale: string,
+  _locale: string,
   _state: ConfigFormState,
   formData: FormData
 ): Promise<ConfigFormState> {
-  const appLocale = safeLocale(locale);
   const session = await auth();
   const ctx = await configActorContextFromSession(session);
 
@@ -97,7 +96,8 @@ export async function createConfigRuleAction(
     return actionErrorState(error);
   }
 
-  revalidatePath(`/${appLocale}/app/configuration`);
+  // The dynamic configuration page refreshes after the success state commits.
+  // Bundling its entire property roster here would delay confirmation of a saved rule.
   return { status: "success", messageKey: "created" };
 }
 

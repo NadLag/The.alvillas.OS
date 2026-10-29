@@ -278,6 +278,7 @@ describe("operations on real PostgreSQL", () => {
     await withTenant(db, f.org, async tx => {
       for (let offset = 0; offset < 4000; offset += 500) await tx.property.createMany({ data: Array.from({ length: 500 }, (_, index) => ({
         organizationId: f.org, name: `Actual assignment roster ${offset + index}`, addressLine1: "Local scale acceptance", city: "Marrakech",
+        timezone: index % 2 ? "Europe/Paris" : "Asia/Tokyo",
         propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [], photoUrls: [] })) });
     }, { timeout: 120000 });
     const task = await createOperationTask(f.ctx, input(f), deps()), candidate = await createOperationTask(f.ctx, input(f), deps());
@@ -287,6 +288,9 @@ describe("operations on real PostgreSQL", () => {
     expect(options.swapTasks.map(row => row.id)).toEqual([candidate.id]);
     const choices = await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).listPropertyScopeOptions());
     expect(choices).toHaveLength(4001); expect(choices.some(property => property.id === f.property.id)).toBe(true);
+    const readiness = await operationReadiness(f.ctx, deps());
+    expect(readiness).toHaveLength(4001); expect(new Set(readiness.map(row => row.propertyId)).size).toBe(4001);
+    expect(readiness.some(row => row.propertyId === f.property.id)).toBe(true);
   });
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname))
