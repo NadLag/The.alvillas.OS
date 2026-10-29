@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
-import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
+import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { authorize, type Action, type AuthContext } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import { present, catalogFieldPolicy } from "@/platform/authz/present";
@@ -15,18 +14,11 @@ import { ExpenseRepository } from "../infrastructure/expense-repository";
 import { SupplierInvoiceRepository, type SupplierInvoiceRecord } from "../infrastructure/supplier-invoice-repository";
 import { createSupplierInvoiceInput, updateSupplierInvoiceInput, archiveSupplierInvoiceInput, supplierInvoiceFilters, supplierInvoiceHistoryInput, canonicalSupplierInvoiceFields, type SupplierInvoiceFields } from "../domain/supplier-invoice";
 import type { FinanceActorContext } from "./finance-access";
+import { SupplierInvoiceAccessError, assertSupplierInvoiceAuthority as authority, supplierInvoiceOrganizationResource as resource } from "./supplier-invoice-access";
+export { SupplierInvoiceAccessError } from "./supplier-invoice-access";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
-export class SupplierInvoiceAccessError extends Error {}
 export class SupplierInvoiceConflictError extends Error {}
-const resource = (organizationId: string) => ({ type: "supplier_invoice", organizationId, dataClass: "financial" as const });
-async function authority(ctx: FinanceActorContext, tx: TenantTransaction, action: Action, now: Date) {
-  if (ctx.actorId !== ctx.authContext.userAccountId || ctx.organizationId !== ctx.authContext.organizationId) throw new SupplierInvoiceAccessError();
-  const current = await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId);
-  if (![ctx.authContext, current].every(auth => ["view" as const, action].every(verb => authorizeOrganizationSource(auth, verb, resource(ctx.organizationId), now)) &&
-    authorizeOrganizationSource(auth, "view", { type: "supplier", organizationId: ctx.organizationId, dataClass: "personal" }, now))) throw new SupplierInvoiceAccessError();
-  return current;
-}
 export async function assertSupplierInvoiceAccess(ctx: FinanceActorContext, action: Action = "view", deps: Deps = {}) {
   await withTenant(deps.db ?? prisma, ctx.organizationId, async tx => authority(ctx, tx, action, await new FinanceRepository(tx, ctx.organizationId).clock()));
 }

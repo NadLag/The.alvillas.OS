@@ -4,7 +4,7 @@ import { nextReferenceNumber } from "@/platform/references/reference-number";
 import { supplierInvoiceTotal, type SupplierInvoiceFields } from "../domain/supplier-invoice";
 import { SupplierPayableRepository } from "./supplier-payable-repository";
 
-const revision = { lines: { orderBy: { position: "asc" as const }, include: { property: { select: { id: true, name: true, cityId: true, regionId: true } }, reservation: { select: { reference: true, status: true, createdBy: true } } } } } satisfies Prisma.SupplierInvoiceRevisionInclude;
+const revision = { lines: { orderBy: { position: "asc" as const }, include: { property: { select: { id: true, name: true, cityId: true, regionId: true, timezone: true, archivedAt: true } }, reservation: { select: { reference: true, status: true, createdBy: true } } } } } satisfies Prisma.SupplierInvoiceRevisionInclude;
 const include = { supplier: { select: { id: true, reference: true, displayName: true, archivedAt: true } }, currentRevision: { include: revision } } satisfies Prisma.SupplierInvoiceInclude;
 export class SupplierInvoiceRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
