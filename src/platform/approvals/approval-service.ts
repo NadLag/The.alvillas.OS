@@ -3,6 +3,7 @@ import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { ExpenseRepository } from "@/modules/finance/infrastructure/expense-repository";
+import { recheckFinanceAuthorization } from "@/modules/finance/application/finance-access";
 import { authorize } from "@/platform/authz/authorize";
 import { present } from "@/platform/authz/present";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
@@ -16,14 +17,21 @@ type Approval = NonNullable<Awaited<ReturnType<ApprovalRepository["find"]>>>;
 async function currentFinancialActor(actor: NotificationActor, tx: TenantTransaction) {
   return { ...actor, authContext: await authContextForAccountInTransaction(tx, actor.organizationId, actor.accountId) };
 }
+async function assertFinancialDecision(actor: NotificationActor, row: Approval, stage: Approval["financialStages"][number],
+  action: "approve" | "reject", tx: TenantTransaction, repository: ApprovalRepository) {
+  const now = await repository.clock();
+  if (!stage.recipients.some(recipient => recipient.userAccountId === actor.accountId) ||
+    !await new NotificationRepository(tx, actor.organizationId).activeRecipient(actor.accountId)) throw new ApprovalAccessError();
+  const resource = approvalResource(row, stage.ownerId);
+  await recheckFinanceAuthorization({ organizationId: actor.organizationId, actorId: actor.accountId, authContext: actor.authContext }, tx, now,
+    [{ action: "view", resource }, { action, resource }], new ApprovalAccessError());
+  return now;
+}
 async function decideFinancial(actor: NotificationActor, input: z.infer<typeof approvalDecisionSchema>, row: Approval,
   tx: TenantTransaction, repository: ApprovalRepository, deps: Deps) {
-  const now = await repository.clock(); actor = await currentFinancialActor(actor, tx);
   const stage = row.financialStages.find(stage => stage.id === input.stageId), action = input.decision === "APPROVED" ? "approve" : "reject";
-  if (!row.expense || !stage || !stage.recipients.some(recipient => recipient.userAccountId === actor.accountId) ||
-    !await new NotificationRepository(tx, actor.organizationId).activeRecipient(actor.accountId) ||
-    !authorize(actor.authContext, "view", approvalResource(row, stage.ownerId), now) ||
-    !authorize(actor.authContext, action, approvalResource(row, stage.ownerId), now)) throw new ApprovalAccessError();
+  if (!row.expense || !stage) throw new ApprovalAccessError();
+  const now = await assertFinancialDecision(actor, row, stage, action, tx, repository);
   if (stage.state !== "PENDING") {
     if (stage.state === input.decision && stage.decidedBy === actor.accountId && stage.decisionReason === input.reason) return;
     throw new ApprovalConflictError();
@@ -31,6 +39,7 @@ async function decideFinancial(actor: NotificationActor, input: z.infer<typeof a
   if (row.state !== "PENDING" || row.expense.state !== "PENDING_APPROVAL" ||
     row.financialStages.find(stage => stage.state === "PENDING")?.id !== stage.id) throw new ApprovalConflictError();
   if ((await repository.decideStage(stage.id, input.decision, actor.accountId, input.reason, now)).count !== 1) throw new ApprovalConflictError();
+  await assertFinancialDecision(actor, row, stage, action, tx, repository);
   await writeAuditEvent(tx, { organizationId: actor.organizationId, actorId: actor.accountId, action: "expense.approval_stage_decided", resourceType: "expense",
     resourceId: row.expense.id, propertyScopeId: row.propertyId, before: { stageId: stage.id, position: stage.position, state: stage.state },
     after: { stageId: stage.id, position: stage.position, state: input.decision, amount: row.expense.amount.toFixed(2), currency: row.expense.currency },
@@ -39,6 +48,7 @@ async function decideFinancial(actor: NotificationActor, input: z.infer<typeof a
   await repository.resolveNotifications(row.id, input.decision, now);
   if (next) {
     await new NotificationRepository(tx, actor.organizationId).publish({ kind: "approval_requested", recipientId: actor.accountId, targetId: row.id }, `approval:${row.id}:stage:${next.id}:requested`);
+    await assertFinancialDecision(actor, row, stage, action, tx, repository);
     return;
   }
   for (const later of row.financialStages.filter(candidate => candidate.position > stage.position && candidate.state === "PENDING"))
@@ -50,6 +60,7 @@ async function decideFinancial(actor: NotificationActor, input: z.infer<typeof a
     resourceType: "expense", resourceId: row.expense.id, propertyScopeId: row.propertyId, before: { state: row.expense.state }, after: { state: input.decision, approvalId: row.id },
     reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now });
   await new NotificationRepository(tx, actor.organizationId).publish({ kind: "approval_decided", recipientId: row.requestedBy, targetId: row.id }, `approval:${row.id}:decided`);
+  await assertFinancialDecision(actor, row, stage, action, tx, repository);
 }
 function assertActor(actor: NotificationActor) {
   if (actor.authContext.organizationId !== actor.organizationId || actor.authContext.userAccountId !== actor.accountId) throw new ApprovalAccessError();
@@ -90,19 +101,22 @@ export async function requestApproval(actor: NotificationActor, raw: unknown, de
 export async function getApproval(actor: NotificationActor, id: string, deps: Deps = {}) {
   z.string().uuid().parse(id); assertActor(actor);
   return withTenant(deps.db ?? prisma, actor.organizationId, async (tx) => {
-    const row = await new ApprovalRepository(tx, actor.organizationId).find(id);
+    const repository = new ApprovalRepository(tx, actor.organizationId), row = await repository.find(id);
     if (!row) throw new ApprovalAccessError();
-    if (row.expenseId) actor = await currentFinancialActor(actor, tx);
+    const authorities = row.expenseId ? [actor.authContext, (await currentFinancialActor(actor, tx)).authContext] : [actor.authContext];
+    const now = await repository.clock();
+    const allowed = (action: "view" | "approve" | "reject", ownerId?: string | null) =>
+      authorities.every(authority => authorize(authority, action, approvalResource(row, ownerId), now));
     const active = row.financialStages.find(stage => stage.state === "PENDING");
-    const own = row.financialStages.find(stage => stage.recipients.some(recipient => recipient.userAccountId === actor.accountId) && authorize(actor.authContext, "view", approvalResource(row, stage.ownerId)));
+    const own = row.financialStages.find(stage => stage.recipients.some(recipient => recipient.userAccountId === actor.accountId) && allowed("view", stage.ownerId));
     const source = approvalResource(row, own?.ownerId ?? active?.ownerId);
-    if (!await new NotificationRepository(tx, actor.organizationId).activeRecipient(actor.accountId) || !authorize(actor.authContext, "view", source)) throw new ApprovalAccessError();
+    if (!await new NotificationRepository(tx, actor.organizationId).activeRecipient(actor.accountId) || !allowed("view", own?.ownerId ?? active?.ownerId)) throw new ApprovalAccessError();
     const selected = row.expenseId ? Boolean(active?.recipients.some(recipient => recipient.userAccountId === actor.accountId)) : row.recipients.some((recipient) => recipient.userAccountId === actor.accountId);
     const data = { id: row.id, propertyName: row.property.name, title: row.title, details: row.details, state: row.state, decisionReason: row.decisionReason,
       financial: row.expense ? { amount: row.expense.amount.toFixed(2), currency: row.expense.currency, category: row.expense.category, occurredOn: row.expense.occurredOn.toISOString().slice(0,10) } : null,
       stageId: active?.id,
-      canApprove: row.state === "PENDING" && selected && authorize(actor.authContext, "approve", approvalResource(row, active?.ownerId)),
-      canReject: row.state === "PENDING" && selected && authorize(actor.authContext, "reject", approvalResource(row, active?.ownerId)) };
+      canApprove: row.state === "PENDING" && selected && allowed("approve", active?.ownerId),
+      canReject: row.state === "PENDING" && selected && allowed("reject", active?.ownerId) };
     return present({ ...actor.authContext, visibleDataClasses: new Set() }, "view", { ...source, data }, {}) as typeof data;
   });
 }
