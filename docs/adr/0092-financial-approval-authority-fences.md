@@ -1,0 +1,7 @@
+# 0092 — Financial approvals preserve caller restrictions across lock waits
+
+Supplier invoice approvals reuse the existing shared financial approval service. Its expense adapter previously replaced the supplied authorization context with current stored grants. That replacement could restore a permission, scope or amount condition the caller had removed. A stage update could also wait on an actual PostgreSQL row after its last authorization check and then commit after the reviewer lost access.
+
+Reads and decision controls now require both the original caller context and current database grants, evaluated against the database clock and actual financial resource. Decisions reuse `recheckFinanceAuthorization()` before mutation, after the stage write and after all source, audit and outbox writes. The last fence also covers a wait on the expense transition. The selected recipient and active account are checked again at each fence. A denied fence rolls back the complete transaction, including any earlier stage decision, source transition, audit and event.
+
+Real PostgreSQL regressions reproduce the former caller-permission, scope and amount-condition failures and both approval and rejection after a held stage row is released. Additional regressions revoke access while the final expense row is held. Existing stage order, immutable snapshots, audit attribution, idempotent replay and financial history remain unchanged. No schema or applied migration changes are required.

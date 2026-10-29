@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant, type TenantTransaction } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
@@ -66,6 +66,41 @@ describe("monthly accounting locks on real PostgreSQL", () => {
     const scoped = new URL(target); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
+
+  it.each(["CLOSE", "REOPEN"] as const)("holds the selected policy against a concurrent configuration replacement through the actual %s write", async operation => {
+    const f = await fixture();
+    const closed = operation === "REOPEN" ? await closeAccountingPeriod(f.ctx, f.input, { db }) : null;
+    const oldPolicy = await withTenant(db, f.org, tx => new AccountingPeriodRepository(tx, f.org).policy(new Date()));
+    let release!: () => void, selected!: () => void, writerStarted!: () => void, writerPid = 0;
+    const gate = new Promise<void>(resolve => release = resolve), ready = new Promise<void>(resolve => selected = resolve), writing = new Promise<void>(resolve => writerStarted = resolve);
+    const original = Object.getOwnPropertyDescriptor(AccountingPeriodRepository.prototype, "policy")?.value as AccountingPeriodRepository["policy"];
+    const hook = vi.spyOn(AccountingPeriodRepository.prototype, "policy").mockImplementation(async function (this: AccountingPeriodRepository, now) {
+      const policy = await original.call(this, now); if (policy?.id === oldPolicy!.id) { selected(); await gate; } return policy;
+    });
+    const pending = (closed ? reopenAccountingPeriod(f.ctx, { periodId: closed.id, expectedVersion: 1, durationSeconds: 30,
+      reason: "Concurrent policy update preserves the selected reopening", idempotencyKey: randomUUID() }, { db }) : closeAccountingPeriod(f.ctx, f.input, { db }))
+      .then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error: error as unknown }));
+    await ready;
+    const replacement = withTenant(db, f.org, async tx => {
+      const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; writerPid = row.pid; writerStarted();
+      return new ConfigRuleRepository(tx, f.org).createVersion({ key: accountingPeriodPolicyKey, scopeType: "organization", scopeId: null,
+        effectiveFrom: new Date("2020-01-01"), reason: "Concurrent configured accounting policy replacement", value: { timezone: "Europe/Paris", allow_early_close: false, max_reopen_seconds: 45 } });
+    }).then(value => ({ ok: true as const, value }), error => ({ ok: false as const, error: error as unknown }));
+    try {
+      await writing;
+      await expect.poll(async () => {
+        const [row] = await admin.$queryRaw<Array<{ blocked: boolean }>>`SELECT cardinality(pg_blocking_pids(${writerPid}::integer))>0 AS blocked`;
+        return row.blocked;
+      }).toBe(true);
+    } finally { release(); hook.mockRestore(); }
+    const [result, changed] = await Promise.all([pending, replacement]);
+    expect(result.ok).toBe(true); if (!result.ok) throw result.error;
+    expect(changed.ok).toBe(true); if (!changed.ok) throw changed.error;
+    expect(changed.value.id).not.toBe(oldPolicy!.id);
+    const detail = await getAccountingPeriod(f.ctx, result.value.id, undefined, { db });
+    expect(detail.latest!.policyRuleId).toBe(oldPolicy!.id); expect(detail.rows).toHaveLength(closed ? 2 : 1);
+    expect(detail.state).toBe(closed ? "REOPENED" : "CLOSED");
+  });
 
   it("closes once with DST-aware boundaries, an audited complete snapshot and unchanged source rows", async () => {
     const f = await fixture(), original = await withTenant(db, f.org, tx => post(tx, f));
