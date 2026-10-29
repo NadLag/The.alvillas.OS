@@ -30,7 +30,7 @@ export default async function Page({ params, searchParams }: { params: Promise<{
     {invoice.historyNext !== undefined ? <Link href={path + "?before=" + invoice.historyNext + (historical ? "&revision=" + invoice.revisionId : "")} prefetch={false}>{t("previousHistory")}</Link> : null}
     {invoice.approvalId && !historical ? <Link className="secondary-button" data-testid="invoice-approval-link" href={`/${locale}/app/approvals/${invoice.approvalId}`}>{t("viewApproval")}</Link> : null}
     {invoice.canSubmit && !historical ? <SupplierInvoiceSubmissionForm key={`submission-${invoice.version}`} invoice={invoice} locale={locale} /> : null}
-    {recognition ? <SupplierInvoiceRecognitionPanel initial={recognition} locale={locale} /> : null}
+    {recognition ? <SupplierInvoiceRecognitionPanel key={invoice.id} initial={recognition} locale={locale} /> : null}
     {invoice.canArchive && !historical ? <SupplierInvoiceArchiveForm key={invoice.version} invoice={invoice} /> : null}
   </AdminShell>;
 }

@@ -5,6 +5,9 @@ import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
+import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
+import { closeAccountingPeriod } from "@/modules/finance/application/accounting-period-service";
+import { authContextForAccount } from "@/platform/authz/account-context";
 import { executeSupplierInvoiceRecognitionReference } from "@/modules/finance/application/supplier-invoice-recognition-requests";
 import { openFieldFixture } from "./support/field-fixture";
 import en from "../../messages/en.json" with { type: "json" };
@@ -20,6 +23,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
   test.skip(!process.env.DATABASE_URL, "Dedicated local PostgreSQL required"); test.setTimeout(240000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw Error("Dedicated local PostgreSQL required");
   const f = await openFieldFixture(page, info, "en"), suffix = randomUUID().slice(0,8), messages = { en, fr, ar }[locale].SupplierInvoices;
+  const economicDate = locale === "fr" ? "2026-09-15" : "2026-10-28";
   const anonymous = await browser.newContext({ baseURL: new URL(page.url()).origin, storageState: { cookies: [], origins: [] } }), errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   try {
@@ -40,6 +44,14 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
         reason: "Actual native recording calendar", value: { timezone: "UTC", allow_early_close: false, max_reopen_seconds: 60 } });
       return property;
     });
+    if (locale === "fr") {
+      const actor = { organizationId: f.organizationId, actorId: user.id, authContext: await authContextForAccount(f.organizationId, user.id, { db: f.db }) };
+      await withTenant(f.db, f.organizationId, async tx => {
+        const periods = new AccountingPeriodRepository(tx, f.organizationId); await periods.lock();
+        if (await periods.postingOpen(new Date("2026-09-15T12:00:00Z")))
+          await closeAccountingPeriod(actor, { month: "2026-09", expectedVersion: 0, idempotencyKey: randomUUID(), reason: "Close actual native recording source period" }, { db: { $transaction: work => work(tx) } });
+      });
+    }
     if (info.project.name === "field-mobile") await page.setViewportSize({ width: 360, height: 900 });
     const supplierName = "Actual recorded invoice supplier " + suffix, number = "INV-RECORD-" + suffix, purpose = "Actual approved original costs " + suffix;
     await page.goto(`/${locale}/app/finance/suppliers/new`); await page.getByTestId("supplier-name").fill(supplierName);
@@ -47,18 +59,24 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
     await page.getByTestId("supplier-save").click(); await expect(page.getByRole("heading", { level: 1, name: supplierName, exact: true })).toBeVisible();
     await page.goto(`/${locale}/app/finance/supplier-invoices/new`); const form = page.getByTestId("supplier-invoice-form");
     await choose(form.getByTestId("invoice-supplier-picker"), supplierName); await form.getByTestId("invoice-number").fill(number);
-    await form.getByTestId("invoice-issued").fill("2026-10-28"); await form.getByTestId("invoice-purpose").fill(purpose);
+    await form.getByTestId("invoice-issued").fill(economicDate); await form.getByTestId("invoice-purpose").fill(purpose);
     await form.getByTestId("invoice-currency").selectOption("MAD"); await choose(form.getByTestId("invoice-property-picker"), property.name);
     await form.getByTestId("invoice-line-category").fill("maintenance"); await form.getByTestId("invoice-line-amount").fill("2400.01");
     await form.getByTestId("invoice-reason").fill("Actual native original cost source"); await form.getByTestId("invoice-save").click();
     await expect(page.getByTestId("supplier-invoice-detail")).toBeVisible(); const id = new URL(page.url()).pathname.split("/").at(-1)!;
-    const submission = page.getByTestId("supplier-invoice-submission-form"); await submission.getByTestId("invoice-economic-date").fill("2026-10-28");
+    const submission = page.getByTestId("supplier-invoice-submission-form"); await submission.getByTestId("invoice-economic-date").fill(economicDate);
     await submission.getByTestId("invoice-preview-policy").click(); await expect(submission.getByTestId("invoice-policy-preview")).toBeVisible();
     await submission.getByTestId("invoice-line-review-note").fill("Actual original cost review context");
     await submission.getByTestId("invoice-submit-reason").fill("Freeze actual native recording source"); await submission.getByTestId("invoice-submit").click();
     await expect(page.getByTestId("invoice-state")).toHaveText(messages.states.APPROVED);
     const panel = page.getByTestId("invoice-recognition"); await expect(panel.getByTestId("invoice-recognition-state")).toHaveText(messages.recognition.notRecorded);
     const reason = "Record the actual approved original native claim " + suffix; await panel.getByTestId("invoice-recognition-reason").fill(reason);
+    if (locale === "fr") {
+      const confirmation = panel.getByTestId("invoice-recognition-adjustment"); await expect(confirmation).not.toBeChecked();
+      await panel.getByTestId("invoice-recognize").click(); await expect(confirmation).not.toBeChecked();
+      expect(await withTenant(f.db, f.organizationId, tx => tx.supplierInvoiceRecognitionRequest.count({ where: { invoiceId: id } }))).toBe(0);
+      await confirmation.check();
+    }
     await page.context().setOffline(true); await expect(panel.getByTestId("invoice-recognize")).toBeDisabled(); await page.context().setOffline(false);
     await expect(panel.getByTestId("invoice-recognize")).toBeEnabled();
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
@@ -102,8 +120,12 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
     await page.reload(); await expect(page.getByTestId("invoice-purpose-detail")).toHaveText(purpose); await expect(page.getByTestId("invoice-recognition")).toHaveCount(0);
     expect(await (await page.request.post(request.url(), { headers, data: request.postDataBuffer()! })).text()).toContain('"code":"forbidden"');
     await withTenant(f.db, f.organizationId, async tx => {
-      const recognition = await tx.supplierInvoiceRecognition.findFirstOrThrow({ where: { invoiceId: id }, include: { lines: { include: { transaction: { include: { postings: { include: { ledgerAccount: true } } } } } } } });
+      const recognition = await tx.supplierInvoiceRecognition.findFirstOrThrow({ where: { invoiceId: id }, include: { lines: { include: { periodAdjustment: true, transaction: { include: { postings: { include: { ledgerAccount: true } } } } } } } });
       expect(recognition.lines).toHaveLength(1); const postings = recognition.lines[0].transaction.postings;
+      if (locale === "fr") {
+        expect(recognition.lines[0].periodAdjustment).not.toBeNull();
+        expect(recognition.lines[0].transaction.occurredAt.getTime()).toBeGreaterThan(recognition.lines[0].sourceOccurredAt.getTime());
+      } else expect(recognition.lines[0].periodAdjustment).toBeNull();
       expect(postings.map(posting => posting.amount.toFixed(2))).toEqual(["2400.01", "2400.01"]);
       expect(postings.some(posting => ["ASSET", "ASSET_LOCATION", "STAFF_WALLET"].includes(posting.ledgerAccount.accountType))).toBe(false);
       expect(await tx.auditLog.count({ where: { action: "finance.supplier_invoice.recognized", resourceId: id } })).toBe(1);
