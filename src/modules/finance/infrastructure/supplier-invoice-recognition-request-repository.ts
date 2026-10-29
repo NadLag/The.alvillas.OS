@@ -18,8 +18,8 @@ export class SupplierInvoiceRecognitionRequestRepository {
     return this.tx.supplierInvoiceRecognitionRequest.create({ data: { organizationId: this.organizationId, ...input,
       authorizationCap: input.authorizationCap } });
   }
-  outcome(input: { id: string; requestId: string; state: RecognitionOutcomeState; recognitionId: string | null; failureCode: string | null }) {
-    return this.tx.supplierInvoiceRecognitionOutcome.create({ data: { organizationId: this.organizationId, ...input } });
+  async outcome(input: { id: string; requestId: string; state: RecognitionOutcomeState; recognitionId: string | null; failureCode: string | null }) {
+    return await this.tx.supplierInvoiceRecognitionOutcome.create({ data: { organizationId: this.organizationId, ...input } });
   }
   async flushGuards() { await this.tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE"); }
 }
