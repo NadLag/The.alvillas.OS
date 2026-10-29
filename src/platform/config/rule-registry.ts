@@ -159,6 +159,11 @@ export const approvalThresholdsConfigSchema = z
         .passthrough()
     ),
     routing: z.partialRecord(z.enum(["manager", "owner", "finance"]), notificationRoutingSchema).optional(),
+    revenue_source: z.discriminatedUnion("basis", [
+      z.object({ basis: z.literal("OWNER_GROSS") }).strict(),
+      z.object({ basis: z.literal("COMPANY_ACCOUNTS"), account_codes: z.array(z.string().trim().min(1).max(120)).min(1)
+        .refine(codes => new Set(codes).size === codes.length, "Revenue account codes must be distinct") }).strict()
+    ]).optional(),
     revenue_period: z.discriminatedUnion("unit", [
       z.object({ unit: z.enum(["MONTH", "YEAR", "RESERVATION"]) }).strict(),
       z.object({ unit: z.literal("ROLLING_DAYS"), days: z.number().int().positive().safe() }).strict()

@@ -34,6 +34,15 @@ export class FinanceConfigNotFoundError extends Error {
     this.name = "FinanceConfigNotFoundError";
   }
 }
+export class FinancePolicyContextChangedError extends Error {}
+
+/** Arbitrary rule conditions are not monotonic: a missing role can add or waive review. */
+export function financePolicyRoleKeys(ctx: FinanceConfigActorContext, resource: Resource, now: Date, authorities: readonly AuthContext[] = []) {
+  const roles = roleKeysForResource(ctx.authContext, resource, now), signature = JSON.stringify([...roles].sort());
+  if (authorities.some(authority => JSON.stringify(roleKeysForResource(authority, resource, now).sort()) !== signature))
+    throw new FinancePolicyContextChangedError("Financial policy actor roles changed; reload the authorization context");
+  return roles;
+}
 
 type FinanceConfigActorContext = {
   organizationId: string;
@@ -155,9 +164,24 @@ export async function evaluateExpensePolicy(
 }
 
 /** Caller authorizes the actual expense before resolving its financial policy. */
+type ExpensePolicyOptions = { resource?: Resource; approvalAmount?: Money; resolvePeriodRevenue?: (config: ApprovalThresholdsConfig) => Promise<Money>; now?: Date; authorities?: readonly AuthContext[] };
 export async function evaluateExpensePolicyInTransaction(ctx: FinanceConfigActorContext, rawInput: ExpensePolicyInput, tx: TenantTransaction,
-  options: { resource?: Resource; approvalAmount?: Money; resolvePeriodRevenue?: (config: ApprovalThresholdsConfig) => Promise<Money>; now?: Date } = {}): Promise<ExpensePolicyDecision> {
-  const input = expensePolicyInputSchema.parse(rawInput);
+  options: ExpensePolicyOptions = {}): Promise<ExpensePolicyDecision> {
+  const parsed = expensePolicyInputSchema.parse(rawInput), input = { ...parsed, asOf: parsed.asOf ?? new Date() };
+  const scopes = await new ReservationConfigScopeRepository(tx, ctx.organizationId).scopes(input);
+  return evaluateCostPolicy(ctx, input, tx, scopes, options);
+}
+
+/** An organization cost has no invented property, owner or physical funding account. */
+const companyCostPolicyInputSchema = expensePolicyInputSchema.omit({ propertyId: true, ownerId: true, periodRevenueAmount: true })
+  .extend({ asOf: z.coerce.date() }).strict();
+export async function evaluateCompanyCostPolicyInTransaction(ctx: FinanceConfigActorContext, rawInput: z.input<typeof companyCostPolicyInputSchema>, tx: TenantTransaction,
+  options: ExpensePolicyOptions & { resource: Resource; now: Date }): Promise<ExpensePolicyDecision> {
+  return evaluateCostPolicy(ctx, companyCostPolicyInputSchema.parse(rawInput), tx, [{ scopeType: "organization", scopeId: null }], options);
+}
+
+async function evaluateCostPolicy(ctx: FinanceConfigActorContext, input: Omit<z.output<typeof expensePolicyInputSchema>, "propertyId"> & { propertyId?: string },
+  tx: TenantTransaction, scopes: readonly ConfigScopeCandidate[], options: ExpensePolicyOptions): Promise<ExpensePolicyDecision> {
   const amount = Money.of(input.amount, input.currency);
   let periodRevenue = input.periodRevenueAmount
     ? Money.of(input.periodRevenueAmount, input.currency)
@@ -165,7 +189,6 @@ export async function evaluateExpensePolicyInTransaction(ctx: FinanceConfigActor
   const asOf = input.asOf ?? new Date();
 
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
-    const scopes = await new ReservationConfigScopeRepository(tx, ctx.organizationId).scopes({ ...input, asOf });
     const snapshot = await repository.scopedSnapshot(scopes, asOf);
     const allocationRule = snapshot.resolve("finance.expense_allocation") ?? snapshot.resolve("finance.expense_treatment");
 
@@ -179,7 +202,7 @@ export async function evaluateExpensePolicyInTransaction(ctx: FinanceConfigActor
       const rule = snapshot.resolve(key); if (!rule) throw new FinanceConfigNotFoundError(`Missing referenced finance configuration: ${key}`); return rule;
     }) : [];
     const subject = options.resource ?? { type: "expense", organizationId: ctx.organizationId, propertyId: input.propertyId, ownerId: input.ownerId, amount: input.amount, dataClass: "financial" as const };
-    const roles = roleKeysForResource(ctx.authContext, subject, options.now ?? new Date());
+    const roles = financePolicyRoleKeys(ctx, subject, options.now ?? new Date(), options.authorities);
     const allocation = allocateConfiguredExpense(allocationRule.value, { category: input.category, amount });
     const evaluation = { fields: { expense: { propertyId: input.propertyId, ownerId: input.ownerId ?? null, category: input.category,
       amount: (options.approvalAmount ?? amount).amount.toString(), allocatedAmount: amount.amount.toString(), currency: input.currency, emergency: input.emergency }, actor: { userAccountId: ctx.actorId, roles } },
