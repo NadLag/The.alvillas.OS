@@ -1,0 +1,104 @@
+import { randomInt, randomUUID } from "node:crypto";
+import { PrismaClient } from "@prisma/client";
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test, type Locator } from "@playwright/test";
+import { withTenant } from "@/platform/db/tenant";
+import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
+import { formatCurrencyAmount } from "@/i18n/format";
+import { ensureE2EAdmin, e2eEmail, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
+import en from "../../messages/en.json" with { type: "json" };
+import fr from "../../messages/fr.json" with { type: "json" };
+import ar from "../../messages/ar.json" with { type: "json" };
+
+async function choose(picker: Locator, label: string) {
+  await picker.fill(label); await expect(picker.locator("..").getByRole("option")).toHaveCount(1);
+  await picker.press("ArrowDown"); await picker.press("Enter"); await expect(picker).toHaveValue(label);
+  await expect(picker.locator("..").getByRole("listbox")).toHaveCount(0);
+}
+test.use({ actionTimeout: 30000, navigationTimeout: 60000, timezoneId: "America/Denver" });
+for (const locale of ["en", "fr", "ar"] as const) test(`Native supplier invoice authoring retains versions and denies operational/revoked authority in ${locale}`, async ({ page, browser }, info) => {
+  test.skip(!process.env.DATABASE_URL, "Real local PostgreSQL required"); test.setTimeout(180000);
+  if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw Error("Dedicated local PostgreSQL required");
+  const suffix = randomUUID().slice(0, 8), email = e2eEmail(`supplier-invoice-${suffix}`, info.project.name), password = process.env.ADMIN_PASSWORD ?? "correct horse battery staple", org = bootstrapOrganizationId;
+  await ensureE2EAdmin(email, password);
+  const db = new PrismaClient(), anonymous = await browser.newContext({ storageState: { cookies: [], origins: [] } }), field = await browser.newContext({ storageState: { cookies: [], origins: [] } }), errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const name = `Native invoice supplier ${suffix}`, number = `INV-NATIVE-${suffix}`, purpose = `Private native supplier invoice ${suffix}`, changed = purpose + " corrected", prefix = `Native invoice villa ${suffix}`, messages = { en, fr, ar }[locale].SupplierInvoices;
+  try {
+    const fixture = await withTenant(db, org, async tx => {
+      await tx.currency.upsert({ where: { code: "MAD" }, update: {}, create: { code: "MAD", name: "Dirham", minorUnit: 2 } });
+      const account = await tx.userAccount.findFirstOrThrow({ where: { organizationId: org, email } });
+      const properties = Array.from({ length: 501 }, (_, index) => ({ id: randomUUID(), organizationId: org, name: `${prefix} ${String(index).padStart(3, "0")}`, addressLine1: "Local native acceptance", city: "Marrakech", propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [], photoUrls: [] }));
+      await tx.property.createMany({ data: properties }); const target = [...properties].sort((a, b) => a.id.localeCompare(b.id)).at(-1)!;
+      return { account, target };
+    });
+    if (info.project.name === "field-mobile") await page.setViewportSize({ width: 360, height: 900 });
+    await page.goto("/en/login"); await waitForE2EAdminLoginWindow(page, email);
+    await page.getByTestId("login-email").fill(email); await page.getByTestId("login-password").fill(password);
+    await page.getByTestId("login-submit").click(); await completeE2EAdminMfa(page, email); await expect(page).toHaveURL(/\/en\/app/u);
+    await page.goto(`/${locale}/app`); await page.getByTestId("suppliers-link").click(); await page.getByTestId("supplier-new").click();
+    await page.getByTestId("supplier-name").fill(name); await page.getByTestId("supplier-category").fill("Native maintenance"); await page.getByTestId("supplier-reason").fill("Dedicated invoice source supplier"); await page.getByTestId("supplier-save").click();
+    await expect(page.getByRole("heading", { level: 1, name, exact: true })).toBeVisible();
+    await page.goto(`/${locale}/app`); await page.getByTestId("supplier-invoices-link").click(); await page.getByTestId("invoice-new").click();
+    const form = page.getByTestId("supplier-invoice-form"); await expect(form).toBeVisible();
+    await choose(form.getByTestId("invoice-supplier-picker"), name);
+    await form.getByTestId("invoice-number").fill(number); await form.getByTestId("invoice-issued").fill("2019-01-15");
+    await form.getByTestId("invoice-purpose").fill(purpose); await form.getByTestId("invoice-currency").selectOption("MAD");
+    const property = form.getByTestId("invoice-property-picker").first(), propertyPanel = property.locator("..");
+    await property.fill(prefix); await expect(propertyPanel.getByRole("option")).toHaveCount(50);
+    await propertyPanel.getByRole("button", { name: messages.more, exact: true }).click(); await expect(propertyPanel.getByRole("option")).toHaveCount(100);
+    await choose(property, fixture.target.name);
+    await form.getByTestId("invoice-line-category").first().fill("maintenance"); await form.getByTestId("invoice-line-amount").first().fill(locale === "en" ? "2400.01" : "2400,01");
+    await form.getByTestId("invoice-add-line").click();
+    await form.getByTestId("invoice-line-category").nth(1).fill("office"); await form.getByTestId("invoice-line-amount").nth(1).fill(locale === "en" ? "100.99" : "100,99");
+    await form.getByTestId("invoice-line").nth(1).locator('[name^="costCenter-"]').fill("company"); await form.getByTestId("invoice-reason").fill("Dedicated native invoice authoring");
+    await expect(page.getByRole("heading", { level: 1, name: messages.create, exact: true })).toBeVisible(); expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; for (const control of document.querySelectorAll<HTMLElement>("[data-testid=supplier-invoice-form] input,[data-testid=supplier-invoice-form] select")) control.style.fontSize = "2em"; });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`supplier-invoice-form-${locale}.png`), fullPage: true });
+    await page.evaluate(() => { document.documentElement.style.fontSize = ""; for (const control of document.querySelectorAll<HTMLElement>("[data-testid=supplier-invoice-form] input,[data-testid=supplier-invoice-form] select")) control.style.fontSize = ""; });
+    const captured = page.waitForRequest(request => request.method() === "POST" && Boolean(request.headers()["next-action"]) && Boolean(request.postData()?.includes(number)));
+    await form.getByTestId("invoice-save").click(); const request = await captured;
+    await expect(page.getByTestId("supplier-invoice-detail")).toBeVisible(); await expect(page.getByRole("heading", { level: 1, name: number, exact: true })).toBeVisible();
+    await expect(page.getByTestId("invoice-total")).toHaveText(formatCurrencyAmount(locale, "2501.00", "MAD")); await expect(page.getByTestId("invoice-detail-line")).toHaveCount(2);
+    const url = page.url(), id = new URL(url).pathname.split("/").at(-1)!, origin = new URL(url).origin;
+    const headers = { "content-type": request.headers()["content-type"], "next-action": request.headers()["next-action"], accept: "text/x-component", origin };
+    for (const response of await Promise.all(Array.from({ length: 4 }, () => page.request.post(request.url(), { data: request.postDataBuffer()!, headers })))) expect(await response.text()).toContain('"idempotent":true');
+    const anonymousRead = await anonymous.request.get(url); expect(anonymousRead.url()).toContain("/login"); expect(await anonymousRead.text()).not.toContain(purpose);
+    expect(await (await anonymous.request.post(request.url(), { data: request.postDataBuffer()!, headers })).text()).toContain('"code":"forbidden"');
+    const original = await withTenant(db, org, async tx => {
+      const invoice = await tx.supplierInvoice.findUniqueOrThrow({ where: { id } }); expect(invoice.createdBy).toBe(fixture.account.id);
+      return tx.supplierInvoiceRevision.findUniqueOrThrow({ where: { id: invoice.currentRevisionId! }, include: { lines: { orderBy: { position: "asc" } } } });
+    });
+    await page.getByTestId("invoice-edit").click(); await page.getByTestId("invoice-purpose").fill(changed); await page.getByTestId("invoice-reason").fill("Dedicated native invoice correction");
+    const editing = page.waitForRequest(candidate => candidate.method() === "POST" && Boolean(candidate.headers()["next-action"]) && Boolean(candidate.postData()?.includes(changed)));
+    await page.getByTestId("invoice-save").click(); const editRequest = await editing;
+    await expect(page.getByTestId("invoice-purpose-detail")).toHaveText(changed); await expect(page.getByTestId("invoice-history-open")).toHaveCount(2);
+    expect(await (await page.request.post(editRequest.url(), { data: editRequest.postDataBuffer()!, headers: { ...headers, "content-type": editRequest.headers()["content-type"], "next-action": editRequest.headers()["next-action"] } })).text()).toContain('"code":"conflict"');
+    await page.getByTestId("invoice-history-open").last().click(); await expect(page.getByTestId("invoice-historical")).toBeVisible(); await expect(page.getByTestId("invoice-purpose-detail")).toHaveText(purpose); await expect(page.getByTestId("invoice-edit")).toHaveCount(0);
+    const current = page.getByRole("link", { name: messages.returnCurrent, exact: true }); await expect(current).toBeVisible(); await current.focus(); await current.press("Enter"); await expect(page.getByTestId("invoice-purpose-detail")).toHaveText(changed);
+    await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr"); await expect(page.getByRole("heading", { level: 1, name: number, exact: true })).toBeVisible();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]); await page.evaluate(() => document.documentElement.style.fontSize = "200%");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true); await page.screenshot({ path: info.outputPath(`supplier-invoice-detail-${locale}.png`), fullPage: true }); await page.evaluate(() => document.documentElement.style.fontSize = "");
+    await page.getByTestId("invoice-archive-reason").fill("Dedicated native invoice archive"); await page.getByTestId("invoice-archive").click(); await expect(page.getByTestId("invoice-edit")).toHaveCount(0);
+    await page.goto(`/${locale}/app/finance/supplier-invoices?q=${number}`); await expect(page.getByTestId("invoices-empty")).toBeVisible();
+    await page.goto(`/${locale}/app/finance/supplier-invoices?q=${number}&archived=1`); await page.getByTestId("invoice-open").click(); await expect(page.getByTestId("invoice-archive-form")).toBeVisible();
+    await page.getByTestId("invoice-archive-reason").fill("Dedicated native invoice restoration"); await page.getByTestId("invoice-archive").click(); await expect(page.getByTestId("invoice-edit")).toBeVisible();
+    const phone = `+21266${randomInt(1_000_000, 10_000_000)}`, pin = "368247", fieldPage = await field.newPage();
+    await page.goto("/en/app/identity"); await page.getByTestId("invite-display-name").fill(`Invoice field employee ${suffix}`); await page.getByTestId("invite-phone").fill(phone); await page.getByTestId("invite-role").selectOption("field_staff"); await page.getByTestId("invite-scope-type").selectOption("property"); await page.getByTestId("invite-scope-id").fill(fixture.target.id); await page.getByTestId("invite-preferred-locale").selectOption(locale); await page.getByTestId("invite-submit").click();
+    const invitation = (await page.getByTestId("invitation-code").innerText()).split(":").at(-1)?.trim(); expect(invitation).toBeTruthy();
+    await fieldPage.goto(`/${locale}/activate/${invitation}`); await fieldPage.getByTestId("activation-phone").fill(phone); await fieldPage.getByTestId("activation-pin").fill(pin); await fieldPage.getByTestId("activation-submit").click(); await expect(fieldPage).toHaveURL(new RegExp(`/${locale}/login$`, "u"));
+    await fieldPage.goto(`/${locale}/login?surface=field`); await fieldPage.getByTestId("login-phone").fill(phone); await fieldPage.getByTestId("login-pin").fill(pin); await fieldPage.getByTestId("login-submit").click(); await expect(fieldPage).toHaveURL(new RegExp(`/${locale}/app/field$`, "u"));
+    const deniedField = await fieldPage.request.get(url); expect(deniedField.status()).toBe(404); expect(await deniedField.text()).not.toContain(changed);
+    expect(await (await fieldPage.request.post(request.url(), { data: request.postDataBuffer()!, headers })).text()).toContain('"code":"forbidden"');
+    await withTenant(db, org, async tx => {
+      expect(await tx.supplierInvoiceRevision.findUniqueOrThrow({ where: { id: original.id }, include: { lines: { orderBy: { position: "asc" } } } })).toEqual(original);
+      expect(await tx.auditLog.count({ where: { organizationId: org, resourceType: "supplier_invoice", resourceId: id } })).toBe(4);
+      expect(await tx.supplierInvoiceRevision.count({ where: { organizationId: org, invoiceId: id } })).toBe(2);
+      expect(await tx.posting.count({ where: { organizationId: org, dimensions: { path: ["supplier_invoice_id"], equals: id } } })).toBe(0);
+      await tx.roleAssignment.updateMany({ where: { organizationId: org, userAccountId: fixture.account.id, archivedAt: null }, data: { archivedAt: new Date() } });
+    });
+    const denied = await page.request.get(url); expect(denied.status()).toBe(404); expect(await denied.text()).not.toContain(changed);
+    expect(await (await page.request.post(request.url(), { data: request.postDataBuffer()!, headers })).text()).toContain('"code":"forbidden"'); expect(errors).toEqual([]);
+  } finally { await anonymous.close(); await field.close(); await db.$disconnect(); }
+});

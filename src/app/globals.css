@@ -2574,3 +2574,13 @@ textarea:disabled {
 .supplier-page :is(input,select,textarea) { min-inline-size: 0; max-inline-size: 100%; inline-size: 100%; }
 .supplier-page :is(input[type="checkbox"],input[type="radio"]) { inline-size: auto; }
 .supplier-page :is(.primary-button,.secondary-button) { min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.invoice-page .field { grid-template-columns: minmax(0, 1fr); }
+.invoice-page fieldset { min-inline-size: 0; max-inline-size: 100%; border: 1px solid var(--border); padding: var(--space-4); margin: 0; }
+.invoice-page .invoice-line { margin-block-end: var(--space-4); }
+.invoice-page dd { margin-inline-start: 0; overflow-wrap: anywhere; }
+.invoice-source-picker { position: relative; min-inline-size: 0; }
+.invoice-source-popover { position: absolute; inset-inline: 0; inset-block-start: 100%; z-index: 10; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-raised); max-block-size: 22rem; overflow: auto; }
+.invoice-source-options { list-style: none; padding: 0; margin: 0; }
+.invoice-source-options [role="option"] { padding: var(--space-3); cursor: pointer; min-block-size: var(--target-min); overflow-wrap: anywhere; }
+.invoice-source-options [aria-selected="true"], .invoice-source-options [role="option"]:hover { background: var(--surface-success); }
+.invoice-source-options small { display: block; color: var(--muted); }

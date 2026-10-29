@@ -371,13 +371,12 @@ export class ConfigRuleRepository {
         organizationId: this.organizationId,
         archivedAt: null
       },
-      orderBy: [{ city: "asc" }, { name: "asc" }],
+      orderBy: [{ city: "asc" }, { name: "asc" }, { id: "asc" }],
       select: {
         id: true,
         name: true,
         city: true
-      },
-      take: 1000
+      }
     });
   }
 
