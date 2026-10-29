@@ -264,6 +264,26 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     await expect(voidSupplierInvoiceClaim(f.ctx, { ...input, idempotencyKey: randomUUID() }, { db })).rejects.toBeInstanceOf(SupplierInvoiceConflictError);
     await expect(voidSupplierInvoiceClaim(f.ctx, { ...input, reason: "A different reversal intent must conflict" }, { db })).rejects.toBeInstanceOf(SupplierInvoiceConflictError);
   });
+  it("allows a different authorized void operator without payment authority and attributes its exact reversal receipt", async () => {
+    const f = await invoiceSettlementFixture();
+    const account = await withTenant(db, f.org, async tx => {
+      const person = await tx.person.create({ data: { organizationId: f.org, displayName: "Independent actual claim reversal operator" } });
+      const account = await tx.userAccount.create({ data: { organizationId: f.org, personId: person.id } });
+      const role = await tx.role.create({ data: { organizationId: f.org, key: "independent_claim_void", name: "Independent authorized claim reversal" } });
+      const keys = [...f.ctx.authContext.permissions].filter(key => !key.endsWith(":pay")), permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: keys } } });
+      expect(permissions).toHaveLength(keys.length);
+      await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: role.id, permissionId: permission.id })) });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: account.id, personId: person.id, scopeType: "organization", validFrom: new Date("2000-01-01") } }); return account;
+    });
+    const actor = { organizationId: f.org, actorId: account.id, authContext: await authContextForAccount(f.org, account.id, { db }) };
+    expect(actor.authContext.permissions.has("supplier_invoice:pay")).toBe(false); expect(actor.authContext.permissions.has("financial_transaction:pay")).toBe(false);
+    const input = { id: f.invoice.id, expectedVersion: f.submitted.version, idempotencyKey: randomUUID(), reason: "An independent authorized operator reverses the whole original claim" };
+    const result = await voidSupplierInvoiceClaim(actor, input, { db }); expect(result.idempotent).toBe(false);
+    expect(await voidSupplierInvoiceClaim(actor, input, { db })).toMatchObject({ idempotent: true, reversalTransactionIds: result.reversalTransactionIds });
+    await expect(voidSupplierInvoiceClaim(f.ctx, input, { db })).rejects.toBeInstanceOf(SupplierInvoiceConflictError);
+    const audit = await withTenant(db, f.org, tx => new FinanceRepository(tx, f.org).financialReversalAudit("finance.supplier_invoice.reversed", "supplier_invoice", [f.invoice.id]));
+    expect(audit?.actorId).toBe(account.id); expect((await getSupplierSettlement(actor, { id: f.invoice.id }, { db })).outstanding.amount).toBe("0.00");
+  });
   it("protects a genuinely paid supplier claim until its payment is exactly reversed and never accepts another payment afterward", async () => {
     const f = await invoiceSettlementFixture(), input = { id: f.invoice.id, expectedVersion: f.submitted.version, idempotencyKey: randomUUID(), reason: "Reverse an actually paid supplier claim" };
     const payment = await postSupplierPayment(f.ctx, f.payment, { db });
