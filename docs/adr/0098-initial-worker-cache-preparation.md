@@ -1,0 +1,7 @@
+# 0098 — Complete cache preparation when the initial worker takes control
+
+The first service-worker installation can briefly occupy the registration's waiting slot. The automatic startup drain deliberately defers its cache pull while a worker is waiting, to preserve the explicit update flow. If navigation has interrupted an earlier pull, the first controller previously left the new device without its assigned work indefinitely. The retained PR #137 browser failure shows cash, linen and inventory controls still preparing despite an authenticated session.
+
+Track whether this audience has a valid prepared snapshot. When the first controller takes control and that snapshot is absent or invalidated, request synchronization with the existing foreground pull option. The existing session, organization/user scope and cache authorization checks still apply. Replacement controllers retain explicit promotion, pending-work settlement and reload behavior. No business rule, timeout, retry policy or persisted data changes.
+
+A real-browser regression uses a fresh device context, an actual assigned job and the real registration and synchronization endpoints. It controls only the initial waiting/controller lifecycle, proves the startup drain deferred its pull, then releases first control. The previous implementation leaves the cash form absent; the corrected implementation prepares the actual job. Existing cash, update-promotion and offline-cache journeys verify the surrounding behavior.
