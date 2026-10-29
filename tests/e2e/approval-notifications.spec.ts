@@ -23,7 +23,8 @@ test.describe("approval notification lifecycle", () => {
       await target.getByTestId("login-submit").click(); await completeE2EAdminMfa(target, email); await expect(target).toHaveURL(/\/en\/app$/u);
     }
     await login(page, requesterEmail);
-    const client = new PrismaClient(); const approverContext = await browser.newContext({ baseURL: "http://127.0.0.1:3000", viewport: page.viewportSize(), isMobile: testInfo.project.name === "field-mobile" });
+    const origin = new URL(page.url()).origin;
+    const client = new PrismaClient(); const approverContext = await browser.newContext({ baseURL: origin, viewport: page.viewportSize(), isMobile: testInfo.project.name === "field-mobile" });
     try {
       const approver = await client.userAccount.findFirstOrThrow({ where: { email: approverEmail } });
       const ownerName = `Approval owner ${suffix}`; const propertyName = `Approval villa ${suffix}`;
@@ -84,7 +85,7 @@ test.describe("approval notification lifecycle", () => {
         await page.keyboard.press("Escape");
       }
       const pushBrowser = await chromium.launch({ channel: "chromium" });
-      const pushContext = await pushBrowser.newContext({ baseURL: "http://127.0.0.1:3000", storageState: await approverContext.storageState(), viewport: testInfo.project.name === "field-mobile" ? { width: 360, height: 800 } : { width: 1440, height: 1000 } });
+      const pushContext = await pushBrowser.newContext({ baseURL: origin, storageState: await approverContext.storageState(), viewport: testInfo.project.name === "field-mobile" ? { width: 360, height: 800 } : { width: 1440, height: 1000 } });
       try {
         const pushPage = await pushContext.newPage(); await installTestPushSubscription(pushPage, suffix);
         await pushPage.goto("/en/app/notifications");
@@ -117,7 +118,7 @@ test.describe("approval notification lifecycle", () => {
           await route.continue();
         });
         await displayAndClickPush(pushPage, delivery.id); await pushContext.unroute(payloadRoute);
-        await expect(pushPage).toHaveURL(`http://127.0.0.1:3000/en/app/approvals/${id}`);
+        await expect(pushPage).toHaveURL(`${origin}/en/app/approvals/${id}`);
         await expect(pushPage.getByTestId("approval-reason")).toBeVisible();
         await expect.poll(async () => withTenant(client, approver.organizationId, (tx) => tx.notificationDelivery.findFirstOrThrow({ where: { id: delivery.id } }))).toMatchObject({ displayedAt: expect.any(Date), openedAt: expect.any(Date) });
         expect((await page.request.get(`/api/notifications/push/${delivery.id}`)).status()).toBe(404);

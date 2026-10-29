@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { openFieldFixture } from "./support/field-fixture";
 import en from "../../messages/en.json" with { type: "json" };
 import fr from "../../messages/fr.json" with { type: "json" };
@@ -28,7 +29,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native company invoice a
       expect(assignments.length).toBeGreaterThan(0); const rules = new ConfigRuleRepository(tx, f.organizationId);
       await rules.createVersion({ key: "finance.expense_treatment", scopeType: "organization", effectiveFrom: new Date("2000-01-01"),
         reason: "Actual company invoice automation treatment", value: { default_treatment: "ALVILLAS_PAID" } });
-      await rules.createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2000-01-01"),
+      await rules.lockVersion("finance.accounting_periods", "organization", null);
+      const calendar = await rules.resolve({ key: "finance.accounting_periods", scopes: [{ scopeType: "organization", scopeId: null }],
+        asOf: await new FinanceRepository(tx, f.organizationId).clock() });
+      if (!calendar) await rules.createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2000-01-01"),
         reason: "Actual company invoice automation calendar", value: { timezone: "UTC", allow_early_close: false, max_reopen_seconds: 60 } });
       await rules.createVersion({ key: "finance.approval_thresholds", scopeType: "organization", effectiveFrom: new Date("2000-01-01"),
         reason: "Actual company invoice automation reviewer", value: { thresholds: [{ key: "native_company_invoice", requires_approval_from: ["finance"] }],
