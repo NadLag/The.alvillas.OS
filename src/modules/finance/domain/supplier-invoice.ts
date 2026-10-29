@@ -5,10 +5,10 @@ import type { Resource } from "@/platform/authz/authorize";
 
 export function supplierInvoiceCostResource(organizationId: string, invoice: { id: string; state: string; createdBy: string },
   line: { propertyId: string | null; reservationId: string | null; property?: { cityId: string | null; regionId: string | null } | null },
-  amount: Money, occurredOn: string, timezone: string): Resource {
+  amount: Money, occurredOn: string, timezone: string, sourceOccurredAt?: Date): Resource {
   return { type: "supplier_invoice", organizationId, id: invoice.id, financialRecordId: invoice.id, propertyId: line.propertyId,
     reservationId: line.reservationId, region: line.property?.regionId, city: line.property?.cityId, amount: amount.toJSON().amount,
-    assignedUserAccountId: invoice.createdBy, occurredAt: calendarDateStart(occurredOn, timezone), dataClass: "financial", status: invoice.state };
+    assignedUserAccountId: invoice.createdBy, occurredAt: sourceOccurredAt ?? calendarDateStart(occurredOn, timezone), dataClass: "financial", status: invoice.state };
 }
 
 const id = z.uuid().transform(value => value.toLowerCase());

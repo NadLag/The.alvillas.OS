@@ -30,6 +30,7 @@ export function supplierInvoiceRecognitionCosts(source: SupplierInvoiceRecogniti
   const ids = new Set<string>(), actual = new Map(source.lines.map(line => [line.id, line]));
   if (actual.size !== source.lines.length) denied();
   let total = Money.zero(source.currency);
+  const sourceInstants = new Map<string, Date>();
   const costs = frozen.lines.map(line => {
     const original = actual.get(line.id), policy = line.policy;
     if (!original || ids.has(line.id)) return denied(); ids.add(line.id);
@@ -56,8 +57,10 @@ export function supplierInvoiceRecognitionCosts(source: SupplierInvoiceRecogniti
       if (!slices.equals(value) || !owners.equals(allocations.ownerAmount) || !company.equals(allocations.alvillasAmount) || !guests.equals(allocations.guestAmount)) denied();
     }
     if (allocations.guestAmount.amount.gt(0) && !line.reservationId) denied();
+    let instant = sourceInstants.get(policy.timezone);
+    if (!instant) { instant = calendarDateStart(source.occurredOn, policy.timezone); sourceInstants.set(policy.timezone, instant); }
     return { id: line.id, position: line.position, propertyId: line.propertyId, reservationId: line.reservationId, category: line.category, costCenter: line.costCenter,
-      amount: value, allocation: allocations, timezone: policy.timezone, sourceOccurredAt: calendarDateStart(source.occurredOn, policy.timezone),
+      amount: value, allocation: allocations, timezone: policy.timezone, sourceOccurredAt: new Date(instant.getTime()),
       owners: policies.map(owner => ({ ownerId: owner.ownerId, ownerName: owner.ownerName, shareBps: owner.shareBps })),
       ownerAmounts: policies.map(owner => ({ ownerId: owner.ownerId, amount: read(owner.allocation.owner) })) };
   });

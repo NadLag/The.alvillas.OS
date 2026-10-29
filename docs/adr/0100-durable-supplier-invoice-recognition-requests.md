@@ -1,0 +1,17 @@
+# 0100 — Durable requests for supplier invoice recognition
+
+Status: Accepted
+
+Supplier recognition of 500 original property costs exceeds the handbook's two-second foreground budget. Use DEC-09's existing transactional outbox and Inngest runtime. The browser submits an immutable request; admission creates no journal, payment, replacement expense or funding movement.
+
+Admission and execution share `prepareSupplierInvoiceRecognition` and the existing financial writer. Both retain the original caller restrictions and independently reload current stored permissions, security enrollment, source invoice, supplier, original costs and completed reviews. The request stores a versioned authorization cap, never a cached grant of authority. Expired or revoked access produces a safe denial even if the account later gains wider permissions. Replay checks precede disclosure of request state and conflicting intent.
+
+Convert the immutable economic date once per distinct source timezone within each preparation, and pass that validated source instant to the existing cost-resource helper. This reuses a pure calendar calculation; permissions, review state, supplier state and database-clock fences are still loaded afresh. The retained 500-cost measurement fell from 2,577 ms to 188 ms for admission and from 14,827 ms to 8,621 ms for background execution, preserving all 500 exact original journals. Source submission's separate foreground performance remains approved work before feature completion.
+
+Requests and terminal outcomes are tenant-scoped, append-only records. Pending means that no terminal outcome exists. A request binds its actual invoice, immutable submission, version, normalized command nonce, actor, reason and fingerprint. Canonical outbox events contain only the request identity; the external Inngest transport sends only organization and outbox identities. Database guards require attributed request/outcome audits, exact opaque events and a successful outcome's exact original recognition. Event delivery metadata may advance while its business facts remain immutable.
+
+The worker locks the request before entering the existing invoice/supplier locks. Admission takes the invoice and a separate nonce lock, never the request lock. A claim and its success outcome commit in one transaction. Deferred financial and receipt guards finish before the last database-clock authorization fence. Transient failures roll back both and use the existing retry infrastructure. Access, period, source and policy failures receive safe terminal codes; a terminal failure cannot overwrite success. A new explicit request may follow a failed request, while the existing invoice uniqueness still prevents a second claim.
+
+Register recognition and terminal-failure consumers explicitly, each with concurrency one and three infrastructure retries. The installed Inngest SDK's automatic `onFailure` registration omits concurrency, which fails the repository's signed registration checks for the existing staging plan. The explicit failure trigger filters the actual originating function and validates its original opaque event before writing a receipt. This changes no business schedule, provider, account or hosting setting.
+
+Recognition remains one part of F-FIN-23. Authorized status reading, native EN/FR/AR controls, exact reversals, settlement and staging acceptance remain required before the feature can be DONE.
