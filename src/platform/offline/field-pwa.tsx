@@ -43,6 +43,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     let cacheSubscription: { unsubscribe(): void } | undefined;
     let stopClaiming: (()=>void)|undefined;
     let hadController = "serviceWorker" in navigator && Boolean(navigator.serviceWorker.controller);
+    let prepared = false;
     let checkedAt = 0;
     let photoRetry: ReturnType<typeof setTimeout> | undefined;
     let ageTimer: ReturnType<typeof setTimeout> | undefined;
@@ -72,6 +73,7 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
         refreshAge();
       }, error: () => { queueSnapshot = { entries: [], tasks: [] }; refreshAge(); setNotice("unavailable"); } });
       cacheSubscription = liveQuery(() => queue.readCache(scope, audience)).subscribe({ next: value => {
+        prepared = Boolean(value.state?.snapshotAt && !value.state.invalidated);
         if (value.state?.snapshotAt) setCached(value.tasks.length);
         else if (value.state?.invalidated) setCached(null);
       }, error: () => setCached(null) });
@@ -116,8 +118,16 @@ export function FieldPwa({ organizationId, userId, audience = "assigned" }: Fiel
     const installAvailable = (event: Event) => { event.preventDefault(); setInstall(event as InstallEvent); };
     const installationFinished = () => { setInstalled(true); setInstall(null); setNotice(null); };
     const controllerChanged = () => {
+      const firstControl = !hadController;
       if (hadController) setUpdate(true);
       hadController = true;
+      // Initial installation can briefly occupy the waiting slot, causing the
+      // startup drain to defer its pull. First control must finish preparation;
+      // replacement controllers retain the explicit update/promotion flow.
+      if (firstControl && !disposed && !prepared) {
+        if (!registration.current?.waiting) setUpdate(false);
+        void sync(true);
+      }
     };
     const acknowledged = (value: unknown) => {
       if (disposed || !value || typeof value !== "object" || !("organizationId" in value) || value.organizationId !== organizationId ||
