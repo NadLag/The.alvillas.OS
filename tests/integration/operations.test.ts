@@ -10,9 +10,13 @@ import type { ReservationActorContext } from "@/modules/reservations/application
 import {
   createOperationTask,
   operationTaskDetail,
+  operationScope,
+  taskResource,
   proxyCompleteOperationTask,
   transitionOperationTask,
 } from "@/modules/reservations/application/operation-service";
+import { OperationRepository } from "@/modules/reservations/infrastructure/operation-repository";
+import { authorize } from "@/platform/authz/authorize";
 import {
   completeAssignedFieldTask,
   ReservationAuthorizationError,
@@ -244,6 +248,50 @@ async function crew(f: Awaited<ReturnType<typeof fixture>>) {
   });
 }
 describe("operations on real PostgreSQL", () => {
+  it("keeps property, state, own-assignment and individual-job grants separate when grouping query predicates", async () => {
+    const f = await fixture();
+    await withTenant(db, f.org, async tx => {
+      const property = await tx.property.create({ data: { organizationId: f.org, name: "Second scoped query property", addressLine1: "Local scope acceptance", city: "Marrakech",
+        propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [], photoUrls: [] } });
+      const jobs = [];
+      for (const propertyId of [f.property.id, property.id]) for (const state of ["PLANNED", "ASSIGNED", "BLOCKED"] as const) for (const own of [false, true])
+        jobs.push({ id: randomUUID(), organizationId: f.org, propertyId, type: "INSPECTION", state, titleTranslations: { en: "Actual scoped query task" },
+          dueDate: new Date("2027-04-10"), priority: "NORMAL", idempotencyKey: randomUUID(), assignedToPersonId: own ? f.person.id : f.worker.id,
+          assignedToUserAccountId: own ? f.account.id : f.workerAccount.id });
+      await tx.operationTask.createMany({ data: jobs });
+      const individual = jobs.find(job => job.propertyId === property.id && job.state === "PLANNED" && job.assignedToPersonId === f.worker.id)!;
+      const permissions = new Set(["task:view", "task:assign"]), ctx = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions, assignments: [
+        { permissions, scope: { organizationId: f.org, scopeType: "property" as const, scopeId: f.property.id }, conditions: { statuses: ["PLANNED"] } },
+        { permissions, scope: { organizationId: f.org, scopeType: "organization" as const }, conditions: { assignedToMe: true, statuses: ["ASSIGNED", "BLOCKED"] } },
+        { permissions, scope: { organizationId: f.org, scopeType: "property" as const, scopeId: property.id }, conditions: { statuses: ["ASSIGNED"] } },
+        { permissions, scope: { organizationId: f.org, scopeType: "job" as const, scopeId: individual.id } }
+      ] } };
+      const repository = new OperationRepository(tx, f.org), scope = await operationScope(ctx, "assign", repository, await repository.properties());
+      const actual = await repository.page({ OR: scope.groups }, 0, 50), all = await repository.scoped(jobs.map(job => job.id));
+      const expected = all.filter(job => authorize(ctx.authContext, "assign", taskResource(job))).map(job => job.id).sort();
+      expect(actual.map(job => job.id).sort()).toEqual(expected); expect(actual).toHaveLength(8);
+      expect(scope.visible).toEqual(new Set([f.property.id, property.id]));
+    });
+  });
+  it("loads authorized assignment options across four thousand properties without exceeding PostgreSQL bind limits", async () => {
+    const f = await fixture(); await crew(f);
+    await withTenant(db, f.org, async tx => {
+      for (let offset = 0; offset < 4000; offset += 500) await tx.property.createMany({ data: Array.from({ length: 500 }, (_, index) => ({
+        organizationId: f.org, name: `Actual assignment roster ${offset + index}`, addressLine1: "Local scale acceptance", city: "Marrakech",
+        timezone: index % 2 ? "Europe/Paris" : "Asia/Tokyo",
+        propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [], photoUrls: [] })) });
+    }, { timeout: 120000 });
+    const task = await createOperationTask(f.ctx, input(f), deps()), candidate = await createOperationTask(f.ctx, input(f), deps());
+    await assignOperationTask(f.ctx, { taskId: candidate.id, expectedVersion: candidate.version, personId: f.worker.id, startMinute: 540,
+      reason: "Actual assigned candidate at property scale", idempotencyKey: randomUUID() }, deps());
+    const options = await operationAssignmentOptions(f.ctx, task.id, deps());
+    expect(options.swapTasks.map(row => row.id)).toEqual([candidate.id]);
+    const choices = await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).listPropertyScopeOptions());
+    expect(choices).toHaveLength(4001); expect(choices.some(property => property.id === f.property.id)).toBe(true);
+    const readiness = await operationReadiness(f.ctx, deps());
+    expect(readiness).toHaveLength(4001); expect(new Set(readiness.map(row => row.propertyId)).size).toBe(4001);
+    expect(readiness.some(row => row.propertyId === f.property.id)).toBe(true);
+  });
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname))
       throw new Error(

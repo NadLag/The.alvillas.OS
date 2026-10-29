@@ -365,6 +365,8 @@
     "form": {
       "key": "Cle de regle",
       "customFeatureFlagKey": "Suffixe feature flag",
+      "propertySearch": "Rechercher des propriétés",
+      "moreProperties": "Autres propriétés",
       "scopeType": "Portee",
       "scopeOrganization": "Organisation",
       "scopeProperty": "Propriete",
@@ -1095,6 +1097,7 @@
       "next": "Suivant",
       "page": "Page {page}",
       "readinessTitle": "Préparation et exceptions des propriétés",
+      "loadingReadiness": "Chargement de la préparation des propriétés…",
       "overdueCount": "{count} en retard",
       "unassignedCount": "{count} non attribuées",
       "recurringTitle": "Travail récurrent",

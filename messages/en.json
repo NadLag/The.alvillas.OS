@@ -365,6 +365,8 @@
     "form": {
       "key": "Rule key",
       "customFeatureFlagKey": "Feature flag suffix",
+      "propertySearch": "Search properties",
+      "moreProperties": "More properties",
       "scopeType": "Scope",
       "scopeOrganization": "Organization",
       "scopeProperty": "Property",
@@ -1095,6 +1097,7 @@
       "next": "Next",
       "page": "Page {page}",
       "readinessTitle": "Property readiness and exceptions",
+      "loadingReadiness": "Loading property readiness…",
       "overdueCount": "{count} overdue",
       "unassignedCount": "{count} unassigned",
       "recurringTitle": "Recurring work",

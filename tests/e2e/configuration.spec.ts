@@ -15,7 +15,9 @@ async function expectConfigRuleCreated(page: Page): Promise<void> {
   const key = selectedKey === "feature_flag" ? `feature_flag.${(await create.locator('[name="customFeatureFlagKey"]').inputValue()).trim()}` : selectedKey;
   await filter.locator('[name="ruleKey"]').fill(key);
   await filter.locator('[name="ruleScopeType"]').selectOption(scopeType);
-  await filter.locator('[name="ruleScopeId"]').selectOption(scopeType === "property" ? await page.getByTestId("config-rule-scope-id").inputValue() : "");
+  const scopeId = scopeType === "property" ? await page.getByTestId("config-rule-scope-id").inputValue() : "";
+  if (scopeType === "property") await filter.getByTestId("config-history-scope-id-search").fill(scopeId);
+  await filter.locator('[name="ruleScopeId"]').selectOption(scopeId);
   await filter.locator('button[type="submit"]').click();
 }
 
@@ -36,6 +38,7 @@ async function selectPropertyScopedRule(
   propertyLabel: string
 ): Promise<void> {
   await page.locator('input[name="scopeType"][value="property"]').check();
+  await page.getByTestId("config-rule-scope-id-search").fill(propertyLabel);
   await page.getByTestId("config-rule-scope-id").selectOption({ label: propertyLabel });
   await page.getByTestId("config-rule-key").selectOption(key);
   await expect(page.getByTestId("config-rule-key")).toHaveValue(key);
@@ -187,6 +190,7 @@ test.describe("configuration engine journey", () => {
     await page.getByTestId("reservation-submit").click();
     await expect(page).toHaveURL(/\/en\/app\/operations/u);
     await expect(page.getByTestId("operation-task-row").filter({ hasText: taskTitle })).toBeVisible();
+    await expect(page.getByTestId("operation-readiness-panel")).toBeVisible();
 
     await page.goto("/en/app/reservations");
     const reservationRow = page.getByTestId("reservation-row").filter({ hasText: guestName });
@@ -201,6 +205,7 @@ test.describe("configuration engine journey", () => {
     const history = page.getByTestId("config-history-filter");
     await history.locator('[name="ruleKey"]').fill("ops.reservation_task_templates");
     await history.locator('[name="ruleScopeType"]').selectOption("property");
+    await history.getByTestId("config-history-scope-id-search").fill(financeSetup.propertyId);
     await history.locator('[name="ruleScopeId"]').selectOption(financeSetup.propertyId);
     await history.locator('button[type="submit"]').click();
     const activeTaskRule = page
