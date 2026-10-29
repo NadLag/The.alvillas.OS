@@ -2152,6 +2152,9 @@
     "blockCount": "{count} availability blocks"
   },
   "Automation": {
+    "organization": "Organization",
+    "restrictedOutcome": "Restricted outcome",
+    "invoiceSubmittedEvent": "Supplier invoice submitted",
     "allProperties": "All properties",
     "filter": "Filter",
     "olderVersions": "Older rule versions",

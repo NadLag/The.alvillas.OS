@@ -2152,6 +2152,9 @@
     "blockCount": "{count} حجب توافر"
   },
   "Automation": {
+    "organization": "المؤسسة",
+    "restrictedOutcome": "نتيجة مقيدة الوصول",
+    "invoiceSubmittedEvent": "إرسال فاتورة المورد",
     "allProperties": "جميع العقارات",
     "filter": "تصفية",
     "olderVersions": "إصدارات القواعد السابقة",

@@ -14,7 +14,7 @@ model AutomationRun {
   ruleKey        String              @map("rule_key")
   eventId        String              @map("event_id") @db.Uuid
   eventKey       String              @map("event_key")
-  propertyId     String              @map("property_id") @db.Uuid
+  propertyId     String?             @map("property_id") @db.Uuid
   actorId        String              @map("actor_id") @db.Uuid
   status         String              @default("PENDING")
   attemptCount   Int                 @default(0) @map("attempt_count")
