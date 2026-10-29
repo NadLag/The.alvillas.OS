@@ -67,9 +67,10 @@ describe("field pull on real PostgreSQL", () => {
     expect(missing.tasks.map(row => row.devicePolicy)).toEqual([null, null]);
     const effective = new Date(now.getTime() - 60_000), organization = await devicePolicy(f, 73, effective);
     const property = await devicePolicy(f, 5, effective, f.property.id); await devicePolicy(foreign, 0, effective);
-    const legacy = await pull(f, { mode: "assigned", known_tasks: known(before.tasks) }, now);
+    const observed = anchor(); // These new requests observe the policies after their actual commits.
+    const legacy = await pull(f, { mode: "assigned", known_tasks: known(before.tasks) }, observed);
     expect(legacy.tasks).toEqual([]); expect(legacy.known_changes).toEqual([]);
-    const opted = await pull(f, { mode: "assigned", include_device_policy: true, known_tasks: [{ id: alien.id, revision: null }] }, now);
+    const opted = await pull(f, { mode: "assigned", include_device_policy: true, known_tasks: [{ id: alien.id, revision: null }] }, observed);
     expect(opted.tasks).toHaveLength(2); expect(opted.tombstones).toEqual([alien.id]);
     expect(opted.tasks.find(row => row.propertyId === f.property.id)?.devicePolicy).toEqual({ queueWarningAfterMinutes: 5, configRuleId: property.id, configVersion: property.version });
     expect(opted.tasks.find(row => row.propertyId === second.id)?.devicePolicy).toEqual({ queueWarningAfterMinutes: 73, configRuleId: organization.id, configVersion: organization.version });

@@ -11,4 +11,5 @@ export const supplierPaymentInput = z.object({
   currentPeriod: z.boolean().default(false), reason
 }).strict();
 export const supplierPaymentVoidInput = z.object({ id, paymentId: id, reason }).strict();
+export const supplierInvoiceReversalInput = z.object({ id, expectedVersion: z.number().int().positive(), idempotencyKey: id, reason }).strict();
 export const supplierSettlementQuery = z.object({ id, before: id.optional() }).strict();
