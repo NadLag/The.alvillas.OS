@@ -111,6 +111,11 @@ function inputJsonObject(value: Record<string, unknown>): Prisma.InputJsonObject
   );
 }
 
+function postingData(organizationId: string, posting: FinancePostingDraft) {
+  return { organizationId, ledgerAccountId: posting.ledgerAccountId, side: posting.side, amount: posting.amount.toJSON().amount,
+    currency: posting.amount.currency, bucket: posting.bucket, dimensions: inputJsonObject(posting.dimensions) };
+}
+
 export class FinanceRepository {
   constructor(
     private readonly tx: TenantTransaction,
@@ -677,15 +682,7 @@ export class FinanceRepository {
         idempotencyKey: input.idempotencyKey,
         createdBy: input.createdBy,
         postings: {
-          create: input.postings.map((posting) => ({
-            organizationId: this.organizationId,
-            ledgerAccountId: posting.ledgerAccountId,
-            side: posting.side,
-            amount: posting.amount.toJSON().amount,
-            currency: posting.amount.currency,
-            bucket: posting.bucket,
-            dimensions: inputJsonObject(posting.dimensions)
-          }))
+          create: input.postings.map(posting => postingData(this.organizationId, posting))
         }
       },
       include: {
@@ -693,5 +690,23 @@ export class FinanceRepository {
         reversedByTransactions: true
       }
     });
+  }
+
+  /** One atomic journal phase; callers must fence current authority before and after its actual writes. */
+  async createFinancialTransactions(inputs: ReadonlyArray<Omit<Parameters<FinanceRepository["createFinancialTransaction"]>[0], "recheckAuthorization">>,
+    recheckAuthorization: (now: Date) => Promise<void>) {
+    if (!inputs.length || new Set(inputs.map(input => input.idempotencyKey)).size !== inputs.length) throw Error("Financial journal batch identities must be distinct and nonempty");
+    const periods = new AccountingPeriodRepository(this.tx, this.organizationId);
+    for (const at of new Map(inputs.map(input => [input.occurredAt.getTime(), input.occurredAt])).values()) await periods.assertPostingOpen(at);
+    await recheckAuthorization(await this.clock());
+    const headers = await this.tx.financialTransaction.createManyAndReturn({ data: inputs.map(input => ({ organizationId: this.organizationId,
+      reference: input.reference, occurredAt: input.occurredAt, description: input.description, idempotencyKey: input.idempotencyKey,
+      reversesTransactionId: input.reversesTransactionId, createdBy: input.createdBy })), select: { id: true, occurredAt: true, idempotencyKey: true } });
+    const identities = new Map(headers.map(header => [header.idempotencyKey, header]));
+    if (identities.size !== inputs.length) throw Error("Every actual journal identity must be retained");
+    await this.tx.posting.createMany({ data: inputs.flatMap(input => input.postings.map(posting => ({
+      ...postingData(this.organizationId, posting), transactionId: identities.get(input.idempotencyKey)!.id }))) });
+    await recheckAuthorization(await this.clock());
+    return inputs.map(input => identities.get(input.idempotencyKey)!);
   }
 }
