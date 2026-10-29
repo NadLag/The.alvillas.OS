@@ -297,10 +297,13 @@ export async function operationReadiness(
           region: p.regionId ?? p.region,
         }),
       );
-    const now = deps.now ?? new Date(),
-      days = properties.map((p) =>
-        dateToUtc(localDate(now, p.timezone)).getTime(),
-      ),
+    const now = deps.now ?? new Date(), dates = new Map<string, string>();
+    const todayIn = (timezone: string) => {
+      let day = dates.get(timezone);
+      if (!day) { day = localDate(now, timezone); dates.set(timezone, day); }
+      return day;
+    };
+    const days = properties.map((p) => dateToUtc(todayIn(p.timezone)).getTime()),
       [rows, policies] = await Promise.all([
         repo.readinessTasks(
           properties.map((p) => p.id),
@@ -334,7 +337,7 @@ export async function operationReadiness(
         continue;
       }
       const policy = operationPolicySchema.parse(configured.parsedValue),
-        today = localDate(now, property.timezone);
+        today = todayIn(property.timezone);
       const tasks = rows.filter(
         (t) =>
           t.propertyId === property.id &&
