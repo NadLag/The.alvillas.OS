@@ -364,6 +364,88 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     expect(facts.originals).toEqual(original); expect(facts.transactions).toBe(5); expect(facts.paymentAudits).toBe(2);
     expect(facts.reversal.postings).toHaveLength(2); expect(facts.reversal.reversesTransactionId).toBe(accepted.value.paymentId);
   });
+  it("shows the derived supplier payment workspace while withholding payment controls from a financial viewer", async () => {
+    const f = await invoiceSettlementFixture();
+    const workspace = await getSupplierSettlement(f.ctx, { id: f.invoice.id }, { db });
+    expect(workspace).toMatchObject({ outstanding: { amount: "3320.02", currency: "MAD" }, canPay: true, canPreparePayment: true, timezone: "UTC", payments: [], minorUnit: 2 });
+    expect(workspace.accounts).toContainEqual({ id: f.bank.id, name: f.bank.name });
+    expect(workspace.preview.calendarRuleId).toBeTruthy(); expect(workspace.preview.calendarRuleVersion).toBe(1);
+    const viewer = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => key !== "supplier_invoice:pay")) } };
+    expect(await getSupplierSettlement(viewer, { id: f.invoice.id }, { db })).toMatchObject({ canPay: false, canPreparePayment: false, accounts: [], outstanding: workspace.outstanding });
+  });
+  it("rejects a changed calendar after a real reviewed payment without changing the claim", async () => {
+    const f = await invoiceSettlementFixture(), preview = await getSupplierSettlement(f.ctx, { id: f.invoice.id, paidLocal: "2026-10-28T10:00:00", amount: "1.00" }, { db });
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2020-01-01"),
+      reason: "Change the actual reviewed payment calendar", value: { timezone: "America/Los_Angeles", allow_early_close: false, max_reopen_seconds: 60 } }));
+    await expect(postSupplierPayment(f.ctx, { ...f.payment, amount: "1.00", paidAt: preview.preview.paidAt }, { db,
+      calendar: { id: preview.preview.calendarRuleId!, version: preview.preview.calendarRuleVersion!, local: preview.preview.paidLocal, occurrence: "reject" } })).rejects.toBeInstanceOf(SupplierInvoiceConflictError);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+    expect((await getSupplierSettlement(f.ctx, { id: f.invoice.id }, { db })).outstanding.amount).toBe("3320.02");
+  });
+  it("keeps canonical payment replay valid after the accounting calendar changes", async () => {
+    const f = await invoiceSettlementFixture(), preview = await getSupplierSettlement(f.ctx, { id: f.invoice.id, paidLocal: "2026-10-28T10:00:00", amount: "1.00" }, { db });
+    const input = { ...f.payment, amount: "1.00", paidAt: preview.preview.paidAt }, calendar = { id: preview.preview.calendarRuleId!, version: preview.preview.calendarRuleVersion!, local: preview.preview.paidLocal, occurrence: "reject" as const };
+    const original = await postSupplierPayment(f.ctx, input, { db, calendar });
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2020-01-01"),
+      reason: "Change calendar after an acknowledged bank transfer", value: { timezone: "America/Los_Angeles", allow_early_close: false, max_reopen_seconds: 60 } }));
+    expect(await postSupplierPayment(f.ctx, input, { db, calendar })).toMatchObject({ paymentId: original.paymentId, idempotent: true });
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(3);
+  });
+  it("uses the configured timezone and requires an explicit repeated-clock occurrence in actual payment previews", async () => {
+    const f = await invoiceSettlementFixture();
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2020-01-01"),
+      reason: "Use the actual configured repeated-clock calendar", value: { timezone: "America/Denver", allow_early_close: false, max_reopen_seconds: 60 } }));
+    const input = { id: f.invoice.id, amount: "1.00", paidLocal: "2025-11-02T01:30:00" };
+    await expect(getSupplierSettlement(f.ctx, input, { db })).rejects.toBeInstanceOf(RangeError);
+    const early = await getSupplierSettlement(f.ctx, { ...input, occurrence: "earlier" }, { db }), late = await getSupplierSettlement(f.ctx, { ...input, occurrence: "later" }, { db });
+    expect(early.preview.paidAt).toBe("2025-11-02T07:30:00.000Z"); expect(late.preview.paidAt).toBe("2025-11-02T08:30:00.000Z");
+    for (const occurrence of ["reject", "earlier", "later"] as const) await expect(getSupplierSettlement(f.ctx, { ...input, paidLocal: "2026-03-08T02:30:00", occurrence }, { db })).rejects.toBeInstanceOf(RangeError);
+  });
+  it("paginates real authorized funding accounts and retains an eligible selection from an earlier page", async () => {
+    const f = await invoiceSettlementFixture();
+    await withTenant(db, f.org, async tx => { const finance = new FinanceRepository(tx, f.org);
+      for (let index = 0; index < 55; index++) await finance.ensureLedgerAccount({ code: "PAGED_FUNDING_" + index, name: "Paged payment bank " + index, accountType: "ASSET_LOCATION", normalSide: "DEBIT" });
+      const archived = await finance.ensureLedgerAccount({ code: "PAGED_FUNDING_ARCHIVED", name: "Paged payment bank archived", accountType: "ASSET_LOCATION", normalSide: "DEBIT" });
+      await tx.ledgerAccount.update({ where: { id: archived.id }, data: { archivedAt: new Date() } });
+    });
+    const first = await getSupplierSettlement(f.ctx, { id: f.invoice.id, fundingQuery: "Paged payment bank" }, { db });
+    expect(first.accounts).toHaveLength(50); expect(first.fundingNext).toBeTruthy();
+    const next = await getSupplierSettlement(f.ctx, { id: f.invoice.id, fundingQuery: "Paged payment bank", fundingAfter: first.fundingNext!, fundingAccountId: first.accounts[0].id }, { db });
+    expect(next.accounts).toHaveLength(6); expect(next.accounts).toContainEqual(first.accounts[0]); expect(next.fundingNext).toBeNull();
+    expect(new Set([...first.accounts, ...next.accounts].map(account => account.id)).size).toBe(55);
+    expect([...first.accounts, ...next.accounts].some(account => account.name.endsWith("archived"))).toBe(false);
+  });
+  it("rechecks a separately granted funding name after listing while keeping the original claim readable", async () => {
+    const f = await invoiceSettlementFixture({ propertyOnly: true });
+    const fundingGrant = await withTenant(db, f.org, async tx => {
+      const old = await tx.rolePermission.findMany({ where: { roleId: f.financialGrant.roleId }, include: { permission: true } });
+      const role = await tx.role.create({ data: { organizationId: f.org, key: "payment_without_global_view", name: "Payment authority without global financial view" } });
+      await tx.rolePermission.createMany({ data: old.filter(link => link.permission.key !== "financial_transaction:view").map(link => ({ organizationId: f.org, roleId: role.id, permissionId: link.permissionId })) });
+      await tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { archivedAt: new Date() } });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: f.account.id, personId: f.account.personId, scopeType: "organization", validFrom: new Date("2000-01-01") } });
+      const reader = await tx.role.create({ data: { organizationId: f.org, key: "payment_scoped_view", name: "Scoped invoice and funding financial view" } });
+      await tx.rolePermission.create({ data: { organizationId: f.org, roleId: reader.id, permissionId: old.find(link => link.permission.key === "financial_transaction:view")!.permissionId } });
+      const base = { organizationId: f.org, roleId: reader.id, userAccountId: f.account.id, personId: f.account.personId, validFrom: new Date("2000-01-01") };
+      await tx.roleAssignment.create({ data: { ...base, scopeType: "property", scopeId: f.property.id } });
+      return tx.roleAssignment.create({ data: { ...base, scopeType: "financial_record", scopeId: f.bank.id } });
+    });
+    const ctx = { ...f.ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
+    expect((await getSupplierSettlement(ctx, { id: f.invoice.id }, { db })).accounts).toContainEqual({ id: f.bank.id, name: f.bank.name });
+    const original = Reflect.get(FinanceRepository.prototype, "listLedgerAccounts");
+    const awaitedRepository: { listLedgerAccounts: (...args: Parameters<FinanceRepository["listLedgerAccounts"]>) => Promise<Awaited<ReturnType<FinanceRepository["listLedgerAccounts"]>>> } = FinanceRepository.prototype;
+    const expire = vi.spyOn(awaitedRepository, "listLedgerAccounts").mockImplementationOnce(async function (this: FinanceRepository, input) {
+      const result = await original.call(this, input);
+      await withTenant(admin, f.org, tx => tx.roleAssignment.update({ where: { id: fundingGrant.id }, data: { validTo: new Date("2001-01-01") } })); return result;
+    });
+    try { await expect(getSupplierSettlement(ctx, { id: f.invoice.id }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError); } finally { expire.mockRestore(); }
+    expect(await getSupplierSettlement(ctx, { id: f.invoice.id }, { db })).toMatchObject({ accounts: [], outstanding: { amount: "2400.01", currency: "MAD" } });
+  });
+  it("refuses a form's canonical instant when it disagrees with its reviewed local clock", async () => {
+    const f = await invoiceSettlementFixture(), preview = await getSupplierSettlement(f.ctx, { id: f.invoice.id, paidLocal: "2026-10-28T10:00:00", amount: "1.00" }, { db });
+    await expect(postSupplierPayment(f.ctx, { ...f.payment, amount: "1.00", paidAt: "2026-10-28T11:00:00.000Z" }, { db,
+      calendar: { id: preview.preview.calendarRuleId!, version: preview.preview.calendarRuleVersion!, local: preview.preview.paidLocal, occurrence: "reject" } })).rejects.toBeInstanceOf(SupplierInvoiceConflictError);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+  });
   it("rejects unaudited and fabricated supplier disbursements at the real deferred database boundary", async () => {
     const f = await invoiceSettlementFixture();
     await expect(rawSupplierPayment(f, "1.00", { omitAudit: true })).rejects.toThrow(/attributed atomic receipt/iu);
@@ -485,6 +567,8 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
       { permissions: new Set([key]), scope: { organizationId: f.org, scopeType: "organization" as const }, conditions: { timeWindow: { startsAt: "2026-10-01T00:00:00Z" } } }
     ] } };
     await expect(voidSupplierPayment(narrow, { id: f.invoice.id, paymentId: paid.paymentId, reason: "A posting adjustment must retain the original date restriction" }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    expect((await getSupplierSettlement(narrow, { id: f.invoice.id }, { db })).payments[0].canVoid).toBe(false);
+    expect((await getSupplierSettlement(f.ctx, { id: f.invoice.id }, { db })).payments[0].canVoid).toBe(true);
     expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
     expect((await getSupplierSettlement(f.ctx, { id: f.invoice.id }, { db })).outstanding.amount).toBe("900.00");
   });

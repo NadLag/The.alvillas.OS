@@ -12,4 +12,8 @@ export const supplierPaymentInput = z.object({
 }).strict();
 export const supplierPaymentVoidInput = z.object({ id, paymentId: id, reason }).strict();
 export const supplierInvoiceReversalInput = z.object({ id, expectedVersion: z.number().int().positive(), idempotencyKey: id, reason }).strict();
-export const supplierSettlementQuery = z.object({ id, before: id.optional() }).strict();
+export const supplierPaymentFormInput = supplierPaymentInput.extend({ paidLocal: z.string().trim().min(1).max(32),
+  occurrence: z.enum(["reject", "earlier", "later"]).default("reject"), calendarRuleId: id, calendarRuleVersion: z.number().int().positive() }).strict();
+export const supplierSettlementQuery = z.object({ id, before: id.optional(), amount: supplierPaymentInput.shape.amount.optional(),
+  paidLocal: z.string().trim().min(1).max(32).optional(), occurrence: z.enum(["reject", "earlier", "later"]).default("reject"),
+  fundingQuery: z.string().trim().max(120).optional(), fundingAfter: id.optional(), fundingAccountId: id.optional() }).strict();
