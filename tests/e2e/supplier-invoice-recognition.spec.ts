@@ -9,6 +9,7 @@ import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/acc
 import { closeAccountingPeriod } from "@/modules/finance/application/accounting-period-service";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { executeSupplierInvoiceRecognitionReference } from "@/modules/finance/application/supplier-invoice-recognition-requests";
+import { localClockLabel } from "@/platform/time/local-instant";
 import { openFieldFixture } from "./support/field-fixture";
 import en from "../../messages/en.json" with { type: "json" };
 import fr from "../../messages/fr.json" with { type: "json" };
@@ -42,7 +43,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
       const calendar = await rules.resolve({ key: "finance.accounting_periods", scopes: [{ scopeType: "organization", scopeId: null }], asOf: await new FinanceRepository(tx, f.organizationId).clock() });
       if (!calendar) await rules.createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2000-01-01"),
         reason: "Actual native recording calendar", value: { timezone: "UTC", allow_early_close: false, max_reopen_seconds: 60 } });
-      return property;
+      return { ...property, accountingTimezone: calendar ? z.object({ timezone: z.string() }).parse(calendar.value).timezone : "UTC" };
     });
     if (locale === "fr") {
       const actor = { organizationId: f.organizationId, actorId: user.id, authContext: await authContextForAccount(f.organizationId, user.id, { db: f.db }) };
@@ -112,8 +113,12 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
     const payments = page.getByTestId("supplier-payment"); await expect(payments.getByTestId("supplier-payment-outstanding")).toBeVisible();
     await payments.getByTestId("supplier-payment-refresh").click();
     await payments.getByTestId("supplier-payment-amount").fill(locale === "fr" ? "1500,01" : locale === "ar" ? "١٥٠٠٫٠١" : "1500.01");
-    await payments.getByTestId("supplier-payment-date").fill(locale === "fr" ? "2026-09-25T12:00" : "2026-10-28T12:00");
+    const paidInstant = locale === "fr" ? "2026-09-25T12:00:00.000Z" : "2026-10-28T12:00:00.000Z";
+    const paidLocal = localClockLabel(paidInstant, property.accountingTimezone).replace(/:00$/u, "");
+    await payments.getByTestId("supplier-payment-date").fill(paidLocal);
     await payments.getByTestId("supplier-payment-preview").click();
+    await payments.getByTestId("supplier-payment-funding-query").fill(bank.name); await payments.getByTestId("supplier-payment-funding-search").click();
+    await expect(payments.getByTestId("supplier-payment-funding").locator(`option[value="${bank.id}"]`)).toHaveCount(1);
     await expect(payments.getByTestId("supplier-payment-funding")).toBeEnabled(); await payments.getByTestId("supplier-payment-funding").selectOption(bank.id);
     const paymentReason = "Actual native supplier payment " + suffix; await payments.getByTestId("supplier-payment-reason").fill(paymentReason);
     await payments.getByTestId("supplier-payment-reference").fill("TRANSFER-" + suffix);
