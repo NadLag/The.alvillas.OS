@@ -2632,6 +2632,7 @@ model SupplierInvoiceRecognitionRequest {
   invoiceId          String                             @map("invoice_id") @db.Uuid
   submissionId       String                             @map("submission_id") @db.Uuid
   invoiceVersion     Int                                @map("invoice_version")
+  operation          String                             @default("RECOGNIZE")
   currentPeriod      Boolean                            @default(false) @map("current_period")
   idempotencyKey     String                             @map("idempotency_key") @db.Uuid
   requestFingerprint String                             @map("request_fingerprint")
