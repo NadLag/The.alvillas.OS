@@ -355,12 +355,12 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
   });
   it("reverses all 500 actual original costs with exact original order and without changing their histories", async () => {
     const f = await invoiceSettlementFixture({ companyLines: 500 });
-    const originals = await withTenant(db, f.org, tx => tx.financialTransaction.findMany({ where: { id: { in: f.recognized.transactionIds } }, include: { postings: true }, orderBy: { id: "asc" } }));
+    const originals = await withTenant(db, f.org, tx => tx.financialTransaction.findMany({ where: { id: { in: f.recognized.transactionIds } }, include: { postings: { orderBy: { id: "asc" } } }, orderBy: { id: "asc" } }));
     const input = { id: f.invoice.id, expectedVersion: f.submitted.version, idempotencyKey: randomUUID(), reason: "Reverse every one of the 500 actual original supplier costs" }, started = performance.now();
     const result = await voidSupplierInvoiceClaim(f.ctx, input, { db }), elapsed = performance.now() - started;
     expect(result.reversalTransactionIds).toHaveLength(500); expect(result.idempotent).toBe(false);
     expect(await voidSupplierInvoiceClaim(f.ctx, input, { db })).toMatchObject({ reversalTransactionIds: result.reversalTransactionIds, idempotent: true });
-    expect(await withTenant(db, f.org, tx => tx.financialTransaction.findMany({ where: { id: { in: f.recognized.transactionIds } }, include: { postings: true }, orderBy: { id: "asc" } }))).toEqual(originals);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.findMany({ where: { id: { in: f.recognized.transactionIds } }, include: { postings: { orderBy: { id: "asc" } } }, orderBy: { id: "asc" } }))).toEqual(originals);
     expect((await getSupplierSettlement(f.ctx, { id: f.invoice.id }, { db })).outstanding.amount).toBe("0.00");
     console.info(JSON.stringify({ actualOriginalCosts: 500, claimReversalMilliseconds: Math.round(elapsed), originalHistoriesUnchanged: true }));
   });
