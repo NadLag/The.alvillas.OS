@@ -321,7 +321,7 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
   it("rolls back the claim and success receipt when financial authority expires after the actual receipt insert", async () => {
     const f = await invoiceRecognitionFixture(); await requestSupplierInvoiceRecognition(f.ctx, f.command, { db });
     const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: "SupplierInvoiceRecognitionRequested" } }));
-    const original = Reflect.get(SupplierInvoiceRecognitionRequestRepository.prototype, "outcome") as SupplierInvoiceRecognitionRequestRepository["outcome"];
+    const original = Reflect.get(SupplierInvoiceRecognitionRequestRepository.prototype, "outcome");
     const expire = vi.spyOn(SupplierInvoiceRecognitionRequestRepository.prototype, "outcome").mockImplementationOnce(async function (this: SupplierInvoiceRecognitionRequestRepository, input) {
       const result = await original.call(this, input);
       const tx = Reflect.get(this, "tx") as Prisma.TransactionClient;
