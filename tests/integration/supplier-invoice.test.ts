@@ -255,6 +255,14 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     expect(await withTenant(db, f.org, tx => tx.supplierInvoiceRecognition.count())).toBe(0);
     expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(0);
   });
+  it("denies narrowed financial source access before disclosing recognition retry conflicts", async () => {
+    const f = await invoiceRecognitionFixture(); await recognizeSupplierInvoice(f.ctx, f.command, { db });
+    const caller = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => !key.startsWith("financial_transaction:"))) } };
+    for (const input of [{ ...f.command, reason: "Different intent must not disclose its private recognition" }, { ...f.command, idempotencyKey: randomUUID() },
+      { ...f.command, expectedVersion: f.command.expectedVersion + 1 }, { ...f.command, currentPeriod: true }])
+      await expect(recognizeSupplierInvoice(caller, input, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+  });
   it("rolls back actual recognition lines and journals after stored financial authority expires during their write", async () => {
     const f = await invoiceRecognitionFixture(), original = Reflect.get(SupplierInvoiceRecognitionRepository.prototype, "lines");
     const expire = vi.spyOn(SupplierInvoiceRecognitionRepository.prototype, "lines").mockImplementationOnce(async function (this: SupplierInvoiceRecognitionRepository, value) {
@@ -714,8 +722,8 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
       const eventId = destination.split("/").at(-1)!;
       const context = { organizationId: f.org, actorId: reviewer.account.id, authContext: reviewer.actor.authContext };
       const data = await getSupplierInvoiceNotice(context, eventId, { db });
-      expect(data).toMatchObject({ purpose: "Emergency villa cost addressed to its owners", amount: "600.25", ownerAmount: "600.25", currency: "MAD" });
-      expect(JSON.stringify(data)).not.toMatch(/9000|Private complete|Confidential emergency/u);
+      expect(data).toEqual({ id: eventId, propertyName: f.property.name, purpose: "Emergency villa cost addressed to its owners", category: "maintenance",
+        amount: "600.25", ownerAmount: "600.25", currency: "MAD", occurredOn: "2026-10-28" });
       const otherEvent = events.find(event => event.id !== eventId)!;
       await expect(getSupplierInvoiceNotice(context, otherEvent.id, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
       await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: reviewer.grant.id }, data: { validTo: new Date() } }));

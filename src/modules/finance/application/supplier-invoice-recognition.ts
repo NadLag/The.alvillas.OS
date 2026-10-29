@@ -39,20 +39,18 @@ export async function recognizeSupplierInvoice(ctx: FinanceActorContext, raw: un
       sourceInvoiceVersion: source.sourceInvoiceVersion, occurredOn: source.occurredOn.toISOString().slice(0,10), amount: revision.amount.toString(), currency: revision.currency,
       lines: revision.lines.map(line => ({ ...line, amount: line.amount.toString() })) }, source.snapshot);
     const existing = await recognitions.byInvoice(row.id), sameKey = await recognitions.byKey(input.idempotencyKey);
-    if (existing || sameKey) {
-      if (!existing || sameKey?.id !== existing.id || existing.requestFingerprint !== fingerprint || existing.createdBy !== ctx.actorId) throw new SupplierInvoiceConflictError();
-    } else if (row.version !== input.expectedVersion) throw new SupplierInvoiceConflictError();
     const postAt = new Map<string, Date>(), adjustments = new Map<string, NonNullable<Awaited<ReturnType<AccountingPeriodRepository["postingPeriod"]>>>>();
+    const closedCosts = new Set<string>(), unavailablePeriods = new Set<string>();
     const current = await finance.clock();
     if (existing) for (const line of existing.lines) postAt.set(line.invoiceLineId, line.transaction.occurredAt);
     else for (const cost of costs) {
       if (input.currentPeriod && !await periods.postingOpen(cost.sourceOccurredAt)) {
+        closedCosts.add(cost.id); postAt.set(cost.id, current);
         const closed = await periods.postingPeriod(cost.sourceOccurredAt);
-        if (!closed?.events[0]) throw new SupplierInvoiceConflictError();
-        adjustments.set(cost.id, closed); postAt.set(cost.id, current);
+        if (!closed?.events[0]) unavailablePeriods.add(cost.id);
+        else adjustments.set(cost.id, closed);
       } else postAt.set(cost.id, cost.sourceOccurredAt);
     }
-    if (!existing && input.currentPeriod && !adjustments.size) throw new SupplierInvoiceConflictError();
     const recheck = async (at: Date, checkedCosts = costs) => {
       await assertSupplierInvoiceAuthority(ctx, tx, "pay", at);
       const actual = await invoices.recognitionSource(row.id, checkedCosts.map(cost => cost.id)), actualSupplier = await supplier.find(row.supplierId);
@@ -73,7 +71,7 @@ export async function recognizeSupplierInvoice(ctx: FinanceActorContext, raw: un
           { action: "view", resource: financial, organizationOnly: !line.propertyId },
           { action: "create", resource: { ...financial, occurredAt: postingAt }, organizationOnly: !line.propertyId });
         const adjustment = existing?.lines.find(link => link.invoiceLineId === cost.id)?.periodAdjustment;
-        if (adjustments.has(cost.id) || adjustment) checks.push({ action: "override", resource: financial, organizationOnly: !line.propertyId });
+        if (closedCosts.has(cost.id) || adjustment) checks.push({ action: "override", resource: financial, organizationOnly: !line.propertyId });
         if (line.reservationId) {
           const reservation = reservations.find(reservation => reservation.id === line.reservationId);
           if (!reservation || reservation.propertyId !== line.propertyId) throw new SupplierInvoiceAccessError();
@@ -84,6 +82,10 @@ export async function recognizeSupplierInvoice(ctx: FinanceActorContext, raw: un
       await recheckFinanceAuthorization(ctx, tx, at, checks, new SupplierInvoiceAccessError());
     };
     await recheck(await finance.clock());
+    if (existing || sameKey) {
+      if (!existing || sameKey?.id !== existing.id || existing.requestFingerprint !== fingerprint || existing.createdBy !== ctx.actorId) throw new SupplierInvoiceConflictError();
+    } else if (row.version !== input.expectedVersion) throw new SupplierInvoiceConflictError();
+    if (!existing && input.currentPeriod && (!adjustments.size || unavailablePeriods.size)) throw new SupplierInvoiceConflictError();
     if (existing) {
       const identities = new Map(existing.lines.map(line => [line.invoiceLineId, line.transactionId]));
       const transactionIds = costs.map(cost => { const id = identities.get(cost.id); if (!id) throw new SupplierInvoiceConflictError(); return id; });
