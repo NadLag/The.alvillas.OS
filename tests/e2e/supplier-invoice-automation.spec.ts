@@ -67,7 +67,11 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native company invoice a
     await submission.getByTestId("invoice-preview-policy").click(); await expect(submission.getByTestId("invoice-policy-preview")).toBeVisible();
     await submission.getByTestId("invoice-line-review-note").fill("Actual private company line requiring configured finance review");
     await submission.getByTestId("invoice-submit-reason").fill("Submit actual company invoice for its configured review");
-    await submission.getByTestId("invoice-submit").click(); await expect(page.getByTestId("invoice-state")).toHaveText(text.SupplierInvoices.states.PENDING_APPROVAL);
+    const submitted = page.waitForResponse(response => response.request().method() === "POST" &&
+      response.url() === page.url() && Boolean(response.request().postData()?.includes("Submit actual company invoice for its configured review")));
+    await submission.getByTestId("invoice-submit").click();
+    const acknowledgement = await submitted; expect(acknowledgement.ok()).toBe(true);
+    await expect(page.getByTestId("invoice-state")).toHaveText(text.SupplierInvoices.states.PENDING_APPROVAL);
     const source = await withTenant(f.db, f.organizationId, async tx => {
       const invoice = await tx.supplierInvoice.findUniqueOrThrow({ where: { id: invoiceId }, include: { currentSubmission: { include: { approval: true } } } });
       const event = await tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: { organizationId: f.organizationId,
