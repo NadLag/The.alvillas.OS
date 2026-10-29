@@ -139,9 +139,11 @@ export async function voidSupplierPayment(ctx: FinanceActorContext, raw: unknown
     await lockWalletHolders(tx, ctx.organizationId, hint.teamWallet ? [hint.teamWallet.personId] : []);
     await new FinancialTransferRepository(tx, ctx.organizationId).lockAccounts([hint.id]);
     const funding = await finance.findLedgerAccountById(hint.id); if (!funding) throw new SupplierInvoiceAccessError();
-    const now = await finance.clock(), target = paymentResource(ctx, source, saved.data.input.amount, original.occurredAt, original.id);
+    const now = await finance.clock(), paidAt = new Date(saved.data.input.paidAt), target = paymentResource(ctx, source, saved.data.input.amount, original.occurredAt, original.id);
     const checks: Check[] = [{ action: "void", resource: target, organizationOnly: !target.propertyId },
+      { action: "void", resource: { ...target, occurredAt: paidAt }, organizationOnly: !target.propertyId },
       { action: "create", resource: { ...target, id: undefined, financialRecordId: undefined, occurredAt: now }, organizationOnly: !target.propertyId },
+      ...fundingChecks(ctx, funding, saved.data.input.amount, paidAt, "void"),
       ...fundingChecks(ctx, funding, saved.data.input.amount, original.occurredAt, "void"), ...fundingChecks(ctx, funding, saved.data.input.amount, now, "void")];
     await source.recheckSettlement(now, checks);
     if (original.reversedByTransactions.length) {

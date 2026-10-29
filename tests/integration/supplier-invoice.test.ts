@@ -186,7 +186,7 @@ async function invoiceAutomationFixture(extra: Partial<AutomationRule> = {}, rev
   return { ...f, actor, config, invoice, draft, submitted, event };
 }
 
-async function invoiceRecognitionFixture({ occurredOn = "2026-10-28", companyLines }: { occurredOn?: string; companyLines?: number } = {}) {
+async function invoiceRecognitionFixture({ occurredOn = "2026-10-28", companyLines, propertyOnly = false }: { occurredOn?: string; companyLines?: number; propertyOnly?: boolean } = {}) {
   const f = await invoicePolicyFixture();
   const second = await withTenant(db, f.org, async tx => {
     for (const [roleId, keys] of [[f.assignment.roleId, ["supplier_invoice:pay"]], [f.financialGrant.roleId, ["financial_transaction:create", "financial_transaction:override", "financial_transaction:configure"]]] as const) {
@@ -199,7 +199,7 @@ async function invoiceRecognitionFixture({ occurredOn = "2026-10-28", companyLin
     await tx.propertyOwner.create({ data: { organizationId: f.org, propertyId: f.property.id, ownerId: second.id, shareBps: 5000, isPrimary: false } }); return second;
   });
   const ctx = { ...f.ctx, authContext: await authContextForAccount(f.org, f.account.id, { db }) };
-  const creation = { ...input(f.supplier.id), issuedOn: occurredOn, lines: companyLines === undefined ? [
+  const creation = { ...input(f.supplier.id), issuedOn: occurredOn, lines: propertyOnly ? [{ propertyId: f.property.id, category: "maintenance", amount: "2400.01" }] : companyLines === undefined ? [
     { category: "software", costCenter: "office", amount: "920.01" }, { propertyId: f.property.id, category: "maintenance", amount: "2400.01" }
   ] : Array.from({ length: companyLines }, (_, index) => ({ category: "software", costCenter: "source_" + index, amount: "0.01" })) };
   const invoice = await createSupplierInvoice(ctx, creation, { db }), draft = await getSupplierInvoice(ctx, invoice.id, {}, { db });
@@ -209,8 +209,8 @@ async function invoiceRecognitionFixture({ occurredOn = "2026-10-28", companyLin
   return { ...f, ctx, second, invoice, submitted, draft, command: { id: invoice.id, expectedVersion: submitted.version, idempotencyKey: randomUUID(), reason: "Recognize the actual approved supplier claim" } };
 }
 
-async function invoiceSettlementFixture() {
-  const f = await invoiceRecognitionFixture();
+async function invoiceSettlementFixture({ propertyOnly = false }: { propertyOnly?: boolean } = {}) {
+  const f = await invoiceRecognitionFixture({ propertyOnly });
   const bank = await withTenant(db, f.org, async tx => {
     for (const [roleId, keys] of [[f.assignment.roleId, ["supplier_invoice:void"]], [f.financialGrant.roleId, ["financial_transaction:pay", "financial_transaction:void"]]] as const) {
       const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: [...keys] } } }); expect(permissions).toHaveLength(keys.length);
@@ -352,6 +352,18 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     const saved = await withTenant(db, f.org, tx => new SupplierPayableRepository(tx, f.org).paymentAudit(recorded.paymentId));
     expect(saved?.after).toMatchObject({ sourcePeriodId: closed.id, input: { paidAt: "2026-09-25T12:00:00.000Z", currentPeriod: true } });
     expect((await getSupplierSettlement(f.ctx, { id: f.invoice.id }, { db })).outstanding.amount).toBe("1820.01");
+  });
+  it("denies reversal when a caller can void the adjusted posting but cannot void the original paid date", async () => {
+    const f = await invoiceSettlementFixture({ propertyOnly: true });
+    await closeAccountingPeriod(f.ctx, { month: "2026-09", expectedVersion: 0, idempotencyKey: randomUUID(), reason: "Close the actual original paid month" }, { db });
+    const paid = await postSupplierPayment(f.ctx, { ...f.payment, paidAt: "2026-09-25T12:00:00Z", currentPeriod: true }, { db });
+    const key = "financial_transaction:void", narrow = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [
+      ...f.ctx.authContext.assignments!.map(assignment => ({ ...assignment, permissions: new Set([...assignment.permissions].filter(permission => permission !== key)) })),
+      { permissions: new Set([key]), scope: { organizationId: f.org, scopeType: "organization" as const }, conditions: { timeWindow: { startsAt: "2026-10-01T00:00:00Z" } } }
+    ] } };
+    await expect(voidSupplierPayment(narrow, { id: f.invoice.id, paymentId: paid.paymentId, reason: "A posting adjustment must retain the original date restriction" }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+    expect((await getSupplierSettlement(f.ctx, { id: f.invoice.id }, { db })).outstanding.amount).toBe("900.00");
   });
   it("reads actual queued and recorded financial status without exposing captured permissions or private execution keys", async () => {
     const f = await invoiceRecognitionFixture();
