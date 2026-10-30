@@ -157,7 +157,9 @@ export const approvalThresholdsConfigSchema = z
           emergency_bypass_owner: z.boolean().default(false),
           requires_approval_from: z.array(approvalStepSchema).min(1)
         })
-        .passthrough()
+        .passthrough().superRefine((threshold,ctx)=>{
+          if(threshold.amount!==undefined&&threshold.currency===undefined)ctx.addIssue({code:"custom",path:["currency"]});
+        })
     ),
     routing: z.partialRecord(z.enum(["manager", "owner", "finance"]), notificationRoutingSchema).optional(),
     revenue_source: z.discriminatedUnion("basis", [

@@ -28,6 +28,10 @@ for(const locale of ["en","fr","ar"] as const)test(`Native bank transfers preser
     const captured=page.waitForRequest(request=>request.method()==="POST"&&Boolean(request.headers()["next-action"])&&Boolean(request.postData()?.includes(purpose)));
     await page.getByTestId("transfer-submit").click();const request=await captured;await expect(page.getByTestId("transfer-saved")).toBeVisible();
     const headers={"content-type":request.headers()["content-type"],"next-action":request.headers()["next-action"],accept:"text/x-component",origin};
+    const validBody=request.postData()!;
+    expect(validBody).toContain('"amount":"1234.56"');
+    const invalidBody=validBody.replace('"amount":"1234.56"','"amount":"invalid"');
+    expect(await(await page.request.post(request.url(),{data:invalidBody,headers})).text()).toContain('"code":"validation"');
     for(const response of await Promise.all(Array.from({length:4},()=>page.request.post(request.url(),{data:request.postDataBuffer()!,headers}))))expect(await response.text()).toContain('"idempotent":true');
     expect(await(await anonymous.request.post(request.url(),{data:request.postDataBuffer()!,headers})).text()).toContain('"code":"forbidden"');
     const original=await withTenant(f.db,f.organizationId,async tx=>{
