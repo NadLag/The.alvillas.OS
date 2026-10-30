@@ -3,6 +3,7 @@ import { useCallback,useEffect,useRef,useState,type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { z } from "zod";
+import { ChevronDown } from "lucide-react";
 import { EmptyState,SkeletonBlock } from "@/design-system/shells";
 import { formatCurrencyAmount,formatDate,formatDateTime } from "@/i18n/format";
 import { localizedText } from "@/i18n/content";
@@ -81,10 +82,13 @@ export function CompensationRunCreate({locale,recoveryScope}:{locale:AppLocale;r
       {work.pending?<p role="status">{t("loadingWork")}</p>:null}
       {work.error?<p role="alert" data-testid="compensation-work-error">{t(work.error)}</p>:null}
       {work.data?.items.length===0?<EmptyState testId="compensation-work-empty">{t("noEligibleWork")}</EmptyState>:null}
-      {work.data?.items.map(item=><fieldset className="compensation-source" key={item.taskId} data-testid="compensation-work-item"><legend>{item.choices[0].sourceTitle?localizedText(item.choices[0].sourceTitle,locale):t("completedWork")}</legend><p>{formatDateTime(locale,new Date(item.recordedCompletionAt),{timeZone:work.data!.timezone})}</p>
+      {work.data?.items.map(item=>{
+        const chosen=item.choices.find(choice=>choice.assignmentId===selected[item.taskId]?.assignmentId);
+        return <details className="compensation-source compensation-work-choice" key={item.taskId} data-testid="compensation-work-item"><summary><span><strong>{item.choices[0].sourceTitle?localizedText(item.choices[0].sourceTitle,locale):t("completedWork")}</strong><small dir="auto">{item.choices[0].propertyName??t("restrictedProperty")}</small><small>{formatDateTime(locale,new Date(item.recordedCompletionAt),{timeZone:work.data!.timezone})}</small></span><span className="compensation-choice-state">{chosen?t("chosenContract",{amount:formatCurrencyAmount(locale,chosen.rate.amount,chosen.rate.currency)}):t("chooseContract")}</span><ChevronDown size={20} aria-hidden="true"/></summary>
+        <fieldset className="compensation-contract-options"><legend className="sr-only">{t("contractChoices")}</legend>
         {item.choices.map(choice=><label className="compensation-contract-choice" key={choice.assignmentId}><input type="radio" name={item.taskId} data-testid={`compensation-choice-${choice.assignmentId}`} checked={selected[item.taskId]?.assignmentId===choice.assignmentId} onChange={()=>setSelected(current=>({...current,[item.taskId]:{taskId:item.taskId,assignmentId:choice.assignmentId,confirmedAssignment:true}}))}/><span><strong dir="auto">{choice.personName??t("restrictedPerson")}</strong><span dir="auto">{choice.propertyName??t("restrictedProperty")}</span><span dir="auto">{choice.roleName}</span><small>{t("contractVersion",{version:choice.contractVersion,at:formatDate(locale,new Date(choice.effectiveFrom),{timeZone:"UTC"})})}</small><strong>{t("perJob",{amount:formatCurrencyAmount(locale,choice.rate.amount,choice.rate.currency)})}</strong><small>{t(`methods.${choice.completionMethod}`)}{choice.completionMethod==="PROXY"?` · ${t("validator")}: ${choice.validatorName??t("restrictedPerson")}`:""}</small></span></label>)}
-        {selected[item.taskId]?<button className="quiet-button" type="button" onClick={()=>setSelected(current=>Object.fromEntries(Object.entries(current).filter(([id])=>id!==item.taskId)))}>{t("removeWork")}</button>:null}
-      </fieldset>)}
+        {selected[item.taskId]?<button className="quiet-button" type="button" onClick={()=>setSelected(current=>Object.fromEntries(Object.entries(current).filter(([id])=>id!==item.taskId)))}>{t("removeWork")}</button>:null}</fieldset>
+      </details>;})}
       <div className="app-actions">{after?<button type="button" className="secondary-button" onClick={()=>setAfter(undefined)}>{t("firstSources")}</button>:null}{work.data?.next?<button type="button" className="secondary-button" data-testid="compensation-work-next" onClick={()=>setAfter(work.data!.next!)}>{t("nextSources")}</button>:null}</div>
     </fieldset>
     <fieldset className="resource-form" disabled={pending||uncertain}><legend>{t("runDetails")}</legend><div className="form-grid"><label className="field"><span>{t("purpose")}</span><textarea data-testid="compensation-create-purpose" value={purpose} onChange={event=>setPurpose(event.target.value)} minLength={3} maxLength={1000} required dir="auto"/></label><label className="field"><span>{t("creationReason")}</span><textarea data-testid="compensation-create-reason" value={reason} onChange={event=>setReason(event.target.value)} minLength={6} maxLength={500} required dir="auto"/></label></div></fieldset>

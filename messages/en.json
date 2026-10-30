@@ -3091,6 +3091,9 @@
     "recoverSaved": "Check the saved result",
     "creationUncertain": "The save acknowledgement was not received. Retry the same save or check the saved result before starting another run.",
     "creationConflict": "This save conflicts with the recorded intent or current sources. Check the saved result before starting another run.",
-    "configuration_unavailable": "Check the earning dates against the configured calendar and maximum period. A current compensation calendar and eligible contracts are required."
+    "configuration_unavailable": "Check the earning dates against the configured calendar and maximum period. A current compensation calendar and eligible contracts are required.",
+    "chooseContract": "Choose a contract",
+    "chosenContract": "Selected · {amount}",
+    "contractChoices": "Applicable contract choices"
   }
 }

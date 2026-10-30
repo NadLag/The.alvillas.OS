@@ -20,6 +20,8 @@ for(const locale of["en","fr","ar"] as const)test(`Native compensation creation 
     for(const check of await page.getByTestId("field-checklist-item").all())await check.check();await page.getByTestId("field-task-complete").click();
     await expect.poll(()=>withTenant(f.db,f.organizationId,tx=>tx.operationTask.findUniqueOrThrow({where:{id:f.taskId},select:{state:true}}).then(row=>row.state))).toBe("COMPLETED");
     await financialPage.goto(`/${locale}/app/finance/compensation`);await financialPage.getByTestId("compensation-new").click();await expect(financialPage.getByTestId("compensation-create-form")).toBeVisible();
+    const workItem=financialPage.getByTestId("compensation-work-item").filter({has:financialPage.getByTestId(`compensation-choice-${alternate.id}`)});
+    await workItem.locator("summary").click();
     await expect(financialPage.getByTestId(`compensation-choice-${f.source.assignment.id}`)).not.toBeChecked();await expect(financialPage.getByTestId(`compensation-choice-${alternate.id}`)).not.toBeChecked();
     await financialPage.getByTestId(`compensation-choice-${alternate.id}`).check();
     const purpose="Actual native explicit contract selection "+randomUUID(),reason="Retain this selected completed work and original contract";

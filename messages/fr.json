@@ -3091,6 +3091,9 @@
     "recoverSaved": "Vérifier le résultat enregistré",
     "creationUncertain": "L’accusé de réception n’a pas été reçu. Réessayez le même enregistrement ou vérifiez son résultat avant de créer un autre décompte.",
     "creationConflict": "Cet enregistrement est incompatible avec l’intention enregistrée ou les sources actuelles. Vérifiez le résultat enregistré avant de créer un autre décompte.",
-    "configuration_unavailable": "Vérifiez les dates selon le calendrier configuré et la durée maximale. Un calendrier de rémunération actuel et des contrats applicables sont nécessaires."
+    "configuration_unavailable": "Vérifiez les dates selon le calendrier configuré et la durée maximale. Un calendrier de rémunération actuel et des contrats applicables sont nécessaires.",
+    "chooseContract": "Choisir un contrat",
+    "chosenContract": "Sélectionné · {amount}",
+    "contractChoices": "Choix des contrats applicables"
   }
 }

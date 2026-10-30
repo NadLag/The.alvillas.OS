@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { Prisma, PrismaClient } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it,vi } from "vitest";
 import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
@@ -15,6 +15,7 @@ import { OperationRepository } from "@/modules/reservations/infrastructure/opera
 import { presentAuditHistoryRow } from "@/modules/audit/application/audit-service";
 import { AuditRepository } from "@/modules/audit/infrastructure/audit-repository";
 import { maskedValue } from "@/platform/authz/present";
+import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -81,14 +82,22 @@ describe("native cash sync on real PostgreSQL", () => {
       const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`; acquired(row.pid); await gate;
     });
     const pid = await ready;
+    let entering!:()=>void;
+    const entered=new Promise<void>(resolve=>{entering=resolve;});
+    const original=Object.getOwnPropertyDescriptor(AccountingPeriodRepository.prototype,"postingOpen")!.value as AccountingPeriodRepository["postingOpen"];
+    const observe=vi.spyOn(AccountingPeriodRepository.prototype,"postingOpen").mockImplementation(async function(this:AccountingPeriodRepository,at:Date){
+      entering();return original.call(this,at);
+    });
     const attempt = push(f, request, ctx);
     try {
+      // Observe entry, then prove the real PostgreSQL lock wait; startup work consumes none of the polling window.
+      await Promise.race([entered,attempt.then(()=>{throw Error("Cash command finished before entering its period check");})]);
       await expect.poll(() => withTenant(db, f.org, async tx => {
         const [row] = await tx.$queryRaw<Array<{ waiting: boolean }>>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${pid}::int=ANY(pg_blocking_pids(pid))) AS waiting`;
         return row.waiting;
       })).toBe(true);
       await withTenant(db, f.org, tx => tx.$executeRaw`UPDATE role_assignment SET valid_to=clock_timestamp() WHERE organization_id=${f.org}::uuid AND id=${f.cashGrant}::uuid`);
-    } finally { release(); await blocker; }
+    } finally { observe.mockRestore();release(); await blocker; }
     expect((await attempt).results[0].status).toBe("REJECTED");
     expect(await counts(f)).toEqual({ collections: 0, transactions: 0, audits: 0, events: 0 });
   });
