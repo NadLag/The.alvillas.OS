@@ -23,7 +23,7 @@ const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.Inp
 const stable = (value: unknown) => JSON.stringify(value);
 const orderedTasks = <T extends { id: string }>(rows: readonly T[]) => [...rows].sort((a,b) => a.id.localeCompare(b.id));
 
-function runModel(ctx: FinanceActorContext, row: CompensationRunRecord, after?: string) {
+export function employeeCompensationRunModel(ctx: FinanceActorContext, row: CompensationRunRecord, after?: string) {
   if (after && !row.lines.some(line => line.id === after)) throw new EmployeeCompensationRunAccessError();
   const facts = employeeCompensationRunFacts(ctx.organizationId, row), remaining = row.lines.filter(line => !after || line.id > after);
   const page = remaining.slice(0,50);
@@ -56,7 +56,7 @@ export async function createEmployeeCompensationRun(ctx: FinanceActorContext, ra
     if (existing) {
       await checkStoredRun(ctx,tx,existing,"create");
       if (existing.createdBy!==ctx.actorId || existing.requestFingerprint!==fingerprint) throw new EmployeeCompensationRunConflictError();
-      return { ...runModel(ctx,existing), idempotent: true };
+      return { ...employeeCompensationRunModel(ctx,existing), idempotent: true };
     }
     const now = await finance.clock(), sources = new EmployeeCompensationRepository(tx,ctx.organizationId), config = new ConfigRuleRepository(tx,ctx.organizationId);
     const tasks = orderedTasks(await sources.completedWorks(input.jobs.map(job=>job.taskId)));
@@ -118,20 +118,22 @@ export async function createEmployeeCompensationRun(ctx: FinanceActorContext, ra
     await repository.flushGuards();await recheck();
     const row=await repository.find(created.id);if(!row)throw new EmployeeCompensationRunConflictError();
     await checkStoredRun(ctx,tx,row,"create");
-    return {...runModel(ctx,row),idempotent:false};
+    return {...employeeCompensationRunModel(ctx,row),idempotent:false};
   },{timeout:120000});
 }
 
-export async function getEmployeeCompensationRun(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
-  const input=z.object({id:z.uuid(),after:z.uuid().optional()}).strict().parse(raw);
-  return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
+export const employeeCompensationRunReadInput=z.object({id:z.uuid(),after:z.uuid().optional()}).strict();
+export async function readEmployeeCompensationRunInTransaction(ctx: FinanceActorContext,input:z.infer<typeof employeeCompensationRunReadInput>,tx:TenantTransaction,deps:Deps={}){
     const repository=new EmployeeCompensationRunRepository(tx,ctx.organizationId),row=await repository.find(input.id);
     if(!row)throw new EmployeeCompensationRunAccessError();await checkStoredRun(ctx,tx,row);
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation_run.viewed",resourceType:"employee_compensation_run",
       resourceId:row.id,after:{runId:row.id,kind:"COMPLETED_WORK_DRAFT"},reason:"Viewed an authorized compensation run",requestId:deps.requestId??crypto.randomUUID(),occurredAt:await new FinanceRepository(tx,ctx.organizationId).clock()});
     const current=await repository.find(row.id);if(!current||stable(current)!==stable(row))throw new EmployeeCompensationRunAccessError();
-    await checkStoredRun(ctx,tx,current);return runModel(ctx,current,input.after);
-  },{timeout:120000});
+    await checkStoredRun(ctx,tx,current);return {model:employeeCompensationRunModel(ctx,current,input.after),record:current};
+}
+export async function getEmployeeCompensationRun(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
+  const input=employeeCompensationRunReadInput.parse(raw);
+  return withTenant(deps.db??prisma,ctx.organizationId,async tx=>(await readEmployeeCompensationRunInTransaction(ctx,input,tx,deps)).model,{timeout:120000});
 }
 
 export async function cancelEmployeeCompensationRun(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {

@@ -98,7 +98,8 @@
     "accountingPeriods": "Accounting periods",
     "companyLedger": "ALVILLAS ledger",
     "suppliers": "Suppliers",
-    "supplierInvoices": "Supplier invoices"
+    "supplierInvoices": "Supplier invoices",
+    "compensation": "Compensation runs"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -3000,5 +3001,71 @@
       "unavailable": "Reversal is currently unavailable for this invoice and your access.",
       "uncertain": "We could not confirm the response. Retry the same request before making another change."
     }
+  },
+  "CompensationRuns": {
+    "eyebrow": "Finance · People",
+    "title": "Compensation runs",
+    "description": "Review completed work, contractual amounts and the original evidence behind each saved run.",
+    "detailTitle": "Compensation run",
+    "detailDescription": "A traceable record of expected compensation for completed work.",
+    "backWorkspace": "Back to workspace",
+    "backRuns": "All compensation runs",
+    "search": "Search purpose",
+    "state": "Status",
+    "allStates": "All statuses",
+    "filter": "Apply filters",
+    "loading": "Checking access and loading compensation…",
+    "retryRead": "Check access and reload",
+    "savedRuns": "Saved compensation runs",
+    "empty": "No compensation runs are available for these filters and your current access.",
+    "purpose": "Purpose",
+    "period": "Earning period",
+    "workCount": "Completed jobs",
+    "expected": "Expected compensation",
+    "createdAt": "Created {at}",
+    "through": "to",
+    "next": "Next runs",
+    "states": {
+      "DRAFT": "Draft",
+      "CANCELLED": "Cancelled"
+    },
+    "draftGuidance": "This run records contractual expectations. Payable recognition and payment require their own approvals.",
+    "recordedTimezone": "Recorded completion · {timezone}",
+    "sources": "Completed work and contract evidence",
+    "sourceGuidance": "Each line retains its original performer, completed-work event and effective contract. Names and work details follow their own access permissions.",
+    "completedWork": "Completed work",
+    "restrictedProperty": "Property name restricted",
+    "restrictedPerson": "Person name restricted",
+    "performer": "Performed by",
+    "contract": "Effective contract",
+    "contractVersion": "Version {version} · effective {at}",
+    "rate": "Contractual rate",
+    "perJob": "{amount} per completed job",
+    "completion": "Completion evidence",
+    "validator": "Validated by",
+    "methods": {
+      "SELF": "Confirmed by the performer",
+      "OFFLINE_SYNC": "Synced performer confirmation",
+      "PROXY": "Validated for the performer"
+    },
+    "firstSources": "First work items",
+    "nextSources": "Next work items",
+    "history": "Run history",
+    "historyActions": {
+      "CREATED": "Run created",
+      "CANCELLED": "Run cancelled"
+    },
+    "cancelTitle": "Cancel this draft",
+    "cancelGuidance": "Cancellation keeps the original run, work evidence and reason in its history.",
+    "cancelReason": "Reason for cancellation",
+    "cancel": "Cancel draft",
+    "cancelling": "Cancelling…",
+    "retryCancel": "Retry the same cancellation",
+    "forbidden": "Your current access does not allow these compensation details. The private data has been cleared.",
+    "offline": "Connect to the internet to check current access and load compensation. Financial commands need a live connection.",
+    "unavailable": "Compensation could not be loaded. Check access and try again.",
+    "validation": "Check the entered details and try again.",
+    "conflict": "This command conflicts with the saved run. Reload the run to review its current history.",
+    "uncertain": "The cancellation acknowledgement was not received. Retry the same cancellation to confirm its result."
   }
 }
