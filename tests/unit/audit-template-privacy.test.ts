@@ -36,6 +36,7 @@ const row = (resourceType: string, after: Prisma.JsonValue): AuditHistoryRow => 
 describe("service template audit privacy", () => {
   it.each([
     ["team.compensation.create", "staff_compensation:view"],
+    ["team.compensation.preview", "staff_compensation:view"],
     ["team.document.upload", "staff_document:view"],
     ["team.wallet.link", "wallet:view"],
     ["identity.person.create", "identity:edit"],
