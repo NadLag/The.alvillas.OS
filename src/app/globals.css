@@ -1,14 +1,17 @@
-.compensation-page { max-inline-size: 80rem; }
+.compensation-page { max-inline-size: 80rem; grid-template-columns: minmax(0, 1fr); }
+.compensation-page > * { min-inline-size: 0; }
 .compensation-filters { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-4); margin-block: var(--space-5) var(--space-7); }
 .compensation-filters .field:first-child { flex: 1 1 20rem; }
 .compensation-filters input, .compensation-filters select { min-block-size: var(--target-min); inline-size: 100%; }
 .compensation-table-scroll { overflow: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); margin-block: var(--space-5); }
-.compensation-table { inline-size: 100%; min-inline-size: 42rem; border-collapse: collapse; text-align: start; background: var(--surface-panel); }
+.compensation-table { inline-size: 100%; min-inline-size: 42rem; table-layout: fixed; border-collapse: collapse; text-align: start; background: var(--surface-panel); }
 .compensation-table th, .compensation-table td { min-block-size: 56px; padding: var(--space-4); border-block-end: 1px solid var(--border-subtle); text-align: start; vertical-align: top; }
 .compensation-table thead th { position: sticky; inset-block-start: 0; background: var(--surface-muted); color: var(--text-soft); font-weight: var(--font-weight-semibold); }
+.compensation-table thead th:first-child { inline-size: 16rem; }
 .compensation-table tbody tr:last-child > * { border-block-end: 0; }
 .compensation-table tbody th { max-inline-size: 26rem; overflow-wrap: anywhere; }
-.compensation-table tbody a { display: inline-block; min-block-size: var(--target-min); padding-block: var(--space-2); }
+.compensation-table tbody a { display: inline-block; max-inline-size: 100%; min-block-size: var(--target-min); padding-block: var(--space-2); overflow-wrap: anywhere; }
+.compensation-table .compensation-numeric { white-space: normal; overflow-wrap: anywhere; }
 .compensation-table small, .compensation-evidence small, .compensation-summary small { display: block; color: var(--text-secondary); font-size: var(--font-size-sm); font-weight: normal; margin-block-start: var(--space-2); }
 .compensation-date-to { padding-inline: var(--space-2); }
 .compensation-numeric, .compensation-total { font-variant-numeric: tabular-nums; white-space: nowrap; }

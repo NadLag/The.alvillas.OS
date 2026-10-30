@@ -24,7 +24,9 @@ for(const locale of["en","fr","ar"] as const)test(`Native compensation workspace
     expect(response.status()).toBe(200);const run=employeeCompensationRunViewSchema.extend({idempotent:z.boolean()}).parse(await response.json());
     await financialPage.goto(`/${locale}/app`);await financialPage.getByTestId("compensation-link").click();await expect(financialPage.getByTestId("compensation-page")).toBeVisible();
     await financialPage.getByTestId("compensation-search").fill(purpose);await financialPage.locator('.compensation-filters button[type="submit"]').click();
-    await expect(financialPage.getByTestId("compensation-run-row")).toHaveCount(1);await financialPage.getByTestId("compensation-open").click();
+    await expect(financialPage.getByTestId("compensation-run-row")).toHaveCount(1);
+    expect(await financialPage.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
+    await financialPage.getByTestId("compensation-open").click();
     await expect(financialPage.getByTestId("compensation-purpose")).toHaveText(purpose);await expect(financialPage.getByTestId("compensation-source")).toHaveCount(1);
     const detailResponse=await financialPage.request.get(`/api/finance/compensation/runs/${run.id}/detail`);expect(detailResponse.status()).toBe(200);expect(detailResponse.headers()["cache-control"]).toBe("private, no-store");
     const model=employeeCompensationRunDetailSchema.parse(await detailResponse.json());expect(model.total).toEqual({amount:"500.25",currency:"MAD"});
