@@ -15,6 +15,8 @@ import { maskedValue } from "@/platform/authz/present";
 import { assignTeamRole } from "@/modules/identity/application/team-service";
 import { provisionIntegrationRole } from "./support/database-role";
 import { employeeCompensationFixtures } from "./support/employee-compensation";
+import { getEmployeeCompensationRunDetail } from "@/modules/finance/application/employee-compensation-run-detail";
+import { listEmployeeCompensationRuns } from "@/modules/finance/application/employee-compensation-run-list";
 
 const url=process.env.TEST_DATABASE_URL;let admin:PrismaClient,db:PrismaClient;
 const fixtures=employeeCompensationFixtures(()=>db,()=>admin);
@@ -63,6 +65,69 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     const command={id:created[0].id,reason:"Serialize exact cancellation attempts without rewriting history"};
     const cancelled=await Promise.all(Array.from({length:3},()=>cancelEmployeeCompensationRun(f.ctx,command,{db})));
     expect(cancelled.filter(row=>!row.idempotent)).toHaveLength(1);expect(await facts(f.org)).toMatchObject({runs:1,lines:1,cancellations:1,createdAudits:1,cancelAudits:1,outbox:2,journals:0,postings:0});
+  });
+
+  it("protects source names independently while retaining actual completed-work and contract evidence",async()=>{
+    const f=await fixture("PROXY",true),created=await createEmployeeCompensationRun(f.ctx,f.input,{db});
+    const hidden=await getEmployeeCompensationRunDetail(f.ctx,{id:created.id},{db});
+    expect(hidden.labels).toEqual([expect.objectContaining({personName:null,propertyName:null,validatorName:"Compensation administrator",roleName:"Contracted pool work",contractVersion:1,
+      completionMethod:"PROXY",sourceTitle:{en:"Perform contracted work",fr:"Réaliser le travail contractuel"},canViewTask:true})]);
+    expect(JSON.stringify(hidden)).not.toMatch(/Performer without login|Contract property|Private address|validation_reason|sourceSnapshot|policySnapshot/u);
+    const identity=await fixtures.reader(f,{permissions:["identity:view","property:view"],scopeType:"property",scopeId:f.property.id});
+    const visible=await getEmployeeCompensationRunDetail(identity.ctx,{id:created.id},{db});
+    expect(visible.labels[0]).toMatchObject({personName:"Performer without login",propertyName:"Contract property",validatorName:"Compensation administrator"});
+    expect(visible.lines).toEqual(hidden.lines);expect(visible.total).toEqual(hidden.total);
+    const operationallyRestricted={...identity.ctx,authContext:{...identity.ctx.authContext,permissions:new Set([...identity.ctx.authContext.permissions].filter(key=>key!=="task:view"))}};
+    expect((await getEmployeeCompensationRunDetail(operationallyRestricted,{id:created.id},{db})).labels[0]).toMatchObject({sourceTitle:null,canViewTask:false,personName:"Performer without login"});
+  });
+
+  it("allows an actual performer to see their own name without granting unrelated identity or property details",async()=>{
+    const f=await fixture(),created=await createEmployeeCompensationRun(f.ctx,f.input,{db});
+    const worker=await fixtures.reader({...f,person:f.staff,account:f.staffAccount},{permissions:["employee_payable:view","staff_compensation:view"]});
+    const detail=await getEmployeeCompensationRunDetail(worker.ctx,{id:created.id},{db});
+    expect(detail.labels[0]).toMatchObject({personName:"Private staff member",propertyName:null,validatorName:null});expect(detail.canCancel).toBe(false);
+  });
+
+  it("rechecks independent identity authority immediately before returning source labels",async()=>{
+    const f=await fixture(),created=await createEmployeeCompensationRun(f.ctx,f.input,{db}),grant=await fixtures.reader(f,{permissions:["identity:view","property:view"]});
+    const before=await withTenant(db,f.org,tx=>tx.auditLog.count({where:{action:"finance.employee_compensation_run.viewed"}}));
+    const original=Object.getOwnPropertyDescriptor(EmployeeCompensationRunRepository.prototype,"find")!.value as EmployeeCompensationRunRepository["find"];let reads=0;
+    const spy=vi.spyOn(EmployeeCompensationRunRepository.prototype,"find").mockImplementation(async function(this:EmployeeCompensationRunRepository,id:string){
+      const result=await original.call(this,id);if(++reads===3)await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:grant.grant.id},data:{validTo:new Date()}}));return result;
+    });
+    try{await expect(getEmployeeCompensationRunDetail(grant.ctx,{id:created.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);}finally{spy.mockRestore();}
+    expect(await withTenant(db,f.org,tx=>tx.auditLog.count({where:{action:"finance.employee_compensation_run.viewed"}}))).toBe(before);
+  });
+
+  it("lists only independently authorized run totals and beneficiary aggregates with encrypted actor-bound cursors",async()=>{
+    const f=await fixture();
+    const created=[];for(let index=0;index<12;index++)created.push(await createEmployeeCompensationRun(f.ctx,{...f.input,idempotencyKey:randomUUID(),purpose:"Saved completed work run "+index},{db}));
+    const first=await listEmployeeCompensationRuns(f.ctx,{query:"Saved completed",state:"draft"},{db});
+    expect(first.runs).toHaveLength(10);expect(first.next).toBeTruthy();expect(first.canCreate).toBe(true);
+    expect(first.next).not.toContain(created[0].id);expect(JSON.stringify(first)).not.toMatch(/Private staff|Contract property|idempotencyKey|sourceSnapshot|requestFingerprint/u);
+    const second=await listEmployeeCompensationRuns(f.ctx,{query:"Saved completed",state:"draft",after:first.next},{db});expect(second.runs).toHaveLength(2);expect(second.next).toBeNull();
+    expect(new Set([...first.runs,...second.runs].map(row=>row.id)).size).toBe(12);
+    await expect(listEmployeeCompensationRuns(f.ctx,{query:"Changed filter",state:"draft",after:first.next},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    const foreign=await fixture();await expect(listEmployeeCompensationRuns(foreign.ctx,{query:"Saved completed",state:"draft",after:first.next},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    const extra=await fixtures.completeTask(f),large=await createEmployeeCompensationRun(f.ctx,{...f.input,idempotencyKey:randomUUID(),purpose:"Aggregate salary visibility cap",
+      jobs:[...f.input.jobs,{taskId:extra,assignmentId:f.contract.id,confirmedAssignment:true}]},{db});
+    const capped={...f.ctx,authContext:{...f.ctx.authContext,assignments:f.ctx.authContext.assignments!.map(assignment=>assignment.permissions.has("staff_compensation:view")?{...assignment,conditions:{maxAmount:"750.00"}}:assignment)}};
+    expect((await listEmployeeCompensationRuns(capped,{query:"Aggregate salary"},{db})).runs).toEqual([]);
+    await cancelEmployeeCompensationRun(f.ctx,{id:large.id,reason:"Retain original completed work during list filtering"},{db});
+    expect((await listEmployeeCompensationRuns(f.ctx,{state:"cancelled"},{db})).runs.map(row=>row.id)).toEqual([large.id]);
+    const denied={...f.ctx,authContext:{...f.ctx.authContext,permissions:new Set<string>()}};
+    expect(await listEmployeeCompensationRuns(denied,{}, {db})).toMatchObject({runs:[],next:null,canCreate:false});
+  });
+
+  it("rolls back the list receipt when run authority expires after loading actual sources",async()=>{
+    const f=await fixture(),created=await createEmployeeCompensationRun(f.ctx,f.input,{db});
+    const before=await withTenant(db,f.org,tx=>tx.auditLog.count({where:{action:"finance.employee_compensation_run.listed"}}));
+    const original=Object.getOwnPropertyDescriptor(EmployeeCompensationRunRepository.prototype,"findMany")!.value as EmployeeCompensationRunRepository["findMany"];
+    const spy=vi.spyOn(EmployeeCompensationRunRepository.prototype,"findMany").mockImplementation(async function(this:EmployeeCompensationRunRepository,ids:readonly string[]){
+      const rows=await original.call(this,ids);expect(ids).toContain(created.id);await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:f.runGrant.id},data:{validTo:new Date()}}));return rows;
+    });
+    try{await expect(listEmployeeCompensationRuns(f.ctx,{}, {db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);}finally{spy.mockRestore();}
+    expect(await withTenant(db,f.org,tx=>tx.auditLog.count({where:{action:"finance.employee_compensation_run.listed"}}))).toBe(before);
   });
 
   it("binds the original creation and cancellation intent to their actual actor and reason",async()=>{

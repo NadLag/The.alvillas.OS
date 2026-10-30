@@ -98,7 +98,8 @@
     "accountingPeriods": "Périodes comptables",
     "companyLedger": "Grand livre ALVILLAS",
     "suppliers": "Fournisseurs",
-    "supplierInvoices": "Factures fournisseurs"
+    "supplierInvoices": "Factures fournisseurs",
+    "compensation": "Décomptes de rémunération"
   },
   "DesignSystem": {
     "nav": "Design system",
@@ -3000,5 +3001,71 @@
       "unavailable": "La contrepassation est actuellement indisponible pour cette facture et vos accès.",
       "uncertain": "La réponse n’a pas pu être confirmée. Réessayez la même demande avant toute autre modification."
     }
+  },
+  "CompensationRuns": {
+    "eyebrow": "Finances · Équipe",
+    "title": "Décomptes de rémunération",
+    "description": "Consultez les travaux terminés, les montants contractuels et les justificatifs d’origine de chaque décompte enregistré.",
+    "detailTitle": "Décompte de rémunération",
+    "detailDescription": "Un historique traçable de la rémunération attendue pour les travaux terminés.",
+    "backWorkspace": "Retour à l’espace de travail",
+    "backRuns": "Tous les décomptes",
+    "search": "Rechercher un objet",
+    "state": "Statut",
+    "allStates": "Tous les statuts",
+    "filter": "Appliquer les filtres",
+    "loading": "Vérification des accès et chargement des rémunérations…",
+    "retryRead": "Vérifier les accès et recharger",
+    "savedRuns": "Décomptes de rémunération enregistrés",
+    "empty": "Aucun décompte n’est disponible pour ces filtres et vos droits actuels.",
+    "purpose": "Objet",
+    "period": "Période de rémunération",
+    "workCount": "Interventions terminées",
+    "expected": "Rémunération attendue",
+    "createdAt": "Créé le {at}",
+    "through": "au",
+    "next": "Décomptes suivants",
+    "states": {
+      "DRAFT": "Brouillon",
+      "CANCELLED": "Annulé"
+    },
+    "draftGuidance": "Ce décompte conserve les montants contractuels attendus. La comptabilisation de la dette et le paiement nécessitent leurs propres approbations.",
+    "recordedTimezone": "Achèvement enregistré · {timezone}",
+    "sources": "Travaux terminés et justificatifs contractuels",
+    "sourceGuidance": "Chaque ligne conserve l’exécutant, l’événement d’achèvement et le contrat applicable d’origine. Les noms et les détails des travaux suivent leurs propres autorisations.",
+    "completedWork": "Travail terminé",
+    "restrictedProperty": "Nom de propriété à accès restreint",
+    "restrictedPerson": "Nom de personne à accès restreint",
+    "performer": "Réalisé par",
+    "contract": "Contrat applicable",
+    "contractVersion": "Version {version} · applicable le {at}",
+    "rate": "Tarif contractuel",
+    "perJob": "{amount} par intervention terminée",
+    "completion": "Justificatif d’achèvement",
+    "validator": "Validé par",
+    "methods": {
+      "SELF": "Confirmé par l’exécutant",
+      "OFFLINE_SYNC": "Confirmation de l’exécutant synchronisée",
+      "PROXY": "Validé pour l’exécutant"
+    },
+    "firstSources": "Premières interventions",
+    "nextSources": "Interventions suivantes",
+    "history": "Historique du décompte",
+    "historyActions": {
+      "CREATED": "Décompte créé",
+      "CANCELLED": "Décompte annulé"
+    },
+    "cancelTitle": "Annuler ce brouillon",
+    "cancelGuidance": "L’annulation conserve le décompte, les justificatifs des travaux et le motif dans l’historique.",
+    "cancelReason": "Motif de l’annulation",
+    "cancel": "Annuler le brouillon",
+    "cancelling": "Annulation en cours…",
+    "retryCancel": "Réessayer la même annulation",
+    "forbidden": "Vos droits actuels ne permettent pas de consulter ces rémunérations. Les données privées ont été effacées.",
+    "offline": "Connectez-vous à Internet pour vérifier vos droits et consulter les rémunérations. Les opérations financières nécessitent une connexion active.",
+    "unavailable": "Impossible de charger les rémunérations. Vérifiez vos droits et réessayez.",
+    "validation": "Vérifiez les informations saisies et réessayez.",
+    "conflict": "Cette opération est incompatible avec le décompte enregistré. Rechargez-le pour consulter son historique actuel.",
+    "uncertain": "L’accusé de réception de l’annulation n’a pas été reçu. Réessayez la même annulation pour confirmer son résultat."
   }
 }
