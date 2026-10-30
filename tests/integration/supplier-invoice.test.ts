@@ -38,7 +38,7 @@ import { ownNotificationContext } from "@/platform/notifications/notification";
 import { getNotificationPage, openNotification, NotificationAccessError } from "@/platform/notifications/notification-service";
 import { ExpensePolicyUnavailableError } from "@/modules/finance/application/expense-submission-policy";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
-import { FinancePolicyContextChangedError } from "@/modules/finance/application/finance-config-service";
+import { evaluateCompanyCostPolicyInTransaction, FinancePolicyContextChangedError } from "@/modules/finance/application/finance-config-service";
 import { captureReservationCommissionSnapshots } from "@/platform/reservations/finance";
 import { Money } from "@/platform/money/money";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
@@ -1694,6 +1694,95 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
       amount: "600.25", propertyId: f.property.id, recipients: [reviewer.account.id] });
     for (const stage of plan.stages) expect(stage.amount).toBe("600.25");
   });
+  it("denies financial policy disclosure when the actual property leaves the caller's city during configuration reads", async () => {
+    const f = await invoicePolicyFixture(), cities = await withTenant(db, f.org, async tx => {
+      const original = await tx.city.create({ data: { organizationId: f.org, name: "Original policy source city" } }), changed = await tx.city.create({ data: { organizationId: f.org, name: "Changed policy source city" } });
+      await tx.property.update({ where: { id: f.property.id }, data: { cityId: original.id } }); return { original, changed };
+    });
+    const key = "financial_transaction:view", caller = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: [
+      ...f.ctx.authContext.assignments!.map(assignment => ({ ...assignment, permissions: new Set([...assignment.permissions].filter(permission => permission !== key)) })),
+      { permissions: new Set([key]), scope: { organizationId: f.org, scopeType: "city" as const, scopeId: cities.original.id } }
+    ] } };
+    const invoice = await createSupplierInvoice(f.ctx, { ...input(f.supplier.id), lines: [{ propertyId: f.property.id, category: "maintenance", amount: "2400.00" }] }, { db });
+    const command = { id: invoice.id, expectedVersion: 0, occurredOn: "2026-10-28", emergency: false };
+    expect((await getSupplierInvoicePolicyPreview(caller, command, { db })).snapshot).toMatchObject({ amount: { amount: "2400.00" } });
+    const actual = Reflect.get(ConfigRuleRepository.prototype, "scopedSnapshot");
+    const move = vi.spyOn(ConfigRuleRepository.prototype, "scopedSnapshot").mockImplementationOnce(async function (this: ConfigRuleRepository, ...args) {
+      const snapshot = await actual.apply(this, args);
+      await withTenant(admin, f.org, tx => tx.property.update({ where: { id: f.property.id }, data: { cityId: cities.changed.id } })); return snapshot;
+    });
+    try { await expect(getSupplierInvoicePolicyPreview(caller, command, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError); expect(move).toHaveBeenCalledOnce(); }
+    finally { move.mockRestore(); }
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(0);
+  });
+  it("rolls back actual submission writes when the property's calendar changes before the final authority check", async () => {
+    const f = await invoicePolicyFixture(), invoice = await createSupplierInvoice(f.ctx, { ...input(f.supplier.id), lines: [{ propertyId: f.property.id, category: "maintenance", amount: "2400.00" }] }, { db });
+    const draft = await getSupplierInvoice(f.ctx, invoice.id, {}, { db }), actual = Reflect.get(SupplierInvoiceRepository.prototype, "event");
+    const change = vi.spyOn(SupplierInvoiceRepository.prototype, "event").mockImplementationOnce(async function (this: SupplierInvoiceRepository, ...args) {
+      const result = await actual.apply(this, args);
+      await withTenant(admin, f.org, tx => tx.property.update({ where: { id: f.property.id }, data: { timezone: "UTC" } })); return result;
+    });
+    try { await expect(submitSupplierInvoice(f.ctx, { id: invoice.id, expectedVersion: 0, occurredOn: "2026-10-28", emergency: false, idempotencyKey: randomUUID(),
+      reason: "Final submission must use the actual property calendar", lineNotes: Object.fromEntries(draft.lines.map(line => [line.id, "Actual current calendar source context"])) }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError); }
+    finally { change.mockRestore(); }
+    await withTenant(db, f.org, async tx => { expect(await tx.supplierInvoiceSubmission.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);
+      expect(await tx.supplierInvoice.findUniqueOrThrow({ where: { id: invoice.id } })).toMatchObject({ state: "DRAFT", version: 0, currentSubmissionId: null });
+      expect(await tx.auditLog.count({ where: { action: "finance.supplier_invoice.submitted" } })).toBe(0);
+      expect(await tx.outboxEvent.count({ where: { type: "SupplierInvoiceSubmitted" } })).toBe(0); });
+    expect((await getSupplierInvoicePolicyPreview(f.ctx, { id: invoice.id, expectedVersion: 0, occurredOn: "2026-10-28", emergency: false }, { db })).snapshot).toMatchObject({ lines: [{ policy: { timezone: "UTC" } }] });
+  });
+  it("binds a reused financial configuration snapshot to its exact tenant, scope and economic instant", async () => {
+    const f = await invoicePolicyFixture(), asOf = new Date("2026-10-28T00:00:00Z"), scopes = [{ scopeType: "organization", scopeId: null }];
+    await withTenant(db, f.org, async tx => {
+      const repository = new ConfigRuleRepository(tx, f.org), snapshot = await repository.scopedSnapshot(scopes, asOf), now = await new FinanceRepository(tx, f.org).clock();
+      const resource = { type: "financial_transaction", organizationId: f.org, dataClass: "financial" as const, amount: "1.00", occurredAt: asOf };
+      const input = { amount: "1.00", currency: "MAD", category: "software", emergency: false, asOf };
+      const accepted = await evaluateCompanyCostPolicyInTransaction(f.ctx, input, tx, { resource, now, configuration: snapshot });
+      expect(accepted.allocation.alvillasAmount.toJSON().amount).toBe("1.00");
+      expect(snapshot.appliesTo(tx, f.org, [...scopes, ...scopes], asOf)).toBe(true);
+      const foreign = await new ConfigRuleRepository(tx, randomUUID()).scopedSnapshot(scopes, asOf), property = await repository.scopedSnapshot([{ scopeType: "property", scopeId: f.property.id }], asOf);
+      for (const configuration of [foreign, property]) await expect(evaluateCompanyCostPolicyInTransaction(f.ctx, input, tx, { resource, now, configuration })).rejects.toBeInstanceOf(FinancePolicyContextChangedError);
+      await expect(evaluateCompanyCostPolicyInTransaction(f.ctx, { ...input, asOf: new Date(asOf.getTime() + 1) }, tx, { resource, now, configuration: snapshot })).rejects.toBeInstanceOf(FinancePolicyContextChangedError);
+    });
+  });
+  it("rejects financial configuration snapshot reuse across actual PostgreSQL transactions", async () => {
+    const f = await invoicePolicyFixture(), asOf = new Date("2026-10-28T00:00:00Z"), snapshot = await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).scopedSnapshot([{ scopeType: "organization", scopeId: null }], asOf));
+    await withTenant(db, f.org, async tx => {
+      await expect(evaluateCompanyCostPolicyInTransaction(f.ctx, { amount: "1.00", currency: "MAD", category: "software", emergency: false, asOf }, tx,
+        { resource: { type: "financial_transaction", organizationId: f.org, dataClass: "financial", amount: "1.00", occurredAt: asOf }, now: await new FinanceRepository(tx, f.org).clock(), configuration: snapshot })).rejects.toBeInstanceOf(FinancePolicyContextChangedError);
+    });
+  });
+  it("reloads actual company configuration on the next invoice policy operation", async () => {
+    const f = await invoicePolicyFixture(), { command, plan } = await policyPreview(f, [{ category: "software", amount: "0.01" }, { category: "supplies", amount: "0.02" }]);
+    const ruleIds = (raw: unknown) => z.object({ lines: z.array(z.object({ policy: z.object({ policies: z.array(z.object({ allocationRule: z.object({ configRuleId: z.uuid() }) })) }) })) }).parse(raw).lines.flatMap(line => line.policy.policies.map(policy => policy.allocationRule.configRuleId));
+    const prior = ruleIds(plan.snapshot);
+    const replacement = await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.expense_treatment", scopeType: "organization", effectiveFrom: new Date("2020-01-02"),
+      reason: "A later invoice policy operation must resolve the current immutable version", value: { default_treatment: "ALVILLAS_PAID" } }));
+    expect(ruleIds((await getSupplierInvoicePolicyPreview(f.ctx, command, { db })).snapshot)).toEqual([replacement.id, replacement.id]);
+    expect(prior).not.toContain(replacement.id);
+  });
+  it("submits 500 actual company costs with one configuration read and all independent authority observations", async () => {
+    const f = await invoicePolicyFixture(), scoped = new URL(url!); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests";
+    const measured = new PrismaClient({ datasourceUrl: scoped.toString(), log: [{ emit: "event", level: "query" }] }), queries: string[] = [];
+    let onCommit: (() => void) | undefined;
+    measured.$on("query", event => { queries.push(event.query); if (event.query.trim() === "COMMIT") onCommit?.(); });
+    try {
+      const invoice = await createSupplierInvoice(f.ctx, { ...input(f.supplier.id), lines: Array.from({ length: 500 }, (_, index) => ({ category: "software", costCenter: "configured_" + index, amount: "0.01" })) }, { db });
+      const draft = await getSupplierInvoice(f.ctx, invoice.id, {}, { db }), committed = new Promise<void>(resolve => { onCommit = resolve; });
+      const result = await submitSupplierInvoice(f.ctx, { id: invoice.id, expectedVersion: 0, occurredOn: "2026-10-28", emergency: false, idempotencyKey: randomUUID(),
+        reason: "Freeze all actual company costs from one configuration observation", lineNotes: Object.fromEntries(draft.lines.map(line => [line.id, "Actual source policy and reviewer context"])) }, { db: measured });
+      await committed; onCommit = undefined;
+      expect(queries.filter(query => query.includes('"config_rule"'))).toHaveLength(1);
+      expect(queries.some(query => query.includes('"role_assignment"'))).toBe(true);
+      await withTenant(db, f.org, async tx => {
+        const source = await tx.supplierInvoiceSubmission.findUniqueOrThrow({ where: { id: result.submissionId } });
+        const frozen = z.object({ amount: z.object({ amount: z.string() }), lines: z.array(z.object({ id: z.uuid(), policy: z.object({ policies: z.array(z.object({ allocationRule: z.object({ configRuleId: z.uuid() }) })) }) })) }).parse(source.snapshot);
+        expect(frozen.amount.amount).toBe("5.00"); expect(frozen.lines).toHaveLength(500); expect(new Set(frozen.lines.map(line => line.id)).size).toBe(500);
+        expect(new Set(frozen.lines.flatMap(line => line.policy.policies.map(policy => policy.allocationRule.configRuleId))).size).toBe(1);
+        expect(await tx.expense.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);
+      });
+    } finally { await measured.$disconnect(); }
+  });
   it("prepares all 500 actual property allocations without truncating the invoice or creating financial rows", async () => {
     const f = await invoicePolicyFixture();
     const properties = await withTenant(db, f.org, async tx => {
@@ -1712,6 +1801,31 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     expect(snapshot.lines.reduce((total, line) => total.add(Money.of(line.policy.allocation.owner.amount, "MAD")), Money.zero("MAD")).toJSON().amount).toBe("5.00");
     expect(snapshot.amount.amount).toBe("5.00");
     await withTenant(db, f.org, async tx => { expect(await tx.expense.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0); });
+  });
+  it("prepares every one of 500 actual company percentage costs from configured income without money writes", async () => {
+    const f = await invoicePolicyFixture(); await companyRevenueFacts(f); const started = performance.now(), observe = vi.spyOn(CompanyLedgerRepository.prototype, "revenue");
+    let prepared: Awaited<ReturnType<typeof policyPreview>>;
+    try { prepared = await policyPreview(f, Array.from({ length: 500 }, (_, index) => ({ category: "office", costCenter: "percentage_" + index, amount: "0.01" }))); expect(observe).toHaveBeenCalledOnce(); }
+    finally { observe.mockRestore(); }
+    const { plan } = prepared;
+    const elapsed = performance.now() - started;
+    const frozen = z.object({ amount: z.object({ amount: z.string() }), lines: z.array(z.object({ policy: z.object({ policies: z.array(z.object({
+      revenueEvidence: z.object({ amount: z.object({ amount: z.string(), currency: z.string() }) }) })) }) })) }).parse(plan.snapshot);
+    expect(frozen.amount.amount).toBe("5.00"); expect(frozen.lines).toHaveLength(500); expect(plan.stages).toHaveLength(0);
+    expect(frozen.lines.every(line => line.policy.policies.every(policy => policy.revenueEvidence.amount.amount === "10000.00" && policy.revenueEvidence.amount.currency === "MAD"))).toBe(true);
+    await withTenant(db, f.org, async tx => { expect(await tx.financialTransaction.count()).toBe(7); expect(await tx.expense.count()).toBe(0); });
+    console.info(JSON.stringify({ actualCompanyPercentageCosts: 500, previewAndAuthoringMilliseconds: Math.round(elapsed), originalRevenueJournalsUnchanged: true }));
+  });
+  it("rechecks current financial authority after reusing one observed company income value for multiple costs", async () => {
+    const f = await invoicePolicyFixture(); await companyRevenueFacts(f);
+    const actual = Reflect.get(CompanyLedgerRepository.prototype, "revenue");
+    const expire = vi.spyOn(CompanyLedgerRepository.prototype, "revenue").mockImplementationOnce(async function (this: CompanyLedgerRepository, window) {
+      const result = await actual.call(this, window);
+      await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { archivedAt: new Date() } })); return result;
+    });
+    try { await expect(policyPreview(f, [{ category: "office", amount: "0.01" }, { category: "supplies", amount: "0.02" }])).rejects.toBeInstanceOf(SupplierInvoiceAccessError); expect(expire).toHaveBeenCalledOnce(); }
+    finally { expire.mockRestore(); }
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(7);
   });
   it("uses only configured company income in the correct calendar/currency and includes exact reversing movements", async () => {
     const f = await invoicePolicyFixture(), facts = await companyRevenueFacts(f), { command, plan } = await policyPreview(f, [{ category: "office", amount: "4000" }]);
