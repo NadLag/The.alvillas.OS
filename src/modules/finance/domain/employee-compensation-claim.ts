@@ -6,6 +6,8 @@ export const employeeCompensationClaimPolicyInput=z.object({runId:id,costOn:z.is
   costs:z.array(z.object({runLineId:id,category:z.string().trim().min(1).max(120),costCenter:z.string().trim().min(1).max(120).nullable(),note:z.string().trim().min(6).max(1000)}).strict()).min(1).max(10000)
 }).strict().superRefine((input,ctx)=>{if(new Set(input.costs.map(cost=>cost.runLineId)).size!==input.costs.length)ctx.addIssue({code:"custom",path:["costs"],message:"Every retained work source has one explicit cost classification"});});
 export class EmployeeCompensationClaimSourceError extends Error{}
+export const employeeCompensationSubmissionInput=z.object({...employeeCompensationClaimPolicyInput.shape,idempotencyKey:id,reason:z.string().trim().min(6).max(500)}).strict()
+  .refine(input=>new Set(input.costs.map(cost=>cost.runLineId)).size===input.costs.length);
 export const employeeCompensationSubmissionRequestViewSchema=z.object({requestId:id,runId:id,state:z.enum(["PENDING","SUCCEEDED","DENIED","CONFLICT","FAILED"]),submissionId:id.nullable(),
   failureCode:z.enum(["ACCESS_DENIED","SOURCE_CHANGED","POLICY_UNAVAILABLE","EXECUTION_UNAVAILABLE"]).nullable(),idempotent:z.boolean()}).strict()
   .refine(value=>value.state==="PENDING"?value.submissionId===null&&value.failureCode===null:value.state==="SUCCEEDED"?value.submissionId!==null&&value.failureCode===null:value.submissionId===null&&value.failureCode!==null);

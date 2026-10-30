@@ -1,5 +1,12 @@
 .compensation-page { max-inline-size: 80rem; grid-template-columns: minmax(0, 1fr); }
 .compensation-page > * { min-inline-size: 0; }
+.compensation-cost-actions { margin-block: var(--space-5); }
+.compensation-cost-check { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--target-min); margin-block: var(--space-4); cursor: pointer; }
+.compensation-cost-check input { min-inline-size: var(--target-compact); min-block-size: var(--target-compact); accent-color: var(--accent); }
+.compensation-cost-allocation { display: flex; flex-wrap: wrap; gap: var(--space-5); border-block-start: 1px solid var(--border-subtle); padding-block-start: var(--space-4); margin-block: var(--space-5) 0; }
+.compensation-cost-allocation dt { color: var(--text-secondary); font-size: var(--font-size-sm); }
+.compensation-cost-allocation dd { margin-inline: 0; margin-block: var(--space-2) 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.compensation-source .form-grid { margin-block-start: var(--space-4); }
 .compensation-filters { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-4); margin-block: var(--space-5) var(--space-7); }
 .compensation-filters .field:first-child { flex: 1 1 20rem; }
 .compensation-filters input, .compensation-filters select { min-block-size: var(--target-min); inline-size: 100%; }

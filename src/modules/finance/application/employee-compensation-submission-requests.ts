@@ -14,6 +14,8 @@ import { EmployeeCompensationClaimSourceError,employeeCompensationSubmissionRequ
 import { employeeCompensationClaimPolicyInput } from "../domain/employee-compensation-claim";
 import { employeeCompensationSubmissionInput,employeeCompensationSubmissionFingerprint,submitEmployeeCompensation,recheckEmployeeSubmission } from "./employee-compensation-submission";
 import { retainEmployeeClaimSourceAccess } from "./employee-compensation-claim-source-access";
+import { employeeCompensationCostAccess } from "./employee-compensation-cost-workspace";
+import { employeeCompensationRunFacts,recheckEmployeeCompensationRun } from "./employee-compensation-run-access";
 import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
 import { FinancePolicyContextChangedError } from "./finance-config-service";
 import { EmployeeCompensationAccessError,EmployeeCompensationSourceUnavailableError } from "../domain/employee-compensation";
@@ -53,6 +55,17 @@ export async function requestEmployeeCompensationSubmission(ctx:FinanceActorCont
 export async function getEmployeeCompensationSubmissionRequest(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
   const input=z.object({id:z.uuid()}).strict().parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     const request=await new EmployeeCompensationSubmissionRequestRepository(tx,ctx.organizationId).find(input.id);if(!request)throw new EmployeeCompensationRunAccessError();await checkReader(ctx,request,tx);return view(request,true);
+  });
+}
+
+export async function recoverEmployeeCompensationSubmissionRequest(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
+  const input=z.object({runId:z.uuid().transform(value=>value.toLowerCase()),key:z.uuid().transform(value=>value.toLowerCase())}).strict().parse(raw);
+  return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
+    const requests=new EmployeeCompensationSubmissionRequestRepository(tx,ctx.organizationId);await requests.lockKey(input.key);const existing=await requests.byKey(input.key);
+    if(existing){if(existing.runId!==input.runId)throw new EmployeeCompensationRunAccessError();await checkReader(ctx,existing,tx);return{request:view(existing,true)};}
+    const run=await new EmployeeCompensationRunRepository(tx,ctx.organizationId).find(input.runId);if(!run)throw new EmployeeCompensationRunAccessError();
+    const facts=employeeCompensationRunFacts(ctx.organizationId,run),access=await employeeCompensationCostAccess(ctx,run,tx);if(!access.canView)throw new EmployeeCompensationRunAccessError();
+    await recheckEmployeeCompensationRun(ctx,tx,await new FinanceRepository(tx,ctx.organizationId).clock(),facts,"edit",access.checks);return{request:null};
   });
 }
 
