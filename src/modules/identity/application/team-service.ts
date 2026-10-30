@@ -30,6 +30,7 @@ import { IdentityRepository } from "../infrastructure/identity-repository";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { authorize, type Resource, type Action } from "@/platform/authz/authorize";
+import { recheckAccountAuthorization } from "@/platform/authz/current-authority";
 import { present, catalogFieldPolicy } from "@/platform/authz/present";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
@@ -579,8 +580,18 @@ export async function saveTeamCompensation(ctx: IdentityActorContext, input: unk
     const assignment = await repository.assignment(value.assignmentId);
     if (!assignment || assignment.archivedAt || assignment.person.archivedAt)
       throw new TeamNotFoundError();
-    allowed(ctx, "create", assignmentResource(ctx.organizationId, assignment, "staff_compensation"));
+    allowed(ctx, "create", { ...assignmentResource(ctx.organizationId, assignment, "staff_compensation"), dataClass: "financial",
+      assignedPersonId: assignment.personId, amount: value.amount, occurredAt: value.effectiveFrom });
     await repository.lock(assignment.personId);
+    const recheck = async () => {
+      const current = await repository.assignment(value.assignmentId);
+      if (!current || current.personId !== assignment.personId || current.archivedAt || current.person.archivedAt ||
+        current.scopeType !== assignment.scopeType || current.scopeId !== assignment.scopeId) throw new IdentityAuthorizationError();
+      const resource = { ...assignmentResource(ctx.organizationId, current, "staff_compensation"), dataClass: "financial" as const,
+        assignedPersonId: current.personId, amount: value.amount, occurredAt: value.effectiveFrom };
+      await recheckAccountAuthorization(ctx, tx, await repository.clock(), [{ action: "create", resource }], new IdentityAuthorizationError());
+    };
+    await recheck();
     const previous = (await repository.compensation(assignment.id))[0];
     if (
       (previous?.version ?? 0) !== value.expectedVersion ||
@@ -637,6 +648,8 @@ export async function saveTeamCompensation(ctx: IdentityActorContext, input: unk
       value.reason,
       { ...deps, propertyScopeId: assignment.scopeType === "property" ? assignment.scopeId : null }
     );
+    await repository.flushGuards();
+    await recheck();
     return { id: row.id };
   });
 }

@@ -27,6 +27,11 @@ import { AutomationRepository } from "@/platform/automation/repository";
 import { readOwnerLedgerStatement } from "@/platform/ledger/owner-statements";
 import { changeReservation } from "@/modules/reservations/application/reservation-management-service";
 import { createExpenseDraft, submitExpense } from "@/modules/finance/application/expense-service";
+import { createSupplier } from "@/modules/finance/application/supplier-service";
+import { createSupplierInvoice, getSupplierInvoice } from "@/modules/finance/application/supplier-invoice-service";
+import { submitSupplierInvoice } from "@/modules/finance/application/supplier-invoice-submission";
+import { recognizeSupplierInvoice } from "@/modules/finance/application/supplier-invoice-recognition";
+import { voidSupplierInvoiceClaim } from "@/modules/finance/application/supplier-payment-service";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -104,9 +109,9 @@ async function paymentGrant(f:Fixture){
   });
   return{...f.ctx,authContext:await authContextForAccount(f.org,f.account.id,{db})};
 }
-async function readyForPayment(expectedSettlementAt="2020-01-01T09:00:00Z",review=false){
+async function readyForPayment(expectedSettlementAt="2020-01-01T09:00:00Z",review=false,timezone?:string){
   const f=await fixture(),receiver=review?await reviewer(f):null;
-  let ctx=await submissionPolicy(f,{payout:{cadence:"OTA_SPLIT_EXPECTED_SETTLEMENT",hold_days:0},...(receiver?{approval:{thresholds:[{key:"review_before_payment",requires_approval_from:["owner"]}],
+  let ctx=await submissionPolicy(f,{...(timezone?{timezone}:{}),payout:{cadence:"OTA_SPLIT_EXPECTED_SETTLEMENT",hold_days:0},...(receiver?{approval:{thresholds:[{key:"review_before_payment",requires_approval_from:["owner"]}],
     routing:{owner:{people:[receiver.person.id],roles:[],assigned:false,channels:["in_app"]}}}}:{})});
   const draft=await createOwnerPayout(ctx,{...f.input,amount:"500.25",expectedSettlementAt},{db});
   let submitted=await submitOwnerPayout(ctx,{id:draft.id,expectedVersion:1,reason:"Dedicated payment-ready source submission"},{db});
@@ -694,6 +699,56 @@ describe("native owner payout persistence on real PostgreSQL", () => {
     expect(await Promise.all(Array.from({length:3},()=>executeAutomationRun(p.f.org,id,{db})))).toEqual(["SUCCEEDED","SUCCEEDED","SUCCEEDED"]);
     await expect(replayAutomation(operational,{runId:id,reason:"Operational completed-result observation must remain denied"},{db})).rejects.toBeInstanceOf(AutomationAccessError);
     await withTenant(db,p.f.org,async tx=>{expect(await tx.approvalRequest.count()).toBe(1);expect(await tx.financialTransaction.count()).toBe(1);});
+  });
+
+  it("derives payout capacity from actual supplier recognition and its exact claim reversal",async()=>{
+    const p=await readyForPayment("2020-01-01T09:00:00Z",false,"UTC");await unrelatedOwnerOpening(p.f);
+    await withTenant(db,p.f.org,async tx=>{
+      const role=await tx.role.create({data:{organizationId:p.f.org,key:"combined_supplier_operator",name:"Actual combined supplier authority"}});
+      const keys=["supplier:view","supplier:create","supplier_invoice:view","supplier_invoice:create","supplier_invoice:edit","supplier_invoice:pay","supplier_invoice:void",
+        "financial_transaction:view","financial_transaction:create","financial_transaction:void","company_ledger:view","property:view"];
+      const permissions=await tx.permission.findMany({where:{organizationId:p.f.org,key:{in:keys}}});expect(permissions).toHaveLength(keys.length);
+      await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:p.f.org,roleId:role.id,permissionId:permission.id}))});
+      await tx.roleAssignment.create({data:{organizationId:p.f.org,roleId:role.id,personId:p.f.account.personId,
+        userAccountId:p.f.account.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});
+      await tx.organizationProfile.create({data:{organizationId:p.f.org,brandName:"Combined supplier and payout acceptance",timezone:"UTC"}});
+      const rules=new ConfigRuleRepository(tx,p.f.org);
+      await rules.createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:p.f.property.id,
+        effectiveFrom:new Date("2020-01-01"),reason:"Actual supplier cost belongs to this owner",value:{default_treatment:"OWNER_PAID"}});
+    });
+    const ctx={...p.ctx,authContext:await authContextForAccount(p.f.org,p.f.account.id,{db})};
+    const supplier=await createSupplier(ctx,{displayName:"Combined actual supplier",category:"Maintenance",idempotencyKey:randomUUID(),reason:"Actual combined financial source"},{db});
+    const occurredOn=new Date().toISOString().slice(0,10);
+    const invoice=await createSupplierInvoice(ctx,{supplierId:supplier.id,invoiceNumber:`COMBINED-${randomUUID()}`,issuedOn:occurredOn,currency:"MAD",
+      purpose:"Actual owner-funded maintenance",lines:[{propertyId:p.f.property.id,category:"maintenance",amount:"9800.00"}],
+      idempotencyKey:randomUUID(),reason:"Actual approved owner financial cost"},{db});
+    const draft=await getSupplierInvoice(ctx,invoice.id,{},{db});
+    const submitted=await submitSupplierInvoice(ctx,{id:invoice.id,expectedVersion:0,occurredOn,emergency:false,idempotencyKey:randomUUID(),
+      reason:"Approve actual supplier cost before owner transfer",lineNotes:Object.fromEntries(draft.lines.map(line=>[line.id,"Actual owner-funded maintenance evidence"]))},{db});
+    expect(submitted.state).toBe("APPROVED");
+    const frozen=await withTenant(db,p.f.org,async tx=>({
+      payout:(await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}})).policySnapshot,
+      invoice:(await tx.supplierInvoiceSubmission.findUniqueOrThrow({where:{id:submitted.submissionId}})).snapshot
+    }));
+    const recognized=await recognizeSupplierInvoice(ctx,{id:invoice.id,expectedVersion:submitted.version,idempotencyKey:randomUUID(),
+      reason:"Recognize actual owner cost in shared ledger",currentPeriod:false},{db});
+    expect(recognized.transactionIds).toHaveLength(1);expect(await closing(p.f)).toBe("200.00");
+    expect(await closing(p.f,true)).toBe("777.77");
+    await expect(payOwnerPayout(ctx,p.command,{db})).rejects.toBeInstanceOf(OwnerPayoutConflictError);
+    await withTenant(db,p.f.org,async tx=>{
+      const payout=await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}});
+      expect(payout.state).toBe("SCHEDULED");expect(payout.transactionId).toBeNull();
+      expect(await tx.auditLog.count({where:{resourceId:p.draft.id,action:"finance.owner_payout.paid"}})).toBe(0);
+    });
+    const reversed=await voidSupplierInvoiceClaim(ctx,{id:invoice.id,expectedVersion:submitted.version,idempotencyKey:randomUUID(),
+      reason:"Reverse actual supplier cost without rewriting approval"},{db});
+    expect(reversed.reversalTransactionIds).toHaveLength(1);expect(await closing(p.f)).toBe("10000.00");
+    const paid=await payOwnerPayout(ctx,p.command,{db});expect(paid.idempotent).toBe(false);
+    expect(await closing(p.f)).toBe("9499.75");expect(await closing(p.f,true)).toBe("777.77");
+    expect(await withTenant(db,p.f.org,async tx=>({
+      payout:(await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}})).policySnapshot,
+      invoice:(await tx.supplierInvoiceSubmission.findUniqueOrThrow({where:{id:submitted.submissionId}})).snapshot
+    }))).toEqual(frozen);
   });
 
   it("rechecks stored permissions after a payment waits for the shared accounting-period lock",async()=>{

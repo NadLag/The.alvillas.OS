@@ -83,6 +83,10 @@ function normalizedScopes(scopes: readonly ConfigScopeCandidate[]): ConfigScopeC
   return output;
 }
 
+function scopeIdentity(scopes: readonly ConfigScopeCandidate[]) {
+  return JSON.stringify(normalizedScopes(scopes).map(scope => JSON.stringify([scope.scopeType, scope.scopeId])).sort());
+}
+
 function scopeFilter(scope: ConfigScopeCandidate): Prisma.ConfigRuleWhereInput {
   return scope.scopeId
     ? {
@@ -251,13 +255,16 @@ export class ConfigRuleRepository {
   }
   async scopedSnapshot(scopes: readonly ConfigScopeCandidate[], asOf: Date) {
     const wanted = normalizedScopes(scopes);
+    const transaction = this.tx, organizationId = this.organizationId, point = asOf.getTime(), identity = scopeIdentity(wanted);
     const rules = wanted.length ? await this.tx.configRule.findMany({ where: { organizationId: this.organizationId, archivedAt: null,
       lifecycle: { in: ["ACTIVE", "RETIRED"] }, effectiveFrom: { lte: asOf }, OR: [{ effectiveTo: null }, { effectiveTo: { gt: asOf } }],
       AND: [{ OR: wanted.map(scopeFilter) }] } }) : [];
     const selected = new Map<string, ResolvedConfigRule | null>();
     // Resolve base policies and their references from one PostgreSQL snapshot.
     // Parse only requested keys, preserving unrelated legacy configuration.
-    return { resolve(key: string) {
+    return { appliesTo(tx: TenantTransaction, organization: string, candidates: readonly ConfigScopeCandidate[], at: Date) {
+      return tx === transaction && organization === organizationId && at.getTime() === point && scopeIdentity(candidates) === identity;
+    }, resolve(key: string) {
       if (!selected.has(key)) selected.set(key, resolveConfigCandidates(rules.filter(rule => rule.key === key)));
       return selected.get(key) ?? null;
     } };

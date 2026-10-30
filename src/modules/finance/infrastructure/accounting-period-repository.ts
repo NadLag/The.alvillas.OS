@@ -10,6 +10,9 @@ import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
 const monthDate = (month: string) => new Date(`${month}-01T00:00:00.000Z`);
 export class AccountingPeriodRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
+  async lockPostingCalendar() {
+    await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock_shared(hashtextextended(${this.organizationId + ":accounting-period"},0))::text`);
+  }
   async lock() {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":accounting-period"},0))::text`);
     await new ConfigRuleRepository(this.tx, this.organizationId).lockVersion(accountingPeriodPolicyKey, "organization", null);

@@ -48,6 +48,15 @@ export class Money {
     return Money.of(new ProductDecimal(this.amount.toFixed()).mul(multiplier.toFixed()).toFixed(), this.currency);
   }
 
+  /** Round an exact fraction once, including thirds and large monetary values. */
+  multiplyRatio(numerator: bigint, denominator: bigint): Money {
+    if (denominator <= 0n) throw new Error("Money ratio denominator must be positive");
+    const product = this.minorUnits() * numerator, negative = product < 0n;
+    const absolute = negative ? -product : product;
+    const rounded = absolute / denominator + (absolute % denominator * 2n >= denominator ? 1n : 0n);
+    return Money.fromMinorUnits(negative ? -rounded : rounded, this.currency);
+  }
+
   splitByRate(rate: MoneyInput): { allocated: Money; remainder: Money } {
     const allocated = this.multiply(rate);
     return {

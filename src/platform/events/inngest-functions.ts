@@ -11,6 +11,7 @@ import { OutboxRepository, type OutboxDatabase } from "./outbox-repository";
 import { outboxDispatchEvent } from "./outbox";
 import { automationEvents } from "@/platform/automation/events";
 import { automationTick, enqueueAutomationEvent, executeAutomationRun } from "@/platform/automation/service";
+import { executeSupplierInvoiceRecognitionReference, failSupplierInvoiceRecognitionReference, supplierInvoiceRecognitionRequested, supplierInvoiceReversalRequested } from "@/modules/finance/application/supplier-invoice-recognition-requests";
 
 import { scheduleDigests } from "@/platform/notifications/digest-service";
 import { scheduleTeamDocumentReminders } from "@/modules/identity/application/team-documents";
@@ -90,4 +91,20 @@ export const cleanupUploadParts = inngest.createFunction({ id: "cleanup-field-up
   if (failed) throw new Error("Temporary upload cleanup unavailable");
   return { organizations: organizations.length, cleaned };
 });
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts];
+export const recognizeSupplierInvoices = inngest.createFunction({ id: "supplier-invoice-recognition", name: "ALVILLAS OS supplier invoice recognition",
+  triggers: [{ event: supplierInvoiceRecognitionRequested }, { event: supplierInvoiceReversalRequested }], concurrency: { limit: 1 }, retries: 3
+}, async ({ event, step }) => step.run(event.name === supplierInvoiceReversalRequested ? "reverse-actual-recognized-invoice" : "recognize-actual-approved-invoice",
+  () => executeSupplierInvoiceRecognitionReference(event.data, { eventType: event.name })));
+const failedInvoiceExecution = z.object({ function_id: z.literal("alvillas-os-supplier-invoice-recognition"),
+  event: z.object({ name: z.enum([supplierInvoiceRecognitionRequested, supplierInvoiceReversalRequested]), data: outboxDispatchInput }) });
+// The SDK's automatic onFailure registration omits concurrency. An explicit consumer
+// keeps both workers within the existing plan's checked admission limits.
+export const failSupplierInvoiceRecognitions = inngest.createFunction({ id: "supplier-invoice-recognition-failure", name: "ALVILLAS OS supplier recognition failure receipt",
+  triggers: [{ event: "inngest/function.failed", if: "event.data.function_id == 'alvillas-os-supplier-invoice-recognition'" }], concurrency: { limit: 1 }, retries: 3
+}, async ({ event, step }) => {
+  const failure = failedInvoiceExecution.safeParse(event.data);
+  if (!failure.success) throw new NonRetriableError("supplier_invoice_failure_reference_denied");
+  return step.run(failure.data.event.name === supplierInvoiceReversalRequested ? "record-terminal-reversal-failure" : "record-terminal-recognition-failure",
+    () => failSupplierInvoiceRecognitionReference(failure.data.event.data, { eventType: failure.data.event.name }));
+});
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions];

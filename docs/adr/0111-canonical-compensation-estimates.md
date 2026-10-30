@@ -1,0 +1,15 @@
+# ADR 0111: Calculate compensation estimates from canonical assignment contracts
+
+Accepted: 2026-10-30
+
+F-FIN-24 reuses immutable `team_compensation` records and their effective-dated `staff.compensation` configuration. It must not create a person-wide rate table or let a newer future rate replace the contract applicable to past work.
+
+Add an internal contractual estimate service that selects the assignment's version at the requested instant and verifies it against the existing configuration resolver. Reject missing, unbound, changed or inapplicable sources. Property and job assignments use their current tenant-scoped geography; city assignments resolve their actual region. Preserve historical estimates before an assignment's retirement, while rejecting work outside its validity or after retirement. No archived contract is rewritten.
+
+The original caller and freshly stored grants must authorize both the contractual rate and the estimated total, with the actual beneficiary and source instant. A person's organization-scoped salary still belongs to that person: permit a valid own-person condition and amount limit. Its resource has no property, so a property-only grant cannot substitute. Re-read the contract, geography and resolved configuration before and after recording the private read audit; recheck current authority before returning the explicit DTO. Reuse the existing staff compensation audit privacy rules. Return no staff contact details, funding accounts or authorization internals.
+
+Extend the existing `Money` class with integer-ratio multiplication, using exact minor units and the class's existing half-up rounding convention. Hourly calculations convert explicit seconds to hours. Monthly calculations require an explicit fraction; no proration policy or number of payable days is assumed. Percentages use the contractual percentage and an explicit basis. Rates and amounts remain exact, including large values and repeating fractions.
+
+The result is identified as `CONTRACTUAL_ESTIMATE`. Supplied units and percentage bases are suitable for estimates only: they are not evidence of approved work, recognized employee claims or permission to pay. Compensation runs must independently validate their earned-work sources, configured proration/allocation/approval rules and duplicate recognition constraints. Employee claims, settlement, wallet offsets, public workflow and authenticated staging are subsequent F-FIN-24 work; this change does not mark the feature done or decide payroll tax treatment.
+
+Real PostgreSQL tests use the production assignment and compensation commands to create the contracts. They cover all four modes, effective versions, multiple assignments for one person, self-only and amount-limited authority, foreign tenants, source/grant/configuration changes across read boundaries, rollback of the private read audit, and constant query count for a selected assignment across 500 properties. Money tests check signed fractions, exact large products and a thousand generated rounding-error bounds. A source estimate does not create journals or postings.

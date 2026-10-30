@@ -27,6 +27,13 @@ export class TeamRepository {
       });
     }
   }
+  async clock() {
+    const [row] = await this.tx.$queryRaw<Array<{ now: Date }>>(Prisma.sql`SELECT clock_timestamp() AS now`);
+    return row.now;
+  }
+  async flushGuards() {
+    await this.tx.$executeRaw(Prisma.sql`SET CONSTRAINTS ALL IMMEDIATE`);
+  }
   compensationFor(assignments: string[]) {
     return this.tx.teamCompensation.findMany({
       where: { organizationId: this.organizationId, assignmentId: { in: assignments } },

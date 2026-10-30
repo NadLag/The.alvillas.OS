@@ -1,13 +1,12 @@
 "use client";
 
-import { normalizeMoneyInput } from "@/i18n/money-input";
-
 import { useEffect, useId, useRef, useState } from "react";
 import { liveQuery } from "dexie";
 import Decimal from "decimal.js";
 import { useTranslations } from "next-intl";
 import type { AppLocale } from "@/i18n/routing";
 import { formatCurrencyAmount, formatDateTime } from "@/i18n/format";
+import { normalizeAmountInput as normalizeAmount } from "@/platform/money/amount-input";
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
 import { fieldCashPayloadSchema } from "@/platform/ledger/field-cash";
 import { fieldQueue } from "./field-queue";
@@ -135,7 +134,7 @@ export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; t
     <h2>{t("title")}</h2><p>{t("guidance")}</p>
     {value ? <>
       <label htmlFor={`${id}-amount`}>{t("amount")}</label><input id={`${id}-amount`} type="text" inputMode="decimal" dir="ltr" autoComplete="off"
-        maxLength={19} value={value.amount} disabled={locked} data-testid="field-cash-amount" onChange={event => edit({ amount: normalizeMoneyInput(event.target.value) })} />
+        maxLength={19} value={value.amount} disabled={locked} data-testid="field-cash-amount" onChange={event => edit({ amount: normalizeAmount(event.target.value) })} />
       <label htmlFor={`${id}-currency`}>{t("currency")}</label><select id={`${id}-currency`} value={value.currency} disabled={locked} data-testid="field-cash-currency" onChange={event => edit({ currency: event.target.value })}>
         {cash?.currencies.map(currency => <option key={currency.code} value={currency.code}>{currency.code}</option>)}
       </select>

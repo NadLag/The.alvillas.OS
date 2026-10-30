@@ -9,6 +9,8 @@ import { submitSupplierInvoice } from "./supplier-invoice-submission";
 import { getSupplierInvoiceSubmissionPreview } from "./supplier-invoice-policy";
 import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
 import { FinancePolicyContextChangedError } from "./finance-config-service";
+import { requestSupplierInvoiceRecognition } from "./supplier-invoice-recognition-requests";
+import { getSupplierInvoiceRecognitionStatus } from "./supplier-invoice-recognition-status";
 
 async function run<T>(work: (actor: NonNullable<Awaited<ReturnType<typeof financeActorContextFromSession>>>, requestId: string) => Promise<T>, mutate = true) {
   const requestId = crypto.randomUUID();
@@ -31,3 +33,5 @@ export async function setSupplierInvoiceArchivedAction(input: unknown) { return 
 export async function getSupplierInvoiceChoicesAction(input: unknown) { return run(actor => getSupplierInvoiceChoices(actor, input), false); }
 export async function getSupplierInvoiceSubmissionPreviewAction(input: unknown) { return run(actor => getSupplierInvoiceSubmissionPreview(actor, input), false); }
 export async function submitSupplierInvoiceAction(input: unknown) { return run((actor, requestId) => submitSupplierInvoice(actor, input, { requestId })); }
+export async function requestSupplierInvoiceRecognitionAction(input: unknown) { return run((actor, requestId) => requestSupplierInvoiceRecognition(actor, input, { requestId })); }
+export async function getSupplierInvoiceRecognitionStatusAction(input: unknown) { return run(actor => getSupplierInvoiceRecognitionStatus(actor, input), false); }

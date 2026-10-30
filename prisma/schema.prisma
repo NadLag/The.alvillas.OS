@@ -72,6 +72,10 @@ model AutomationSuggestion {
 
 model Organization {
   ownerPayouts                                   OwnerPayout[]
+  supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
+  supplierInvoiceRecognitionOutcomes SupplierInvoiceRecognitionOutcome[]
+  supplierInvoiceRecognitions                    SupplierInvoiceRecognition[]
+  supplierInvoiceRecognitionLines                SupplierInvoiceRecognitionLine[]
   supplierInvoiceSubmissions                     SupplierInvoiceSubmission[]
   supplierInvoices                               SupplierInvoice[]
   supplierInvoiceRevisions                       SupplierInvoiceRevision[]
@@ -92,11 +96,11 @@ model Organization {
   teamAvailabilities                             TeamAvailability[]
   teamDocuments                                  TeamDocument[]
   teamWallets                                    TeamWallet[]
-  id                                             String                         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  id                                             String                           @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   name                                           String
-  baseCurrency                                   String                         @default("MAD") @map("base_currency") @db.Char(3)
-  createdAt                                      DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                                      DateTime                       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  baseCurrency                                   String                           @default("MAD") @map("base_currency") @db.Char(3)
+  createdAt                                      DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                                      DateTime                         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   profile                                        OrganizationProfile?
   regions                                        Region[]
   cities                                         City[]
@@ -158,15 +162,15 @@ model Organization {
   syncOps                                        SyncOp[]
   airbnbSettlements                              AirbnbSettlement[]
   variances                                      Variance[]
-  reservationGuestRecordRecords                  GuestRecord[]                  @relation("ReservationGuestRecordOrganization")
-  reservationReservationFeedRecords              ReservationFeed[]              @relation("ReservationReservationFeedOrganization")
-  reservationReservationFeedEntryRecords         ReservationFeedEntry[]         @relation("ReservationReservationFeedEntryOrganization")
-  reservationFeedSyncRunRecords                  FeedSyncRun[]                  @relation("ReservationFeedSyncRunOrganization")
-  reservationReservationRevisionRecords          ReservationRevision[]          @relation("ReservationReservationRevisionOrganization")
-  reservationReservationFinancialSnapshotRecords ReservationFinancialSnapshot[] @relation("ReservationReservationFinancialSnapshotOrganization")
-  reservationCalendarBlockRecords                CalendarBlock[]                @relation("ReservationCalendarBlockOrganization")
-  reservationReservationImportBatchRecords       ReservationImportBatch[]       @relation("ReservationReservationImportBatchOrganization")
-  reservationReservationExceptionRecords         ReservationException[]         @relation("ReservationReservationExceptionOrganization")
+  reservationGuestRecordRecords                  GuestRecord[]                    @relation("ReservationGuestRecordOrganization")
+  reservationReservationFeedRecords              ReservationFeed[]                @relation("ReservationReservationFeedOrganization")
+  reservationReservationFeedEntryRecords         ReservationFeedEntry[]           @relation("ReservationReservationFeedEntryOrganization")
+  reservationFeedSyncRunRecords                  FeedSyncRun[]                    @relation("ReservationFeedSyncRunOrganization")
+  reservationReservationRevisionRecords          ReservationRevision[]            @relation("ReservationReservationRevisionOrganization")
+  reservationReservationFinancialSnapshotRecords ReservationFinancialSnapshot[]   @relation("ReservationReservationFinancialSnapshotOrganization")
+  reservationCalendarBlockRecords                CalendarBlock[]                  @relation("ReservationCalendarBlockOrganization")
+  reservationReservationImportBatchRecords       ReservationImportBatch[]         @relation("ReservationReservationImportBatchOrganization")
+  reservationReservationExceptionRecords         ReservationException[]           @relation("ReservationReservationExceptionOrganization")
 
   inventoryItems        InventoryItem[]
   inventoryLocations    InventoryLocation[]
@@ -356,6 +360,8 @@ model Person {
 model UserAccount {
   createdOwnerPayouts         OwnerPayout[]                @relation("OwnerPayoutCreator")
   updatedOwnerPayouts         OwnerPayout[]                @relation("OwnerPayoutUpdater")
+  supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
+  supplierInvoiceRecognitions SupplierInvoiceRecognition[] @relation("SupplierInvoiceRecognitionCreator")
   submittedSupplierInvoices   SupplierInvoiceSubmission[]
   createdSupplierInvoices     SupplierInvoice[]            @relation("SupplierInvoiceCreator")
   updatedSupplierInvoices     SupplierInvoice[]            @relation("SupplierInvoiceUpdater")
@@ -1332,24 +1338,25 @@ model LedgerAccount {
 model FinancialTransaction {
   ownerPayout            OwnerPayout?                @relation("OwnerPayoutPayment")
   reversedOwnerPayout    OwnerPayout?                @relation("OwnerPayoutReversal")
-  periodAdjustment       AccountingPeriodAdjustment?
-  groupEntries           TransactionGroupEntry[]
-  expense                Expense?
-  cashCollection         CashCollection?
-  id                     String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId         String                      @map("organization_id") @db.Uuid
-  reference              String
-  occurredAt             DateTime                    @map("occurred_at") @db.Timestamptz(6)
-  description            String?
-  reversesTransactionId  String?                     @map("reverses_transaction_id") @db.Uuid
-  idempotencyKey         String?                     @map("idempotency_key")
-  createdBy              String?                     @map("created_by") @db.Uuid
-  createdAt              DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
-  sealed                 Boolean                     @default(true)
-  organization           Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  postings               Posting[]
-  reversesTransaction    FinancialTransaction?       @relation("FinancialTransactionReversal", fields: [reversesTransactionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  reversedByTransactions FinancialTransaction[]      @relation("FinancialTransactionReversal")
+  supplierInvoiceRecognitionLine SupplierInvoiceRecognitionLine?
+  periodAdjustment               AccountingPeriodAdjustment?
+  groupEntries                   TransactionGroupEntry[]
+  expense                        Expense?
+  cashCollection                 CashCollection?
+  id                             String                          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId                 String                          @map("organization_id") @db.Uuid
+  reference                      String
+  occurredAt                     DateTime                        @map("occurred_at") @db.Timestamptz(6)
+  description                    String?
+  reversesTransactionId          String?                         @map("reverses_transaction_id") @db.Uuid
+  idempotencyKey                 String?                         @map("idempotency_key")
+  createdBy                      String?                         @map("created_by") @db.Uuid
+  createdAt                      DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  sealed                         Boolean                         @default(true)
+  organization                   Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  postings                       Posting[]
+  reversesTransaction            FinancialTransaction?           @relation("FinancialTransactionReversal", fields: [reversesTransactionId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  reversedByTransactions         FinancialTransaction[]          @relation("FinancialTransactionReversal")
 
   @@unique([organizationId, id], map: "financial_transaction_org_id_unique")
   @@unique([organizationId, reference], map: "financial_transaction_org_reference_unique")
@@ -2298,25 +2305,28 @@ model CashCollection {
 }
 
 model AccountingPeriodAdjustment {
-  id               String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId   String                @map("organization_id") @db.Uuid
-  expenseId        String                @map("expense_id") @db.Uuid
-  transactionId    String                @map("transaction_id") @db.Uuid
-  periodId         String                @map("period_id") @db.Uuid
-  periodEventId    String                @map("period_event_id") @db.Uuid
-  sourceOccurredAt DateTime              @map("source_occurred_at") @db.Timestamptz(6)
-  reason           String                @db.VarChar(500)
-  createdBy        String                @map("created_by") @db.Uuid
-  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  organization     Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  expense          Expense               @relation(fields: [organizationId, expenseId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  transaction      FinancialTransaction  @relation(fields: [organizationId, transactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  period           AccountingPeriod      @relation(fields: [organizationId, periodId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  periodEvent      AccountingPeriodEvent @relation(fields: [organizationId, periodEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  creator          UserAccount           @relation("AccountingPeriodAdjustmentCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  invoiceRecognitionLineId String?                         @map("invoice_recognition_line_id") @db.Uuid
+  invoiceRecognitionLine   SupplierInvoiceRecognitionLine? @relation(fields: [organizationId, invoiceRecognitionLineId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  id                       String                          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId           String                          @map("organization_id") @db.Uuid
+  expenseId                String?                         @map("expense_id") @db.Uuid
+  transactionId            String                          @map("transaction_id") @db.Uuid
+  periodId                 String                          @map("period_id") @db.Uuid
+  periodEventId            String                          @map("period_event_id") @db.Uuid
+  sourceOccurredAt         DateTime                        @map("source_occurred_at") @db.Timestamptz(6)
+  reason                   String                          @db.VarChar(500)
+  createdBy                String                          @map("created_by") @db.Uuid
+  createdAt                DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization             Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  expense                  Expense?                        @relation(fields: [organizationId, expenseId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  transaction              FinancialTransaction            @relation(fields: [organizationId, transactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  period                   AccountingPeriod                @relation(fields: [organizationId, periodId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  periodEvent              AccountingPeriodEvent           @relation(fields: [organizationId, periodEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator                  UserAccount                     @relation("AccountingPeriodAdjustmentCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organizationId, id])
   @@unique([organizationId, expenseId])
+  @@unique([organizationId, invoiceRecognitionLineId])
   @@unique([organizationId, transactionId])
   @@index([organizationId, periodId, createdAt])
   @@map("accounting_period_adjustment")
@@ -2511,6 +2521,8 @@ model Supplier {
 }
 
 model SupplierInvoice {
+  recognitionRequests SupplierInvoiceRecognitionRequest[]
+  recognition         SupplierInvoiceRecognition?
   currentSubmissionId String?                     @map("current_submission_id") @db.Uuid
   currentSubmission   SupplierInvoiceSubmission?  @relation("CurrentSupplierInvoiceSubmission", fields: [organizationId, currentSubmissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   submissions         SupplierInvoiceSubmission[] @relation("SupplierInvoiceSubmissions")
@@ -2574,25 +2586,26 @@ model SupplierInvoiceRevision {
 }
 
 model SupplierInvoiceLine {
+  recognition    SupplierInvoiceRecognitionLine?
   approvalStages ApprovalStage[]
-  id             String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId String                  @map("organization_id") @db.Uuid
-  revisionId     String                  @map("revision_id") @db.Uuid
+  id             String                          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                          @map("organization_id") @db.Uuid
+  revisionId     String                          @map("revision_id") @db.Uuid
   position       Int
-  propertyId     String?                 @map("property_id") @db.Uuid
-  reservationId  String?                 @map("reservation_id") @db.Uuid
+  propertyId     String?                         @map("property_id") @db.Uuid
+  reservationId  String?                         @map("reservation_id") @db.Uuid
   category       String
-  costCenter     String?                 @map("cost_center")
-  amount         Decimal                 @db.Decimal(18, 2)
-  currency       String                  @db.Char(3)
-  createdBy      String                  @map("created_by") @db.Uuid
-  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
-  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  revision       SupplierInvoiceRevision @relation(fields: [organizationId, revisionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  property       Property?               @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  reservation    Reservation?            @relation(fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  creator        UserAccount             @relation(fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  costCenter     String?                         @map("cost_center")
+  amount         Decimal                         @db.Decimal(18, 2)
+  currency       String                          @db.Char(3)
+  createdBy      String                          @map("created_by") @db.Uuid
+  createdAt      DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                        @default(now()) @map("updated_at") @db.Timestamptz(6)
+  organization   Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  revision       SupplierInvoiceRevision         @relation(fields: [organizationId, revisionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  property       Property?                       @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reservation    Reservation?                    @relation(fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator        UserAccount                     @relation(fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organizationId, id])
   @@unique([organizationId, revisionId, position])
@@ -2602,24 +2615,26 @@ model SupplierInvoiceLine {
 }
 
 model SupplierInvoiceSubmission {
-  id                   String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId       String                  @map("organization_id") @db.Uuid
-  invoiceId            String                  @map("invoice_id") @db.Uuid
-  revisionId           String                  @map("revision_id") @db.Uuid
-  sourceInvoiceVersion Int                     @map("source_invoice_version")
-  occurredOn           DateTime                @map("occurred_on") @db.Date
+  recognitionRequests SupplierInvoiceRecognitionRequest[]
+  recognition          SupplierInvoiceRecognition?
+  id                   String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId       String                      @map("organization_id") @db.Uuid
+  invoiceId            String                      @map("invoice_id") @db.Uuid
+  revisionId           String                      @map("revision_id") @db.Uuid
+  sourceInvoiceVersion Int                         @map("source_invoice_version")
+  occurredOn           DateTime                    @map("occurred_on") @db.Date
   emergency            Boolean
-  reason               String                  @db.VarChar(500)
+  reason               String                      @db.VarChar(500)
   snapshot             Json
-  idempotencyKey       String                  @map("idempotency_key") @db.Uuid
-  requestFingerprint   String                  @map("request_fingerprint")
-  submittedBy          String                  @map("submitted_by") @db.Uuid
-  submittedAt          DateTime                @default(now()) @map("submitted_at") @db.Timestamptz(6)
-  organization         Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  invoice              SupplierInvoice         @relation("SupplierInvoiceSubmissions", fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  revision             SupplierInvoiceRevision @relation(fields: [organizationId, revisionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  submitter            UserAccount             @relation(fields: [organizationId, submittedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  selectedBy           SupplierInvoice[]       @relation("CurrentSupplierInvoiceSubmission")
+  idempotencyKey       String                      @map("idempotency_key") @db.Uuid
+  requestFingerprint   String                      @map("request_fingerprint")
+  submittedBy          String                      @map("submitted_by") @db.Uuid
+  submittedAt          DateTime                    @default(now()) @map("submitted_at") @db.Timestamptz(6)
+  organization         Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice              SupplierInvoice             @relation("SupplierInvoiceSubmissions", fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  revision             SupplierInvoiceRevision     @relation(fields: [organizationId, revisionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  submitter            UserAccount                 @relation(fields: [organizationId, submittedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  selectedBy           SupplierInvoice[]           @relation("CurrentSupplierInvoiceSubmission")
   approval             ApprovalRequest?
 
   @@unique([organizationId, id])
@@ -2628,4 +2643,98 @@ model SupplierInvoiceSubmission {
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, invoiceId, submittedAt, id])
   @@map("supplier_invoice_submission")
+}
+
+model SupplierInvoiceRecognition {
+  requestOutcomes SupplierInvoiceRecognitionOutcome[]
+  id                 String                           @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String                           @map("organization_id") @db.Uuid
+  invoiceId          String                           @map("invoice_id") @db.Uuid
+  submissionId       String                           @map("submission_id") @db.Uuid
+  invoiceVersion     Int                              @map("invoice_version")
+  currentPeriod      Boolean                          @default(false) @map("current_period")
+  idempotencyKey     String                           @map("idempotency_key") @db.Uuid
+  requestFingerprint String                           @map("request_fingerprint")
+  reason             String                           @db.VarChar(500)
+  createdBy          String                           @map("created_by") @db.Uuid
+  createdAt          DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization       Organization                     @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice            SupplierInvoice                  @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  submission         SupplierInvoiceSubmission        @relation(fields: [organizationId, submissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  creator            UserAccount                      @relation("SupplierInvoiceRecognitionCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  lines              SupplierInvoiceRecognitionLine[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, invoiceId])
+  @@unique([organizationId, submissionId])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, createdAt, id])
+  @@map("supplier_invoice_recognition")
+}
+
+model SupplierInvoiceRecognitionLine {
+  id               String                      @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId   String                      @map("organization_id") @db.Uuid
+  recognitionId    String                      @map("recognition_id") @db.Uuid
+  invoiceLineId    String                      @map("invoice_line_id") @db.Uuid
+  transactionId    String                      @map("transaction_id") @db.Uuid
+  sourceOccurredAt DateTime                    @map("source_occurred_at") @db.Timestamptz(6)
+  createdAt        DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization     Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  recognition      SupplierInvoiceRecognition  @relation(fields: [organizationId, recognitionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  invoiceLine      SupplierInvoiceLine         @relation(fields: [organizationId, invoiceLineId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  transaction      FinancialTransaction        @relation(fields: [organizationId, transactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  periodAdjustment AccountingPeriodAdjustment?
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, invoiceLineId])
+  @@unique([organizationId, transactionId])
+  @@index([organizationId, recognitionId, id])
+  @@map("supplier_invoice_recognition_line")
+}
+
+model SupplierInvoiceRecognitionRequest {
+  id                 String                             @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String                             @map("organization_id") @db.Uuid
+  invoiceId          String                             @map("invoice_id") @db.Uuid
+  submissionId       String                             @map("submission_id") @db.Uuid
+  invoiceVersion     Int                                @map("invoice_version")
+  operation          String                             @default("RECOGNIZE")
+  currentPeriod      Boolean                            @default(false) @map("current_period")
+  idempotencyKey     String                             @map("idempotency_key") @db.Uuid
+  requestFingerprint String                             @map("request_fingerprint")
+  reason             String                             @db.VarChar(500)
+  authorizationCap   Json                               @map("authorization_cap")
+  requestedBy        String                             @map("requested_by") @db.Uuid
+  requestedAt        DateTime                           @default(now()) @map("requested_at") @db.Timestamptz(6)
+  organization       Organization                       @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice            SupplierInvoice                    @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  submission         SupplierInvoiceSubmission          @relation(fields: [organizationId, submissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  requester          UserAccount                        @relation(fields: [organizationId, requestedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  outcome            SupplierInvoiceRecognitionOutcome?
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, invoiceId, requestedAt, id])
+  @@index([organizationId, requestedBy, requestedAt, id])
+  @@map("supplier_invoice_recognition_request")
+}
+
+model SupplierInvoiceRecognitionOutcome {
+  id             String                            @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                            @map("organization_id") @db.Uuid
+  requestId      String                            @map("request_id") @db.Uuid
+  state          String
+  recognitionId  String?                           @map("recognition_id") @db.Uuid
+  failureCode    String?                           @map("failure_code")
+  occurredAt     DateTime                          @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  organization   Organization                      @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  request        SupplierInvoiceRecognitionRequest @relation(fields: [organizationId, requestId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  recognition    SupplierInvoiceRecognition?       @relation(fields: [organizationId, recognitionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, requestId])
+  @@index([organizationId, occurredAt, id])
+  @@index([organizationId, recognitionId])
+  @@map("supplier_invoice_recognition_outcome")
 }
