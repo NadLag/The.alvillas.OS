@@ -9,6 +9,7 @@ import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/acc
 import { closeAccountingPeriod } from "@/modules/finance/application/accounting-period-service";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { executeSupplierInvoiceRecognitionReference } from "@/modules/finance/application/supplier-invoice-recognition-requests";
+import { localClockLabel } from "@/platform/time/local-instant";
 import { openFieldFixture } from "./support/field-fixture";
 import en from "../../messages/en.json" with { type: "json" };
 import fr from "../../messages/fr.json" with { type: "json" };
@@ -19,7 +20,7 @@ async function choose(picker: Locator, label: string) {
   await picker.press("ArrowDown"); await picker.press("Enter"); await expect(picker).toHaveValue(label);
 }
 test.use({ timezoneId: "America/Denver", actionTimeout: 30000, navigationTimeout: 60000 });
-for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice recording survives lost acknowledgements and retains actual financial privacy in ${locale}`, async ({ page, browser }, info) => {
+for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice recording and payments survive lost acknowledgements and retain actual financial privacy in ${locale}`, async ({ page, browser }, info) => {
   test.skip(!process.env.DATABASE_URL, "Dedicated local PostgreSQL required"); test.setTimeout(240000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw Error("Dedicated local PostgreSQL required");
   const f = await openFieldFixture(page, info, "en"), suffix = randomUUID().slice(0,8), messages = { en, fr, ar }[locale].SupplierInvoices;
@@ -42,7 +43,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
       const calendar = await rules.resolve({ key: "finance.accounting_periods", scopes: [{ scopeType: "organization", scopeId: null }], asOf: await new FinanceRepository(tx, f.organizationId).clock() });
       if (!calendar) await rules.createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2000-01-01"),
         reason: "Actual native recording calendar", value: { timezone: "UTC", allow_early_close: false, max_reopen_seconds: 60 } });
-      return property;
+      return { ...property, accountingTimezone: calendar ? z.object({ timezone: z.string() }).parse(calendar.value).timezone : "UTC" };
     });
     if (locale === "fr") {
       const actor = { organizationId: f.organizationId, actorId: user.id, authContext: await authContextForAccount(f.organizationId, user.id, { db: f.db }) };
@@ -106,6 +107,59 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
     await expect(panel.getByTestId("invoice-recognized-amount")).toBeVisible(); await expect(panel.getByTestId("invoice-recognize")).toHaveCount(0);
     await page.reload(); await expect(page.getByTestId("invoice-recognition-state")).toHaveText(messages.recognition.recorded);
     await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
+    const bank = await withTenant(f.db, f.organizationId, tx => new FinanceRepository(tx, f.organizationId).ensureLedgerAccount({ code: "PAYMENT_NATIVE_" + suffix.toUpperCase(),
+      name: "Actual native supplier bank " + suffix, accountType: "ASSET_LOCATION", normalSide: "DEBIT" }));
+    const originals = await withTenant(f.db, f.organizationId, tx => tx.financialTransaction.findMany({ where: { supplierInvoiceRecognitionLine: { recognition: { invoiceId: id } } }, include: { postings: true } }));
+    const payments = page.getByTestId("supplier-payment"); await expect(payments.getByTestId("supplier-payment-outstanding")).toBeVisible();
+    await payments.getByTestId("supplier-payment-refresh").click();
+    await payments.getByTestId("supplier-payment-amount").fill(locale === "fr" ? "1500,01" : locale === "ar" ? "١٥٠٠٫٠١" : "1500.01");
+    const paidInstant = locale === "fr" ? "2026-09-25T12:00:00.000Z" : "2026-10-28T12:00:00.000Z";
+    const paidLocal = localClockLabel(paidInstant, property.accountingTimezone).replace(/:00$/u, "");
+    await payments.getByTestId("supplier-payment-date").fill(paidLocal);
+    await payments.getByTestId("supplier-payment-preview").click();
+    await payments.getByTestId("supplier-payment-funding-query").fill(bank.name); await payments.getByTestId("supplier-payment-funding-search").click();
+    await expect(payments.getByTestId("supplier-payment-funding").locator(`option[value="${bank.id}"]`)).toHaveCount(1);
+    await expect(payments.getByTestId("supplier-payment-funding")).toBeEnabled(); await payments.getByTestId("supplier-payment-funding").selectOption(bank.id);
+    const paymentReason = "Actual native supplier payment " + suffix; await payments.getByTestId("supplier-payment-reason").fill(paymentReason);
+    await payments.getByTestId("supplier-payment-reference").fill("TRANSFER-" + suffix);
+    if (locale === "fr") {
+      const confirmation = payments.getByTestId("supplier-payment-adjustment"); await expect(confirmation).not.toBeChecked();
+      await payments.getByTestId("supplier-payment-submit").click(); await expect(confirmation).not.toBeChecked();
+      expect(await withTenant(f.db, f.organizationId, tx => tx.auditLog.count({ where: { action: "finance.supplier_payment.posted", reason: paymentReason } }))).toBe(0); await confirmation.check();
+    }
+    await page.context().setOffline(true); await expect(payments.getByTestId("supplier-payment-submit")).toBeDisabled(); await page.context().setOffline(false);
+    await expect(payments.getByTestId("supplier-payment-submit")).toBeEnabled(); expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    await page.evaluate(() => document.documentElement.style.fontSize = "200%");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`supplier-payment-${locale}.png`), fullPage: true }); await page.evaluate(() => document.documentElement.style.fontSize = "");
+    let losePayment = true, markPaymentLost!: () => void; const paymentLost = new Promise<void>(resolve => { markPaymentLost = resolve; });
+    await page.route(target, async route => {
+      if (losePayment && route.request().method() === "POST" && route.request().postData()?.includes(paymentReason)) { losePayment = false; await route.fetch(); await route.abort("failed"); markPaymentLost(); }
+      else await route.continue();
+    });
+    const capturedPayment = page.waitForRequest(candidate => candidate.method() === "POST" && Boolean(candidate.headers()["next-action"]) && Boolean(candidate.postData()?.includes(paymentReason)));
+    await payments.getByTestId("supplier-payment-submit").click(); const paymentRequest = await capturedPayment; await paymentLost;
+    await expect(payments.getByTestId("supplier-payment-retry")).toBeVisible(); await expect(payments.getByTestId("supplier-payment-reason")).toHaveValue(paymentReason);
+    await expect(payments.getByTestId("supplier-payment-amount")).toBeDisabled(); await payments.getByTestId("supplier-payment-retry").click();
+    await expect(payments.getByTestId("supplier-payment-entry")).toHaveCount(1); await expect(payments.getByTestId("supplier-payment-retry")).toHaveCount(0); await page.unroute(target);
+    const paid = await withTenant(f.db, f.organizationId, tx => tx.auditLog.findMany({ where: { action: "finance.supplier_payment.posted", reason: paymentReason } }));
+    expect(paid).toHaveLength(1); expect(paid[0].after).toMatchObject({ input: { amount: "1500.01", fundingAccountId: bank.id, paidAt: locale === "fr" ? "2026-09-25T12:00:00.000Z" : "2026-10-28T12:00:00.000Z", currentPeriod: locale === "fr" } });
+    const paymentHeaders = { "content-type": paymentRequest.headers()["content-type"], "next-action": paymentRequest.headers()["next-action"] };
+    for (const response of await Promise.all(Array.from({ length: 4 }, () => page.request.post(paymentRequest.url(), { headers: paymentHeaders, data: paymentRequest.postDataBuffer()! })))) expect(await response.text()).toContain('"idempotent":true');
+    expect(await (await anonymous.request.post(paymentRequest.url(), { headers: paymentHeaders, data: paymentRequest.postDataBuffer()! })).text()).toContain('"code":"forbidden"');
+    const voidReason = "Reverse the actual native supplier payment " + suffix; await payments.getByTestId("supplier-payment-void-reason").fill(voidReason); let loseVoid = true, markVoidLost!: () => void;
+    const voidLost = new Promise<void>(resolve => { markVoidLost = resolve; });
+    await page.route(target, async route => { if (loseVoid && route.request().method() === "POST" && route.request().postData()?.includes(voidReason)) { loseVoid = false; await route.fetch(); await route.abort("failed"); markVoidLost(); } else await route.continue(); });
+    await payments.getByTestId("supplier-payment-void").click(); await voidLost; await expect(payments.getByTestId("supplier-payment-retry")).toBeVisible(); await payments.getByTestId("supplier-payment-retry").click();
+    await expect(payments.getByTestId("supplier-payment-history")).toContainText(messages.payment.reversed); await expect(payments.getByTestId("supplier-payment-void")).toHaveCount(0);
+    await expect(payments.getByTestId("supplier-payment-retry")).toHaveCount(0); await expect(payments.getByTestId("supplier-payment-refresh")).toBeEnabled(); await page.unroute(target);
+    await withTenant(f.db, f.organizationId, async tx => {
+      const journal = await tx.financialTransaction.findUniqueOrThrow({ where: { id: paid[0].resourceId! }, include: { postings: true, reversedByTransactions: { include: { postings: true } } } });
+      expect(journal.postings).toHaveLength(2); expect(journal.reversedByTransactions).toHaveLength(1); expect(journal.reversedByTransactions[0].postings).toHaveLength(2);
+      expect(await tx.auditLog.count({ where: { action: "finance.supplier_payment.posted", reason: paymentReason } })).toBe(1);
+      expect(await tx.auditLog.count({ where: { action: "finance.supplier_payment.reversed", reason: voidReason } })).toBe(1);
+      expect(await tx.financialTransaction.findMany({ where: { id: { in: originals.map(original => original.id) } }, include: { postings: true } })).toEqual(originals);
+    });
     const headers = { "content-type": request.headers()["content-type"], "next-action": request.headers()["next-action"] };
     expect(await (await anonymous.request.get(url)).text()).not.toContain(purpose);
     expect(await (await anonymous.request.post(request.url(), { headers, data: request.postDataBuffer()! })).text()).toContain('"code":"forbidden"');
@@ -117,6 +171,9 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
       await tx.roleAssignment.updateMany({ where: { userAccountId: user.id, archivedAt: null }, data: { archivedAt: new Date() } });
       await tx.roleAssignment.create({ data: { organizationId: f.organizationId, userAccountId: user.id, personId: account.personId, roleId: role.id, scopeType: "organization", validFrom: new Date("2000-01-01") } });
     });
+    await payments.getByTestId("supplier-payment-refresh").click(); await expect(payments.getByTestId("supplier-payment-error")).toHaveText(messages.payment.errors.forbidden);
+    await expect(payments.getByTestId("supplier-payment-outstanding")).toHaveCount(0); await expect(payments.getByTestId("supplier-payment-history")).toHaveCount(0);
+    expect(await (await page.request.post(paymentRequest.url(), { headers: paymentHeaders, data: paymentRequest.postDataBuffer()! })).text()).toContain('"code":"forbidden"');
     await page.reload(); await expect(page.getByTestId("invoice-purpose-detail")).toHaveText(purpose); await expect(page.getByTestId("invoice-recognition")).toHaveCount(0);
     expect(await (await page.request.post(request.url(), { headers, data: request.postDataBuffer()! })).text()).toContain('"code":"forbidden"');
     await withTenant(f.db, f.organizationId, async tx => {

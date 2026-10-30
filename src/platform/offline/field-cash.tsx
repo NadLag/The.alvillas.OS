@@ -6,6 +6,7 @@ import Decimal from "decimal.js";
 import { useTranslations } from "next-intl";
 import type { AppLocale } from "@/i18n/routing";
 import { formatCurrencyAmount, formatDateTime } from "@/i18n/format";
+import { normalizeAmountInput as normalizeAmount } from "@/platform/money/amount-input";
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
 import { fieldCashPayloadSchema } from "@/platform/ledger/field-cash";
 import { fieldQueue } from "./field-queue";
@@ -17,10 +18,6 @@ function fresh(snapshot: Snapshot, taskId: string, locale: AppLocale): FieldCash
   return { taskId, amount: "", currency: snapshot.task.cash.baseCurrency, payer: snapshot.task.guestName ?? "",
     purpose: localizedTaskTitle(snapshot.task.title, locale).slice(0, 500), expectedRevision: snapshot.task.cash.revision,
     clientOpId: crypto.randomUUID(), clientCreatedAt: new Date().toISOString() };
-}
-function normalizeAmount(value: string) {
-  return value.replace(/[٠-٩۰-۹]/gu, digit => String(digit.charCodeAt(0) - (digit >= "۰" ? 0x6f0 : 0x660)))
-    .replace(/[٫,]/gu, ".").replace(/^0+(?=\d)/u, "");
 }
 export function FieldCash({ scope, taskId, locale }: { scope: FieldQueueScope; taskId: string; locale: AppLocale }) {
   const t = useTranslations("FieldCash"), id = useId(), { organizationId, userId } = scope;

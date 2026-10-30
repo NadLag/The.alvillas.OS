@@ -5,6 +5,7 @@ import { safeLocale } from "@/i18n/routing";
 import { formatCurrencyAmount, formatDateTime } from "@/i18n/format";
 import { getSupplierInvoiceRecognitionStatusAction, requestSupplierInvoiceRecognitionAction } from "../application/supplier-invoice-actions";
 import type { getSupplierInvoiceRecognitionStatus } from "../application/supplier-invoice-recognition-status";
+import { SupplierPaymentPanel } from "./supplier-payment-panel";
 
 type Status = Awaited<ReturnType<typeof getSupplierInvoiceRecognitionStatus>>;
 type Failure = "forbidden" | "conflict" | "validation" | "policy" | "error";
@@ -61,6 +62,7 @@ export function SupplierInvoiceRecognitionPanel({ initial, locale }: { initial: 
         {request.failureCode ? <p>{t(`recognition.failures.${request.failureCode}`)}</p> : null}
       </li>)}</ol> : <p>{t("recognition.empty")}</p>}
       {data.next ? <button className="secondary-button" type="button" data-testid="invoice-recognition-older" disabled={busy || !online} onClick={() => startTransition(() => refresh(data.next ?? undefined))}>{t("recognition.older")}</button> : null}
+      {data.recognized ? <SupplierPaymentPanel key={data.id} invoiceId={data.id} locale={locale} /> : null}
     </> : null}
     {!online ? <p role="status">{t("recognition.offline")}</p> : null}
     {error ? <p role="alert" data-testid="invoice-recognition-error">{t(error)}</p> : null}

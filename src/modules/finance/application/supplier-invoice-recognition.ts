@@ -66,6 +66,8 @@ async function prepareRecognitionSource(ctx: FinanceActorContext, intent: Recogn
     for (const cost of checkedCosts) {
       const line = actual.currentRevision.lines.find(line => line.id === cost.id), postingAt = postAt.get(cost.id);
       if (!line || line.propertyId && (!line.property || line.property.archivedAt) || !postingAt) throw new SupplierInvoiceAccessError();
+      const captured = revision.lines.find(line => line.id === cost.id);
+      if (line.propertyId && (line.property?.cityId !== captured?.property?.cityId || line.property?.regionId !== captured?.property?.regionId)) throw new SupplierInvoiceAccessError();
       const invoice = supplierInvoiceCostResource(ctx.organizationId, actual, line, Money.of(revision.amount.toString(), revision.currency), source.occurredOn.toISOString().slice(0,10), cost.timezone, cost.sourceOccurredAt);
       const recognized = existing?.lines.find(link => link.invoiceLineId === cost.id);
       const identity = input ? undefined : recognized?.transactionId;
