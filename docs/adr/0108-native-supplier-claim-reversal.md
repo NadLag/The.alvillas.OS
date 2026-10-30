@@ -1,0 +1,11 @@
+# Native supplier claim reversal admission
+
+The approved, recognized invoice workspace exposes whole-claim reversal through the durable request pipeline. Its status reader reuses the existing settlement source checks, including every actual payment, funding contributor and original/current financial date. Preparing the same reversal source determines current admission authority; view access does not imply void or payment access. Recognition and reversal share one paginated history presenter without exposing captured caps, fingerprints or canonical nonces.
+
+The financial session gate protects both public server actions. Admission additionally requires explicit whole-claim confirmation and a reason. The request runs the existing background cancellation, which appends every exact opposite cost together in the actual current open accounting period. It never invokes the journal batch in the foreground. Closed periods and unreversed payments are shown as actionable blockers.
+
+The form freezes the complete original intent after a lost or uncertain acknowledgement. Only an acknowledged request rotates the nonce. A post-commit revalidation failure remains an uncertain response even when the thrown error would otherwise mean access or validation failure. Exact retries therefore cannot silently become another cancellation. Forbidden reads or mutations clear private status, history and form data. Financial writes are unavailable offline; only pending requests poll for completion.
+
+Payment and reversal panels communicate through stable parent callbacks. An acknowledged payment change refreshes reversal availability without remounting a form that may be recovering its acknowledgement. Confirmed cancellation refreshes the payment view to its actual zero claim. Generation checks discard stale reads and responses after unmount. All controls and recovery states use the existing design system and EN, FR and AR catalogs.
+
+The database schema and all 80 applied migration files remain unchanged. Verification covers real financial source access, no-pay void operators, post-read revocation, complete history pagination with a constant query count, explicit confirmation, post-commit response failure, and native acknowledgement recovery.
