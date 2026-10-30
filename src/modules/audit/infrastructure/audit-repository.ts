@@ -5,7 +5,7 @@ import { calendarDateStart } from "@/platform/time/calendar";
 import { Money } from "@/platform/money/money";
 import { employeeCompensationRunFacts } from "@/platform/authz/employee-compensation-resource";
 
-export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[] };
+export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];sourceRecordId?:string };
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -92,6 +92,12 @@ export class AuditRepository {
         recordedCompletionAt: true, currency: true, amount: true, rate: true, property: { select: { cityId: true, regionId: true } } } } } });
     return new Map(rows.map(row => { const facts = employeeCompensationRunFacts(this.organizationId,row);
       return [row.id,{ ...facts.resource, salarySources:facts.salarySources }]; }));
+  }
+  async employeeCompensationSubmissionResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
+    if(!ids.length)return new Map();
+    const rows=await this.tx.employeeCompensationSubmission.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:{id:true,run:{select:{id:true,currency:true,createdAt:true,
+      lines:{select:{personId:true,propertyId:true,taskId:true,recordedCompletionAt:true,currency:true,amount:true,rate:true,property:{select:{cityId:true,regionId:true}}}}}}}});
+    return new Map(rows.map(row=>{const facts=employeeCompensationRunFacts(this.organizationId,row.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources}];}));
   }
   async cashResources(ids: string[]): Promise<Map<string, Resource>> {
     if (!ids.length) return new Map();
