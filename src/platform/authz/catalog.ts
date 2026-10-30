@@ -21,6 +21,7 @@ export const permissionResources = [
   "identity",
   "team_member",
   "staff_compensation",
+  "employee_payable",
   "staff_document",
   "role",
   "permission",
@@ -86,7 +87,7 @@ const operationalFull = permissionsFor(
 const geographyView = permissionsFor(["region", "city"], ["view"]);
 
 const financeFull = permissionsFor(
-  ["financial_transaction", "wallet", "cash_collection", "expense", "supplier_invoice", "owner_statement", "company_ledger", "report"],
+  ["financial_transaction", "wallet", "cash_collection", "expense", "supplier_invoice", "employee_payable", "owner_statement", "company_ledger", "report"],
   ["view", "create", "edit", "void", "approve", "reject", "export", "pay", "reconcile"]
 );
 
@@ -246,6 +247,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
       permissionKey("property", "view"),
       permissionKey("reservation", "view"),
       ...permissionsFor(["supplier"], ["view", "create", "edit", "export"]),
+      permissionKey("staff_compensation", "view"),
       ...financeFull
     ],
     mfaRequired: true
@@ -347,6 +349,7 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
+  ...(["purpose", "currency", "fromOn", "toOn", "timezone", "total", "lines", "history"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "employee_payable", field, dataClass: "financial", requiredPermission: permissionKey("employee_payable", "view"), mask: "placeholder" })),
   ...(["amount", "currency", "purpose", "invoiceNumber", "issuedOn", "dueOn", "lines", "history"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "supplier_invoice", field, dataClass: "financial", requiredPermission: permissionKey("supplier_invoice", "view"), mask: "placeholder" })),
   { resource: "supplier_invoice", field: "supplierName", dataClass: "personal", requiredPermission: permissionKey("supplier", "view"), mask: "placeholder" },
   ...(["contactName", "email", "phone", "address", "externalReference"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "supplier", field, dataClass: "personal", requiredPermission: permissionKey("supplier", "view"), mask: "placeholder" })),

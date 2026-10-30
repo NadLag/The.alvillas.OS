@@ -10,9 +10,10 @@ import { employeeCompensationAmount, employeeCompensationBasisSchema } from "../
 import { EmployeeCompensationRepository } from "../infrastructure/employee-compensation-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
+import { validateEmployeeCompensationAssignment, validateEmployeeCompensationRate } from "./employee-compensation-source";
+import { EmployeeCompensationAccessError, EmployeeCompensationSourceUnavailableError } from "../domain/employee-compensation";
 
-export class EmployeeCompensationAccessError extends Error {}
-export class EmployeeCompensationSourceUnavailableError extends Error {}
+export { EmployeeCompensationAccessError, EmployeeCompensationSourceUnavailableError } from "../domain/employee-compensation";
 export const employeeCompensationPreviewInput = z.object({ assignmentId: z.uuid(), earnedAt: z.iso.datetime({ offset: true }),
   basis: employeeCompensationBasisSchema }).strict();
 
@@ -42,16 +43,11 @@ export async function previewEmployeeCompensationInTransaction(ctx: FinanceActor
       ...(amount ? [{ action: "view" as const, resource: { ...resource, amount: amount.toJSON().amount } }] : [])
     ], new EmployeeCompensationAccessError());
     await check();
-    if (assignment.validFrom > earnedAt || assignment.validTo && assignment.validTo <= earnedAt || assignment.archivedAt && assignment.archivedAt <= earnedAt ||
-      assignment.person.archivedAt && assignment.person.archivedAt <= earnedAt || assignment.scopeType === "property" && !property || assignment.scopeType === "job" && (!job || !property) ||
-      assignment.scopeType === "city" && !city || assignment.scopeType === "region" && !region ||
-      !["organization", "property", "region", "city", "job"].includes(assignment.scopeType)) throw new EmployeeCompensationSourceUnavailableError();
+    validateEmployeeCompensationAssignment(source, earnedAt);
     const rule = await new ConfigRuleRepository(tx, ctx.organizationId).resolve({ key: "staff.compensation",
       scopes: [{ scopeType: "role_assignment", scopeId: assignment.id }], asOf: earnedAt });
-    const value = z.object({ mode: z.enum(["PER_JOB", "PER_MONTH", "PER_HOUR", "PERCENTAGE"]), amount: z.string(), currency: z.string() }).safeParse(rule?.parsedValue);
-    if (!rule || !value.success || rule.id !== rate.configRuleId || rule.scopeType !== "role_assignment" || rule.scopeId !== assignment.id ||
-      value.data.mode !== rate.mode || value.data.currency !== rate.currency || !Money.of(value.data.amount, rate.currency).equals(Money.of(rate.amount.toString(), rate.currency)) ||
-      rule.effectiveFrom.getTime() !== rate.effectiveFrom.getTime()) throw new EmployeeCompensationSourceUnavailableError();
+    validateEmployeeCompensationRate(source, rule);
+    if (!rule) throw new EmployeeCompensationSourceUnavailableError();
     const amount = employeeCompensationAmount({ mode: rate.mode, amount: Money.of(rate.amount.toString(), rate.currency) }, input.basis);
     const recheckSource = async () => {
       if (JSON.stringify(await repository.source(input.assignmentId, earnedAt)) !== JSON.stringify(source)) throw new EmployeeCompensationAccessError();

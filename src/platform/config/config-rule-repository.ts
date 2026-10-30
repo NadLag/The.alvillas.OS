@@ -275,6 +275,24 @@ export class ConfigRuleRepository {
     return new Map([...groups].map(([id,scopes])=>[id,resolveConfigCandidates(rules.filter(r=>scopes.some(s=>s.scopeType===r.scopeType&&s.scopeId===r.scopeId)))]));
   }
 
+  /** Resolve a run's independently dated sources with the existing scope/version policy. */
+  async resolveDatedScopeGroups(key: string, groups: ReadonlyMap<string, { scopes: readonly ConfigScopeCandidate[]; asOf: Date }>) {
+    if (!groups.size) return new Map<string, ResolvedConfigRule | null>();
+    const entries = [...groups], dates = entries.map(([, group]) => group.asOf.getTime());
+    if (dates.some(point => !Number.isFinite(point))) throw Error("Configuration source instants must be valid");
+    const scopes = normalizedScopes(entries.flatMap(([, group]) => [...group.scopes]));
+    if (!scopes.length) return new Map(entries.map(([id]) => [id, null]));
+    const first = new Date(dates.reduce((a, b) => Math.min(a, b))), last = new Date(dates.reduce((a, b) => Math.max(a, b)));
+    const rules = await this.tx.configRule.findMany({ where: { organizationId: this.organizationId, key, archivedAt: null,
+      lifecycle: { in: ["ACTIVE", "RETIRED"] }, effectiveFrom: { lte: last },
+      AND: [{ OR: [{ effectiveTo: null }, { effectiveTo: { gt: first } }] }, { OR: scopes.map(scopeFilter) }] } });
+    const scopeKey = (scope: ConfigScopeCandidate) => JSON.stringify([scope.scopeType, scope.scopeId]);
+    const byScope = new Map<string, typeof rules>();
+    for (const rule of rules) { const id = scopeKey(rule), group = byScope.get(id) ?? []; group.push(rule); byScope.set(id, group); }
+    return new Map(entries.map(([id, group]) => [id, resolveConfigCandidates(normalizedScopes(group.scopes)
+      .flatMap(scope => byScope.get(scopeKey(scope)) ?? []).filter(rule => rule.effectiveFrom <= group.asOf && (!rule.effectiveTo || rule.effectiveTo > group.asOf)))]));
+  }
+
   async list(input: {
     key?: string;
     scopeType?: string;

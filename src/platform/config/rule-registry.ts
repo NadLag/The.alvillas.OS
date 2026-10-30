@@ -15,6 +15,7 @@ import { fieldUploadLifecycleKey, fieldUploadLifecycleSchema } from "./field-upl
 import { configSlugSchema } from "./identifiers";
 import { inventoryMinimumsSchema } from "./inventory-policy";
 import { accountingPeriodPolicyKey, accountingPeriodPolicySchema } from "@/modules/finance/domain/accounting-period";
+import { employeeCompensationRunPolicyKey, employeeCompensationRunPolicySchema } from "@/modules/finance/domain/employee-compensation-run";
 export { inventoryMinimumsSchema } from "./inventory-policy";
 
 const moneyAmountSchema = z
@@ -359,6 +360,7 @@ export const configRuleSchemas = {
   [agreementNoticeConfigKey]: agreementNoticeConfigSchema,
   [agreementSpecialConditionsConfigKey]: agreementSpecialConditionsConfigSchema,
   "staff.compensation": staffCompensationSchema,
+  [employeeCompensationRunPolicyKey]: employeeCompensationRunPolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
   "ops.workflows": workflowSchema,

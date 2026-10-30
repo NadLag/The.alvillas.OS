@@ -2,7 +2,8 @@ import { z } from "zod";
 import {
   AuditRepository,
   type AuditHistoryFilters,
-  type AuditHistoryRow
+  type AuditHistoryRow,
+  type FinancialAuditResource
 } from "@/modules/audit/infrastructure/audit-repository";
 import type { AuditActorContext } from "@/modules/audit/application/audit-access";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
@@ -81,8 +82,18 @@ export function presentAuditHistoryRow(
   ctx: AuditActorContext,
   row: AuditHistoryRow,
   action: "view" | "export" = "view",
-  financialResource?: Resource
+  financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
+  if (row.resourceType === "employee_compensation_run") {
+    const now = new Date();
+    const allowed = Boolean(financialResource?.type === "employee_payable" && financialResource.id === row.resourceId &&
+      financialResource.organizationId === ctx.organizationId && financialResource.salarySources?.length &&
+      authorize(ctx.authContext,action,financialResource,now) && financialResource.salarySources.every(source =>
+        source.type === "staff_compensation" && source.organizationId === ctx.organizationId && authorize(ctx.authContext,"view",source,now)));
+    return present({ ...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[]) },action,
+      {type:auditLogResource,organizationId:ctx.organizationId,data:row},
+      {before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}}) as AuditHistoryRow;
+  }
   if (row.resourceType === "supplier_invoice") {
     const now = new Date();
     const allowed = authorizeOrganizationSource(ctx.authContext, action, { type: "supplier_invoice", organizationId: ctx.organizationId, dataClass: "financial" }, now) &&
@@ -193,18 +204,19 @@ export function parseAuditFilters(input: AuditFilterInput): AuditHistoryFilters 
   return auditFilterSchema.parse(input);
 }
 
-async function financialAuditResources(repository: AuditRepository, rows: AuditHistoryRow[]): Promise<Map<string, Resource>> {
+async function financialAuditResources(repository: AuditRepository, rows: AuditHistoryRow[]): Promise<Map<string, FinancialAuditResource>> {
   const read = (type: string, load: (ids: string[]) => Promise<Map<string, Resource>>) => {
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts, groups, periods] = await Promise.all([
+  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
     read("ledger_account", ids => repository.ledgerAccountResources(ids)),
     read("transaction_group", ids => repository.transactionGroupResources(ids)),
-    read("accounting_period", ids => repository.accountingPeriodResources(ids))
+    read("accounting_period", ids => repository.accountingPeriodResources(ids)),
+    read("employee_compensation_run", ids => repository.employeeCompensationRunResources(ids))
   ]);
   return new Map([
     ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),
@@ -212,7 +224,8 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     ...[...transactions].map(([id, resource]) => [`financial_transaction:${id}`, resource] as const),
     ...[...accounts].map(([id, resource]) => [`ledger_account:${id}`, resource] as const),
     ...[...groups].map(([id, resource]) => [`transaction_group:${id}`, resource] as const),
-    ...[...periods].map(([id, resource]) => [`accounting_period:${id}`, resource] as const)
+    ...[...periods].map(([id, resource]) => [`accounting_period:${id}`, resource] as const),
+    ...[...employeeRuns].map(([id,resource])=>[`employee_compensation_run:${id}`,resource] as const)
   ]);
 }
 

@@ -71,6 +71,9 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  employeeCompensationRuns EmployeeCompensationRun[]
+  employeeCompensationRunLines EmployeeCompensationRunLine[]
+  employeeCompensationRunCancellations EmployeeCompensationRunCancellation[]
   supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
   supplierInvoiceRecognitionOutcomes SupplierInvoiceRecognitionOutcome[]
   supplierInvoiceRecognitions                    SupplierInvoiceRecognition[]
@@ -245,6 +248,7 @@ model OrganizationProfile {
 }
 
 model TeamCompensation {
+  runLines EmployeeCompensationRunLine[]
   currencyRef    Currency       @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_currency_fkey")
   configRule     ConfigRule     @relation(fields: [configRuleId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_config_fkey")
   id             String         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -263,6 +267,7 @@ model TeamCompensation {
   assignment     RoleAssignment @relation(fields: [organizationId, assignmentId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organizationId, assignmentId, version], map: "team_compensation_org_assignment_version_unique")
+  @@unique([organizationId, id], map: "team_compensation_org_id_unique")
   @@index([organizationId, assignmentId, effectiveFrom], map: "team_compensation_org_assignment_effective_idx")
   @@map("team_compensation")
 }
@@ -327,6 +332,7 @@ model TeamWallet {
 }
 
 model Person {
+  compensationRunLines EmployeeCompensationRunLine[]
   cashCollections    CashCollection[]
   teamAvailabilities TeamAvailability[]
   teamDocuments      TeamDocument[]
@@ -357,6 +363,8 @@ model Person {
 }
 
 model UserAccount {
+  createdCompensationRuns EmployeeCompensationRun[] @relation("EmployeeRunCreator")
+  cancelledCompensationRuns EmployeeCompensationRunCancellation[] @relation("EmployeeRunCanceller")
   supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
   supplierInvoiceRecognitions SupplierInvoiceRecognition[] @relation("SupplierInvoiceRecognitionCreator")
   submittedSupplierInvoices   SupplierInvoiceSubmission[]
@@ -608,6 +616,7 @@ model RolePermission {
 }
 
 model RoleAssignment {
+  compensationRunLines EmployeeCompensationRunLine[]
   teamCompensations TeamCompensation[]
   id                String             @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId    String             @map("organization_id") @db.Uuid
@@ -736,6 +745,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  compensationRunLines EmployeeCompensationRunLine[]
   invoiceApprovalStages ApprovalStage[]             @relation("InvoiceApprovalProperty")
   supplierInvoiceLines  SupplierInvoiceLine[]
   expenses              Expense[]
@@ -1061,6 +1071,7 @@ model ReservationConflict {
 }
 
 model OperationTask {
+  compensationRunLines EmployeeCompensationRunLine[]
   cashCollections          CashCollection[]
   id                       String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId           String                       @map("organization_id") @db.Uuid
@@ -1126,6 +1137,7 @@ model OperationTask {
 }
 
 model OperationTaskEvent {
+  compensationRunLines EmployeeCompensationRunLine[]
   id             String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String        @map("organization_id") @db.Uuid
   taskId         String        @map("task_id") @db.Uuid
@@ -1141,6 +1153,7 @@ model OperationTaskEvent {
   task           OperationTask @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "operation_task_event_task_fk")
 
   @@unique([organizationId, taskId, version], map: "operation_task_event_version_unique")
+  @@unique([organizationId, id], map: "operation_task_event_org_id_unique")
   @@index([organizationId, taskId, occurredAt], map: "operation_task_event_history_idx")
   @@map("operation_task_event")
 }
@@ -1503,6 +1516,8 @@ model ReferenceSequence {
 }
 
 model Currency {
+  employeeCompensationRuns EmployeeCompensationRun[]
+  employeeCompensationRunLines EmployeeCompensationRunLine[]
   expenses                Expense[]
   financialApprovalStages ApprovalStage[]
   cashCollections         CashCollection[]
@@ -1539,6 +1554,8 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  employeeRunPolicies EmployeeCompensationRun[] @relation("EmployeeRunPolicy")
+  employeeRunRates EmployeeCompensationRunLine[] @relation("EmployeeRunRate")
   accountingPeriods      AccountingPeriod[]          @relation("AccountingPeriodCalendarPolicy")
   accountingPeriodEvents AccountingPeriodEvent[]     @relation("AccountingPeriodEventPolicy")
   automationRuns         AutomationRun[]
@@ -2670,4 +2687,83 @@ model SupplierInvoiceRecognitionOutcome {
   @@index([organizationId, occurredAt, id])
   @@index([organizationId, recognitionId])
   @@map("supplier_invoice_recognition_outcome")
+}
+
+model EmployeeCompensationRun {
+  id                 String                               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String                               @map("organization_id") @db.Uuid
+  createdBy          String                               @map("created_by") @db.Uuid
+  idempotencyKey     String                               @map("idempotency_key") @db.Uuid
+  requestFingerprint String                               @map("request_fingerprint") @db.Char(64)
+  fromOn             DateTime                             @map("from_on") @db.Date
+  toOn               DateTime                             @map("to_on") @db.Date
+  timezone           String                               @db.VarChar(120)
+  currency           String                               @db.Char(3)
+  purpose            String                               @db.VarChar(1000)
+  reason             String                               @db.VarChar(500)
+  policyRuleId       String                               @map("policy_rule_id") @db.Uuid
+  policySnapshot     Json                                 @map("policy_snapshot")
+  createdAt          DateTime                             @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization       Organization                         @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  creator            UserAccount                          @relation("EmployeeRunCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  policyRule         ConfigRule                           @relation("EmployeeRunPolicy", fields: [organizationId, policyRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  moneyCurrency      Currency                             @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  lines              EmployeeCompensationRunLine[]
+  cancellation       EmployeeCompensationRunCancellation?
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, createdAt, id])
+  @@map("employee_compensation_run")
+}
+
+model EmployeeCompensationRunLine {
+  id                   String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId       String                  @map("organization_id") @db.Uuid
+  runId                String                  @map("run_id") @db.Uuid
+  personId             String                  @map("person_id") @db.Uuid
+  assignmentId         String                  @map("assignment_id") @db.Uuid
+  compensationId       String                  @map("compensation_id") @db.Uuid
+  configRuleId         String                  @map("config_rule_id") @db.Uuid
+  taskId               String                  @map("task_id") @db.Uuid
+  completionEventId    String                  @map("completion_event_id") @db.Uuid
+  propertyId           String                  @map("property_id") @db.Uuid
+  recordedCompletionAt DateTime                @map("recorded_completion_at") @db.Timestamptz(6)
+  rate                 Decimal                 @db.Decimal(18, 2)
+  amount               Decimal                 @db.Decimal(18, 2)
+  currency             String                  @db.Char(3)
+  sourceSnapshot       Json                    @map("source_snapshot")
+  createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization         Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  run                  EmployeeCompensationRun @relation(fields: [organizationId, runId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  person               Person                  @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  assignment           RoleAssignment          @relation(fields: [organizationId, assignmentId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  compensation         TeamCompensation        @relation(fields: [organizationId, compensationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  configRule           ConfigRule              @relation("EmployeeRunRate", fields: [organizationId, configRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  task                 OperationTask           @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  completionEvent      OperationTaskEvent      @relation(fields: [organizationId, completionEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  property             Property                @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  moneyCurrency        Currency                @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, runId, taskId])
+  @@index([organizationId, personId, recordedCompletionAt, id])
+  @@index([organizationId, taskId])
+  @@map("employee_compensation_run_line")
+}
+
+model EmployeeCompensationRunCancellation {
+  id             String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                  @map("organization_id") @db.Uuid
+  runId          String                  @map("run_id") @db.Uuid
+  cancelledBy    String                  @map("cancelled_by") @db.Uuid
+  reason         String                  @db.VarChar(500)
+  createdAt      DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  run            EmployeeCompensationRun @relation(fields: [organizationId, runId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  canceller      UserAccount             @relation("EmployeeRunCanceller", fields: [organizationId, cancelledBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, runId])
+  @@map("employee_compensation_run_cancellation")
 }
