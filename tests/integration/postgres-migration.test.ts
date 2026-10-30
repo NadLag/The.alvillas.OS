@@ -6293,6 +6293,30 @@ describe("PostgreSQL baseline", () => {
     expect(payoutPlan.payout.eligibleOn.toISOString()).toBe("2028-04-17T00:00:00.000Z");
     expect(payoutPlan.payout.holdbackAmount.toJSON().amount).toBe("1100.00");
     expect(payoutPlan.payout.payableAmount.toJSON().amount).toBe("8900.00");
+    const agreementRules = await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, async tx => {
+      const first = await tx.managementAgreement.create({ data: { organizationId: orgA.id, propertyId: fixture.property.id,
+        reference: `CFG-PAYOUT-A-${randomUUID()}`, status: "ACTIVE", effectiveFrom: new Date("2026-03-01"), effectiveTo: new Date("2026-03-20") } });
+      const next = await tx.managementAgreement.create({ data: { organizationId: orgA.id, propertyId: fixture.property.id,
+        reference: `CFG-PAYOUT-B-${randomUUID()}`, status: "ACTIVE", effectiveFrom: new Date("2026-03-20"), effectiveTo: new Date("2026-04-01") } });
+      const rules = new ConfigRuleRepository(tx, orgA.id);
+      const original = await rules.createVersion({ key: "finance.payout_schedule", scopeType: "agreement", scopeId: first.id,
+        effectiveFrom: new Date("2026-03-01"), reason: "Dedicated payout agreement terms", value: { cadence: "AFTER_CHECKOUT", hold_days: 3, holdback_amount: "250.00", holdback_currency: "MAD", holdback_bps: 2000 } });
+      const revised = await rules.createVersion({ key: "finance.payout_schedule", scopeType: "agreement", scopeId: first.id,
+        effectiveFrom: new Date("2026-03-16"), reason: "Dedicated future payout agreement version", value: { cadence: "AFTER_CHECKOUT", hold_days: 4, holdback_amount: "250.00", holdback_currency: "MAD", holdback_bps: 4000 } });
+      const replacement = await rules.createVersion({ key: "finance.payout_schedule", scopeType: "agreement", scopeId: next.id,
+        effectiveFrom: new Date("2026-03-20"), reason: "Dedicated replacement agreement payout terms", value: { cadence: "AFTER_CHECKOUT", hold_days: 5, holdback_bps: 3000 } });
+      return { original, revised, replacement };
+    });
+    const payoutAt = (at: string) => planOwnerPayout(financeCtx, { propertyId: fixture.property.id, ownerId: fixture.owner.id,
+      availableBalance: "10000.00", currency: "MAD", checkoutDate: new Date("2028-04-14"), triggeredAt: new Date("2028-04-15"), asOf: new Date(at) },
+    { db: prisma as unknown as TenantTransactionRunner });
+    const agreed = await payoutAt("2026-03-15"), revised = await payoutAt("2026-03-16"), replacement = await payoutAt("2026-03-20");
+    expect(agreed.payoutRule.configRuleId).toBe(agreementRules.original.id);
+    expect(agreed.payout.holdbackAmount.toJSON().amount).toBe("2250.00");expect(agreed.payout.payableAmount.toJSON().amount).toBe("7750.00");
+    expect(revised.payoutRule.configRuleId).toBe(agreementRules.revised.id);expect(revised.payout.payableAmount.toJSON().amount).toBe("5750.00");
+    expect(replacement.payoutRule.configRuleId).toBe(agreementRules.replacement.id);expect(replacement.payout.payableAmount.toJSON().amount).toBe("7000.00");
+    expect((await payoutAt("2026-02-28")).payout.payableAmount.toJSON().amount).toBe("8900.00");
+    expect((await payoutAt("2026-04-01")).payout.payableAmount.toJSON().amount).toBe("8900.00");
     expect(disabledFlag.configRuleId).toBe(orgFlag.id);
     expect(disabledFlag.enabled).toBe(false);
     expect(enabledFlag.configRuleId).toBe(propertyFlag.id);

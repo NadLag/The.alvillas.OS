@@ -94,7 +94,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
     await expect.poll(cachedPolicy).toEqual({ queueWarningAfterMinutes: null, configRuleId: disabled.id, configVersion: disabled.version });
     await expect(page.getByTestId("field-queue-age-warning")).toHaveCount(0); await expect(page.getByTestId("field-checklist-item")).toBeChecked();
     expect(await storedFieldData(page)).toEqual(original);
+    const pushed=page.waitForResponse(response=>response.request().method()==="POST"&&new URL(response.url()).pathname==="/api/sync/push"&&response.ok()&&
+      Boolean(response.request().postData()?.includes(recorded.operation.client_op_id)));
     await network.release(); await expect(page.getByTestId("field-sync-now")).toBeEnabled(); await page.getByTestId("field-sync-now").click();
+    await pushed;
     await expect.poll(() => storedFieldData(page)).toEqual([]); await expect(page.getByTestId("field-checklist-item")).toBeChecked();
     await withTenant(f.db, f.organizationId, async tx => {
       const receipt = await tx.syncOp.findMany({ where: { organizationId: f.organizationId, deviceId: recorded.deviceId, clientOpId: recorded.operation.client_op_id } });

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { ensureE2EAdmin, e2eEmail, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { reservationManagementFixture, reservationAcceptanceRows, reservationPayoutBank, reservationPayoutEvidence } from "./support/reservation-management";
@@ -13,6 +13,12 @@ test.describe("F-RES-01-16 complete reservation management", () => {
     await page.goto("/en/login"); await waitForE2EAdminLoginWindow(page, email);
     await page.getByTestId("login-email").fill(email); await page.getByTestId("login-password").fill(password); await page.getByTestId("login-submit").click(); await completeE2EAdminMfa(page, email);
     await expect(page).toHaveURL(/\/en\/app$/u);
+    const submitImport=async(importer:Locator)=>{
+      const submitted=page.waitForResponse(response=>response.request().method()==="POST"&&Boolean(response.request().headers()["next-action"])&&
+        new URL(response.url()).pathname.endsWith("/app/reservations/calendar")&&Boolean(response.request().postData()?.includes(fixture.propertyId)));
+      await importer.locator("button[type=submit]").click();expect((await submitted).ok()).toBe(true);
+      await expect(importer.getByRole("status")).toBeVisible();
+    };
     let reservationId = "";
     for (const [index, locale] of ["en", "fr", "ar"].entries()) {
       const month = String(index + 4).padStart(2, "0"), checkIn = `2029-${month}-10`, checkOut = `2029-${month}-14`;
@@ -22,11 +28,10 @@ test.describe("F-RES-01-16 complete reservation management", () => {
       const importer = page.getByTestId("import-reservations"); await importer.locator("..").locator("summary").click();
       await importer.locator('select[name="propertyId"]').selectOption(fixture.propertyId);
       await importer.getByTestId("reservation-import-csv").fill(`Confirmation code,Start date,End date,Guest,Guest email,Currency,Gross earnings\nHM-${locale}-${suffix},${checkIn},${checkOut},Guest ${locale},${locale}-${suffix}@example.test,MAD,5000.25`);
-      await importer.locator("button[type=submit]").click();
-      await expect(importer.getByRole("status")).toBeVisible();
+      await submitImport(importer);
       await expect(page.getByTestId("calendar-reservation").filter({ hasText: `Guest ${locale}` })).toHaveCount(1);
 
-      await importer.locator("button[type=submit]").click(); await expect(importer.getByRole("status")).toBeVisible();
+      await submitImport(importer);
       await expect(page.getByTestId("calendar-reservation").filter({ hasText: `Guest ${locale}` })).toHaveCount(1);
       await page.getByTestId("calendar-reservation").filter({ hasText: `Guest ${locale}` }).getByRole("link").click();
       await expect(page.getByTestId("reservation-detail-page")).toBeVisible(); reservationId = page.url().split("/").at(-1)!;
@@ -46,7 +51,7 @@ test.describe("F-RES-01-16 complete reservation management", () => {
     for (const locale of ["en", "fr", "ar"] as const) {
       const sourceId = `PAYOUT-${locale}-${suffix}`, transactionId = `TX-${locale}-${suffix}`;
       await page.goto(`/${locale}/app/reservations/calendar?property=${fixture.propertyId}&start=2029-09-01&end=2029-10-01`);
-      const payoutImport = page.getByTestId("import-reservations"); await payoutImport.locator("..").locator("summary").click(); await payoutImport.getByTestId("reservation-import-csv").fill(`Confirmation code,Start date,End date,Guest,Currency,Gross earnings\n${sourceId},2029-09-10,2029-09-14,${sourceId},MAD,5500.00`); await payoutImport.locator("button[type=submit]").click(); await expect(payoutImport.getByRole("status")).toBeVisible();
+      const payoutImport = page.getByTestId("import-reservations"); await payoutImport.locator("..").locator("summary").click(); await payoutImport.getByTestId("reservation-import-csv").fill(`Confirmation code,Start date,End date,Guest,Currency,Gross earnings\n${sourceId},2029-09-10,2029-09-14,${sourceId},MAD,5500.00`); await submitImport(payoutImport);
       await page.getByTestId("calendar-reservation").filter({ hasText: sourceId }).getByRole("link").click(); await expect(page.getByTestId("reservation-detail-page")).toBeVisible(); const payoutReservationId = page.url().split("/").at(-1)!;
       const payoutReference = await page.getByRole("heading", { level: 1 }).innerText();
       await page.goto(`/${locale}/app/reservations`);

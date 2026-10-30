@@ -2570,6 +2570,10 @@ textarea:disabled {
 .owner-ledger-buckets { list-style: none; padding: 0; }
 .owner-ledger-buckets li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3); padding-block: var(--space-3); border-block-end: 1px solid var(--border); }
 .owner-ledger-lines { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); list-style: none; padding: 0; }
+.owner-payout-page { overflow-wrap: anywhere; }
+.owner-payout-page :is(fieldset,.field,.detail-grid > div) { min-inline-size: 0; }
+.owner-payout-page summary { min-block-size: 44px; padding-block: var(--space-3); cursor: pointer; }
+.owner-payout-page details { margin-block: var(--space-4); }
 .owner-ledger-lines li { min-inline-size: 0; }
 @media (max-width: 600px) { .owner-ledger-form .form-grid { grid-template-columns: minmax(0, 1fr); } }
 

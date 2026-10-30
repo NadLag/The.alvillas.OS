@@ -4,13 +4,13 @@ import type { z } from "zod";
 import type { approvalRequestSchema } from "./approval";
 import { SupplierPayableRepository } from "@/modules/finance/infrastructure/supplier-payable-repository";
 
-const include = { property: true, recipients: true, expense: true, invoiceSubmission: { include: { invoice: true } },
+const include = { property: true, recipients: true, expense: true, payout: true, invoiceSubmission: { include: { invoice: true } },
   financialStages: { orderBy: { position: "asc" as const }, include: { recipients: true, property: { select: { name: true, cityId: true, regionId: true } } } } } satisfies Prisma.ApprovalRequestInclude;
 
 export type FinancialApprovalStageDraft = { kind: string; ownerId: string | null; amount: string; currency: string; routing: Prisma.InputJsonObject; recipients: string[];
   lineId?: string; propertyId?: string | null; reservationId?: string | null; sourceSnapshot?: Prisma.InputJsonObject };
 type FinancialApprovalInput = { requestedBy: string; title: string; details: string; stages: FinancialApprovalStageDraft[] } &
-  ({ expenseId: string; propertyId: string; invoiceSubmissionId?: never } | { invoiceSubmissionId: string; propertyId: null; expenseId?: never });
+  ({ expenseId: string; propertyId: string; invoiceSubmissionId?: never; payoutId?: never } | { invoiceSubmissionId: string; propertyId: null; expenseId?: never; payoutId?: never } | { payoutId: string; propertyId: string; expenseId?: never; invoiceSubmissionId?: never });
 
 export class ApprovalRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
@@ -34,10 +34,10 @@ export class ApprovalRepository {
   }
   lockInvoice(id: string) { return new SupplierPayableRepository(this.tx, this.organizationId).lockInvoice(id); }
   async createFinancial(input: FinancialApprovalInput) {
-    if (!input.stages.length || Boolean(input.expenseId) === Boolean(input.invoiceSubmissionId)) throw Error("Financial approval requires one source and its configured stages");
-    const row = await this.tx.approvalRequest.create({ data: { organizationId: this.organizationId, expenseId: input.expenseId, invoiceSubmissionId: input.invoiceSubmissionId,
+    if (!input.stages.length || Number(Boolean(input.expenseId)) + Number(Boolean(input.invoiceSubmissionId)) + Number(Boolean(input.payoutId)) !== 1) throw Error("Financial approval requires one source and its configured stages");
+    const row = await this.tx.approvalRequest.create({ data: { organizationId: this.organizationId, expenseId: input.expenseId, payoutId: input.payoutId, invoiceSubmissionId: input.invoiceSubmissionId,
       propertyId: input.propertyId, requestedBy: input.requestedBy, title: input.title, details: input.details,
-      idempotencyKey: input.expenseId ? `expense:${input.expenseId}:approval` : `supplier-invoice-submission:${input.invoiceSubmissionId}:approval`, routingSnapshot: input.stages[0].routing } });
+      idempotencyKey: input.expenseId ? `expense:${input.expenseId}:approval` : input.payoutId ? `payout:${input.payoutId}:approval` : `supplier-invoice-submission:${input.invoiceSubmissionId}:approval`, routingSnapshot: input.stages[0].routing } });
     await this.tx.approvalRecipient.createMany({ data: [...new Set(input.stages.flatMap(stage => stage.recipients))].map(userAccountId =>
       ({ organizationId: this.organizationId, approvalId: row.id, userAccountId })) });
     for (const [index, stage] of input.stages.entries()) {
@@ -57,7 +57,7 @@ export class ApprovalRepository {
     await this.tx.approvalRecipient.createMany({ data: recipients.map((userAccountId) => ({ organizationId: this.organizationId, approvalId: row.id, userAccountId })) });
     return row;
   }
-  decide(id: string, state: "APPROVED" | "REJECTED", decidedBy: string, decisionReason: string, decidedAt: Date) {
+  decide(id: string, state: "APPROVED" | "REJECTED" | "CANCELLED", decidedBy: string, decisionReason: string, decidedAt: Date) {
     return this.tx.approvalRequest.update({ where: { id, organizationId: this.organizationId }, data: { state, decidedBy, decisionReason, decidedAt } });
   }
   event(type: "ApprovalRequested" | "ApprovalDecided", approvalId: string, propertyId: string | null) {

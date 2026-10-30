@@ -3,6 +3,9 @@ import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { ExpenseRepository } from "@/modules/finance/infrastructure/expense-repository";
+import { OwnerPayoutRepository } from "@/modules/finance/infrastructure/owner-payout-repository";
+import { ownerPayoutCapacity } from "@/modules/finance/application/owner-payout-policy";
+import { Money } from "@/platform/money/money";
 import { SupplierInvoiceRepository } from "@/modules/finance/infrastructure/supplier-invoice-repository";
 import { recheckFinanceAuthorization } from "@/modules/finance/application/finance-access";
 import { authorize } from "@/platform/authz/authorize";
@@ -33,9 +36,9 @@ async function decideFinancial(actor: NotificationActor, input: z.infer<typeof a
   tx: TenantTransaction, repository: ApprovalRepository, deps: Deps) {
   const stage = row.financialStages.find(stage => stage.id === input.stageId), action = input.decision === "APPROVED" ? "approve" : "reject";
   const invoice = row.invoiceSubmission?.invoice;
-  if ((!row.expense && !invoice) || !stage) throw new ApprovalAccessError();
-  const source = row.expense ?? invoice!;
-  const invoiceSource = Boolean(invoice), resourceType = invoiceSource ? "supplier_invoice" : "expense";
+  if ((!row.expense && !row.payout && !invoice) || !stage) throw new ApprovalAccessError();
+  const source = row.expense ?? row.payout ?? invoice!;
+  const invoiceSource = Boolean(invoice), resourceType = invoiceSource ? "supplier_invoice" : row.payout ? "owner_payout" : "expense";
   const now = await assertFinancialDecision(actor, row, stage, action, tx, repository);
   if (stage.state !== "PENDING") {
     if (stage.state === input.decision && stage.decidedBy === actor.accountId && stage.decisionReason === input.reason) return;
@@ -45,10 +48,10 @@ async function decideFinancial(actor: NotificationActor, input: z.infer<typeof a
     row.financialStages.find(stage => stage.state === "PENDING")?.id !== stage.id) throw new ApprovalConflictError();
   if ((await repository.decideStage(stage.id, input.decision, actor.accountId, input.reason, now)).count !== 1) throw new ApprovalConflictError();
   await assertFinancialDecision(actor, row, stage, action, tx, repository);
-  await writeAuditEvent(tx, { organizationId: actor.organizationId, actorId: actor.accountId, action: invoiceSource ? "finance.supplier_invoice.approval_stage_decided" : "expense.approval_stage_decided", resourceType,
+  await writeAuditEvent(tx, { organizationId: actor.organizationId, actorId: actor.accountId, action: invoiceSource ? "finance.supplier_invoice.approval_stage_decided" : row.payout ? "finance.owner_payout.approval_stage_decided" : "expense.approval_stage_decided", resourceType,
     resourceId: source.id, propertyScopeId: invoiceSource ? stage.propertyId : row.propertyId, before: { stageId: stage.id, position: stage.position, state: stage.state },
-    after: { stageId: stage.id, position: stage.position, state: input.decision, amount: (invoiceSource ? stage.amount : row.expense!.amount).toFixed(2),
-      currency: invoiceSource ? stage.currency : row.expense!.currency, ...(invoiceSource ? { lineId: stage.invoiceLineId } : {}) },
+    after: { stageId: stage.id, position: stage.position, state: input.decision, amount: (invoiceSource ? stage.amount : (row.expense ?? row.payout)!.amount).toFixed(2),
+      currency: invoiceSource ? stage.currency : (row.expense ?? row.payout)!.currency, ...(invoiceSource ? { lineId: stage.invoiceLineId } : {}) },
     reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now });
   const next = input.decision === "APPROVED" ? row.financialStages.find(candidate => candidate.state === "PENDING" && candidate.position > stage.position) : undefined;
   await repository.resolveNotifications(row.id, input.decision, now);
@@ -60,14 +63,27 @@ async function decideFinancial(actor: NotificationActor, input: z.infer<typeof a
   for (const later of row.financialStages.filter(candidate => candidate.position > stage.position && candidate.state === "PENDING"))
     await repository.decideStage(later.id, "CANCELLED", actor.accountId, input.reason, now);
   await repository.decide(row.id, input.decision, actor.accountId, input.reason, now);
-  const changed = invoice ? await new SupplierInvoiceRepository(tx, actor.organizationId).transitionReview(invoice.id, invoice.version, input.decision, actor.accountId) :
-    await new ExpenseRepository(tx, actor.organizationId).transition(row.expense!.id, row.expense!.version, "PENDING_APPROVAL", input.decision, actor.accountId);
-  if (changed.count !== 1) throw new ApprovalConflictError();
+  const state = row.payout && input.decision==="REJECTED" ? "CANCELLED" : input.decision;
+  if(row.payout){
+    const payouts=new OwnerPayoutRepository(tx,actor.organizationId),payout=await payouts.find(row.payout.id);
+    if(!payout)throw new ApprovalConflictError();
+    if(input.decision==="APPROVED"){
+      const frozen=z.object({payout:z.object({holdbackAmount:z.object({amount:z.string(),currency:z.literal(payout.currency)})})}).parse(payout.policySnapshot);
+      const capacity=await ownerPayoutCapacity({organizationId:actor.organizationId,actorId:actor.accountId,authContext:actor.authContext},payout,tx,now);
+      if(Money.of(payout.amount.toString(),payout.currency).amount.gt(capacity.balance.subtract(capacity.committed).subtract(Money.of(frozen.payout.holdbackAmount.amount,payout.currency)).amount))throw new ApprovalConflictError();
+    }
+    if((await payouts.transition(payout.id,payout.version,"PENDING_APPROVAL",input.decision==="APPROVED"?"APPROVED":"CANCELLED",actor.accountId,
+      input.decision==="APPROVED"?{approvedAt:now}:{})).count!==1)throw new ApprovalConflictError();
+  } else {
+    const changed = invoice ? await new SupplierInvoiceRepository(tx, actor.organizationId).transitionReview(invoice.id, invoice.version, input.decision, actor.accountId) :
+      await new ExpenseRepository(tx, actor.organizationId).transition(row.expense!.id, row.expense!.version, "PENDING_APPROVAL", input.decision, actor.accountId);
+    if (changed.count !== 1) throw new ApprovalConflictError();
+  }
   await repository.event("ApprovalDecided", row.id, row.propertyId);
   await writeAuditEvent(tx, { organizationId: actor.organizationId, actorId: actor.accountId, action: invoiceSource ?
-    (input.decision === "APPROVED" ? "finance.supplier_invoice.approved" : "finance.supplier_invoice.rejected") : (input.decision === "APPROVED" ? "expense.approved" : "expense.rejected"),
-    resourceType, resourceId: source.id, propertyScopeId: row.propertyId, before: { state: source.state, ...(invoice ? { version: invoice.version } : {}) },
-    after: { state: input.decision, approvalId: row.id, ...(invoice ? { version: invoice.version + 1, revisionId: invoice.currentRevisionId, submissionId: row.invoiceSubmissionId } : {}) },
+    (input.decision === "APPROVED" ? "finance.supplier_invoice.approved" : "finance.supplier_invoice.rejected") : row.payout ? (input.decision === "APPROVED" ? "finance.owner_payout.approved" : "finance.owner_payout.cancelled") : (input.decision === "APPROVED" ? "expense.approved" : "expense.rejected"),
+    resourceType, resourceId: source.id, propertyScopeId: row.propertyId, before: { state: source.state, version: source.version },
+    after: { state, version: source.version + 1, approvalId: row.id, ...(row.payout ? { payoutId: row.payout.id } : {}), ...(invoice ? { revisionId: invoice.currentRevisionId, submissionId: row.invoiceSubmissionId } : {}) },
     reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now });
   await new NotificationRepository(tx, actor.organizationId).publish({ kind: "approval_decided", recipientId: row.requestedBy, targetId: row.id }, `approval:${row.id}:decided`);
   await assertFinancialDecision(actor, row, stage, action, tx, repository);
@@ -115,7 +131,7 @@ export async function getApproval(actor: NotificationActor, id: string, deps: De
   return withTenant(deps.db ?? prisma, actor.organizationId, async (tx) => {
     const repository = new ApprovalRepository(tx, actor.organizationId), row = await repository.find(id);
     if (!row) throw new ApprovalAccessError();
-    const financial = Boolean(row.expenseId || row.invoiceSubmissionId);
+    const financial = Boolean(row.expenseId || row.payoutId || row.invoiceSubmissionId);
     const authorities = financial ? [actor.authContext, (await currentFinancialActor(actor, tx)).authContext] : [actor.authContext];
     const now = await repository.clock();
     const allowed = (action: "view" | "approve" | "reject", stage?: Approval["financialStages"][number]) =>
@@ -142,7 +158,7 @@ export async function getApproval(actor: NotificationActor, id: string, deps: De
       title: line ? line.note.slice(0,160) : row.title, details: line?.note ?? row.details,
       state: line && (!fullInvoice || requested) ? shown!.state : row.state, decisionReason: line && (!fullInvoice || requested) ? (shown!.state === "CANCELLED" ? null : shown!.decisionReason) : row.decisionReason,
       financial: row.expense ? { amount: row.expense.amount.toFixed(2), currency: row.expense.currency, category: row.expense.category, occurredOn: row.expense.occurredOn.toISOString().slice(0,10) } :
-        line ? { amount: shown!.amount.toFixed(2), currency: shown!.currency, category: line.category, occurredOn: line.occurredOn } : null,
+        row.payout ? { amount: row.payout.amount.toFixed(2), currency: row.payout.currency, category: "owner_payout", occurredOn: row.payout.createdAt.toISOString().slice(0,10) } : line ? { amount: shown!.amount.toFixed(2), currency: shown!.currency, category: line.category, occurredOn: line.occurredOn } : null,
       stageId: row.invoiceSubmissionId ? shown?.id : active?.id,
       history: history.slice(0, 50).map(stage => ({ id: stage.id, note: invoiceApprovalSourceSnapshotSchema.parse(stage.sourceSnapshot).note,
         state: stage.state, amount: stage.amount.toFixed(2), currency: stage.currency })),
@@ -158,9 +174,14 @@ export async function decideApproval(actor: NotificationActor, raw: unknown, dep
     const repository = new ApprovalRepository(tx, actor.organizationId);
     const initial = await repository.find(input.id);
     if (initial?.expenseId) await repository.lockExpense(initial.expenseId);
+    if(initial?.payout){
+      const payouts=new OwnerPayoutRepository(tx,actor.organizationId);
+      await payouts.lockOwner(initial.payout.ownerId,initial.payout.propertyId,initial.payout.currency);
+      await payouts.lock(initial.payout.id);
+    }
     if (initial?.invoiceSubmission) await repository.lockInvoice(initial.invoiceSubmission.invoice.id);
     const row = await repository.find(input.id, true);
-    if (row?.expenseId || row?.invoiceSubmissionId) return decideFinancial(actor, input, row, tx, repository, deps);
+    if (row?.expenseId || row?.payoutId || row?.invoiceSubmissionId) return decideFinancial(actor, input, row, tx, repository, deps);
     const action = input.decision === "APPROVED" ? "approve" : "reject";
     if (!row || !await new NotificationRepository(tx, actor.organizationId).activeRecipient(actor.accountId) || !row.recipients.some((recipient) => recipient.userAccountId === actor.accountId) || !authorize(actor.authContext, "view", approvalResource(row)) || !authorize(actor.authContext, action, approvalResource(row))) throw new ApprovalAccessError();
     if (row.state !== "PENDING") {

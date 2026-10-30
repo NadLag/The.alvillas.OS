@@ -215,6 +215,11 @@ async function actionPlan(
     return { type: action.type, dueDate: date, taskType: action.task_type };
   }
   if (action.type === "create_approval_request") {
+    if(ctx.payout){
+      allowed(actor,"view",ctx.payout.resource);allowed(actor,"edit",ctx.payout.resource);
+      if(!ctx.payout.approvalId)throw new Error("automation_payout_approval_not_required");
+      return{type:action.type};
+    }
     if (ctx.invoice) {
       await recheckFinanceAuthorization(actor, repo.tx, await new FinanceRepository(repo.tx, actor.organizationId).clock(),
         ctx.invoice.authority.filter(check => check.resource.type === "supplier_invoice").map(check => ({ ...check, action: "edit" as const })), new AutomationAccessError());
@@ -382,7 +387,7 @@ async function perform(
     }
     producedIds = tasks.map((t) => t.id);
   } else if (action.type === "create_approval_request") {
-    producedIds = ctx.invoice ? [text(ctx.invoice.approvalId)] : ctx.expense ? [text(ctx.expense.approvalId)] : [
+    producedIds = ctx.invoice ? [text(ctx.invoice.approvalId)] : ctx.payout ? [text(ctx.payout.approvalId)] : ctx.expense ? [text(ctx.expense.approvalId)] : [
       (
         await requestApproval(
           {
@@ -488,7 +493,7 @@ async function authorizeEvaluation(actor: AutomationActor, ctx: Context, tx: Ten
   // Predicate results are observable. Protect financial inputs before deciding
   // whether a rule matches, including a condition which evaluates to false.
   if (
-    ctx.expense || /^(Expense|Payout|Payment|BankLine|PeriodClosed|Variance)/u.test(
+    ctx.payout || ctx.expense || /^(Expense|Payout|Payment|BankLine|PeriodClosed|Variance)/u.test(
       ctx.event.type,
     ) ||
     Object.hasOwn(ctx.evaluation.fields, "variance") ||
@@ -499,10 +504,19 @@ async function authorizeEvaluation(actor: AutomationActor, ctx: Context, tx: Ten
     allowed(actor, "view", {
       ...resource(actor, ctx.property, "financial_transaction"),
       ...(ctx.expense ? { ...ctx.expense.resource, type: "financial_transaction" } : {}),
+      ...(ctx.payout?ctx.payout.resource:{}),
       dataClass: "financial",
     });
     if (ctx.expense) allowed(actor, "view", ctx.expense.resource);
   }
+}
+async function restoreEvaluation(repo:AutomationRepository,ctx:Context,value:unknown,inputs:unknown):Promise<unknown>{
+  const frozen=inputs as {fields?:Record<string,unknown>;configs?:Record<string,unknown>;configVersions?:unknown};
+  if(frozen.fields&&frozen.configs){
+    if (ctx.invoice && !isDeepStrictEqual(frozen.fields, ctx.evaluation.fields)) throw new Error("automation_source_snapshot_mismatch");
+    ctx.evaluation={fields:frozen.fields,configs:frozen.configs};return frozen.configVersions;
+  }
+  return(await repo.resolve(value,ctx)).metadata;
 }
 
 export const saveAutomationSchema = z
@@ -797,19 +811,7 @@ export async function executeAutomationRun(
         await repo.release();
         return "PAUSED";
       }
-      const frozen = run.inputs as {
-        fields?: Record<string, unknown>;
-        configs?: Record<string, unknown>;
-        configVersions?: unknown;
-      };
-      let metadata: unknown;
-      if (frozen.fields && frozen.configs) {
-        if (ctx.invoice && !isDeepStrictEqual(frozen.fields, ctx.evaluation.fields)) throw new Error("automation_source_snapshot_mismatch");
-        ctx.evaluation = { fields: frozen.fields, configs: frozen.configs };
-        metadata = frozen.configVersions;
-      } else {
-        metadata = (await repo.resolve(source.value, ctx)).metadata;
-      }
+      const metadata=await restoreEvaluation(repo,ctx,source.value,run.inputs);
       await authorizeEvaluation(actor, ctx, repo.tx);
       evaluatedInput = {
         ...ctx.evaluation,
@@ -947,16 +949,15 @@ export async function replayAutomation(
     if (!run) throw new AutomationAccessError();
     const property = run.propertyId ? await repo.property(run.propertyId) : null;
     if (run.propertyId && !property) throw new AutomationAccessError();
-    allowed(actor, "configure", resource(actor, property));
-    const ctx = !run.propertyId ? await repo.context(run.eventId, null) : null;
-    if (ctx) {
-      if (!ctx.invoice || ctx.property) throw new AutomationAccessError();
-      const source = await repo.rule(run.configRuleId);
-      if (!source) throw new AutomationAccessError();
-      await repo.resolve(source.value, ctx);
-      await authorizeEvaluation(actor, ctx, repo.tx);
-    }
+    const current = await principal(repo, actor.actorId);
+    for (const authority of [actor, current]) allowed(authority, "configure", resource(authority, property));
+    const ctx = await repo.context(run.eventId, run.propertyId), source = await repo.rule(run.configRuleId);
+    if (!source || !run.propertyId && (!ctx.invoice || ctx.property)) throw new AutomationAccessError();
+    const rule = automationRuleSchema.parse(source.value);
+    await restoreEvaluation(repo, ctx, source.value, run.inputs);
+    for (const authority of [actor, current]) await authorizeEvaluation(authority, ctx, repo.tx);
     if (["SUCCEEDED", "SKIPPED"].includes(run.status)) return run.status;
+    for(const authority of [actor,current])for(const action of rule.actions)await actionPlan(repo,authority,action,ctx);
     await repo.update(run.id, {
       status: "PENDING",
       nextAttemptAt: null,

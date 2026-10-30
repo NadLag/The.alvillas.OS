@@ -121,6 +121,27 @@ describe("monthly accounting locks on real PostgreSQL", () => {
     await expect(closeAccountingPeriod(f.ctx, { ...f.input, reason: "Changed closing intent" }, { db })).rejects.toBeInstanceOf(AccountingPeriodConflictError);
   });
 
+  it("refuses a new financial calendar when PostgreSQL timezone data disagrees with the current application calendar",async()=>{
+    const f=await fixture(),legacy=await closeAccountingPeriod(f.ctx,f.input,{db});
+    const retained=()=>withTenant(db,f.org,tx=>tx.accountingPeriod.findUniqueOrThrow({where:{id:legacy.id},include:{events:{orderBy:{version:"asc"}}}}));
+    const original=await retained();
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:accountingPeriodPolicyKey,scopeType:"organization",scopeId:null,
+      effectiveFrom:new Date("2020-01-01"),reason:"Dedicated current Moroccan accounting calendar",value:{timezone:"Africa/Casablanca",allow_early_close:false,max_reopen_seconds:60}}));
+    const database=await withTenant(db,f.org,async tx=>{
+      const [row]=await tx.$queryRaw<Array<{end:Date;source:Date}>>`SELECT '2026-10-01'::date::timestamp AT TIME ZONE 'Africa/Casablanca' AS "end", '2026-11-02'::date::timestamp AT TIME ZONE 'Africa/Casablanca' AS source`;return row;
+    });
+    const command={...f.input,month:"2026-09",idempotencyKey:randomUUID()},source=()=>withTenant(db,f.org,tx=>new AccountingPeriodRepository(tx,f.org).sourceInstant(new Date("2026-11-02"),"Africa/Casablanca"));
+    if(database.end.toISOString()!=="2026-10-01T00:00:00.000Z"){
+      await expect(closeAccountingPeriod(f.ctx,command,{db})).rejects.toBeInstanceOf(AccountingPeriodPolicyError);
+      expect(await withTenant(db,f.org,tx=>tx.accountingPeriod.count())).toBe(1);
+    }else{
+      const closed=await closeAccountingPeriod(f.ctx,command,{db}),detail=await getAccountingPeriod(f.ctx,closed.id,undefined,{db});
+      expect(detail.period.startsAt.toISOString()).toBe("2026-08-31T23:00:00.000Z");expect(detail.period.endsAt.toISOString()).toBe("2026-10-01T00:00:00.000Z");
+    }
+    expect(await source()).toEqual(database.source);
+    expect(await retained()).toEqual(original);
+  });
+
   it("requires independent current close/reopen rights and denies wrong tenant and scoped grants", async () => {
     const f = await fixture(), closed = await closeAccountingPeriod(f.ctx, f.input, { db });
     const reader = await actor(f.org, ["financial_transaction:view"]), closer = await actor(f.org, ["financial_transaction:view", "financial_transaction:configure"]);

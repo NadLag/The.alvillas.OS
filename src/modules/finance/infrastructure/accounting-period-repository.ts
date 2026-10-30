@@ -4,6 +4,8 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { accountingPeriodPolicyKey, accountingPeriodPolicySchema, accountingPeriodSnapshotSchema,
   AccountingPeriodClosedError, AccountingPeriodPolicyError } from "../domain/accounting-period";
+import { calendarDateStart } from "@/platform/time/calendar";
+import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
 
 const monthDate = (month: string) => new Date(`${month}-01T00:00:00.000Z`);
 export class AccountingPeriodRepository {
@@ -39,9 +41,15 @@ export class AccountingPeriodRepository {
     } catch (error) { if (error instanceof ZodError) throw new AccountingPeriodPolicyError(); throw error; }
   }
   async bounds(month: string, timezone: string) {
+    // Existing period and expense instants remain authoritative historical data.
+    // New calendars must agree with the application's current timezone data.
+    requireCurrentTimezoneData();
+    const next=monthDate(month);next.setUTCMonth(next.getUTCMonth()+1);
+    const expectedStart=calendarDateStart(month+"-01",timezone),expectedEnd=calendarDateStart(next.toISOString().slice(0,10),timezone);
     const [row] = await this.tx.$queryRaw<Array<{ startsAt: Date; endsAt: Date }>>(Prisma.sql`SELECT
       (${month + "-01"}::date::timestamp AT TIME ZONE ${timezone}) AS "startsAt",
       ((${month + "-01"}::date::timestamp+interval '1 month') AT TIME ZONE ${timezone}) AS "endsAt"`);
+    if(row.startsAt.getTime()!==expectedStart.getTime()||row.endsAt.getTime()!==expectedEnd.getTime())throw new AccountingPeriodPolicyError("timezoneData");
     return row;
   }
   period(id: string) { return this.tx.accountingPeriod.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } } }); }

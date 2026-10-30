@@ -6,7 +6,7 @@ import {
   type ResolvedConfigRule
 } from "@/platform/config/config-rule-repository";
 import { authorize, roleKeysForResource, type AuthContext, type Resource } from "@/platform/authz/authorize";
-import { approvalThresholdsConfigSchema, type ApprovalThresholdsConfig } from "@/platform/config/rule-registry";
+import { approvalThresholdsConfigSchema, payoutCalendarSchema, type ApprovalThresholdsConfig } from "@/platform/config/rule-registry";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
@@ -96,9 +96,12 @@ export const expensePolicyInputSchema = z.object({
 export const ownerPayoutPlanInputSchema = z.object({
   propertyId: z.string().uuid(),
   ownerId: z.string().uuid().optional(),
-  availableBalance: moneyAmountSchema,
+  availableBalance: z.string().trim().max(80).regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/u),
   currency: currencySchema,
   checkoutDate: z.coerce.date().optional(),
+  completedAt: z.coerce.date().optional(),
+  settlementAt: z.coerce.date().optional(),
+  timezone: payoutCalendarSchema.shape.timezone,
   triggeredAt: z.coerce.date(),
   asOf: z.coerce.date().optional()
 });
@@ -120,14 +123,6 @@ function assertAllowed(ctx: FinanceConfigActorContext): void {
   if (!allowed) {
     throw new FinanceConfigAuthorizationError();
   }
-}
-
-function scopesFor(input: { propertyId: string; ownerId?: string }): ConfigScopeCandidate[] {
-  return [
-    { scopeType: "property", scopeId: input.propertyId },
-    ...(input.ownerId ? [{ scopeType: "owner", scopeId: input.ownerId }] : []),
-    { scopeType: "organization", scopeId: null }
-  ];
 }
 
 function evidence(rule: ResolvedConfigRule): ConfigDecisionEvidence {
@@ -248,10 +243,13 @@ export async function planOwnerPayout(
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
+    const scopes = await new ReservationConfigScopeRepository(tx, ctx.organizationId).scopes({
+      propertyId: input.propertyId, ownerId: input.ownerId, asOf
+    });
     const payoutRule = await resolveRequired(
       repository,
       "finance.payout_schedule",
-      scopesFor(input),
+      scopes,
       asOf
     );
 
@@ -259,7 +257,11 @@ export async function planOwnerPayout(
       payout: planConfiguredPayout(payoutRule.value, {
         availableBalance: Money.of(input.availableBalance, input.currency),
         checkoutDate: input.checkoutDate,
-        triggeredAt: input.triggeredAt
+        completedAt: input.completedAt,
+        settlementAt: input.settlementAt,
+        triggeredAt: input.triggeredAt,
+        timezone: input.timezone,
+        hashSeed: [ctx.organizationId, input.propertyId, input.ownerId, payoutRule.id].join(":")
       }),
       payoutRule: evidence(payoutRule)
     };

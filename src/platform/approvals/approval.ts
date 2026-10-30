@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
+import { ownerPayoutResource } from "@/platform/authz/financial-resource";
 
 export const approvalRequestSchema = z.object({
   propertyId: z.string().uuid(), title: z.string().trim().min(3).max(160),
@@ -16,10 +17,15 @@ export const invoiceApprovalSourceSnapshotSchema = z.object({ lineId: z.uuid(), 
 export type InvoiceApprovalStageSource = { invoiceLineId: string | null; propertyId: string | null; reservationId: string | null; ownerId: string | null;
   amount: { toString(): string }; currency: string; sourceSnapshot: unknown; property?: { cityId: string | null; regionId: string | null } | null };
 type ApprovalSource = { id: string; organizationId: string; propertyId: string | null; state: string;
-  property: { regionId: string | null; cityId: string | null; timezone?: string } | null; expenseId?: string | null;
+  property: { regionId: string | null; cityId: string | null; timezone?: string } | null; expenseId?: string | null; payoutId?: string | null;
+  payout?: Parameters<typeof ownerPayoutResource>[1] | null;
   invoiceSubmissionId?: string | null; invoiceSubmission?: { id: string; invoice: { id: string; state: string; currentSubmissionId: string | null } } | null;
   expense?: { id: string; state: string; amount: { toString(): string }; reservationId: string | null; occurredOn: Date; createdBy: string } | null };
 export function approvalResource(row: ApprovalSource, ownerId?: string | null, stage?: InvoiceApprovalStageSource): Resource {
+  if (row.payoutId) {
+    if (!row.payout || !row.property) throw new ApprovalAccessError();
+    return { ...ownerPayoutResource(row.organizationId, row.payout, row.property), approvalId: row.id };
+  }
   if (row.invoiceSubmissionId) {
     const source = stage && invoiceApprovalSourceSnapshotSchema.safeParse(stage.sourceSnapshot);
     if (!row.invoiceSubmission || !stage?.invoiceLineId || !source || !source.success || source.data.lineId !== stage.invoiceLineId) throw new ApprovalAccessError();

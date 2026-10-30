@@ -29,5 +29,5 @@ export class AccountingPeriodClosedError extends Error {}
 export class AccountingPeriodAccessError extends Error {}
 export class AccountingPeriodConflictError extends Error {}
 export class AccountingPeriodPolicyError extends Error {
-  constructor(readonly code: "missingPolicy" | "earlyClose" | "invalidWindow" | "unbalanced" = "missingPolicy") { super(code); }
+  constructor(readonly code: "missingPolicy" | "earlyClose" | "invalidWindow" | "unbalanced" | "timezoneData" = "missingPolicy") { super(code); }
 }

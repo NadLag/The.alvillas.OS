@@ -14,12 +14,15 @@ import { z } from "zod";
 import { stocktakeEventDataSchema } from "@/modules/inventory/domain/events";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
+import { ownerPayoutResource } from "@/platform/authz/financial-resource";
 import { SupplierInvoiceRepository } from "@/modules/finance/infrastructure/supplier-invoice-repository";
 import { invoiceAutomationSource, type InvoiceAutomationSource } from "./invoice-source";
 
 export const json = (v: unknown) =>
   JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
 const uuid = z.string().uuid();
+const frozenConfig = z.object({key:z.string(),config_rule_id:z.uuid(),config_rule_version:z.number().int().positive(),value:z.unknown()});
+const payoutSnapshot = z.object({payout:z.object({cadence:z.string()}),payoutRule:frozenConfig,approvalRule:frozenConfig,configReferences:z.array(frozenConfig)});
 const inventory = z
   .object({
     item: z.string().regex(/^[a-z0-9_.-]{1,120}$/u),
@@ -159,6 +162,7 @@ export class AutomationRepository {
     evaluation: EvaluationContext;
     scopes: Awaited<ReturnType<ReservationConfigScopeRepository["scopes"]>>;
     expense?: { resource: Resource; approvalId: string | null; submissionId: string };
+    payout?: {resource:Resource;approvalId:string|null;configs:Array<{key:string;id:string;version:number;value:unknown}>};
     invoice?: InvoiceAutomationSource;
   }> {
     const event = await this.event(eventId);
@@ -208,6 +212,12 @@ export class AutomationRepository {
     if (expenseId && (!expense?.submission || p.submissionId && p.submissionId !== expense.submission.id) ||
       /^Expense/u.test(event.type) && event.idempotencyKey.startsWith("expense:") && (!expense || event.idempotencyKey !== `expense:${expense.id}:${event.type}`))
       throw new Error("automation_source_missing");
+    const payoutId=p.payoutId??approval?.payoutId;
+    const payout=payoutId?await this.tx.ownerPayout.findFirst({where:{organizationId:this.organizationId,id:uuid.parse(payoutId)},include:{approvals:{select:{id:true}}}}):null;
+    if(payoutId&&(!payout||!payout.policySnapshot)||
+      /^Payout/u.test(event.type)&&event.idempotencyKey.startsWith("payout:")&&(!payout||event.idempotencyKey!==`payout:${payout.id}:${event.type}`))throw new Error("automation_source_missing");
+    if(payout&&(approval?.payoutId&&approval.payoutId!==payout.id||p.ownerId&&p.ownerId!==payout.ownerId||p.reservationId&&p.reservationId!==payout.reservationId))throw new Error("automation_scope_mismatch");
+    const frozen=payout?payoutSnapshot.parse(payout.policySnapshot):null;
     if (
       (p.reservationId && !reservation) ||
       (p.taskId && !task) ||
@@ -220,6 +230,7 @@ export class AutomationRepository {
       task?.propertyId ??
       approval?.propertyId ??
       expense?.propertyId ??
+      payout?.propertyId ??
       String(p.propertyId);
     for (const ref of [
       p.propertyId,
@@ -227,6 +238,7 @@ export class AutomationRepository {
       task?.propertyId,
       approval?.propertyId,
       expense?.propertyId,
+      payout?.propertyId,
     ])
       if (ref && ref !== id) throw new Error("automation_scope_mismatch");
     const property = await this.property(id);
@@ -306,12 +318,16 @@ export class AutomationRepository {
         amount: expense.amount.toFixed(2), currency: expense.currency, category: expense.category, purpose: expense.purpose,
         emergency: expense.emergency, occurredOn: day(expense.occurredOn), submitted_by: expense.submission.submittedBy,
         submission_id: expense.submission.id, status: typeof p.state === "string" ? p.state : expense.state } } : {}),
+      ...(payout&&frozen?{payout:{id:payout.id,propertyId:payout.propertyId,ownerId:payout.ownerId,reservationId:payout.reservationId,
+        amount:payout.amount.toFixed(2),currency:payout.currency,cadence:frozen.payout.cadence,status:typeof p.state==="string"?p.state:payout.state,
+        current_status:payout.state,eligible_at:payout.eligibleAt?.toISOString()??null,scheduled_for:payout.scheduledFor?.toISOString()??null,paid_at:payout.paidAt?.toISOString()??null}}:{}),
     };
     const scopes = await new ReservationConfigScopeRepository(
       this.tx,
       this.organizationId,
     ).scopes({
       propertyId: id,
+      ownerId:payout?.ownerId,
       source: reservation?.source,
       asOf: event.occurredAt,
     });
@@ -320,7 +336,9 @@ export class AutomationRepository {
         resource: { type: "expense", id: expense.id, financialRecordId: expense.id, organizationId: this.organizationId,
           propertyId: expense.propertyId, reservationId: expense.reservationId, city: property.cityId, region: property.regionId,
           amount: expense.amount.toString(), status: expense.state, dataClass: "financial" as const,
-          assignedUserAccountId: expense.createdBy, occurredAt: calendarDateStart(day(expense.occurredOn), property.timezone) } } } : {}) };
+          assignedUserAccountId: expense.createdBy, occurredAt: calendarDateStart(day(expense.occurredOn), property.timezone) } } } : {}),
+      ...(payout&&frozen?{payout:{resource:ownerPayoutResource(this.organizationId,payout,property),approvalId:approval?.id??payout.approvals[0]?.id??null,
+        configs:[frozen.payoutRule,frozen.approvalRule,...frozen.configReferences].map(rule=>({key:rule.key,id:rule.config_rule_id,version:rule.config_rule_version,value:rule.value}))}}:{}) };
   }
   property(id: string) {
     return this.tx.property.findFirst({
@@ -362,6 +380,8 @@ export class AutomationRepository {
     if (parsed.actions.some((action) => action.type === "reorder_suggestion"))
       keys.add("inventory.minimums");
     for (const key of keys) {
+      const frozen=ctx.payout?.configs.find(rule=>rule.key===key);
+      if(frozen){ctx.evaluation.configs[key]=frozen.value;metadata.push({key,id:frozen.id,version:frozen.version});continue;}
       const resolved = await config.resolve({
         key,
         scopes: ctx.scopes,

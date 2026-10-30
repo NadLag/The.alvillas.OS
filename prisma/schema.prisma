@@ -71,6 +71,7 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  ownerPayouts                                   OwnerPayout[]
   supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
   supplierInvoiceRecognitionOutcomes SupplierInvoiceRecognitionOutcome[]
   supplierInvoiceRecognitions                    SupplierInvoiceRecognition[]
@@ -357,6 +358,8 @@ model Person {
 }
 
 model UserAccount {
+  createdOwnerPayouts         OwnerPayout[]                @relation("OwnerPayoutCreator")
+  updatedOwnerPayouts         OwnerPayout[]                @relation("OwnerPayoutUpdater")
   supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
   supplierInvoiceRecognitions SupplierInvoiceRecognition[] @relation("SupplierInvoiceRecognitionCreator")
   submittedSupplierInvoices   SupplierInvoiceSubmission[]
@@ -637,6 +640,7 @@ model RoleAssignment {
 }
 
 model Owner {
+  payouts               OwnerPayout[]
   expenseApprovalStages ApprovalStage[]
   id                    String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId        String                @map("organization_id") @db.Uuid
@@ -691,26 +695,28 @@ model OwnerRepresentative {
 }
 
 model OwnerPayoutMethod {
-  id                String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId    String       @map("organization_id") @db.Uuid
-  ownerId           String       @map("owner_id") @db.Uuid
+  payouts           OwnerPayout[]
+  id                String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId    String        @map("organization_id") @db.Uuid
+  ownerId           String        @map("owner_id") @db.Uuid
   label             String
-  methodType        String       @map("method_type")
-  accountHolderName String       @map("account_holder_name")
-  currency          String       @db.Char(3)
-  countryCode       String       @map("country_code") @db.Char(2)
-  detailsEncrypted  String       @map("details_encrypted")
-  maskedAccount     String       @map("masked_account")
-  isDefault         Boolean      @default(false) @map("is_default")
-  status            String       @default("ACTIVE")
-  archivedAt        DateTime?    @map("archived_at") @db.Timestamptz(6)
-  createdBy         String?      @map("created_by") @db.Uuid
-  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  owner             Owner        @relation(fields: [ownerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  currencyRef       Currency     @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  methodType        String        @map("method_type")
+  accountHolderName String        @map("account_holder_name")
+  currency          String        @db.Char(3)
+  countryCode       String        @map("country_code") @db.Char(2)
+  detailsEncrypted  String        @map("details_encrypted")
+  maskedAccount     String        @map("masked_account")
+  isDefault         Boolean       @default(false) @map("is_default")
+  status            String        @default("ACTIVE")
+  archivedAt        DateTime?     @map("archived_at") @db.Timestamptz(6)
+  createdBy         String?       @map("created_by") @db.Uuid
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  owner             Owner         @relation(fields: [ownerId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  currencyRef       Currency      @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
 
+  @@unique([organizationId, id], map: "owner_payout_method_org_id_unique")
   @@index([organizationId, ownerId, archivedAt], map: "owner_payout_method_org_owner_archived_idx")
   @@index([organizationId, ownerId, isDefault], map: "owner_payout_method_org_owner_default_idx")
   @@map("owner_payout_method")
@@ -736,6 +742,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  ownerPayouts          OwnerPayout[]
   invoiceApprovalStages ApprovalStage[]             @relation("InvoiceApprovalProperty")
   supplierInvoiceLines  SupplierInvoiceLine[]
   expenses              Expense[]
@@ -985,6 +992,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  ownerPayouts                                         OwnerPayout[]
   invoiceApprovalStages                                ApprovalStage[]                @relation("InvoiceApprovalReservation")
   supplierInvoiceLines                                 SupplierInvoiceLine[]
   expenses                                             Expense[]
@@ -1306,20 +1314,21 @@ model SyncOp {
 }
 
 model LedgerAccount {
-  fundedExpenses  Expense[]
-  cashCollections CashCollection[]
-  teamWallet      TeamWallet?
-  id              String           @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
-  organizationId  String           @map("organization_id") @db.Uuid
-  code            String
-  name            String
-  accountType     String           @map("account_type")
-  normalSide      String           @map("normal_side")
-  archivedAt      DateTime?        @map("archived_at") @db.Timestamptz(6)
-  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  postings        Posting[]
+  fundedOwnerPayouts OwnerPayout[]
+  fundedExpenses     Expense[]
+  cashCollections    CashCollection[]
+  teamWallet         TeamWallet?
+  id                 String           @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String           @map("organization_id") @db.Uuid
+  code               String
+  name               String
+  accountType        String           @map("account_type")
+  normalSide         String           @map("normal_side")
+  archivedAt         DateTime?        @map("archived_at") @db.Timestamptz(6)
+  createdAt          DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  postings           Posting[]
 
   @@unique([organizationId, code], map: "ledger_account_org_code_unique")
   @@unique([organizationId, id], map: "ledger_account_org_id_unique")
@@ -1327,6 +1336,8 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  ownerPayout            OwnerPayout?                @relation("OwnerPayoutPayment")
+  reversedOwnerPayout    OwnerPayout?                @relation("OwnerPayoutReversal")
   supplierInvoiceRecognitionLine SupplierInvoiceRecognitionLine?
   periodAdjustment               AccountingPeriodAdjustment?
   groupEntries                   TransactionGroupEntry[]
@@ -1503,6 +1514,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  ownerPayouts            OwnerPayout[]
   expenses                Expense[]
   financialApprovalStages ApprovalStage[]
   cashCollections         CashCollection[]
@@ -1848,6 +1860,8 @@ model AuditLog {
 }
 
 model ApprovalRequest {
+  payoutId            String?                    @map("payout_id") @db.Uuid
+  payout              OwnerPayout?               @relation(fields: [organizationId, payoutId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   invoiceSubmissionId String?                    @map("invoice_submission_id") @db.Uuid
   invoiceSubmission   SupplierInvoiceSubmission? @relation(fields: [organizationId, invoiceSubmissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   expenseId           String?                    @map("expense_id") @db.Uuid
@@ -1874,6 +1888,7 @@ model ApprovalRequest {
 
   @@unique([organizationId, expenseId], map: "approval_request_org_expense_unique")
   @@unique([organizationId, invoiceSubmissionId], map: "approval_request_org_invoice_submission_unique")
+  @@unique([organizationId, payoutId], map: "approval_request_org_payout_unique")
   @@unique([organizationId, id])
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, propertyId, state, createdAt])
@@ -2359,6 +2374,58 @@ model Expense {
   @@index([organizationId, propertyId, state, occurredOn, id])
   @@index([organizationId, correctsExpenseId, createdAt, id])
   @@map("expense")
+}
+
+model OwnerPayout {
+  id                    String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId        String                @map("organization_id") @db.Uuid
+  propertyId            String                @map("property_id") @db.Uuid
+  ownerId               String                @map("owner_id") @db.Uuid
+  reservationId         String?               @map("reservation_id") @db.Uuid
+  expectedSettlementAt  DateTime?             @map("expected_settlement_at") @db.Timestamptz(6)
+  payoutMethodId        String                @map("payout_method_id") @db.Uuid
+  fundingAccountId      String                @map("funding_account_id") @db.Uuid
+  amount                Decimal               @db.Decimal(18, 2)
+  currency              String                @db.Char(3)
+  purpose               String                @db.VarChar(500)
+  state                 String                @default("DRAFT") @db.VarChar(40)
+  version               Int                   @default(1)
+  idempotencyKey        String                @map("idempotency_key") @db.Uuid
+  policySnapshot        Json?                 @map("policy_snapshot")
+  methodSnapshotHash    String?               @map("method_snapshot_hash") @db.VarChar(64)
+  eligibleAt            DateTime?             @map("eligible_at") @db.Timestamptz(6)
+  approvedAt            DateTime?             @map("approved_at") @db.Timestamptz(6)
+  scheduledFor          DateTime?             @map("scheduled_for") @db.Timestamptz(6)
+  paidAt                DateTime?             @map("paid_at") @db.Timestamptz(6)
+  paymentReference      String?               @map("payment_reference") @db.VarChar(160)
+  transactionId         String?               @map("transaction_id") @db.Uuid
+  reversalTransactionId String?               @map("reversal_transaction_id") @db.Uuid
+  reconciledAt          DateTime?             @map("reconciled_at") @db.Timestamptz(6)
+  failureReason         String?               @map("failure_reason") @db.VarChar(500)
+  createdBy             String                @map("created_by") @db.Uuid
+  updatedBy             String                @map("updated_by") @db.Uuid
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  organization          Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  property              Property              @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  owner                 Owner                 @relation(fields: [organizationId, ownerId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reservation           Reservation?          @relation(fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  payoutMethod          OwnerPayoutMethod     @relation(fields: [organizationId, payoutMethodId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  fundingAccount        LedgerAccount         @relation(fields: [organizationId, fundingAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  currencyRef           Currency              @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  creator               UserAccount           @relation("OwnerPayoutCreator", fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  updater               UserAccount           @relation("OwnerPayoutUpdater", fields: [organizationId, updatedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  transaction           FinancialTransaction? @relation("OwnerPayoutPayment", fields: [organizationId, transactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reversalTransaction   FinancialTransaction? @relation("OwnerPayoutReversal", fields: [organizationId, reversalTransactionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  approvals             ApprovalRequest[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, idempotencyKey])
+  @@unique([organizationId, transactionId])
+  @@unique([organizationId, reversalTransactionId])
+  @@index([organizationId, ownerId, propertyId, currency, state, createdAt])
+  @@index([organizationId, state, scheduledFor, id])
+  @@map("owner_payout")
 }
 
 model ExpenseSubmission {
