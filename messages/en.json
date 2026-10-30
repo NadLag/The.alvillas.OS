@@ -2984,6 +2984,21 @@
         "POLICY_UNAVAILABLE": "A required accounting rule is unavailable. Review the finance configuration before trying again.",
         "EXECUTION_UNAVAILABLE": "Recording could not complete. Refresh the status before submitting a new request."
       }
+    },
+    "reversal": {
+      "title": "Reverse invoice claim",
+      "description": "Reverse all recorded costs together after reversing every payment. Original records stay in history.",
+      "active": "Claim recorded",
+      "reversed": "The invoice claim is reversed. Original records are retained.",
+      "pending": "Reversal requested. The claim remains active until processing completes.",
+      "confirm": "I confirm the reversal of every original cost in the current open accounting period.",
+      "request": "Request full reversal",
+      "history": "Reversal requests",
+      "loading": "Loading claim reversal history…",
+      "paymentsActive": "Reverse each active supplier payment before reversing this invoice claim.",
+      "closed": "An open current accounting period is required for this reversal.",
+      "unavailable": "Reversal is currently unavailable for this invoice and your access.",
+      "uncertain": "We could not confirm the response. Retry the same request before making another change."
     }
   }
 }

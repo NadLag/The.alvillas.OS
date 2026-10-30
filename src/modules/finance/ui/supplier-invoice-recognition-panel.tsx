@@ -6,6 +6,7 @@ import { formatCurrencyAmount, formatDateTime } from "@/i18n/format";
 import { getSupplierInvoiceRecognitionStatusAction, requestSupplierInvoiceRecognitionAction } from "../application/supplier-invoice-actions";
 import type { getSupplierInvoiceRecognitionStatus } from "../application/supplier-invoice-recognition-status";
 import { SupplierPaymentPanel } from "./supplier-payment-panel";
+import { SupplierClaimReversalPanel } from "./supplier-claim-reversal-panel";
 
 type Status = Awaited<ReturnType<typeof getSupplierInvoiceRecognitionStatus>>;
 type Failure = "forbidden" | "conflict" | "validation" | "policy" | "error";
@@ -17,6 +18,10 @@ export function SupplierInvoiceRecognitionPanel({ initial, locale }: { initial: 
   const t = useTranslations("SupplierInvoices"), prefix = useId(), online = useSyncExternalStore(subscribe, clientOnline, serverOnline);
   const [data, setData] = useState<Status | null>(initial), [error, setError] = useState<Failure | null>(null), [nonce, setNonce] = useState(() => crypto.randomUUID());
   const [busy, startTransition] = useTransition();
+  const [settlementVersion, setSettlementVersion] = useState(0);
+  const [reversalVersion, setReversalVersion] = useState(0);
+  const claimReversed = useCallback(() => setSettlementVersion(version => version + 1), []);
+  const paymentChanged = useCallback(() => setReversalVersion(version => version + 1), []);
   const generation = useRef(0);
   const refresh = useCallback(async (before?: string) => {
     const current = ++generation.current;
@@ -62,7 +67,10 @@ export function SupplierInvoiceRecognitionPanel({ initial, locale }: { initial: 
         {request.failureCode ? <p>{t(`recognition.failures.${request.failureCode}`)}</p> : null}
       </li>)}</ol> : <p>{t("recognition.empty")}</p>}
       {data.next ? <button className="secondary-button" type="button" data-testid="invoice-recognition-older" disabled={busy || !online} onClick={() => startTransition(() => refresh(data.next ?? undefined))}>{t("recognition.older")}</button> : null}
-      {data.recognized ? <SupplierPaymentPanel key={data.id} invoiceId={data.id} locale={locale} /> : null}
+      {data.recognized ? <>
+        <SupplierPaymentPanel key={`${data.id}:${settlementVersion}`} invoiceId={data.id} locale={locale} onChanged={paymentChanged} />
+        <SupplierClaimReversalPanel key={data.id} invoiceId={data.id} locale={locale} revision={reversalVersion} onReversed={claimReversed} />
+      </> : null}
     </> : null}
     {!online ? <p role="status">{t("recognition.offline")}</p> : null}
     {error ? <p role="alert" data-testid="invoice-recognition-error">{t(error)}</p> : null}

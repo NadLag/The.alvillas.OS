@@ -2984,6 +2984,21 @@
         "POLICY_UNAVAILABLE": "Une règle comptable nécessaire est indisponible. Vérifiez la configuration financière avant de réessayer.",
         "EXECUTION_UNAVAILABLE": "L’enregistrement n’a pas pu aboutir. Actualisez le statut avant d’envoyer une nouvelle demande."
       }
+    },
+    "reversal": {
+      "title": "Contrepasser la facture",
+      "description": "Contrepassez tous les coûts comptabilisés ensemble après avoir contrepassé chaque paiement. Les écritures d’origine restent dans l’historique.",
+      "active": "Dette fournisseur comptabilisée",
+      "reversed": "La dette de cette facture est contrepassée. Les écritures d’origine sont conservées.",
+      "pending": "Contrepassation demandée. La dette reste active jusqu’à la fin du traitement.",
+      "confirm": "Je confirme la contrepassation de tous les coûts d’origine dans la période comptable ouverte.",
+      "request": "Demander la contrepassation complète",
+      "history": "Demandes de contrepassation",
+      "loading": "Chargement de l’historique des contrepassations…",
+      "paymentsActive": "Contrepassez chaque paiement fournisseur actif avant de contrepasser cette facture.",
+      "closed": "Une période comptable courante ouverte est nécessaire pour cette contrepassation.",
+      "unavailable": "La contrepassation est actuellement indisponible pour cette facture et vos accès.",
+      "uncertain": "La réponse n’a pas pu être confirmée. Réessayez la même demande avant toute autre modification."
     }
   }
 }

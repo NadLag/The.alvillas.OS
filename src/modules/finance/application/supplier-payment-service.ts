@@ -194,10 +194,14 @@ export async function voidSupplierPayment(ctx: FinanceActorContext, raw: unknown
   }, { timeout: 120000 });
 }
 
+export function inspectSupplierInvoiceSettlementSource(ctx: FinanceActorContext, id: string, tx: TenantTransaction) {
+  return prepareSettlement(ctx, id, tx, "view");
+}
+
 export async function getSupplierSettlement(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
   const input = supplierSettlementQuery.parse(raw);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
-    const source = await prepareSettlement(ctx, input.id, tx, "view");
+    const source = await inspectSupplierInvoiceSettlementSource(ctx, input.id, tx);
     const outstanding = await source.payables.outstanding({ supplierId: source.row.supplierId, invoiceId: input.id, currency: source.revision.currency });
     const now = await source.finance.clock(), current = await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId);
     const allows = (checks: Check[]) => checks.every(check => [ctx.authContext, current].every(authority =>

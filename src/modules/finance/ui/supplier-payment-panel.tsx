@@ -19,7 +19,7 @@ const clientOnline = () => navigator.onLine, serverOnline = () => true;
 const canonicalAmount = (value: string) => normalizeAmountInput(value.trim());
 const formText = (form: FormData, name: string) => { const value = form.get(name); return typeof value === "string" ? value.trim() : ""; };
 
-export function SupplierPaymentPanel({ invoiceId, locale }: { invoiceId: string; locale: string }) {
+export function SupplierPaymentPanel({ invoiceId, locale, onChanged }: { invoiceId: string; locale: string; onChanged?: () => void }) {
   const t = useTranslations("SupplierInvoices.payment"), prefix = useId(), online = useSyncExternalStore(subscribe, clientOnline, serverOnline);
   const [data, setData] = useState<Statement | null>(null), [error, setError] = useState<Failure | null>(null), [busy, startTransition] = useTransition();
   const [amount, setAmount] = useState(""), [paidLocal, setPaidLocal] = useState(""), [occurrence, setOccurrence] = useState<Occurrence>("reject");
@@ -46,7 +46,7 @@ export function SupplierPaymentPanel({ invoiceId, locale }: { invoiceId: string;
     try {
       const result = await postSupplierPaymentAction(input);
       if (!result.ok) { if (result.code === "error") setUncertain(input); else { setUncertain(null); setReviewed(false); } failed(result.code); return; }
-      setUncertain(null); nonce.current = crypto.randomUUID(); paymentForm.current?.reset(); await load({ id: invoiceId }, true);
+      setUncertain(null); nonce.current = crypto.randomUUID(); paymentForm.current?.reset(); await load({ id: invoiceId }, true); onChanged?.();
     } catch { setUncertain(input); setError("error"); }
   };
   const reverse = async (input: { id: string; paymentId: string; reason: string }) => {
@@ -54,7 +54,7 @@ export function SupplierPaymentPanel({ invoiceId, locale }: { invoiceId: string;
     try {
       const result = await voidSupplierPaymentAction(input);
       if (!result.ok) { setUncertainVoid(result.code === "error" ? input : null); failed(result.code); return; }
-      setUncertainVoid(null); await load({ id: invoiceId }, true);
+      setUncertainVoid(null); await load({ id: invoiceId }, true); onChanged?.();
     } catch { setUncertainVoid(input); setError("error"); }
   };
   const frozen = busy || !online || Boolean(uncertain || uncertainVoid);

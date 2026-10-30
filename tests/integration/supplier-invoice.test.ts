@@ -13,6 +13,7 @@ import { SupplierInvoiceRepository } from "@/modules/finance/infrastructure/supp
 import { supplierInvoiceFields } from "@/modules/finance/domain/supplier-invoice";
 import { recognizeSupplierInvoice } from "@/modules/finance/application/supplier-invoice-recognition";
 import { getSupplierInvoiceRecognitionStatus } from "@/modules/finance/application/supplier-invoice-recognition-status";
+import { getSupplierInvoiceReversalStatus } from "@/modules/finance/application/supplier-invoice-reversal-status";
 import { postSupplierPayment, voidSupplierPayment, getSupplierSettlement, voidSupplierInvoiceClaim } from "@/modules/finance/application/supplier-payment-service";
 import { supplierPaymentPostings } from "@/modules/finance/domain/supplier-payable";
 import { supplierPaymentInput } from "@/modules/finance/domain/supplier-payment";
@@ -720,6 +721,7 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     });
     const actor = { organizationId: f.org, actorId: account.id, authContext: await authContextForAccount(f.org, account.id, { db }) };
     expect(actor.authContext.permissions.has("supplier_invoice:pay")).toBe(false); expect(actor.authContext.permissions.has("financial_transaction:pay")).toBe(false);
+    expect(await getSupplierInvoiceReversalStatus(actor, { id: f.invoice.id }, { db })).toMatchObject({ canRequest: true });
     await requestSupplierInvoiceReversal(actor, { id: f.invoice.id, expectedVersion: f.submitted.version, idempotencyKey: randomUUID(), reason: "Background cancellation belongs to its actual independent void operator" }, { db });
     const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: "SupplierInvoiceReversalRequested" } }));
     expect(await executeSupplierInvoiceRecognitionReference({ organizationId: f.org, outboxEventId: event.id }, { db })).toMatchObject({ state: "SUCCEEDED" });
@@ -808,6 +810,75 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
       submissionId: f.submitted.submissionId, invoiceVersion: f.submitted.version, currentPeriod: false, idempotencyKey: randomUUID(), requestFingerprint: "0".repeat(64),
       reason: "A cancellation request cannot invent its original financial claim", authorizationCap: captureAuthorizationCap(f.ctx.authContext), requestedBy: f.account.id }))).rejects.toThrow("actual original recognized claim");
     expect(await withTenant(db, f.org, tx => tx.supplierInvoiceRecognitionRequest.count())).toBe(0);
+  });
+  it("presents only protected actual cancellation history and the derived complete claim state", async () => {
+    const f = await invoiceSettlementFixture(), input = { id: f.invoice.id, expectedVersion: f.submitted.version, idempotencyKey: randomUUID(), reason: "Expose only the actual complete claim cancellation status" };
+    expect(await getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id }, { db })).toMatchObject({ reversed: false, pending: false, canRequest: true, sourceCosts: 2, amount: { amount: "3320.02", currency: "MAD" }, history: [] });
+    await requestSupplierInvoiceReversal(f.ctx, input, { db });
+    const pending = await getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id }, { db });
+    expect(pending).toMatchObject({ pending: true, canRequest: false, history: [{ reason: input.reason, state: "PENDING" }] });
+    expect(JSON.stringify(pending)).not.toMatch(/authorizationCap|requestFingerprint|idempotencyKey|requestedBy/u);
+    const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: "SupplierInvoiceReversalRequested" } }));
+    await executeSupplierInvoiceRecognitionReference({ organizationId: f.org, outboxEventId: event.id }, { db });
+    expect(await getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id }, { db })).toMatchObject({ reversed: true, pending: false, canRequest: false, history: [{ state: "SUCCEEDED" }] });
+  });
+  it("presents the actual unreversed payment blocker before allowing claim cancellation", async () => {
+    const f = await invoiceSettlementFixture(), paid = await postSupplierPayment(f.ctx, f.payment, { db });
+    expect(await getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id }, { db })).toMatchObject({ paymentsActive: true, canRequest: false });
+    await voidSupplierPayment(f.ctx, { id: f.invoice.id, paymentId: paid.paymentId, reason: "Restore actual claim before showing cancellation admission" }, { db });
+    expect(await getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id }, { db })).toMatchObject({ paymentsActive: false, canRequest: true });
+  });
+  it("denies cancellation history without independent current financial source access", async () => {
+    const f = await invoiceSettlementFixture(), key = "financial_transaction:view";
+    const limited = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(permission => permission !== key)),
+      assignments: f.ctx.authContext.assignments!.map(assignment => ({ ...assignment, permissions: new Set([...assignment.permissions].filter(permission => permission !== key)) })) } };
+    await expect(getSupplierInvoiceReversalStatus(limited, { id: f.invoice.id }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+    await expect(getSupplierInvoiceReversalStatus({ ...f.ctx, organizationId: randomUUID() }, { id: f.invoice.id }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError);
+  });
+  it("discards the entire cancellation DTO when financial authority expires after actual history reads", async () => {
+    const f = await invoiceSettlementFixture(), original = Reflect.get(FinanceRepository.prototype, "clock"), history = vi.spyOn(SupplierInvoiceRecognitionRequestRepository.prototype, "history");
+    let expired = false;
+    const expire = vi.spyOn(FinanceRepository.prototype, "clock").mockImplementation(async function (this: FinanceRepository) {
+      const result = await original.call(this);
+      // The reader awaits history and pending before observing this actual database clock.
+      if (history.mock.calls.length && !expired) { expired = true;
+        await withTenant(admin, f.org, tx => tx.roleAssignment.update({ where: { id: f.financialGrant.id }, data: { validTo: new Date("2001-01-01") } })); }
+      return result;
+    });
+    try { await expect(getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id }, { db })).rejects.toBeInstanceOf(SupplierInvoiceAccessError); expect(expired).toBe(true); }
+    finally { expire.mockRestore(); history.mockRestore(); }
+  });
+  it("presents a closed current period without offering a foreground or queued claim reversal", async () => {
+    const f = await invoiceSettlementFixture(), now = await withTenant(db, f.org, tx => new FinanceRepository(tx, f.org).clock());
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2020-01-01"),
+      reason: "Configure actual cancellation status close acceptance", value: { timezone: "UTC", allow_early_close: true, max_reopen_seconds: 60 } }));
+    await closeAccountingPeriod(f.ctx, { month: now.toISOString().slice(0, 7), expectedVersion: 0, idempotencyKey: randomUUID(), reason: "Close actual current cancellation status period" }, { db });
+    expect(await getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id }, { db })).toMatchObject({ postingOpen: false, canRequest: false, pending: false });
+    expect(await withTenant(db, f.org, tx => tx.supplierInvoiceRecognitionRequest.count())).toBe(0);
+  });
+  it("pages actual cancellation requests without a query per historical request", async () => {
+    const f = await invoiceSettlementFixture(), scoped = new URL(url!); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests";
+    const measured = new PrismaClient({ datasourceUrl: scoped.toString(), log: [{ emit: "event", level: "query" }] }), queries: string[] = [];
+    let onCommit: (() => void) | undefined;
+    measured.$on("query", event => { queries.push(event.query); if (event.query.trim() === "COMMIT") onCommit?.(); });
+    const readStatus = async (before?: string) => {
+      queries.length = 0; const committed = new Promise<void>(resolve => { onCommit = resolve; });
+      const result = await getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id, ...(before ? { before } : {}) }, { db: measured });
+      await committed; onCommit = undefined; return result;
+    };
+    try {
+      const record = async (index: number) => {
+        const requested = await requestSupplierInvoiceReversal(f.ctx, { id: f.invoice.id, expectedVersion: f.submitted.version, idempotencyKey: randomUUID(), reason: "Actual cancellation history request " + index }, { db });
+        const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: "SupplierInvoiceReversalRequested", payload: { path: ["requestId"], equals: requested.requestId } } }));
+        await failSupplierInvoiceRecognitionReference({ organizationId: f.org, outboxEventId: event.id }, { db });
+      };
+      await record(0); await readStatus(); const initialQueries = queries.length;
+      for (let index = 1; index < 52; index++) await record(index);
+      const first = await readStatus(); expect(queries.length).toBe(initialQueries); expect(first.history).toHaveLength(50); expect(first.next).not.toBeNull();
+      const second = await readStatus(first.next!); expect(second.history).toHaveLength(2);
+      expect(new Set([...first.history, ...second.history].map(row => row.id)).size).toBe(52);
+      expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
+    } finally { await measured.$disconnect(); }
   });
   it("durably queues recognition with an immutable caller restriction and no financial movement", async () => {
     const f = await invoiceRecognitionFixture(), requested = await requestSupplierInvoiceRecognition(f.ctx, f.command, { db });
