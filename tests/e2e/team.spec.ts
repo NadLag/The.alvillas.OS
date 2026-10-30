@@ -297,12 +297,12 @@ test.describe("Team Management", () => {
       const staffContext = await browser.newContext(info.project.use);
       try {
         const staffPage = await staffContext.newPage();
-        await staffPage.goto("http://127.0.0.1:3000/en/login");
+        await staffPage.goto("/en/login");
         await staffPage.getByTestId("login-email").fill(staffEmail);
         await staffPage.getByTestId("login-password").fill(password);
         await staffPage.getByTestId("login-submit").click();
         await expect(staffPage).toHaveURL(/\/en\/app$/u);
-        await staffPage.goto(`http://127.0.0.1:3000/en/app/team/${personId}`);
+        await staffPage.goto(`/en/app/team/${personId}`);
         await expect(staffPage.getByRole("heading", { level: 1 })).toHaveText(name);
         const text = await staffPage.locator("body").innerText();
         expect(text).not.toContain("500.25");
@@ -315,7 +315,7 @@ test.describe("Team Management", () => {
             })
           ).status()
         ).toBe(404);
-        await staffPage.goto("http://127.0.0.1:3000/en/app/team");
+        await staffPage.goto("/en/app/team");
         await expect(staffPage.getByRole("link", { name, exact: true })).toBeVisible();
         await expect(
           staffPage.getByRole("link", { name: "ALVILLAS E2E Admin", exact: true })
@@ -352,7 +352,7 @@ test.describe("Team Management", () => {
         expect(
           (
             await anonymous.request.get(
-              `http://127.0.0.1:3000/api/team/documents/${fixture.document.id}`,
+              `/api/team/documents/${fixture.document.id}`,
               { maxRedirects: 0 }
             )
           ).status()
