@@ -448,9 +448,9 @@ describe("team management on real PostgreSQL", () => {
       await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: grant.id }, data: { validTo: new Date("2020-01-02") } }));
       expired = true;
     };
-    const originalLock = Reflect.get(TeamRepository.prototype, "lock") as TeamRepository["lock"];
-    const originalConfig = Reflect.get(ConfigRuleRepository.prototype, "createVersion") as ConfigRuleRepository["createVersion"];
-    const originalFlush = Reflect.get(TeamRepository.prototype, "flushGuards") as TeamRepository["flushGuards"];
+    const originalLock = Reflect.get<TeamRepository, "lock">(TeamRepository.prototype, "lock");
+    const originalConfig = Reflect.get<ConfigRuleRepository, "createVersion">(ConfigRuleRepository.prototype, "createVersion");
+    const originalFlush = Reflect.get<TeamRepository, "flushGuards">(TeamRepository.prototype, "flushGuards");
     const spy = boundary === "after_lock" ? vi.spyOn(TeamRepository.prototype, "lock").mockImplementation(async function (this: TeamRepository, ...args) {
       await originalLock.apply(this, args); await expire();
     }) : boundary === "after_configuration" ? vi.spyOn(ConfigRuleRepository.prototype, "createVersion").mockImplementation(async function (this: ConfigRuleRepository, ...args) {
