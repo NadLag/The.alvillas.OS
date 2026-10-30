@@ -169,7 +169,8 @@ export async function evaluateExpensePolicy(
 }
 
 /** Caller authorizes the actual expense before resolving its financial policy. */
-type ExpensePolicyOptions = { resource?: Resource; approvalAmount?: Money; resolvePeriodRevenue?: (config: ApprovalThresholdsConfig) => Promise<Money>; now?: Date; authorities?: readonly AuthContext[] };
+type ExpensePolicyOptions = { resource?: Resource; approvalAmount?: Money; resolvePeriodRevenue?: (config: ApprovalThresholdsConfig) => Promise<Money>; now?: Date; authorities?: readonly AuthContext[];
+  configuration?: Awaited<ReturnType<ConfigRuleRepository["scopedSnapshot"]>> };
 export async function evaluateExpensePolicyInTransaction(ctx: FinanceConfigActorContext, rawInput: ExpensePolicyInput, tx: TenantTransaction,
   options: ExpensePolicyOptions = {}): Promise<ExpensePolicyDecision> {
   const parsed = expensePolicyInputSchema.parse(rawInput), input = { ...parsed, asOf: parsed.asOf ?? new Date() };
@@ -194,7 +195,8 @@ async function evaluateCostPolicy(ctx: FinanceConfigActorContext, input: Omit<z.
   const asOf = input.asOf ?? new Date();
 
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
-    const snapshot = await repository.scopedSnapshot(scopes, asOf);
+    const snapshot = options.configuration ?? await repository.scopedSnapshot(scopes, asOf);
+    if (options.configuration && !snapshot.appliesTo(tx, ctx.organizationId, scopes, asOf)) throw new FinancePolicyContextChangedError("Financial configuration snapshot belongs to another transaction, organization, scope or instant");
     const allocationRule = snapshot.resolve("finance.expense_allocation") ?? snapshot.resolve("finance.expense_treatment");
 
     if (!allocationRule) {

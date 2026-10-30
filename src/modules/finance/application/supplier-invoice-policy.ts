@@ -7,6 +7,7 @@ import { authorizeOrganizationSource } from "@/platform/authz/organization-autho
 import { Money } from "@/platform/money/money";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { approvalThresholdsConfigSchema } from "@/platform/config/rule-registry";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
 import { CompanyLedgerRepository } from "../infrastructure/company-ledger-repository";
@@ -23,23 +24,30 @@ export const supplierInvoicePolicyInput = z.object({ id: z.uuid().transform(valu
 type PolicyInput = z.infer<typeof supplierInvoicePolicyInput>;
 type Line = NonNullable<SupplierInvoiceRecord["currentRevision"]>["lines"][number];
 type Stage = FinancialPolicyStage & { lineId: string; propertyId: string | null; reservationId: string | null };
+type CompanyConfiguration = { asOf: Date; snapshot: Awaited<ReturnType<ConfigRuleRepository["scopedSnapshot"]>>;
+  revenue: Map<string, { window: ReturnType<typeof expenseRevenueWindow>; amount: Money }> };
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
 
 async function companyLinePolicy(ctx: FinanceActorContext, row: SupplierInvoiceRecord, line: Line, input: PolicyInput, target: Resource,
-  timezone: string, authorities: readonly AuthContext[], tx: TenantTransaction, now: Date) {
+  timezone: string, authorities: readonly AuthContext[], tx: TenantTransaction, now: Date, configuration: CompanyConfiguration) {
   const amount = Money.of(line.amount.toString(), line.currency), companyLedger = new CompanyLedgerRepository(tx, ctx.organizationId);
   let revenueEvidence: Prisma.InputJsonObject | null = null;
   const policy = await evaluateCompanyCostPolicyInTransaction(ctx, { amount: amount.toJSON().amount, currency: line.currency, category: line.category,
-    emergency: input.emergency, asOf: calendarDateStart(input.occurredOn, timezone) }, tx, { resource: target, now, authorities,
+    emergency: input.emergency, asOf: configuration.asOf }, tx, { resource: target, now, authorities, configuration: configuration.snapshot,
     approvalAmount: Money.of(row.currentRevision!.amount.toString(), line.currency), resolvePeriodRevenue: async config => {
       if (!config.thresholds.some(threshold => threshold.percentage_of_revenue_bps !== undefined)) return Money.zero(line.currency);
       if (config.revenue_source?.basis !== "COMPANY_ACCOUNTS") throw new ExpensePolicyUnavailableError("Company percentage approval requires explicit company revenue accounts");
       if (authorities.some(authority => !authorizeOrganizationSource(authority, "view", { type: "company_ledger", organizationId: ctx.organizationId, dataClass: "financial" }, now)))
         throw new SupplierInvoiceAccessError();
-      const window = expenseRevenueWindow(config, input.occurredOn, timezone, null);
-      const value = await companyLedger.revenue({ ...window, currency: line.currency, accountCodes: config.revenue_source.account_codes });
-      const revenue = Money.of(value, line.currency);
-      if (revenue.amount.lt(0)) throw new ExpensePolicyUnavailableError("Company approval revenue cannot be negative");
+      const key = JSON.stringify({ occurredOn: input.occurredOn, timezone, currency: line.currency, period: config.revenue_period, source: config.revenue_source });
+      let observed = configuration.revenue.get(key);
+      if (!observed) {
+        const window = expenseRevenueWindow(config, input.occurredOn, timezone, null);
+        const amount = Money.of(await companyLedger.revenue({ ...window, currency: line.currency, accountCodes: config.revenue_source.account_codes }), line.currency);
+        if (amount.amount.lt(0)) throw new ExpensePolicyUnavailableError("Company approval revenue cannot be negative");
+        observed = { window, amount }; configuration.revenue.set(key, observed);
+      }
+      const { window, amount: revenue } = observed;
       revenueEvidence = json({ period: config.revenue_period, source: config.revenue_source, ...window, amount: revenue.toJSON() });
       return revenue;
     } });
@@ -77,20 +85,26 @@ export async function prepareSupplierInvoicePolicy(ctx: FinanceActorContext, row
     if (authorities.some(authority => organizationOnly ? !authorizeOrganizationSource(authority, "view", resource, now) : !authorize(authority, "view", resource, now))) throw new SupplierInvoiceAccessError();
   };
   const companyTimezone = revision.lines.some(line => !line.propertyId) ? (await new CompanyLedgerRepository(tx, ctx.organizationId).settings()).timezone : null;
+  const instants = new Map<string, Date>();
+  let companyConfiguration: CompanyConfiguration | undefined;
   for (const line of revision.lines) {
     const timezone = line.propertyId ? line.property?.timezone : companyTimezone;
     if (!timezone || line.property?.archivedAt || (line.propertyId && !line.property)) throw new ExpensePolicyUnavailableError("Invoice cost calendar and active property source are required");
-    const target = supplierInvoiceCostResource(ctx.organizationId, row, line, Money.of(line.amount.toString(), line.currency), input.occurredOn, timezone);
+    let instant = instants.get(timezone);
+    if (!instant) { instant = calendarDateStart(input.occurredOn, timezone); instants.set(timezone, instant); }
+    const target = supplierInvoiceCostResource(ctx.organizationId, row, line, Money.of(line.amount.toString(), line.currency), input.occurredOn, timezone, instant);
     const actorRoles = financePolicyRoleKeys(ctx, target, now, authorities); roleChecks.push({ resource: target, roles: actorRoles });
     const source = { ...target, type: "financial_transaction", id: undefined, financialRecordId: undefined };
     requireSource(source, !line.propertyId);
     if (line.reservationId) requireSource({ ...target, id: line.reservationId, financialRecordId: undefined,
       type: "reservation", status: line.reservation?.status, assignedUserAccountId: line.reservation?.createdBy ?? undefined });
+    if (!line.propertyId && !companyConfiguration) companyConfiguration = { asOf: instant,
+      snapshot: await new ConfigRuleRepository(tx, ctx.organizationId).scopedSnapshot([{ scopeType: "organization", scopeId: null }], instant), revenue: new Map() };
     const plan = line.propertyId ? await preparePropertyCostSubmissionPolicy(ctx, { id: line.id, propertyId: line.propertyId, reservationId: line.reservationId,
       amount: line.amount, currency: line.currency, category: line.category, occurredOn: new Date(input.occurredOn + "T00:00:00.000Z"), emergency: input.emergency,
       purpose: revision.purpose, property: { timezone } }, target, tx, now,
       { sourceKind: "supplier_invoice_line", invoiceId: row.id, revisionId: revision.id, lineId: line.id, actorRoles },
-      { approvalAmount: invoiceAmount, discloseOwnerSlice: true, authorities }) : await companyLinePolicy(ctx, row, line, input, target, timezone, authorities, tx, now);
+      { approvalAmount: invoiceAmount, discloseOwnerSlice: true, authorities }) : await companyLinePolicy(ctx, row, line, input, target, timezone, authorities, tx, now, companyConfiguration!);
     if ("requiresCompanyRevenue" in plan && plan.requiresCompanyRevenue) requireSource({ type: "company_ledger", organizationId: ctx.organizationId, dataClass: "financial" }, true);
     const revenues = z.object({ policies: z.array(z.object({ revenueEvidence: z.object({ amount: z.object({ amount: z.string() }) }).nullable().optional() })) }).parse(plan.snapshot);
     if (line.propertyId) for (const policy of revenues.policies) if (policy.revenueEvidence) requireSource({ ...source, amount: policy.revenueEvidence.amount.amount });
@@ -100,6 +114,24 @@ export async function prepareSupplierInvoicePolicy(ctx: FinanceActorContext, row
       category: line.category, costCenter: line.costCenter, policy: plan.snapshot });
   }
   const recheckAuthorization = async () => {
+    const related = revision.lines.filter(line => line.propertyId || line.reservationId);
+    if (related.length) {
+      const repository = new SupplierInvoiceRepository(tx, ctx.organizationId), actual = await repository.recognitionSource(row.id, related.map(line => line.id));
+      if (!actual || actual.archivedAt || actual.supplier.archivedAt || actual.currentRevision?.id !== revision.id || actual.currentRevision.lines.length !== related.length) throw new SupplierInvoiceAccessError();
+      const currentLines = new Map(actual.currentRevision.lines.map(line => [line.id, line]));
+      const reservationIds = related.flatMap(line => line.reservationId ? [line.reservationId] : []);
+      const reservations = new Map((reservationIds.length ? await repository.reservations(reservationIds) : []).map(reservation => [reservation.id, reservation]));
+      for (const captured of related) {
+        const current = currentLines.get(captured.id);
+        if (!current || current.propertyId !== captured.propertyId || current.reservationId !== captured.reservationId ||
+          current.propertyId && (!current.property || current.property.archivedAt || current.property.cityId !== captured.property?.cityId ||
+            current.property.regionId !== captured.property?.regionId || current.property.timezone !== captured.property?.timezone)) throw new SupplierInvoiceAccessError();
+        if (captured.reservationId) {
+          const reservation = reservations.get(captured.reservationId);
+          if (!reservation || reservation.propertyId !== captured.propertyId || reservation.status !== captured.reservation?.status || reservation.createdBy !== captured.reservation?.createdBy) throw new SupplierInvoiceAccessError();
+        }
+      }
+    }
     const at = await new FinanceRepository(tx, ctx.organizationId).clock(), renewed = await assertSupplierInvoiceAuthority(ctx, tx, "edit", at);
     for (const { resource, organizationOnly } of checks) if ([ctx.authContext, renewed].some(authority => organizationOnly ?
       !authorizeOrganizationSource(authority, "view", resource, at) : !authorize(authority, "view", resource, at))) throw new SupplierInvoiceAccessError();
