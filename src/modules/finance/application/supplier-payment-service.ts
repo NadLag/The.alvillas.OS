@@ -16,7 +16,7 @@ import { SupplierPayableRepository } from "../infrastructure/supplier-payable-re
 import { expenseFundingWalletResource, isExpenseFundingAccount } from "../domain/expense";
 import { supplierInvoiceCostResource } from "../domain/supplier-invoice";
 import { supplierPaymentPostings } from "../domain/supplier-payable";
-import { supplierPaymentInput, supplierPaymentVoidInput, supplierSettlementQuery } from "../domain/supplier-payment";
+import { supplierPaymentInput, supplierPaymentVoidInput, supplierSettlementQuery, supplierInvoiceReversalInput } from "../domain/supplier-payment";
 import { matchesFinancialReversalAttempt } from "../domain/financial-reversal";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
 import { inspectSupplierInvoiceRecognitionSource } from "./supplier-invoice-recognition";
@@ -45,6 +45,7 @@ function fundingChecks(ctx: FinanceActorContext, account: FinanceLedgerAccount, 
 async function prepareSettlement(ctx: FinanceActorContext, id: string, tx: TenantTransaction, action: "view" | "pay" | "void") {
   const source = await inspectSupplierInvoiceRecognitionSource(ctx, id, tx), payables = new SupplierPayableRepository(tx, ctx.organizationId);
   if (!source.existing) throw new SupplierInvoiceConflictError();
+  const originalCosts = new Map(source.existing.lines.map(link => [link.transactionId, source.costs.find(cost => cost.id === link.invoiceLineId)]));
   const sourceChecks = (verb: "view" | "pay" | "void") => {
     const checks: Check[] = [];
     for (const cost of source.costs) {
@@ -68,6 +69,12 @@ async function prepareSettlement(ctx: FinanceActorContext, id: string, tx: Tenan
     const paymentIds = journals.filter(journal => !journal.reversesTransactionId && journal.postings.some(posting => posting.bucket === "SUPPLIER_PAYMENT")).map(journal => journal.id);
     const receipts = new Map((paymentIds.length ? await payables.paymentAudits(paymentIds) : []).map(audit => [audit.resourceId, receipt.parse(audit.after)]));
     for (const journal of journals) {
+      const reversedCost = journal.reversesTransactionId && originalCosts.get(journal.reversesTransactionId);
+      if (reversedCost) {
+        const line = source.revision.lines.find(line => line.id === reversedCost.id)!;
+        const cost = supplierInvoiceCostResource(ctx.organizationId, source.row, line, reversedCost.amount, source.source.occurredOn.toISOString().slice(0, 10), reversedCost.timezone, reversedCost.sourceOccurredAt);
+        checks.push({ action: "view", resource: { ...cost, type: "financial_transaction", id: journal.id, financialRecordId: journal.id, occurredAt: journal.occurredAt }, organizationOnly: !line.propertyId });
+      }
       const payment = journal.postings.find(posting => posting.bucket === "SUPPLIER_PAYMENT");
       if (!payment) continue;
       const target = paymentResource(ctx, source, payment.amount.toString(), journal.occurredAt, journal.id);
@@ -243,5 +250,63 @@ export async function getSupplierSettlement(ctx: FinanceActorContext, raw: unkno
     ]);
     return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...supplierInvoiceOrganizationResource(ctx.organizationId), data: result },
       catalogFieldPolicy<typeof result>("supplier_invoice"), await source.finance.clock()) as typeof result;
+  }, { timeout: 120000 });
+}
+
+/** One source check for direct execution and durable admission; every original cost remains authoritative. */
+export async function prepareSupplierInvoiceReversal(ctx: FinanceActorContext, raw: unknown, tx: TenantTransaction) {
+  const input = supplierInvoiceReversalInput.parse(raw), source = await prepareSettlement(ctx, input.id, tx, "void");
+  const now = await source.finance.clock(), total = Money.of(source.revision.amount.toString(), source.revision.currency);
+  const checks: Check[] = source.costs.flatMap(cost => {
+    const line = source.revision.lines.find(line => line.id === cost.id)!;
+    const resource = supplierInvoiceCostResource(ctx.organizationId, source.row, line, total, source.source.occurredOn.toISOString().slice(0, 10), cost.timezone, cost.sourceOccurredAt);
+    const current = { ...resource, type: "financial_transaction", id: undefined, financialRecordId: undefined, occurredAt: now };
+    return [{ action: "view", resource: current, organizationOnly: !line.propertyId }, { action: "create", resource: current, organizationOnly: !line.propertyId }];
+  });
+  const recheck = (at: Date) => source.recheckSettlement(at, checks);
+  await recheck(now);
+  if (source.row.version !== input.expectedVersion) throw new SupplierInvoiceConflictError();
+  const originals = source.costs.map(cost => {
+    const link = source.existing!.lines.find(link => link.invoiceLineId === cost.id), journal = source.journals.find(journal => journal.id === link?.transactionId);
+    if (!journal || journal.reversesTransactionId) throw new SupplierInvoiceConflictError(); return journal;
+  });
+  const reversals = originals.flatMap(journal => journal.reversedByTransactions);
+  if (reversals.length) {
+    const audit = await source.finance.financialReversalAudit("finance.supplier_invoice.reversed", "supplier_invoice", [input.id]);
+    const intent = z.object({ idempotencyKey: z.uuid(), invoiceVersion: z.number().int() }).safeParse(audit?.after);
+    if (reversals.length !== originals.length || !intent.success || intent.data.idempotencyKey !== input.idempotencyKey || intent.data.invoiceVersion !== input.expectedVersion ||
+      !matchesFinancialReversalAttempt({ actorId: ctx.actorId, reason: input.reason, originalIds: originals.map(journal => journal.id), reversals, audit })) throw new SupplierInvoiceConflictError();
+  } else {
+    if (source.journals.some(journal => !journal.reversesTransactionId && journal.postings.some(posting => posting.bucket === "SUPPLIER_PAYMENT") && !journal.reversedByTransactions.length))
+      throw new SupplierInvoiceConflictError();
+    const outstanding = await source.payables.outstanding({ supplierId: source.row.supplierId, invoiceId: input.id, currency: source.revision.currency });
+    if (!outstanding.amount.eq(total.amount)) throw new SupplierInvoiceConflictError();
+    await new AccountingPeriodRepository(tx, ctx.organizationId).assertPostingOpen(now);
+  }
+  return { ...source, input, originals, reversals, now, recheckReversal: recheck };
+}
+
+/** Append the exact opposite of every original claim atomically after all actual payments were reversed. */
+export async function voidSupplierInvoiceClaim(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const source = await prepareSupplierInvoiceReversal(ctx, raw, tx), { input, originals, now } = source;
+    if (source.reversals.length) {
+      await source.recheckReversal(await source.finance.clock());
+      return { id: input.id, recognitionId: source.existing!.id,
+        reversalTransactionIds: originals.map(original => source.reversals.find(reversal => reversal.reversesTransactionId === original.id)!.id), idempotent: true };
+    }
+    const reversals = await source.finance.createFinancialTransactions(originals.map(original => ({ reference: original.reference + ":VOID", description: input.reason,
+      occurredAt: now, idempotencyKey: original.idempotencyKey + ":void", reversesTransactionId: original.id, createdBy: ctx.actorId,
+      postings: original.postings.map(posting => ({ ledgerAccountId: posting.ledgerAccountId, side: posting.side === "DEBIT" ? "CREDIT" as const : "DEBIT" as const,
+        amount: Money.of(posting.amount.toString(), posting.currency), bucket: z.string().parse(posting.bucket), dimensions: z.record(z.string(), z.unknown()).parse(posting.dimensions) })) })),
+      at => source.recheckReversal(at).then(() => undefined));
+    await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.supplier_invoice.reversed", resourceType: "supplier_invoice", resourceId: input.id,
+      after: { recognitionId: source.existing!.id, invoiceVersion: input.expectedVersion, idempotencyKey: input.idempotencyKey,
+        originalTransactionIds: originals.map(original => original.id), reversalTransactionIds: reversals.map(reversal => reversal.id) },
+      reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now });
+    await source.recognitions.flushGuards(); await source.recheckReversal(await source.finance.clock());
+    const outstanding = await source.payables.outstanding({ supplierId: source.row.supplierId, invoiceId: input.id, currency: source.revision.currency });
+    if (!outstanding.amount.isZero()) throw new SupplierInvoiceConflictError();
+    return { id: input.id, recognitionId: source.existing!.id, reversalTransactionIds: reversals.map(reversal => reversal.id), idempotent: false };
   }, { timeout: 120000 });
 }

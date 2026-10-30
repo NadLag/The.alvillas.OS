@@ -10,6 +10,8 @@ import { closeAccountingPeriod } from "@/modules/finance/application/accounting-
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { executeSupplierInvoiceRecognitionReference } from "@/modules/finance/application/supplier-invoice-recognition-requests";
 import { localClockLabel } from "@/platform/time/local-instant";
+import { voidSupplierInvoiceClaim } from "@/modules/finance/application/supplier-payment-service";
+import { formatCurrencyAmount } from "@/i18n/format";
 import { openFieldFixture } from "./support/field-fixture";
 import en from "../../messages/en.json" with { type: "json" };
 import fr from "../../messages/fr.json" with { type: "json" };
@@ -20,7 +22,7 @@ async function choose(picker: Locator, label: string) {
   await picker.press("ArrowDown"); await picker.press("Enter"); await expect(picker).toHaveValue(label);
 }
 test.use({ timezoneId: "America/Denver", actionTimeout: 30000, navigationTimeout: 60000 });
-for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice recording and payments survive lost acknowledgements and retain actual financial privacy in ${locale}`, async ({ page, browser }, info) => {
+for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice recording, payments and claim reversal retain exact history and financial privacy in ${locale}`, async ({ page, browser }, info) => {
   test.skip(!process.env.DATABASE_URL, "Dedicated local PostgreSQL required"); test.setTimeout(240000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw Error("Dedicated local PostgreSQL required");
   const f = await openFieldFixture(page, info, "en"), suffix = randomUUID().slice(0,8), messages = { en, fr, ar }[locale].SupplierInvoices;
@@ -159,6 +161,20 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
       expect(await tx.auditLog.count({ where: { action: "finance.supplier_payment.posted", reason: paymentReason } })).toBe(1);
       expect(await tx.auditLog.count({ where: { action: "finance.supplier_payment.reversed", reason: voidReason } })).toBe(1);
       expect(await tx.financialTransaction.findMany({ where: { id: { in: originals.map(original => original.id) } }, include: { postings: true } })).toEqual(originals);
+    });
+    const claimActor = { organizationId: f.organizationId, actorId: user.id, authContext: await authContextForAccount(f.organizationId, user.id, { db: f.db }) };
+    const version = await withTenant(f.db, f.organizationId, tx => tx.supplierInvoice.findUniqueOrThrow({ where: { id }, select: { version: true } }));
+    const claimCommand = { id, expectedVersion: version.version, idempotencyKey: randomUUID(), reason: "Reverse the actual native original supplier claim " + suffix };
+    const claimReversal = await voidSupplierInvoiceClaim(claimActor, claimCommand, { db: f.db });
+    expect(claimReversal.idempotent).toBe(false); expect(claimReversal.reversalTransactionIds).toHaveLength(1);
+    expect(await voidSupplierInvoiceClaim(claimActor, claimCommand, { db: f.db })).toMatchObject({ reversalTransactionIds: claimReversal.reversalTransactionIds, idempotent: true });
+    await payments.getByTestId("supplier-payment-refresh").click();
+    await expect(payments.getByTestId("supplier-payment-outstanding")).toHaveText(messages.payment.outstanding + ": " + formatCurrencyAmount(locale, "0.00", "MAD"));
+    await expect(payments.getByText(messages.payment.claimReversed, { exact: true })).toBeVisible(); await expect(payments.getByTestId("supplier-payment-form")).toHaveCount(0);
+    await expect(payments.getByTestId("supplier-payment-refresh")).toBeEnabled();
+    await withTenant(f.db, f.organizationId, async tx => {
+      expect(await tx.financialTransaction.findMany({ where: { id: { in: originals.map(original => original.id) } }, include: { postings: true } })).toEqual(originals);
+      expect(await tx.auditLog.count({ where: { action: "finance.supplier_invoice.reversed", resourceId: id } })).toBe(1);
     });
     const headers = { "content-type": request.headers()["content-type"], "next-action": request.headers()["next-action"] };
     expect(await (await anonymous.request.get(url)).text()).not.toContain(purpose);
