@@ -2,7 +2,9 @@ import { provisionIntegrationRole } from "./support/database-role";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { beforeAll, afterAll, describe, it, expect } from "vitest";
+import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
+import { TeamRepository } from "@/modules/identity/infrastructure/team-repository";
+import { authContextForAccount } from "@/platform/authz/account-context";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { permissionCatalog } from "@/platform/authz/catalog";
 import {
@@ -121,6 +123,15 @@ async function fixture() {
   return { ...rows, org, ctx: actor(org, rows.account.id, rows.person.id) };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
+async function compensationWriter(f: Fixture, conditions?: { maxAmount?: string; timeWindow?: { startsAt: string; endsAt: string } }) {
+  return withTenant(db, f.org, async tx => {
+    const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: ["staff_compensation:create", "staff_compensation:view"] } } });
+    const role = await tx.role.create({ data: { organizationId: f.org, key: "compensation_writer_" + randomUUID(), name: "Compensation administrator",
+      rolePermissions: { create: permissions.map(permission => ({ organizationId: f.org, permissionId: permission.id })) } } });
+    return tx.roleAssignment.create({ data: { organizationId: f.org, personId: f.person.id, userAccountId: f.account.id, roleId: role.id,
+      scopeType: "organization", conditions, validFrom: new Date("2020-01-01") } });
+  });
+}
 const deps = () => ({ db });
 async function assignment(f: Fixture) {
   return assignTeamRole(
@@ -177,6 +188,7 @@ describe("team management on real PostgreSQL", () => {
   });
   it("invites an explicitly selected active profile without changing its contacts or compensation history", async () => {
     const f = await fixture();
+    await compensationWriter(f);
     const person = await createPersonProfile(f.ctx, { displayName: "Existing staff profile", email: "existing-staff@example.test", phone: "+212600000003", preferredLocale: "fr" }, deps());
     const role = await assignTeamRole(f.ctx, { personId: person.id, roleId: f.role.id, scopeType: "property", scopeId: f.property.id, validFrom: "2027-01-01", validTo: null, assignedToMe: true, reason: "Preserve the staff assignment" }, deps());
     await saveTeamCompensation(f.ctx, { assignmentId: role.id, mode: "PER_MONTH", amount: "500.25", currency: "MAD", effectiveFrom: "2027-01-01", expectedVersion: 0, reason: "Preserve the agreed compensation" }, deps());
@@ -301,6 +313,7 @@ describe("team management on real PostgreSQL", () => {
   it("versions exact compensation per assignment with concurrent and immutable history safeguards", async () => {
     const f = await fixture(),
       a = await assignment(f);
+    await compensationWriter(f);
     const base = {
       assignmentId: a.id,
       expectedVersion: 0,
@@ -356,6 +369,7 @@ describe("team management on real PostgreSQL", () => {
   it("masks unauthorized contacts and financial fields and returns only a staff member's own record", async () => {
     const f = await fixture(),
       a = await assignment(f);
+    await compensationWriter(f);
     await saveTeamCompensation(
       f.ctx,
       {
@@ -413,6 +427,68 @@ describe("team management on real PostgreSQL", () => {
     await expect(
       teamMember(limited, { personId: f.ctx.personId, from: "2027-01-01", until: "2027-03-01" }, deps())
     ).rejects.toBeInstanceOf(IdentityAuthorizationError);
+  });
+  it("requires stored compensation authority even when the caller retains an old permission", async () => {
+    const f = await fixture(), a = await assignment(f);
+    await expect(saveTeamCompensation(f.ctx, { assignmentId: a.id, expectedVersion: 0, mode: "PER_JOB", amount: "500.25", currency: "MAD",
+      effectiveFrom: "2027-01-01", reason: "Do not trust a stale caller grant" }, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    expect(await withTenant(db, f.org, tx => tx.teamCompensation.count({ where: { organizationId: f.org } }))).toBe(0);
+  });
+  it.each(["after_lock", "after_configuration", "after_guards"] as const)("rolls back compensation and its configuration when authority expires %s", async boundary => {
+    const f = await fixture(), a = await assignment(f), grant = await compensationWriter(f);
+    const snapshot = () => withTenant(db, f.org, async tx => ({
+      rates: await tx.teamCompensation.findMany({ where: { organizationId: f.org }, orderBy: { id: "asc" } }),
+      configuration: await tx.configRule.findMany({ where: { organizationId: f.org }, orderBy: { id: "asc" } }),
+      audit: await tx.auditLog.findMany({ where: { organizationId: f.org }, orderBy: { id: "asc" } }),
+      outbox: await tx.outboxEvent.findMany({ where: { organizationId: f.org }, orderBy: { id: "asc" } })
+    }));
+    const before = await snapshot(); let expired = false;
+    const expire = async () => {
+      if (expired) return;
+      await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: grant.id }, data: { validTo: new Date("2020-01-02") } }));
+      expired = true;
+    };
+    const originalLock = Reflect.get<TeamRepository, "lock">(TeamRepository.prototype, "lock");
+    const originalConfig = Reflect.get<ConfigRuleRepository, "createVersion">(ConfigRuleRepository.prototype, "createVersion");
+    const originalFlush = Reflect.get<TeamRepository, "flushGuards">(TeamRepository.prototype, "flushGuards");
+    const spy = boundary === "after_lock" ? vi.spyOn(TeamRepository.prototype, "lock").mockImplementation(async function (this: TeamRepository, ...args) {
+      await originalLock.apply(this, args); await expire();
+    }) : boundary === "after_configuration" ? vi.spyOn(ConfigRuleRepository.prototype, "createVersion").mockImplementation(async function (this: ConfigRuleRepository, ...args) {
+      const row = await originalConfig.apply(this, args); if (args[0].key === "staff.compensation") await expire(); return row;
+    }) : vi.spyOn(TeamRepository.prototype, "flushGuards").mockImplementation(async function (this: TeamRepository, ...args) {
+      await originalFlush.apply(this, args); await expire();
+    });
+    try {
+      await expect(saveTeamCompensation(f.ctx, { assignmentId: a.id, expectedVersion: 0, mode: "PER_MONTH", amount: "4500.25", currency: "MAD",
+        effectiveFrom: "2027-01-01", reason: "Retain no writes after a grant expires" }, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+      expect(expired).toBe(true);
+      expect(await snapshot()).toEqual(before);
+    } finally { spy.mockRestore(); }
+  });
+  it("applies stored compensation limits to the actual amount and effective date", async () => {
+    const f = await fixture(), a = await assignment(f);
+    await compensationWriter(f, { maxAmount: "500.25", timeWindow: { startsAt: "2027-01-01", endsAt: "2027-01-31" } });
+    const input = { assignmentId: a.id, expectedVersion: 0, mode: "PER_JOB", amount: "500.25", currency: "MAD", effectiveFrom: "2027-01-01", reason: "Explicit contractual limit and date" };
+    await expect(saveTeamCompensation(f.ctx, { ...input, amount: "500.26" }, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    await expect(saveTeamCompensation(f.ctx, { ...input, effectiveFrom: "2027-02-01" }, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    const result = await saveTeamCompensation(f.ctx, input, deps());
+    expect(await withTenant(db, f.org, tx => tx.teamCompensation.findUniqueOrThrow({ where: { id: result.id } }))).toMatchObject({ assignmentId: a.id, version: 1 });
+  });
+  it("retains the caller's compensation limit when stored authority is broader", async () => {
+    const f = await fixture(), a = await assignment(f); await compensationWriter(f);
+    const permission = new Set(["staff_compensation:create"]);
+    const caller: IdentityActorContext = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: permission, assignments: [
+      { scope: { organizationId: f.org }, permissions: permission, conditions: { maxAmount: "400.00" } }
+    ] } };
+    await expect(saveTeamCompensation(caller, { assignmentId: a.id, expectedVersion: 0, mode: "PER_HOUR", amount: "400.01", currency: "MAD",
+      effectiveFrom: "2027-01-01", reason: "Never expand the caller restriction" }, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    expect(await withTenant(db, f.org, tx => tx.teamCompensation.count({ where: { organizationId: f.org } }))).toBe(0);
+  });
+  it("does not borrow a stored compensation grant for another actor", async () => {
+    const f = await fixture(), a = await assignment(f); await compensationWriter(f);
+    const stored = await authContextForAccount(f.org, f.account.id, deps());
+    await expect(saveTeamCompensation({ ...f.ctx, actorId: f.staffAccount.id, authContext: { ...stored, personId: f.person.id } },
+      { assignmentId: a.id, expectedVersion: 0, mode: "PER_JOB", amount: "500.25", currency: "MAD", effectiveFrom: "2027-01-01", reason: "Actor identity must match its authority" }, deps())).rejects.toBeInstanceOf(IdentityAuthorizationError);
   });
   it("rejects leave conflicts in both directions and serializes competing leave decisions", async () => {
     const f = await fixture();
@@ -880,7 +956,7 @@ describe("team management on real PostgreSQL", () => {
   });
 
   it.skipIf(!url)("own field wallet keeps compensation independently permissioned and displays only effective terms", async () => {
-    const f = await ownWalletFixture(); const assigned = await assignTeamRole(f.ctx, { personId: f.staff.id, roleId: f.role.id,
+    const f = await ownWalletFixture(); await compensationWriter(f); const assigned = await assignTeamRole(f.ctx, { personId: f.staff.id, roleId: f.role.id,
       scopeType: "property", scopeId: f.property.id, validFrom: "2020-01-01", validTo: null, assignedToMe: true, reason: "Explicit current staff assignment" }, deps());
     await saveTeamCompensation(f.ctx, { assignmentId: assigned.id, expectedVersion: 0, mode: "PER_MONTH", amount: "3500.00", currency: "MAD",
       effectiveFrom: "2021-01-01", reason: "Current authorized compensation terms" }, deps());

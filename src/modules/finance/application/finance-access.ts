@@ -1,7 +1,7 @@
 import type { Session } from "next-auth";
-import { authorize, type Action, type AuthContext, type Resource } from "@/platform/authz/authorize";
-import { authContextForAccount, authContextForAccountInTransaction } from "@/platform/authz/account-context";
-import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
+import { type Action, type AuthContext, type Resource } from "@/platform/authz/authorize";
+import { authContextForAccount } from "@/platform/authz/account-context";
+import { recheckAccountAuthorization } from "@/platform/authz/current-authority";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
 export type FinanceActorContext = {
@@ -13,10 +13,7 @@ export type FinanceActorContext = {
 /** Called after the period lock: retain caller restrictions and re-read stored grants. */
 export async function recheckFinanceAuthorization(ctx: FinanceActorContext, tx: TenantTransaction, now: Date,
   checks: ReadonlyArray<{ action: Action; resource: Resource; organizationOnly?: boolean }>, denied: Error) {
-  if (ctx.organizationId !== ctx.authContext.organizationId || ctx.actorId !== ctx.authContext.userAccountId) throw denied;
-  const current = { ...(await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId)), personId: ctx.authContext.personId };
-  if (checks.some(({ action, resource, organizationOnly }) => resource.organizationId !== ctx.organizationId ||
-    [ctx.authContext, current].some(authority => !(organizationOnly ? authorizeOrganizationSource(authority, action, resource, now) : authorize(authority, action, resource, now))))) throw denied;
+  await recheckAccountAuthorization(ctx, tx, now, checks, denied);
 }
 
 export async function financeActorContextFromSession(
