@@ -4,14 +4,18 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { EmployeeCompensationRunAccessError,EmployeeCompensationRunConflictError,EmployeeCompensationRunPolicyError } from "@/modules/finance/domain/employee-compensation-run";
 
-const boundary=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),create:vi.fn(),read:vi.fn(),cancel:vi.fn(),capture:vi.fn()}));
+const boundary=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),create:vi.fn(),read:vi.fn(),cancel:vi.fn(),capture:vi.fn(),list:vi.fn(),detail:vi.fn()}));
 vi.mock("@/platform/auth/session",()=>({auth:boundary.auth}));
 vi.mock("@/modules/finance/application/finance-access",()=>({financeActorContextFromSession:boundary.actor}));
 vi.mock("@/modules/finance/application/employee-compensation-run-service",()=>({createEmployeeCompensationRun:boundary.create,getEmployeeCompensationRun:boundary.read,cancelEmployeeCompensationRun:boundary.cancel}));
 vi.mock("@/platform/observability/sentry",()=>({captureException:boundary.capture}));
+vi.mock("@/modules/finance/application/employee-compensation-run-list",()=>({listEmployeeCompensationRuns:boundary.list}));
+vi.mock("@/modules/finance/application/employee-compensation-run-detail",()=>({getEmployeeCompensationRunDetail:boundary.detail}));
 import { POST as create } from "@/app/api/finance/compensation/runs/route";
 import { GET as read } from "@/app/api/finance/compensation/runs/[runId]/route";
 import { POST as cancel } from "@/app/api/finance/compensation/runs/[runId]/cancel/route";
+import { GET as list } from "@/app/api/finance/compensation/runs/list/route";
+import { GET as detail } from "@/app/api/finance/compensation/runs/[runId]/detail/route";
 
 const actor={organizationId:randomUUID(),actorId:randomUUID()},id=randomUUID(),origin="http://localhost:3138";
 const params=()=>({params:Promise.resolve({runId:id})});
@@ -22,6 +26,18 @@ const privateResponse=(response:Response)=>{expect(response.headers.get("cache-c
 describe("private persisted compensation run HTTP boundary",()=>{
   beforeEach(()=>{vi.clearAllMocks();boundary.auth.mockResolvedValue({user:{id:actor.actorId}});boundary.actor.mockResolvedValue(actor);
     boundary.create.mockResolvedValue({id,idempotent:false});boundary.read.mockResolvedValue({id});boundary.cancel.mockResolvedValue({id,idempotent:false});boundary.capture.mockResolvedValue(undefined);});
+  it("requires the authenticated finance session on list and evidence detail",async()=>{
+    boundary.actor.mockResolvedValue(null);
+    for(const response of[await list(get()),await detail(get(),params())]){expect(response.status).toBe(401);expect(await response.json()).toEqual({error:"unauthorized"});privateResponse(response);}
+    expect(boundary.list).not.toHaveBeenCalled();expect(boundary.detail).not.toHaveBeenCalled();
+  });
+  it("keeps evidence detail cursor validation and list query actor binding at the private HTTP boundary",async()=>{
+    boundary.list.mockResolvedValue({runs:[],next:null,canCreate:false});boundary.detail.mockResolvedValue({id});
+    const listed=await list(get("?query=Completed&state=draft"));expect(listed.status).toBe(200);privateResponse(listed);
+    expect(boundary.list.mock.calls[0]?.slice(0,2)).toEqual([actor,{query:"Completed",state:"draft"}]);
+    const response=await detail(get(),params());expect(response.status).toBe(200);privateResponse(response);expect(boundary.detail.mock.calls[0]?.slice(0,2)).toEqual([actor,{id}]);
+    const rejected=await detail(get("?organizationId="+randomUUID()),params());expect(rejected.status).toBe(400);privateResponse(rejected);expect(boundary.detail).toHaveBeenCalledTimes(1);
+  });
   it("requires the authenticated finance session on create, read and cancel",async()=>{
     boundary.actor.mockResolvedValue(null);
     for(const response of[await create(post()),await read(get(),params()),await cancel(post("/"+id+"/cancel"),params())]){
