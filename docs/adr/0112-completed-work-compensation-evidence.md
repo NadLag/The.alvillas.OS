@@ -1,0 +1,17 @@
+# ADR 0112: Bind per-job compensation estimates to immutable completed-work evidence
+
+Accepted: 2026-10-30
+
+Compensation belongs to a role assignment, and work performed on someone's behalf must retain its actual performer. A mutable task state or current assignee alone is insufficient evidence for a per-job estimate.
+
+Use the existing append-only operation task event that changes the task to `COMPLETED`. Require one such event with its tenant, task, version and actor intact. Direct and offline completion must identify the actual performer account. Proxy completion must identify a distinct validator, the original performer, validation time and reason; a performer without a login remains supported.
+
+Match the event with the current completion facts and completed checklist attribution. Require the selected contract's beneficiary, recorded role and property/city/region/job scope to match the performed work. Require explicit assignment confirmation. Reject a seeded completed state, missing evidence, inconsistent actor attribution, an incomplete checklist, a different contract role/property or a non-job rate.
+
+Compose the existing contractual estimate reader inside the same tenant transaction. It calculates one unit using the canonical rate at the recorded completion instant. Pass the validated job identity, performer and instant into that internal calculation so a single-job financial grant covers precisely that estimate. The standalone contract estimate receives no job context and remains independently protected. Recheck the task, contract and current caller/stored authority after both private read audits; roll back the whole read if either source or authority changes. Both audits share one request identifier and reuse staff compensation audit privacy. Return explicit provenance identifiers without the validator's private reason or unrelated operational details.
+
+The result is a `COMPLETED_JOB_ESTIMATE`; it does not recognize an employee claim or authorize payment. Compensation run policy must establish earning dates, approval, other quantified work sources, duplicate recognition and settlement rules. The recorded completion instant remains explicit, including for offline synchronization. F-FIN-24 remains in progress through those requirements, the public workflow and authenticated staging. No financial rows or applied migrations are changed here.
+
+Expose contract and completed-work estimates through a private POST endpoint using the existing Auth.js session and finance actor loader. The strict request schema accepts no caller or tenant identity. Share the existing field-upload same-origin/content-type check through a platform helper, reuse bounded JSON parsing, generate audit identifiers on the server, and make all estimate/error responses private and non-cacheable. Return generic denial, validation and source-unavailable codes. Native browser coverage completes an actual field task, calls the API with its authenticated session, verifies the immutable event and unchanged financial rows, and checks denial after actual salary authority expires.
+
+Tests use the production task creation, scheduling and completion services for direct, offline and proxy work. They cover a person without a login, rejection of a validator's contract, seeded states, altered checklists, role/property mismatches, source-date authorization, foreign tenants and late grant/geography changes with complete audit rollback.

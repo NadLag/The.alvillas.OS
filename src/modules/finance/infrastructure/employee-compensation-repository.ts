@@ -7,7 +7,7 @@ export class EmployeeCompensationRepository {
   async source(assignmentId: string, earnedAt: Date) {
     const assignment = await this.tx.roleAssignment.findFirst({ where: { organizationId: this.organizationId, id: assignmentId },
       select: { id: true, personId: true, roleId: true, scopeType: true, scopeId: true, validFrom: true, validTo: true, archivedAt: true,
-        person: { select: { archivedAt: true } }, teamCompensations: { where: { organizationId: this.organizationId, effectiveFrom: { lte: earnedAt } },
+        person: { select: { archivedAt: true } }, role: { select: { key: true } }, teamCompensations: { where: { organizationId: this.organizationId, effectiveFrom: { lte: earnedAt } },
           orderBy: { version: "desc" }, take: 1, select: { id: true, configRuleId: true, version: true, mode: true, amount: true, currency: true, effectiveFrom: true } } } });
     if (!assignment) return null;
     const job = assignment.scopeType === "job" && assignment.scopeId ? await this.tx.operationTask.findFirst({
@@ -20,5 +20,18 @@ export class EmployeeCompensationRepository {
     const region = assignment.scopeType === "region" && assignment.scopeId ? await this.tx.region.findFirst({
       where: { organizationId: this.organizationId, id: assignment.scopeId }, select: { id: true } }) : null;
     return { assignment, property, job, city, region, rate: assignment.teamCompensations[0] ?? null };
+  }
+
+  completedWork(taskId: string) {
+    return this.tx.operationTask.findFirst({ where: { organizationId: this.organizationId, id: taskId }, select: {
+      id: true, propertyId: true, requiredRoleKey: true, version: true, state: true, completedAt: true, completedByPersonId: true,
+      completedByUserAccountId: true, completionSource: true, completionIdempotencyKey: true,
+      validatedByPersonId: true, validatedByUserAccountId: true, validatedAt: true, validationReason: true,
+      property: { select: { id: true, cityId: true, regionId: true } },
+      checklistItems: { orderBy: { sortOrder: "asc" }, select: { id: true, completedAt: true, completedByPersonId: true, completedByUserAccountId: true } },
+      events: { where: { organizationId: this.organizationId, kind: "CHANGED", after: { path: ["state"], equals: "COMPLETED" },
+        NOT: { before: { path: ["state"], equals: "COMPLETED" } } }, orderBy: { version: "asc" }, take: 2,
+        select: { id: true, organizationId: true, taskId: true, version: true, actorId: true, before: true, after: true } }
+    } });
   }
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import type { Resource } from "@/platform/authz/authorize";
 import { present, catalogFieldPolicy } from "@/platform/authz/present";
@@ -18,17 +18,25 @@ export const employeeCompensationPreviewInput = z.object({ assignmentId: z.uuid(
 
 /** Preview a contract with explicit units. This does not approve work, accrue a claim, or move money. */
 export async function previewEmployeeCompensation(ctx: FinanceActorContext, raw: unknown, deps: { db?: TenantTransactionRunner; requestId?: string } = {}) {
-  const input = employeeCompensationPreviewInput.parse(raw), earnedAt = new Date(input.earnedAt);
-  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+  const input = employeeCompensationPreviewInput.parse(raw);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, tx => previewEmployeeCompensationInTransaction(ctx, input, tx, deps));
+}
+
+/** Internal financial sources compose in one tenant transaction, including their private read audit. */
+export async function previewEmployeeCompensationInTransaction(ctx: FinanceActorContext, input: z.infer<typeof employeeCompensationPreviewInput>,
+  tx: TenantTransaction, deps: { requestId?: string } = {}, completedJob?: { taskId: string; personId: string; completedAt: Date }) {
+    const earnedAt = new Date(input.earnedAt);
     const repository = new EmployeeCompensationRepository(tx, ctx.organizationId), finance = new FinanceRepository(tx, ctx.organizationId);
     const source = await repository.source(input.assignmentId, earnedAt);
     if (!source?.rate) throw new EmployeeCompensationAccessError();
     const { assignment, rate, property, job, city, region } = source;
+    if (completedJob && (input.basis.mode !== "PER_JOB" || input.basis.jobs !== "1" || completedJob.personId !== assignment.personId ||
+      completedJob.completedAt.getTime() !== earnedAt.getTime())) throw new EmployeeCompensationSourceUnavailableError();
     const resource: Resource = { type: "staff_compensation", id: assignment.personId, organizationId: ctx.organizationId, dataClass: "financial",
       assignedPersonId: assignment.personId, amount: rate.amount.toFixed(2), occurredAt: earnedAt,
       propertyId: property?.id, region: region?.id ?? city?.regionId ?? property?.regionId,
       city: city?.id ?? property?.cityId,
-      jobId: assignment.scopeType === "job" ? assignment.scopeId : undefined, reservationId: job?.reservationId };
+      jobId: completedJob?.taskId ?? (assignment.scopeType === "job" ? assignment.scopeId : undefined), reservationId: job?.reservationId };
     const check = async (amount?: Money) => recheckFinanceAuthorization(ctx, tx, await finance.clock(), [
       { action: "view", resource },
       ...(amount ? [{ action: "view" as const, resource: { ...resource, amount: amount.toJSON().amount } }] : [])
@@ -63,5 +71,4 @@ export async function previewEmployeeCompensation(ctx: FinanceActorContext, raw:
       compensationVersion: rate.version, configRuleId: rule.id, configVersion: rule.version, earnedAt: earnedAt.toISOString(),
       mode: rate.mode, rate: Money.of(rate.amount.toString(), rate.currency).toJSON(), basis: input.basis, amount: amount.toJSON() };
     return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...resource, data }, catalogFieldPolicy<typeof data>("staff_compensation"));
-  });
 }
