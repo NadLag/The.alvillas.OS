@@ -5,6 +5,7 @@ import { reservationActorContextFromSession, type ReservationActorContext } from
 import { ReservationAuthorizationError, ReservationConflictError, ReservationNotFoundError } from "@/modules/reservations/application/reservation-service";
 import { FieldUploadUnavailableError } from "@/modules/reservations/application/field-upload-service";
 import { readBoundedJsonRequest } from "@/platform/http/read-exact-response";
+import { isSameOriginContentType } from "@/platform/http/same-origin";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie" };
 type Handler = (ctx: ReservationActorContext, value: unknown, meta: { requestId: string; ipAddress: string | null }) => Promise<unknown>;
@@ -13,10 +14,7 @@ export async function fieldUploadRequest(request: NextRequest, action: Handler, 
 } = { contentType: "application/json", read: request => readBoundedJsonRequest(request, 65536) }) {
   const ctx = await reservationActorContextFromSession(await auth());
   if (!ctx) return NextResponse.json({ error: "unauthorized" }, { status: 401, headers });
-  // Match the existing private notification endpoint: Next can normalize the
-  // internal URL hostname, while Host retains the browser's requested authority.
-  const url = new URL(request.url), expectedOrigin = `${url.protocol}//${request.headers.get("host") ?? url.host}`;
-  if (request.headers.get("origin") !== expectedOrigin || request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== options.contentType)
+  if (!isSameOriginContentType(request, options.contentType))
     return NextResponse.json({ error: "forbidden" }, { status: 403, headers });
   let value: unknown;
   try { value = await options.read(request); }

@@ -10,6 +10,11 @@ import { ensureStandardIdentitySetup } from "@/modules/identity/application/iden
 import { assignTeamRole, saveTeamCompensation } from "@/modules/identity/application/team-service";
 import { previewEmployeeCompensation, EmployeeCompensationAccessError, EmployeeCompensationSourceUnavailableError } from "@/modules/finance/application/employee-compensation-service";
 import { EmployeeCompensationRepository } from "@/modules/finance/infrastructure/employee-compensation-repository";
+import { previewEmployeeCompletedWork } from "@/modules/finance/application/employee-completed-work-service";
+import { createOperationTask, proxyCompleteOperationTask } from "@/modules/reservations/application/operation-service";
+import { assignOperationTask } from "@/modules/reservations/application/operation-scheduling";
+import { completeAssignedFieldTask, completeAssignedFieldTaskInTransaction } from "@/modules/reservations/application/reservation-service";
+import operatingPolicy from "@/platform/config/defaults/operations.json";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -54,6 +59,43 @@ async function rate(f: Fixture, mode = "PER_JOB", amount = "500.25", expectedVer
   return saveTeamCompensation(f.ctx, { assignmentId, mode, amount, currency: "MAD", expectedVersion, effectiveFrom, reason: "Actual immutable contractual compensation version" }, { db });
 }
 const input = (f: Fixture, basis: Record<string, string> = { mode: "PER_JOB", jobs: "3" }) => ({ assignmentId: f.assignment.id, earnedAt: "2027-01-15T12:00:00Z", basis });
+
+async function completedFixture(method: "SELF" | "OFFLINE_SYNC" | "PROXY", noLogin = false) {
+  const f = await fixture();
+  const operations = await reader(f, { permissions: ["task:view", "task:create", "task:edit", "task:assign", "task:validate"] });
+  const ctx = { ...operations.ctx, personId: f.person.id };
+  await withTenant(db, f.org, async tx => {
+    const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: ["task:view", "task:edit"] } } });
+    await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: f.role.id, permissionId: permission.id })) });
+    const policy = structuredClone(operatingPolicy); policy.types.INSPECTION.role_keys = [f.role.key];
+    await new ConfigRuleRepository(tx, f.org).createVersion({ key: "ops.task_policy", scopeType: "organization", effectiveFrom: new Date("2020-01-01"),
+      value: policy, reason: "Actual configured compensation task routing" });
+    await new ConfigRuleRepository(tx, f.org).createVersion({ key: "ops.checklists", scopeType: "organization", effectiveFrom: new Date("2020-01-01"),
+      value: { checklists: [{ key: "compensation_work", name: { en: "Completed contracted work", fr: "Travail contractuel terminé" },
+        items: [{ key: "completed", label: { en: "Confirm contracted work", fr: "Confirmer le travail contractuel" } }] }] }, reason: "Actual completed-work checklist evidence" });
+  });
+  const performer = noLogin ? await withTenant(db, f.org, tx => tx.person.create({ data: { organizationId: f.org, displayName: "Performer without login" } })) : f.staff;
+  const contract = noLogin ? await assignTeamRole(ctx, { personId: performer.id, roleId: f.role.id, scopeType: "property", scopeId: f.property.id,
+    userAccountId: null, validFrom: "2020-01-01", validTo: null, assignedToMe: false, reason: "Actual contract for person-only completed work" }, { db }) : f.assignment;
+  await saveTeamCompensation(ctx, { assignmentId: contract.id, expectedVersion: 0, mode: "PER_JOB", amount: "500.25", currency: "MAD", effectiveFrom: "2020-01-01",
+    reason: "Actual configured per-job compensation" }, { db });
+  const created = await createOperationTask(ctx, { propertyId: f.property.id, type: "INSPECTION", title: { en: "Perform contracted work", fr: "Réaliser le travail contractuel" },
+    dueDate: "2027-04-10", priority: "NORMAL", checklistTemplateKey: "compensation_work", idempotencyKey: randomUUID(), reason: "Actual completed-work source creation" }, { db, requestId: randomUUID() });
+  const assigned = await assignOperationTask(ctx, { taskId: created.id, expectedVersion: created.version, personId: performer.id,
+    startMinute: 600, idempotencyKey: randomUUID(), reason: "Actual performer assignment before completion" }, { db, requestId: randomUUID() });
+  const checklistItemIds = assigned.checklistItems.map(item => item.id), requestId = randomUUID();
+  if (method === "PROXY") await proxyCompleteOperationTask(ctx, { taskId: assigned.id, expectedVersion: assigned.version, performedByPersonId: performer.id,
+    checklistItemIds, idempotencyKey: randomUUID(), reason: "Validate the colleague's work while they are offline" }, { db, requestId });
+  else {
+    const worker = { organizationId: f.org, actorId: f.staffAccount.id, personId: f.staff.id,
+      authContext: { ...await authContextForAccount(f.org, f.staffAccount.id, { db }), personId: f.staff.id } };
+    const command = { taskId: assigned.id, checklistItemIds, idempotencyKey: randomUUID(), note: "Actual performed contracted work" };
+    if (method === "SELF") await completeAssignedFieldTask(worker, command, { db, requestId });
+    else await withTenant(db, f.org, tx => completeAssignedFieldTaskInTransaction(worker, command, tx,
+      { requestId, ipAddress: null }, "OFFLINE_SYNC"));
+  }
+  return { ...f, ctx, performer, contract, taskId: assigned.id };
+}
 
 describe("canonical employee compensation sources on real PostgreSQL", () => {
   beforeAll(async () => {
@@ -210,5 +252,124 @@ describe("canonical employee compensation sources on real PostgreSQL", () => {
       expect(after.result).toEqual(before.result);
       expect(after.queries).toBe(before.queries);
     } finally { await observed.$disconnect(); }
+  });
+  it.each(["SELF", "OFFLINE_SYNC", "PROXY"] as const)("binds %s completed work to its actual performer and immutable event", async method => {
+    const f = await completedFixture(method), requestId = randomUUID();
+    const result = await previewEmployeeCompletedWork(f.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: true }, { db, requestId });
+    expect(result).toMatchObject({ kind: "COMPLETED_JOB_ESTIMATE", taskId: f.taskId, performedByPersonId: f.performer.id, completionMethod: method,
+      basis: { mode: "PER_JOB", jobs: "1" }, amount: { amount: "500.25", currency: "MAD" } });
+    expect(result.performedByPersonId).not.toBe(f.person.id);
+    const event = await withTenant(db, f.org, tx => tx.operationTaskEvent.findUniqueOrThrow({ where: { id: result.completionEventId } }));
+    expect(event).toMatchObject({ taskId: f.taskId, version: result.completionVersion });
+    const audits = await withTenant(db, f.org, tx => tx.auditLog.findMany({ where: { requestId }, orderBy: { id: "asc" } }));
+    expect(audits.map(row => row.action).sort()).toEqual(["team.compensation.completed_work.preview", "team.compensation.preview"]);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(0);
+  });
+  it("preserves a person-only proxy performer without requiring a worker login", async () => {
+    const f = await completedFixture("PROXY", true);
+    expect(await previewEmployeeCompletedWork(f.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: true }, { db })).toMatchObject({
+      performedByPersonId: f.performer.id, completionMethod: "PROXY", amount: { amount: "500.25" } });
+  });
+  it("rejects the proxy validator's contract and an unconfirmed assignment", async () => {
+    const f = await completedFixture("PROXY");
+    const validatorContract = await withTenant(db, f.org, tx => tx.roleAssignment.findFirstOrThrow({ where: { organizationId: f.org, personId: f.person.id, scopeType: "organization" } }));
+    await saveTeamCompensation(f.ctx, { assignmentId: validatorContract.id, expectedVersion: 0, mode: "PER_JOB", amount: "700.25", currency: "MAD",
+      effectiveFrom: "2020-01-01", reason: "Validator contract is not the performer's contract" }, { db });
+    await expect(previewEmployeeCompletedWork(f.ctx, { taskId: f.taskId, assignmentId: validatorContract.id, confirmedAssignment: true }, { db })).rejects.toBeInstanceOf(EmployeeCompensationAccessError);
+    await expect(previewEmployeeCompletedWork(f.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: false }, { db })).rejects.toThrow();
+  });
+  it("rejects a seeded completed state without its actual immutable completion event", async () => {
+    const f = await completedFixture("SELF");
+    const seeded = await withTenant(db, f.org, tx => tx.operationTask.create({ data: { organizationId: f.org, propertyId: f.property.id, type: "INSPECTION", state: "COMPLETED",
+      dueDate: new Date("2027-04-10"), titleTranslations: { en: "Unverified state", fr: "État non vérifié" }, idempotencyKey: randomUUID(),
+      completedAt: new Date(), completedByPersonId: f.staff.id, completedByUserAccountId: f.staffAccount.id, completionSource: "SELF", completionIdempotencyKey: randomUUID() } }));
+    await expect(previewEmployeeCompletedWork(f.ctx, { taskId: seeded.id, assignmentId: f.contract.id, confirmedAssignment: true }, { db })).rejects.toBeInstanceOf(EmployeeCompensationSourceUnavailableError);
+  });
+  it("requires the actual completed checklist to retain the performer attribution", async () => {
+    const f = await completedFixture("SELF");
+    await withTenant(db, f.org, tx => tx.operationTaskChecklistItem.updateMany({ where: { organizationId: f.org, taskId: f.taskId },
+      data: { completedAt: null, completedByPersonId: null, completedByUserAccountId: null } }));
+    await expect(previewEmployeeCompletedWork(f.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: true }, { db })).rejects.toBeInstanceOf(EmployeeCompensationSourceUnavailableError);
+  });
+  it("requires the contract's role to match the role recorded for the performed job", async () => {
+    const f = await completedFixture("SELF");
+    const role = await withTenant(db, f.org, tx => tx.role.create({ data: { organizationId: f.org, key: "different_contracted_work", name: "A different contracted role" } }));
+    const assignment = await assignTeamRole(f.ctx, { personId: f.staff.id, roleId: role.id, scopeType: "property", scopeId: f.property.id,
+      validFrom: "2020-01-01", validTo: null, assignedToMe: false, reason: "Independent role cannot consume another role's job" }, { db });
+    await saveTeamCompensation(f.ctx, { assignmentId: assignment.id, expectedVersion: 0, mode: "PER_JOB", amount: "800.25", currency: "MAD",
+      effectiveFrom: "2020-01-01", reason: "Actual distinct contractual source" }, { db });
+    await expect(previewEmployeeCompletedWork(f.ctx, { taskId: f.taskId, assignmentId: assignment.id, confirmedAssignment: true }, { db })).rejects.toBeInstanceOf(EmployeeCompensationSourceUnavailableError);
+  });
+  it("rejects a job outside the contract's actual property and a non-job rate", async () => {
+    const f = await completedFixture("SELF");
+    const property = await withTenant(db, f.org, tx => tx.property.create({ data: { organizationId: f.org, name: "Different contract property", addressLine1: "Private other address",
+      city: f.city.name, cityId: f.city.id, regionId: f.region.id, propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [], photoUrls: [] } }));
+    const contract = await assignTeamRole(f.ctx, { personId: f.staff.id, roleId: f.role.id, scopeType: "property", scopeId: property.id,
+      validFrom: "2020-01-01", validTo: null, assignedToMe: false, reason: "Different property has its own independent rate" }, { db });
+    await saveTeamCompensation(f.ctx, { assignmentId: contract.id, expectedVersion: 0, mode: "PER_JOB", amount: "900.25", currency: "MAD", effectiveFrom: "2020-01-01",
+      reason: "Actual other property rate" }, { db });
+    await expect(previewEmployeeCompletedWork(f.ctx, { taskId: f.taskId, assignmentId: contract.id, confirmedAssignment: true }, { db })).rejects.toBeInstanceOf(EmployeeCompensationSourceUnavailableError);
+    await saveTeamCompensation(f.ctx, { assignmentId: f.contract.id, expectedVersion: 1, mode: "PER_HOUR", amount: "50.25", currency: "MAD", effectiveFrom: "2021-01-01",
+      reason: "Hourly work requires its quantified work evidence" }, { db });
+    await expect(previewEmployeeCompletedWork(f.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: true }, { db })).rejects.toBeInstanceOf(EmployeeCompensationSourceUnavailableError);
+  });
+  it("uses recorded completion time instead of the planned due date for the caller's time limit", async () => {
+    const f = await completedFixture("SELF");
+    const limited = await reader({ org: f.org, person: f.staff, account: f.staffAccount }, { conditions: { timeWindow: { startsAt: "2027-01-01", endsAt: "2027-12-31" } } });
+    await expect(previewEmployeeCompletedWork(limited.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: true }, { db })).rejects.toBeInstanceOf(EmployeeCompensationAccessError);
+    const foreign = await fixture();
+    await expect(previewEmployeeCompletedWork(foreign.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: true }, { db })).rejects.toBeInstanceOf(EmployeeCompensationAccessError);
+  });
+  it("honors an explicit single-job financial grant without exposing other jobs or the full contract estimate", async () => {
+    const f = await completedFixture("SELF");
+    const limited = await reader({ org: f.org, person: f.staff, account: f.staffAccount }, { scopeType: "job", scopeId: f.taskId });
+    expect(await previewEmployeeCompletedWork(limited.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: true }, { db })).toMatchObject({
+      taskId: f.taskId, amount: { amount: "500.25" } });
+    await expect(previewEmployeeCompensation(limited.ctx, { assignmentId: f.contract.id, earnedAt: new Date().toISOString(), basis: { mode: "PER_JOB", jobs: "1" } }, { db })).rejects.toBeInstanceOf(EmployeeCompensationAccessError);
+    const created = await createOperationTask(f.ctx, { propertyId: f.property.id, type: "INSPECTION", title: { en: "A different job", fr: "Un autre travail" },
+      dueDate: "2027-04-11", priority: "NORMAL", checklistTemplateKey: "compensation_work", idempotencyKey: randomUUID(), reason: "Actual separate job in the same tenant" }, { db, requestId: randomUUID() });
+    const other = await assignOperationTask(f.ctx, { taskId: created.id, expectedVersion: created.version, personId: f.staff.id,
+      startMinute: 600, idempotencyKey: randomUUID(), reason: "Actual separate assignment for the same performer" }, { db, requestId: randomUUID() });
+    const worker = { organizationId: f.org, actorId: f.staffAccount.id, personId: f.staff.id,
+      authContext: { ...await authContextForAccount(f.org, f.staffAccount.id, { db }), personId: f.staff.id } };
+    await completeAssignedFieldTask(worker, { taskId: other.id, checklistItemIds: other.checklistItems.map(item => item.id),
+      idempotencyKey: randomUUID(), note: "Complete the independent second job" }, { db, requestId: randomUUID() });
+    await expect(previewEmployeeCompletedWork(limited.ctx, { taskId: other.id, assignmentId: f.contract.id, confirmedAssignment: true }, { db })).rejects.toBeInstanceOf(EmployeeCompensationAccessError);
+  });
+  it("rolls back both source read audits when the actual grant expires after all source reads", async () => {
+    const f = await completedFixture("PROXY"), limited = await reader({ org: f.org, person: f.staff, account: f.staffAccount }), requestId = randomUUID();
+    const original = Reflect.get<EmployeeCompensationRepository, "source">(EmployeeCompensationRepository.prototype, "source"); let reads = 0, expired = false;
+    const spy = vi.spyOn(EmployeeCompensationRepository.prototype, "source").mockImplementation(async function (this: EmployeeCompensationRepository, ...args) {
+      const source = await original.apply(this, args);
+      if (++reads === 5) {
+        await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: limited.grant.id }, data: { validTo: new Date("2020-01-01") } }));
+        expired = true;
+      }
+      return source;
+    });
+    try {
+      await expect(previewEmployeeCompletedWork(limited.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: true }, { db, requestId })).rejects.toBeInstanceOf(EmployeeCompensationAccessError);
+      expect(expired).toBe(true);
+      expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { requestId } }))).toBe(0);
+    } finally { spy.mockRestore(); }
+  });
+  it("rejects a property scope change inside the contractual estimate and rolls back the complete job read", async () => {
+    const f = await completedFixture("PROXY"), limited = await reader({ org: f.org, person: f.staff, account: f.staffAccount }, { scopeType: "city", scopeId: f.city.id }), requestId = randomUUID();
+    const original = Reflect.get<ConfigRuleRepository, "resolve">(ConfigRuleRepository.prototype, "resolve"); let reads = 0, changed = false;
+    const spy = vi.spyOn(ConfigRuleRepository.prototype, "resolve").mockImplementation(async function (this: ConfigRuleRepository, ...args) {
+      const rule = await original.apply(this, args);
+      if (args[0].key === "staff.compensation" && ++reads === 3) {
+        await withTenant(db, f.org, async tx => {
+          const city = await tx.city.create({ data: { organizationId: f.org, regionId: f.region.id, name: "Different actual work scope" } });
+          await tx.property.update({ where: { id: f.property.id }, data: { cityId: city.id } });
+        }); changed = true;
+      }
+      return rule;
+    });
+    try {
+      await expect(previewEmployeeCompletedWork(limited.ctx, { taskId: f.taskId, assignmentId: f.contract.id, confirmedAssignment: true }, { db, requestId })).rejects.toBeInstanceOf(EmployeeCompensationAccessError);
+      expect(changed).toBe(true);
+      expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { requestId } }))).toBe(0);
+    } finally { spy.mockRestore(); }
   });
 });
