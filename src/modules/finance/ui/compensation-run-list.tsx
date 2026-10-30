@@ -12,6 +12,7 @@ export function CompensationRunList({locale,query,state,after}:{locale:AppLocale
   const resource=useCompensationRead(`/api/finance/compensation/runs/list?${params}`,employeeCompensationRunListSchema);
   const next=new URLSearchParams({q:query,state});if(resource.data?.next)next.set("after",resource.data.next);
   return <div aria-busy={resource.pending} data-testid="compensation-list">
+    {resource.data?.canCreate?<div className="app-actions"><Link className="primary-button" href={`/${locale}/app/finance/compensation/new`} prefetch={false} data-testid="compensation-new">{t("create")}</Link></div>:null}
     <form className="compensation-filters" method="get">
       <label className="field"><span>{t("search")}</span><input type="search" name="q" defaultValue={query} maxLength={160} dir="auto" data-testid="compensation-search" /></label>
       <label className="field"><span>{t("state")}</span><select name="state" defaultValue={state} data-testid="compensation-state"><option value="all">{t("allStates")}</option><option value="draft">{t("states.DRAFT")}</option><option value="cancelled">{t("states.CANCELLED")}</option></select></label>
