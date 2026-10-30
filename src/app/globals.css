@@ -37,12 +37,34 @@
 .compensation-cancellation textarea { inline-size: 100%; min-block-size: 6rem; }
 .compensation-cancellation button { justify-self: start; }
 .compensation-notice { padding: var(--space-5); background: var(--surface-muted); border-radius: var(--radius-md); margin-block: var(--space-5); }
+.compensation-create-form { min-inline-size: 0; display: grid; gap: var(--space-6); }
+.compensation-create-form > fieldset { min-inline-size: 0; margin: 0; }
+.compensation-work-picker { padding: 0; border: 0; display: grid; gap: var(--space-4); }
+.compensation-work-picker > legend, .compensation-create-form > fieldset > legend { font-weight: var(--font-weight-semibold); font-size: var(--font-size-lg); padding-block: var(--space-3); }
+.compensation-contract-choice { display: flex; align-items: start; gap: var(--space-3); min-block-size: var(--target-min); padding-block: var(--space-4); border-block-end: 1px solid var(--border-subtle); cursor: pointer; }
+.compensation-contract-choice input { margin-block-start: var(--space-2); min-inline-size: var(--target-compact); min-block-size: var(--target-compact); accent-color: var(--accent); }
+.compensation-contract-choice > span { display: grid; min-inline-size: 0; gap: var(--space-2); overflow-wrap: anywhere; }
+.compensation-contract-choice small { color: var(--text-secondary); }
+.compensation-work-choice > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); cursor: pointer; list-style: none; min-block-size: var(--target-min); }
+.compensation-work-choice > summary::-webkit-details-marker { display: none; }
+.compensation-work-choice > summary > span:first-child { display: grid; min-inline-size: 0; overflow-wrap: anywhere; gap: var(--space-1); }
+.compensation-work-choice > summary small { color: var(--text-secondary); }
+.compensation-work-choice[open] > summary > svg { transform: rotate(180deg); }
+.compensation-choice-state { font-size: var(--font-size-sm); color: var(--accent); max-inline-size: 12rem; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.compensation-contract-options { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+.compensation-work-choice[open] > summary { padding-block-end: var(--space-4); border-block-end: 1px solid var(--border-subtle); }
+.compensation-create-review { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); padding-block: var(--space-5); border-block-start: 1px solid var(--border-subtle); }
+.compensation-create-review p { flex: 1 1 100%; margin: 0; }
 @media (max-width: 600px) {
   .compensation-summary, .compensation-evidence { grid-template-columns: minmax(0, 1fr); }
   .compensation-filters { align-items: stretch; flex-direction: column; }
   .compensation-filters .field:first-child { flex-basis: auto; }
   .compensation-source { padding: var(--space-4); }
   .compensation-source-heading { flex-direction: column; }
+  .compensation-work-choice > summary { grid-template-columns: minmax(0, 1fr) auto; }
+  .compensation-work-choice > summary > span:first-child { grid-row: span 2; }
+  .compensation-work-choice > summary > svg { grid-column: 2; justify-self: end; }
+  .compensation-choice-state { max-inline-size: 7rem; }
 }
 .team-section { padding-block: var(--space-6); border-block-end: 1px solid var(--border); }
 .team-section > h2 { margin-block: 0 var(--space-4); }

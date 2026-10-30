@@ -6,6 +6,7 @@ const lineFields = { id: true, taskId: true, personId: true, assignmentId: true,
   property: { select: { cityId: true, regionId: true } } } as const;
 const include = { lines: { orderBy: { id: "asc" as const }, select: lineFields }, cancellation: true } satisfies Prisma.EmployeeCompensationRunInclude;
 export type CompensationRunRecord = Prisma.EmployeeCompensationRunGetPayload<{ include: typeof include }>;
+export type CompensationDisplaySource=Awaited<ReturnType<EmployeeCompensationRunRepository["displayLines"]>>[number];
 
 export class EmployeeCompensationRunRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
