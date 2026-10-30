@@ -3,6 +3,7 @@ import type { AuthorizationCap } from "@/platform/authz/authorization-cap";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
 export type RecognitionOutcomeState = "SUCCEEDED" | "DENIED" | "CONFLICT" | "FAILED";
+export type SupplierInvoiceFinancialOperation = "RECOGNIZE" | "REVERSE";
 export class SupplierInvoiceRecognitionRequestRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
   async lockRequest(id: string) {
@@ -13,16 +14,16 @@ export class SupplierInvoiceRecognitionRequestRepository {
   }
   find(id: string) { return this.tx.supplierInvoiceRecognitionRequest.findFirst({ where: { organizationId: this.organizationId, id }, include: { outcome: true } }); }
   byKey(idempotencyKey: string) { return this.tx.supplierInvoiceRecognitionRequest.findFirst({ where: { organizationId: this.organizationId, idempotencyKey }, include: { outcome: true } }); }
-  history(invoiceId: string, before?: string) {
-    return this.tx.supplierInvoiceRecognitionRequest.findMany({ where: { organizationId: this.organizationId, invoiceId, ...(before ? { id: { lt: before } } : {}) },
+  history(invoiceId: string, before?: string, operation: SupplierInvoiceFinancialOperation = "RECOGNIZE") {
+    return this.tx.supplierInvoiceRecognitionRequest.findMany({ where: { organizationId: this.organizationId, invoiceId, operation, ...(before ? { id: { lt: before } } : {}) },
       orderBy: { id: "desc" }, take: 51, select: { id: true, reason: true, requestedAt: true, currentPeriod: true,
         outcome: { select: { state: true, occurredAt: true, failureCode: true } } } });
   }
-  pending(invoiceId: string) {
-    return this.tx.supplierInvoiceRecognitionRequest.findFirst({ where: { organizationId: this.organizationId, invoiceId, outcome: null }, select: { id: true } });
+  pending(invoiceId: string, operation: SupplierInvoiceFinancialOperation = "RECOGNIZE") {
+    return this.tx.supplierInvoiceRecognitionRequest.findFirst({ where: { organizationId: this.organizationId, invoiceId, operation, outcome: null }, select: { id: true } });
   }
   create(input: { invoiceId: string; submissionId: string; invoiceVersion: number; currentPeriod: boolean; idempotencyKey: string;
-    requestFingerprint: string; reason: string; authorizationCap: AuthorizationCap; requestedBy: string }) {
+    requestFingerprint: string; reason: string; authorizationCap: AuthorizationCap; requestedBy: string; operation?: SupplierInvoiceFinancialOperation }) {
     return this.tx.supplierInvoiceRecognitionRequest.create({ data: { organizationId: this.organizationId, ...input,
       authorizationCap: input.authorizationCap } });
   }

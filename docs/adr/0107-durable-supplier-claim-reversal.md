@@ -1,0 +1,11 @@
+# Durable supplier claim reversal
+
+Measured reversal of 500 immutable supplier costs takes about eight seconds. Browser admission therefore captures the original caller and intent in the existing financial request table and outbox; the existing worker performs the whole cancellation and terminal receipt in one transaction. No browser action executes the journal batch directly.
+
+An immutable operation distinguishes recognition from reversal. A constant recognition default preserves existing rows and their original fingerprints, outcomes and event identities. Recognition history and pending reads filter by operation. Reversal never requires payment permission: the original recognition may belong to a different operator, while cancellation uses its own captured void authority and fresh stored grants. Every original cost, contributing payment and original/current date remains protected by the shared source and financial services.
+
+The existing recognition execution and explicit failure handlers accept both event types without changing their stable function identities, concurrency or retry limits. There are still nine registered handlers. Events carry only organization and outbox identities; the database checks the canonical opaque request payload, operation, timestamp and event key. Completion binds the whole immutable reversal receipt to the request's actor, nonce, reason, invoice version and actual original recognition. An exhausted or denied reversal cannot overwrite its committed cancellation.
+
+Existing cancellations can be adopted only through the exact original intent and actor. Admission writes their success receipt atomically, without another journal or pending work. Historical completion checks retain the original posting date; they do not require the old period to be open today or its timestamp to belong to this transaction. Migration 79's creation-time financial guards remain unchanged.
+
+Forward migration 80 adds the operation and extends the existing guards. All 79 prior applied SQL files stay byte-identical. A rollback-only test against a populated 79-migration restore proves old recognition compatibility, cancellation admission, execution, retry and late failure behavior while preserving every original row and tuple version.

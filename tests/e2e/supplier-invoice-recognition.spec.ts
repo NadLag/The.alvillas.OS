@@ -8,9 +8,8 @@ import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repo
 import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
 import { closeAccountingPeriod } from "@/modules/finance/application/accounting-period-service";
 import { authContextForAccount } from "@/platform/authz/account-context";
-import { executeSupplierInvoiceRecognitionReference } from "@/modules/finance/application/supplier-invoice-recognition-requests";
+import { requestSupplierInvoiceReversal, executeSupplierInvoiceRecognitionReference } from "@/modules/finance/application/supplier-invoice-recognition-requests";
 import { localClockLabel } from "@/platform/time/local-instant";
-import { voidSupplierInvoiceClaim } from "@/modules/finance/application/supplier-payment-service";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { openFieldFixture } from "./support/field-fixture";
 import en from "../../messages/en.json" with { type: "json" };
@@ -165,9 +164,14 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
     const claimActor = { organizationId: f.organizationId, actorId: user.id, authContext: await authContextForAccount(f.organizationId, user.id, { db: f.db }) };
     const version = await withTenant(f.db, f.organizationId, tx => tx.supplierInvoice.findUniqueOrThrow({ where: { id }, select: { version: true } }));
     const claimCommand = { id, expectedVersion: version.version, idempotencyKey: randomUUID(), reason: "Reverse the actual native original supplier claim " + suffix };
-    const claimReversal = await voidSupplierInvoiceClaim(claimActor, claimCommand, { db: f.db });
-    expect(claimReversal.idempotent).toBe(false); expect(claimReversal.reversalTransactionIds).toHaveLength(1);
-    expect(await voidSupplierInvoiceClaim(claimActor, claimCommand, { db: f.db })).toMatchObject({ reversalTransactionIds: claimReversal.reversalTransactionIds, idempotent: true });
+    const claimRequest = await requestSupplierInvoiceReversal(claimActor, claimCommand, { db: f.db });
+    expect(claimRequest).toMatchObject({ state: "PENDING", idempotent: false });
+    expect(await requestSupplierInvoiceReversal(claimActor, claimCommand, { db: f.db })).toEqual({ ...claimRequest, idempotent: true });
+    const claimEvent = await withTenant(f.db, f.organizationId, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: "SupplierInvoiceReversalRequested", payload: { path: ["requestId"], equals: claimRequest.requestId } } }));
+    const claimReference = { organizationId: f.organizationId, outboxEventId: claimEvent.id };
+    expect(await executeSupplierInvoiceRecognitionReference(claimReference, { db: f.db, eventType: claimEvent.type })).toMatchObject({ state: "SUCCEEDED", idempotent: false });
+    expect(await executeSupplierInvoiceRecognitionReference(claimReference, { db: f.db, eventType: claimEvent.type })).toMatchObject({ state: "SUCCEEDED", idempotent: true });
+    expect(await withTenant(f.db, f.organizationId, tx => tx.financialTransaction.count({ where: { reversesTransactionId: { in: originals.map(original => original.id) } } }))).toBe(1);
     await payments.getByTestId("supplier-payment-refresh").click();
     await expect(payments.getByTestId("supplier-payment-outstanding")).toHaveText(messages.payment.outstanding + ": " + formatCurrencyAmount(locale, "0.00", "MAD"));
     await expect(payments.getByText(messages.payment.claimReversed, { exact: true })).toBeVisible(); await expect(payments.getByTestId("supplier-payment-form")).toHaveCount(0);
