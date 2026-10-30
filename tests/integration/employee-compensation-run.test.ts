@@ -19,10 +19,18 @@ import { decryptSecret } from "@/platform/auth/secret-encryption";
 import { getEmployeeCompensationRunEditor,listEmployeeCompensationWork } from "@/modules/finance/application/employee-compensation-picker";
 import { EmployeeCompensationPickerRepository } from "@/modules/finance/infrastructure/employee-compensation-picker-repository";
 import { recoverEmployeeCompensationRun } from "@/modules/finance/application/employee-compensation-run-recovery";
+import { submitEmployeeCompensation,withdrawEmployeeCompensation,getEmployeeCompensationSubmission } from "@/modules/finance/application/employee-compensation-submission";
+import { EmployeeCompensationClaimRepository } from "@/modules/finance/infrastructure/employee-compensation-claim-repository";
+import { getApproval,decideApproval } from "@/platform/approvals/approval-service";
+import { ApprovalAccessError,ApprovalConflictError } from "@/platform/approvals/approval";
+import { authContextForAccount } from "@/platform/authz/account-context";
+import { requestEmployeeCompensationSubmission,executeEmployeeCompensationSubmissionReference,getEmployeeCompensationSubmissionRequest,failEmployeeCompensationSubmissionReference,employeeCompensationSubmissionRequested } from "@/modules/finance/application/employee-compensation-submission-requests";
 import { provisionIntegrationRole } from "./support/database-role";
 import { employeeCompensationFixtures } from "./support/employee-compensation";
 import { getEmployeeCompensationRunDetail } from "@/modules/finance/application/employee-compensation-run-detail";
 import { listEmployeeCompensationRuns } from "@/modules/finance/application/employee-compensation-run-list";
+import { prepareEmployeeCompensationClaimPolicy } from "@/modules/finance/application/employee-compensation-claim-policy";
+import { EmployeeCompensationClaimSourceError } from "@/modules/finance/domain/employee-compensation-claim";
 
 const url=process.env.TEST_DATABASE_URL;let admin:PrismaClient,db:PrismaClient;
 const fixtures=employeeCompensationFixtures(()=>db,()=>admin);
@@ -40,6 +48,21 @@ async function facts(org:string){return withTenant(db,org,async tx=>({runs:await
   outbox:await tx.outboxEvent.count({where:{type:{in:["EmployeeCompensationRunCreated","EmployeeCompensationRunCancelled"]}}}),journals:await tx.financialTransaction.count(),postings:await tx.posting.count()}));}
 async function sourceRows(org:string,runId:string){return withTenant(db,org,async tx=>({run:await tx.employeeCompensationRun.findUniqueOrThrow({where:{id:runId}}),
   lines:await tx.employeeCompensationRunLine.findMany({where:{runId},orderBy:{id:"asc"}})}));}
+async function claimFixture(method:"SELF"|"OFFLINE_SYNC"|"PROXY"="SELF",noLogin=false){
+  const f=await fixture(method,noLogin),run=await createEmployeeCompensationRun(f.ctx,f.input,{db});
+  await fixtures.reader(f,{permissions:["employee_payable:edit"]});
+  const financial=await fixtures.reader(f,{permissions:["financial_transaction:view","expense:view","expense:approve","expense:reject"]});
+  const costOwner=await withTenant(db,f.org,async tx=>{
+    const owner=await tx.owner.create({data:{organizationId:f.org,displayName:"Actual completed work property owner"}});
+    await tx.propertyOwner.create({data:{organizationId:f.org,propertyId:f.property.id,ownerId:owner.id}});
+    const rules=new ConfigRuleRepository(tx,f.org);
+    await rules.createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,effectiveFrom:new Date("2020-01-01"),value:{default_treatment:"ALVILLAS_PAID"},reason:"Explicit configured employer work cost allocation"});
+    await rules.createVersion({key:"finance.approval_thresholds",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),value:{thresholds:[]},reason:"Explicit configured initial employee work review"});
+    return owner;
+  });
+  return{...f,run,costOwner,claimActor:financial.ctx,financialGrant:financial.grant,claimInput:{runId:run.id,costOn:run.fromOn,emergency:false,
+    costs:run.lines.map(line=>({runLineId:line.id,category:"staff",costCenter:null,note:"Review the original completed work contractual cost"}))}};
+}
 
 describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
   beforeAll(async()=>{
@@ -71,6 +94,252 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     const command={id:created[0].id,reason:"Serialize exact cancellation attempts without rewriting history"};
     const cancelled=await Promise.all(Array.from({length:3},()=>cancelEmployeeCompensationRun(f.ctx,command,{db})));
     expect(cancelled.filter(row=>!row.idempotent)).toHaveLength(1);expect(await facts(f.org)).toMatchObject({runs:1,lines:1,cancellations:1,createdAudits:1,cancelAudits:1,outbox:2,journals:0,postings:0});
+  });
+
+  it("prepares actual employee work costs through the canonical property allocation engine without posting or changing the original run",async()=>{
+    const f=await claimFixture(),before=await sourceRows(f.org,f.run.id);
+    const plan=await withTenant(db,f.org,async tx=>{const prepared=await prepareEmployeeCompensationClaimPolicy(f.claimActor,f.claimInput,tx);await prepared.recheck();return prepared;});
+    expect(plan.total).toEqual({amount:"500.25",currency:"MAD"});expect(plan.costs).toHaveLength(1);expect(plan.stages).toEqual([]);
+    expect(plan.costs[0]).toMatchObject({runLineId:f.run.lines[0].id,personId:f.performer.id,propertyId:f.property.id,completionEventId:f.run.lines[0].completionEventId,
+      amount:{amount:"500.25",currency:"MAD"},policy:{sourceKind:"employee_compensation_run_line",allocation:{owner:{amount:"0.00",currency:"MAD"},alvillas:{amount:"500.25",currency:"MAD"},guest:{amount:"0.00",currency:"MAD"}}}});
+    expect(await sourceRows(f.org,f.run.id)).toEqual(before);expect(await facts(f.org)).toMatchObject({runs:1,lines:1,journals:0,postings:0});
+  });
+
+  it("submits original positive work costs once under concurrent retries without recognizing or paying them",async()=>{
+    const f=await claimFixture(),before=await sourceRows(f.org,f.run.id),input={...f.claimInput,idempotencyKey:randomUUID(),reason:"Submit the actual completed-work contractual costs"};
+    const results=await Promise.all(Array.from({length:3},()=>submitEmployeeCompensation(f.claimActor,input,{db})));
+    expect(new Set(results.map(result=>result.id)).size).toBe(1);expect(results.filter(result=>!result.idempotent)).toHaveLength(1);
+    expect(results[0]).toMatchObject({runId:f.run.id,state:"APPROVED",claimCount:1,costCount:1,approvalId:null});
+    await withTenant(db,f.org,async tx=>{const saved=await new EmployeeCompensationClaimRepository(tx,f.org).find(results[0].id);expect(saved?.costs[0]).toMatchObject({runLineId:f.run.lines[0].id,completionEventId:f.run.lines[0].completionEventId,currency:"MAD",claim:{personId:f.performer.id}});
+      expect(saved?.costs[0].amount.toFixed(2)).toBe("500.25");expect(await tx.employeeCompensationSubmission.count()).toBe(1);expect(await tx.employeeCompensationClaim.count()).toBe(1);
+      expect(await tx.auditLog.count({where:{action:"finance.employee_compensation.submitted"}})).toBe(1);expect(await tx.outboxEvent.count({where:{type:"EmployeeCompensationSubmitted"}})).toBe(1);});
+    await expect(submitEmployeeCompensation(f.claimActor,{...input,reason:"Changed original proposal reason"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
+    await expect(submitEmployeeCompensation(f.claimActor,{...input,amount:"1.00"},{db})).rejects.toBeInstanceOf(z.ZodError);
+    expect(await sourceRows(f.org,f.run.id)).toEqual(before);expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it.each([["SELF",false],["OFFLINE_SYNC",false],["PROXY",false],["PROXY",true]] as const)("binds employee claims to the actual %s performer, including person-only=%s",async(method,noLogin)=>{
+    const f=await claimFixture(method,noLogin),created=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Retain the actual completed-work beneficiary independently from validation"},{db}),detail=await getEmployeeCompensationSubmission(f.claimActor,{id:created.id},{db});
+    expect(detail.costs[0]).toMatchObject({personId:f.performer.id,completionEventId:f.run.lines[0].completionEventId,amount:{amount:"500.25",currency:"MAD"}});
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationClaim.findUniqueOrThrow({where:{id:detail.costs[0].claimId}}))).toMatchObject({personId:f.performer.id});
+    if(method==="PROXY")expect(f.performer.id).not.toBe(f.person.id);if(noLogin)expect(await withTenant(db,f.org,tx=>tx.userAccount.count({where:{personId:f.performer.id}}))).toBe(0);
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("uses the same actual run financial-record scope for employee proposal detail and audit disclosure",async()=>{
+    const f=await claimFixture(),created=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Bind employee source and audit to this actual run authority"},{db});
+    const scoped={...f.claimActor,authContext:{...f.claimActor.authContext,assignments:f.claimActor.authContext.assignments!.flatMap(assignment=>assignment.permissions.has("employee_payable:view")?
+      [{...assignment,permissions:new Set([...assignment.permissions].filter(key=>key!=="employee_payable:view"))},{...assignment,permissions:new Set(["employee_payable:view"]),scope:{organizationId:f.org,scopeType:"financial_record" as const,scopeId:f.run.id}}]:[assignment])}};
+    expect((await getEmployeeCompensationSubmission(scoped,{id:created.id},{db})).total.amount).toBe("500.25");
+    const allowed=await listAuditHistory({...scoped,personId:f.person.id},{resourceType:"employee_compensation_submission",resourceId:created.id},{db});
+    expect(allowed.rows.find(row=>row.action==="finance.employee_compensation.submitted")?.after).toMatchObject({submissionId:created.id,total:{amount:"500.25",currency:"MAD"}});
+    const denied={...scoped,authContext:{...scoped.authContext,assignments:scoped.authContext.assignments.map(assignment=>assignment.scope.scopeType==="financial_record"?{...assignment,scope:{...assignment.scope,scopeId:randomUUID()}}:assignment)}};
+    await expect(getEmployeeCompensationSubmission(denied,{id:created.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    const masked=await listAuditHistory({...denied,personId:f.person.id},{resourceType:"employee_compensation_submission",resourceId:created.id},{db});expect(masked.rows.find(row=>row.action==="finance.employee_compensation.submitted")?.after).toBe(maskedValue);
+  });
+
+  it("retains the actual run creator when financial source access is restricted to assigned records",async()=>{
+    const f=await claimFixture(),caller={...f.claimActor,authContext:{...f.claimActor.authContext,assignments:f.claimActor.authContext.assignments!.flatMap(assignment=>assignment.permissions.has("financial_transaction:view")?
+      [{...assignment,permissions:new Set([...assignment.permissions].filter(key=>key!=="financial_transaction:view"))},{...assignment,permissions:new Set(["financial_transaction:view"]),conditions:{...assignment.conditions,assignedToMe:true}}]:[assignment])}};
+    const queued=await requestEmployeeCompensationSubmission(caller,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Retain original assigned financial source facts during queued work"},{db});expect(queued.state).toBe("PENDING");
+    const event=await withTenant(db,f.org,tx=>tx.outboxEvent.findFirstOrThrow({where:{type:employeeCompensationSubmissionRequested,payload:{path:["requestId"],equals:queued.requestId}}}));
+    const result=await executeEmployeeCompensationSubmissionReference({organizationId:f.org,outboxEventId:event.id},{db});expect(result.state).toBe("SUCCEEDED");expect(result.submissionId).toBeTruthy();
+    expect((await getEmployeeCompensationSubmission(caller,{id:result.submissionId!},{db})).total.amount).toBe("500.25");expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+    const other=await withTenant(db,f.org,async tx=>{const person=await tx.person.create({data:{organizationId:f.org,displayName:"Different assigned-record financial reviewer"}});return{person,account:await tx.userAccount.create({data:{organizationId:f.org,personId:person.id}})};});
+    await fixtures.reader({...f,...other},{permissions:["employee_payable:view","employee_payable:edit","staff_compensation:view"]});
+    const restricted=await fixtures.reader({...f,...other},{permissions:["financial_transaction:view"],conditions:{assignedToMe:true}});
+    await expect(getEmployeeCompensationSubmission(restricted.ctx,{id:result.submissionId!},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+  });
+
+  it("queues immutable employee submission intent and commits one source with one success outcome across worker redeliveries",async()=>{
+    const f=await claimFixture(),input={...f.claimInput,idempotencyKey:randomUUID(),reason:"Queue the actual completed-work cost review intent"},before=await sourceRows(f.org,f.run.id);
+    const attempts=await Promise.all(Array.from({length:3},()=>requestEmployeeCompensationSubmission(f.claimActor,input,{db})));expect(new Set(attempts.map(result=>result.requestId)).size).toBe(1);expect(attempts.filter(result=>!result.idempotent)).toHaveLength(1);
+    expect(attempts[0]).toMatchObject({state:"PENDING",submissionId:null,failureCode:null});expect(JSON.stringify(attempts)).not.toMatch(/authorizationCap|costs|500\.25|requestFingerprint/u);
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationSubmission.count())).toBe(0);
+    const event=await withTenant(db,f.org,tx=>tx.outboxEvent.findFirstOrThrow({where:{type:employeeCompensationSubmissionRequested,payload:{path:["requestId"],equals:attempts[0].requestId}}}));
+    expect(event.payload).toEqual({requestId:attempts[0].requestId});const reference={organizationId:f.org,outboxEventId:event.id};
+    const results=await Promise.all(Array.from({length:2},()=>executeEmployeeCompensationSubmissionReference(reference,{db})));expect(new Set(results.map(result=>result.submissionId)).size).toBe(1);expect(results.filter(result=>!result.idempotent)).toHaveLength(1);
+    expect(results[0]).toMatchObject({state:"SUCCEEDED",failureCode:null});expect(await getEmployeeCompensationSubmissionRequest(f.claimActor,{id:attempts[0].requestId},{db})).toMatchObject({state:"SUCCEEDED",submissionId:results[0].submissionId});
+    const detail=await getEmployeeCompensationSubmission(f.claimActor,{id:results[0].submissionId!},{db});expect(detail).toMatchObject({state:"APPROVED",total:{amount:"500.25",currency:"MAD"},canWithdraw:true,costCount:1,claimCount:1});
+    expect(detail.costs[0]).toMatchObject({personId:f.performer.id,runLineId:f.run.lines[0].id,amount:{amount:"500.25",currency:"MAD"},allocation:{alvillas:{amount:"500.25",currency:"MAD"}}});
+    expect(JSON.stringify(detail)).not.toMatch(/policySnapshot|authorizationCap|requestFingerprint|idempotencyKey|sourceSnapshot|contractRule/u);
+    await withTenant(db,f.org,async tx=>{expect(await tx.employeeCompensationSubmission.count()).toBe(1);expect(await tx.employeeCompensationSubmissionRequest.count()).toBe(1);expect(await tx.employeeCompensationSubmissionOutcome.count()).toBe(1);
+      expect(await tx.auditLog.count({where:{action:"finance.employee_compensation.submission_completed"}})).toBe(1);});
+    await expect(withTenant(db,f.org,tx=>tx.outboxEvent.update({where:{id:event.id},data:{payload:{requestId:randomUUID()}}}))).rejects.toThrow(/immutable/u);
+    await expect(withTenant(db,f.org,tx=>tx.employeeCompensationSubmissionRequest.update({where:{id:attempts[0].requestId},data:{authorizationCap:{}}}))).rejects.toThrow();
+    await withdrawEmployeeCompensation(f.claimActor,{id:results[0].submissionId!,reason:"Retain historical work and request after withdrawal"},{db});
+    await cancelEmployeeCompensationRun(f.claimActor,{id:f.run.id,reason:"Cancel the original run after its proposal withdrawal"},{db});
+    expect(await getEmployeeCompensationSubmissionRequest(f.claimActor,{id:attempts[0].requestId},{db})).toMatchObject({state:"SUCCEEDED",submissionId:results[0].submissionId});
+    const history=await getEmployeeCompensationSubmission(f.claimActor,{id:results[0].submissionId!},{db});expect(history.state).toBe("WITHDRAWN");expect(history.history.map(event=>event.action)).toEqual(["SUBMITTED","WITHDRAWN"]);
+    expect(await sourceRows(f.org,f.run.id)).toEqual(before);expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("rechecks queued caller restrictions and current stored financial authority before creating employee claims",async()=>{
+    const f=await claimFixture(),input={...f.claimInput,idempotencyKey:randomUUID(),reason:"Require current authority for deferred employee review"},queued=await requestEmployeeCompensationSubmission(f.claimActor,input,{db});
+    const event=await withTenant(db,f.org,tx=>tx.outboxEvent.findFirstOrThrow({where:{type:employeeCompensationSubmissionRequested,payload:{path:["requestId"],equals:queued.requestId}}}));
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:f.financialGrant.id},data:{validTo:new Date("2020-01-02")}}));
+    const reference={organizationId:f.org,outboxEventId:event.id};expect(await executeEmployeeCompensationSubmissionReference(reference,{db})).toMatchObject({state:"DENIED",failureCode:"ACCESS_DENIED",submissionId:null,idempotent:false});
+    expect(await executeEmployeeCompensationSubmissionReference(reference,{db})).toMatchObject({state:"DENIED",idempotent:true});
+    await expect(getEmployeeCompensationSubmissionRequest(f.claimActor,{id:queued.requestId},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationSubmission.count())).toBe(0);expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("retains terminal worker failure and rejects forged or foreign employee submission references",async()=>{
+    const f=await claimFixture(),other=await claimFixture(),queued=await requestEmployeeCompensationSubmission(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Keep an attributed exhausted employee submission outcome"},{db});
+    const event=await withTenant(db,f.org,tx=>tx.outboxEvent.findFirstOrThrow({where:{type:employeeCompensationSubmissionRequested,payload:{path:["requestId"],equals:queued.requestId}}}));
+    await expect(executeEmployeeCompensationSubmissionReference({organizationId:other.org,outboxEventId:event.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    await expect(executeEmployeeCompensationSubmissionReference({organizationId:f.org,outboxEventId:event.id},{db,eventType:"SupplierInvoiceRecognitionRequested"})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    await expect(getEmployeeCompensationSubmissionRequest(other.claimActor,{id:queued.requestId},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    const reference={organizationId:f.org,outboxEventId:event.id};expect(await failEmployeeCompensationSubmissionReference(reference,{db})).toMatchObject({state:"FAILED",failureCode:"EXECUTION_UNAVAILABLE",idempotent:false});
+    expect(await executeEmployeeCompensationSubmissionReference(reference,{db})).toMatchObject({state:"FAILED",idempotent:true});expect(await withTenant(db,f.org,tx=>tx.employeeCompensationSubmission.count())).toBe(0);
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("retains the captured caller expiry despite wider stored employee submission authority",async()=>{
+    const f=await claimFixture(),now=await withTenant(db,f.org,tx=>new FinanceRepository(tx,f.org).clock()),expires=new Date(now.getTime()+5000),caller={...f.claimActor,authContext:{...f.claimActor.authContext,
+      assignments:f.claimActor.authContext.assignments!.map(assignment=>({...assignment,validTo:expires}))}};
+    const queued=await requestEmployeeCompensationSubmission(caller,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Retain original restricted caller validity through deferred work"},{db});
+    await withTenant(db,f.org,tx=>tx.$executeRaw`SELECT pg_sleep(5.1)`);
+    const event=await withTenant(db,f.org,tx=>tx.outboxEvent.findFirstOrThrow({where:{type:employeeCompensationSubmissionRequested,payload:{path:["requestId"],equals:queued.requestId}}}));
+    expect(await executeEmployeeCompensationSubmissionReference({organizationId:f.org,outboxEventId:event.id},{db})).toMatchObject({state:"DENIED",failureCode:"ACCESS_DENIED"});
+    expect((await authContextForAccount(f.org,f.account.id,{db})).permissions.has("employee_payable:edit")).toBe(true);
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationSubmission.count())).toBe(0);expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("returns a durable source conflict when the actual earning contract changes before queued submission",async()=>{
+    const f=await claimFixture(),queued=await requestEmployeeCompensationSubmission(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Queue only this saved completed-work earning expectation"},{db});
+    await saveTeamCompensation(f.ctx,{assignmentId:f.contract.id,expectedVersion:1,mode:"PER_JOB",amount:"750.00",currency:"MAD",effectiveFrom:"2020-01-02",reason:"Actual changed earning terms require a fresh expectation"},{db});
+    const event=await withTenant(db,f.org,tx=>tx.outboxEvent.findFirstOrThrow({where:{type:employeeCompensationSubmissionRequested,payload:{path:["requestId"],equals:queued.requestId}}}));
+    expect(await executeEmployeeCompensationSubmissionReference({organizationId:f.org,outboxEventId:event.id},{db})).toMatchObject({state:"CONFLICT",failureCode:"SOURCE_CHANGED",submissionId:null});
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationSubmission.count())).toBe(0);expect((await getEmployeeCompensationRun(f.ctx,{id:f.run.id},{db})).total.amount).toBe("500.25");
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("reserves completed work across separate drafts and releases it only through an attributed withdrawal",async()=>{
+    const f=await claimFixture(),input={...f.claimInput,idempotencyKey:randomUUID(),reason:"Reserve this original work for employee cost review"},first=await submitEmployeeCompensation(f.claimActor,input,{db});
+    const second=await createEmployeeCompensationRun(f.ctx,{...f.input,idempotencyKey:randomUUID()},{db}),retry={...input,runId:second.id,idempotencyKey:randomUUID(),costs:second.lines.map(line=>({...input.costs[0],runLineId:line.id}))};
+    await expect(submitEmployeeCompensation(f.claimActor,retry,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
+    await expect(cancelEmployeeCompensationRun(f.claimActor,{id:f.run.id,reason:"Must retain work while its employee claim is active"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
+    const withdrawal={id:first.id,reason:"Withdraw the cost proposal before replacement review"};expect(await withdrawEmployeeCompensation(f.claimActor,withdrawal,{db})).toMatchObject({state:"WITHDRAWN",idempotent:false});
+    expect(await withdrawEmployeeCompensation(f.claimActor,withdrawal,{db})).toMatchObject({id:first.id,idempotent:true});
+    await expect(withdrawEmployeeCompensation(f.claimActor,{...withdrawal,reason:"Different withdrawal intent"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
+    expect(await submitEmployeeCompensation(f.claimActor,retry,{db})).toMatchObject({runId:second.id,state:"APPROVED",idempotent:false});
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("protects employee claims and cost sources against raw rewrites, late append and incomplete submissions",async()=>{
+    const f=await claimFixture(),created=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Persist actual immutable employee cost sources"},{db});
+    const saved=await withTenant(db,f.org,tx=>new EmployeeCompensationClaimRepository(tx,f.org).find(created.id));expect(saved).toBeTruthy();const cost=saved!.costs[0];
+    await expect(withTenant(db,f.org,tx=>tx.employeeCompensationCost.update({where:{id:cost.id},data:{amount:"1"}}))).rejects.toThrow();
+    await expect(withTenant(db,f.org,tx=>tx.employeeCompensationClaim.deleteMany({where:{submissionId:created.id}}))).rejects.toThrow();
+    await expect(withTenant(db,f.org,tx=>tx.employeeCompensationCost.create({data:{organizationId:f.org,submissionId:created.id,claimId:cost.claimId,runLineId:cost.runLineId,
+      completionEventId:cost.completionEventId,propertyId:cost.propertyId,reservationId:cost.reservationId,amount:cost.amount,currency:cost.currency,category:cost.category,costCenter:cost.costCenter,note:cost.note,timezone:cost.timezone,policySnapshot:cost.policySnapshot as Prisma.InputJsonObject}}))).rejects.toThrow(/original submission/u);
+    await expect(withTenant(db,f.org,tx=>tx.employeeCompensationSubmission.create({data:{organizationId:f.org,runId:f.run.id,submittedBy:f.account.id,idempotencyKey:randomUUID(),requestFingerprint:"0".repeat(64),costOn:saved!.costOn,
+      emergency:false,reason:"Incomplete submission must never be admitted",snapshot:saved!.snapshot as Prisma.InputJsonObject}}))).rejects.toThrow(/every original positive source/u);
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationSubmission.count())).toBe(1);expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("rolls back the complete employee submission when financial authority expires after deferred source guards",async()=>{
+    const f=await claimFixture(),original=Object.getOwnPropertyDescriptor(EmployeeCompensationClaimRepository.prototype,"flushGuards")!.value as EmployeeCompensationClaimRepository["flushGuards"];
+    const spy=vi.spyOn(EmployeeCompensationClaimRepository.prototype,"flushGuards").mockImplementation(async function(this:EmployeeCompensationClaimRepository){await original.call(this);
+      await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:f.financialGrant.id},data:{validTo:new Date("2020-01-02")}}));});
+    try{await expect(submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Require final current employee cost financial authority"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);}finally{spy.mockRestore();}
+    await withTenant(db,f.org,async tx=>{expect(await tx.employeeCompensationSubmission.count()).toBe(0);expect(await tx.employeeCompensationClaim.count()).toBe(0);expect(await tx.employeeCompensationCost.count()).toBe(0);expect(await tx.auditLog.count({where:{action:"finance.employee_compensation.submitted"}})).toBe(0);expect(await tx.outboxEvent.count({where:{type:"EmployeeCompensationSubmitted"}})).toBe(0);});
+    expect(await facts(f.org)).toMatchObject({runs:1,lines:1,journals:0,postings:0});
+  });
+
+  it("requires actual salary and independent financial-source view before resolving employee work cost configuration",async()=>{
+    const f=await claimFixture(),spy=vi.spyOn(ConfigRuleRepository.prototype,"scopedSnapshot");
+    try{for(const key of["staff_compensation:view","financial_transaction:view"]){
+      const denied={...f.claimActor,authContext:{...f.claimActor.authContext,permissions:new Set([...f.claimActor.authContext.permissions].filter(permission=>permission!==key))}};
+      await expect(withTenant(db,f.org,tx=>prepareEmployeeCompensationClaimPolicy(denied,f.claimInput,tx))).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    }expect(spy).not.toHaveBeenCalled();}finally{spy.mockRestore();}
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("requires a fresh expected run when its original earning contract has changed before claim submission",async()=>{
+    const f=await claimFixture(),before=await sourceRows(f.org,f.run.id);
+    await saveTeamCompensation({...f.ctx,personId:f.person.id},{assignmentId:f.contract.id,expectedVersion:1,mode:"PER_JOB",amount:"750.00",currency:"MAD",effectiveFrom:"2020-01-02",reason:"Actual revised earning terms before proposing a claim"},{db});
+    await expect(withTenant(db,f.org,tx=>prepareEmployeeCompensationClaimPolicy(f.claimActor,f.claimInput,tx))).rejects.toBeInstanceOf(EmployeeCompensationClaimSourceError);
+    expect(await sourceRows(f.org,f.run.id)).toEqual(before);expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("checks the complete employee claim amount against financial-source caps before reading cost rules",async()=>{
+    const f=await claimFixture(),taskId=await fixtures.completeTask(f),run=await createEmployeeCompensationRun(f.ctx,{...f.input,idempotencyKey:randomUUID(),jobs:[...f.input.jobs,{taskId,assignmentId:f.contract.id,confirmedAssignment:true}]},{db});
+    const capped={...f.claimActor,authContext:{...f.claimActor.authContext,assignments:f.claimActor.authContext.assignments!.map(assignment=>assignment.permissions.has("financial_transaction:view")?{...assignment,conditions:{maxAmount:"750.00"}}:assignment)}};
+    const input={...f.claimInput,runId:run.id,costs:run.lines.map(line=>({...f.claimInput.costs[0],runLineId:line.id}))},spy=vi.spyOn(ConfigRuleRepository.prototype,"scopedSnapshot");
+    try{await expect(withTenant(db,f.org,tx=>prepareEmployeeCompensationClaimPolicy(capped,input,tx))).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);expect(spy).not.toHaveBeenCalled();}finally{spy.mockRestore();}
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("rejects a changed allocation policy or revoked financial grant during the retained employee claim recheck",async()=>{
+    const f=await claimFixture();
+    await expect(withTenant(db,f.org,async tx=>{
+      const plan=await prepareEmployeeCompensationClaimPolicy(f.claimActor,f.claimInput,tx);
+      await withTenant(db,f.org,other=>new ConfigRuleRepository(other,f.org).createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,
+        effectiveFrom:new Date("2020-01-02"),value:{default_treatment:"OWNER_PAID"},reason:"Actual cost allocation change after original work plan"}));
+      await plan.recheck();
+    })).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    await expect(withTenant(db,f.org,async tx=>{
+      const plan=await prepareEmployeeCompensationClaimPolicy(f.claimActor,f.claimInput,tx);
+      await withTenant(db,f.org,other=>other.roleAssignment.update({where:{id:f.financialGrant.id},data:{validTo:new Date()}}));await plan.recheck();
+    })).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("evaluates configured employee review thresholds against the complete run instead of separately smaller jobs",async()=>{
+    const f=await claimFixture(),taskId=await fixtures.completeTask(f),run=await createEmployeeCompensationRun(f.ctx,{...f.input,idempotencyKey:randomUUID(),jobs:[...f.input.jobs,{taskId,assignmentId:f.contract.id,confirmedAssignment:true}]},{db});
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.approval_thresholds",scopeType:"organization",effectiveFrom:new Date("2020-01-02"),reason:"Explicit whole-run employee cost approval threshold",
+      value:{thresholds:[{key:"whole_employee_cost",amount:"750.00",currency:"MAD",requires_approval_from:["finance"]}],routing:{finance:{people:[f.person.id],roles:[],assigned:false,channels:["in_app"]}}}}));
+    const input={...f.claimInput,runId:run.id,costs:run.lines.map(line=>({...f.claimInput.costs[0],runLineId:line.id}))};
+    const plan=await withTenant(db,f.org,tx=>prepareEmployeeCompensationClaimPolicy(f.claimActor,input,tx));
+    expect(plan.total.amount).toBe("1000.50");expect(plan.stages).toHaveLength(2);
+    expect(plan.stages.every(stage=>stage.kind==="finance"&&stage.amount==="500.25"&&stage.recipients.length===1&&stage.recipients[0]===f.account.id)).toBe(true);
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("routes configured owner cost review by actual ownership scope without granting access to employee salaries",async()=>{
+    const f=await claimFixture();
+    const source=await withTenant(db,f.org,async tx=>{
+      await tx.propertyOwner.updateMany({where:{organizationId:f.org,propertyId:f.property.id},data:{shareBps:5000}});
+      const second=await tx.owner.create({data:{organizationId:f.org,displayName:"Other actual employee work cost owner"}});
+      await tx.propertyOwner.create({data:{organizationId:f.org,propertyId:f.property.id,ownerId:second.id,shareBps:5000,isPrimary:false}});
+      const reviewers=[];for(const owner of[f.costOwner,second]){
+        const person=await tx.person.create({data:{organizationId:f.org,displayName:"Actual scoped cost reviewer"}}),account=await tx.userAccount.create({data:{organizationId:f.org,personId:person.id,status:"ACTIVE"}});reviewers.push({owner,person,account});
+      }return reviewers;
+    });
+    for(const reviewer of source){const actor=await fixtures.reader({...f,person:reviewer.person,account:reviewer.account},{scopeType:"owner",scopeId:reviewer.owner.id,permissions:["expense:view","expense:approve","expense:reject"]});expect(actor.ctx.authContext.permissions.has("staff_compensation:view")).toBe(false);}
+    await withTenant(db,f.org,async tx=>{
+      const rules=new ConfigRuleRepository(tx,f.org);
+      await rules.createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,effectiveFrom:new Date("2020-01-02"),reason:"Actual configured owner funding for completed work",value:{default_treatment:"OWNER_PAID"}});
+      await rules.createVersion({key:"finance.approval_thresholds",scopeType:"organization",effectiveFrom:new Date("2020-01-02"),reason:"Explicit independent owner cost review",value:{thresholds:[{key:"actual_owner_cost_review",requires_approval_from:["owner"]}],routing:{owner:{people:source.map(row=>row.person.id),roles:[],assigned:false,channels:["in_app"]}}}});
+    });
+    const plan=await withTenant(db,f.org,tx=>prepareEmployeeCompensationClaimPolicy(f.claimActor,f.claimInput,tx));
+    expect(plan.stages).toHaveLength(2);expect(plan.stages.map(stage=>stage.amount).sort()).toEqual(["250.12","250.13"]);
+    for(const stage of plan.stages)expect(stage.recipients).toEqual([source.find(row=>row.owner.id===stage.ownerId)!.account.id]);
+    const submitted=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Submit the two independently scoped actual owner cost slices"},{db});
+    expect(submitted).toMatchObject({state:"PENDING_APPROVAL",claimCount:1,costCount:1});expect(submitted.approvalId).toBeTruthy();
+    const actors=await Promise.all(source.map(async reviewer=>({organizationId:f.org,accountId:reviewer.account.id,authContext:await authContextForAccount(f.org,reviewer.account.id,{db})})));
+    const stages=await withTenant(db,f.org,tx=>tx.approvalStage.findMany({where:{approvalId:submitted.approvalId!},orderBy:{position:"asc"},include:{recipients:true}}));
+    for(const [index,actor]of actors.entries()){
+      const visible=await getApproval(actor,submitted.approvalId!,{db});expect(visible.financial?.amount).toBe(stages.find(stage=>stage.ownerId===source[index].owner.id)!.amount.toFixed(2));
+      await expect(getEmployeeCompensationSubmission({organizationId:f.org,actorId:actor.accountId,authContext:actor.authContext},{id:submitted.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+      expect(visible.history).toHaveLength(1);expect(visible.title).toBe(f.claimInput.costs[0].note);expect(actor.authContext.permissions.has("staff_compensation:view")).toBe(false);
+      for(const privateValue of["500.25",f.run.purpose,f.performer.id,source[1-index].owner.id,source[1-index].account.id])expect(JSON.stringify(visible)).not.toContain(privateValue);
+      await expect(getApproval(actor,submitted.approvalId!,{db,stageId:stages.find(stage=>stage.ownerId!==source[index].owner.id)!.id})).rejects.toBeInstanceOf(ApprovalAccessError);
+    }
+    const firstActor=actors.find(actor=>stages[0].recipients.some(recipient=>recipient.userAccountId===actor.accountId))!,lastActor=actors.find(actor=>actor.accountId!==firstActor.accountId)!;
+    await expect(decideApproval(lastActor,{id:submitted.approvalId!,stageId:stages[0].id,decision:"APPROVED",reason:"Another owner cannot decide this cost slice"},{db})).rejects.toBeInstanceOf(ApprovalAccessError);
+    await expect(decideApproval(lastActor,{id:submitted.approvalId!,stageId:stages[1].id,decision:"APPROVED",reason:"Require the actual configured review sequence"},{db})).rejects.toBeInstanceOf(ApprovalConflictError);
+    const decision={id:submitted.approvalId!,stageId:stages[0].id,decision:"APPROVED",reason:"Approve only my original attributed work cost slice"};
+    await decideApproval(firstActor,decision,{db});await decideApproval(firstActor,decision,{db});
+    expect((await getApproval(lastActor,submitted.approvalId!,{db})).canApprove).toBe(true);
+    await decideApproval(lastActor,{...decision,stageId:stages[1].id},{db});
+    expect(await withTenant(db,f.org,tx=>tx.approvalRequest.findUniqueOrThrow({where:{id:submitted.approvalId!}}))).toMatchObject({state:"APPROVED"});
+    const auditOnly=await fixtures.reader(f,{permissions:["audit_log:view"]}),withoutSalary={...auditOnly.ctx.authContext,permissions:new Set(["audit_log:view"]),assignments:[]};
+    const denied=await listAuditHistory({...auditOnly.ctx,authContext:withoutSalary,personId:f.person.id},{resourceType:"employee_compensation_submission"},{db});
+    expect(denied.rows.filter(row=>row.resourceId===submitted.id).every(row=>row.after===maskedValue)).toBe(true);
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
   });
 
   it("recovers a real committed creation using only its original actor's nonce and current source authority",async()=>{
@@ -333,6 +602,35 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
       const first=await getEmployeeCompensationRun(f.ctx,{id:many.result.id},{db});expect(first.lines).toHaveLength(50);expect(first.nextCursor).toBeTruthy();
       const next=await getEmployeeCompensationRun(f.ctx,{id:many.result.id,after:first.nextCursor!},{db});expect(next.lines).toHaveLength(50);
       expect(new Set([...first.lines,...next.lines].map(line=>line.id)).size).toBe(100);expect(next.total.amount).toBe("250125.00");
+      await fixtures.reader(f,{permissions:["employee_payable:edit"]});
+      const costActor=await fixtures.reader(f,{permissions:["financial_transaction:view","expense:view","expense:approve","expense:reject"]});
+      await withTenant(db,f.org,async tx=>{
+        const owner=await tx.owner.create({data:{organizationId:f.org,displayName:"Actual portfolio work cost owner"}});
+        await tx.propertyOwner.createMany({data:[f.property,...properties].map(property=>({organizationId:f.org,propertyId:property.id,ownerId:owner.id}))});
+        const rules=new ConfigRuleRepository(tx,f.org);
+        await rules.createVersion({key:"finance.expense_treatment",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),value:{default_treatment:"ALVILLAS_PAID"},reason:"Explicit portfolio completed-work cost allocation"});
+        await rules.createVersion({key:"finance.approval_thresholds",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),value:{thresholds:[]},reason:"Explicit portfolio completed-work review policy"});
+      });
+      const portfolio=await withTenant(db,f.org,tx=>new EmployeeCompensationRunRepository(tx,f.org).find(many.result.id));expect(portfolio).toBeTruthy();
+      queryCount=0;const costStarted=performance.now();
+      const costs=await withTenant(measured,f.org,tx=>prepareEmployeeCompensationClaimPolicy(costActor.ctx,{runId:many.result.id,costOn:f.input.fromOn,emergency:false,
+        costs:portfolio!.lines.map(line=>({runLineId:line.id,category:"staff",costCenter:null,note:"Review actual completed work across the property portfolio"}))},tx),{timeout:120000});
+      expect(costs.total.amount).toBe("250125.00");expect(costs.costs).toHaveLength(500);
+      const costMeasurement={actualCompletedProperties:500,actualSourceCosts:costs.costs.length,queries:queryCount,durationMs:Math.round(performance.now()-costStarted),noFinancialMovements:true};
+      if(process.env.AUT_RECORD_RUN_CAPACITY==="1")writeFileSync(".tmp/employee-claim-policy-capacity-500.json",JSON.stringify(costMeasurement,null,2),{flag:"wx"});
+      console.info(JSON.stringify(costMeasurement));
+      const command={runId:many.result.id,costOn:f.input.fromOn,emergency:false,idempotencyKey:randomUUID(),reason:"Submit the complete actual portfolio work through durable execution",
+        costs:portfolio!.lines.map(line=>({runLineId:line.id,category:"staff",costCenter:null,note:"Review actual completed work across the property portfolio"}))};
+      const requestStarted=performance.now(),queued=await requestEmployeeCompensationSubmission(costActor.ctx,command,{db:measured}),requestMs=Math.round(performance.now()-requestStarted);expect(queued.state).toBe("PENDING");
+      const event=await withTenant(db,f.org,tx=>tx.outboxEvent.findFirstOrThrow({where:{type:employeeCompensationSubmissionRequested,payload:{path:["requestId"],equals:queued.requestId}}}));
+      const workerStarted=performance.now(),finished=await executeEmployeeCompensationSubmissionReference({organizationId:f.org,outboxEventId:event.id},{db:measured}),workerMs=Math.round(performance.now()-workerStarted);
+      expect(finished.state).toBe("SUCCEEDED");expect(finished.submissionId).toBeTruthy();
+      const readStarted=performance.now(),submitted=await getEmployeeCompensationSubmission(costActor.ctx,{id:finished.submissionId!},{db}),detailMs=Math.round(performance.now()-readStarted);
+      expect(submitted.total.amount).toBe("250125.00");expect(submitted.costCount).toBe(500);expect(submitted.claimCount).toBe(1);expect(submitted.costs).toHaveLength(50);expect(submitted.nextCursor).toBeTruthy();
+      const following=await getEmployeeCompensationSubmission(costActor.ctx,{id:finished.submissionId!,after:submitted.nextCursor!},{db});expect(following.costs).toHaveLength(50);expect(new Set([...submitted.costs,...following.costs].map(cost=>cost.id)).size).toBe(100);
+      const durableMeasurement={actualCompletedProperties:500,actualSourceCosts:500,requestMs,workerMs,detailMs,actualClaimCount:1,claimedAmount:submitted.total,noFinancialMovements:true};
+      if(process.env.AUT_RECORD_EMPLOYEE_CLAIM_CAPACITY==="1")writeFileSync(".tmp/employee-submission-capacity-500.json",JSON.stringify(durableMeasurement,null,2),{flag:"wx"});
+      console.info(JSON.stringify(durableMeasurement));
       expect(await facts(f.org)).toMatchObject({runs:2,lines:501,createdAudits:2,outbox:2,journals:0,postings:0});
       const measurement={actualCompletedProperties:500,sourceQueriesOne:one.queries,sourceQueries500:many.queries,singleMs:Math.round(one.durationMs),portfolioMs:Math.round(many.durationMs),noFinancialMovements:true};
       if(process.env.AUT_RECORD_RUN_CAPACITY==="1"){mkdirSync(".tmp",{recursive:true});writeFileSync(".tmp/employee-run-capacity-500.json",JSON.stringify(measurement,null,2),{flag:"wx"});}

@@ -71,6 +71,12 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  employeeSubmissionRequests EmployeeCompensationSubmissionRequest[]
+  employeeSubmissionOutcomes EmployeeCompensationSubmissionOutcome[]
+  employeeCompensationSubmissions                EmployeeCompensationSubmission[]
+  employeeCompensationClaims                     EmployeeCompensationClaim[]
+  employeeCompensationCosts                      EmployeeCompensationCost[]
+  employeeCompensationWithdrawals                EmployeeCompensationWithdrawal[]
   employeeCompensationRuns EmployeeCompensationRun[]
   employeeCompensationRunLines EmployeeCompensationRunLine[]
   employeeCompensationRunCancellations EmployeeCompensationRunCancellation[]
@@ -332,6 +338,7 @@ model TeamWallet {
 }
 
 model Person {
+  employeeCompensationClaims EmployeeCompensationClaim[]
   compensationRunLines EmployeeCompensationRunLine[]
   cashCollections    CashCollection[]
   teamAvailabilities TeamAvailability[]
@@ -363,6 +370,9 @@ model Person {
 }
 
 model UserAccount {
+  employeeSubmissionRequests EmployeeCompensationSubmissionRequest[] @relation("EmployeeSubmissionRequester")
+  employeeCompensationSubmissions    EmployeeCompensationSubmission[]      @relation("EmployeeSubmissionCreator")
+  employeeCompensationWithdrawals    EmployeeCompensationWithdrawal[]      @relation("EmployeeSubmissionWithdrawer")
   createdCompensationRuns EmployeeCompensationRun[] @relation("EmployeeRunCreator")
   cancelledCompensationRuns EmployeeCompensationRunCancellation[] @relation("EmployeeRunCanceller")
   supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
@@ -745,6 +755,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  employeeCompensationCosts EmployeeCompensationCost[]
   compensationRunLines EmployeeCompensationRunLine[]
   invoiceApprovalStages ApprovalStage[]             @relation("InvoiceApprovalProperty")
   supplierInvoiceLines  SupplierInvoiceLine[]
@@ -995,6 +1006,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  employeeCompensationCosts                            EmployeeCompensationCost[]
   invoiceApprovalStages                                ApprovalStage[]                @relation("InvoiceApprovalReservation")
   supplierInvoiceLines                                 SupplierInvoiceLine[]
   expenses                                             Expense[]
@@ -1137,6 +1149,7 @@ model OperationTask {
 }
 
 model OperationTaskEvent {
+  employeeCompensationCosts EmployeeCompensationCost[]
   compensationRunLines EmployeeCompensationRunLine[]
   id             String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String        @map("organization_id") @db.Uuid
@@ -1516,6 +1529,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  employeeCompensationCosts    EmployeeCompensationCost[]
   employeeCompensationRuns EmployeeCompensationRun[]
   employeeCompensationRunLines EmployeeCompensationRunLine[]
   expenses                Expense[]
@@ -1865,6 +1879,8 @@ model AuditLog {
 }
 
 model ApprovalRequest {
+  employeeSubmissionId String?                         @map("employee_submission_id") @db.Uuid
+  employeeSubmission   EmployeeCompensationSubmission? @relation(fields: [organizationId, employeeSubmissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   invoiceSubmissionId String?                    @map("invoice_submission_id") @db.Uuid
   invoiceSubmission   SupplierInvoiceSubmission? @relation(fields: [organizationId, invoiceSubmissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   expenseId           String?                    @map("expense_id") @db.Uuid
@@ -1890,6 +1906,7 @@ model ApprovalRequest {
   recipients          ApprovalRecipient[]
 
   @@unique([organizationId, expenseId], map: "approval_request_org_expense_unique")
+  @@unique([organizationId, employeeSubmissionId], map: "approval_request_org_employee_submission_unique")
   @@unique([organizationId, invoiceSubmissionId], map: "approval_request_org_invoice_submission_unique")
   @@unique([organizationId, id])
   @@unique([organizationId, idempotencyKey])
@@ -2395,6 +2412,8 @@ model ExpenseSubmission {
 }
 
 model ApprovalStage {
+  employeeCostId  String?                   @map("employee_cost_id") @db.Uuid
+  employeeCost    EmployeeCompensationCost? @relation(fields: [organizationId, employeeCostId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   invoiceLineId   String?                  @map("invoice_line_id") @db.Uuid
   propertyId      String?                  @map("property_id") @db.Uuid
   reservationId   String?                  @map("reservation_id") @db.Uuid
@@ -2690,6 +2709,8 @@ model SupplierInvoiceRecognitionOutcome {
 }
 
 model EmployeeCompensationRun {
+  submissionRequests EmployeeCompensationSubmissionRequest[]
+  submissions        EmployeeCompensationSubmission[]
   id                 String                               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId     String                               @map("organization_id") @db.Uuid
   createdBy          String                               @map("created_by") @db.Uuid
@@ -2718,6 +2739,7 @@ model EmployeeCompensationRun {
 }
 
 model EmployeeCompensationRunLine {
+  costs                EmployeeCompensationCost[]
   id                   String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId       String                  @map("organization_id") @db.Uuid
   runId                String                  @map("run_id") @db.Uuid
@@ -2766,4 +2788,136 @@ model EmployeeCompensationRunCancellation {
   @@unique([organizationId, id])
   @@unique([organizationId, runId])
   @@map("employee_compensation_run_cancellation")
+}
+
+model EmployeeCompensationSubmission {
+  requestOutcome EmployeeCompensationSubmissionOutcome?
+  id                 String                          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId     String                          @map("organization_id") @db.Uuid
+  runId              String                          @map("run_id") @db.Uuid
+  submittedBy        String                          @map("submitted_by") @db.Uuid
+  idempotencyKey     String                          @map("idempotency_key") @db.Uuid
+  requestFingerprint String                          @map("request_fingerprint") @db.Char(64)
+  costOn             DateTime                        @map("cost_on") @db.Date
+  emergency          Boolean
+  reason             String                          @db.VarChar(500)
+  snapshot           Json
+  createdAt          DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization       Organization                    @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  run                EmployeeCompensationRun         @relation(fields: [organizationId, runId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  submitter          UserAccount                     @relation("EmployeeSubmissionCreator", fields: [organizationId, submittedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  claims             EmployeeCompensationClaim[]
+  costs              EmployeeCompensationCost[]
+  approval           ApprovalRequest?
+  withdrawal         EmployeeCompensationWithdrawal?
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, idempotencyKey], map: "employee_submission_nonce_unique")
+  @@index([organizationId, runId, createdAt, id], map: "employee_submission_run_history_idx")
+  @@map("employee_compensation_submission")
+}
+
+model EmployeeCompensationClaim {
+  id             String                         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                         @map("organization_id") @db.Uuid
+  submissionId   String                         @map("submission_id") @db.Uuid
+  personId       String                         @map("person_id") @db.Uuid
+  createdAt      DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization                   @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  submission     EmployeeCompensationSubmission @relation(fields: [organizationId, submissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  person         Person                         @relation(fields: [organizationId, personId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  costs          EmployeeCompensationCost[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, submissionId, personId], map: "employee_claim_submission_person_unique")
+  @@index([organizationId, personId, id], map: "employee_claim_person_idx")
+  @@map("employee_compensation_claim")
+}
+
+model EmployeeCompensationCost {
+  id                String                         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId    String                         @map("organization_id") @db.Uuid
+  submissionId      String                         @map("submission_id") @db.Uuid
+  claimId           String                         @map("claim_id") @db.Uuid
+  runLineId         String                         @map("run_line_id") @db.Uuid
+  completionEventId String                         @map("completion_event_id") @db.Uuid
+  propertyId        String                         @map("property_id") @db.Uuid
+  reservationId     String?                        @map("reservation_id") @db.Uuid
+  amount            Decimal                        @db.Decimal(18, 2)
+  currency          String                         @db.Char(3)
+  category          String                         @db.VarChar(120)
+  costCenter        String?                        @map("cost_center") @db.VarChar(120)
+  note              String                         @db.VarChar(1000)
+  timezone          String                         @db.VarChar(120)
+  policySnapshot    Json                           @map("policy_snapshot")
+  createdAt         DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization      Organization                   @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  submission        EmployeeCompensationSubmission @relation(fields: [organizationId, submissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  claim             EmployeeCompensationClaim      @relation(fields: [organizationId, claimId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  runLine           EmployeeCompensationRunLine    @relation(fields: [organizationId, runLineId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  completionEvent   OperationTaskEvent             @relation(fields: [organizationId, completionEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  property          Property                       @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  reservation       Reservation?                   @relation(fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  moneyCurrency     Currency                       @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+  approvalStages    ApprovalStage[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, submissionId, runLineId], map: "employee_cost_source_unique")
+  @@unique([organizationId, submissionId, completionEventId], map: "employee_cost_completion_unique")
+  @@index([organizationId, completionEventId, submissionId], map: "employee_cost_completion_idx")
+  @@map("employee_compensation_cost")
+}
+
+model EmployeeCompensationWithdrawal {
+  id             String                         @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String                         @map("organization_id") @db.Uuid
+  submissionId   String                         @map("submission_id") @db.Uuid
+  withdrawnBy    String                         @map("withdrawn_by") @db.Uuid
+  reason         String                         @db.VarChar(500)
+  createdAt      DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization   Organization                   @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  submission     EmployeeCompensationSubmission @relation(fields: [organizationId, submissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  withdrawer     UserAccount                    @relation("EmployeeSubmissionWithdrawer", fields: [organizationId, withdrawnBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, submissionId], map: "employee_submission_withdrawal_unique")
+  @@map("employee_compensation_withdrawal")
+}
+
+
+model EmployeeCompensationSubmissionRequest {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  runId String @map("run_id") @db.Uuid
+  requestedBy String @map("requested_by") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  input Json
+  authorizationCap Json @map("authorization_cap")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  run EmployeeCompensationRun @relation(fields:[organizationId,runId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_submission_request_run_fk")
+  requester UserAccount @relation("EmployeeSubmissionRequester",fields:[organizationId,requestedBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_submission_request_actor_fk")
+  outcome EmployeeCompensationSubmissionOutcome?
+  @@unique([organizationId,id])
+  @@unique([organizationId,idempotencyKey],map:"employee_submission_request_nonce_unique")
+  @@index([organizationId,runId,id],map:"employee_submission_request_run_idx")
+  @@map("employee_compensation_submission_request")
+}
+
+model EmployeeCompensationSubmissionOutcome {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  requestId String @map("request_id") @db.Uuid
+  submissionId String? @map("submission_id") @db.Uuid
+  state String @db.VarChar(16)
+  failureCode String? @map("failure_code") @db.VarChar(80)
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  request EmployeeCompensationSubmissionRequest @relation(fields:[organizationId,requestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  submission EmployeeCompensationSubmission? @relation(fields:[organizationId,submissionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id])
+  @@unique([organizationId,requestId],map:"employee_submission_outcome_request_unique")
+  @@unique([organizationId,submissionId],map:"employee_submission_outcome_source_unique")
+  @@map("employee_compensation_submission_outcome")
 }

@@ -25,3 +25,11 @@ export function employeeCompensationRunFacts(organizationId: string, run: Employ
   });
   return { resource, salarySources, total };
 }
+
+/** Submission, queued admission and historical reads retain the same actual source assignment. */
+export function employeeCompensationFinancialSourceFacts(organizationId:string,createdBy:string,source:{propertyId:string;taskId:string;reservationId:string|null;
+  amount:Amount;property:{cityId:string|null;regionId:string|null}},occurredAt:Date){
+  const scope={organizationId,propertyId:source.propertyId,city:source.property.cityId,region:source.property.regionId,reservationId:source.reservationId,
+    jobId:source.taskId,assignedUserAccountId:createdBy,dataClass:"financial" as const};
+  return{scope,financial:{...scope,type:"financial_transaction",amount:source.amount.toString(),occurredAt} satisfies Resource};
+}

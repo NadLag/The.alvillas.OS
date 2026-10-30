@@ -9,6 +9,7 @@ import { defaultNotificationPreferences, shouldDeliverNotification, type Notific
 import { authorize } from "@/platform/authz/authorize";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
 import { approvalResource } from "@/platform/approvals/approval";
+import { approvalInclude } from "@/platform/approvals/approval-repository";
 import { contextForRoleAssignments,authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { expenseEmergencyNoticeSchema,expenseResource,viewableExpenseResource,type ExpenseEmergencyNotice } from "@/modules/finance/domain/expense";
 import { z } from "zod";
@@ -83,7 +84,7 @@ export class NotificationRepository {
     const approval = input.kind === "approval_requested" ? await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: input.targetId },
       include: { recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } }) : null;
     const stage = approval?.financialStages.find(stage => stage.state === "PENDING");
-    if ((approval?.expenseId||approval?.invoiceSubmissionId) && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
+    if ((approval?.expenseId||approval?.invoiceSubmissionId||approval?.employeeSubmissionId) && (!stage || approval.state !== "PENDING")) return this.finish(event.id, batch);
     const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
     let routing:NotificationRouting;
@@ -381,19 +382,19 @@ export class NotificationRepository {
     for (const row of reservations) targets.set(row.id, { type: "reservation", organizationId: this.organizationId, id: row.id, reservationId: row.id, propertyId: row.propertyId, region: row.property.regionId, city: row.property.cityId, status: row.status });
     const approvalIds = rows.filter((row) => row.kind === "approval_requested" || row.kind === "approval_decided").map((row) => row.targetId);
     const approvals = approvalIds.length ? await this.tx.approvalRequest.findMany({ where: { organizationId: this.organizationId, id: { in: approvalIds },
-      OR: [{ invoiceSubmissionId: { not: null } }, { invoiceSubmissionId: null, property: { archivedAt: null } }] },
-      include: { property: true, expense: true, invoiceSubmission: { include: { invoice: true } },
-        financialStages: { orderBy: { position: "asc" }, include: { recipients: true, property: { select: { name: true, cityId: true, regionId: true } } } } } }) : [];
-    const approvalReader = readerId && approvals.some(row => row.invoiceSubmissionId) ? await authContextForAccountInTransaction(this.tx, this.organizationId, readerId) : null;
+      OR: [{ invoiceSubmissionId: { not: null } },{employeeSubmissionId:{not:null}}, { invoiceSubmissionId: null, property: { archivedAt: null } }] },
+      include:approvalInclude }) : [];
+    const approvalReader = readerId && approvals.some(row => row.invoiceSubmissionId||row.employeeSubmissionId) ? await authContextForAccountInTransaction(this.tx, this.organizationId, readerId) : null;
     for (const row of approvals) {
-      const active = row.financialStages.find(stage => stage.state === "PENDING");
+      if(row.employeeSubmission?.withdrawal)continue;
+      const lineSource=Boolean(row.invoiceSubmissionId||row.employeeSubmissionId),active = row.financialStages.find(stage => stage.state === "PENDING");
       const owned = readerId ? row.financialStages.filter(stage => stage.recipients.some(recipient => recipient.userAccountId === readerId) &&
-        (!row.invoiceSubmissionId || approvalReader && authorize(approvalReader, "view", approvalResource(row, stage.ownerId, stage)))) : [];
-      const ownStage = row.invoiceSubmissionId ? owned.find(stage => stage.id === active?.id) ?? owned.find(stage => stage.state === "PENDING") ?? owned.at(-1) : owned[0];
+        (!lineSource || approvalReader && authorize(approvalReader, "view", approvalResource(row, stage.ownerId, stage)))) : [];
+      const ownStage = lineSource ? owned.find(stage => stage.id === active?.id) ?? owned.find(stage => stage.state === "PENDING") ?? owned.at(-1) : owned[0];
       const shown = ownStage ?? active ?? row.financialStages.at(-1);
-      if (row.invoiceSubmissionId && !shown) continue;
+      if (lineSource && !shown) continue;
       const resource = approvalResource(row, shown?.ownerId, shown);
-      targets.set(row.id, row.invoiceSubmissionId ? resource : { ...resource, assignedUserAccountId: row.requestedBy });
+      targets.set(row.id, lineSource ? resource : { ...resource, assignedUserAccountId: row.requestedBy });
     }
     const invoiceNoticeIds = rows.filter(row => row.kind === "supplier_invoice_emergency").map(row => row.targetId);
     const invoiceNoticeEvents = invoiceNoticeIds.length ? await this.tx.outboxEvent.findMany({ where: { organizationId: this.organizationId, id: { in: invoiceNoticeIds }, type: notificationEventType } }) : [];
@@ -423,9 +424,9 @@ export class NotificationRepository {
   }
   async approvalDeliveryAllowed(approvalId: string, recipientId: string, sourceEventId?: string) {
     const row = await this.tx.approvalRequest.findFirst({ where: { organizationId: this.organizationId, id: approvalId },
-      include: { recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } });
-    if (!row || row.state !== "PENDING") return false;
-    if (!row.expenseId && !row.invoiceSubmissionId) return row.recipients.some(recipient => recipient.userAccountId === recipientId);
+      include: { employeeSubmission:{select:{withdrawal:true}},recipients: true, financialStages: { orderBy: { position: "asc" }, include: { recipients: true } } } });
+    if (!row || row.state !== "PENDING"||row.employeeSubmission?.withdrawal) return false;
+    if (!row.expenseId && !row.invoiceSubmissionId&&!row.employeeSubmissionId) return row.recipients.some(recipient => recipient.userAccountId === recipientId);
     const stage = row.financialStages.find(stage => stage.state === "PENDING");
     if (!stage || !sourceEventId || !stage.recipients.some(recipient => recipient.userAccountId === recipientId)) return false;
     const event = await this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id: sourceEventId, type: notificationEventType } });

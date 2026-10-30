@@ -5,10 +5,10 @@ import type { employeeCompensationRunFacts } from "@/platform/authz/employee-com
 export { employeeCompensationRunFacts } from "@/platform/authz/employee-compensation-resource";
 
 export async function recheckEmployeeCompensationRun(ctx: FinanceActorContext, tx: TenantTransaction, now: Date,
-  facts: ReturnType<typeof employeeCompensationRunFacts>, action: "view" | "create" | "void" | "export" = "view") {
+  facts: ReturnType<typeof employeeCompensationRunFacts>, action: "view" | "create" | "edit" | "void" | "export" | "pay" = "view",additionalChecks:Parameters<typeof recheckFinanceAuthorization>[3]=[]) {
   await recheckFinanceAuthorization(ctx, tx, now, [
     { action: "view", resource: facts.resource },
     ...(action === "view" ? [] : [{ action, resource: facts.resource }]),
-    ...facts.salarySources.map(resource => ({ action: "view" as const, resource }))
+    ...facts.salarySources.map(resource => ({ action: "view" as const, resource })),...additionalChecks
   ], new EmployeeCompensationRunAccessError());
 }

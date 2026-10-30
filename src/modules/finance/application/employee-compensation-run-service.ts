@@ -142,6 +142,7 @@ export async function cancelEmployeeCompensationRun(ctx: FinanceActorContext, ra
     const repository=new EmployeeCompensationRunRepository(tx,ctx.organizationId);await repository.lock(input.id);
     const row=await repository.find(input.id);if(!row)throw new EmployeeCompensationRunAccessError();await checkStoredRun(ctx,tx,row,"void");
     if(row.cancellation){if(row.cancellation.cancelledBy!==ctx.actorId||row.cancellation.reason!==input.reason)throw new EmployeeCompensationRunConflictError();return{id:row.id,idempotent:true};}
+    if(await repository.activeSubmissions(row.id))throw new EmployeeCompensationRunConflictError();
     const cancelled=await repository.cancel(row.id,ctx.actorId,input.reason);
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation_run.cancelled",resourceType:"employee_compensation_run",
       resourceId:row.id,after:{runId:row.id,cancellationId:cancelled.id},reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await new FinanceRepository(tx,ctx.organizationId).clock()});

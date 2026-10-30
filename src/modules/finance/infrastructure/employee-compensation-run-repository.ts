@@ -1,9 +1,10 @@
 import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
-const lineFields = { id: true, taskId: true, personId: true, assignmentId: true, compensationId: true, configRuleId: true,
+export const employeeCompensationRunLineFields = { id: true, taskId: true, personId: true, assignmentId: true, compensationId: true, configRuleId: true,
   completionEventId: true, propertyId: true, recordedCompletionAt: true, rate: true, amount: true, currency: true,
   property: { select: { cityId: true, regionId: true } } } as const;
+const lineFields=employeeCompensationRunLineFields;
 const include = { lines: { orderBy: { id: "asc" as const }, select: lineFields }, cancellation: true } satisfies Prisma.EmployeeCompensationRunInclude;
 export type CompensationRunRecord = Prisma.EmployeeCompensationRunGetPayload<{ include: typeof include }>;
 export type CompensationDisplaySource=Awaited<ReturnType<EmployeeCompensationRunRepository["displayLines"]>>[number];
@@ -18,6 +19,7 @@ export class EmployeeCompensationRunRepository {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":employee-compensation-run:" + id},0))::text`);
   }
   async find(id: string) { return this.tx.employeeCompensationRun.findFirst({ where: { organizationId: this.organizationId, id }, include }); }
+  activeSubmissions(runId:string){return this.tx.employeeCompensationSubmission.count({where:{organizationId:this.organizationId,runId,withdrawal:null,OR:[{approval:null},{approval:{state:{not:"REJECTED"}}}]}});}
   byKey(idempotencyKey: string) { return this.tx.employeeCompensationRun.findUnique({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, include }); }
   create(input: Omit<Prisma.EmployeeCompensationRunUncheckedCreateInput, "organizationId" | "lines" | "cancellation">) {
     return this.tx.employeeCompensationRun.create({ data: { ...input, organizationId: this.organizationId } });
@@ -56,5 +58,11 @@ export class EmployeeCompensationRunRepository {
   }
   async findMany(ids: readonly string[]) {
     return this.tx.employeeCompensationRun.findMany({ where: { organizationId: this.organizationId, id: { in: [...ids] } }, include });
+  }
+  claimSources(runId:string){
+    return this.tx.employeeCompensationRunLine.findMany({where:{organizationId:this.organizationId,runId},orderBy:{id:"asc"},
+      select:{...lineFields,property:{select:{id:true,timezone:true,cityId:true,regionId:true}},
+        task:{select:{propertyId:true,reservationId:true,reservation:{select:{id:true,propertyId:true,status:true,createdBy:true}}}},
+        completionEvent:{select:{id:true,organizationId:true,taskId:true,version:true,actorId:true,after:true}}}});
   }
 }

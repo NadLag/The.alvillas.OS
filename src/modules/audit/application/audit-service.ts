@@ -84,9 +84,9 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
-  if (row.resourceType === "employee_compensation_run") {
+  if (row.resourceType === "employee_compensation_run"||row.resourceType==="employee_compensation_submission") {
     const now = new Date();
-    const allowed = Boolean(financialResource?.type === "employee_payable" && financialResource.id === row.resourceId &&
+    const allowed = Boolean(financialResource?.type === "employee_payable" && (row.resourceType==="employee_compensation_submission"?financialResource.sourceRecordId===row.resourceId:financialResource.id === row.resourceId) &&
       financialResource.organizationId === ctx.organizationId && financialResource.salarySources?.length &&
       authorize(ctx.authContext,action,financialResource,now) && financialResource.salarySources.every(source =>
         source.type === "staff_compensation" && source.organizationId === ctx.organizationId && authorize(ctx.authContext,"view",source,now)));
@@ -209,14 +209,15 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns] = await Promise.all([
+  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
     read("ledger_account", ids => repository.ledgerAccountResources(ids)),
     read("transaction_group", ids => repository.transactionGroupResources(ids)),
     read("accounting_period", ids => repository.accountingPeriodResources(ids)),
-    read("employee_compensation_run", ids => repository.employeeCompensationRunResources(ids))
+    read("employee_compensation_run", ids => repository.employeeCompensationRunResources(ids)),
+    read("employee_compensation_submission",ids=>repository.employeeCompensationSubmissionResources(ids))
   ]);
   return new Map([
     ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),
@@ -225,7 +226,8 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     ...[...accounts].map(([id, resource]) => [`ledger_account:${id}`, resource] as const),
     ...[...groups].map(([id, resource]) => [`transaction_group:${id}`, resource] as const),
     ...[...periods].map(([id, resource]) => [`accounting_period:${id}`, resource] as const),
-    ...[...employeeRuns].map(([id,resource])=>[`employee_compensation_run:${id}`,resource] as const)
+    ...[...employeeRuns].map(([id,resource])=>[`employee_compensation_run:${id}`,resource] as const),
+    ...[...employeeSubmissions].map(([id,resource])=>[`employee_compensation_submission:${id}`,resource] as const)
   ]);
 }
 
