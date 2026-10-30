@@ -79,6 +79,7 @@ describe("config rule registry", () => {
       "reservation.sync_policy",
       "services.pricing",
       "staff.compensation",
+      "staff.compensation_runs",
       "staff.management_policy"
     ]);
 
@@ -86,6 +87,9 @@ describe("config rule registry", () => {
   });
 
   it("parses known config values and rejects unregistered keys", () => {
+    expect(parseConfigRuleValue("staff.compensation_runs",{earning_date:"RECORDED_COMPLETION",timezone:"UTC",max_period_days:31}))
+      .toEqual({earning_date:"RECORDED_COMPLETION",timezone:"UTC",max_period_days:31});
+    expect(()=>parseConfigRuleValue("staff.compensation_runs",{timezone:"UTC",max_period_days:31})).toThrow();
     expect(parseConfigRuleValue("finance.accounting_periods", {
       timezone: "Europe/Paris", allow_early_close: false, max_reopen_seconds: 120
     })).toEqual({ timezone: "Europe/Paris", allow_early_close: false, max_reopen_seconds: 120 });

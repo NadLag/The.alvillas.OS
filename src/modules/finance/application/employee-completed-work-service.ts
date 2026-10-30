@@ -5,9 +5,9 @@ import { Money } from "@/platform/money/money";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { EmployeeCompensationRepository } from "../infrastructure/employee-compensation-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
-import { employeeCompletedWorkEvidence } from "../domain/employee-completed-work";
-import { EmployeeCompensationAccessError, EmployeeCompensationSourceUnavailableError, previewEmployeeCompensationInTransaction } from "./employee-compensation-service";
+import { EmployeeCompensationAccessError, previewEmployeeCompensationInTransaction } from "./employee-compensation-service";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
+import { validateEmployeeCompletedWorkSource } from "./employee-compensation-source";
 
 export const employeeCompletedWorkInput = z.object({ taskId: z.uuid(), assignmentId: z.uuid(), confirmedAssignment: z.literal(true) }).strict();
 
@@ -27,24 +27,7 @@ export async function previewEmployeeCompletedWork(ctx: FinanceActorContext, raw
       amount: Money.of(rate.amount.toString(), rate.currency).toJSON().amount, occurredAt: task.completedAt };
     const recheck = async () => recheckFinanceAuthorization(ctx, tx, await finance.clock(), [{ action: "view", resource }], new EmployeeCompensationAccessError());
     await recheck();
-    const event = task.events[0];
-    if (task.events.length !== 1 || !event || rate.mode !== "PER_JOB") throw new EmployeeCompensationSourceUnavailableError();
-    let evidence: ReturnType<typeof employeeCompletedWorkEvidence>;
-    try { evidence = employeeCompletedWorkEvidence(event); } catch { throw new EmployeeCompensationSourceUnavailableError(); }
-    const scopeMatches = assignment.scopeType === "organization" || assignment.scopeType === "property" && assignment.scopeId === task.propertyId ||
-      assignment.scopeType === "city" && assignment.scopeId === task.property.cityId || assignment.scopeType === "region" && assignment.scopeId === task.property.regionId ||
-      assignment.scopeType === "job" && assignment.scopeId === task.id;
-    if (!scopeMatches || evidence.property_id !== task.propertyId || evidence.completed_by_person_id !== assignment.personId ||
-      evidence.completed_by_person_id !== task.completedByPersonId || evidence.completed_by_user_account_id !== task.completedByUserAccountId ||
-      evidence.completion_idempotency_key !== task.completionIdempotencyKey || evidence.completion_source !== task.completionSource ||
-      new Date(evidence.completed_at).getTime() !== task.completedAt.getTime() || event.version > task.version ||
-      evidence.required_role_key !== task.requiredRoleKey || evidence.required_role_key && evidence.required_role_key !== assignment.role.key ||
-      evidence.validated_by_person_id !== task.validatedByPersonId || evidence.validated_by_user_account_id !== task.validatedByUserAccountId ||
-      (evidence.validated_at ? new Date(evidence.validated_at).getTime() : null) !== (task.validatedAt?.getTime() ?? null) ||
-      evidence.validation_reason !== task.validationReason) throw new EmployeeCompensationSourceUnavailableError();
-    if (!task.checklistItems.length || task.checklistItems.some(item => !item.completedAt || item.completedAt > task.completedAt! ||
-      item.completedByPersonId !== evidence.completed_by_person_id || item.completedByUserAccountId !== evidence.completed_by_user_account_id))
-      throw new EmployeeCompensationSourceUnavailableError();
+    const { evidence, event } = validateEmployeeCompletedWorkSource(task, source);
     const estimate = await previewEmployeeCompensationInTransaction(ctx, { assignmentId: assignment.id, earnedAt: task.completedAt.toISOString(),
       basis: { mode: "PER_JOB", jobs: "1" } }, tx, { requestId }, { taskId: task.id, personId: assignment.personId, completedAt: task.completedAt });
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "team.compensation.completed_work.preview", resourceType: "team_member",

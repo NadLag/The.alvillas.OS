@@ -1,8 +1,8 @@
-import type { PrismaClient } from "@prisma/client";
+import type { TenantTransactionRunner } from "@/platform/db/tenant";
 
 // GRANT to different test roles still updates the same pg_class ACL tuple.
 // Serialize catalog setup across suites without serializing business tests.
-export async function provisionIntegrationRole(admin: PrismaClient, role: "alvillas_app_test" | "alvillas_team_tests" | "alvillas_ops_tests") {
+export async function provisionIntegrationRole(admin: TenantTransactionRunner, role: "alvillas_app_test" | "alvillas_team_tests" | "alvillas_ops_tests") {
   await admin.$transaction(async tx => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('alvillas-integration-role-provisioning'))`;
     await tx.$executeRawUnsafe(`DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname='${role}') THEN CREATE ROLE ${role} LOGIN; END IF; END $$`);

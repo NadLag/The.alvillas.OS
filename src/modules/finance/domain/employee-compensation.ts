@@ -10,6 +10,8 @@ export const employeeCompensationBasisSchema = z.discriminatedUnion("mode", [
 ]);
 export type EmployeeCompensationBasis = z.infer<typeof employeeCompensationBasisSchema>;
 export class EmployeeCompensationBasisError extends Error {}
+export class EmployeeCompensationAccessError extends Error {}
+export class EmployeeCompensationSourceUnavailableError extends Error {}
 
 /** A contractual calculation, independent of approval and recognition of earned work. */
 export function employeeCompensationAmount(rate: { mode: string; amount: Money }, rawBasis: unknown): Money {

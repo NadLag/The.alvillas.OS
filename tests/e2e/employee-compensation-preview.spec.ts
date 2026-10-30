@@ -1,10 +1,7 @@
-import { createHash } from "node:crypto";
 import { expect, test } from "@playwright/test";
 import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
-import { authContextForAccount } from "@/platform/authz/account-context";
-import { saveTeamCompensation } from "@/modules/identity/application/team-service";
-import { openFieldFixture } from "./support/field-fixture";
+import { openCompensationApiFixture } from "./support/compensation-api";
 
 const preview = z.object({ kind: z.string(), amount: z.object({ amount: z.string(), currency: z.string() }), personId: z.uuid(),
   compensationId: z.uuid(), taskId: z.uuid().optional(), completionEventId: z.uuid().optional(), performedByPersonId: z.uuid().optional(), completionMethod: z.string().optional() });
@@ -13,24 +10,10 @@ test.use({ serviceWorkers: "allow", timezoneId: "America/Denver", actionTimeout:
 for (const locale of ["en", "fr", "ar"] as const) test(`Private compensation API binds completed work and expires actual salary authority in ${locale}`, async ({ page, browser }, info) => {
   test.skip(!process.env.DATABASE_URL, "Real local PostgreSQL required");
   test.setTimeout(120000);
-  const f = await openFieldFixture(page, info, locale), origin = new URL(page.url()).origin;
+  const f = await openCompensationApiFixture(page, info, locale), origin = new URL(page.url()).origin;
   const anonymous = await browser.newContext({ baseURL: origin, storageState: { cookies: [], origins: [] } });
   try {
-    const source = await withTenant(f.db, f.organizationId, async tx => {
-      const task = await tx.operationTask.findUniqueOrThrow({ where: { id: f.taskId } });
-      const account = await tx.userAccount.findUniqueOrThrow({ where: { id: task.assignedToUserAccountId! } });
-      const assignment = await tx.roleAssignment.findFirstOrThrow({ where: { organizationId: f.organizationId, userAccountId: account.id,
-        scopeType: "organization", archivedAt: null, role: { key: "admin" } } });
-      return { account, assignment };
-    });
-    const actor = { organizationId: f.organizationId, actorId: source.account.id, personId: source.account.personId,
-      authContext: { ...await authContextForAccount(f.organizationId, source.account.id, { db: f.db }), personId: source.account.personId } };
-    const rate = await saveTeamCompensation(actor, { assignmentId: source.assignment.id, expectedVersion: 0, mode: "PER_JOB", amount: "500.25", currency: "MAD",
-      effectiveFrom: new Date().toISOString(), reason: "Native API verification of the actual contractual rate" }, { db: f.db });
-    const facts = () => withTenant(f.db, f.organizationId, async tx => createHash("sha256").update(JSON.stringify({
-      journals: await tx.financialTransaction.findMany({ orderBy: { id: "asc" } }), postings: await tx.posting.findMany({ orderBy: { id: "asc" } })
-    })).digest("hex"));
-    const original = await facts();
+    const { source, rate, facts, original } = f;
     const contract = { kind: "contract", input: { assignmentId: source.assignment.id, earnedAt: new Date().toISOString(), basis: { mode: "PER_JOB", jobs: "3" } } };
     const unauthorized = await anonymous.request.post(path, { headers: { origin }, data: contract });
     expect(unauthorized.status()).toBe(401); expect(failure.parse(await unauthorized.json())).toEqual({ error: "unauthorized" });
