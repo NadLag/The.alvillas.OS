@@ -52,10 +52,10 @@ export function validateEmployeeCompletedWorkEvidence(task: CompletedWorkSource)
   return { evidence, event };
 }
 
-export function validateEmployeeCompletedWorkSource(task: CompletedWorkSource, source: CompensationSource) {
+export function validateEmployeeCompletedWorkSource(task: CompletedWorkSource, source: CompensationSource,mode:"PER_JOB"|"PER_HOUR"="PER_JOB") {
   const { assignment, rate } = source;
   if (!rate || assignment.personId !== task.completedByPersonId) throw new EmployeeCompensationAccessError();
-  if (rate.mode !== "PER_JOB") throw new EmployeeCompensationSourceUnavailableError();
+  if (rate.mode !== mode) throw new EmployeeCompensationSourceUnavailableError();
   const original=validateEmployeeCompletedWorkEvidence(task);
   const scopeMatches = assignment.scopeType === "organization" || assignment.scopeType === "property" && assignment.scopeId === task.propertyId ||
     assignment.scopeType === "city" && assignment.scopeId === task.property.cityId || assignment.scopeType === "region" && assignment.scopeId === task.property.regionId ||

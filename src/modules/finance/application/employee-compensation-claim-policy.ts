@@ -47,7 +47,7 @@ export async function prepareEmployeeCompensationClaimPolicy(ctx:FinanceActorCon
     let companyTimezone:string|undefined,companyConfiguration:CompanyCostConfiguration|undefined;
     for(const item of classified.costs){
       const source=item.source,identity=employeeCompensationSourceIdentity(source);let reservationId:string|null=null;
-      if(identity.kind==="PER_JOB"){
+      if(identity.kind!=="PER_MONTH"){
        if(!source.completionEvent||!source.task||!source.property)throw new EmployeeCompensationClaimSourceError();const evidence=employeeCompletedWorkEvidence(source.completionEvent);reservationId=reservationEvidence.parse(evidence).reservation_id;
        if(evidence.property_id!==source.propertyId||evidence.completed_by_person_id!==source.personId||source.task.propertyId!==source.propertyId||source.task.reservationId!==reservationId||(reservationId&&(!source.task.reservation||source.task.reservation.propertyId!==source.propertyId)))throw new EmployeeCompensationClaimSourceError();
       }else{reservationId=source.task?.reservationId??null;if(source.completionEvent||source.propertyId&&!source.property||source.task&&source.task.propertyId!==source.propertyId||!source.propertyId&&reservationId)throw new EmployeeCompensationClaimSourceError();}
@@ -58,7 +58,8 @@ export async function prepareEmployeeCompensationClaimPolicy(ctx:FinanceActorCon
       if(reservationId)requireRead({...scope,type:"reservation",id:reservationId,status:source.task!.reservation!.status,assignedUserAccountId:source.task!.reservation!.createdBy});
       const target:Resource={...scope,type:"expense",id:source.id,financialRecordId:source.id,amount:item.amount.toJSON().amount,occurredAt:at,status:"DRAFT"};
       const roles=financePolicyRoleKeys(ctx,target,now,authorities);roleChecks.push({resource:target,roles});
-      const sourceEvidence={sourceKind:"employee_compensation_run_line",runId:run.id,runLineId:source.id,completionEventId:source.completionEventId,personId:source.personId,recordedCompletionAt:source.recordedCompletionAt.toISOString(),actorRoles:roles,...identity.kind==="PER_MONTH"?{earningKind:"PER_MONTH",assignmentId:source.assignmentId,earningPeriodKey:identity.month}:{}};
+      const earningEvidence=identity.kind==="PER_MONTH"?{earningKind:"PER_MONTH",assignmentId:source.assignmentId,earningPeriodKey:identity.month}:identity.kind==="PER_HOUR"?{earningKind:"PER_HOUR",assignmentId:source.assignmentId,workTimeEvidenceId:identity.evidenceId,workTimeDecisionId:identity.decisionId}:{};
+      const sourceEvidence={sourceKind:"employee_compensation_run_line",runId:run.id,runLineId:source.id,completionEventId:source.completionEventId,personId:source.personId,recordedCompletionAt:source.recordedCompletionAt.toISOString(),actorRoles:roles,...earningEvidence};
       if(!source.propertyId&&!companyConfiguration)companyConfiguration={asOf:at,snapshot:await new ConfigRuleRepository(tx,ctx.organizationId).scopedSnapshot([{scopeType:"organization",scopeId:null}],at),revenue:new Map()};
       const plan=source.propertyId?await preparePropertyCostSubmissionPolicy(ctx,{id:source.id,propertyId:source.propertyId,reservationId,amount:source.amount,currency:source.currency,occurredOn:new Date(input.costOn+"T00:00:00Z"),category:item.category,emergency:input.emergency,purpose:item.note,property:{timezone}},target,tx,now,sourceEvidence,{approvalAmount:classified.total,discloseOwnerSlice:true,authorities,postHocAudience:(notice,resource)=>pendingNotices.push({notice,resource})}):await prepareCompanyCostSubmissionPolicy(ctx,{amount:item.amount,approvalAmount:classified.total,category:item.category,purpose:item.note,occurredOn:input.costOn,emergency:input.emergency,sourceEvidence},target,timezone,authorities,tx,now,companyConfiguration!,()=>new EmployeeCompensationRunAccessError());
       if("requiresCompanyRevenue" in plan&&plan.requiresCompanyRevenue)requireRead({type:"company_ledger",organizationId:ctx.organizationId,dataClass:"financial"},true);
@@ -69,7 +70,7 @@ export async function prepareEmployeeCompensationClaimPolicy(ctx:FinanceActorCon
       if(Money.of(frozen.allocation.guest.amount,run.currency).amount.gt(0)&&!reservationId)throw new ExpensePolicyUnavailableError("Guest work allocation requires its original reservation");
       for(const policy of frozen.policies)if(source.propertyId&&policy.revenueEvidence)requireRead({...financial,amount:policy.revenueEvidence.amount.amount});
       stages.push(...plan.stages.map(stage=>({...stage,runLineId:source.id,propertyId:source.propertyId,reservationId})));
-      costs.push({...identity.kind==="PER_MONTH"?{earningKind:"PER_MONTH",assignmentId:source.assignmentId,earningPeriodKey:identity.month}:{},runLineId:source.id,personId:source.personId,propertyId:source.propertyId,reservationId,taskId:source.taskId,completionEventId:source.completionEventId,
+      costs.push({...earningEvidence,runLineId:source.id,personId:source.personId,propertyId:source.propertyId,reservationId,taskId:source.taskId,completionEventId:source.completionEventId,
         recordedCompletionAt:source.recordedCompletionAt.toISOString(),costOn:input.costOn,timezone,category:item.category,costCenter:item.costCenter,note:item.note,
         amount:item.amount.toJSON(),policy:plan.snapshot,postHocNotices:plan.postHocNotices});
     }

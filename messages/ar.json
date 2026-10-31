@@ -3157,7 +3157,21 @@
     "monthlyContractCount": "العقود",
     "monthlySources": "أدلة مستحقات العقد الشهرية",
     "monthlyTimezone": "تقويم العقد · {timezone}",
-    "beneficiary": "المستفيد"
+    "beneficiary": "المستفيد",
+    "perHour": "{amount} / ساعة",
+    "hourlyEvidence": "العمل الفعلي بالساعات المعتمد",
+    "hourlyActualDuration": "مدة العمل الفعلية المستحقة",
+    "hourlyDuration": "{hours} ساعة {minutes} دقيقة {seconds} ثانية",
+    "hourlyValidation": "الاعتماد الأصلي لوقت العمل",
+    "hourlyEvidenceVersion": "نسخة الإثبات المعتمدة {version}",
+    "hourlyUTC": "تُعرض جميع أوقات الفترات والاعتماد بالتوقيت العالمي UTC.",
+    "hourlyAppliedRates": "أسعار الساعة الأصلية السارية",
+    "hourlyContractVersion": "نسخة العقد {version}",
+    "hourlyRatesNavigation": "شرائح أسعار الساعة",
+    "hourlyPreviousRates": "الشرائح السابقة",
+    "hourlyNextRates": "الشرائح التالية",
+    "hourlyRatePage": "الشرائح {from}–{to} من {total}",
+    "hourlyRounding": "تُجمع جميع مساهمات الفترات والأسعار الأصلية قبل التقريب مرة واحدة لإجمالي مستحقات العمل المكتمل."
   },
   "EmployeeCostNotices": {
     "eyebrow": "المالية · إشعار المالك",
