@@ -1,5 +1,6 @@
 .compensation-page { max-inline-size: 80rem; grid-template-columns: minmax(0, 1fr); }
 .compensation-page > * { min-inline-size: 0; }
+.employee-cost-notice { min-inline-size: 0; overflow-wrap: anywhere; }
 .compensation-cost-actions { margin-block: var(--space-5); }
 .compensation-cost-check { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--target-min); margin-block: var(--space-4); cursor: pointer; }
 .compensation-cost-check input { min-inline-size: var(--target-compact); min-block-size: var(--target-compact); accent-color: var(--accent); }

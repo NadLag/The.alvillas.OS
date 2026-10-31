@@ -59,7 +59,7 @@ export async function prepareExpenseSubmissionPolicy(ctx: FinanceActorContext, r
 /** One property-cost engine serves paid expenses and actual unpaid invoice lines. */
 export async function preparePropertyCostSubmissionPolicy(ctx: FinanceActorContext, row: PropertyCostPolicySource, target: Resource,
   tx: TenantTransaction, now: Date, sourceEvidence: Prisma.InputJsonObject,
-  options: { approvalAmount?: Money; discloseOwnerSlice?: boolean; authorities?: readonly AuthContext[] } = {}) {
+  options: { approvalAmount?: Money; discloseOwnerSlice?: boolean; authorities?: readonly AuthContext[];postHocAudience?:(notice:ExpenseEmergencyNotice,resource:Resource)=>void } = {}) {
   const repository = new ExpenseRepository(tx, ctx.organizationId), source = await repository.sourceOwners(row.propertyId, row.reservationId ?? undefined);
   const correction = row.correctsExpenseId ? correctionPolicySchema.safeParse(row.correctsExpense?.submission?.snapshot) : null;
   if (correction && !correction.success) throw new ExpensePolicyUnavailableError("Original expense agreement policy is unavailable");
@@ -156,9 +156,9 @@ export async function preparePropertyCostSubmissionPolicy(ctx: FinanceActorConte
       const routing=notificationRoutingSchema.parse(configured.routing?.owner);
       await notifications.validateRoutingReferences(routing,row.propertyId);
       if (!routing.channels.includes("in_app")) throw new ExpensePolicyUnavailableError("Emergency approval requires a durable owner inbox notice");
-      const recipients=await notifications.viewers(routing,stageTarget);
-      if (!recipients.length) throw new ExpensePolicyUnavailableError("Emergency approval has no authorized owner notice recipient");
-      postHocNotices.push({ownerId:slice.ownerId,routing,recipients});
+      const recipients=options.postHocAudience?[]:await notifications.viewers(routing,stageTarget);
+      if (!recipients.length&&!options.postHocAudience) throw new ExpensePolicyUnavailableError("Emergency approval has no authorized owner notice recipient");
+      const notice={ownerId:slice.ownerId,routing,recipients};postHocNotices.push(notice);options.postHocAudience?.(notice,stageTarget);
     }
     policies.push({ ownerId: slice.ownerId, ownerName: slice.ownerName, shareBps: slice.shareBps, sourceAmount: slice.grossAmount.toJSON(),
       allocation: { treatment: policy.allocation.treatment, owner: policy.allocation.ownerAmount.toJSON(), alvillas: policy.allocation.alvillasAmount.toJSON(), guest: policy.allocation.guestAmount.toJSON() },

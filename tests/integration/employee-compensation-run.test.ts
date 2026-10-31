@@ -1,3 +1,6 @@
+import { getEmployeeCompensationCostWorkspace } from "@/modules/finance/application/employee-compensation-cost-workspace";
+import { getEmployeeCompensationCostDetail } from "@/modules/finance/application/employee-compensation-cost-detail";
+import { recoverEmployeeCompensationSubmissionRequest } from "@/modules/finance/application/employee-compensation-submission-requests";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { execFileSync } from "node:child_process";
@@ -31,9 +34,11 @@ import { getEmployeeCompensationRunDetail } from "@/modules/finance/application/
 import { listEmployeeCompensationRuns } from "@/modules/finance/application/employee-compensation-run-list";
 import { prepareEmployeeCompensationClaimPolicy } from "@/modules/finance/application/employee-compensation-claim-policy";
 import { EmployeeCompensationClaimSourceError } from "@/modules/finance/domain/employee-compensation-claim";
-import { getEmployeeCompensationCostWorkspace } from "@/modules/finance/application/employee-compensation-cost-workspace";
-import { getEmployeeCompensationCostDetail } from "@/modules/finance/application/employee-compensation-cost-detail";
-import { recoverEmployeeCompensationSubmissionRequest } from "@/modules/finance/application/employee-compensation-submission-requests";
+import { getEmployeeCompensationNotice } from "@/modules/finance/application/employee-compensation-notice";
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { ExpensePolicyUnavailableError } from "@/modules/finance/application/expense-submission-policy";
+import { ownNotificationContext } from "@/platform/notifications/notification";
+import { getNotificationPage,openNotification } from "@/platform/notifications/notification-service";
 
 const url=process.env.TEST_DATABASE_URL;let admin:PrismaClient,db:PrismaClient;
 const fixtures=employeeCompensationFixtures(()=>db,()=>admin);
@@ -67,6 +72,20 @@ async function claimFixture(method:"SELF"|"OFFLINE_SYNC"|"PROXY"="SELF",noLogin=
     costs:run.lines.map(line=>({runLineId:line.id,category:"staff",costCenter:null,note:"Review the original completed work contractual cost"}))}};
 }
 
+async function emergencyFixture(){
+  const f=await claimFixture(),owners=await withTenant(db,f.org,async tx=>{
+    await tx.propertyOwner.updateMany({where:{organizationId:f.org,propertyId:f.property.id},data:{shareBps:5000}});
+    const second=await tx.owner.create({data:{organizationId:f.org,displayName:"Independent emergency work cost owner"}});await tx.propertyOwner.create({data:{organizationId:f.org,propertyId:f.property.id,ownerId:second.id,shareBps:5000,isPrimary:false}});
+    const rows=[];for(const owner of[f.costOwner,second]){const person=await tx.person.create({data:{organizationId:f.org,displayName:"Actual employee cost notice owner"}}),account=await tx.userAccount.create({data:{organizationId:f.org,personId:person.id,status:"ACTIVE"}});rows.push({owner,person,account});}return rows;
+  });
+  const readers:Array<(typeof owners)[number]&Awaited<ReturnType<typeof fixtures.reader>>>=[];for(const owner of owners){const reader=await fixtures.reader({...f,person:owner.person,account:owner.account},{scopeType:"owner",scopeId:owner.owner.id,permissions:["expense:view"]});readers.push({...owner,...reader});}
+  await withTenant(db,f.org,async tx=>{const rules=new ConfigRuleRepository(tx,f.org);
+    await rules.createVersion({key:"finance.expense_treatment",scopeType:"property",scopeId:f.property.id,effectiveFrom:new Date("2020-01-02"),reason:"Explicit actual emergency employee owner allocation",value:{default_treatment:"OWNER_PAID"}});
+    await rules.createVersion({key:"finance.approval_thresholds",scopeType:"organization",effectiveFrom:new Date("2020-01-02"),reason:"Explicit actual emergency employee owner notice policy",value:{thresholds:[{key:"actual_employee_emergency_owner",requires_approval_from:["owner"],emergency_bypass_owner:true}],routing:{owner:{people:readers.map(row=>row.person.id),roles:[],assigned:false,channels:["in_app"]}}}});
+  });
+  return{...f,readers,emergencyInput:{...f.claimInput,emergency:true,idempotencyKey:randomUUID(),reason:"Submit actual emergency completed work with retained owner notice"}};
+}
+
 describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
   beforeAll(async()=>{
     if(!url||!["localhost","127.0.0.1"].includes(new URL(url).hostname))throw Error("Dedicated local PostgreSQL required");
@@ -91,7 +110,7 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     expect(await facts(f.org)).toMatchObject({journals:before.journals,postings:before.postings});
   });
 
-  it("denies private cost workspace and source labels without both salary and financial source authority",async()=>{
+it("denies private cost workspace and source labels without both salary and financial source authority",async()=>{
     const f=await claimFixture(),created=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Retain source facts for private workspace checks"},{db}),foreign=await claimFixture();
     for(const ctx of[f.ctx,foreign.claimActor]){
       await expect(getEmployeeCompensationCostWorkspace(ctx,{runId:f.run.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
@@ -103,7 +122,7 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     await expect(getEmployeeCompensationCostDetail({...f.claimActor,authContext},{id:created.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
   });
 
-  it("recovers the exact cost request by an actor and run scoped nonce before and after actual worker execution",async()=>{
+it("recovers the exact cost request by an actor and run scoped nonce before and after actual worker execution",async()=>{
     const f=await claimFixture(),key=randomUUID();expect(await recoverEmployeeCompensationSubmissionRequest(f.claimActor,{runId:f.run.id,key},{db})).toEqual({request:null});
     const queued=await requestEmployeeCompensationSubmission(f.claimActor,{...f.claimInput,idempotencyKey:key,reason:"Recover this exact actual employee cost request"},{db});
     expect(await recoverEmployeeCompensationSubmissionRequest(f.claimActor,{runId:f.run.id,key},{db})).toMatchObject({request:{requestId:queued.requestId,state:"PENDING",idempotent:true}});
@@ -117,7 +136,7 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     expect(await withTenant(db,f.org,tx=>tx.employeeCompensationSubmissionRequest.count({where:{runId:f.run.id}}))).toBe(1);
   });
 
-  it("paginates cost workspace history with an encrypted actor and run bound cursor",async()=>{
+it("paginates cost workspace history with an encrypted actor and run bound cursor",async()=>{
     const f=await claimFixture();for(let index=0;index<11;index++){
       const created=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Retain paginated actual cost proposal history "+index},{db});
       await withdrawEmployeeCompensation(f.claimActor,{id:created.id,reason:"Retain each original proposal before preparing another"},{db});
@@ -131,7 +150,7 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     await expect(getEmployeeCompensationCostWorkspace(otherActor,{runId:f.run.id,after:first.next!},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
   });
 
-  it("rolls back cost workspace disclosure when stored financial authority expires after the actual read",async()=>{
+it("rolls back cost workspace disclosure when stored financial authority expires after the actual read",async()=>{
     const f=await claimFixture();await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Retain actual cost proposal for late authority checks"},{db});
     const auditCount=()=>withTenant(db,f.org,tx=>tx.auditLog.count({where:{action:"finance.employee_compensation.costs_listed"}})),before=await auditCount();
     const original=Object.getOwnPropertyDescriptor(EmployeeCompensationClaimRepository.prototype,"workspaceStates")!.value as EmployeeCompensationClaimRepository["workspaceStates"],spy=vi.spyOn(EmployeeCompensationClaimRepository.prototype,"workspaceStates").mockImplementation(async function(this:EmployeeCompensationClaimRepository,...args){
@@ -140,6 +159,73 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     try{await expect(getEmployeeCompensationCostWorkspace(f.claimActor,{runId:f.run.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);}finally{spy.mockRestore();}
     expect(await auditCount()).toBe(before);
     await expect(recoverEmployeeCompensationSubmissionRequest(f.claimActor,{runId:f.run.id,key:randomUUID()},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+  });
+
+it("retains actual emergency employee owner notices as separate authorized slices without salary disclosure",async()=>{
+    const f=await emergencyFixture();await withTenant(db,f.org,tx=>new NotificationRepository(tx,f.org).savePreferences(f.readers[0].account.id,{in_app:{enabled:false,account:true,operations:false,security:true},email:{security:true}}));
+    const created=await submitEmployeeCompensation(f.claimActor,f.emergencyInput,{db});expect(created).toMatchObject({state:"APPROVED",approvalId:null});
+    const notices=await withTenant(db,f.org,tx=>tx.notification.findMany({where:{kind:"employee_cost_emergency"},orderBy:{recipientId:"asc"}}));expect(notices).toHaveLength(2);
+    const amounts=[];for(const reader of f.readers){const own=notices.find(row=>row.recipientId===reader.account.id)!,other=notices.find(row=>row.recipientId!==reader.account.id)!;
+      expect(reader.ctx.authContext.permissions.has("staff_compensation:view")).toBe(false);const view=await getEmployeeCompensationNotice(reader.ctx,own.targetId,{db});amounts.push(view.amount);
+      expect(view).toMatchObject({propertyName:null,purpose:f.claimInput.costs[0].note,currency:"MAD",ownerAmount:view.amount});
+      for(const hidden of[f.run.id,f.run.purpose,f.performer.id,f.performer.displayName,f.property.name,other.recipientId,"500.25"])expect(JSON.stringify(view)).not.toContain(hidden);
+      await expect(getEmployeeCompensationNotice(reader.ctx,other.targetId,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+      await expect(getEmployeeCompensationSubmission(reader.ctx,{id:created.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    }
+    expect(amounts.sort()).toEqual(["250.12","250.13"]);expect(await submitEmployeeCompensation(f.claimActor,f.emergencyInput,{db})).toMatchObject({id:created.id,idempotent:true});
+    expect(await withTenant(db,f.org,async tx=>({notices:await tx.notification.count({where:{kind:"employee_cost_emergency"}}),audits:await tx.auditLog.count({where:{action:"finance.employee_compensation.emergency_owner_notified",resourceId:created.id}})}))).toEqual({notices:2,audits:1});
+    await withdrawEmployeeCompensation(f.claimActor,{id:created.id,reason:"Retain actual owner emergency notices after withdrawal"},{db});
+    expect((await getEmployeeCompensationNotice(f.readers[0].ctx,notices.find(row=>row.recipientId===f.readers[0].account.id)!.targetId,{db})).purpose).toBe(f.claimInput.costs[0].note);
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("rolls back emergency employee submission when a configured owner has no delivered inbox receipt",async()=>{
+    const f=await emergencyFixture(),spy=vi.spyOn(NotificationRepository.prototype,"publishMany").mockResolvedValue(undefined);
+    try{await expect(submitEmployeeCompensation(f.claimActor,f.emergencyInput,{db})).rejects.toBeInstanceOf(ExpensePolicyUnavailableError);}finally{spy.mockRestore();}
+    expect(await withTenant(db,f.org,async tx=>({sources:await tx.employeeCompensationSubmission.count(),costs:await tx.employeeCompensationCost.count(),notices:await tx.notification.count({where:{kind:"employee_cost_emergency"}}),events:await tx.outboxEvent.count({where:{payload:{path:["kind"],equals:"employee_cost_emergency"}}})}))).toEqual({sources:0,costs:0,notices:0,events:0});
+    expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("rejects a fabricated employee emergency notice receipt at the actual deferred SQL boundary",async()=>{
+    const f=await emergencyFixture(),spy=vi.spyOn(NotificationRepository.prototype,"publishEmployeeCostEmergencyNotices").mockResolvedValue({count:2});
+    try{await expect(submitEmployeeCompensation(f.claimActor,f.emergencyInput,{db})).rejects.toThrow(/actual source inbox receipt/u);}finally{spy.mockRestore();}
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationSubmission.count())).toBe(0);expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("rolls back emergency work and delivered notices when an actual owner grant expires after deferred guards",async()=>{
+    const f=await emergencyFixture(),original=Object.getOwnPropertyDescriptor(EmployeeCompensationClaimRepository.prototype,"flushGuards")!.value as EmployeeCompensationClaimRepository["flushGuards"];
+    const spy=vi.spyOn(EmployeeCompensationClaimRepository.prototype,"flushGuards").mockImplementation(async function(this:EmployeeCompensationClaimRepository){await original.call(this);await withTenant(db,f.org,async tx=>tx.roleAssignment.update({where:{id:f.readers[0].grant.id},data:{validTo:await new FinanceRepository(tx,f.org).clock()}}));});
+    try{await expect(submitEmployeeCompensation(f.claimActor,f.emergencyInput,{db})).rejects.toBeInstanceOf(ExpensePolicyUnavailableError);}finally{spy.mockRestore();}
+    expect(await withTenant(db,f.org,async tx=>({sources:await tx.employeeCompensationSubmission.count(),notices:await tx.notification.count({where:{kind:"employee_cost_emergency"}})}))).toEqual({sources:0,notices:0});expect(await facts(f.org)).toMatchObject({journals:0,postings:0});
+  });
+
+  it("preserves employee emergency source and inbox identity at the real SQL boundary",async()=>{
+    const f=await emergencyFixture();await submitEmployeeCompensation(f.claimActor,f.emergencyInput,{db});
+    const before=await withTenant(db,f.org,async tx=>({notice:await tx.notification.findFirstOrThrow({where:{kind:"employee_cost_emergency"}}),event:await tx.outboxEvent.findFirstOrThrow({where:{payload:{path:["kind"],equals:"employee_cost_emergency"}}})}));
+    await expect(withTenant(db,f.org,tx=>tx.notification.deleteMany({where:{id:before.notice.id}}))).rejects.toThrow(/append-only/u);
+    await expect(withTenant(db,f.org,tx=>tx.outboxEvent.deleteMany({where:{id:before.event.id}}))).rejects.toThrow(/append-only/u);
+    await expect(withTenant(db,f.org,tx=>tx.notification.update({where:{id:before.notice.id},data:{recipientId:f.account.id}}))).rejects.toThrow(/identity is immutable/u);
+    await expect(withTenant(db,f.org,tx=>tx.outboxEvent.update({where:{id:before.event.id},data:{payload:{kind:"employee_cost_emergency",recipientId:f.account.id,targetId:before.event.id,employeeNotice:{submissionId:randomUUID(),costId:randomUUID(),ownerId:f.costOwner.id}}}}))).rejects.toThrow(/identity is immutable/u);
+    const unbound=randomUUID();await expect(withTenant(db,f.org,tx=>tx.outboxEvent.create({data:{id:unbound,organizationId:f.org,type:"notification.requested",idempotencyKey:"invalid-employee-cost:"+unbound,
+      payload:{kind:"employee_cost_emergency",recipientId:f.account.id,targetId:unbound}}}))).rejects.toThrow(/actual source and frozen owner recipient/u);
+    expect(await withTenant(db,f.org,async tx=>({notice:await tx.notification.findUniqueOrThrow({where:{id:before.notice.id}}),event:await tx.outboxEvent.findUniqueOrThrow({where:{id:before.event.id}})}))).toEqual(before);
+  });
+
+  it("denies an owner notice after actual owner authority expires without exposing the retained source",async()=>{
+    const f=await emergencyFixture();await submitEmployeeCompensation(f.claimActor,f.emergencyInput,{db});const reader=f.readers[0],notice=await withTenant(db,f.org,tx=>tx.notification.findFirstOrThrow({where:{kind:"employee_cost_emergency",recipientId:reader.account.id}}));
+    expect((await getEmployeeCompensationNotice(reader.ctx,notice.targetId,{db})).withdrawn).toBe(false);
+    const capped={...reader.ctx,authContext:{...reader.ctx.authContext,assignments:reader.ctx.authContext.assignments!.map(assignment=>({...assignment,conditions:{maxAmount:"250.00"}}))}};
+    await expect(getEmployeeCompensationNotice(capped,notice.targetId,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    await withTenant(db,f.org,async tx=>tx.roleAssignment.update({where:{id:reader.grant.id},data:{validTo:await new FinanceRepository(tx,f.org).clock()}}));
+    await expect(getEmployeeCompensationNotice(reader.ctx,notice.targetId,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+  });
+
+  it("opens the actual retained employee notice through the shared inbox with independently scoped owner access",async()=>{
+    const f=await emergencyFixture();await submitEmployeeCompensation(f.claimActor,f.emergencyInput,{db});
+    for(const reader of f.readers){const notice=await withTenant(db,f.org,tx=>tx.notification.findFirstOrThrow({where:{recipientId:reader.account.id,kind:"employee_cost_emergency"}})),actor={organizationId:f.org,accountId:reader.account.id,authContext:ownNotificationContext(reader.ctx.authContext,reader.account.id)};
+      const page=await getNotificationPage(actor,{},{db});expect(page.items).toHaveLength(1);expect(page.items[0]).toMatchObject({id:notice.id,kind:"employee_cost_emergency",available:true});
+      expect(await openNotification(actor,notice.id,"en",{db})).toBe(`/en/app/finance/employee-cost-notices/${notice.targetId}`);
+    }
   });
 
   it.each([["SELF",false],["OFFLINE_SYNC",false],["PROXY",false],["PROXY",true]] as const)("retains actual %s work, person-only=%s, through exact create/read/cancel replays",async(method,noLogin)=>{

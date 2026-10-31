@@ -1,7 +1,7 @@
 import type { Notification, OutboxEvent } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
-import { notificationEventType, notificationInputSchema, type NotificationCursor, type NotificationInput } from "./notification";
+import { notificationEventType, notificationInputSchema, NotificationAudienceUnavailableError,type NotificationCursor, type NotificationInput } from "./notification";
 import { Prisma } from "@prisma/client";
 import { digestSettingsSchema, nextDigestAt } from "./digest";
 import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
@@ -18,10 +18,16 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { initialNotificationRouting, notificationRoutingKey, notificationRoutingSchema, type NotificationRouting, type RoutedNotificationKind } from "./notification-routing";
 import { Money } from "@/platform/money/money";
 import { supplierInvoiceCostResource } from "@/modules/finance/domain/supplier-invoice";
+import { employeeCompensationCostResource } from "@/modules/finance/domain/employee-compensation-cost-resource";
+import type { employeeCompensationNoticeSchema } from "@/modules/finance/domain/employee-compensation-notice";
 
 type InvoiceEmergencyNotice = ExpenseEmergencyNotice & { lineId: string; propertyId: string | null };
 const invoiceEmergencyNoticeSchema = expenseEmergencyNoticeSchema.extend({ lineId: z.uuid(), propertyId: z.uuid().nullable() });
 type CurrentAuthorizationStates = Awaited<ReturnType<IdentityRepository["authorizationStates"]>>;
+const employeeNoticeCostInclude={submission:{select:{id:true,emergency:true,submittedBy:true,costOn:true,withdrawal:{select:{id:true}},approval:{select:{state:true}}}},property:{select:{name:true,cityId:true,regionId:true}}} satisfies Prisma.EmployeeCompensationCostInclude;
+type EmployeeNoticeCost=Prisma.EmployeeCompensationCostGetPayload<{include:typeof employeeNoticeCostInclude}>;
+type EmployeeNoticeSource={notice:ExpenseEmergencyNotice;target:Resource;data:z.infer<typeof employeeCompensationNoticeSchema>};
+type EmployeeNoticeBatch=ReadonlyArray<{costId:string;notices:readonly ExpenseEmergencyNotice[]}>;
 
 type DeliveryBatch = {
   targets: Map<string, Resource>;
@@ -30,6 +36,8 @@ type DeliveryBatch = {
   inbox: Prisma.NotificationCreateManyInput[];
   finished: string[];
   observations: Map<string, Awaited<ReturnType<IdentityRepository["authorizationObservation"]>>>;
+  employeeNotices?:Map<string,EmployeeNoticeSource>;
+  employeeStates?:CurrentAuthorizationStates;
 };
 
 export class NotificationRepository {
@@ -73,10 +81,10 @@ export class NotificationRepository {
   private async deliverLocked(event: OutboxEvent, batch?: DeliveryBatch): Promise<void> {
     const input = notificationInputSchema.parse(event.payload);
     const financialNotice=input.kind==="expense_emergency"?await this.expenseEmergencySource(event,input):
-      input.kind==="supplier_invoice_emergency"?await this.invoiceEmergencySource(event,input):null;
+      input.kind==="supplier_invoice_emergency"?await this.invoiceEmergencySource(event,input):input.kind==="employee_cost_emergency"?(batch?.employeeNotices?batch.employeeNotices.get(event.id)??null:await this.employeeCostEmergencySource(event,input)):null;
     const target = financialNotice?.target ?? (batch ? batch.targets.get(`${input.kind}:${input.targetId}`) :
       (await this.targets([{ kind: input.kind, targetId: input.targetId }])).get(input.targetId));
-    if((input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency")&&!financialNotice)return this.finish(event.id,batch);
+    if((input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency")&&!financialNotice)return this.finish(event.id,batch);
     if (!target) return this.finish(event.id, batch);
     if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id, batch);
     const identity = target.type === "identity";
@@ -88,7 +96,7 @@ export class NotificationRepository {
     const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
     let routing:NotificationRouting;
-    if(input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency")routing=financialNotice!.notice.routing;
+    if(input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency")routing=financialNotice!.notice.routing;
     else routing=approval?notificationRoutingSchema.parse(stage?.routingSnapshot??approval.routingSnapshot):batch?.routing.get(routingKey)??await this.routing(input.kind,target.propertyId??null,event.occurredAt);
     if (batch && !approval&&!financialNotice) batch.routing.set(routingKey, routing);
     const mandatory = input.kind === "security_session_revoked";
@@ -112,7 +120,8 @@ export class NotificationRepository {
       const explicit = routing.people.includes(candidate.personId);
       const assignments = observation ? candidate.roleAssignments.filter(assignment => observation.ids.includes(assignment.id)) : candidate.roleAssignments;
       const roleAssignments = assignments.filter(assignment => routing.roles.includes(assignment.role.id));
-      const current=financialNotice?await new IdentityRepository(this.tx,this.organizationId).authorizationState(candidate.id):null;
+      const batchState=input.kind==="employee_cost_emergency"?batch?.employeeStates:undefined,captured=batchState?.states.get(candidate.id);
+      const current=financialNotice?(batchState?{account:captured?.account??null,assignments:captured?.assignments??[],now:batchState.now}:await new IdentityRepository(this.tx,this.organizationId).authorizationState(candidate.id)):null;
       const ctx = contextForRoleAssignments(this.organizationId, candidate.id, current?current.assignments:explicit || selected || approval ? assignments : roleAssignments);
       if(current&&(!current.account||securityEnrollment(current.account,current.now).setupRequired))continue;
       if (!identity && !current&&securityEnrollment({ ...candidate, roleAssignments: assignments }, observation!.now).setupRequired) continue;
@@ -170,6 +179,57 @@ export class NotificationRepository {
     if (!event || !input.success || input.data.kind !== "supplier_invoice_emergency" || input.data.recipientId !== readerId ||
       !await this.tx.notification.findFirst({ where: { organizationId: this.organizationId, recipientId: readerId, eventId: id, targetId: id, kind: "supplier_invoice_emergency" } })) return null;
     return this.invoiceEmergencySource(event, input.data);
+  }
+
+  private async employeeCostEmergencySource(event:OutboxEvent,input:Extract<NotificationInput,{kind:"employee_cost_emergency"}>){
+    if(!input.employeeNotice)return null;const metadata=input.employeeNotice;
+    const cost=await this.tx.employeeCompensationCost.findFirst({where:{organizationId:this.organizationId,id:metadata.costId,submissionId:metadata.submissionId},
+      include:employeeNoticeCostInclude});return this.employeeCostEmergencyProjection(cost??undefined,event,input);
+  }
+
+  private employeeCostEmergencyProjection(cost:EmployeeNoticeCost|undefined,event:OutboxEvent,input:Extract<NotificationInput,{kind:"employee_cost_emergency"}>):EmployeeNoticeSource|null{
+    if(event.id!==input.targetId||event.organizationId!==this.organizationId||!input.employeeNotice||cost?.submissionId!==input.employeeNotice.submissionId||cost.id!==input.employeeNotice.costId)return null;const metadata=input.employeeNotice;
+    const policy=z.object({postHocNotices:z.array(expenseEmergencyNoticeSchema),policies:z.array(z.object({ownerId:z.uuid().optional(),sourceAmount:z.unknown().optional(),allocation:z.unknown().optional()}).passthrough())}).safeParse(cost?.policySnapshot);
+    if(!cost||!cost.submission.emergency||!policy.success)return null;
+    const notice=policy.data.postHocNotices.find(value=>value.ownerId===metadata.ownerId&&value.recipients.includes(input.recipientId)),owner=policy.data.policies.find(value=>value.ownerId===metadata.ownerId);
+    const amounts=z.object({gross:z.object({amount:z.string(),currency:z.string()}).strict(),allocation:z.object({owner:z.object({amount:z.string(),currency:z.string()}).strict()}).passthrough()}).safeParse({gross:owner?.sourceAmount,allocation:owner?.allocation});
+    if(!notice||!amounts.success||!notice.routing.channels.includes("in_app")||event.idempotencyKey!==`employee-cost:${cost.id}:emergency:${notice.ownerId}:${input.recipientId}`)return null;
+    const gross=Money.of(amounts.data.gross.amount,amounts.data.gross.currency),ownerAmount=Money.of(amounts.data.allocation.owner.amount,amounts.data.allocation.owner.currency);
+    if(gross.currency!==cost.currency||ownerAmount.currency!==cost.currency||gross.amount.lt(0)||ownerAmount.amount.lt(0))return null;
+    const status=cost.submission.withdrawal?"CANCELLED":cost.submission.approval?.state==="PENDING"?"PENDING_APPROVAL":cost.submission.approval?.state??"APPROVED";
+    const target=employeeCompensationCostResource(this.organizationId,cost.submission,cost,{ownerId:notice.ownerId,amount:gross.amount,status,notificationEventId:event.id},cost.property);
+    return{notice,target,data:{id:event.id,propertyName:cost.property.name,purpose:cost.note,category:cost.category,withdrawn:Boolean(cost.submission.withdrawal),amount:gross.toJSON().amount,ownerAmount:ownerAmount.toJSON().amount,currency:cost.currency,occurredOn:cost.submission.costOn.toISOString().slice(0,10)}};
+  }
+
+  private async employeeCostEmergencySources(events:readonly OutboxEvent[]){
+    const inputs=events.flatMap(event=>{const input=notificationInputSchema.safeParse(event.payload);return input.success&&input.data.kind==="employee_cost_emergency"&&input.data.employeeNotice?[{event,input:input.data}]:[];});
+    const costs=inputs.length?await this.tx.employeeCompensationCost.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(inputs.map(row=>row.input.employeeNotice!.costId))]}},include:employeeNoticeCostInclude}):[],byId=new Map(costs.map(cost=>[cost.id,cost])),sources=new Map<string,EmployeeNoticeSource>();
+    for(const{event,input}of inputs){const source=this.employeeCostEmergencyProjection(byId.get(input.employeeNotice!.costId),event,input);if(source)sources.set(event.id,source);}return sources;
+  }
+
+  async employeeCostEmergencyNotice(id:string,readerId:string){
+    const event=await this.tx.outboxEvent.findFirst({where:{organizationId:this.organizationId,id,type:notificationEventType}}),input=notificationInputSchema.safeParse(event?.payload);
+    if(!event||!input.success||input.data.kind!=="employee_cost_emergency"||input.data.recipientId!==readerId||!await this.tx.notification.findFirst({where:{organizationId:this.organizationId,recipientId:readerId,eventId:id,targetId:id,kind:"employee_cost_emergency"}}))return null;
+    return this.employeeCostEmergencySource(event,input.data);
+  }
+
+  async publishEmployeeCostEmergencyNotices(submissionId:string,planned:EmployeeNoticeBatch){
+    const entries=planned.flatMap(row=>row.notices.flatMap(notice=>notice.recipients.map(recipientId=>({costId:row.costId,ownerId:notice.ownerId,recipientId}))));if(!entries.length)return{count:0};
+    const ids=await this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`SELECT app_uuid_v7()::text AS id FROM generate_series(1,${entries.length}::int)`);
+    await this.publishMany(entries.map((entry,index)=>({eventId:ids[index].id,key:`employee-cost:${entry.costId}:emergency:${entry.ownerId}:${entry.recipientId}`,
+      input:{kind:"employee_cost_emergency",recipientId:entry.recipientId,targetId:ids[index].id,employeeNotice:{submissionId,costId:entry.costId,ownerId:entry.ownerId}}})));
+    return this.recheckEmployeeCostEmergencyNotices(submissionId,planned);
+  }
+
+  async recheckEmployeeCostEmergencyNotices(submissionId:string,planned:EmployeeNoticeBatch){
+    const keys=planned.flatMap(row=>row.notices.flatMap(notice=>notice.recipients.map(recipientId=>`employee-cost:${row.costId}:emergency:${notice.ownerId}:${recipientId}`)));if(!keys.length)return{count:0};
+    const events=await this.tx.outboxEvent.findMany({where:{organizationId:this.organizationId,type:notificationEventType,idempotencyKey:{in:keys}}}),sources=await this.employeeCostEmergencySources(events);
+    const rows=await this.tx.notification.findMany({where:{organizationId:this.organizationId,kind:"employee_cost_emergency",eventId:{in:events.map(event=>event.id)}}}),receipts:Array<{costId:string;ownerId:string;recipientId:string;target:Resource}>=[];
+    for(const row of rows){const source=sources.get(row.eventId),event=events.find(value=>value.id===row.eventId),input=notificationInputSchema.safeParse(event?.payload);
+      if(source&&input.success&&input.data.kind==="employee_cost_emergency"&&input.data.employeeNotice?.submissionId===submissionId&&input.data.recipientId===row.recipientId&&row.targetId===row.eventId)receipts.push({costId:source.target.id!,ownerId:source.notice.ownerId,recipientId:row.recipientId,target:source.target});}
+    const states=await new IdentityRepository(this.tx,this.organizationId).authorizationStates([...new Set(receipts.map(receipt=>receipt.recipientId))]);
+    for(const row of planned)for(const notice of row.notices)if(!receipts.some(receipt=>{const state=states.states.get(receipt.recipientId);return receipt.costId===row.costId&&receipt.ownerId===notice.ownerId&&notice.recipients.includes(receipt.recipientId)&&state?.account&&!securityEnrollment(state.account,states.now).setupRequired&&authorize(contextForRoleAssignments(this.organizationId,receipt.recipientId,state.assignments),"view",receipt.target,states.now);}))throw new NotificationAudienceUnavailableError("Required employee cost notice has no current authorized inbox receipt");
+    return{count:receipts.length};
   }
 
   async publishInvoiceEmergencyNotices(submissionId: string, notices: InvoiceEmergencyNotice[]) {
@@ -235,12 +295,16 @@ export class NotificationRepository {
     return entries.every(entry => candidates.some(candidate => entry.recipients.includes(candidate.id) && this.currentApprover(candidate, entry.routing, entry.resource, current)));
   }
   async viewers(routing:NotificationRouting,resource:Resource):Promise<string[]> {
+    return(await this.viewerAudiences([{routing,resource}]))[0];
+  }
+  async viewerAudiences(entries:ReadonlyArray<{routing:NotificationRouting;resource:Resource}>):Promise<string[][]>{
+    if(!entries.length)return[];const routing={roles:[...new Set(entries.flatMap(entry=>entry.routing.roles))],people:[...new Set(entries.flatMap(entry=>entry.routing.people))],assigned:false,channels:["in_app" as const]};
     const candidates=await this.candidates(routing,undefined,undefined,true),current=await new IdentityRepository(this.tx,this.organizationId).authorizationStates(candidates.map(candidate=>candidate.id));
-    return candidates.filter(candidate=>{
+    return entries.map(entry=>candidates.filter(candidate=>{
       const state=current.states.get(candidate.id);if(!state?.account||securityEnrollment(state.account,current.now).setupRequired)return false;
-      const assignments=routing.people.includes(candidate.personId)?state.assignments:state.assignments.filter(assignment=>routing.roles.includes(assignment.role.id));
-      return authorize(contextForRoleAssignments(this.organizationId,candidate.id,assignments),"view",resource,current.now);
-    }).map(candidate=>candidate.id);
+      const assignments=entry.routing.people.includes(candidate.personId)?state.assignments:state.assignments.filter(assignment=>entry.routing.roles.includes(assignment.role.id));
+      return authorize(contextForRoleAssignments(this.organizationId,candidate.id,assignments),"view",entry.resource,current.now);
+    }).map(candidate=>candidate.id).sort());
   }
 
   async manualRecipients(kind: RoutedNotificationKind, resource: Resource) {
@@ -315,12 +379,12 @@ export class NotificationRepository {
     await this.deliver(event);
   }
 
-  async publishMany(entries: Array<{ input: NotificationInput; key: string }>): Promise<void> {
+  async publishMany(entries: Array<{ input: NotificationInput; key: string;eventId?:string }>): Promise<void> {
     if (!entries.length) return;
-    const parsed = entries.map(entry => ({ input: notificationInputSchema.parse(entry.input), key: entry.key }));
+    const parsed = entries.map(entry => ({ input: notificationInputSchema.parse(entry.input), key: entry.key,eventId:entry.eventId }));
     parsed.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
     await this.tx.outboxEvent.createMany({ skipDuplicates: true, data: parsed.map(entry => ({
-      organizationId: this.organizationId, type: notificationEventType, payload: entry.input, idempotencyKey: entry.key
+      id:entry.eventId,organizationId: this.organizationId, type: notificationEventType, payload: entry.input, idempotencyKey: entry.key
     })) });
     const keys = [...new Set(parsed.map(entry => entry.key))];
     // One lock/read covers the whole command; replay still reads durable status.
@@ -333,11 +397,13 @@ export class NotificationRepository {
     const inputs = pending.map(event => notificationInputSchema.parse(event.payload));
     const targets = new Map<string, Resource>();
     for (const kind of new Set(inputs.map(input => input.kind))) {
-      if(kind==="expense_emergency"||kind==="supplier_invoice_emergency")continue;
+      if(kind==="expense_emergency"||kind==="supplier_invoice_emergency"||kind==="employee_cost_emergency")continue;
       for (const [id, target] of await this.targets(inputs.filter(input => input.kind === kind)))
         targets.set(`${kind}:${id}`, target);
     }
     const batch: DeliveryBatch = { targets, routing: new Map(), candidates: new Map(), inbox: [], finished: [], observations: new Map() };
+    const employeeEvents=pending.filter(event=>notificationInputSchema.parse(event.payload).kind==="employee_cost_emergency");
+    if(employeeEvents.length){batch.employeeNotices=await this.employeeCostEmergencySources(employeeEvents);batch.employeeStates=await new IdentityRepository(this.tx,this.organizationId).authorizationStates([...new Set(employeeEvents.map(event=>notificationInputSchema.parse(event.payload).recipientId))]);}
     for (const event of pending) await this.deliverLocked(event, batch);
     if (batch.inbox.length) await this.tx.notification.createMany({ data: batch.inbox, skipDuplicates: true });
     if (batch.finished.length) await this.tx.outboxEvent.updateMany({
@@ -409,6 +475,14 @@ export class NotificationRepository {
           !authorize(contextForRoleAssignments(this.organizationId, readerId, state.assignments), "view", source.target, invoiceNoticeReader!.now)) continue;
       }
       if (source) targets.set(event.id, source.target);
+    }
+    const employeeNoticeIds=rows.filter(row=>row.kind==="employee_cost_emergency").map(row=>row.targetId),employeeNoticeEvents=employeeNoticeIds.length?await this.tx.outboxEvent.findMany({where:{organizationId:this.organizationId,id:{in:employeeNoticeIds},type:notificationEventType}}):[];
+    const employeeNoticeReader=readerId&&employeeNoticeEvents.length?await new IdentityRepository(this.tx,this.organizationId).authorizationStates([readerId]):null;
+    for(const event of employeeNoticeEvents){
+      const input=notificationInputSchema.safeParse(event.payload);if(!input.success||input.data.kind!=="employee_cost_emergency"||readerId&&input.data.recipientId!==readerId)continue;
+      const source=readerId?await this.employeeCostEmergencyNotice(event.id,readerId):await this.employeeCostEmergencySource(event,input.data);
+      if(readerId){const state=employeeNoticeReader?.states.get(readerId);if(!source||!state?.account||securityEnrollment(state.account,employeeNoticeReader!.now).setupRequired||!authorize(contextForRoleAssignments(this.organizationId,readerId,state.assignments),"view",source.target,employeeNoticeReader!.now))continue;}
+      if(source)targets.set(event.id,source.target);
     }
     const expenseIds=rows.filter(row=>row.kind==="expense_emergency").map(row=>row.targetId);
     const expenses=expenseIds.length?await this.tx.expense.findMany({where:{organizationId:this.organizationId,id:{in:expenseIds},property:{archivedAt:null}},include:{property:true,submission:true}}):[];

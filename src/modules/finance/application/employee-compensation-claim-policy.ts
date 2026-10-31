@@ -7,6 +7,8 @@ import { employeeCompensationFinancialSourceFacts } from "@/platform/authz/emplo
 import { calendarDateStart } from "@/platform/time/calendar";
 import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
 import { Money } from "@/platform/money/money";
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import type { ExpenseEmergencyNotice } from "../domain/expense";
 import { employeeCompensationClaimCosts,employeeCompensationClaimPolicyInput,EmployeeCompensationClaimSourceError } from "../domain/employee-compensation-claim";
 import { employeeCompletedWorkEvidence } from "../domain/employee-completed-work";
 import { EmployeeCompensationRunAccessError } from "../domain/employee-compensation-run";
@@ -26,6 +28,7 @@ export async function prepareEmployeeCompensationClaimPolicy(ctx:FinanceActorCon
   const input=employeeCompensationClaimPolicyInput.parse(raw),repository=new EmployeeCompensationRunRepository(tx,ctx.organizationId),finance=new FinanceRepository(tx,ctx.organizationId);
   await repository.lock(input.runId);requireCurrentTimezoneData();
   const build=async()=>{
+    const pendingNotices:Array<{notice:ExpenseEmergencyNotice;resource:Resource}>=[];
     const run=await repository.find(input.runId);if(!run||run.cancellation)throw new EmployeeCompensationRunAccessError();
     const facts=employeeCompensationRunFacts(ctx.organizationId,run),now=await finance.clock();await recheckEmployeeCompensationRun(ctx,tx,now,facts,"edit");
     const recheckWork=await retainCurrentEmployeeClaimWork(ctx.organizationId,run,tx);
@@ -49,7 +52,7 @@ export async function prepareEmployeeCompensationClaimPolicy(ctx:FinanceActorCon
       const plan=await preparePropertyCostSubmissionPolicy(ctx,{id:source.id,propertyId:source.propertyId,reservationId,amount:source.amount,currency:source.currency,
         occurredOn:new Date(input.costOn+"T00:00:00Z"),category:item.category,emergency:input.emergency,purpose:item.note,property:{timezone:source.property.timezone}},target,tx,now,
         {sourceKind:"employee_compensation_run_line",runId:run.id,runLineId:source.id,completionEventId:source.completionEventId,personId:source.personId,
-          recordedCompletionAt:source.recordedCompletionAt.toISOString(),actorRoles:roles},{approvalAmount:classified.total,discloseOwnerSlice:true,authorities});
+          recordedCompletionAt:source.recordedCompletionAt.toISOString(),actorRoles:roles},{approvalAmount:classified.total,discloseOwnerSlice:true,authorities,postHocAudience:(notice,resource)=>pendingNotices.push({notice,resource})});
       const frozen=z.object({allocation:z.object({owner:z.object({amount:z.string()}),alvillas:z.object({amount:z.string()}),guest:z.object({amount:z.string()})}),
         policies:z.array(z.object({revenueEvidence:z.object({amount:z.object({amount:z.string()})}).nullable().optional()}))}).passthrough().parse(plan.snapshot);
       if(item.amount.currency!==run.currency)throw new EmployeeCompensationClaimSourceError();
@@ -60,6 +63,9 @@ export async function prepareEmployeeCompensationClaimPolicy(ctx:FinanceActorCon
         recordedCompletionAt:source.recordedCompletionAt.toISOString(),costOn:input.costOn,timezone:source.property.timezone,category:item.category,costCenter:item.costCenter,note:item.note,
         amount:item.amount.toJSON(),policy:plan.snapshot,postHocNotices:plan.postHocNotices});
     }
+    const audiences=await new NotificationRepository(tx,ctx.organizationId).viewerAudiences(pendingNotices.map(row=>({routing:row.notice.routing,resource:row.resource})));
+    for(const[index,row]of pendingNotices.entries()){if(!audiences[index].length)throw new ExpensePolicyUnavailableError("Emergency approval has no authorized owner notice recipient");row.notice.recipients.push(...audiences[index]);}
+    for(const cost of costs)cost.policy=json({...cost.policy,postHocNotices:cost.postHocNotices});
     const final=await repository.find(run.id),finalSources=await repository.claimSources(run.id);
     if(JSON.stringify(final)!==JSON.stringify(run)||JSON.stringify(finalSources)!==JSON.stringify(sources))throw new EmployeeCompensationRunAccessError();
     const latest=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId),at=await finance.clock();
