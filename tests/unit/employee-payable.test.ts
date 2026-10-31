@@ -38,6 +38,10 @@ describe("employee compensation claim and settlement posting recipes",()=>{
     expect(()=>employeeWalletOffsetPostings({...base,wallet,available:money("450","EUR")})).toThrow();
     expect(()=>employeePaymentPostings({...base,amount:money("500.01"),funding:bank})).toThrow();
   });
+  it("requires explicit offset mode when the beneficiary retains their own wallet funds",()=>{
+    expect(()=>employeePaymentPostings({...base,funding:wallet})).toThrow();
+    expect(employeePaymentPostings({...base,funding:{...wallet,teamWallet:{...wallet.teamWallet,personId:"other"}}})).toHaveLength(2);
+  });
   it("conserves exact minor units across real credit/debit sides for generated partial wallet offsets",()=>{
     fc.assert(fc.property(fc.bigInt({min:1n,max:9999999999999999n}),fc.integer({min:1,max:100}), (cents,percentage)=>{
       const outstanding=money((cents/100n).toString()+"."+(cents%100n).toString().padStart(2,"0")),part=outstanding.multiplyRatio(BigInt(percentage),100n);

@@ -28,7 +28,7 @@ function requireOutstanding(input:Settlement){
 /** Payment settles an existing earned claim without recognizing its cost again. */
 export function employeePaymentPostings(input:Settlement&{funding:Parameters<typeof isExpenseFundingAccount>[0]&{id:string}}):FinancePostingDraft[]{
   requireOutstanding(input);
-  if(!isExpenseFundingAccount(input.funding)||input.funding.id===input.liabilityAccountId)throw Error("Employee payment requires a distinct available physical account");
+  if(!isExpenseFundingAccount(input.funding)||input.funding.id===input.liabilityAccountId||input.funding.teamWallet?.personId===input.personId)throw Error("Employee payment requires a distinct physical source; the beneficiary wallet requires explicit offset");
   const dimensions={employee_person_id:input.personId,employee_compensation_claim_id:input.claimId,employee_compensation_payment_id:input.settlementId,source:"EMPLOYEE_PAYMENT"};
   const postings:FinancePostingDraft[]=[{ledgerAccountId:input.liabilityAccountId,side:"DEBIT",amount:input.amount,bucket:"EMPLOYEE_PAYMENT",dimensions},
     {ledgerAccountId:input.funding.id,side:"CREDIT",amount:input.amount,bucket:"EMPLOYEE_PAYMENT",dimensions}];
