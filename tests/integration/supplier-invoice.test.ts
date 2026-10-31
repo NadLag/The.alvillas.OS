@@ -367,7 +367,9 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
   });
   it("settles actual recognized costs once across retries, serializes overpayment and exactly reverses a payment", async () => {
     const f = await invoiceSettlementFixture();
-    const original = await withTenant(db, f.org, tx => tx.financialTransaction.findMany({ where: { id: { in: f.recognized.transactionIds } }, include: { postings: true } }));
+    // SQL does not promise row order: compare every original field in a stable identity order.
+    const readOriginals = () => withTenant(db, f.org, tx => tx.financialTransaction.findMany({ where: { id: { in: f.recognized.transactionIds } }, include: { postings: { orderBy: { id: "asc" } } }, orderBy: { id: "asc" } }));
+    const original = await readOriginals();
     const first = await Promise.all(Array.from({ length: 4 }, () => postSupplierPayment(f.ctx, f.payment, { db })));
     expect(new Set(first.map(payment => payment.paymentId)).size).toBe(1); expect(first.filter(payment => !payment.idempotent)).toHaveLength(1);
     const attempts = await Promise.allSettled(Array.from({ length: 2 }, () => postSupplierPayment(f.ctx, { ...f.payment, amount: "1000.00", idempotencyKey: randomUUID() }, { db })));
@@ -380,7 +382,7 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     expect(await voidSupplierPayment(f.ctx, command, { db })).toEqual({ ...reversed, idempotent: true });
     expect((await getSupplierSettlement(f.ctx, { id: f.invoice.id }, { db })).outstanding.amount).toBe("1820.01");
     await expect(voidSupplierPayment(f.ctx, { ...command, reason: "Different intent for the existing reversal" }, { db })).rejects.toBeInstanceOf(SupplierInvoiceConflictError);
-    const facts = await withTenant(db, f.org, async tx => ({ originals: await tx.financialTransaction.findMany({ where: { id: { in: f.recognized.transactionIds } }, include: { postings: true } }),
+    const facts = await withTenant(db, f.org, async tx => ({ originals: await tx.financialTransaction.findMany({ where: { id: { in: f.recognized.transactionIds } }, include: { postings: { orderBy: { id: "asc" } } }, orderBy: { id: "asc" } }),
       transactions: await tx.financialTransaction.count(), paymentAudits: await tx.auditLog.count({ where: { action: "finance.supplier_payment.posted" } }), reversal: await tx.financialTransaction.findUniqueOrThrow({ where: { id: reversed.reversalTransactionId }, include: { postings: true } }) }));
     expect(facts.originals).toEqual(original); expect(facts.transactions).toBe(5); expect(facts.paymentAudits).toBe(2);
     expect(facts.reversal.postings).toHaveLength(2); expect(facts.reversal.reversesTransactionId).toBe(accepted.value.paymentId);
