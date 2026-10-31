@@ -1,4 +1,5 @@
 import { OperationEvidencePanel } from "@/modules/reservations/ui/operation-evidence-panel";
+import { EmployeeWorkTimePanel } from "@/modules/finance/ui/employee-work-time-panel";
 import { operationAssignmentOptions } from "@/modules/reservations/application/operation-scheduling";
 import { randomUUID } from "node:crypto";
 import Link from "next/link";
@@ -396,6 +397,7 @@ export default async function TaskPage({
         </section>
       </div>
       <OperationEvidencePanel ctx={ctx} taskId={task.id} locale={locale} />
+      {task.state==="COMPLETED"?<EmployeeWorkTimePanel taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}.${task.id}`}/>:null}
     </ManagerShell>
   );
 }

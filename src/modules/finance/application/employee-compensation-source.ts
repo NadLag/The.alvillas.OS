@@ -31,21 +31,18 @@ export function validateEmployeeCompensationRate(source: CompensationSource, rul
 }
 
 /** Run snapshots and interactive estimates require the same actual performer and immutable completion. */
-export function validateEmployeeCompletedWorkSource(task: CompletedWorkSource, source: CompensationSource) {
-  const { assignment, rate } = source, event = task.events[0];
-  if (task.state !== "COMPLETED" || !task.completedAt || !task.completedByPersonId || !rate || assignment.personId !== task.completedByPersonId)
+export function validateEmployeeCompletedWorkEvidence(task: CompletedWorkSource) {
+  const event = task.events[0];
+  if (task.state !== "COMPLETED" || !task.completedAt || !task.completedByPersonId)
     throw new EmployeeCompensationAccessError();
-  if (task.events.length !== 1 || !event || rate.mode !== "PER_JOB") throw new EmployeeCompensationSourceUnavailableError();
+  if (task.events.length !== 1 || !event) throw new EmployeeCompensationSourceUnavailableError();
   let evidence: ReturnType<typeof employeeCompletedWorkEvidence>;
   try { evidence = employeeCompletedWorkEvidence(event); } catch { throw new EmployeeCompensationSourceUnavailableError(); }
-  const scopeMatches = assignment.scopeType === "organization" || assignment.scopeType === "property" && assignment.scopeId === task.propertyId ||
-    assignment.scopeType === "city" && assignment.scopeId === task.property.cityId || assignment.scopeType === "region" && assignment.scopeId === task.property.regionId ||
-    assignment.scopeType === "job" && assignment.scopeId === task.id;
-  if (!scopeMatches || evidence.property_id !== task.propertyId || evidence.completed_by_person_id !== assignment.personId ||
+  if (evidence.property_id !== task.propertyId ||
     evidence.completed_by_person_id !== task.completedByPersonId || evidence.completed_by_user_account_id !== task.completedByUserAccountId ||
     evidence.completion_idempotency_key !== task.completionIdempotencyKey || evidence.completion_source !== task.completionSource ||
     new Date(evidence.completed_at).getTime() !== task.completedAt.getTime() || event.version > task.version ||
-    evidence.required_role_key !== task.requiredRoleKey || evidence.required_role_key && evidence.required_role_key !== assignment.role.key ||
+    evidence.required_role_key !== task.requiredRoleKey ||
     evidence.validated_by_person_id !== task.validatedByPersonId || evidence.validated_by_user_account_id !== task.validatedByUserAccountId ||
     (evidence.validated_at ? new Date(evidence.validated_at).getTime() : null) !== (task.validatedAt?.getTime() ?? null) ||
     evidence.validation_reason !== task.validationReason) throw new EmployeeCompensationSourceUnavailableError();
@@ -53,6 +50,18 @@ export function validateEmployeeCompletedWorkSource(task: CompletedWorkSource, s
     item.completedByPersonId !== evidence.completed_by_person_id || item.completedByUserAccountId !== evidence.completed_by_user_account_id))
     throw new EmployeeCompensationSourceUnavailableError();
   return { evidence, event };
+}
+
+export function validateEmployeeCompletedWorkSource(task: CompletedWorkSource, source: CompensationSource) {
+  const { assignment, rate } = source;
+  if (!rate || assignment.personId !== task.completedByPersonId) throw new EmployeeCompensationAccessError();
+  if (rate.mode !== "PER_JOB") throw new EmployeeCompensationSourceUnavailableError();
+  const original=validateEmployeeCompletedWorkEvidence(task);
+  const scopeMatches = assignment.scopeType === "organization" || assignment.scopeType === "property" && assignment.scopeId === task.propertyId ||
+    assignment.scopeType === "city" && assignment.scopeId === task.property.cityId || assignment.scopeType === "region" && assignment.scopeId === task.property.regionId ||
+    assignment.scopeType === "job" && assignment.scopeId === task.id;
+  if(!scopeMatches||original.evidence.required_role_key&&original.evidence.required_role_key!==assignment.role.key)throw new EmployeeCompensationSourceUnavailableError();
+  return original;
 }
 
 /** Estimate and earned-source preparation share the actual canonical assignment geography and rate. */

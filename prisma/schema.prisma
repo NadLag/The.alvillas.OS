@@ -71,6 +71,9 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  workTimeEvidence EmployeeWorkTimeEvidence[]
+  workTimeIntervals EmployeeWorkTimeInterval[]
+  workTimeDecisions EmployeeWorkTimeDecision[]
   employeeMonthlyRunRequests EmployeeMonthlyRunRequest[]
   employeeMonthlyRunOutcomes EmployeeMonthlyRunOutcome[]
   employeeContractWitnesses EmployeeCompensationContractWitness[]
@@ -350,6 +353,9 @@ model TeamWallet {
 }
 
 model Person {
+  performedWorkTimeEvidence EmployeeWorkTimeEvidence[] @relation("WorkTimePerformer")
+  submittedWorkTimeEvidence EmployeeWorkTimeEvidence[] @relation("WorkTimeSubmitterPerson")
+  validatedWorkTimeDecisions EmployeeWorkTimeDecision[] @relation("WorkTimeValidatorPerson")
   employeeCompensationClaims EmployeeCompensationClaim[]
   compensationRunLines EmployeeCompensationRunLine[]
   cashCollections    CashCollection[]
@@ -382,6 +388,8 @@ model Person {
 }
 
 model UserAccount {
+  submittedWorkTimeEvidence EmployeeWorkTimeEvidence[] @relation("WorkTimeSubmitterAccount")
+  validatedWorkTimeDecisions EmployeeWorkTimeDecision[] @relation("WorkTimeValidatorAccount")
   employeeMonthlyRunRequests EmployeeMonthlyRunRequest[] @relation("EmployeeMonthlyRunRequester")
   employeeRecognitions EmployeeCompensationRecognition[] @relation("EmployeeRecognitionCreator")
   employeeRecognitionRequests EmployeeCompensationRecognitionRequest[] @relation("EmployeeRecognitionRequester")
@@ -770,6 +778,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  workTimeEvidence EmployeeWorkTimeEvidence[]
   employeeCompensationCosts EmployeeCompensationCost[]
   compensationRunLines EmployeeCompensationRunLine[]
   invoiceApprovalStages ApprovalStage[]             @relation("InvoiceApprovalProperty")
@@ -1098,6 +1107,7 @@ model ReservationConflict {
 }
 
 model OperationTask {
+  workTimeEvidence EmployeeWorkTimeEvidence[]
   compensationRunLines EmployeeCompensationRunLine[]
   cashCollections          CashCollection[]
   id                       String                       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -1164,6 +1174,7 @@ model OperationTask {
 }
 
 model OperationTaskEvent {
+  workTimeEvidence EmployeeWorkTimeEvidence[]
   employeeCompensationCosts EmployeeCompensationCost[]
   compensationRunLines EmployeeCompensationRunLine[]
   id             String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -1584,6 +1595,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  workTimeEvidence EmployeeWorkTimeEvidence[]
   employeeMonthlyRunRequests EmployeeMonthlyRunRequest[]
   monthlyWitnesses EmployeeCompensationContractWitness[] @relation("EmployeeMonthlyWitnessRule")
   employeeRunPolicies EmployeeCompensationRun[] @relation("EmployeeRunPolicy")
@@ -3099,4 +3111,81 @@ model EmployeeCompensationContractWitness {
  @@unique([organizationId,runLineId,sourceOn],map:"employee_contract_witness_day_unique")
  @@index([organizationId,compensationId,occurredAt],map:"employee_contract_witness_rate_idx")
  @@map("employee_compensation_contract_witness")
+}
+
+
+model EmployeeWorkTimeEvidence {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  taskId String @map("task_id") @db.Uuid
+  propertyId String @map("property_id") @db.Uuid
+  completionEventId String @map("completion_event_id") @db.Uuid
+  performedByPersonId String @map("performed_by_person_id") @db.Uuid
+  submittedByAccountId String @map("submitted_by_account_id") @db.Uuid
+  submittedByPersonId String @map("submitted_by_person_id") @db.Uuid
+  policyRuleId String @map("policy_rule_id") @db.Uuid
+  previousEvidenceId String? @map("previous_evidence_id") @db.Uuid
+  version Int
+  kind String @db.VarChar(24)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  sourceSnapshot Json @map("source_snapshot")
+  policySnapshot Json @map("policy_snapshot")
+  reason String @db.VarChar(1000)
+  submittedAt DateTime @default(now()) @map("submitted_at") @db.Timestamptz(3)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  task OperationTask @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  property Property @relation(fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  completionEvent OperationTaskEvent @relation(fields:[organizationId,completionEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  performer Person @relation("WorkTimePerformer",fields:[organizationId,performedByPersonId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  submitterAccount UserAccount @relation("WorkTimeSubmitterAccount",fields:[organizationId,submittedByAccountId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  submitterPerson Person @relation("WorkTimeSubmitterPerson",fields:[organizationId,submittedByPersonId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  policyRule ConfigRule @relation(fields:[organizationId,policyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  previousEvidence EmployeeWorkTimeEvidence? @relation("WorkTimeVersions",fields:[organizationId,previousEvidenceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  revisions EmployeeWorkTimeEvidence[] @relation("WorkTimeVersions")
+  intervals EmployeeWorkTimeInterval[]
+  decision EmployeeWorkTimeDecision?
+  @@unique([organizationId,id],map:"employee_work_time_evidence_org_id_unique")
+  @@unique([organizationId,idempotencyKey],map:"employee_work_time_evidence_nonce_unique")
+  @@unique([organizationId,taskId,performedByPersonId,version],map:"employee_work_time_evidence_version_unique")
+  @@index([organizationId,propertyId,submittedAt(sort:Desc),id(sort:Desc)],map:"employee_work_time_property_history_idx")
+  @@index([organizationId,performedByPersonId,submittedAt(sort:Desc),id(sort:Desc)],map:"employee_work_time_person_history_idx")
+  @@map("employee_work_time_evidence")
+}
+
+model EmployeeWorkTimeInterval {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  evidenceId String @map("evidence_id") @db.Uuid
+  position Int
+  startsAt DateTime @map("starts_at") @db.Timestamptz(3)
+  endsAt DateTime @map("ends_at") @db.Timestamptz(3)
+  note String? @db.VarChar(1000)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  evidence EmployeeWorkTimeEvidence @relation(fields:[organizationId,evidenceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"employee_work_time_interval_org_id_unique")
+  @@unique([organizationId,evidenceId,position],map:"employee_work_time_interval_position_unique")
+  @@index([organizationId,evidenceId,startsAt],map:"employee_work_time_interval_evidence_idx")
+  @@map("employee_work_time_interval")
+}
+
+model EmployeeWorkTimeDecision {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  evidenceId String @map("evidence_id") @db.Uuid
+  decidedByAccountId String @map("decided_by_account_id") @db.Uuid
+  decidedByPersonId String @map("decided_by_person_id") @db.Uuid
+  verdict String @db.VarChar(24)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  reason String @db.VarChar(1000)
+  decidedAt DateTime @default(now()) @map("decided_at") @db.Timestamptz(3)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  evidence EmployeeWorkTimeEvidence @relation(fields:[organizationId,evidenceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  validatorAccount UserAccount @relation("WorkTimeValidatorAccount",fields:[organizationId,decidedByAccountId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  validatorPerson Person @relation("WorkTimeValidatorPerson",fields:[organizationId,decidedByPersonId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"employee_work_time_decision_org_id_unique")
+  @@unique([organizationId,evidenceId],map:"employee_work_time_decision_once_unique")
+  @@unique([organizationId,idempotencyKey],map:"employee_work_time_decision_nonce_unique")
+  @@map("employee_work_time_decision")
 }

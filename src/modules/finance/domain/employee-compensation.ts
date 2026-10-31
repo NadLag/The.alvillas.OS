@@ -13,6 +13,11 @@ export class EmployeeCompensationBasisError extends Error {}
 export class EmployeeCompensationAccessError extends Error {}
 export class EmployeeCompensationSourceUnavailableError extends Error {}
 
+export function employeeCompensationPercentageBasisPoints(rate:Money):bigint{
+  if(rate.amount.isNegative()||rate.amount.gt(100))throw new EmployeeCompensationBasisError("Compensation percentage must be between zero and one hundred");
+  return BigInt(rate.toJSON().amount.replace(".",""));
+}
+
 /** A contractual calculation, independent of approval and recognition of earned work. */
 export function employeeCompensationAmount(rate: { mode: string; amount: Money }, rawBasis: unknown): Money {
   const basis = employeeCompensationBasisSchema.parse(rawBasis);
@@ -22,8 +27,7 @@ export function employeeCompensationAmount(rate: { mode: string; amount: Money }
     case "PER_HOUR": return rate.amount.multiplyRatio(BigInt(basis.seconds), 3600n);
     case "PER_MONTH": return rate.amount.multiplyRatio(BigInt(basis.numerator), BigInt(basis.denominator));
     case "PERCENTAGE": {
-      if (rate.amount.amount.gt(100)) throw new EmployeeCompensationBasisError("Compensation percentage exceeds one hundred");
-      return Money.of(basis.baseAmount, rate.amount.currency).multiplyRatio(BigInt(rate.amount.toJSON().amount.replace(".", "")), 10000n);
+      return Money.of(basis.baseAmount, rate.amount.currency).multiplyRatio(employeeCompensationPercentageBasisPoints(rate.amount), 10000n);
     }
   }
 }

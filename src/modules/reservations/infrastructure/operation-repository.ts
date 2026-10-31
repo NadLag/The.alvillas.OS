@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
+import { advisoryTransactionLock } from "@/platform/db/advisory-lock-repository";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { checklistCatalogSchema } from "@/platform/config/rule-registry";
 import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
@@ -20,9 +21,7 @@ export class OperationRepository {
     );
   }
   async lock(key: string) {
-    await this.tx.$executeRaw(
-      Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`operation:${this.organizationId}:${key}`}, 0))`,
-    );
+    await advisoryTransactionLock(this.tx,`operation:${this.organizationId}:${key}`);
   }
   task(id: string) {
     return this.tx.operationTask.findFirst({
