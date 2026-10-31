@@ -25,7 +25,7 @@ export async function getEmployeeCompensationRunDetail(ctx:FinanceActorContext,r
     await recheckEmployeeCompensationRun(ctx,tx,await new FinanceRepository(tx,ctx.organizationId).clock(),employeeCompensationRunFacts(ctx.organizationId,refreshed));
     await recheckFinanceAuthorization(ctx,tx,await new FinanceRepository(tx,ctx.organizationId).clock(),metadataChecks,new EmployeeCompensationRunAccessError());
     const facts=employeeCompensationRunFacts(ctx.organizationId,refreshed),at=await new FinanceRepository(tx,ctx.organizationId).clock();
-    const canCancel=record.cancellation===null&&[ctx.authContext,current].every(auth=>authorize(auth,"void",facts.resource,at));
+    const canCancel=record.cancellation===null&&!await repository.activeSubmissions(record.id)&&[ctx.authContext,current].every(auth=>authorize(auth,"void",facts.resource,at));
     return employeeCompensationRunDetailSchema.parse({...model,labels,canCancel});
   },{timeout:120000});
 }

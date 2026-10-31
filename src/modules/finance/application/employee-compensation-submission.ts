@@ -12,7 +12,7 @@ import { approvalResource,invoiceApprovalSourceSnapshotSchema } from "@/platform
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
 import { NotificationAudienceUnavailableError } from "@/platform/notifications/notification";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
-import { employeeCompensationClaimPolicyInput,employeeCompensationSubmissionViewSchema } from "../domain/employee-compensation-claim";
+import { employeeCompensationSubmissionInput,employeeCompensationSubmissionViewSchema } from "../domain/employee-compensation-claim";
 import { EmployeeCompensationRunAccessError,EmployeeCompensationRunConflictError } from "../domain/employee-compensation-run";
 import { EmployeeCompensationRunRepository } from "../infrastructure/employee-compensation-run-repository";
 import { EmployeeCompensationClaimRepository,type EmployeeSubmissionRecord } from "../infrastructure/employee-compensation-claim-repository";
@@ -22,8 +22,7 @@ import type { FinanceActorContext } from "./finance-access";
 import { prepareEmployeeCompensationClaimPolicy } from "./employee-compensation-claim-policy";
 import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
 
-export const employeeCompensationSubmissionInput=z.object({...employeeCompensationClaimPolicyInput.shape,idempotencyKey:z.uuid().transform(value=>value.toLowerCase()),reason:z.string().trim().min(6).max(500)}).strict()
-  .refine(input=>new Set(input.costs.map(cost=>cost.runLineId)).size===input.costs.length);
+export { employeeCompensationSubmissionInput } from "../domain/employee-compensation-claim";
 export function employeeCompensationSubmissionFingerprint(actorId:string,input:z.infer<typeof employeeCompensationSubmissionInput>){return createHash("sha256").update(JSON.stringify({...input,actorId,costs:[...input.costs].sort((a,b)=>a.runLineId.localeCompare(b.runLineId))})).digest("hex");}
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 const json=(value:unknown)=>JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
@@ -31,8 +30,8 @@ export const employeeCompensationSubmissionState=(row:EmployeeSubmissionRecord)=
 const receipt=(row:EmployeeSubmissionRecord,idempotent:boolean)=>({id:row.id,runId:row.runId,state:employeeCompensationSubmissionState(row),approvalId:row.approval?.id??null,claimCount:row.claims.length,costCount:row.costs.length,idempotent});
 
 /** Complete artifact authority precedes the paged DTO; no policy, request restriction or private rate dump is returned. */
-export async function getEmployeeCompensationSubmission(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
-  const input=z.object({id:z.uuid(),after:z.uuid().optional()}).strict().parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
+export const employeeCompensationSubmissionReadInput=z.object({id:z.uuid(),after:z.uuid().optional()}).strict();
+export async function readEmployeeCompensationSubmissionInTransaction(ctx:FinanceActorContext,input:z.infer<typeof employeeCompensationSubmissionReadInput>,tx:TenantTransaction,deps:Deps={}){
     const repository=new EmployeeCompensationClaimRepository(tx,ctx.organizationId),row=await repository.find(input.id);if(!row)throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx);
     const boundary=input.after?row.costs.findIndex(cost=>cost.id===input.after):-1;if(input.after&&boundary<0)throw new EmployeeCompensationRunAccessError();const page=row.costs.slice(boundary+1,boundary+52);
     let canWithdraw=!row.withdrawal;
@@ -47,19 +46,25 @@ export async function getEmployeeCompensationSubmission(ctx:FinanceActorContext,
         allocation:z.object({allocation:employeeCompensationSubmissionViewSchema.shape.costs.element.shape.allocation}).passthrough().parse(cost.policySnapshot).allocation})),nextCursor:page.length>50?page[49].id:null,history});
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation.viewed",resourceType:"employee_compensation_submission",resourceId:row.id,
       after:{submissionId:row.id},reason:"Viewed the authorized original employee cost proposal",requestId:deps.requestId??crypto.randomUUID(),occurredAt:await new FinanceRepository(tx,ctx.organizationId).clock()});
-    const final=await repository.find(row.id);if(JSON.stringify(final)!==JSON.stringify(row))throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx);return view;
-  });
+    const final=await repository.find(row.id);if(JSON.stringify(final)!==JSON.stringify(row))throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx);return{model:view,record:row};
+}
+export async function getEmployeeCompensationSubmission(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
+  const input=employeeCompensationSubmissionReadInput.parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>(await readEmployeeCompensationSubmissionInTransaction(ctx,input,tx,deps)).model);
 }
 
 /** Historical retries bind the frozen source and current authority, without replacing approved terms. */
 export async function recheckEmployeeSubmission(ctx:FinanceActorContext,row:EmployeeSubmissionRecord,tx:TenantTransaction,action:"view"|"edit"|"void"="view"){
   const finance=new FinanceRepository(tx,ctx.organizationId),facts=employeeCompensationRunFacts(ctx.organizationId,row.run);
+  await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),facts,action,employeeCompensationSubmissionFinancialChecks(ctx.organizationId,row,facts.total));
+}
+export function employeeCompensationSubmissionFinancialChecks(organizationId:string,row:{costOn:Date;run:{createdBy:string};costs:ReadonlyArray<{propertyId:string;reservationId:string|null;amount:{toString():string};timezone:string;
+  runLine:{taskId:string;recordedCompletionAt:Date};property:{cityId:string|null;regionId:string|null}}>},total:Money){
   const costOn=row.costOn.toISOString().slice(0,10),starts=new Map<string,Date>();
-  const checks=row.costs.flatMap(cost=>{
+  return row.costs.flatMap(cost=>{
     let at=starts.get(cost.timezone);if(!at){at=calendarDateStart(costOn,cost.timezone);starts.set(cost.timezone,at);}
-    const{financial:resource}=employeeCompensationFinancialSourceFacts(ctx.organizationId,row.run.createdBy,{...cost,taskId:cost.runLine.taskId},at);
-    return[{action:"view" as const,resource},{action:"view" as const,resource:{...resource,amount:facts.total.toJSON().amount}},{action:"view" as const,resource:{...resource,occurredAt:cost.runLine.recordedCompletionAt}}];
-  });await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),facts,action,checks);
+    const{financial:resource}=employeeCompensationFinancialSourceFacts(organizationId,row.run.createdBy,{...cost,taskId:cost.runLine.taskId},at);
+    return[{action:"view" as const,resource},{action:"view" as const,resource:{...resource,amount:total.toJSON().amount}},{action:"view" as const,resource:{...resource,occurredAt:cost.runLine.recordedCompletionAt}}];
+  });
 }
 
 export async function withdrawEmployeeCompensation(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
