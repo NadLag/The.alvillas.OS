@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
+import { employeeCompensationCostResource } from "@/modules/finance/domain/employee-compensation-cost-resource";
 
 export const approvalRequestSchema = z.object({
   propertyId: z.string().uuid(), title: z.string().trim().min(3).max(160),
@@ -27,9 +28,8 @@ export function approvalResource(row: ApprovalSource, ownerId?: string | null, s
     if(!submission||!stage?.employeeCostId||!cost||cost.id!==stage.employeeCostId||cost.submissionId!==submission.id||!source?.success||source.data.lineId!==cost.id||
       source.data.note!==cost.note||source.data.category!==cost.category||source.data.timezone!==cost.timezone||source.data.createdBy!==submission.submittedBy||
       source.data.occurredOn!==submission.costOn.toISOString().slice(0,10)||stage.propertyId!==cost.propertyId||stage.reservationId!==cost.reservationId||stage.currency!==cost.currency)throw new ApprovalAccessError();
-    return{type:"expense",id:cost.id,financialRecordId:cost.id,approvalId:row.id,organizationId:row.organizationId,propertyId:cost.propertyId,reservationId:cost.reservationId,
-      ownerId:stage.ownerId,amount:stage.amount.toString(),occurredAt:calendarDateStart(source.data.occurredOn,cost.timezone),assignedUserAccountId:submission.submittedBy,
-      dataClass:"financial",city:stage.property?.cityId,region:stage.property?.regionId,status:submission.withdrawal?"CANCELLED":row.state==="PENDING"?"PENDING_APPROVAL":row.state};
+    return employeeCompensationCostResource(row.organizationId,submission,cost,{ownerId:stage.ownerId,amount:stage.amount,approvalId:row.id,
+      status:submission.withdrawal?"CANCELLED":row.state==="PENDING"?"PENDING_APPROVAL":row.state},stage.property);
   }
   if (row.invoiceSubmissionId) {
     const source = stage && invoiceApprovalSourceSnapshotSchema.safeParse(stage.sourceSnapshot);

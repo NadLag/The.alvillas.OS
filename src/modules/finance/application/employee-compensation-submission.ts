@@ -10,6 +10,7 @@ import { Money } from "@/platform/money/money";
 import { ApprovalRepository } from "@/platform/approvals/approval-repository";
 import { approvalResource,invoiceApprovalSourceSnapshotSchema } from "@/platform/approvals/approval";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { NotificationAudienceUnavailableError } from "@/platform/notifications/notification";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
 import { employeeCompensationClaimPolicyInput,employeeCompensationSubmissionViewSchema } from "../domain/employee-compensation-claim";
 import { EmployeeCompensationRunAccessError,EmployeeCompensationRunConflictError } from "../domain/employee-compensation-run";
@@ -90,8 +91,6 @@ export async function submitEmployeeCompensation(ctx:FinanceActorContext,raw:unk
     await repository.lockSources(run.lines.map(line=>line.completionEventId));
     if((await repository.activeSources(run.lines.map(line=>line.completionEventId))).length)throw new EmployeeCompensationRunConflictError();
     const plan=await prepareEmployeeCompensationClaimPolicy(ctx,{runId:input.runId,costOn:input.costOn,emergency:input.emergency,costs:input.costs},tx);
-    // Emergency owner notices must use the same durable source adapter before submission is admitted.
-    if(plan.costs.some(cost=>cost.postHocNotices.length))throw new ExpensePolicyUnavailableError("Employee cost emergency notification source is unavailable");
     const source=await repository.create({runId:run.id,submittedBy:ctx.actorId,idempotencyKey:input.idempotencyKey,requestFingerprint:fingerprint,costOn:new Date(input.costOn+"T00:00:00Z"),
       emergency:input.emergency,reason:input.reason,snapshot:json({...plan.snapshot,stages:plan.stages})});
     const claims=await repository.createClaims(source.id,plan.costs.map(cost=>cost.personId)),byPerson=new Map(claims.map(claim=>[claim.personId,claim.id]));
@@ -109,7 +108,12 @@ export async function submitEmployeeCompensation(ctx:FinanceActorContext,raw:unk
     }
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation.submitted",resourceType:"employee_compensation_submission",resourceId:source.id,
       after:{submissionId:source.id,runId:run.id,claimCount:claims.length,costCount:plan.costs.length,total:plan.total},reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await finance.clock()});
+    let noticeCount=0;const notifications=new NotificationRepository(tx,ctx.organizationId),emergencyNotices=plan.costs.flatMap(planned=>{if(!planned.postHocNotices.length)return[];const cost=byLine.get(planned.runLineId);if(!cost)throw new EmployeeCompensationRunConflictError();return[{costId:cost.id,notices:planned.postHocNotices}];});
+    if(emergencyNotices.length)try{noticeCount=(await notifications.publishEmployeeCostEmergencyNotices(source.id,emergencyNotices)).count;}catch(error){if(error instanceof NotificationAudienceUnavailableError)throw new ExpensePolicyUnavailableError("Required employee owner notice is unavailable");throw error;}
+    if(noticeCount)await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation.emergency_owner_notified",resourceType:"employee_compensation_submission",resourceId:source.id,
+      after:{submissionId:source.id,noticeCount,ownerApprovalBypassed:true},reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await finance.clock()});
     await repository.event(source.id,"EmployeeCompensationSubmitted");await plan.recheck();await repository.flushGuards();await plan.recheck();
+    if(emergencyNotices.length)try{await notifications.recheckEmployeeCostEmergencyNotices(source.id,emergencyNotices);}catch(error){if(error instanceof NotificationAudienceUnavailableError)throw new ExpensePolicyUnavailableError("Required employee owner notice audience changed");throw error;}
     saved=await repository.find(source.id);if(!saved)throw new EmployeeCompensationRunConflictError();await recheckEmployeeSubmission(ctx,saved,tx,"edit");return receipt(saved,false);
   },{timeout:120000});
 }

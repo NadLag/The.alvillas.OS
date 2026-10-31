@@ -1283,7 +1283,8 @@
       "staff_document_expiring": "A staff document is expiring.",
       "task_overdue": "An assigned task is overdue.",
       "expense_emergency": "Emergency expense approval exception",
-      "supplier_invoice_emergency": "Emergency invoice cost submitted"
+      "supplier_invoice_emergency": "Emergency invoice cost submitted",
+      "employee_cost_emergency": "Emergency employee work cost notice"
     },
     "settings": {
       "eyebrow": "Your account",
@@ -3095,5 +3096,27 @@
     "chooseContract": "Choose a contract",
     "chosenContract": "Selected · {amount}",
     "contractChoices": "Applicable contract choices"
+  },
+  "EmployeeCostNotices": {
+    "eyebrow": "Finance · Owner notice",
+    "title": "Emergency work cost notice",
+    "description": "Your retained notice of the emergency work costs allocated to this property.",
+    "back": "Back to notifications",
+    "loading": "Loading your authorized cost notice…",
+    "forbidden": "This cost notice is unavailable to your account.",
+    "offline": "Cost notices are unavailable offline. Reconnect to read this notice.",
+    "unavailable": "This cost notice is temporarily unavailable.",
+    "validation": "This cost notice reference is invalid.",
+    "configuration_unavailable": "The required cost notice information is unavailable.",
+    "retry": "Try again",
+    "restrictedProperty": "Property cost notice",
+    "gross": "Your gross share of the work cost",
+    "allocation": "Cost allocated to you",
+    "category": "Category",
+    "date": "Cost date",
+    "retained": "Retained emergency notice",
+    "withdrawn": "Source proposal withdrawn",
+    "paymentGuidance": "The configured emergency policy bypassed owner approval and retained this notice. This notice does not record a payment.",
+    "withdrawnGuidance": "The source cost proposal was withdrawn. This notice remains part of its original history."
   }
 }

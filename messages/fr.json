@@ -1283,7 +1283,8 @@
       "staff_document_expiring": "Un document du personnel arrive à expiration.",
       "task_overdue": "Une tâche attribuée est en retard.",
       "expense_emergency": "Exception de validation pour une dépense urgente",
-      "supplier_invoice_emergency": "Coût de facture urgente soumis"
+      "supplier_invoice_emergency": "Coût de facture urgente soumis",
+      "employee_cost_emergency": "Avis de coûts urgents du personnel"
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -3095,5 +3096,27 @@
     "chooseContract": "Choisir un contrat",
     "chosenContract": "Sélectionné · {amount}",
     "contractChoices": "Choix des contrats applicables"
+  },
+  "EmployeeCostNotices": {
+    "eyebrow": "Finance · Avis au propriétaire",
+    "title": "Avis de coûts de travaux urgents",
+    "description": "Votre avis conservé des coûts de travaux urgents attribués à cette propriété.",
+    "back": "Retour aux notifications",
+    "loading": "Chargement de votre avis de coûts autorisé…",
+    "forbidden": "Cet avis de coûts n’est pas accessible à votre compte.",
+    "offline": "Les avis de coûts sont indisponibles hors ligne. Reconnectez-vous pour consulter cet avis.",
+    "unavailable": "Cet avis de coûts est temporairement indisponible.",
+    "validation": "La référence de cet avis de coûts est invalide.",
+    "configuration_unavailable": "Les informations requises de cet avis sont indisponibles.",
+    "retry": "Réessayer",
+    "restrictedProperty": "Avis de coûts de propriété",
+    "gross": "Votre part brute du coût du travail",
+    "allocation": "Coût à votre charge",
+    "category": "Catégorie",
+    "date": "Date du coût",
+    "retained": "Avis d’urgence conservé",
+    "withdrawn": "Proposition d’origine retirée",
+    "paymentGuidance": "La règle d’urgence configurée a contourné la validation du propriétaire et conservé cet avis. Cet avis ne constitue pas un paiement.",
+    "withdrawnGuidance": "La proposition de coûts d’origine a été retirée. Cet avis reste dans son historique initial."
   }
 }
