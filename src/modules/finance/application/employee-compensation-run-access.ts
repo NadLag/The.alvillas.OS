@@ -9,6 +9,6 @@ export async function recheckEmployeeCompensationRun(ctx: FinanceActorContext, t
   await recheckFinanceAuthorization(ctx, tx, now, [
     { action: "view", resource: facts.resource },
     ...(action === "view" ? [] : [{ action, resource: facts.resource }]),
-    ...facts.salarySources.map(resource => ({ action: "view" as const, resource })),...additionalChecks
+    ...facts.salarySources.map(resource => ({ action: "view" as const, resource })),...(facts.financialSources??[]).map(resource=>({action:"view" as const,resource})),...additionalChecks
   ], new EmployeeCompensationRunAccessError());
 }

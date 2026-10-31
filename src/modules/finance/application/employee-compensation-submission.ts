@@ -92,7 +92,7 @@ export async function submitEmployeeCompensation(ctx:FinanceActorContext,raw:unk
     const run=await runs.find(input.runId);if(!run||run.cancellation)throw new EmployeeCompensationRunAccessError();
     await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),employeeCompensationRunFacts(ctx.organizationId,run),"edit");
     const sources=employeeCompensationSourceGroups(run.lines);await repository.lockSources(sources.keys);
-    if((await repository.activeSources(sources.completionEventIds,sources.monthly)).length)throw new EmployeeCompensationRunConflictError();
+    if((await repository.activeSources(sources.completionEventIds,sources.monthly,sources.percentage)).length)throw new EmployeeCompensationRunConflictError();
     const plan=await prepareEmployeeCompensationClaimPolicy(ctx,{runId:input.runId,costOn:input.costOn,emergency:input.emergency,costs:input.costs},tx);
     const source=await repository.create({runId:run.id,submittedBy:ctx.actorId,idempotencyKey:input.idempotencyKey,requestFingerprint:fingerprint,costOn:new Date(input.costOn+"T00:00:00Z"),
       emergency:input.emergency,reason:input.reason,snapshot:json({...plan.snapshot,stages:plan.stages})});

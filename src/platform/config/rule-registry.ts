@@ -18,6 +18,7 @@ import { accountingPeriodPolicyKey, accountingPeriodPolicySchema } from "@/modul
 import { employeeMonthlyEarningsPolicyKey,employeeMonthlyEarningsPolicySchema } from "@/modules/finance/domain/employee-monthly-earnings";
 import { employeeHourlyEarningsPolicyKey,employeeHourlyEarningsPolicySchema } from "@/modules/finance/domain/employee-hourly-earnings";
 import { employeeHourlyRunPolicyKey,employeeHourlyRunPolicySchema } from "@/modules/finance/domain/employee-hourly-run";
+import {employeePercentageRunPolicyKey,employeePercentageRunPolicySchema} from "@/modules/finance/domain/employee-percentage-run";
 import { employeePercentageEarningsPolicyKey,employeePercentageEarningsPolicySchema } from "@/modules/finance/domain/employee-percentage-earnings";
 import { employeeCompensationRunPolicyKey, employeeCompensationRunPolicySchema } from "@/modules/finance/domain/employee-compensation-run";
 export { inventoryMinimumsSchema } from "./inventory-policy";
@@ -370,6 +371,7 @@ export const configRuleSchemas = {
   [employeeMonthlyEarningsPolicyKey]: employeeMonthlyEarningsPolicySchema,
   [employeeHourlyEarningsPolicyKey]: employeeHourlyEarningsPolicySchema,
   [employeeHourlyRunPolicyKey]: employeeHourlyRunPolicySchema,
+  [employeePercentageRunPolicyKey]:employeePercentageRunPolicySchema,
   [employeePercentageEarningsPolicyKey]: employeePercentageEarningsPolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,

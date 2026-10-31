@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { employeeCompensationAuthorityLineFields,employeeCompensationContractWitnessFields,employeeCompensationHourlyWitnessFields } from "@/platform/authz/employee-compensation-resource";
+import {employeePercentageAuthorityWitnessFields} from "@/platform/authz/employee-percentage-resource";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
 export const employeeCompensationRunLineFields = { ...employeeCompensationAuthorityLineFields,id: true,workTimeEvidenceId:true,workTimeDecisionId:true,contractWitnesses:{orderBy:{sourceOn:"asc" as const},select:employeeCompensationContractWitnessFields},earningKind:true,earningPeriodKey:true,sourceCityId:true,sourceRegionId:true,sourceCity:{select:{id:true,regionId:true}},sourceRegion:{select:{id:true}}, taskId: true, personId: true, assignmentId: true, compensationId: true, configRuleId: true,
@@ -9,7 +10,7 @@ const lineFields=employeeCompensationRunLineFields;
 const include = { lines: { orderBy: { id: "asc" as const }, select: lineFields }, cancellation: true } satisfies Prisma.EmployeeCompensationRunInclude;
 export type CompensationRunRecord = Prisma.EmployeeCompensationRunGetPayload<{ include: typeof include }>;
 type PersistedDisplaySource=Awaited<ReturnType<EmployeeCompensationRunRepository["displayLines"]>>[number];
-type MonthlyDisplayKeys="earningKind"|"earningPeriodKey"|"sourceCity"|"sourceRegion"|"contractWitnesses"|"amount"|"run"|"hourlyWitnesses"|"workTimeEvidence"|"workTimeDecision"|"currency"|"recordedCompletionAt";
+type MonthlyDisplayKeys="earningKind"|"earningPeriodKey"|"sourceCity"|"sourceRegion"|"contractWitnesses"|"amount"|"run"|"hourlyWitnesses"|"workTimeEvidence"|"workTimeDecision"|"currency"|"recordedCompletionAt"|"percentageWitnesses"|"sourceSnapshot";
 export type CompensationDisplaySource=Omit<PersistedDisplaySource,MonthlyDisplayKeys|"compensation">&Partial<Pick<PersistedDisplaySource,MonthlyDisplayKeys>>&{compensation:Omit<PersistedDisplaySource["compensation"],"currency">&{currency?:string}};
 
 export class EmployeeCompensationRunRepository {
@@ -47,7 +48,7 @@ export class EmployeeCompensationRunRepository {
   async flushGuards() { await this.tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE"); }
   displayLines(runId: string, lineIds: readonly string[]) {
     return this.tx.employeeCompensationRunLine.findMany({ where: { organizationId: this.organizationId, runId, id: { in: [...lineIds] } },
-      select: { id: true,amount:true,currency:true,recordedCompletionAt:true,hourlyWitnesses:{orderBy:{position:"asc"},select:employeeCompensationHourlyWitnessFields},
+      select: { id: true,amount:true,currency:true,recordedCompletionAt:true,sourceSnapshot:true,percentageWitnesses:{orderBy:{position:"asc"},select:employeePercentageAuthorityWitnessFields},hourlyWitnesses:{orderBy:{position:"asc"},select:employeeCompensationHourlyWitnessFields},
         workTimeEvidence:{select:{id:true,version:true,kind:true,performedByPersonId:true,policySnapshot:true,intervals:{orderBy:{position:"asc"},select:{id:true,startsAt:true,endsAt:true}}}},workTimeDecision:{select:{evidenceId:true,verdict:true,decidedAt:true,decidedByPersonId:true}},
         contractWitnesses:{orderBy:{sourceOn:"asc"},select:employeeCompensationContractWitnessFields},run:{select:{policySnapshot:true}},earningKind:true,earningPeriodKey:true,sourceCity:{select:{id:true,regionId:true}},sourceRegion:{select:{id:true}},taskId: true, personId: true, propertyId: true,
         person: { select: { displayName: true, userAccounts: { select: { id: true } } } },
@@ -67,6 +68,9 @@ export class EmployeeCompensationRunRepository {
   async createHourlyWitnesses(rows:readonly Omit<Prisma.EmployeeCompensationHourlyWitnessCreateManyInput,"organizationId">[]){
     if(!rows.length)return{count:0};
     return this.tx.employeeCompensationHourlyWitness.createMany({data:rows.map(row=>({...row,organizationId:this.organizationId}))});
+  }
+  async createPercentageWitnesses(rows:readonly Omit<Prisma.EmployeeCompensationPercentageWitnessCreateManyInput,"organizationId">[]){
+    if(!rows.length)return{count:0};return this.tx.employeeCompensationPercentageWitness.createMany({data:rows.map(row=>({...row,organizationId:this.organizationId}))});
   }
   sourceSnapshots(runId:string){return this.tx.employeeCompensationRunLine.findMany({where:{organizationId:this.organizationId,runId},select:{id:true,assignmentId:true,sourceSnapshot:true}});}
   people(ids: readonly string[]) {

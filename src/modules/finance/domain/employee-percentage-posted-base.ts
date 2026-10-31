@@ -9,6 +9,11 @@ export type EmployeePercentagePostedSource={
  account:{id:string;organizationId:string};
 };
 
+/** Whole original financial authority is calculated once per journal and currency. */
+export function employeePostedJournalAmounts(postings:readonly {side:string;currency:string;amount:{toString():string}}[]){
+ const totals=new Map<string,Money>();for(const posting of postings)if(posting.side==="DEBIT")totals.set(posting.currency,(totals.get(posting.currency)??Money.zero(posting.currency)).add(Money.of(posting.amount.toString(),posting.currency)));return totals;
+}
+
 /** Only an actual sealed, unreversed journal posting can supply a contractual percentage base. */
 export function employeePercentagePostedBase(organizationId:string,currency:string,rawPolicy:unknown,source:EmployeePercentagePostedSource){
  const policy=employeePercentageEarningsPolicySchema.parse(rawPolicy),{posting,transaction,account}=source;
