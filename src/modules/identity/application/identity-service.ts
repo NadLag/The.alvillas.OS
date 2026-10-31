@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { recheckAccountAuthorization } from "@/platform/authz/current-authority";
+import { authContextsForAccountsInTransaction } from "@/platform/authz/account-context";
 import { identityResource } from "../domain/identity";
 import { publishNotification } from "@/platform/notifications/notification-service";
 import {
@@ -54,7 +55,6 @@ import {
 import {
   IdentityAuthorizationError,
   assertIdentityAllowed,
-  authContextForAccount,
   type IdentityActorContext
 } from "@/modules/identity/application/identity-access";
 import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
@@ -581,12 +581,12 @@ export async function ensureStandardIdentitySetup(
 async function buildAccountSimulations(
   organizationId: string,
   accounts: IdentityAccountSummary[],
-  deps: IdentityServiceDeps
+  tx: TenantTransaction
 ): Promise<AccountPermissionSimulation[]> {
   const simulations: AccountPermissionSimulation[] = [];
-
-  for (const account of accounts.slice(0, 12)) {
-    const ctx = await authContextForAccount(organizationId, account.id, deps);
+  const selected=accounts.slice(0,12),contexts=await authContextsForAccountsInTransaction(tx,organizationId,selected.map(account=>account.id));
+  for (const account of selected) {
+    const ctx=contexts.get(account.id)!;
     const propertyScope = ctx.scopes.find((scope) => {
       const type = scope.scopeType ?? scope.resourceType;
       return type === "property" && (scope.scopeId || scope.resourceId);
@@ -648,10 +648,7 @@ export async function listIdentityDashboard(
       roles: await repository.listRoles(),
       permissions: await repository.listPermissions(),
       assignments: await repository.listRoleAssignments(),
-      simulations: await buildAccountSimulations(ctx.organizationId, accounts, {
-        ...deps,
-        db: { $transaction: (callback) => callback(tx) }
-      })
+      simulations: await buildAccountSimulations(ctx.organizationId, accounts, tx)
     };
   });
 }
