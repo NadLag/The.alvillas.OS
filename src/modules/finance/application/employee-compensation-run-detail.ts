@@ -17,7 +17,7 @@ export async function getEmployeeCompensationRunDetail(ctx:FinanceActorContext,r
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     const {model,record}=await readEmployeeCompensationRunInTransaction(ctx,input,tx,deps),repository=new EmployeeCompensationRunRepository(tx,ctx.organizationId);
     const rows=await repository.displayLines(record.id,model.lines.map(line=>line.id));
-    const evidence=new Map(rows.map(row=>[row.id,employeeCompletedWorkEvidence(row.completionEvent)]));
+    const evidence=new Map(rows.filter(row=>row.completionEvent!==null).map(row=>[row.id,employeeCompletedWorkEvidence(row.completionEvent!)]));
     const validators=await repository.people([...evidence.values()].flatMap(value=>value.validated_by_person_id?[value.validated_by_person_id]:[]));
     const {labels,checks:metadataChecks,current}=await employeeCompensationSourceLabels(ctx,tx,rows,validators);
     const refreshed=await repository.find(record.id);

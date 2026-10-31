@@ -1,3 +1,4 @@
+import { employeeCompensationSourceGroups } from "../domain/employee-compensation-source-identity";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
@@ -58,9 +59,9 @@ export async function recheckEmployeeSubmission(ctx:FinanceActorContext,row:Empl
   const finance=new FinanceRepository(tx,ctx.organizationId),facts=employeeCompensationRunFacts(ctx.organizationId,row.run);
   await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),facts,action,employeeCompensationSubmissionFinancialChecks(ctx.organizationId,row,facts.total));
 }
-export function employeeCompensationSubmissionFinancialChecks(organizationId:string,row:{costOn:Date;run:{createdBy:string};costs:ReadonlyArray<{propertyId:string;reservationId:string|null;amount:{toString():string};timezone:string;
-  runLine:{taskId:string;recordedCompletionAt:Date};property:{cityId:string|null;regionId:string|null}}>},total:Money){
-  return employeeCompensationSubmittedFinancialSources(organizationId,row,total).map(resource=>({action:"view" as const,resource}));
+export function employeeCompensationSubmissionFinancialChecks(organizationId:string,row:{costOn:Date;run:{createdBy:string};costs:ReadonlyArray<{propertyId:string|null;reservationId:string|null;amount:{toString():string};timezone:string;
+  runLine:{taskId:string|null;recordedCompletionAt:Date};property:{cityId:string|null;regionId:string|null}|null}>},total:Money){
+  return employeeCompensationSubmittedFinancialSources(organizationId,row,total).map(resource=>({action:"view" as const,resource,organizationOnly:!resource.propertyId}));
 }
 
 export async function withdrawEmployeeCompensation(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
@@ -71,7 +72,7 @@ export async function withdrawEmployeeCompensation(ctx:FinanceActorContext,raw:u
     const row=await repository.find(input.id);if(!row)throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx,"void");
     if(row.withdrawal){if(row.withdrawal.withdrawnBy!==ctx.actorId||row.withdrawal.reason!==input.reason)throw new EmployeeCompensationRunConflictError();return receipt(row,true);}
     if((await new EmployeeCompensationRecognitionRepository(tx,ctx.organizationId).forSubmission(row.id)).length)throw new EmployeeCompensationRunConflictError();
-    await repository.lockSources(row.costs.map(cost=>cost.completionEventId));const withdrawal=await repository.withdraw(row.id,ctx.actorId,input.reason);
+    await repository.lockSources(employeeCompensationSourceGroups(row.costs.map(cost=>cost.runLine)).keys);const withdrawal=await repository.withdraw(row.id,ctx.actorId,input.reason);
     if(row.approval)await new ApprovalRepository(tx,ctx.organizationId).resolveNotifications(row.approval.id,"CANCELLED",await finance.clock());
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation.withdrawn",resourceType:"employee_compensation_submission",resourceId:row.id,
       after:{submissionId:row.id,withdrawalId:withdrawal.id},reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await finance.clock()});
@@ -90,8 +91,8 @@ export async function submitEmployeeCompensation(ctx:FinanceActorContext,raw:unk
     if(existing){await recheckEmployeeSubmission(ctx,existing,tx,"edit");if(existing.runId!==input.runId||existing.submittedBy!==ctx.actorId||existing.requestFingerprint!==fingerprint)throw new EmployeeCompensationRunConflictError();return receipt(existing,true);}
     const run=await runs.find(input.runId);if(!run||run.cancellation)throw new EmployeeCompensationRunAccessError();
     await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),employeeCompensationRunFacts(ctx.organizationId,run),"edit");
-    await repository.lockSources(run.lines.map(line=>line.completionEventId));
-    if((await repository.activeSources(run.lines.map(line=>line.completionEventId))).length)throw new EmployeeCompensationRunConflictError();
+    const sources=employeeCompensationSourceGroups(run.lines);await repository.lockSources(sources.keys);
+    if((await repository.activeSources(sources.completionEventIds,sources.monthly)).length)throw new EmployeeCompensationRunConflictError();
     const plan=await prepareEmployeeCompensationClaimPolicy(ctx,{runId:input.runId,costOn:input.costOn,emergency:input.emergency,costs:input.costs},tx);
     const source=await repository.create({runId:run.id,submittedBy:ctx.actorId,idempotencyKey:input.idempotencyKey,requestFingerprint:fingerprint,costOn:new Date(input.costOn+"T00:00:00Z"),
       emergency:input.emergency,reason:input.reason,snapshot:json({...plan.snapshot,stages:plan.stages})});

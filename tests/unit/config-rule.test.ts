@@ -79,6 +79,7 @@ describe("config rule registry", () => {
       "reservation.sync_policy",
       "services.pricing",
       "staff.compensation",
+      "staff.compensation_monthly_earnings",
       "staff.compensation_runs",
       "staff.management_policy"
     ]);
@@ -87,6 +88,10 @@ describe("config rule registry", () => {
   });
 
   it("parses known config values and rejects unregistered keys", () => {
+    const monthly={timezone:"UTC",proration:"COMPLETE_ELIGIBLE_CALENDAR_DAYS",rate_selection:"DAILY_EFFECTIVE",rounding:"HALF_UP_AT_PERIOD_TOTAL"};
+    expect(parseConfigRuleValue("staff.compensation_monthly_earnings",monthly)).toEqual(monthly);
+    for(const key of Object.keys(monthly))expect(()=>parseConfigRuleValue("staff.compensation_monthly_earnings",Object.fromEntries(Object.entries(monthly).filter(([name])=>name!==key)))).toThrow();
+    expect(()=>parseConfigRuleValue("staff.compensation_monthly_earnings",{...monthly,proration:"STATUTORY_DEFAULT"})).toThrow();
     expect(parseConfigRuleValue("staff.compensation_runs",{earning_date:"RECORDED_COMPLETION",timezone:"UTC",max_period_days:31}))
       .toEqual({earning_date:"RECORDED_COMPLETION",timezone:"UTC",max_period_days:31});
     expect(()=>parseConfigRuleValue("staff.compensation_runs",{timezone:"UTC",max_period_days:31})).toThrow();

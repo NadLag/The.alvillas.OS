@@ -51,11 +51,12 @@ async function prepare(ctx:FinanceActorContext,intent:Intent,tx:TenantTransactio
     for(const cost of retained.costs){
       const source=actual.costs.find(line=>line.id===cost.id),postingAt=postAt.get(cost.id);if(!source||!postingAt)throw new EmployeeCompensationRunAccessError();
       const {financial}=employeeCompensationFinancialSourceFacts(ctx.organizationId,row.run.createdBy,{...source,taskId:source.runLine.taskId},cost.sourceOccurredAt),link=existing?.lines.find(line=>line.costId===cost.id);
-      checks.push({action:"view",resource:employeeCompensationCostResource(ctx.organizationId,actual,source,{ownerId:null,amount:source.amount,status:"APPROVED"},source.property,cost.sourceOccurredAt)},
-        {action:"view",resource:{...financial,id:link?.transactionId,financialRecordId:link?.transactionId}});
-      if(input)checks.push({action:"create",resource:{...financial,occurredAt:postingAt}});
-      if(input&&(adjustments.has(cost.id)||link?.periodAdjustment))checks.push({action:"override",resource:financial});
-      if(link&&postingAt.getTime()!==cost.sourceOccurredAt.getTime())checks.push({action:"view",resource:{...financial,id:link.transactionId,financialRecordId:link.transactionId,occurredAt:postingAt}});
+      const organizationOnly=source.propertyId===null;
+      checks.push({action:"view",resource:employeeCompensationCostResource(ctx.organizationId,actual,source,{ownerId:null,amount:source.amount,status:"APPROVED"},source.property,cost.sourceOccurredAt),organizationOnly},
+        {action:"view",resource:{...financial,id:link?.transactionId,financialRecordId:link?.transactionId},organizationOnly});
+      if(input)checks.push({action:"create",resource:{...financial,occurredAt:postingAt},organizationOnly});
+      if(input&&(adjustments.has(cost.id)||link?.periodAdjustment))checks.push({action:"override",resource:financial,organizationOnly});
+      if(link&&postingAt.getTime()!==cost.sourceOccurredAt.getTime())checks.push({action:"view",resource:{...financial,id:link.transactionId,financialRecordId:link.transactionId,occurredAt:postingAt},organizationOnly});
     }
     await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),facts,input?"pay":"view",checks);
   };

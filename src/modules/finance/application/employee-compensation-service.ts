@@ -10,7 +10,7 @@ import { employeeCompensationAmount, employeeCompensationBasisSchema } from "../
 import { EmployeeCompensationRepository } from "../infrastructure/employee-compensation-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
-import { validateEmployeeCompensationAssignment, validateEmployeeCompensationRate } from "./employee-compensation-source";
+import { validateEmployeeCompensationAssignment, validateEmployeeCompensationRate,employeeCompensationContractResource } from "./employee-compensation-source";
 import { EmployeeCompensationAccessError, EmployeeCompensationSourceUnavailableError } from "../domain/employee-compensation";
 
 export { EmployeeCompensationAccessError, EmployeeCompensationSourceUnavailableError } from "../domain/employee-compensation";
@@ -30,14 +30,10 @@ export async function previewEmployeeCompensationInTransaction(ctx: FinanceActor
     const repository = new EmployeeCompensationRepository(tx, ctx.organizationId), finance = new FinanceRepository(tx, ctx.organizationId);
     const source = await repository.source(input.assignmentId, earnedAt);
     if (!source?.rate) throw new EmployeeCompensationAccessError();
-    const { assignment, rate, property, job, city, region } = source;
+    const { assignment, rate, property } = source;
     if (completedJob && (input.basis.mode !== "PER_JOB" || input.basis.jobs !== "1" || completedJob.personId !== assignment.personId ||
       completedJob.completedAt.getTime() !== earnedAt.getTime())) throw new EmployeeCompensationSourceUnavailableError();
-    const resource: Resource = { type: "staff_compensation", id: assignment.personId, organizationId: ctx.organizationId, dataClass: "financial",
-      assignedPersonId: assignment.personId, amount: rate.amount.toFixed(2), occurredAt: earnedAt,
-      propertyId: property?.id, region: region?.id ?? city?.regionId ?? property?.regionId,
-      city: city?.id ?? property?.cityId,
-      jobId: completedJob?.taskId ?? (assignment.scopeType === "job" ? assignment.scopeId : undefined), reservationId: job?.reservationId };
+    const resource:Resource=employeeCompensationContractResource(ctx.organizationId,source,earnedAt,completedJob?.taskId);
     const check = async (amount?: Money) => recheckFinanceAuthorization(ctx, tx, await finance.clock(), [
       { action: "view", resource },
       ...(amount ? [{ action: "view" as const, resource: { ...resource, amount: amount.toJSON().amount } }] : [])

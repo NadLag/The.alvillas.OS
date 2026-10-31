@@ -71,6 +71,7 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  employeeContractWitnesses EmployeeCompensationContractWitness[]
   employeeRecognitions EmployeeCompensationRecognition[]
   employeeRecognitionLines EmployeeCompensationRecognitionLine[]
   employeeRecognitionRequests EmployeeCompensationRecognitionRequest[]
@@ -194,6 +195,7 @@ model Organization {
 }
 
 model Region {
+  employeeCompensationSources EmployeeCompensationRunLine[] @relation("EmployeeRunSourceRegion")
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   name           String
@@ -210,9 +212,11 @@ model Region {
 
   @@index([organizationId, archivedAt, sortOrder, name], map: "region_org_archived_sort_idx")
   @@map("region")
+  @@unique([organizationId, id])
 }
 
 model City {
+  employeeCompensationSources EmployeeCompensationRunLine[] @relation("EmployeeRunSourceCity")
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   regionId       String?      @map("region_id") @db.Uuid
@@ -231,6 +235,7 @@ model City {
   @@index([organizationId, regionId, archivedAt, sortOrder, name], map: "city_org_region_archived_sort_idx")
   @@index([organizationId, archivedAt, name], map: "city_org_archived_name_idx")
   @@map("city")
+  @@unique([organizationId, id])
 }
 
 model OrganizationProfile {
@@ -258,6 +263,7 @@ model OrganizationProfile {
 }
 
 model TeamCompensation {
+  monthlyWitnesses EmployeeCompensationContractWitness[]
   runLines EmployeeCompensationRunLine[]
   currencyRef    Currency       @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_currency_fkey")
   configRule     ConfigRule     @relation(fields: [configRuleId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_config_fkey")
@@ -1575,6 +1581,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  monthlyWitnesses EmployeeCompensationContractWitness[] @relation("EmployeeMonthlyWitnessRule")
   employeeRunPolicies EmployeeCompensationRun[] @relation("EmployeeRunPolicy")
   employeeRunRates EmployeeCompensationRunLine[] @relation("EmployeeRunRate")
   accountingPeriods      AccountingPeriod[]          @relation("AccountingPeriodCalendarPolicy")
@@ -2719,6 +2726,7 @@ model SupplierInvoiceRecognitionOutcome {
 }
 
 model EmployeeCompensationRun {
+  earningKind String @default("PER_JOB") @map("earning_kind") @db.VarChar(24)
   submissionRequests EmployeeCompensationSubmissionRequest[]
   submissions        EmployeeCompensationSubmission[]
   id                 String                               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -2749,6 +2757,13 @@ model EmployeeCompensationRun {
 }
 
 model EmployeeCompensationRunLine {
+  contractWitnesses EmployeeCompensationContractWitness[]
+  earningKind String @default("PER_JOB") @map("earning_kind") @db.VarChar(24)
+  earningPeriodKey String? @map("earning_period_key") @db.VarChar(120)
+  sourceCityId String? @map("source_city_id") @db.Uuid
+  sourceRegionId String? @map("source_region_id") @db.Uuid
+  sourceCity City? @relation("EmployeeRunSourceCity",fields:[organizationId,sourceCityId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  sourceRegion Region? @relation("EmployeeRunSourceRegion",fields:[organizationId,sourceRegionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   costs                EmployeeCompensationCost[]
   id                   String                  @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId       String                  @map("organization_id") @db.Uuid
@@ -2757,9 +2772,9 @@ model EmployeeCompensationRunLine {
   assignmentId         String                  @map("assignment_id") @db.Uuid
   compensationId       String                  @map("compensation_id") @db.Uuid
   configRuleId         String                  @map("config_rule_id") @db.Uuid
-  taskId               String                  @map("task_id") @db.Uuid
-  completionEventId    String                  @map("completion_event_id") @db.Uuid
-  propertyId           String                  @map("property_id") @db.Uuid
+  taskId               String?                  @map("task_id") @db.Uuid
+  completionEventId    String?                  @map("completion_event_id") @db.Uuid
+  propertyId           String?                  @map("property_id") @db.Uuid
   recordedCompletionAt DateTime                @map("recorded_completion_at") @db.Timestamptz(6)
   rate                 Decimal                 @db.Decimal(18, 2)
   amount               Decimal                 @db.Decimal(18, 2)
@@ -2772,15 +2787,17 @@ model EmployeeCompensationRunLine {
   assignment           RoleAssignment          @relation(fields: [organizationId, assignmentId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   compensation         TeamCompensation        @relation(fields: [organizationId, compensationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   configRule           ConfigRule              @relation("EmployeeRunRate", fields: [organizationId, configRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  task                 OperationTask           @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  completionEvent      OperationTaskEvent      @relation(fields: [organizationId, completionEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  property             Property                @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  task                 OperationTask?           @relation(fields: [organizationId, taskId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  completionEvent      OperationTaskEvent?      @relation(fields: [organizationId, completionEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  property             Property?                @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   moneyCurrency        Currency                @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organizationId, id])
   @@unique([organizationId, runId, taskId])
   @@index([organizationId, personId, recordedCompletionAt, id])
   @@index([organizationId, taskId])
+  @@unique([organizationId,runId,assignmentId,earningPeriodKey],map:"employee_run_monthly_assignment_unique")
+  @@index([organizationId,assignmentId,earningPeriodKey],map:"employee_run_monthly_source_idx")
   @@map("employee_compensation_run_line")
 }
 
@@ -2855,8 +2872,8 @@ model EmployeeCompensationCost {
   submissionId      String                         @map("submission_id") @db.Uuid
   claimId           String                         @map("claim_id") @db.Uuid
   runLineId         String                         @map("run_line_id") @db.Uuid
-  completionEventId String                         @map("completion_event_id") @db.Uuid
-  propertyId        String                         @map("property_id") @db.Uuid
+  completionEventId String?                         @map("completion_event_id") @db.Uuid
+  propertyId        String?                         @map("property_id") @db.Uuid
   reservationId     String?                        @map("reservation_id") @db.Uuid
   amount            Decimal                        @db.Decimal(18, 2)
   currency          String                         @db.Char(3)
@@ -2870,8 +2887,8 @@ model EmployeeCompensationCost {
   submission        EmployeeCompensationSubmission @relation(fields: [organizationId, submissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   claim             EmployeeCompensationClaim      @relation(fields: [organizationId, claimId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   runLine           EmployeeCompensationRunLine    @relation(fields: [organizationId, runLineId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  completionEvent   OperationTaskEvent             @relation(fields: [organizationId, completionEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
-  property          Property                       @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  completionEvent   OperationTaskEvent?             @relation(fields: [organizationId, completionEventId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  property          Property?                       @relation(fields: [organizationId, propertyId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   reservation       Reservation?                   @relation(fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   moneyCurrency     Currency                       @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
   approvalStages    ApprovalStage[]
@@ -3018,4 +3035,24 @@ model EmployeeCompensationRecognitionOutcome {
   @@unique([organizationId,requestId],map:"employee_recognition_outcome_request_unique")
   @@index([organizationId,recognitionId],map:"employee_recognition_outcome_source_idx")
   @@map("employee_compensation_recognition_outcome")
+}
+
+model EmployeeCompensationContractWitness {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ runLineId String @map("run_line_id") @db.Uuid
+ sourceOn DateTime @map("source_on") @db.Date
+ occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+ eligible Boolean
+ compensationId String? @map("compensation_id") @db.Uuid
+ configRuleId String? @map("config_rule_id") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ runLine EmployeeCompensationRunLine @relation(fields:[organizationId,runLineId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ compensation TeamCompensation? @relation(fields:[organizationId,compensationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ configRule ConfigRule? @relation("EmployeeMonthlyWitnessRule",fields:[organizationId,configRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ @@unique([organizationId,id])
+ @@unique([organizationId,runLineId,sourceOn],map:"employee_contract_witness_day_unique")
+ @@index([organizationId,compensationId,occurredAt],map:"employee_contract_witness_rate_idx")
+ @@map("employee_compensation_contract_witness")
 }

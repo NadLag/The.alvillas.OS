@@ -1,0 +1,13 @@
+import { z } from "zod";
+import { Money } from "@/platform/money/money";
+import { employeeMonthlyEarnedAmountForWindow,employeeMonthlyEarningsPolicySchema,employeeMonthlyEarningsWindow } from "./employee-monthly-earnings";
+import { EmployeeCompensationClaimSourceError } from "./employee-compensation-claim";
+type Witness={sourceOn:Date;eligible:boolean;compensation:{id:string;version:number;amount:{toString():string};currency:string}|null};
+/** Display actual retained contractual rates and complete-day coverage, using the frozen calculation choice. */
+export function employeeMonthlySourceEvidence(input:{month:string;currency:string;amount:{toString():string};policySnapshot:unknown;witnesses:readonly Witness[]},calendars?:Map<string,ReturnType<typeof employeeMonthlyEarningsWindow>>){
+ const policy=z.object({value:employeeMonthlyEarningsPolicySchema}).parse(input.policySnapshot).value,key=JSON.stringify([input.month,policy]);let window=calendars?.get(key);if(!window){window=employeeMonthlyEarningsWindow(input.month,policy);calendars?.set(key,window);}const rows=[...input.witnesses].sort((a,b)=>a.sourceOn.getTime()-b.sourceOn.getTime()),earned=employeeMonthlyEarnedAmountForWindow(window,input.currency,rows.map(row=>({on:row.sourceOn.toISOString().slice(0,10),eligible:row.eligible,rate:row.eligible&&row.compensation?Money.of(row.compensation.amount.toString(),row.compensation.currency):null})));
+ if(!earned.amount.equals(Money.of(input.amount.toString(),input.currency)))throw new EmployeeCompensationClaimSourceError();const eligible=rows.filter(row=>row.eligible);if(eligible.some(row=>!row.compensation))throw new EmployeeCompensationClaimSourceError();
+ const rates:Array<{fromOn:string;toOn:string;days:number;contractVersion:number;rate:ReturnType<Money["toJSON"]>;contractId:string}>=[];
+ for(const row of eligible){const contract=policy.rate_selection==="AT_FIRST_ELIGIBLE_DAY"?eligible[0].compensation!:row.compensation!,on=row.sourceOn.toISOString().slice(0,10),previous=rates.at(-1),next=previous?new Date(previous.toOn+"T00:00:00.000Z"):null;if(next)next.setUTCDate(next.getUTCDate()+1);if(previous&&previous.contractId===contract.id&&next?.toISOString().slice(0,10)===on){previous.toOn=on;previous.days++;}else rates.push({fromOn:on,toOn:on,days:1,contractVersion:contract.version,rate:Money.of(contract.amount.toString(),contract.currency).toJSON(),contractId:contract.id});}
+ return{month:input.month,eligibleDays:earned.eligibleDays,calendarDays:earned.calendarDays,proration:policy.proration,rateSelection:policy.rate_selection,rates:rates.map(({contractId,...row})=>{void contractId;return row;})};
+}

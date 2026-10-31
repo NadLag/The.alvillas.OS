@@ -8,7 +8,7 @@ import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
 import { defaultNotificationPreferences, shouldDeliverNotification, type NotificationPreferences } from "./notification-preferences";
 import { authorize } from "@/platform/authz/authorize";
 import { securityEnrollment } from "@/platform/auth/security-enrollment";
-import { approvalResource } from "@/platform/approvals/approval";
+import { approvalResource,authorizeApprovalResource } from "@/platform/approvals/approval";
 import { approvalInclude } from "@/platform/approvals/approval-repository";
 import { contextForRoleAssignments,authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { expenseEmergencyNoticeSchema,expenseResource,viewableExpenseResource,type ExpenseEmergencyNotice } from "@/modules/finance/domain/expense";
@@ -125,8 +125,8 @@ export class NotificationRepository {
       const ctx = contextForRoleAssignments(this.organizationId, candidate.id, current?current.assignments:explicit || selected || approval ? assignments : roleAssignments);
       if(current&&(!current.account||securityEnrollment(current.account,current.now).setupRequired))continue;
       if (!identity && !current&&securityEnrollment({ ...candidate, roleAssignments: assignments }, observation!.now).setupRequired) continue;
-      if (!identity && !authorize(ctx, "view", target,current?.now ?? observation?.now)) continue;
-      if (approval && !authorize(ctx, "approve", target, current?.now ?? observation?.now) && !authorize(ctx, "reject", target, current?.now ?? observation?.now)) continue;
+      if (!identity && !authorizeApprovalResource(ctx, "view", target,current?.now ?? observation?.now)) continue;
+      if (approval && !authorizeApprovalResource(ctx, "approve", target, current?.now ?? observation?.now) && !authorizeApprovalResource(ctx, "reject", target, current?.now ?? observation?.now)) continue;
       for (const channel of ["email", "push"] as const) {
         if ((!mandatory && !routing.channels.includes(channel)) || !shouldDeliverNotification(input.kind, channel, this.preferenceValue(candidate.notificationPreference))) continue;
         await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } }, update: {},
@@ -190,7 +190,7 @@ export class NotificationRepository {
   private employeeCostEmergencyProjection(cost:EmployeeNoticeCost|undefined,event:OutboxEvent,input:Extract<NotificationInput,{kind:"employee_cost_emergency"}>):EmployeeNoticeSource|null{
     if(event.id!==input.targetId||event.organizationId!==this.organizationId||!input.employeeNotice||cost?.submissionId!==input.employeeNotice.submissionId||cost.id!==input.employeeNotice.costId)return null;const metadata=input.employeeNotice;
     const policy=z.object({postHocNotices:z.array(expenseEmergencyNoticeSchema),policies:z.array(z.object({ownerId:z.uuid().optional(),sourceAmount:z.unknown().optional(),allocation:z.unknown().optional()}).passthrough())}).safeParse(cost?.policySnapshot);
-    if(!cost||!cost.submission.emergency||!policy.success)return null;
+    if(!cost||!cost.propertyId||!cost.property||!cost.submission.emergency||!policy.success)return null;
     const notice=policy.data.postHocNotices.find(value=>value.ownerId===metadata.ownerId&&value.recipients.includes(input.recipientId)),owner=policy.data.policies.find(value=>value.ownerId===metadata.ownerId);
     const amounts=z.object({gross:z.object({amount:z.string(),currency:z.string()}).strict(),allocation:z.object({owner:z.object({amount:z.string(),currency:z.string()}).strict()}).passthrough()}).safeParse({gross:owner?.sourceAmount,allocation:owner?.allocation});
     if(!notice||!amounts.success||!notice.routing.channels.includes("in_app")||event.idempotencyKey!==`employee-cost:${cost.id}:emergency:${notice.ownerId}:${input.recipientId}`)return null;
@@ -286,7 +286,7 @@ export class NotificationRepository {
     if (!state?.account || securityEnrollment(state.account, current.now).setupRequired) return false;
     const assignments = routing.people.includes(candidate.personId) ? state.assignments : state.assignments.filter(assignment => routing.roles.includes(assignment.role.id));
     const context = contextForRoleAssignments(this.organizationId, candidate.id, assignments);
-    return authorize(context, "view", resource, current.now) && (authorize(context, "approve", resource, current.now) || authorize(context, "reject", resource, current.now));
+    return authorizeApprovalResource(context, "view", resource, current.now) && (authorizeApprovalResource(context, "approve", resource, current.now) || authorizeApprovalResource(context, "reject", resource, current.now));
   }
   async financialApprovalAudiencesAvailable(entries: Array<{ routing: NotificationRouting; resource: Resource; recipients: string[] }>) {
     const ids = [...new Set(entries.flatMap(entry => entry.recipients))];
@@ -455,11 +455,12 @@ export class NotificationRepository {
       if(row.employeeSubmission?.withdrawal)continue;
       const lineSource=Boolean(row.invoiceSubmissionId||row.employeeSubmissionId),active = row.financialStages.find(stage => stage.state === "PENDING");
       const owned = readerId ? row.financialStages.filter(stage => stage.recipients.some(recipient => recipient.userAccountId === readerId) &&
-        (!lineSource || approvalReader && authorize(approvalReader, "view", approvalResource(row, stage.ownerId, stage)))) : [];
+        (!lineSource || approvalReader && authorizeApprovalResource(approvalReader, "view", approvalResource(row, stage.ownerId, stage)))) : [];
       const ownStage = lineSource ? owned.find(stage => stage.id === active?.id) ?? owned.find(stage => stage.state === "PENDING") ?? owned.at(-1) : owned[0];
       const shown = ownStage ?? active ?? row.financialStages.at(-1);
       if (lineSource && !shown) continue;
       const resource = approvalResource(row, shown?.ownerId, shown);
+      if(readerId&&row.employeeSubmissionId&&shown?.employeeCost?.propertyId===null&&(!approvalReader||!authorizeApprovalResource(approvalReader,"view",resource)))continue;
       targets.set(row.id, lineSource ? resource : { ...resource, assignedUserAccountId: row.requestedBy });
     }
     const invoiceNoticeIds = rows.filter(row => row.kind === "supplier_invoice_emergency").map(row => row.targetId);

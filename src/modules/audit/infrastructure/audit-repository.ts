@@ -3,13 +3,15 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { Money } from "@/platform/money/money";
-import { employeeCompensationRunFacts,employeeCompensationSubmittedFinancialSources } from "@/platform/authz/employee-compensation-resource";
+import { employeeCompensationAuthorityLineFields,employeeCompensationRunFacts,employeeCompensationSubmittedFinancialSources } from "@/platform/authz/employee-compensation-resource";
 import { employeeSettlementAuditSources } from "@/platform/ledger/employee-settlement-audit";
 
-export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];financialSources?:readonly Resource[];walletSources?:readonly Resource[];compensationRoot?:Resource;sourceRecordId?:string };
+export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];financialSources?:readonly Resource[];companyFinancialSources?:readonly Resource[];walletSources?:readonly Resource[];compensationRoot?:Resource;sourceRecordId?:string };
 const employeeSubmissionAuditFields={id:true,costOn:true,run:{select:{id:true,createdBy:true,currency:true,createdAt:true,
-  lines:{select:{personId:true,propertyId:true,taskId:true,recordedCompletionAt:true,currency:true,amount:true,rate:true,property:{select:{cityId:true,regionId:true}}}}}},
+  lines:{select:employeeCompensationAuthorityLineFields}}},
   costs:{select:{propertyId:true,reservationId:true,amount:true,timezone:true,runLine:{select:{taskId:true,recordedCompletionAt:true}},property:{select:{cityId:true,regionId:true}}}}} as const;
+
+function employeeFinancialAuditSources(organizationId:string,row:Parameters<typeof employeeCompensationSubmittedFinancialSources>[1],total:Money){const resources=employeeCompensationSubmittedFinancialSources(organizationId,row,total);return{financialSources:resources,companyFinancialSources:resources.filter(source=>!source.propertyId)};}
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -92,20 +94,19 @@ export class AuditRepository {
   async employeeCompensationRunResources(ids: string[]): Promise<Map<string, FinancialAuditResource>> {
     if (!ids.length) return new Map();
     const rows = await this.tx.employeeCompensationRun.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
-      select: { id: true, currency: true, createdAt: true, lines: { select: { personId: true, propertyId: true, taskId: true,
-        recordedCompletionAt: true, currency: true, amount: true, rate: true, property: { select: { cityId: true, regionId: true } } } } } });
+      select: { id: true, currency: true, createdAt: true, lines: { select: employeeCompensationAuthorityLineFields } } });
     return new Map(rows.map(row => { const facts = employeeCompensationRunFacts(this.organizationId,row);
       return [row.id,{ ...facts.resource, salarySources:facts.salarySources }]; }));
   }
   async employeeCompensationSubmissionResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     if(!ids.length)return new Map();
     const rows=await this.tx.employeeCompensationSubmission.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:employeeSubmissionAuditFields});
-    return new Map(rows.map(row=>{const facts=employeeCompensationRunFacts(this.organizationId,row.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,financialSources:employeeCompensationSubmittedFinancialSources(this.organizationId,row,facts.total)}];}));
+    return new Map(rows.map(row=>{const facts=employeeCompensationRunFacts(this.organizationId,row.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,...employeeFinancialAuditSources(this.organizationId,row,facts.total)}];}));
   }
   async employeeCompensationClaimResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     if(!ids.length)return new Map();
     const rows=await this.tx.employeeCompensationClaim.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:{id:true,submission:{select:employeeSubmissionAuditFields}}});
-    return new Map(rows.map(row=>{const source=row.submission,facts=employeeCompensationRunFacts(this.organizationId,source.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,financialSources:employeeCompensationSubmittedFinancialSources(this.organizationId,source,facts.total)}];}));
+    return new Map(rows.map(row=>{const source=row.submission,facts=employeeCompensationRunFacts(this.organizationId,source.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,...employeeFinancialAuditSources(this.organizationId,source,facts.total)}];}));
   }
   async cashResources(ids: string[]): Promise<Map<string, Resource>> {
     if (!ids.length) return new Map();
@@ -168,7 +169,7 @@ export class AuditRepository {
         assignedUserAccountId: row.createdBy, occurredAt: row.occurredAt, status: "POSTED",
         propertyId: dimension("property_id"), ownerId: dimension("owner_id"), reservationId: dimension("reservation_id"),
         amount: totals.size === 1 ? [...totals.values()][0].amount.toString() : undefined, dataClass: "financial",
-        ...(claimId?{compensationRoot:bound?claim:undefined,salarySources:claim?.salarySources??[],financialSources:[...(claim?.financialSources??[]),...fundingSources],...(settlement?{walletSources}:{})}: {})
+        ...(claimId?{compensationRoot:bound?claim:undefined,salarySources:claim?.salarySources??[],companyFinancialSources:claim?.companyFinancialSources??[],financialSources:[...(claim?.financialSources??[]),...fundingSources],...(settlement?{walletSources}:{})}: {})
       }];
     }));
   }

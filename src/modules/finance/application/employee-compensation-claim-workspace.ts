@@ -40,7 +40,7 @@ function claimChecks(organizationId:string,row:EmployeeSubmissionRecord,claimId:
   }return checks;
 }
 async function labels(ctx:FinanceActorContext,row:EmployeeSubmissionRecord,lineIds:readonly string[],tx:TenantTransaction){
-  const runs=new EmployeeCompensationRunRepository(tx,ctx.organizationId),rows=await runs.displayLines(row.runId,lineIds),evidence=rows.map(value=>employeeCompletedWorkEvidence(value.completionEvent)),validators=await runs.people(evidence.flatMap(event=>event.validated_by_person_id?[event.validated_by_person_id]:[]));
+  const runs=new EmployeeCompensationRunRepository(tx,ctx.organizationId),rows=await runs.displayLines(row.runId,lineIds),evidence=rows.flatMap(value=>value.completionEvent?[employeeCompletedWorkEvidence(value.completionEvent)]:[]),validators=await runs.people(evidence.flatMap(event=>event.validated_by_person_id?[event.validated_by_person_id]:[]));
   if(rows.length!==new Set(lineIds).size)throw new EmployeeCompensationRunAccessError();return employeeCompensationSourceLabels(ctx,tx,rows,validators);
 }
 async function finalSource(ctx:FinanceActorContext,row:EmployeeSubmissionRecord,receipts:Receipts,pending:Pending,claimIds:readonly string[],checks:Checks,tx:TenantTransaction){
