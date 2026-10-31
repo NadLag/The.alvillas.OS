@@ -179,6 +179,11 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     const totals=await withTenant(db,f.org,async tx=>{const repository=new EmployeePayableRepository(tx,f.org);return(await repository.outstanding({claimId:f.command.claimId,personId:f.performer.id,currency:"MAD"})).add(await repository.outstanding({claimId:source.claims[0].id,personId:f.performer.id,currency:"MAD"}));});expect(totals.toJSON().amount).toBe("900.50");
   });
 
+  it("employee settlement requires explicit offset mode for the beneficiary's own wallet",async()=>{
+    const f=await settlementFixture();await linkTeamWallet({...f.actor,personId:f.person.id},{personId:f.performer.id,accountName:"Actual beneficiary wallet requiring explicit offset",reason:"Link actual beneficiary wallet before payment-kind isolation"},{db});const wallet=await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id));if(!wallet)throw Error("Actual beneficiary wallet required");const before=await facts(f.org);
+    await expect(postEmployeeCompensationSettlement(f.actor,{...f.payment,kind:"PAYMENT",fundingAccountId:wallet.ledgerAccountId,amount:"100.00"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);expect(await facts(f.org)).toEqual(before);
+  });
+
   it("employee settlement requires independent current claim, salary, financial and funding authority",async()=>{
     const f=await settlementFixture(),before=await facts(f.org);
     for(const permission of["employee_payable:pay","staff_compensation:view","financial_transaction:pay","financial_transaction:create","financial_transaction:view"]){const actor={...f.actor,authContext:{...f.actor.authContext,permissions:new Set([...f.actor.authContext.permissions].filter(value=>value!==permission))}};await expect(postEmployeeCompensationSettlement(actor,f.payment,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);}
