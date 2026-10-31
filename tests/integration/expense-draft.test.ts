@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { listPaymentAccountChoices } from "@/modules/finance/application/payment-account-choices";
+import { PaymentAccountChoiceAccessError } from "@/modules/finance/domain/payment-account-choices";
+import { searchIdentityAccounts } from "@/modules/identity/application/identity-service";
+import { IdentityAuthorizationError } from "@/modules/identity/application/identity-access";
 import { execFileSync } from "node:child_process";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -146,6 +150,93 @@ async function correctionFixture(){
 }
 
 describe("native expenses on real PostgreSQL", () => {
+  it("pages all actual funding accounts beyond the old 100-row cap and searches visible metadata without changing financial history",async()=>{
+    const f=await fixture(),ctx=await actor(f);
+    const added=await withTenant(db,f.org,async tx=>{
+      const rows=Array.from({length:151},(_,index)=>({id:randomUUID(),organizationId:f.org,code:`PAGED_BANK_${index}`,name:`Actual paged funding ${index}`,accountType:"ASSET_LOCATION",normalSide:"DEBIT"}));
+      await tx.ledgerAccount.createMany({data:rows});return rows;
+    });
+    const seen=new Set<string>();let after:string|undefined;
+    for(let page=0;page<10;page++){
+      const result=await listPaymentAccountChoices(ctx,{source:{kind:"expense",propertyId:f.property.id},query:"",after},{db});
+      expect(result.accounts.length).toBeLessThanOrEqual(50);for(const row of result.accounts){expect(seen.has(row.id)).toBe(false);seen.add(row.id);expect(Object.keys(row).sort()).toEqual(["code","id","name"]);}
+      if(!result.next)break;after=result.next;
+    }
+    expect(seen).toEqual(new Set([f.bank.id,...added.map(row=>row.id)]));
+    const target=added[150],matches:string[]=[];after=undefined;
+    for(let page=0;page<10;page++){
+      const result=await listPaymentAccountChoices(ctx,{source:{kind:"expense",propertyId:f.property.id},query:target.name,after},{db});matches.push(...result.accounts.map(row=>row.id));if(!result.next)break;after=result.next;
+    }
+    expect(matches).toEqual([target.id]);
+    const pinned=await listPaymentAccountChoices(ctx,{source:{kind:"expense",propertyId:f.property.id},query:"does not match",selectedId:target.id},{db});
+    expect(pinned.selected).toEqual({id:target.id,name:target.name,code:target.code});
+    await withTenant(db,f.org,async tx=>{expect(await tx.financialTransaction.count()).toBe(0);expect(await tx.posting.count()).toBe(0);expect(await tx.expense.count()).toBe(0);expect(await tx.auditLog.count({where:{action:"finance.payment_accounts.viewed"}})).toBeGreaterThan(0);});
+  });
+  it("requires both held and fresh property authority and does not disclose a foreign tenant's funding account",async()=>{
+    const f=await fixture(),foreign=await fixture(),ctx=await actor(f),input={source:{kind:"expense",propertyId:f.property.id},query:"",selectedId:foreign.bank.id},privateName=`Actual foreign private bank ${randomUUID()}`;
+    await withTenant(db,foreign.org,tx=>tx.ledgerAccount.update({where:{id:foreign.bank.id},data:{name:privateName}}));
+    const result=await listPaymentAccountChoices(ctx,input,{db});expect(result.selected).toBeNull();expect(JSON.stringify(result)).not.toContain(privateName);expect(JSON.stringify(result)).not.toContain(foreign.bank.id);
+    await expect(listPaymentAccountChoices({...ctx,authContext:{...ctx.authContext,permissions:new Set(),assignments:[]}},input,{db})).rejects.toBeInstanceOf(PaymentAccountChoiceAccessError);
+    await expect(listPaymentAccountChoices(ctx,{...input,source:{kind:"expense",propertyId:foreign.property.id}},{db})).rejects.toBeInstanceOf(ExpenseAccessError);
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:f.grant.id},data:{archivedAt:new Date()}}));
+    await expect(listPaymentAccountChoices(ctx,input,{db})).rejects.toBeInstanceOf(PaymentAccountChoiceAccessError);
+  });
+  it("binds opaque funding pagination to its tenant, actor, source and search without releasing hidden record IDs",async()=>{
+    const f=await fixture(),other=await fixture(),ctx=await actor(f);
+    await withTenant(db,f.org,tx=>tx.ledgerAccount.createMany({data:Array.from({length:51},(_,index)=>({organizationId:f.org,code:`CURSOR_BANK_${index}`,name:`Actual cursor funding ${index}`,accountType:"ASSET_LOCATION",normalSide:"DEBIT"}))}));
+    const source={kind:"expense",propertyId:f.property.id},first=await listPaymentAccountChoices(ctx,{source,query:""},{db});expect(first.next).toBeTruthy();
+    expect(first.accounts.every(row=>!first.next!.includes(row.id))).toBe(true);
+    for(const input of[{source,query:"changed search",after:first.next},{source,query:"",after:first.next!.slice(0,-3)+"xyz"},{source:{kind:"revenue"},query:"",after:first.next}])await expect(listPaymentAccountChoices(ctx,input,{db})).rejects.toBeInstanceOf(PaymentAccountChoiceAccessError);
+    await expect(listPaymentAccountChoices(await actor(other),{source:{kind:"expense",propertyId:other.property.id},query:"",after:first.next},{db})).rejects.toBeInstanceOf(PaymentAccountChoiceAccessError);
+    expect((await listPaymentAccountChoices(ctx,{source,query:"",after:first.next},{db})).accounts).toHaveLength(2);
+  });
+  it("keeps a linked staff wallet pinned only with independent wallet view authority",async()=>{
+    const f=await fixture(),wallet=await withTenant(db,f.org,async tx=>{
+      const account=await tx.ledgerAccount.create({data:{organizationId:f.org,code:`STAFF_WALLET_${f.person.id.replaceAll("-","").toUpperCase()}`,name:"Actual private funding wallet",accountType:"STAFF_WALLET",normalSide:"DEBIT"}});
+      await tx.teamWallet.create({data:{organizationId:f.org,personId:f.person.id,ledgerAccountId:account.id,createdBy:f.account.id}});return account;
+    });
+    const input={source:{kind:"expense",propertyId:f.property.id},query:wallet.id,selectedId:wallet.id};
+    expect((await listPaymentAccountChoices(await actor(f),input,{db})).selected).toBeNull();
+    const grant=await accountingGrant(f,["wallet:view"]);
+    expect((await listPaymentAccountChoices(await actor(f),input,{db})).selected?.id).toBe(wallet.id);
+    const held=await actor(f);await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:grant.id},data:{archivedAt:new Date()}}));
+    expect((await listPaymentAccountChoices(held,input,{db})).selected).toBeNull();
+  });
+  it("rejects changed funding metadata after reading it and rolls back the private read audit",async()=>{
+    const f=await fixture(),ctx=await actor(f),original=Object.getOwnPropertyDescriptor(FinanceRepository.prototype,"paymentAccountChoicePage")!.value as (this:FinanceRepository,input:Parameters<FinanceRepository["paymentAccountChoicePage"]>[0])=>ReturnType<FinanceRepository["paymentAccountChoicePage"]>;let changed=false;
+    const spy=vi.spyOn(FinanceRepository.prototype,"paymentAccountChoicePage").mockImplementation(async function(this:FinanceRepository,input){
+      const result=await original.call(this,input);
+      if(!changed){changed=true;await withTenant(db,f.org,tx=>tx.ledgerAccount.update({where:{id:f.bank.id},data:{name:"Changed after the actual read"}}));}
+      return result;
+    });
+    try{await expect(listPaymentAccountChoices(ctx,{source:{kind:"expense",propertyId:f.property.id},query:"Dedicated"},{db})).rejects.toBeInstanceOf(PaymentAccountChoiceAccessError);}finally{spy.mockRestore();}
+    await withTenant(db,f.org,async tx=>expect(await tx.auditLog.count({where:{action:"finance.payment_accounts.viewed"}})).toBe(0));
+  });
+  it("keeps revenue funding separate from property expense authority and searches the authorized chart by exact account identity",async()=>{
+    const f=await fixture(),input={source:{kind:"revenue"},query:f.bank.id};
+    await expect(listPaymentAccountChoices(await actor(f),input,{db})).rejects.toBeInstanceOf(PaymentAccountChoiceAccessError);
+    await accountingGrant(f,["financial_transaction:create","financial_transaction:view"]);
+    expect((await listPaymentAccountChoices(await actor(f),input,{db})).accounts.map(row=>row.id)).toEqual([f.bank.id]);
+  });
+  it("searches and pages identity accounts beyond 100 users while retaining tenant isolation and current authorization",async()=>{
+    const f=await fixture(),foreign=await fixture();await accountingGrant(f,["identity:view"]);
+    await withTenant(db,f.org,async tx=>{
+      for(let index=0;index<101;index++){
+        const person=await tx.person.create({data:{organizationId:f.org,displayName:`Actual searchable user ${index}`}});
+        await tx.userAccount.create({data:{organizationId:f.org,personId:person.id,email:`actual-search-${index}@example.test`}});
+      }
+    });
+    const actorContext={...await actor(f),personId:f.person.id},first=await searchIdentityAccounts(actorContext,{query:""},{db});
+    expect(first.accounts).toHaveLength(100);expect(first.next).not.toBeNull();
+    const second=await searchIdentityAccounts(actorContext,{query:"",after:first.next!},{db});expect(second.accounts).toHaveLength(2);expect(second.next).toBeNull();
+    expect(new Set([...first.accounts,...second.accounts].map(row=>row.id)).size).toBe(102);
+    expect((await searchIdentityAccounts(actorContext,{query:f.person.displayName},{db})).accounts.map(row=>row.id)).toEqual([f.account.id]);
+    expect((await searchIdentityAccounts(actorContext,{query:"actual-search-100@example.test"},{db})).accounts).toHaveLength(1);
+    expect((await searchIdentityAccounts(actorContext,{query:"",after:foreign.account.id},{db})).accounts).toEqual([]);
+    await expect(searchIdentityAccounts({...actorContext,authContext:{...actorContext.authContext,permissions:new Set(),assignments:[]}},{query:""},{db})).rejects.toBeInstanceOf(IdentityAuthorizationError);
+    await withTenant(db,f.org,tx=>tx.roleAssignment.updateMany({where:{userAccountId:f.account.id},data:{archivedAt:new Date()}}));
+    await expect(searchIdentityAccounts(actorContext,{query:"actual-search"},{db})).rejects.toBeInstanceOf(IdentityAuthorizationError);
+  });
   it.each(["view", "approve", "reject", "scope", "condition"] as const)("preserves caller financial approval restrictions for %s", async restriction => {
     const { f, reviewer, draft, approval } = await pendingFinancialApproval(), original = reviewer.actor.authContext;
     const authContext = restriction === "scope" ? { ...original, assignments: original.assignments?.map(assignment => ({ ...assignment,
