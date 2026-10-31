@@ -3189,7 +3189,10 @@
     "percentageNext": "Bases de revenus suivantes",
     "percentagePage": "Bases {from}–{to} sur {total}",
     "percentageRounding": "Les contributions des écritures d’origine sont additionnées avant un arrondi unique de la rémunération de ce contrat.",
-    "percentageVariedRates": "Selon le revenu d’origine"
+    "percentageVariedRates": "Selon le revenu d’origine",
+    "percentagePreviousGroup": "Ensemble de rémunération précédent",
+    "percentageNextGroup": "Ensemble de rémunération suivant",
+    "percentageGroupPage": "Ensemble {current} sur {total}"
   },
   "EmployeeCostNotices": {
     "eyebrow": "Finance · Avis au propriétaire",

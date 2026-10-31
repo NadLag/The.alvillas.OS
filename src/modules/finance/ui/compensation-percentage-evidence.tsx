@@ -7,6 +7,14 @@ import {formatCurrencyAmount,formatDateTime,formatNumber} from "@/i18n/format";
 import type {employeeCompensationRunDetailSchema} from "../domain/employee-compensation-workspace";
 
 type Coverage=NonNullable<z.infer<typeof employeeCompensationRunDetailSchema>["labels"][number]["percentageCoverage"]>;
+export function CompensationPercentageEvidenceGroups({locale,groups}:{locale:AppLocale;groups:readonly {runLineId:string;coverage:Coverage}[]}){
+ const t=useTranslations("CompensationRuns"),[index,setIndex]=useState(0),selected=Math.min(index,groups.length-1),group=groups[selected];
+ if(!group)return null;
+ return <section className="compensation-history" aria-label={t("percentageEvidence")}>
+  {groups.length>1?<div className="app-actions"><button type="button" className="secondary-button" disabled={selected===0} onClick={()=>setIndex(selected-1)}>{t("percentagePreviousGroup")}</button><span role="status">{t("percentageGroupPage",{current:formatNumber(locale,String(selected+1)),total:formatNumber(locale,String(groups.length))})}</span><button type="button" className="secondary-button" disabled={selected===groups.length-1} onClick={()=>setIndex(selected+1)}>{t("percentageNextGroup")}</button></div>:null}
+  <CompensationPercentageEvidence key={group.runLineId} locale={locale} coverage={group.coverage} headingLevel={3}/>
+ </section>;
+}
 export function CompensationPercentageEvidence({locale,coverage,headingLevel=4}:{locale:AppLocale;coverage:Coverage;headingLevel?:3|4}){
  const t=useTranslations("CompensationRuns"),headingId=useId(),Heading=headingLevel===3?"h3":"h4",[page,setPage]=useState(0),size=25,offset=page*size,sources=coverage.sources.slice(offset,offset+size);
  return <div role="group" data-testid="compensation-percentage-evidence" aria-labelledby={headingId}>

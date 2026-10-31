@@ -3189,7 +3189,10 @@
     "percentageNext": "Next income bases",
     "percentagePage": "Bases {from}–{to} of {total}",
     "percentageRounding": "Original posting contributions are added before rounding the earning once for this contract.",
-    "percentageVariedRates": "Varies by original posting"
+    "percentageVariedRates": "Varies by original posting",
+    "percentagePreviousGroup": "Previous earning set",
+    "percentageNextGroup": "Next earning set",
+    "percentageGroupPage": "Earning set {current} of {total}"
   },
   "EmployeeCostNotices": {
     "eyebrow": "Finance · Owner notice",
