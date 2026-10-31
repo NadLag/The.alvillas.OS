@@ -31,9 +31,10 @@ const receipt=(row:EmployeeSubmissionRecord,idempotent:boolean)=>({id:row.id,run
 
 /** Complete artifact authority precedes the paged DTO; no policy, request restriction or private rate dump is returned. */
 export const employeeCompensationSubmissionReadInput=z.object({id:z.uuid(),after:z.uuid().optional()}).strict();
-export async function readEmployeeCompensationSubmissionInTransaction(ctx:FinanceActorContext,input:z.infer<typeof employeeCompensationSubmissionReadInput>,tx:TenantTransaction,deps:Deps={}){
+export async function readEmployeeCompensationSubmissionInTransaction(ctx:FinanceActorContext,input:z.infer<typeof employeeCompensationSubmissionReadInput>,tx:TenantTransaction,deps:Deps={},selection?:{claimId:string}){
     const repository=new EmployeeCompensationClaimRepository(tx,ctx.organizationId),row=await repository.find(input.id);if(!row)throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx);
-    const boundary=input.after?row.costs.findIndex(cost=>cost.id===input.after):-1;if(input.after&&boundary<0)throw new EmployeeCompensationRunAccessError();const page=row.costs.slice(boundary+1,boundary+52);
+    if(selection&&!row.claims.some(claim=>claim.id===selection.claimId))throw new EmployeeCompensationRunAccessError();
+    const selected=selection?row.costs.filter(cost=>cost.claimId===selection.claimId):row.costs,boundary=input.after?selected.findIndex(cost=>cost.id===input.after):-1;if(input.after&&boundary<0)throw new EmployeeCompensationRunAccessError();const page=selected.slice(boundary+1,boundary+52);
     let canWithdraw=!row.withdrawal&&!(await new EmployeeCompensationRecognitionRepository(tx,ctx.organizationId).forSubmission(row.id)).length;
     if(canWithdraw)try{await recheckEmployeeSubmission(ctx,row,tx,"void");}catch(error){if(error instanceof EmployeeCompensationRunAccessError)canWithdraw=false;else throw error;}
     const history:Array<{action:"SUBMITTED"|"APPROVED"|"REJECTED"|"WITHDRAWN";at:string;reason:string}>=[{action:"SUBMITTED",at:row.createdAt.toISOString(),reason:row.reason}];

@@ -8,6 +8,8 @@ export class EmployeeCompensationRecognitionRepository{
   byClaim(claimId:string){return this.tx.employeeCompensationRecognition.findFirst({where:{organizationId:this.organizationId,claimId},include});}
   byKey(idempotencyKey:string){return this.tx.employeeCompensationRecognition.findFirst({where:{organizationId:this.organizationId,idempotencyKey},include});}
   forSubmission(submissionId:string){return this.tx.employeeCompensationRecognition.findMany({where:{organizationId:this.organizationId,submissionId},select:{id:true,claimId:true}});}
+  workspaceForSubmission(submissionId:string){return this.tx.employeeCompensationRecognition.findMany({where:{organizationId:this.organizationId,submissionId},orderBy:{id:"asc"},select:{id:true,claimId:true,reason:true,createdAt:true,
+    lines:{orderBy:{costId:"asc"},select:{costId:true,transactionId:true,sourceOccurredAt:true,transaction:{select:{occurredAt:true}}}}}});}
   person(id:string){return this.tx.person.findFirst({where:{organizationId:this.organizationId,id},select:{id:true,archivedAt:true}});}
   create(input:{submissionId:string;claimId:string;currentPeriod:boolean;idempotencyKey:string;requestFingerprint:string;reason:string;createdBy:string}){
     return this.tx.employeeCompensationRecognition.create({data:{organizationId:this.organizationId,...input}});
