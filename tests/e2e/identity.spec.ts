@@ -8,7 +8,7 @@ import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 
 const adminPassword = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 const hasDatabase = Boolean(process.env.DATABASE_URL);
-const passkeyOrigin = "http://localhost:3000";
+const passkeyOrigin = new URL(process.env.PLAYWRIGHT_TEST_BASE_URL ?? "http://localhost:3000").origin;
 
 async function loginAdmin(page: Page, email: string, origin = "") {
   await page.goto(`${origin}/en/login`);
@@ -204,6 +204,8 @@ test.describe("identity lifecycle", () => {
     await page.context().clearCookies();
     await loginAdmin(page, adminEmail);
     await page.goto("/en/app/identity");
+    await page.getByTestId("identity-account-query").fill(invitedEmail);
+    await page.getByTestId("identity-account-search").click();
     const recoveredRow = page.getByTestId("identity-account-row").filter({ hasText: invitedEmail });
     await recoveredRow.getByTestId("issue-recovery-button").click();
     const recoveryText = await recoveredRow.getByTestId("recovery-code").innerText();

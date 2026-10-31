@@ -7,6 +7,8 @@ import { expenseDraftSchema } from "../domain/expense";
 import { createExpenseDraftAction,updateExpenseDraftAction, submitExpenseAction,postExpenseAction,voidExpenseAction } from "../application/expense-actions";
 import type { getExpenseEditor,getExpenseDraftEditor, getExpense } from "../application/expense-service";
 
+import { PaymentAccountPicker } from "./payment-account-picker";
+
 type ErrorCode = "forbidden" | "conflict" | "configuration" | "validation" | "periodClosed" | "error";
 export function ExpenseDraftForm({ editor,draft,fundingAccountId }: { editor: Awaited<ReturnType<typeof getExpenseEditor>>;draft?:Awaited<ReturnType<typeof getExpenseDraftEditor>>["draft"];fundingAccountId?:string }) {
   const t = useTranslations("Expenses"), locale = useLocale(), router = useRouter(), key = useRef<string | null>(null);
@@ -30,7 +32,7 @@ export function ExpenseDraftForm({ editor,draft,fundingAccountId }: { editor: Aw
       <input type="hidden" name="reservationId" value={draft!.reservationId??""}/><p>{t("correctionDraftGuidance")}</p></>:null}
     {error ? <p role="alert" data-testid="expense-error">{t(error)}</p> : null}
     {!editor.accounts.length ? <p role="status">{t("noAccounts")}</p> : null}
-    <fieldset className="resource-form" disabled={!ready || pending || !editor.accounts.length}><legend>{t(draft?"editDraft":"new")}</legend>
+    <fieldset className="resource-form" disabled={!ready || pending}><legend>{t(draft?"editDraft":"new")}</legend>
       <div className="form-grid two">
         <label className="field"><span>{t("amount")}</span><input name="amount" data-testid="expense-amount" defaultValue={draft?.amount} type="text" inputMode="decimal" dir="ltr" maxLength={19} required /></label>
         <label className="field"><span>{t("currency")}</span><select name="currency" data-testid="expense-currency" defaultValue={draft?.currency??editor.baseCurrency} disabled={correction} required>{editor.currencies.map(currency => <option key={currency.code} value={currency.code}>{currency.code}</option>)}</select></label>
@@ -38,9 +40,8 @@ export function ExpenseDraftForm({ editor,draft,fundingAccountId }: { editor: Aw
         <label className="field"><span>{t("occurredOn")}</span><input name="occurredOn" data-testid="expense-occurred-on" type="date" defaultValue={draft?.occurredOn??editor.today} readOnly={correction} required /></label>
       </div>
       <label className="field"><span>{t("purpose")}</span><textarea name="purpose" data-testid="expense-purpose" defaultValue={draft?.purpose} readOnly={correction} minLength={3} maxLength={1000} required /></label>
-      <label className="field"><span>{t("fundingAccount")}</span><select name="fundingAccountId" data-testid="expense-funding-account" defaultValue={draft?.fundingAccountId??fundingAccountId??""} disabled={correction} required>
-        <option value="" disabled>{t("selectFunding")}</option>{draft&&!editor.accounts.some(account=>account.id===draft.fundingAccountId)?<option value={draft.fundingAccountId} disabled>{t("unavailableFunding")}</option>:null}
-        {editor.accounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
+      {correction?<label className="field"><span>{t("fundingAccount")}</span><select data-testid="expense-funding-account" value={draft!.fundingAccountId} disabled><option value={draft!.fundingAccountId}>{editor.accounts.find(account=>account.id===draft!.fundingAccountId)?.name??t("unavailableFunding")}</option></select></label>:
+        <PaymentAccountPicker source={{kind:"expense",propertyId:editor.property.id,...draft?{expenseId:draft.id}:{}}} testId="expense-funding-account" name="fundingAccountId" label={t("fundingAccount")} initialValue={draft?.fundingAccountId??fundingAccountId??""}/>}
       <label className="field"><span>{t("reservation")}</span><select name="reservationId" data-testid="expense-reservation" defaultValue={draft?.reservationId??""} disabled={correction}><option value="">{t("noReservation")}</option>
         {draft?.reservationId&&!editor.reservations.some(row=>row.id===draft.reservationId)?<option value={draft.reservationId}>{t("retainedReservation")}</option>:null}
         {editor.reservations.map(reservation => <option key={reservation.id} value={reservation.id}>{reservation.reference}</option>)}</select></label>

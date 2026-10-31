@@ -1,4 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
+import { z } from "zod";
+import { recheckAccountAuthorization } from "@/platform/authz/current-authority";
+import { identityResource } from "../domain/identity";
 import { publishNotification } from "@/platform/notifications/notification-service";
 import {
   generateAuthenticationOptions,
@@ -611,6 +614,17 @@ async function buildAccountSimulations(
   }
 
   return simulations;
+}
+
+export async function searchIdentityAccounts(ctx:IdentityActorContext,raw:unknown,deps:IdentityServiceDeps={}){
+  const input=z.object({query:z.string().trim().max(120),after:z.uuid().optional()}).strict().parse(raw);
+  return withTenant(db(deps),ctx.organizationId,async tx=>{
+    const checks=[{action:"view" as const,resource:{type:identityResource,organizationId:ctx.organizationId}}];
+    await recheckAccountAuthorization(ctx,tx,new Date(),checks,new IdentityAuthorizationError());
+    const rows=await new IdentityRepository(tx,ctx.organizationId).listAccounts({...input,take:101});
+    await recheckAccountAuthorization(ctx,tx,new Date(),checks,new IdentityAuthorizationError());
+    return{accounts:rows.slice(0,100),next:rows.length>100?rows[99].id:null};
+  });
 }
 
 export async function listIdentityDashboard(

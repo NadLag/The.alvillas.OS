@@ -4,6 +4,8 @@ import { withTenant,type TenantTransaction,type TenantTransactionRunner } from "
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { lockWalletHolders,readWalletLedger } from "@/platform/ledger/wallet-lock";
 import { Money } from "@/platform/money/money";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { localClockInstant } from "@/platform/time/local-instant";
 import { employeeCompensationFinancialSourceFacts } from "@/platform/authz/employee-compensation-resource";
 import type { FinanceLedgerAccount } from "../infrastructure/finance-repository";
 import { FinancialTransferRepository } from "../infrastructure/financial-transfer-repository";
@@ -18,49 +20,58 @@ import { employeeCompensationRunFacts,recheckEmployeeCompensationRun } from "./e
 import type { recheckFinanceAuthorization,FinanceActorContext } from "./finance-access";
 import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
 
-type Deps={db?:TenantTransactionRunner;requestId?:string};
+type Deps={db?:TenantTransactionRunner;requestId?:string;calendar?:{id:string;version:number;local:string;occurrence:"reject"|"earlier"|"later"}};
 type Source=Awaited<ReturnType<typeof inspectEmployeeCompensationRecognition>>;
 type Check=Parameters<typeof recheckFinanceAuthorization>[3][number];
 type Receipt=z.infer<typeof employeeCompensationSettlementAuditSchema>;
-function paymentResource(ctx:FinanceActorContext,source:Source,amount:string,at:Date,id?:string,createdBy?:string){
+export function employeeSettlementPaymentResource(ctx:FinanceActorContext,source:Source,amount:string,at:Date,id?:string,createdBy?:string){
   const properties=new Set(source.retained.costs.map(cost=>cost.propertyId)),first=source.retained.costs[0],actual=source.row.costs.find(cost=>cost.id===first.id)!;
   const{financial}=employeeCompensationFinancialSourceFacts(ctx.organizationId,createdBy??ctx.actorId,{...actual,taskId:actual.runLine.taskId},at);
   return{type:"financial_transaction" as const,organizationId:ctx.organizationId,dataClass:"financial" as const,id,financialRecordId:id,assignedUserAccountId:createdBy??ctx.actorId,occurredAt:at,amount,
     ...(properties.size===1?{propertyId:financial.propertyId,city:financial.city,region:financial.region}: {})};
 }
-function fundingChecks(ctx:FinanceActorContext,account:FinanceLedgerAccount,amount:string,at:Date,action:"view"|"pay"|"void"):Check[]{
+export function employeeSettlementFundingChecks(ctx:FinanceActorContext,account:FinanceLedgerAccount,amount:string,at:Date,action:"view"|"pay"|"void"):Check[]{
   const target={type:"financial_transaction" as const,organizationId:ctx.organizationId,id:account.id,financialRecordId:account.id,dataClass:"financial" as const,amount,occurredAt:at},wallet=expenseFundingWalletResource(ctx.organizationId,account,amount,at);
   return[{action:"view",resource:target},{action,resource:target},...(wallet?[{action:"view" as const,resource:wallet},{action,resource:wallet}]:[])];
 }
-async function prepareSettlement(ctx:FinanceActorContext,id:string,claimId:string,tx:TenantTransaction,action:"view"|"pay"|"void"){
+export async function prepareEmployeeCompensationSettlement(ctx:FinanceActorContext,id:string,claimId:string,tx:TenantTransaction,action:"view"|"pay"|"void"){
   const source=await inspectEmployeeCompensationRecognition(ctx,id,claimId,tx),payables=new EmployeePayableRepository(tx,ctx.organizationId);if(!source.existing)throw new EmployeeCompensationRunConflictError();
   const facts=employeeCompensationRunFacts(ctx.organizationId,source.row.run);
-  const recheck=async(at:Date,extra:Check[]=[])=>{
-    await source.recheck();const checks:Check[]=[...extra];
-    if(action!=="view")for(const cost of source.retained.costs){const actual=source.row.costs.find(line=>line.id===cost.id)!,link=source.existing!.lines.find(line=>line.costId===cost.id)!;
+  const sourceActionChecks=(verb:"view"|"pay"|"void"):Check[]=>{const checks:Check[]=verb==="view"?[]:[{action:verb,resource:facts.resource}];
+    if(verb!=="view")for(const cost of source.retained.costs){const actual=source.row.costs.find(line=>line.id===cost.id)!,link=source.existing!.lines.find(line=>line.costId===cost.id)!;
       const{financial}=employeeCompensationFinancialSourceFacts(ctx.organizationId,source.row.run.createdBy,{...actual,taskId:actual.runLine.taskId},cost.sourceOccurredAt);
-      checks.push({action,resource:financial},{action,resource:{...financial,id:link.transactionId,financialRecordId:link.transactionId,occurredAt:link.transaction.occurredAt}});}
+      checks.push({action:verb,resource:financial},{action:verb,resource:{...financial,id:link.transactionId,financialRecordId:link.transactionId,occurredAt:link.transaction.occurredAt}});}
+    return checks;
+  };
+  const recheck=async(at:Date,extra:Check[]=[])=>{
+    await source.recheck();const checks:Check[]=[...extra,...sourceActionChecks(action)];
     const journals=await payables.journals(claimId),paymentIds=journals.filter(journal=>!journal.reversesTransactionId&&journal.postings.some(posting=>["EMPLOYEE_PAYMENT","COMPENSATION_OFFSET"].includes(posting.bucket??""))).map(journal=>journal.id),audits=await payables.audits(paymentIds),receipts=new Map<string,Receipt>();
     for(const audit of audits){if(!audit.resourceId||receipts.has(audit.resourceId))throw new EmployeeCompensationRunConflictError();receipts.set(audit.resourceId,employeeCompensationSettlementAuditSchema.parse(audit.after));}
     for(const journal of journals){const saved=receipts.get(journal.reversesTransactionId??journal.id);if(!saved){if(journal.postings.some(posting=>["EMPLOYEE_PAYMENT","COMPENSATION_OFFSET"].includes(posting.bucket??"")))throw new EmployeeCompensationRunConflictError();continue;}
       if(saved.input.id!==id||saved.input.claimId!==claimId||saved.recognitionId!==source.existing!.id)throw new EmployeeCompensationRunConflictError();
       const funding=journal.postings.find(posting=>posting.ledgerAccountId===saved.input.fundingAccountId)?.ledgerAccount;if(!funding)throw new EmployeeCompensationRunConflictError();
-      for(const instant of[new Date(saved.input.paidAt),journal.occurredAt]){const resource=paymentResource(ctx,source,saved.input.amount,instant,journal.id,journal.createdBy??undefined);checks.push({action:"view",resource,organizationOnly:!resource.propertyId},...fundingChecks(ctx,funding,saved.input.amount,instant,"view"));}
+      for(const instant of[new Date(saved.input.paidAt),journal.occurredAt]){const resource=employeeSettlementPaymentResource(ctx,source,saved.input.amount,instant,journal.id,journal.createdBy??undefined);checks.push({action:"view",resource,organizationOnly:!resource.propertyId},...employeeSettlementFundingChecks(ctx,funding,saved.input.amount,instant,"view"));}
     }
     await recheckEmployeeCompensationRun(ctx,tx,at,facts,action,checks);return{journals,receipts};
   };
-  const observed=await recheck(await source.finance.clock());return{...source,payables,...observed,recheckSettlement:recheck};
+  const observed=await recheck(await source.finance.clock());return{...source,payables,...observed,recheckSettlement:recheck,sourceActionChecks};
+}
+
+export function employeeSettlementVoidChecks(ctx:FinanceActorContext,source:Awaited<ReturnType<typeof prepareEmployeeCompensationSettlement>>,saved:Receipt,original:Awaited<ReturnType<typeof prepareEmployeeCompensationSettlement>>["journals"][number],funding:FinanceLedgerAccount,postedAt:Date):Check[]{
+  const checks:Check[]=[...source.sourceActionChecks("void")];for(const at of[new Date(saved.input.paidAt),original.occurredAt,postedAt]){const target=employeeSettlementPaymentResource(ctx,source,saved.input.amount,at,original.id,original.createdBy??undefined);checks.push({action:"void",resource:target,organizationOnly:!target.propertyId},...employeeSettlementFundingChecks(ctx,funding,saved.input.amount,at,"void"));}
+  const target=employeeSettlementPaymentResource(ctx,source,saved.input.amount,postedAt);checks.push({action:"create",resource:target,organizationOnly:!target.propertyId});return checks;
 }
 
 /** Record an actual payment or explicit wallet offset against an existing earned liability. */
 export async function postEmployeeCompensationSettlement(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
   const input=employeeCompensationSettlementInput.parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
-    const payables=new EmployeePayableRepository(tx,ctx.organizationId);await payables.lockKey(input.idempotencyKey);const source=await prepareSettlement(ctx,input.id,input.claimId,tx,"pay"),finance=source.finance,hint=await finance.findLedgerAccountById(input.fundingAccountId);if(!hint)throw new EmployeeCompensationRunAccessError();
+    const payables=new EmployeePayableRepository(tx,ctx.organizationId);await payables.lockKey(input.idempotencyKey);const source=await prepareEmployeeCompensationSettlement(ctx,input.id,input.claimId,tx,"pay"),finance=source.finance,hint=await finance.findLedgerAccountById(input.fundingAccountId);if(!hint)throw new EmployeeCompensationRunAccessError();
     await lockWalletHolders(tx,ctx.organizationId,hint.teamWallet?[hint.teamWallet.personId]:[]);await new FinancialTransferRepository(tx,ctx.organizationId).lockAccounts([hint.id]);const funding=await finance.findLedgerAccountById(hint.id);if(!funding)throw new EmployeeCompensationRunAccessError();
-    const existing=(await finance.findTransactionsByIdempotencyKeys([`employee-settlement:${input.idempotencyKey}`]))[0],saved=existing?source.receipts.get(existing.id):null,paidAt=new Date(input.paidAt),now=await finance.clock(),postedAt=existing?.occurredAt??(input.currentPeriod?now:paidAt),target=paymentResource(ctx,source,input.amount,paidAt,existing?.id,existing?.createdBy??undefined);
-    const checks:Check[]=[{action:"view",resource:target,organizationOnly:!target.propertyId},{action:"pay",resource:target,organizationOnly:!target.propertyId},{action:"create",resource:{...target,id:undefined,financialRecordId:undefined,occurredAt:postedAt},organizationOnly:!target.propertyId},...fundingChecks(ctx,funding,input.amount,paidAt,"pay"),...fundingChecks(ctx,funding,input.amount,postedAt,"pay")];
+    const existing=(await finance.findTransactionsByIdempotencyKeys([`employee-settlement:${input.idempotencyKey}`]))[0],saved=existing?source.receipts.get(existing.id):null,paidAt=new Date(input.paidAt),now=await finance.clock(),postedAt=existing?.occurredAt??(input.currentPeriod?now:paidAt),target=employeeSettlementPaymentResource(ctx,source,input.amount,paidAt,existing?.id,existing?.createdBy??undefined);
+    const checks:Check[]=[{action:"view",resource:target,organizationOnly:!target.propertyId},{action:"pay",resource:target,organizationOnly:!target.propertyId},{action:"create",resource:{...target,id:undefined,financialRecordId:undefined,occurredAt:postedAt},organizationOnly:!target.propertyId},...employeeSettlementFundingChecks(ctx,funding,input.amount,paidAt,"pay"),...employeeSettlementFundingChecks(ctx,funding,input.amount,postedAt,"pay")];
     if(input.currentPeriod)checks.push({action:"override",resource:target,organizationOnly:!target.propertyId});await source.recheckSettlement(now,checks);
     if(existing){const audit=(await payables.audits([existing.id]))[0];if(!saved||existing.createdBy!==ctx.actorId||audit?.actorId!==ctx.actorId||audit.reason!==input.reason||JSON.stringify(saved.input)!==JSON.stringify(input)||saved.transactionId!==existing.id)throw new EmployeeCompensationRunConflictError();await source.recheckSettlement(await finance.clock(),checks);return{id:input.id,claimId:input.claimId,paymentId:existing.id,kind:input.kind,idempotent:true};}
+    if(deps.calendar){await source.periods.lockPostingCalendar();await new ConfigRuleRepository(tx,ctx.organizationId).lockVersion("finance.accounting_periods","organization",null);const calendar=await source.periods.policy(await finance.clock());if(!calendar||calendar.id!==deps.calendar.id||calendar.version!==deps.calendar.version||new Date(localClockInstant(deps.calendar.local,calendar.value.timezone,deps.calendar.occurrence)).toISOString()!==input.paidAt)throw new EmployeeCompensationRunConflictError();}
     if(input.kind==="PAYMENT"&&funding.teamWallet?.personId===source.retained.personId)throw new EmployeeCompensationRunConflictError();
     if(source.journals.some(journal=>source.existing!.lines.some(line=>line.transactionId===journal.id)&&journal.reversedByTransactions.length))throw new EmployeeCompensationRunConflictError();
     const currency=await source.claims.currency(input.currency),amount=Money.of(input.amount,input.currency),outstanding=await payables.outstanding({claimId:input.claimId,personId:source.retained.personId,currency:input.currency});
@@ -79,10 +90,9 @@ export async function postEmployeeCompensationSettlement(ctx:FinanceActorContext
 /** Exact opposite journals restore the derived earned liability without rewriting a payment. */
 export async function voidEmployeeCompensationSettlement(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
   const input=employeeCompensationSettlementVoidInput.parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
-    const source=await prepareSettlement(ctx,input.id,input.claimId,tx,"void"),original=source.journals.find(journal=>journal.id===input.paymentId),saved=source.receipts.get(input.paymentId);if(!original||!saved||original.reversesTransactionId||saved.transactionId!==original.id)throw new EmployeeCompensationRunAccessError();
+    const source=await prepareEmployeeCompensationSettlement(ctx,input.id,input.claimId,tx,"void"),original=source.journals.find(journal=>journal.id===input.paymentId),saved=source.receipts.get(input.paymentId);if(!original||!saved||original.reversesTransactionId||saved.transactionId!==original.id)throw new EmployeeCompensationRunAccessError();
     const hint=await source.finance.findLedgerAccountById(saved.input.fundingAccountId);if(!hint)throw new EmployeeCompensationRunAccessError();await lockWalletHolders(tx,ctx.organizationId,hint.teamWallet?[hint.teamWallet.personId]:[]);await new FinancialTransferRepository(tx,ctx.organizationId).lockAccounts([hint.id]);const funding=await source.finance.findLedgerAccountById(hint.id);if(!funding)throw new EmployeeCompensationRunAccessError();
-    const now=await source.finance.clock(),postedAt=original.reversedByTransactions[0]?.occurredAt??now,checks:Check[]=[];for(const at of[new Date(saved.input.paidAt),original.occurredAt,postedAt]){const target=paymentResource(ctx,source,saved.input.amount,at,original.id,original.createdBy??undefined);checks.push({action:"void",resource:target,organizationOnly:!target.propertyId},...fundingChecks(ctx,funding,saved.input.amount,at,"void"));}
-    const target=paymentResource(ctx,source,saved.input.amount,postedAt);checks.push({action:"create",resource:target,organizationOnly:!target.propertyId});await source.recheckSettlement(now,checks);
+    const now=await source.finance.clock(),postedAt=original.reversedByTransactions[0]?.occurredAt??now,checks=employeeSettlementVoidChecks(ctx,source,saved,original,funding,postedAt);await source.recheckSettlement(now,checks);
     if(original.reversedByTransactions.length){const audit=await source.payables.reversalAudit(original.id);if(!matchesFinancialReversalAttempt({actorId:ctx.actorId,reason:input.reason,originalIds:[original.id],reversals:original.reversedByTransactions,audit}))throw new EmployeeCompensationRunConflictError();return{id:input.id,claimId:input.claimId,paymentId:original.id,reversalTransactionId:original.reversedByTransactions[0].id,idempotent:true};}
     const reversed=await source.finance.createFinancialTransaction({reference:original.reference+":VOID",description:input.reason,occurredAt:postedAt,idempotencyKey:original.idempotencyKey+":void",reversesTransactionId:original.id,createdBy:ctx.actorId,
       postings:original.postings.map(posting=>({ledgerAccountId:posting.ledgerAccountId,side:posting.side==="DEBIT"?"CREDIT" as const:"DEBIT" as const,amount:Money.of(posting.amount.toString(),posting.currency),bucket:z.string().parse(posting.bucket),dimensions:z.record(z.string(),z.unknown()).parse(posting.dimensions)})),recheckAuthorization:at=>source.recheckSettlement(at,checks).then(()=>undefined)});
@@ -92,7 +102,7 @@ export async function voidEmployeeCompensationSettlement(ctx:FinanceActorContext
 
 export async function recoverEmployeeCompensationSettlement(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
   const input=employeeCompensationSettlementRecoveryInput.parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
-    const source=await prepareSettlement(ctx,input.id,input.claimId,tx,"view"),journal=(await source.finance.findTransactionsByIdempotencyKeys([`employee-settlement:${input.key}`]))[0];if(!journal)return{payment:null};
+    const source=await prepareEmployeeCompensationSettlement(ctx,input.id,input.claimId,tx,"view"),journal=(await source.finance.findTransactionsByIdempotencyKeys([`employee-settlement:${input.key}`]))[0];if(!journal)return{payment:null};
     const saved=source.receipts.get(journal.id),audit=(await source.payables.audits([journal.id]))[0];if(!saved||saved.input.id!==input.id||saved.input.claimId!==input.claimId||journal.createdBy!==ctx.actorId||audit?.actorId!==ctx.actorId)throw new EmployeeCompensationRunAccessError();await source.recheckSettlement(await source.finance.clock());return{payment:{id:input.id,claimId:input.claimId,paymentId:journal.id,kind:saved.input.kind,idempotent:true}};
   },{timeout:120000});
 }

@@ -45,6 +45,8 @@ import {
   verifyPasskeyAuthentication
 } from "@/modules/identity/application/identity-service";
 import { auth } from "@/platform/auth/session";
+import { searchIdentityAccounts } from "./identity-service";
+import { formatDate } from "@/i18n/format";
 import { routing, type AppLocale } from "@/i18n/routing";
 
 export type IdentityFormState = {
@@ -82,6 +84,16 @@ export type IdentityFormState = {
   totpUri?: string;
   recoveryCodes?: string[];
 };
+
+/** Private server-action transport keeps account searches out of URL/history. */
+export async function searchIdentityAccountsAction(locale:string,input:unknown){
+  const session=await auth();
+  if(session?.user?.securitySetupRequired||session?.user?.sessionRevoked)throw new IdentityAuthorizationError();
+  const ctx=await identityActorContextFromSession(session);if(!ctx)throw new IdentityAuthorizationError();
+  const result=await searchIdentityAccounts(ctx,input);
+  const dates=result.accounts.flatMap(account=>[...account.recentSessions.flatMap(value=>[value.lastSeenAt,value.expiresAt]),...account.devices.map(value=>value.lastSeenAt),...account.credentials.map(value=>value.expiresAt)]).filter((value):value is Date=>value!==null);
+  return{...result,dateLabels:Object.fromEntries(dates.map(date=>[date.toISOString(),formatDate(safeLocale(locale),date)]))};
+}
 
 function safeLocale(locale: string): AppLocale {
   return routing.locales.includes(locale as AppLocale) ? (locale as AppLocale) : routing.defaultLocale;

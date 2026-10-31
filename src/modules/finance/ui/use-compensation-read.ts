@@ -4,7 +4,7 @@ import type { z } from "zod";
 
 export type CompensationReadError="forbidden"|"offline"|"unavailable"|"validation"|"configuration_unavailable";
 /** Financial data stays in memory and is cleared before revalidation, on denied access, and on connection loss. */
-export function useCompensationRead<T>(url:string|null,schema:z.ZodType<T>,onInvalidate?:()=>void){
+export function useCompensationRead<T>(url:string|null,schema:z.ZodType<T>,onInvalidate?:()=>void,body?:string){
   const [data,setData]=useState<T|null>(null),[error,setError]=useState<CompensationReadError|null>(null),[pending,setPending]=useState(true);
   const controller=useRef<AbortController|null>(null),generation=useRef(0);
   const clear=useCallback((reason:CompensationReadError)=>{generation.current++;controller.current?.abort();setData(null);setPending(false);setError(reason);onInvalidate?.();},[onInvalidate]);
@@ -14,7 +14,7 @@ export function useCompensationRead<T>(url:string|null,schema:z.ZodType<T>,onInv
     if(!navigator.onLine){setError("offline");setPending(false);onInvalidate?.();return;}
     const abort=new AbortController();controller.current=abort;
     try{
-      const response=await fetch(url,{credentials:"same-origin",cache:"no-store",signal:abort.signal});
+      const response=await fetch(url,{credentials:"same-origin",cache:"no-store",signal:abort.signal,...body===undefined?{}:{method:"POST",headers:{"Content-Type":"application/json"},body}});
       if(own!==generation.current)return;
       if(!response.ok){
         if(response.status===401||response.status===403){onInvalidate?.();setError("forbidden");}
@@ -26,7 +26,7 @@ export function useCompensationRead<T>(url:string|null,schema:z.ZodType<T>,onInv
       if(parsed.success)setData(parsed.data);else setError("unavailable");
     }catch{if(own===generation.current)setError(navigator.onLine?"unavailable":"offline");}
     finally{if(own===generation.current)setPending(false);}
-  },[url,schema,onInvalidate]);
+  },[url,schema,onInvalidate,body]);
   useEffect(()=>{
     let disposed=false;const invalidate=()=>{generation.current++;controller.current?.abort();};
     queueMicrotask(()=>{if(!disposed)void refresh();});const offline=()=>clear("offline"),revalidate=()=>{void refresh();};

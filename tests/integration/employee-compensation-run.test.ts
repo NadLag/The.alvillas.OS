@@ -1,3 +1,4 @@
+import { getEmployeeCompensationPaymentWorkspace } from "@/modules/finance/application/employee-compensation-payment-workspace";
 import { getEmployeeCompensationCostWorkspace } from "@/modules/finance/application/employee-compensation-cost-workspace";
 import { postEmployeeCompensationSettlement,voidEmployeeCompensationSettlement,recoverEmployeeCompensationSettlement } from "@/modules/finance/application/employee-compensation-settlement";
 import { EmployeePayableRepository } from "@/modules/finance/infrastructure/employee-payable-repository";
@@ -115,6 +116,8 @@ async function settlementFixture(){
   return{...f,settlementWriter:writer,actor,recognition,funding,payment:{id:f.source.id,claimId:f.command.claimId,kind:"PAYMENT" as const,fundingAccountId:funding.id,idempotencyKey:randomUUID(),amount:"200.00",currency:"MAD",paidAt:paidAt.toISOString(),reference:"Actual recorded staff payment",currentPeriod:false,reason:"Record actual partial payment against this earned beneficiary claim"}};
 }
 
+async function paymentCalendar(f:Awaited<ReturnType<typeof settlementFixture>>,timezone="UTC"){return withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),value:{timezone,allow_early_close:false,max_reopen_seconds:60},reason:"Actual payment workspace configured accounting calendar"}));}
+
 describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
   beforeAll(async()=>{
     if(!url||!["localhost","127.0.0.1"].includes(new URL(url).hostname))throw Error("Dedicated local PostgreSQL required");
@@ -123,6 +126,53 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     const scoped=new URL(url);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});
   });
   afterAll(async()=>{vi.restoreAllMocks();await db?.$disconnect();await admin?.$disconnect();});
+
+  it("payment workspace derives an unchanged earned liability before showing independently authorized funding",async()=>{
+    const f=await settlementFixture();await paymentCalendar(f);const before=await facts(f.org),original=await sourceRows(f.org,f.run.id),read=await getEmployeeCompensationPaymentWorkspace(f.actor,{id:f.source.id,claimId:f.command.claimId,amount:"200.00"},{db});
+    expect(read).toMatchObject({earned:{amount:"500.25",currency:"MAD"},outstanding:{amount:"500.25",currency:"MAD"},canPrepare:true,blocked:null,preview:{amount:"200.00",canPay:true,error:null},payments:[]});expect(read.accounts.some(row=>row.id===f.funding.id)).toBe(true);expect(read.personName).toBeNull();expect(await facts(f.org)).toEqual(before);expect(await sourceRows(f.org,f.run.id)).toEqual(original);expect(JSON.stringify(read)).not.toMatch(/authorizationCap|policySnapshot|sourceSnapshot|idempotencyKey/u);
+  });
+
+  it("payment workspace retains review without payment authority and denies every missing independent source view",async()=>{
+    const f=await settlementFixture();await paymentCalendar(f);const input={id:f.source.id,claimId:f.command.claimId},restricted=(permission:string)=>({...f.actor,authContext:{...f.actor.authContext,permissions:new Set([...f.actor.authContext.permissions].filter(key=>key!==permission))}});
+    expect(await getEmployeeCompensationPaymentWorkspace(restricted("employee_payable:pay"),input,{db})).toMatchObject({canPrepare:false,blocked:"posting_forbidden",accounts:[]});
+    for(const key of["employee_payable:view","staff_compensation:view","expense:view","financial_transaction:view"])await expect(getEmployeeCompensationPaymentWorkspace(restricted(key),input,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    const foreign=await settlementFixture();await expect(getEmployeeCompensationPaymentWorkspace(foreign.actor,input,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);await expect(getEmployeeCompensationPaymentWorkspace(f.actor,{...input,claimId:foreign.command.claimId},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+  });
+
+  it("payment workspace excludes the beneficiary wallet from payments and requires an actual sufficient advance for offsets",async()=>{
+    const f=await settlementFixture();await paymentCalendar(f);await linkTeamWallet(f.actor,{personId:f.performer.id,accountName:"Actual payment workspace beneficiary wallet",reason:"Link real beneficiary wallet before reviewing advance settlement"},{db});const wallet=await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id));if(!wallet)throw Error("Actual beneficiary wallet required");const input={id:f.source.id,claimId:f.command.claimId,amount:"100.00"};
+    expect((await getEmployeeCompensationPaymentWorkspace(f.actor,input,{db})).accounts.some(row=>row.id===wallet.ledgerAccountId)).toBe(false);expect(await getEmployeeCompensationPaymentWorkspace(f.actor,{...input,kind:"WALLET_OFFSET"},{db})).toMatchObject({accounts:[],walletAvailable:{amount:"0.00"},preview:{canPay:false,error:"wallet_unavailable"}});
+    await postFinancialTransfer(f.actor,{fromAccountId:f.funding.id,toAccountId:wallet.ledgerAccountId,kind:"ADVANCE",amount:"150.00",currency:"MAD",purpose:"Actual workspace employee advance",reason:"Record real advance before reviewing employee wallet offset",idempotencyKey:randomUUID()},{db});
+    expect(await getEmployeeCompensationPaymentWorkspace(f.actor,{...input,kind:"WALLET_OFFSET"},{db})).toMatchObject({accounts:[{id:wallet.ledgerAccountId}],walletAvailable:{amount:"150.00"},preview:{canPay:true,error:null}});
+    const denied={...f.actor,authContext:{...f.actor.authContext,permissions:new Set([...f.actor.authContext.permissions].filter(key=>key!=="wallet:view"))}};expect(await getEmployeeCompensationPaymentWorkspace(denied,{...input,kind:"WALLET_OFFSET"},{db})).toMatchObject({accounts:[],walletAvailable:null,preview:{canPay:false}});
+  });
+
+  it("payment workspace shows actual immutable payments and opposite journals with a claim-bound history cursor",async()=>{
+    const f=await settlementFixture();await paymentCalendar(f);const paid=await postEmployeeCompensationSettlement(f.actor,f.payment,{db}),input={id:f.source.id,claimId:f.command.claimId};
+    expect(await getEmployeeCompensationPaymentWorkspace(f.actor,input,{db})).toMatchObject({outstanding:{amount:"300.25"},payments:[{id:paid.paymentId,kind:"PAYMENT",amount:{amount:"200.00"},reversal:null,canVoid:true}]});expect((await getEmployeeCompensationPaymentWorkspace(f.actor,{...input,before:paid.paymentId},{db})).payments).toEqual([]);await expect(getEmployeeCompensationPaymentWorkspace(f.actor,{...input,before:randomUUID()},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    const reversed=await voidEmployeeCompensationSettlement(f.actor,{...input,paymentId:paid.paymentId,reason:"Reverse actual workspace payment with immutable original history"},{db});expect(await getEmployeeCompensationPaymentWorkspace(f.actor,input,{db})).toMatchObject({outstanding:{amount:"500.25"},payments:[{id:paid.paymentId,canVoid:false,reversal:{id:reversed.reversalTransactionId}}]});
+  });
+
+  it("payment workspace validates gaps and repeated local times using the current configured calendar",async()=>{
+    const f=await settlementFixture();await paymentCalendar(f,"America/New_York");const input={id:f.source.id,claimId:f.command.claimId,amount:"100.00"};
+    expect(await getEmployeeCompensationPaymentWorkspace(f.actor,{...input,paidLocal:"2026-03-08T02:30:00"},{db})).toMatchObject({preview:{canPay:false,error:"clock",paidAt:null}});expect(await getEmployeeCompensationPaymentWorkspace(f.actor,{...input,paidLocal:"2025-11-02T01:30:00"},{db})).toMatchObject({preview:{canPay:false,error:"clock"}});
+    const earlier=await getEmployeeCompensationPaymentWorkspace(f.actor,{...input,paidLocal:"2025-11-02T01:30:00",occurrence:"earlier"},{db}),later=await getEmployeeCompensationPaymentWorkspace(f.actor,{...input,paidLocal:"2025-11-02T01:30:00",occurrence:"later"},{db});expect(earlier.preview.paidAt).toBe("2025-11-02T05:30:00.000Z");expect(later.preview.paidAt).toBe("2025-11-02T06:30:00.000Z");
+  });
+
+  it("payment workspace rejects a stale calendar before new posting while preserving an exact acknowledged retry",async()=>{
+    const f=await settlementFixture(),calendar=await paymentCalendar(f),input={id:f.source.id,claimId:f.command.claimId,amount:"200.00"},read=await getEmployeeCompensationPaymentWorkspace(f.actor,input,{db});const deps={db,calendar:{id:calendar.id,version:calendar.version,local:read.preview.paidLocal!,occurrence:"reject" as const}},command={...f.payment,paidAt:read.preview.paidAt!};
+    const paid=await postEmployeeCompensationSettlement(f.actor,command,deps);await paymentCalendar(f,"Africa/Casablanca");const before=await facts(f.org);expect(await postEmployeeCompensationSettlement(f.actor,command,deps)).toEqual({...paid,idempotent:true});await expect(postEmployeeCompensationSettlement(f.actor,{...command,idempotencyKey:randomUUID()},deps)).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);expect(await facts(f.org)).toEqual(before);
+  });
+
+  it("payment workspace previews a closed paid date only with current independent adjustment permission",async()=>{
+    const f=await settlementFixture();await paymentCalendar(f);const now=new Date(),on=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()-1,15)).toISOString().slice(0,10);await closeAccountingPeriod(f.actor,{month:on.slice(0,7),expectedVersion:0,idempotencyKey:randomUUID(),reason:"Close original payment month before actual workspace review"},{db});const input={id:f.source.id,claimId:f.command.claimId,amount:"100.00",paidLocal:on+"T12:00:00"};
+    expect(await getEmployeeCompensationPaymentWorkspace(f.actor,input,{db})).toMatchObject({preview:{closed:true,canAdjust:true,canPay:true}});const restricted={...f.actor,authContext:{...f.actor.authContext,permissions:new Set([...f.actor.authContext.permissions].filter(key=>key!=="financial_transaction:override"))}};expect(await getEmployeeCompensationPaymentWorkspace(restricted,input,{db})).toMatchObject({preview:{closed:true,canAdjust:false,canPay:false,error:"forbidden"}});
+  });
+
+  it("payment workspace rechecks final stored grants and clears an intervening unauthorized read audit",async()=>{
+    const f=await settlementFixture();await paymentCalendar(f);const original=Object.getOwnPropertyDescriptor(EmployeePayableRepository.prototype,"outstanding")!.value as EmployeePayableRepository["outstanding"],before=await facts(f.org),spy=vi.spyOn(EmployeePayableRepository.prototype,"outstanding").mockImplementation(async function(this:EmployeePayableRepository,input){const value=await original.call(this,input);await withTenant(db,f.org,async tx=>tx.roleAssignment.update({where:{id:f.settlementWriter.grant.id},data:{validTo:await new FinanceRepository(tx,f.org).clock()}}));return value;});
+    try{await expect(getEmployeeCompensationPaymentWorkspace(f.actor,{id:f.source.id,claimId:f.command.claimId,amount:"200.00"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);}finally{spy.mockRestore();}expect(await facts(f.org)).toEqual(before);
+  });
 
   it("employee settlement records a partial actual payment once and preserves the original earned costs",async()=>{
     const f=await settlementFixture(),before=await facts(f.org),original=await withTenant(db,f.org,tx=>tx.employeeCompensationRecognitionLine.findMany({where:{recognitionId:f.recognition.recognitionId},include:{transaction:{include:{postings:true}}}}));

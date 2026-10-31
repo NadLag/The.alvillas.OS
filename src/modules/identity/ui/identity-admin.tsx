@@ -1,8 +1,10 @@
 "use client";
 
-import { Fragment, useActionState, useState, useTransition } from "react";
+import { Fragment, useActionState, useState, useTransition,useEffect,useRef } from "react";
+import { useTranslations } from "next-intl";
 import {
   assignRoleAction,
+  searchIdentityAccountsAction,
   createCustomRoleAction,
   createInvitationAction,
   createPersonProfileAction,
@@ -800,12 +802,12 @@ function PermissionCatalog({
 
 export function IdentityAdmin({
   locale,
-  dateLabels,
+  dateLabels:initialDateLabels,
   people,
   invitationProfiles,
   initialPersonId,
   duplicateContacts,
-  accounts,
+  accounts:initialAccounts,
   invitations,
   roles,
   permissions,
@@ -813,6 +815,19 @@ export function IdentityAdmin({
   simulations,
   labels
 }: IdentityAdminProps) {
+  const searchLabels=useTranslations("AccountSearch");
+  const [accountQuery,setAccountQuery]=useState(""),[accountFilter,setAccountFilter]=useState<string|null>(null),[accountAfter,setAccountAfter]=useState<string|undefined>();
+  const [accountPage,setAccountPage]=useState<Awaited<ReturnType<typeof searchIdentityAccountsAction>>|null>(null),[accountsLoading,setAccountsLoading]=useState(false),[accountsError,setAccountsError]=useState(false);
+  const [accountReadVersion,setAccountReadVersion]=useState(0);
+  const accountGeneration=useRef(0);
+  useEffect(()=>{
+    if(accountFilter===null)return;
+    const generation=++accountGeneration.current;let disposed=false;
+    queueMicrotask(()=>{if(!disposed){setAccountPage(null);setAccountsLoading(true);setAccountsError(false);}});
+    void searchIdentityAccountsAction(locale,{query:accountFilter,after:accountAfter}).then(page=>{if(!disposed&&accountGeneration.current===generation)setAccountPage(page);}).catch(()=>{if(!disposed&&accountGeneration.current===generation)setAccountsError(true);}).finally(()=>{if(!disposed&&accountGeneration.current===generation)setAccountsLoading(false);});
+    return()=>{disposed=true;};
+  },[accountFilter,accountAfter,initialAccounts,locale,accountReadVersion]);
+  const accounts=accountFilter===null?initialAccounts:accountPage?.accounts??[],dateLabels=accountFilter===null?initialDateLabels:accountPage?.dateLabels??{};
   const [invitationPersonId, setInvitationPersonId] = useState(initialPersonId ?? "");
   const invitationPerson = invitationProfiles.find(person => person.id === invitationPersonId);
   const [state, formAction, pending] = useActionState(
@@ -925,6 +940,12 @@ export function IdentityAdmin({
         <div className="section-heading">
           <h2>{labels.accounts}</h2>
         </div>
+        <form className="form-grid two" onSubmit={event=>{event.preventDefault();setAccountPage(null);setAccountAfter(undefined);setAccountFilter(accountQuery.trim());setAccountReadVersion(value=>value+1);}}>
+          <label className="field"><span>{searchLabels("label")}</span><input data-testid="identity-account-query" value={accountQuery} maxLength={120} onChange={event=>setAccountQuery(event.target.value)}/></label>
+          <button type="submit" className="secondary-button" data-testid="identity-account-search" disabled={accountsLoading}>{searchLabels("search")}</button>
+        </form>
+        {accountsLoading?<p role="status">{searchLabels("loading")}</p>:accountsError?<p role="alert">{searchLabels("unavailable")}</p>:accountFilter!==null&&!accounts.length?<p role="status">{searchLabels("empty")}</p>:null}
+        {(accountFilter===null&&initialAccounts.length===100||accountPage?.next)?<button type="button" className="secondary-button" data-testid="identity-account-next" disabled={accountsLoading} onClick={()=>{setAccountAfter(accountPage?.next??initialAccounts.at(-1)!.id);setAccountFilter(accountFilter??"");}}>{searchLabels("next")}</button>:null}
         <div className="identity-account-list">
           {accounts.map((account) => (
             <article className="identity-account-row identity-account-row-expanded" data-testid="identity-account-row" key={account.id}>
