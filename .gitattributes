@@ -3,3 +3,5 @@ prisma/migrations/20261031050000_employee_review_withdrawal_notices/migration.sq
 prisma/migrations/20261031060000_employee_earned_claim_history/migration.sql text eol=lf
 prisma/migrations/20261031070000_employee_recognition_tenant_policies/migration.sql text eol=lf
 prisma/migrations/20261031080000_employee_claim_posting_admission/migration.sql text eol=lf
+prisma/migrations/20261031090000_employee_compensation_settlements/migration.sql text eol=lf
+prisma/migrations/20261031100000_employee_settlement_canonical_receipts/migration.sql text eol=lf
