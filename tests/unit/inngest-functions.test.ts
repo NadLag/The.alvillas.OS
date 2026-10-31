@@ -18,7 +18,7 @@ afterEach(() => vi.unstubAllEnvs());
 describe("Inngest signed outbox dispatcher", () => {
   it("registers the dispatcher and durable automation consumer", () => {
     expect(inngestFunctions).toHaveLength(9);
-    expect(recognizeSupplierInvoices.opts.triggers).toEqual([{ event: "SupplierInvoiceRecognitionRequested" }, { event: "SupplierInvoiceReversalRequested" },{event:"EmployeeCompensationSubmissionRequested"},{event:"EmployeeCompensationRecognitionRequested"}]);
+    expect(recognizeSupplierInvoices.opts.triggers).toEqual([{ event: "SupplierInvoiceRecognitionRequested" }, { event: "SupplierInvoiceReversalRequested" },{event:"EmployeeCompensationSubmissionRequested"},{event:"EmployeeCompensationRecognitionRequested"},{event:"EmployeeMonthlyRunRequested"}]);
     expect(recognizeSupplierInvoices.opts.concurrency).toEqual({ limit: 1 });
     expect(recognizeSupplierInvoices.opts.retries).toBe(3);
     expect(failSupplierInvoiceRecognitions.opts.triggers).toEqual([{ event: "inngest/function.failed", if: "event.data.function_id == 'alvillas-os-supplier-invoice-recognition'" }]);

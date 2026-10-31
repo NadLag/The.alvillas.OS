@@ -1,0 +1,11 @@
+import { describe,expect,it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { NextIntlClientProvider } from "next-intl";
+import en from "../../messages/en.json";
+import fr from "../../messages/fr.json";
+import ar from "../../messages/ar.json";
+import { MonthlyContractEvidence } from "@/modules/finance/ui/compensation-monthly-create";
+import { formatCurrencyAmount } from "@/i18n/format";
+const choice={assignmentId:"018f0a0b-0000-7000-9000-000000000001",propertyId:null,personName:"Actual employee",propertyName:null,roleName:"Actual monthly contract",contractVersion:1,amount:{amount:"754.84",currency:"MAD"},eligibleDays:31,calendarDays:31,rates:[{compensationId:"018f0a0b-0000-7000-9000-000000000002",version:1,effectiveFrom:"2020-01-01T00:00:00.000Z",rate:{amount:"600.00",currency:"MAD"}},{compensationId:"018f0a0b-0000-7000-9000-000000000003",version:2,effectiveFrom:"2026-01-16T00:00:00.000Z",rate:{amount:"900.00",currency:"MAD"}}]};
+describe("actual original monthly rates remain distinct from the earned period amount",()=>{for(const[locale,messages]of[["en",en],["fr",fr],["ar",ar]] as const)it(`renders the exact amount and both original effective rates in ${locale}`,()=>{const html=renderToStaticMarkup(createElement(NextIntlClientProvider,{locale,messages,timeZone:"UTC",children:createElement(MonthlyContractEvidence,{locale,choice})}));for(const amount of["754.84","600.00","900.00"])expect(html).toContain(formatCurrencyAmount(locale,amount,"MAD").replaceAll("&","&amp;"));expect(html).toContain("Actual employee");expect(html).toMatch(/2026|٢٠٢٦/u);expect(html).not.toContain("INVALID_FORMAT");});});

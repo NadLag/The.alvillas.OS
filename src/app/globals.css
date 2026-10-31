@@ -31,6 +31,8 @@
 .compensation-total { font-size: var(--font-size-2xl); font-weight: var(--font-weight-semibold); white-space: normal; overflow-wrap: anywhere; }
 .compensation-source-list { list-style: none; padding: 0; display: grid; gap: var(--space-4); }
 .compensation-source { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-panel); padding: var(--space-5); }
+.compensation-monthly-review-line { display: grid; gap: var(--space-2); overflow-wrap: anywhere; }
+.compensation-monthly-rate-list { display: grid; gap: var(--space-2); color: var(--text-secondary); }
 .compensation-source-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: var(--space-3); }
 .compensation-source-heading h3 { margin-block: 0 var(--space-2); overflow-wrap: anywhere; }
 .compensation-source-heading p { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }

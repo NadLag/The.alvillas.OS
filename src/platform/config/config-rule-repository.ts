@@ -374,6 +374,11 @@ export class ConfigRuleRepository {
       : null;
   }
 
+  async findByIds(ids:readonly string[]):Promise<Map<string,ConfigRuleRecord>>{
+    const rows=await this.tx.configRule.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]},archivedAt:null},select:{id:true,key:true,scopeType:true,scopeId:true,value:true,effectiveFrom:true,effectiveTo:true,version:true,lifecycle:true,createdBy:true,reason:true,createdAt:true}});
+    return new Map(rows.map(row=>[row.id,{...row,lifecycle:normalizeLifecycle(row.lifecycle)}]));
+  }
+
   async previousVersions(rules: readonly ConfigRuleRecord[]): Promise<Map<string, ConfigRuleRecord>> {
     if (!rules.length) return new Map();
     const inputs = JSON.stringify(rules.map(rule => ({ id: rule.id, key: rule.key, scope_type: rule.scopeType, scope_id: rule.scopeId, version: rule.version })));

@@ -45,7 +45,17 @@ export async function authContextForAccount(
 export async function authContextForAccountInTransaction(
   tx: TenantTransaction, organizationId: string, userAccountId: string
 ): Promise<AuthContext> {
-    const { account, assignments, now } = await new IdentityRepository(tx, organizationId).authorizationState(userAccountId);
+    return contextForAccountState(organizationId,userAccountId,await new IdentityRepository(tx, organizationId).authorizationState(userAccountId));
+}
+
+/** Fresh per-account security and scoped grants, loaded together for a bounded dashboard read. */
+export async function authContextsForAccountsInTransaction(tx:TenantTransaction,organizationId:string,userAccountIds:readonly string[]):Promise<Map<string,AuthContext>>{
+  const ids=[...new Set(userAccountIds)];if(!ids.length)return new Map();
+  const batch=await new IdentityRepository(tx,organizationId).authorizationStates(ids);
+  return new Map(ids.map(id=>{const state=batch.states.get(id);return[id,contextForAccountState(organizationId,id,{account:state?.account??null,assignments:state?.assignments??[],now:batch.now})];}));
+}
+
+function contextForAccountState(organizationId:string,userAccountId:string,{account,assignments,now}:Awaited<ReturnType<IdentityRepository["authorizationState"]>>):AuthContext{
     if (!account || securityEnrollment(account, now).setupRequired) {
       return { organizationId, userAccountId, permissions: new Set<string>(), scopes: [{ organizationId }], assignments: [] };
     }

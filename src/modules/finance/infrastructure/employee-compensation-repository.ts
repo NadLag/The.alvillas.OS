@@ -19,6 +19,7 @@ const completedWorkFields = (organizationId: string) => ({
 /** Read the canonical identity contract; employee payables never maintain a second rate table. */
 export class EmployeeCompensationRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
+  originalContracts(ids:readonly string[]){return this.tx.teamCompensation.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]}},select:{...rateFields,assignmentId:true}});}
 
   async source(assignmentId: string, earnedAt: Date) {
     const assignment = await this.tx.roleAssignment.findFirst({ where: { organizationId: this.organizationId, id: assignmentId },

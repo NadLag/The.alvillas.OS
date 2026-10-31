@@ -601,6 +601,14 @@ function CustomRoleCreateForm({
   );
 }
 
+function CustomRoleEditDisclosure(props:Parameters<typeof CustomRoleEditForm>[0]){
+  const [activated,setActivated]=useState(false);
+  return <details className="role-edit-details" onToggle={event=>{if(event.currentTarget.open)setActivated(true);}}>
+    <summary>{props.labels.editRole}</summary>
+    {activated?<CustomRoleEditForm {...props}/>:null}
+  </details>;
+}
+
 function CustomRoleEditForm({
   locale,
   role,
@@ -1180,15 +1188,7 @@ export function IdentityAdmin({
                 <strong>{role.assignmentCount}</strong>
               </span>
               {!role.isSystem ? (
-                <details className="role-edit-details">
-                  <summary>{labels.editRole}</summary>
-                  <CustomRoleEditForm
-                    labels={labels}
-                    locale={locale}
-                    permissions={permissions}
-                    role={role}
-                  />
-                </details>
+                <CustomRoleEditDisclosure labels={labels} locale={locale} permissions={permissions} role={role}/>
               ) : null}
             </article>
           ))}
