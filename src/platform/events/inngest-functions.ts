@@ -14,6 +14,7 @@ import { automationTick, enqueueAutomationEvent, executeAutomationRun } from "@/
 import { executeSupplierInvoiceRecognitionReference, failSupplierInvoiceRecognitionReference, supplierInvoiceRecognitionRequested, supplierInvoiceReversalRequested } from "@/modules/finance/application/supplier-invoice-recognition-requests";
 import { employeeCompensationSubmissionRequested,executeEmployeeCompensationSubmissionReference,failEmployeeCompensationSubmissionReference } from "@/modules/finance/application/employee-compensation-submission-requests";
 import { employeeMonthlyRunRequested,executeEmployeeMonthlyRunReference,failEmployeeMonthlyRunReference } from "@/modules/finance/application/employee-monthly-run-requests";
+import { employeeEarningRunRequested,executeEmployeeEarningRunReference,failEmployeeEarningRunReference } from "@/modules/finance/application/employee-earning-run-requests";
 import { employeeCompensationRecognitionRequested,executeEmployeeCompensationRecognitionReference,failEmployeeCompensationRecognitionReference } from "@/modules/finance/application/employee-compensation-recognition-requests";
 
 import { scheduleDigests } from "@/platform/notifications/digest-service";
@@ -95,8 +96,10 @@ export const cleanupUploadParts = inngest.createFunction({ id: "cleanup-field-up
   return { organizations: organizations.length, cleaned };
 });
 export const recognizeSupplierInvoices = inngest.createFunction({ id: "supplier-invoice-recognition", name: "ALVILLAS OS financial commands",
-  triggers: [{ event: supplierInvoiceRecognitionRequested }, { event: supplierInvoiceReversalRequested },{event:employeeCompensationSubmissionRequested},{event:employeeCompensationRecognitionRequested},{event:employeeMonthlyRunRequested}], concurrency: { limit: 1 }, retries: 3
-}, async ({ event, step }) => event.name===employeeMonthlyRunRequested?
+  triggers: [{ event: supplierInvoiceRecognitionRequested }, { event: supplierInvoiceReversalRequested },{event:employeeCompensationSubmissionRequested},{event:employeeCompensationRecognitionRequested},{event:employeeMonthlyRunRequested},{event:employeeEarningRunRequested}], concurrency: { limit: 1 }, retries: 3
+}, async ({ event, step }) => event.name===employeeEarningRunRequested?
+  step.run("create-reviewed-actual-earning-run",()=>executeEmployeeEarningRunReference(event.data,{eventType:event.name})):
+  event.name===employeeMonthlyRunRequested?
   step.run("create-reviewed-monthly-contractual-run",()=>executeEmployeeMonthlyRunReference(event.data,{eventType:event.name})):
   event.name===employeeCompensationRecognitionRequested?
   step.run("recognize-actual-approved-employee-claim",()=>executeEmployeeCompensationRecognitionReference(event.data,{eventType:event.name})):
@@ -105,7 +108,7 @@ export const recognizeSupplierInvoices = inngest.createFunction({ id: "supplier-
   step.run(event.name === supplierInvoiceReversalRequested ? "reverse-actual-recognized-invoice" : "recognize-actual-approved-invoice",
   () => executeSupplierInvoiceRecognitionReference(event.data, { eventType: event.name })));
 const failedInvoiceExecution = z.object({ function_id: z.literal("alvillas-os-supplier-invoice-recognition"),
-  event: z.object({ name: z.enum([supplierInvoiceRecognitionRequested, supplierInvoiceReversalRequested,employeeCompensationSubmissionRequested,employeeCompensationRecognitionRequested,employeeMonthlyRunRequested]), data: outboxDispatchInput }) });
+  event: z.object({ name: z.enum([supplierInvoiceRecognitionRequested, supplierInvoiceReversalRequested,employeeCompensationSubmissionRequested,employeeCompensationRecognitionRequested,employeeMonthlyRunRequested,employeeEarningRunRequested]), data: outboxDispatchInput }) });
 // The SDK's automatic onFailure registration omits concurrency. An explicit consumer
 // keeps both workers within the existing plan's checked admission limits.
 export const failSupplierInvoiceRecognitions = inngest.createFunction({ id: "supplier-invoice-recognition-failure", name: "ALVILLAS OS supplier recognition failure receipt",
@@ -113,6 +116,7 @@ export const failSupplierInvoiceRecognitions = inngest.createFunction({ id: "sup
 }, async ({ event, step }) => {
   const failure = failedInvoiceExecution.safeParse(event.data);
   if (!failure.success) throw new NonRetriableError("supplier_invoice_failure_reference_denied");
+  if(failure.data.event.name===employeeEarningRunRequested)return step.run("record-terminal-earning-run-failure",()=>failEmployeeEarningRunReference(failure.data.event.data,{eventType:employeeEarningRunRequested}));
   if(failure.data.event.name===employeeMonthlyRunRequested)return step.run("record-terminal-monthly-run-failure",()=>failEmployeeMonthlyRunReference(failure.data.event.data,{eventType:employeeMonthlyRunRequested}));
   if(failure.data.event.name===employeeCompensationRecognitionRequested)return step.run("record-terminal-employee-recognition-failure",()=>failEmployeeCompensationRecognitionReference(failure.data.event.data,{eventType:employeeCompensationRecognitionRequested}));
   if(failure.data.event.name===employeeCompensationSubmissionRequested)return step.run("record-terminal-employee-submission-failure",()=>failEmployeeCompensationSubmissionReference(failure.data.event.data,{eventType:employeeCompensationSubmissionRequested}));
