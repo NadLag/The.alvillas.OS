@@ -1,0 +1,15 @@
+# ADR 0118: Present employee work costs through the existing private workspace
+
+Status: Accepted for integration; full feature and staging acceptance remain outstanding.
+
+The saved work run links to its cost proposals only after the current caller can read the complete run, every salary source and the independent financial sources. Preparation uses the same authority and the actual run edit permission. Active completion reservations and cancellation determine eligibility; the eventual durable command still validates the complete original source, current contract, explicit cost date and configured cost policy. Displayed eligibility does not grant command authority.
+
+The workspace lists authorized proposal headers using bounded scans and an encrypted cursor bound to the organization, actor and actual run. Audit disclosure records only returned proposal IDs. It rechecks stored authority and displayed proposal states before returning. Detail reuses the canonical submission read, original source label helper and independent identity and property disclosure checks. Required reviews link to the existing approval UI only for an actual authorized recipient. Owner review continues to expose its configured slice without salary access or the whole proposal.
+
+The preparation form includes every positive retained work source. A shared classification can be overridden for individual sources across paged evidence; amounts, currency and contractual attribution remain immutable. Cost date, category, review note and proposal reason are explicit inputs. Successful submission creates a durable cost proposal for review and makes no accounting movement.
+
+An exact retry retains the original command in memory. Only a random nonce, scoped to the organization, actor and run, is written to tab storage. Reload recovery looks up the actual request under its nonce lock and requires its creator and current complete source authority. An unmatched nonce remains bound to the next attempt so a delayed original request cannot create a second proposal. Terminal outcomes must be confirmed before preparing a new request. Financial payloads and authorization snapshots are never written to browser storage or an offline queue.
+
+Financial reads use the existing private read hook. Connection loss and denied access clear source views and form data; original in-memory command payloads are also cleared. Returning online recovers the durable request before preparing another command. Pending request polling is bounded to one in-flight read and stops on unmount, terminal outcome or denied access. Withdrawal retains the exact original reason for an uncertain retry and leaves the original work, proposal and review history intact.
+
+The interface uses the existing design system, English, French and Arabic messages, logical CSS and paged evidence. It distinguishes an approved proposal from a recorded payment. Recognition, settlement, additional earning sources, corrections and the configured emergency owner-notice adapter remain required F-FIN-24 work.

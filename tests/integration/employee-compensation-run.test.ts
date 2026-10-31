@@ -31,6 +31,9 @@ import { getEmployeeCompensationRunDetail } from "@/modules/finance/application/
 import { listEmployeeCompensationRuns } from "@/modules/finance/application/employee-compensation-run-list";
 import { prepareEmployeeCompensationClaimPolicy } from "@/modules/finance/application/employee-compensation-claim-policy";
 import { EmployeeCompensationClaimSourceError } from "@/modules/finance/domain/employee-compensation-claim";
+import { getEmployeeCompensationCostWorkspace } from "@/modules/finance/application/employee-compensation-cost-workspace";
+import { getEmployeeCompensationCostDetail } from "@/modules/finance/application/employee-compensation-cost-detail";
+import { recoverEmployeeCompensationSubmissionRequest } from "@/modules/finance/application/employee-compensation-submission-requests";
 
 const url=process.env.TEST_DATABASE_URL;let admin:PrismaClient,db:PrismaClient;
 const fixtures=employeeCompensationFixtures(()=>db,()=>admin);
@@ -72,6 +75,72 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     const scoped=new URL(url);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});
   });
   afterAll(async()=>{vi.restoreAllMocks();await db?.$disconnect();await admin?.$disconnect();});
+
+  it("shows authorized cost workspace eligibility and retained proposal history without financial movement",async()=>{
+    const f=await claimFixture(),before=await facts(f.org),empty=await getEmployeeCompensationCostWorkspace(f.claimActor,{runId:f.run.id},{db});
+    expect(empty).toMatchObject({canPrepare:true,blocked:null,positiveLineIds:[f.run.lines[0].id],proposals:[],next:null});
+    const created=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Submit actual workspace work costs for review"},{db});
+    const active=await getEmployeeCompensationCostWorkspace(f.claimActor,{runId:f.run.id},{db});expect(active).toMatchObject({canPrepare:false,blocked:"active_source",proposals:[{id:created.id,state:"APPROVED",total:{amount:"500.25",currency:"MAD"},costCount:1,claimCount:1}]});
+    expect((await getEmployeeCompensationRunDetail(f.claimActor,{id:f.run.id},{db})).canCancel).toBe(false);
+    const detail=await getEmployeeCompensationCostDetail(f.claimActor,{id:created.id},{db});expect(detail.labels).toHaveLength(1);expect(detail.labels[0].lineId).toBe(f.run.lines[0].id);expect(detail.canOpenApproval).toBe(false);
+    expect(detail.costs[0].allocation).toEqual({owner:{amount:"0.00",currency:"MAD"},alvillas:{amount:"500.25",currency:"MAD"},guest:{amount:"0.00",currency:"MAD"}});
+    expect(JSON.stringify(detail)).not.toMatch(/authorizationCap|policySnapshot|sourceSnapshot|requestFingerprint|idempotencyKey/u);
+    await withdrawEmployeeCompensation(f.claimActor,{id:created.id,reason:"Withdraw the retained workspace cost proposal"},{db});
+    expect(await getEmployeeCompensationCostWorkspace(f.claimActor,{runId:f.run.id},{db})).toMatchObject({canPrepare:true,blocked:null,proposals:[{id:created.id,state:"WITHDRAWN"}]});
+    expect((await getEmployeeCompensationCostDetail(f.claimActor,{id:created.id},{db})).history.map(row=>row.action)).toEqual(["SUBMITTED","WITHDRAWN"]);
+    expect(await facts(f.org)).toMatchObject({journals:before.journals,postings:before.postings});
+  });
+
+  it("denies private cost workspace and source labels without both salary and financial source authority",async()=>{
+    const f=await claimFixture(),created=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Retain source facts for private workspace checks"},{db}),foreign=await claimFixture();
+    for(const ctx of[f.ctx,foreign.claimActor]){
+      await expect(getEmployeeCompensationCostWorkspace(ctx,{runId:f.run.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+      await expect(getEmployeeCompensationCostDetail(ctx,{id:created.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+      await expect(recoverEmployeeCompensationSubmissionRequest(ctx,{runId:f.run.id,key:randomUUID()},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    }
+    const authContext={...f.claimActor.authContext,permissions:new Set([...f.claimActor.authContext.permissions].filter(key=>key!=="staff_compensation:view"))};
+    await expect(getEmployeeCompensationCostWorkspace({...f.claimActor,authContext},{runId:f.run.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    await expect(getEmployeeCompensationCostDetail({...f.claimActor,authContext},{id:created.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+  });
+
+  it("recovers the exact cost request by an actor and run scoped nonce before and after actual worker execution",async()=>{
+    const f=await claimFixture(),key=randomUUID();expect(await recoverEmployeeCompensationSubmissionRequest(f.claimActor,{runId:f.run.id,key},{db})).toEqual({request:null});
+    const queued=await requestEmployeeCompensationSubmission(f.claimActor,{...f.claimInput,idempotencyKey:key,reason:"Recover this exact actual employee cost request"},{db});
+    expect(await recoverEmployeeCompensationSubmissionRequest(f.claimActor,{runId:f.run.id,key},{db})).toMatchObject({request:{requestId:queued.requestId,state:"PENDING",idempotent:true}});
+    const otherRun=await createEmployeeCompensationRun(f.ctx,{...f.input,idempotencyKey:randomUUID()},{db});
+    await expect(recoverEmployeeCompensationSubmissionRequest(f.claimActor,{runId:otherRun.id,key},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    const event=await withTenant(db,f.org,tx=>tx.outboxEvent.findFirstOrThrow({where:{type:employeeCompensationSubmissionRequested,payload:{path:["requestId"],equals:queued.requestId}}}));
+    const executed=await executeEmployeeCompensationSubmissionReference({organizationId:f.org,outboxEventId:event.id},{db});expect(executed.state).toBe("SUCCEEDED");
+    expect(await recoverEmployeeCompensationSubmissionRequest(f.claimActor,{runId:f.run.id,key},{db})).toEqual({request:{...executed,idempotent:true}});
+    await withdrawEmployeeCompensation(f.claimActor,{id:executed.submissionId!,reason:"Retain recoverable proposal history after withdrawal"},{db});
+    expect(await recoverEmployeeCompensationSubmissionRequest(f.claimActor,{runId:f.run.id,key},{db})).toMatchObject({request:{state:"SUCCEEDED",submissionId:executed.submissionId}});
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationSubmissionRequest.count({where:{runId:f.run.id}}))).toBe(1);
+  });
+
+  it("paginates cost workspace history with an encrypted actor and run bound cursor",async()=>{
+    const f=await claimFixture();for(let index=0;index<11;index++){
+      const created=await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Retain paginated actual cost proposal history "+index},{db});
+      await withdrawEmployeeCompensation(f.claimActor,{id:created.id,reason:"Retain each original proposal before preparing another"},{db});
+    }
+    const first=await getEmployeeCompensationCostWorkspace(f.claimActor,{runId:f.run.id},{db});expect(first.proposals).toHaveLength(10);expect(first.next).toBeTruthy();
+    const second=await getEmployeeCompensationCostWorkspace(f.claimActor,{runId:f.run.id,after:first.next!},{db});expect(second.proposals).toHaveLength(1);expect(second.next).toBeNull();expect(new Set([...first.proposals,...second.proposals].map(row=>row.id)).size).toBe(11);
+    expect(first.next).not.toContain(f.org);expect(first.next).not.toContain(first.proposals[0].id);
+    const other=await createEmployeeCompensationRun(f.ctx,{...f.input,idempotencyKey:randomUUID()},{db});
+    await expect(getEmployeeCompensationCostWorkspace(f.claimActor,{runId:other.id,after:first.next!},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    const otherActor={organizationId:f.org,actorId:f.staffAccount.id,authContext:await authContextForAccount(f.org,f.staffAccount.id,{db})};
+    await expect(getEmployeeCompensationCostWorkspace(otherActor,{runId:f.run.id,after:first.next!},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+  });
+
+  it("rolls back cost workspace disclosure when stored financial authority expires after the actual read",async()=>{
+    const f=await claimFixture();await submitEmployeeCompensation(f.claimActor,{...f.claimInput,idempotencyKey:randomUUID(),reason:"Retain actual cost proposal for late authority checks"},{db});
+    const auditCount=()=>withTenant(db,f.org,tx=>tx.auditLog.count({where:{action:"finance.employee_compensation.costs_listed"}})),before=await auditCount();
+    const original=Object.getOwnPropertyDescriptor(EmployeeCompensationClaimRepository.prototype,"workspaceStates")!.value as EmployeeCompensationClaimRepository["workspaceStates"],spy=vi.spyOn(EmployeeCompensationClaimRepository.prototype,"workspaceStates").mockImplementation(async function(this:EmployeeCompensationClaimRepository,...args){
+      const result=await original.apply(this,args);await withTenant(db,f.org,async tx=>tx.roleAssignment.update({where:{id:f.financialGrant.id},data:{validTo:await new FinanceRepository(tx,f.org).clock()}}));return result;
+    });
+    try{await expect(getEmployeeCompensationCostWorkspace(f.claimActor,{runId:f.run.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);}finally{spy.mockRestore();}
+    expect(await auditCount()).toBe(before);
+    await expect(recoverEmployeeCompensationSubmissionRequest(f.claimActor,{runId:f.run.id,key:randomUUID()},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+  });
 
   it.each([["SELF",false],["OFFLINE_SYNC",false],["PROXY",false],["PROXY",true]] as const)("retains actual %s work, person-only=%s, through exact create/read/cancel replays",async(method,noLogin)=>{
     const f=await fixture(method,noLogin),created=await createEmployeeCompensationRun(f.ctx,f.input,{db}),before=await sourceRows(f.org,created.id);

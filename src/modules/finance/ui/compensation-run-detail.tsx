@@ -9,6 +9,7 @@ import type { AppLocale } from "@/i18n/routing";
 import { employeeCompensationRunCancelSchema } from "../domain/employee-compensation-run";
 import { employeeCompensationRunDetailSchema } from "../domain/employee-compensation-workspace";
 import { useCompensationRead } from "./use-compensation-read";
+import { CompensationCostNavigation } from "./compensation-cost-list";
 
 export function CompensationRunDetail({locale,runId,after}:{locale:AppLocale;runId:string;after?:string}){
   const t=useTranslations("CompensationRuns"),query=after?`?${new URLSearchParams({after})}`:"";
@@ -21,6 +22,7 @@ export function CompensationRunDetail({locale,runId,after}:{locale:AppLocale;run
       <section className="compensation-summary" aria-labelledby="compensation-purpose"><div><StatusBadge tone={run.state==="DRAFT"?"warning":"neutral"}>{t(`states.${run.state}`)}</StatusBadge><h2 id="compensation-purpose" dir="auto" data-testid="compensation-purpose">{run.purpose}</h2><p>{t("draftGuidance")}</p></div>
         <dl><div><dt>{t("expected")}</dt><dd className="compensation-total" data-testid="compensation-total">{formatCurrencyAmount(locale,run.total.amount,run.total.currency)}</dd></div><div><dt>{t("workCount")}</dt><dd>{new Intl.NumberFormat(locale).format(run.lineCount)}</dd></div><div><dt>{t("period")}</dt><dd>{formatDate(locale,new Date(run.fromOn+"T12:00:00Z"),{timeZone:"UTC"})} {t("through")} {formatDate(locale,new Date(run.toOn+"T12:00:00Z"),{timeZone:"UTC"})}<small>{t("recordedTimezone",{timezone:run.timezone})}</small></dd></div></dl>
       </section>
+      <CompensationCostNavigation locale={locale} runId={runId}/>
       <section aria-labelledby="compensation-sources"><h2 id="compensation-sources">{t("sources")}</h2><p>{t("sourceGuidance")}</p><ol className="compensation-source-list" start={after?undefined:1}>{run.lines.map(line=>{
         const label=labels.get(line.id);if(!label)return null;
         return <li className="compensation-source" key={line.id} data-testid="compensation-source"><div className="compensation-source-heading"><div><h3>{label.sourceTitle?localizedText(label.sourceTitle,locale):t("completedWork")}</h3><p dir="auto" data-testid="compensation-property">{label.propertyName??t("restrictedProperty")}</p></div><strong className="compensation-numeric">{formatCurrencyAmount(locale,line.amount.amount,line.amount.currency)}</strong></div>
