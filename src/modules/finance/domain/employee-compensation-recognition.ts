@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { employeeCompensationSourceIdentity } from "./employee-compensation-source-identity";
 import { Money } from "@/platform/money/money";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { employeeCompensationClaimCosts,employeeCompensationSubmissionViewSchema } from "./employee-compensation-claim";
@@ -7,16 +8,16 @@ import { readSubmittedCostAllocation,sameSubmittedCostPolicy } from "./submitted
 export { employeeCompensationRecognitionInput,employeeCompensationRecognitionRequestViewSchema } from "./employee-compensation-recognition-command";
 
 const money=z.object({amount:z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u),currency:z.string().regex(/^[A-Z]{3}$/u)});
-const frozenCost=z.object({runLineId:z.uuid(),personId:z.uuid(),propertyId:z.uuid(),reservationId:z.uuid().nullable(),taskId:z.uuid(),completionEventId:z.uuid(),
+const frozenCost=z.object({runLineId:z.uuid(),personId:z.uuid(),propertyId:z.uuid().nullable(),reservationId:z.uuid().nullable(),taskId:z.uuid().nullable(),completionEventId:z.uuid().nullable(),earningKind:z.enum(["PER_JOB","PER_MONTH"]).optional(),assignmentId:z.uuid().optional(),earningPeriodKey:z.string().optional(),
   recordedCompletionAt:z.iso.datetime({offset:true}),costOn:z.iso.date(),timezone:z.string().min(1),category:z.string(),costCenter:z.string().nullable(),note:z.string(),amount:money,policy:z.unknown()});
 const frozenSource=z.object({schemaVersion:z.literal(1),kind:z.literal("EMPLOYEE_COMPENSATION_COSTS"),runId:z.uuid(),costOn:z.iso.date(),total:employeeCompensationSubmissionViewSchema.shape.total,costs:z.array(frozenCost).min(1).max(10000)});
-const policySchema=z.object({schemaVersion:z.literal(1),sourceKind:z.literal("employee_compensation_run_line"),runId:z.uuid(),runLineId:z.uuid(),completionEventId:z.uuid(),personId:z.uuid(),
-  recordedCompletionAt:z.iso.datetime({offset:true}),propertyId:z.uuid(),reservationId:z.uuid().nullable(),occurredOn:z.iso.date(),timezone:z.string(),category:z.string(),amount:money}).passthrough();
+const policySchema=z.object({schemaVersion:z.literal(1),sourceKind:z.literal("employee_compensation_run_line"),runId:z.uuid(),runLineId:z.uuid(),completionEventId:z.uuid().nullable(),personId:z.uuid(),earningKind:z.enum(["PER_JOB","PER_MONTH"]).optional(),assignmentId:z.uuid().optional(),earningPeriodKey:z.string().optional(),
+  recordedCompletionAt:z.iso.datetime({offset:true}),propertyId:z.uuid().nullable(),reservationId:z.uuid().nullable(),occurredOn:z.iso.date(),timezone:z.string(),category:z.string(),amount:money}).passthrough();
 
 export type EmployeeCompensationRecognitionSource={organizationId:string;id:string;runId:string;costOn:string;currency:string;emergency:boolean;
   claims:ReadonlyArray<{id:string;organizationId:string;submissionId:string;personId:string}>;
-  runLines:ReadonlyArray<{id:string;personId:string;propertyId:string;taskId:string;completionEventId:string;recordedCompletionAt:string;amount:string;currency:string}>;
-  costs:ReadonlyArray<{id:string;organizationId:string;submissionId:string;claimId:string;runLineId:string;completionEventId:string;propertyId:string;reservationId:string|null;amount:string;currency:string;category:string;costCenter:string|null;note:string;timezone:string;policySnapshot:unknown}>};
+  runLines:ReadonlyArray<{id:string;personId:string;propertyId:string|null;taskId:string|null;completionEventId:string|null;earningKind?:string;assignmentId?:string;earningPeriodKey?:string|null;recordedCompletionAt:string;amount:string;currency:string}>;
+  costs:ReadonlyArray<{id:string;organizationId:string;submissionId:string;claimId:string;runLineId:string;completionEventId:string|null;propertyId:string|null;reservationId:string|null;amount:string;currency:string;category:string;costCenter:string|null;note:string;timezone:string;policySnapshot:unknown}>};
 export class EmployeeCompensationRecognitionSourceError extends Error{}
 
 /** Every claim binds its original performer and approved costs; current rules never reprice recognition. */
@@ -31,6 +32,7 @@ export function employeeCompensationRecognitionCosts(source:EmployeeCompensation
   const starts=new Map<string,Date>();let amount=Money.zero(source.currency);
   const costs=frozen.costs.flatMap(line=>{
     const cost=actual.get(line.runLineId),runLine=original.get(line.runLineId),policy=policySchema.parse(line.policy);if(!cost||!runLine)denied();
+    const identity=employeeCompensationSourceIdentity(runLine);if((line.earningKind??"PER_JOB")!==identity.kind||(policy.earningKind??"PER_JOB")!==identity.kind||identity.kind==="PER_MONTH"&&(line.assignmentId!==identity.assignmentId||line.earningPeriodKey!==identity.month||policy.assignmentId!==identity.assignmentId||policy.earningPeriodKey!==identity.month))denied();
     const beneficiary=claims.get(cost.claimId),value=Money.of(cost.amount,cost.currency);
     if(cost.organizationId!==source.organizationId||cost.submissionId!==source.id||!beneficiary||beneficiary.personId!==runLine.personId||line.personId!==runLine.personId||line.taskId!==runLine.taskId||line.propertyId!==runLine.propertyId||line.completionEventId!==runLine.completionEventId||
       line.recordedCompletionAt!==runLine.recordedCompletionAt||line.costOn!==source.costOn||line.timezone!==cost.timezone||line.category!==cost.category||line.costCenter!==cost.costCenter||line.note!==cost.note||
@@ -40,7 +42,7 @@ export function employeeCompensationRecognitionCosts(source:EmployeeCompensation
       !sameSubmittedCostPolicy(cost.policySnapshot,line.policy))denied();
     const retained=readSubmittedCostAllocation({organizationId:source.organizationId,propertyId:cost.propertyId,reservationId:cost.reservationId,amount:value},line.policy,denied);
     if(cost.claimId!==claimId)return[];amount=amount.add(value);let instant=starts.get(cost.timezone);if(!instant){instant=calendarDateStart(source.costOn,cost.timezone);starts.set(cost.timezone,instant);}
-    return[{id:cost.id,runLineId:runLine.id,completionEventId:runLine.completionEventId,personId:beneficiary.personId,propertyId:cost.propertyId,reservationId:cost.reservationId,category:cost.category,costCenter:cost.costCenter,
+    return[{...identity.kind==="PER_MONTH"?{earningKind:"PER_MONTH" as const,assignmentId:identity.assignmentId,earningPeriodKey:identity.month,taskId:runLine.taskId}:{},id:cost.id,runLineId:runLine.id,completionEventId:runLine.completionEventId,personId:beneficiary.personId,propertyId:cost.propertyId,reservationId:cost.reservationId,category:cost.category,costCenter:cost.costCenter,
       note:cost.note,amount:value,...retained,timezone:cost.timezone,sourceOccurredAt:new Date(instant.getTime())}];
   });
   if(!costs.length||!amount.amount.gt(0))denied();return{claimId,personId:claim.personId,amount,costs};

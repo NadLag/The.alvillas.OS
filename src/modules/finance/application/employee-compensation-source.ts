@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Resource } from "@/platform/authz/authorize";
 import type { ResolvedConfigRule } from "@/platform/config/config-rule-repository";
 import { Money } from "@/platform/money/money";
 import type { EmployeeCompensationRepository } from "../infrastructure/employee-compensation-repository";
@@ -51,4 +52,10 @@ export function validateEmployeeCompletedWorkSource(task: CompletedWorkSource, s
     item.completedByPersonId !== evidence.completed_by_person_id || item.completedByUserAccountId !== evidence.completed_by_user_account_id))
     throw new EmployeeCompensationSourceUnavailableError();
   return { evidence, event };
+}
+
+/** Estimate and earned-source preparation share the actual canonical assignment geography and rate. */
+export function employeeCompensationContractResource(organizationId:string,source:CompensationSource,earnedAt:Date,taskId?:string):Resource{
+  const{assignment,rate,property,job,city,region}=source;if(!rate)throw new EmployeeCompensationAccessError();
+  return{type:"staff_compensation",id:assignment.personId,organizationId,dataClass:"financial",assignedPersonId:assignment.personId,amount:rate.amount.toFixed(2),occurredAt:earnedAt,propertyId:property?.id,region:region?.id??city?.regionId??property?.regionId,city:city?.id??property?.cityId,jobId:taskId??(assignment.scopeType==="job"?assignment.scopeId:undefined),reservationId:job?.reservationId};
 }

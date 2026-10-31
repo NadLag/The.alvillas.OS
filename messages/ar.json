@@ -3009,7 +3009,7 @@
     "title": "كشوف التعويضات",
     "description": "راجع الأعمال المكتملة والمبالغ التعاقدية والأدلة الأصلية لكل كشف محفوظ.",
     "detailTitle": "كشف التعويضات",
-    "detailDescription": "سجل قابل للتتبع للتعويض المتوقع عن الأعمال المكتملة.",
+    "detailDescription": "سجل قابل للتتبع للتعويض التعاقدي المتوقع.",
     "backWorkspace": "العودة إلى مساحة العمل",
     "backRuns": "جميع كشوف التعويضات",
     "search": "البحث في الغرض",
@@ -3096,7 +3096,33 @@
     "configuration_unavailable": "تحقق من تواريخ الاستحقاق وفق التقويم والحد الأقصى المحددين. يلزم تقويم تعويضات سارٍ وعقود مؤهلة.",
     "chooseContract": "اختيار عقد",
     "chosenContract": "تم الاختيار · {amount}",
-    "contractChoices": "خيارات العقود السارية"
+    "contractChoices": "خيارات العقود السارية",
+    "monthlyWork": "مستحقات العقد الشهرية",
+    "contractMonth": "شهر العقد",
+    "companyCost": "مصروف شركة ALVILLAS",
+    "monthlyRate": "{amount} / شهر",
+    "earnedThrough": "الفترة المستحقة حتى",
+    "monthlyEvidence": "إثبات الاستحقاق الشهري",
+    "monthlyCoverage": "تغطية الشهر",
+    "monthlyDays": "{eligible} يومًا تقويميًا كاملًا من أصل {total}",
+    "monthlyRateChoice": "اختيار سعر العقد",
+    "monthlyRateChoices": {
+      "AT_FIRST_ELIGIBLE_DAY": "سعر العقد في أول يوم مستحق",
+      "DAILY_EFFECTIVE": "سعر العقد الساري في كل يوم"
+    },
+    "monthlyProration": "قاعدة التغطية المضبوطة",
+    "monthlyProrations": {
+      "FULL_CALENDAR_MONTH_ONLY": "يشترط شهر تقويمي كامل",
+      "COMPLETE_ELIGIBLE_CALENDAR_DAYS": "التناسب حسب الأيام التقويمية المستحقة الكاملة"
+    },
+    "monthlyAppliedRates": "الأسعار المطبقة",
+    "monthlyRateDays": "{days} أيام مستحقة · إصدار العقد {version}",
+    "monthlyRounding": "يُقرّب المبلغ مرة واحدة عند حساب الإجمالي الشهري.",
+    "monthlySourceGuidance": "يحتفظ كل بند بالتكليف الأصلي وأسعار العقد اليومية وتغطية الشهر المستحق وفق القاعدة المضبوطة.",
+    "monthlyContractCount": "العقود",
+    "monthlySources": "أدلة مستحقات العقد الشهرية",
+    "monthlyTimezone": "تقويم العقد · {timezone}",
+    "beneficiary": "المستفيد"
   },
   "EmployeeCostNotices": {
     "eyebrow": "المالية · إشعار المالك",

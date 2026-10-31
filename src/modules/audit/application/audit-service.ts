@@ -88,7 +88,7 @@ export function presentAuditHistoryRow(
   if (row.resourceType === "employee_compensation_run"||row.resourceType==="employee_compensation_submission"||row.resourceType==="employee_compensation_claim") {
     const now = new Date();
     const allowed = Boolean(financialResource?.type === "employee_payable" && (row.resourceType!=="employee_compensation_run"?financialResource.sourceRecordId===row.resourceId:financialResource.id === row.resourceId) &&
-      financialResource.organizationId === ctx.organizationId && financialResource.salarySources?.length &&
+      financialResource.organizationId === ctx.organizationId && financialResource.salarySources?.length && (!financialResource.companyFinancialSources||financialResource.companyFinancialSources.every(source=>source.organizationId===ctx.organizationId&&source.type==="financial_transaction"&&authorizeOrganizationSource(ctx.authContext,"view",source,now)))&&
       (row.resourceType==="employee_compensation_run"||Boolean(financialResource.financialSources?.length&&financialResource.financialSources.every(source=>source.organizationId===ctx.organizationId&&source.type==="financial_transaction"&&authorize(ctx.authContext,"view",source,now))))&&
       authorize(ctx.authContext,action,financialResource,now) && financialResource.salarySources.every(source =>
         source.type === "staff_compensation" && source.organizationId === ctx.organizationId && authorize(ctx.authContext,"view",source,now)));
@@ -117,6 +117,7 @@ export function presentAuditHistoryRow(
       { type: "financial_transaction", organizationId: ctx.organizationId, dataClass: "financial" as const } : financialResource;
     const allowed = Boolean(financialResource && financialResource.type === expectedType &&
       (!requiresSourceId || financialResource.id === row.resourceId) && permissionResource && authorize(ctx.authContext, action, permissionResource) &&
+        (!financialResource.companyFinancialSources||financialResource.companyFinancialSources.every(source=>source.organizationId===ctx.organizationId&&source.type==="financial_transaction"&&authorizeOrganizationSource(ctx.authContext,"view",source,new Date())))&&
         (!financialResource.walletSources||financialResource.walletSources.every(source=>source.type==="wallet"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source)))&&
         (!financialResource.salarySources||Boolean(financialResource.compensationRoot?.type==="employee_payable"&&financialResource.compensationRoot.organizationId===ctx.organizationId&&authorize(ctx.authContext,action,financialResource.compensationRoot)&&
         financialResource.salarySources.length&&financialResource.salarySources.every(source=>source.type==="staff_compensation"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source))&&

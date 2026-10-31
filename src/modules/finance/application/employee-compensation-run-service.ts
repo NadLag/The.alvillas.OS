@@ -27,10 +27,10 @@ export function employeeCompensationRunModel(ctx: FinanceActorContext, row: Comp
   if (after && !row.lines.some(line => line.id === after)) throw new EmployeeCompensationRunAccessError();
   const facts = employeeCompensationRunFacts(ctx.organizationId, row), remaining = row.lines.filter(line => !after || line.id > after);
   const page = remaining.slice(0,50);
-  const data = { id: row.id, kind: "COMPLETED_WORK_DRAFT" as const, state: row.cancellation ? "CANCELLED" as const : "DRAFT" as const,
+  const data = { id: row.id, kind: row.earningKind==="PER_MONTH"?"MONTHLY_CONTRACT_DRAFT" as const:"COMPLETED_WORK_DRAFT" as const, state: row.cancellation ? "CANCELLED" as const : "DRAFT" as const,
     purpose: row.purpose, fromOn: row.fromOn.toISOString().slice(0,10), toOn: row.toOn.toISOString().slice(0,10), timezone: row.timezone,
     currency: row.currency, createdAt: row.createdAt.toISOString(), total: facts.total.toJSON(), lineCount: row.lines.length,
-    lines: page.map(line => ({ id: line.id, taskId: line.taskId, personId: line.personId, propertyId: line.propertyId, assignmentId: line.assignmentId,
+    lines: page.map(line => ({ ...line.earningKind==="PER_MONTH"?{earningKind:"PER_MONTH" as const,earningPeriodKey:line.earningPeriodKey!}:{},id: line.id, taskId: line.taskId, personId: line.personId, propertyId: line.propertyId, assignmentId: line.assignmentId,
       completionEventId: line.completionEventId, recordedCompletionAt: line.recordedCompletionAt.toISOString(),
       rate: Money.of(line.rate.toString(), line.currency).toJSON(), amount: Money.of(line.amount.toString(), line.currency).toJSON() })),
     nextCursor: remaining.length>50 ? page.at(-1)!.id : null,
@@ -69,7 +69,7 @@ export async function createEmployeeCompensationRun(ctx: FinanceActorContext, ra
       if (!source?.rate || source.assignment.personId!==task.completedByPersonId || source.rate.currency!==input.currency) throw new EmployeeCompensationRunAccessError();
       return {job,task,source,rate:source.rate};
     });
-    const provisional: Pick<CompensationRunRecord,"id"|"currency"|"createdAt"|"lines"> = {id:"",currency:input.currency,createdAt:now,
+    const provisional: Parameters<typeof employeeCompensationRunFacts>[1] = {id:"",currency:input.currency,createdAt:now,
       lines:records.map(({job,task,source,rate})=>({id:task.id,taskId:task.id,personId:source.assignment.personId,propertyId:task.propertyId,
         assignmentId:job.assignmentId,compensationId:rate.id,configRuleId:rate.configRuleId,completionEventId:task.events[0]?.id??task.id,
         recordedCompletionAt:task.completedAt!,rate:rate.amount,amount:rate.amount,currency:input.currency,property:task.property}))};
@@ -105,21 +105,27 @@ export async function createEmployeeCompensationRun(ctx: FinanceActorContext, ra
       if(stable(currentPolicy)!==stable(rule)) throw new EmployeeCompensationRunPolicyError();
       await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),facts,"create");
     };
-    await recheck();
-    const created = await repository.create({createdBy:ctx.actorId,idempotencyKey:input.idempotencyKey,requestFingerprint:fingerprint,
+    return persistEmployeeCompensationRun(ctx,tx,{createdBy:ctx.actorId,idempotencyKey:input.idempotencyKey,requestFingerprint:fingerprint,
       fromOn:new Date(input.fromOn+"T00:00:00.000Z"),toOn:new Date(input.toOn+"T00:00:00.000Z"),timezone:window.policy.timezone,currency:input.currency,
-      purpose:input.purpose,reason:input.reason,policyRuleId:rule.id,policySnapshot:json({schemaVersion:1,policyRuleId:rule.id,policyVersion:rule.version,value:rule.value})});
-    const result=await repository.createLines(created.id,lines);
+      purpose:input.purpose,reason:input.reason,policyRuleId:rule.id,policySnapshot:json({schemaVersion:1,policyRuleId:rule.id,policyVersion:rule.version,value:rule.value})},lines,facts.total,recheck,deps);
+  },{timeout:120000});
+}
+
+/** One attributed immutable writer serves every independently validated earning source. */
+export async function persistEmployeeCompensationRun(ctx:FinanceActorContext,tx:TenantTransaction,header:Parameters<EmployeeCompensationRunRepository["create"]>[0],lines:Parameters<EmployeeCompensationRunRepository["createLines"]>[1],total:Money,recheck:()=>Promise<void>,deps:Deps={},retainSources?:(runId:string)=>Promise<void>){
+ const repository=new EmployeeCompensationRunRepository(tx,ctx.organizationId),finance=new FinanceRepository(tx,ctx.organizationId);await recheck();const created=await repository.create(header);
+
+  const result=await repository.createLines(created.id,lines);
     if(result.count!==lines.length) throw new EmployeeCompensationRunConflictError();
+    if(retainSources)await retainSources(created.id);
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation_run.created",resourceType:"employee_compensation_run",
-      resourceId:created.id,after:{runId:created.id,kind:"COMPLETED_WORK_DRAFT",lineCount:lines.length,total:facts.total.toJSON()},
-      reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await finance.clock()});
+      resourceId:created.id,after:{runId:created.id,kind:header.earningKind==="PER_MONTH"?"MONTHLY_CONTRACT_DRAFT":"COMPLETED_WORK_DRAFT",lineCount:lines.length,total:total.toJSON()},
+      reason:header.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await finance.clock()});
     await new OutboxRepository(tx,ctx.organizationId).append("EmployeeCompensationRunCreated",{runId:created.id},`employee-compensation-run:${created.id}:created`,await finance.clock());
     await repository.flushGuards();await recheck();
     const row=await repository.find(created.id);if(!row)throw new EmployeeCompensationRunConflictError();
     await checkStoredRun(ctx,tx,row,"create");
     return {...employeeCompensationRunModel(ctx,row),idempotent:false};
-  },{timeout:120000});
 }
 
 export const employeeCompensationRunReadInput=z.object({id:z.uuid(),after:z.uuid().optional()}).strict();
@@ -127,7 +133,7 @@ export async function readEmployeeCompensationRunInTransaction(ctx: FinanceActor
     const repository=new EmployeeCompensationRunRepository(tx,ctx.organizationId),row=await repository.find(input.id);
     if(!row)throw new EmployeeCompensationRunAccessError();await checkStoredRun(ctx,tx,row);
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation_run.viewed",resourceType:"employee_compensation_run",
-      resourceId:row.id,after:{runId:row.id,kind:"COMPLETED_WORK_DRAFT"},reason:"Viewed an authorized compensation run",requestId:deps.requestId??crypto.randomUUID(),occurredAt:await new FinanceRepository(tx,ctx.organizationId).clock()});
+      resourceId:row.id,after:{runId:row.id,kind:row.earningKind==="PER_MONTH"?"MONTHLY_CONTRACT_DRAFT":"COMPLETED_WORK_DRAFT"},reason:"Viewed an authorized compensation run",requestId:deps.requestId??crypto.randomUUID(),occurredAt:await new FinanceRepository(tx,ctx.organizationId).clock()});
     const current=await repository.find(row.id);if(!current||stable(current)!==stable(row))throw new EmployeeCompensationRunAccessError();
     await checkStoredRun(ctx,tx,current);return {model:employeeCompensationRunModel(ctx,current,input.after),record:current};
 }

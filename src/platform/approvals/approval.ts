@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { Resource } from "@/platform/authz/authorize";
+import { authorize,type Action,type AuthContext,type Resource } from "@/platform/authz/authorize";
+import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { employeeCompensationCostResource } from "@/modules/finance/domain/employee-compensation-cost-resource";
 
@@ -12,11 +13,15 @@ export const approvalDecisionSchema = z.object({
 }).strict();
 export class ApprovalAccessError extends Error {}
 export class ApprovalConflictError extends Error {}
+/** Company employee costs have no narrower property source; routing, reads and decisions share this authority. */
+export function authorizeApprovalResource(ctx:AuthContext,action:Action,resource:Resource,now:Date=new Date()){
+  return(resource.type==="expense"&&resource.propertyId===null?authorizeOrganizationSource:authorize)(ctx,action,resource,now);
+}
 export const invoiceApprovalSourceSnapshotSchema = z.object({ lineId: z.uuid(), note: z.string().trim().min(6).max(1000), category: z.string(),
   occurredOn: z.iso.date(), timezone: z.string().min(1), createdBy: z.uuid() }).strict();
 export type InvoiceApprovalStageSource = { invoiceLineId: string | null; propertyId: string | null; reservationId: string | null; ownerId: string | null;
   amount: { toString(): string }; currency: string; sourceSnapshot: unknown; property?: { cityId: string | null; regionId: string | null } | null;
-  employeeCostId?:string|null;employeeCost?:{id:string;submissionId:string;propertyId:string;reservationId:string|null;category:string;note:string;timezone:string;currency:string}|null };
+  employeeCostId?:string|null;employeeCost?:{id:string;submissionId:string;propertyId:string|null;reservationId:string|null;category:string;note:string;timezone:string;currency:string}|null };
 type ApprovalSource = { id: string; organizationId: string; propertyId: string | null; state: string;
   property: { regionId: string | null; cityId: string | null; timezone?: string } | null; expenseId?: string | null;
   invoiceSubmissionId?: string | null; invoiceSubmission?: { id: string; invoice: { id: string; state: string; currentSubmissionId: string | null } } | null;

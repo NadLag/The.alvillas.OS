@@ -6,3 +6,7 @@ prisma/migrations/20261031080000_employee_claim_posting_admission/migration.sql 
 prisma/migrations/20261031090000_employee_compensation_settlements/migration.sql text eol=lf
 prisma/migrations/20261031100000_employee_settlement_canonical_receipts/migration.sql text eol=lf
 prisma/migrations/20261031110000_employee_own_wallet_offset_mode/migration.sql text eol=lf
+
+prisma/migrations/20261031120000_employee_monthly_contract_sources/migration.sql text eol=lf
+
+prisma/migrations/20261031130000_employee_contract_witness_policy_name/migration.sql text eol=lf

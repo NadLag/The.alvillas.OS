@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { authorize, type AuthContext, type Resource } from "@/platform/authz/authorize";
+import { authorizeApprovalResource } from "@/platform/approvals/approval";
 
 export const notificationEventType = "notification.requested";
 export class NotificationAudienceUnavailableError extends Error{}
@@ -59,7 +60,7 @@ export function notificationDestination(
       assignments: [{ scope: self, permissions }] };
     return authorize(selfContext, "configure", target) ? `/${locale}/app${input.kind === "security_session_revoked" ? "/security" : ""}` : null;
   }
-  if (!authorize(ctx, "view", target)) return null;
+  if (!(input.kind==="approval_requested"||input.kind==="approval_decided"?authorizeApprovalResource:authorize)(ctx, "view", target)) return null;
   if (input.kind === "expense_emergency") return target.type === "expense" ? `/${locale}/app/expenses/${target.id}` : null;
   if (input.kind === "supplier_invoice_emergency") return target.type === "supplier_invoice" ? `/${locale}/app/finance/supplier-invoice-notices/${input.targetId}` : null;
   if(input.kind==="employee_cost_emergency")return target.type==="expense"?`/${locale}/app/finance/employee-cost-notices/${input.targetId}`:null;

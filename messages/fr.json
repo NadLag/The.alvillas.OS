@@ -3009,7 +3009,7 @@
     "title": "Décomptes de rémunération",
     "description": "Consultez les travaux terminés, les montants contractuels et les justificatifs d’origine de chaque décompte enregistré.",
     "detailTitle": "Décompte de rémunération",
-    "detailDescription": "Un historique traçable de la rémunération attendue pour les travaux terminés.",
+    "detailDescription": "Un suivi traçable de la rémunération contractuelle attendue.",
     "backWorkspace": "Retour à l’espace de travail",
     "backRuns": "Tous les décomptes",
     "search": "Rechercher un objet",
@@ -3096,7 +3096,33 @@
     "configuration_unavailable": "Vérifiez les dates selon le calendrier configuré et la durée maximale. Un calendrier de rémunération actuel et des contrats applicables sont nécessaires.",
     "chooseContract": "Choisir un contrat",
     "chosenContract": "Sélectionné · {amount}",
-    "contractChoices": "Choix des contrats applicables"
+    "contractChoices": "Choix des contrats applicables",
+    "monthlyWork": "Rémunération contractuelle mensuelle",
+    "contractMonth": "Mois du contrat",
+    "companyCost": "Charge de l’entreprise ALVILLAS",
+    "monthlyRate": "{amount} / mois",
+    "earnedThrough": "Période acquise jusqu’au",
+    "monthlyEvidence": "Justificatifs du salaire mensuel",
+    "monthlyCoverage": "Couverture du calendrier",
+    "monthlyDays": "{eligible} jours calendaires complets sur {total}",
+    "monthlyRateChoice": "Sélection du tarif contractuel",
+    "monthlyRateChoices": {
+      "AT_FIRST_ELIGIBLE_DAY": "Tarif du contrat au premier jour admissible",
+      "DAILY_EFFECTIVE": "Tarif contractuel applicable à chaque jour"
+    },
+    "monthlyProration": "Règle de couverture configurée",
+    "monthlyProrations": {
+      "FULL_CALENDAR_MONTH_ONLY": "Mois calendaire complet requis",
+      "COMPLETE_ELIGIBLE_CALENDAR_DAYS": "Prorata des jours calendaires admissibles complets"
+    },
+    "monthlyAppliedRates": "Tarifs appliqués",
+    "monthlyRateDays": "{days} jours admissibles · version du contrat {version}",
+    "monthlyRounding": "Le montant est arrondi une seule fois sur le total mensuel.",
+    "monthlySourceGuidance": "Chaque ligne conserve l’affectation d’origine, les tarifs contractuels journaliers et la couverture calendaire configurée du mois acquis.",
+    "monthlyContractCount": "Contrats",
+    "monthlySources": "Justificatifs de rémunération contractuelle mensuelle",
+    "monthlyTimezone": "Calendrier du contrat · {timezone}",
+    "beneficiary": "Bénéficiaire"
   },
   "EmployeeCostNotices": {
     "eyebrow": "Finance · Avis au propriétaire",

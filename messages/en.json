@@ -3009,7 +3009,7 @@
     "title": "Compensation runs",
     "description": "Review completed work, contractual amounts and the original evidence behind each saved run.",
     "detailTitle": "Compensation run",
-    "detailDescription": "A traceable record of expected compensation for completed work.",
+    "detailDescription": "A traceable record of expected contractual compensation.",
     "backWorkspace": "Back to workspace",
     "backRuns": "All compensation runs",
     "search": "Search purpose",
@@ -3096,7 +3096,33 @@
     "configuration_unavailable": "Check the earning dates against the configured calendar and maximum period. A current compensation calendar and eligible contracts are required.",
     "chooseContract": "Choose a contract",
     "chosenContract": "Selected · {amount}",
-    "contractChoices": "Applicable contract choices"
+    "contractChoices": "Applicable contract choices",
+    "monthlyWork": "Monthly contract earnings",
+    "contractMonth": "Contract month",
+    "companyCost": "ALVILLAS company cost",
+    "monthlyRate": "{amount} / month",
+    "earnedThrough": "Period earned through",
+    "monthlyEvidence": "Monthly earning evidence",
+    "monthlyCoverage": "Calendar coverage",
+    "monthlyDays": "{eligible} of {total} complete calendar days",
+    "monthlyRateChoice": "Contract rate selection",
+    "monthlyRateChoices": {
+      "AT_FIRST_ELIGIBLE_DAY": "First eligible day's contract rate",
+      "DAILY_EFFECTIVE": "Contract rate effective on each day"
+    },
+    "monthlyProration": "Configured coverage rule",
+    "monthlyProrations": {
+      "FULL_CALENDAR_MONTH_ONLY": "Complete calendar month required",
+      "COMPLETE_ELIGIBLE_CALENDAR_DAYS": "Prorate complete eligible calendar days"
+    },
+    "monthlyAppliedRates": "Rates applied",
+    "monthlyRateDays": "{days} eligible days · contract version {version}",
+    "monthlyRounding": "Amounts are rounded once at the monthly total.",
+    "monthlySourceGuidance": "Each line retains the original assignment, daily contractual rates and configured calendar coverage for the earned month.",
+    "monthlyContractCount": "Contracts",
+    "monthlySources": "Monthly contractual earning evidence",
+    "monthlyTimezone": "Contract calendar · {timezone}",
+    "beneficiary": "Beneficiary"
   },
   "EmployeeCostNotices": {
     "eyebrow": "Finance · Owner notice",

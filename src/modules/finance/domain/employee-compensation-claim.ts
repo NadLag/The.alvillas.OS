@@ -14,7 +14,7 @@ export const employeeCompensationSubmissionRequestViewSchema=z.object({requestId
 const moneyView=z.object({amount:z.string().regex(/^(?:0|[1-9]\d*)\.\d{2}$/u),currency:z.string().regex(/^[A-Z]{3}$/u)}).strict();
 export const employeeCompensationSubmissionViewSchema=z.object({id,runId:id,state:z.enum(["PENDING_APPROVAL","APPROVED","REJECTED","WITHDRAWN"]),purpose:z.string(),costOn:z.iso.date(),
   createdAt:z.iso.datetime(),total:moneyView,costCount:z.number().int().positive(),claimCount:z.number().int().positive(),approvalId:id.nullable(),canWithdraw:z.boolean(),
-  costs:z.array(z.object({id,claimId:id,personId:id,runLineId:id,propertyId:id,reservationId:id.nullable(),completionEventId:id,amount:moneyView,
+  costs:z.array(z.object({id,claimId:id,personId:id,runLineId:id,propertyId:id.nullable(),reservationId:id.nullable(),completionEventId:id.nullable(),amount:moneyView,
     category:z.string(),costCenter:z.string().nullable(),note:z.string(),allocation:z.object({owner:moneyView,alvillas:moneyView,guest:moneyView}).strict()}).strict()).max(50),
   nextCursor:id.nullable(),history:z.array(z.object({action:z.enum(["SUBMITTED","APPROVED","REJECTED","WITHDRAWN"]),at:z.iso.datetime(),reason:z.string()}).strict()).min(1).max(3)
 }).strict();
