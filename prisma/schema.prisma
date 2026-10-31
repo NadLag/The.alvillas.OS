@@ -71,6 +71,8 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  hourlyEarningWitnesses EmployeeCompensationHourlyWitness[]
+
   workTimeEvidence EmployeeWorkTimeEvidence[]
   workTimeIntervals EmployeeWorkTimeInterval[]
   workTimeDecisions EmployeeWorkTimeDecision[]
@@ -268,6 +270,8 @@ model OrganizationProfile {
 }
 
 model TeamCompensation {
+  hourlyEarningWitnesses EmployeeCompensationHourlyWitness[]
+
   monthlyWitnesses EmployeeCompensationContractWitness[]
   runLines EmployeeCompensationRunLine[]
   currencyRef    Currency       @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction, map: "team_compensation_currency_fkey")
@@ -1595,6 +1599,8 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  hourlyEarningWitnesses EmployeeCompensationHourlyWitness[] @relation("EmployeeHourlyWitnessRule")
+
   workTimeEvidence EmployeeWorkTimeEvidence[]
   employeeMonthlyRunRequests EmployeeMonthlyRunRequest[]
   monthlyWitnesses EmployeeCompensationContractWitness[] @relation("EmployeeMonthlyWitnessRule")
@@ -2774,6 +2780,12 @@ model EmployeeCompensationRun {
 }
 
 model EmployeeCompensationRunLine {
+  hourlyWitnesses EmployeeCompensationHourlyWitness[]
+  workTimeEvidenceId String? @map("work_time_evidence_id") @db.Uuid
+  workTimeDecisionId String? @map("work_time_decision_id") @db.Uuid
+  workTimeEvidence EmployeeWorkTimeEvidence? @relation("EmployeeHourlyEvidence",fields:[organizationId,workTimeEvidenceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_hourly_line_evidence_fk")
+  workTimeDecision EmployeeWorkTimeDecision? @relation("EmployeeHourlyDecision",fields:[organizationId,workTimeDecisionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_hourly_line_decision_fk")
+
   contractWitnesses EmployeeCompensationContractWitness[]
   earningKind String @default("PER_JOB") @map("earning_kind") @db.VarChar(24)
   earningPeriodKey String? @map("earning_period_key") @db.VarChar(120)
@@ -3115,6 +3127,9 @@ model EmployeeCompensationContractWitness {
 
 
 model EmployeeWorkTimeEvidence {
+  hourlyRunLines EmployeeCompensationRunLine[] @relation("EmployeeHourlyEvidence")
+  @@index([organizationId,taskId,version(sort:Desc)],map:"employee_work_time_latest_task_idx")
+
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   taskId String @map("task_id") @db.Uuid
@@ -3154,6 +3169,8 @@ model EmployeeWorkTimeEvidence {
 }
 
 model EmployeeWorkTimeInterval {
+  hourlyEarningWitnesses EmployeeCompensationHourlyWitness[]
+
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   evidenceId String @map("evidence_id") @db.Uuid
@@ -3170,6 +3187,8 @@ model EmployeeWorkTimeInterval {
 }
 
 model EmployeeWorkTimeDecision {
+  hourlyRunLines EmployeeCompensationRunLine[] @relation("EmployeeHourlyDecision")
+
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   evidenceId String @map("evidence_id") @db.Uuid
@@ -3188,4 +3207,27 @@ model EmployeeWorkTimeDecision {
   @@unique([organizationId,evidenceId],map:"employee_work_time_decision_once_unique")
   @@unique([organizationId,idempotencyKey],map:"employee_work_time_decision_nonce_unique")
   @@map("employee_work_time_decision")
+}
+
+model EmployeeCompensationHourlyWitness {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  runLineId String @map("run_line_id") @db.Uuid
+  intervalId String @map("interval_id") @db.Uuid
+  compensationId String @map("compensation_id") @db.Uuid
+  configRuleId String @map("config_rule_id") @db.Uuid
+  position Int
+  startsAt DateTime @map("starts_at") @db.Timestamptz(3)
+  endsAt DateTime @map("ends_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  runLine EmployeeCompensationRunLine @relation(fields:[organizationId,runLineId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_hourly_witness_line_fk")
+  interval EmployeeWorkTimeInterval @relation(fields:[organizationId,intervalId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_hourly_witness_interval_fk")
+  compensation TeamCompensation @relation(fields:[organizationId,compensationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_hourly_witness_contract_fk")
+  configRule ConfigRule @relation("EmployeeHourlyWitnessRule",fields:[organizationId,configRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_hourly_witness_rule_fk")
+  @@unique([organizationId,id],map:"employee_hourly_witness_org_id_unique")
+  @@unique([organizationId,runLineId,position],map:"employee_hourly_witness_position_unique")
+  @@unique([organizationId,runLineId,intervalId,startsAt],map:"employee_hourly_witness_interval_start_unique")
+  @@index([organizationId,intervalId],map:"employee_hourly_witness_interval_idx")
+  @@map("employee_compensation_hourly_witness")
 }

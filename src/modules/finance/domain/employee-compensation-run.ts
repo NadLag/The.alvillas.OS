@@ -25,10 +25,10 @@ export class EmployeeCompensationRunPolicyError extends Error {}
 
 const runMoney = z.object({ amount: z.string().max(128).regex(/^(?:0|[1-9]\d*)\.\d{2}$/u), currency: z.string().regex(/^[A-Z]{3}$/u) }).strict();
 export const employeeCompensationRunViewSchema = z.object({
-  id, kind: z.enum(["COMPLETED_WORK_DRAFT","MONTHLY_CONTRACT_DRAFT"]), state: z.enum(["DRAFT","CANCELLED"]), purpose: z.string(),
+  id, kind: z.enum(["COMPLETED_WORK_DRAFT","MONTHLY_CONTRACT_DRAFT","HOURLY_WORK_DRAFT"]), state: z.enum(["DRAFT","CANCELLED"]), purpose: z.string(),
   fromOn: z.iso.date(), toOn: z.iso.date(), timezone: z.string(), currency: z.string().regex(/^[A-Z]{3}$/u), createdAt: z.iso.datetime(),
   total: runMoney, lineCount: z.number().int().positive(),
-  lines: z.array(z.object({ id, taskId: id.nullable(), personId: id, propertyId: id.nullable(), assignmentId: id, completionEventId: id.nullable(),earningKind:z.literal("PER_MONTH").optional(),earningPeriodKey:z.string().optional(),
+  lines: z.array(z.object({ id, taskId: id.nullable(), personId: id, propertyId: id.nullable(), assignmentId: id, completionEventId: id.nullable(),earningKind:z.enum(["PER_MONTH","PER_HOUR"]).optional(),earningPeriodKey:z.string().optional(),
     recordedCompletionAt: z.iso.datetime(), rate: runMoney, amount: runMoney }).strict()).max(50),
   nextCursor: id.nullable(), history: z.array(z.object({ action: z.enum(["CREATED","CANCELLED"]), at: z.iso.datetime(), reason: z.string() }).strict()).min(1).max(2)
 }).strict();

@@ -49,10 +49,11 @@ export class EmployeeCompensationRepository {
       select: { ...assignmentFields, teamCompensations: { where: { organizationId: this.organizationId,
         effectiveFrom: { lte: new Date(entries.reduce((last, entry) => Math.max(last, entry.earnedAt.getTime()), -Infinity)) } }, orderBy: { version: "desc" }, select: rateFields } } });
     const scopeIds = (scope: string) => [...new Set(assignments.filter(assignment => assignment.scopeType === scope && assignment.scopeId).map(assignment => assignment.scopeId!))];
+    const jobIds=scopeIds("job"),cityIds=scopeIds("city"),regionIds=scopeIds("region");
     const [jobs, cities, regions] = await Promise.all([
-      this.tx.operationTask.findMany({ where: { organizationId: this.organizationId, id: { in: scopeIds("job") } }, select: { id: true, propertyId: true, reservationId: true } }),
-      this.tx.city.findMany({ where: { organizationId: this.organizationId, id: { in: scopeIds("city") } }, select: { id: true, regionId: true } }),
-      this.tx.region.findMany({ where: { organizationId: this.organizationId, id: { in: scopeIds("region") } }, select: { id: true } })
+      jobIds.length?this.tx.operationTask.findMany({ where: { organizationId: this.organizationId, id: { in: jobIds } }, select: { id: true, propertyId: true, reservationId: true } }):[],
+      cityIds.length?this.tx.city.findMany({ where: { organizationId: this.organizationId, id: { in: cityIds } }, select: { id: true, regionId: true } }):[],
+      regionIds.length?this.tx.region.findMany({ where: { organizationId: this.organizationId, id: { in: regionIds } }, select: { id: true } }):[]
     ]);
     const properties = await this.tx.property.findMany({ where: { organizationId: this.organizationId,
       id: { in: [...new Set([...scopeIds("property"), ...jobs.map(job => job.propertyId)])] } }, select: propertyFields });

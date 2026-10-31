@@ -11,7 +11,7 @@ export async function employeeCompensationCostSources(organizationId:string,crea
  const companyTimezone=sources.some(source=>!source.propertyId)?(await new CompanyLedgerRepository(tx,organizationId).settings()).timezone:null,starts=new Map<string,Date>();
  return sources.map(source=>{
   const identity=employeeCompensationSourceIdentity(source),reservationId=source.task?.reservationId??null,timezone=source.property?.timezone??companyTimezone;
-  if(!timezone||source.propertyId&&!source.property||identity.kind==="PER_JOB"&&(!source.task||!source.completionEvent)||!source.propertyId&&reservationId)throw new EmployeeCompensationClaimSourceError();
+  if(!timezone||source.propertyId&&!source.property||identity.kind!=="PER_MONTH"&&(!source.task||!source.completionEvent)||!source.propertyId&&reservationId)throw new EmployeeCompensationClaimSourceError();
   let at=source.recordedCompletionAt;if(costOn){at=starts.get(timezone)??calendarDateStart(costOn,timezone);starts.set(timezone,at);}
   return{source,identity,reservationId,timezone,at,organizationOnly:!source.propertyId,...employeeCompensationFinancialSourceFacts(organizationId,createdBy,{...source,reservationId},at)};
  });

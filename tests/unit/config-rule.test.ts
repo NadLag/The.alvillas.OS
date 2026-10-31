@@ -80,6 +80,7 @@ describe("config rule registry", () => {
       "services.pricing",
       "staff.compensation",
       "staff.compensation_hourly_earnings",
+      "staff.compensation_hourly_runs",
       "staff.compensation_monthly_earnings",
       "staff.compensation_percentage_earnings",
       "staff.compensation_runs",

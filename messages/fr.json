@@ -3157,7 +3157,21 @@
     "monthlyContractCount": "Contrats",
     "monthlySources": "Justificatifs de rémunération contractuelle mensuelle",
     "monthlyTimezone": "Calendrier du contrat · {timezone}",
-    "beneficiary": "Bénéficiaire"
+    "beneficiary": "Bénéficiaire",
+    "perHour": "{amount} / heure",
+    "hourlyEvidence": "Travail horaire réel validé",
+    "hourlyActualDuration": "Durée réelle rémunérée",
+    "hourlyDuration": "{hours} h {minutes} min {seconds} s",
+    "hourlyValidation": "Validation initiale du temps de travail",
+    "hourlyEvidenceVersion": "Version validée des justificatifs : {version}",
+    "hourlyUTC": "Les horaires des intervalles et de validation sont affichés en UTC.",
+    "hourlyAppliedRates": "Taux horaires effectifs d’origine",
+    "hourlyContractVersion": "Version du contrat : {version}",
+    "hourlyRatesNavigation": "Tranches de taux horaires",
+    "hourlyPreviousRates": "Tranches précédentes",
+    "hourlyNextRates": "Tranches suivantes",
+    "hourlyRatePage": "Tranches {from}–{to} sur {total}",
+    "hourlyRounding": "Toutes les contributions des intervalles et des taux d’origine sont additionnées avant un seul arrondi du total gagné pour le travail terminé."
   },
   "EmployeeCostNotices": {
     "eyebrow": "Finance · Avis au propriétaire",
