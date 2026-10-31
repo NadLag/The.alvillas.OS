@@ -71,6 +71,8 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  employeeMonthlyRunRequests EmployeeMonthlyRunRequest[]
+  employeeMonthlyRunOutcomes EmployeeMonthlyRunOutcome[]
   employeeContractWitnesses EmployeeCompensationContractWitness[]
   employeeRecognitions EmployeeCompensationRecognition[]
   employeeRecognitionLines EmployeeCompensationRecognitionLine[]
@@ -380,6 +382,7 @@ model Person {
 }
 
 model UserAccount {
+  employeeMonthlyRunRequests EmployeeMonthlyRunRequest[] @relation("EmployeeMonthlyRunRequester")
   employeeRecognitions EmployeeCompensationRecognition[] @relation("EmployeeRecognitionCreator")
   employeeRecognitionRequests EmployeeCompensationRecognitionRequest[] @relation("EmployeeRecognitionRequester")
   employeeSubmissionRequests EmployeeCompensationSubmissionRequest[] @relation("EmployeeSubmissionRequester")
@@ -1581,6 +1584,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  employeeMonthlyRunRequests EmployeeMonthlyRunRequest[]
   monthlyWitnesses EmployeeCompensationContractWitness[] @relation("EmployeeMonthlyWitnessRule")
   employeeRunPolicies EmployeeCompensationRun[] @relation("EmployeeRunPolicy")
   employeeRunRates EmployeeCompensationRunLine[] @relation("EmployeeRunRate")
@@ -2726,6 +2730,7 @@ model SupplierInvoiceRecognitionOutcome {
 }
 
 model EmployeeCompensationRun {
+  monthlyRequestOutcome EmployeeMonthlyRunOutcome?
   earningKind String @default("PER_JOB") @map("earning_kind") @db.VarChar(24)
   submissionRequests EmployeeCompensationSubmissionRequest[]
   submissions        EmployeeCompensationSubmission[]
@@ -2916,6 +2921,45 @@ model EmployeeCompensationWithdrawal {
   @@map("employee_compensation_withdrawal")
 }
 
+
+model EmployeeMonthlyRunRequest {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  requestedBy String @map("requested_by") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  reviewedSourceFingerprint String @map("reviewed_source_fingerprint") @db.Char(64)
+  policyRuleId String @map("policy_rule_id") @db.Uuid
+  input Json
+  review Json
+  authorizationCap Json @map("authorization_cap")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  requester UserAccount @relation("EmployeeMonthlyRunRequester",fields:[organizationId,requestedBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_monthly_request_actor_fk")
+  policy ConfigRule @relation(fields:[organizationId,policyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_monthly_request_policy_fk")
+  outcome EmployeeMonthlyRunOutcome?
+  @@unique([organizationId,id])
+  @@unique([organizationId,idempotencyKey],map:"employee_monthly_request_nonce_unique")
+  @@index([organizationId,requestedBy,id],map:"employee_monthly_request_actor_idx")
+  @@map("employee_monthly_run_request")
+}
+
+model EmployeeMonthlyRunOutcome {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  requestId String @map("request_id") @db.Uuid
+  runId String? @map("run_id") @db.Uuid
+  state String @db.VarChar(16)
+  failureCode String? @map("failure_code") @db.VarChar(80)
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  request EmployeeMonthlyRunRequest @relation(fields:[organizationId,requestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  run EmployeeCompensationRun? @relation(fields:[organizationId,runId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id])
+  @@unique([organizationId,requestId],map:"employee_monthly_outcome_request_unique")
+  @@unique([organizationId,runId],map:"employee_monthly_outcome_source_unique")
+  @@map("employee_monthly_run_outcome")
+}
 
 model EmployeeCompensationSubmissionRequest {
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid

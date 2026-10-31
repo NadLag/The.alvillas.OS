@@ -8,6 +8,7 @@ import { employeeCompletedWorkEvidence } from "../domain/employee-completed-work
 
 export type CompensationSource = NonNullable<Awaited<ReturnType<EmployeeCompensationRepository["source"]>>>;
 export type CompletedWorkSource = NonNullable<Awaited<ReturnType<EmployeeCompensationRepository["completedWork"]>>>;
+const compensationRateValueSchema=z.object({mode:z.enum(["PER_JOB","PER_MONTH","PER_HOUR","PERCENTAGE"]),amount:z.string(),currency:z.string()});
 
 export function validateEmployeeCompensationAssignment(source: CompensationSource, earnedAt: Date) {
   const { assignment, rate, property, job, city, region } = source;
@@ -22,7 +23,7 @@ export function validateEmployeeCompensationAssignment(source: CompensationSourc
 export function validateEmployeeCompensationRate(source: CompensationSource, rule: ResolvedConfigRule | null) {
   const { assignment, rate } = source;
   if (!rate) throw new EmployeeCompensationAccessError();
-  const value = z.object({ mode: z.enum(["PER_JOB", "PER_MONTH", "PER_HOUR", "PERCENTAGE"]), amount: z.string(), currency: z.string() }).safeParse(rule?.parsedValue);
+  const value = compensationRateValueSchema.safeParse(rule?.parsedValue);
   if (!rule || !value.success || rule.id !== rate.configRuleId || rule.scopeType !== "role_assignment" || rule.scopeId !== assignment.id ||
     value.data.mode !== rate.mode || value.data.currency !== rate.currency || !Money.of(value.data.amount, rate.currency).equals(Money.of(rate.amount.toString(), rate.currency)) ||
     rule.effectiveFrom.getTime() !== rate.effectiveFrom.getTime()) throw new EmployeeCompensationSourceUnavailableError();
