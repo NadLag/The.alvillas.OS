@@ -1,4 +1,5 @@
 import { describe,expect,it } from "vitest";
+import fc from "fast-check";
 import { Money } from "@/platform/money/money";
 import { employeePercentageEarnedAmount,type EmployeePercentageBase } from "@/modules/finance/domain/employee-percentage-earnings";
 const policy={evidence:"IMMUTABLE_POSTED_FINANCIAL_BASES",base_buckets:["ALVILLAS_COMMISSION"],base_side:"CREDIT",rate_selection:"AT_ACTUAL_BASE_INSTANT",rounding:"HALF_UP_AT_EARNING_TOTAL"};
@@ -6,6 +7,7 @@ const money=(value:string,currency="MAD")=>Money.of(value,currency);
 function base(amount="500.25",rate="5.00",postingId="actual-posting"):EmployeePercentageBase{return{postingId,transactionId:"actual-transaction",bucket:"ALVILLAS_COMMISSION",side:"CREDIT",amount:money(amount),rate:money(rate)};}
 const calculate=(rows:EmployeePercentageBase[],rules:unknown=policy)=>employeePercentageEarnedAmount(rules,"MAD",rows);
 describe("original posted-base percentage calculation",()=>{
+  it("preserves earned Money when an actual base is split into independently retained postings",()=>{fc.assert(fc.property(fc.integer({min:1,max:100000000}),fc.integer({min:1,max:100000000}),fc.integer({min:0,max:10000}),(first,second,bps)=>{const text=(cents:number)=>(BigInt(cents)/100n).toString()+"."+(BigInt(cents)%100n).toString().padStart(2,"0"),rate=text(bps),whole=calculate([base(text(first+second),rate,"whole")]),parts=calculate([base(text(first),rate,"first"),base(text(second),rate,"second")]);expect(parts.amount.equals(whole.amount)).toBe(true);expect(parts.baseAmount.equals(whole.baseAmount)).toBe(true);}),{numRuns:250});});
   it("calculates the configured original percentage exactly",()=>{const result=calculate([base()]);expect(result.amount.toJSON()).toEqual({amount:"25.01",currency:"MAD"});expect(result.baseAmount.toJSON().amount).toBe("500.25");});
   it("rounds half-cent contributions once at the complete earning total",()=>{expect(calculate([base("0.01","50.00","first"),base("0.01","50.00","second")]).amount.toJSON().amount).toBe("0.01");});
   it("retains each base's independently effective percentage",()=>{expect(calculate([base(),base("100.00","10.00","second")]).amount.toJSON().amount).toBe("35.01");});

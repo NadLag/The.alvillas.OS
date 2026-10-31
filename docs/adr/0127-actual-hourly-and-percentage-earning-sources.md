@@ -8,4 +8,8 @@ Both calculations use the shared Money implementation, exact integer weighting a
 
 Evidence, decisions and earning witnesses are tenant-bound and append-only. Corrections must link their original sources and use the existing cancellation or opposite-journal boundaries; existing earnings and financial rows are never rewritten. New database guards must be rollback-qualified before migration admission, and held/current source authority is rechecked before releasing data or committing a command.
 
+Work-time recording uses operational task edit authority, and validation uses task validate authority. Shared task-resource facts, command fingerprints and PostgreSQL transaction locks keep the operational and financial source readers consistent without cross-module repository imports. Recording work does not grant financial visibility. Each version retains its actual policy, source event, intervals and atomic audit/outbox attribution; a later policy controls new versions while validation and exact replay retain their original policy.
+
+Applied SQL remains immutable. Tenant policies are also declared explicitly in a forward migration so the existing static isolation gate can verify the same FORCE RLS policies exercised by the NOBYPASS behavioral checks. Policy replacement is transactional and preserves existing business values and row versions.
+
 Scope unchanged: all 355 features remain required.

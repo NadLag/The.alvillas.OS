@@ -5,6 +5,8 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import type { AuditEvent } from "@/platform/audit/audit-event";
+import { taskResource } from "@/platform/authz/task-resource";
+export { taskResource } from "@/platform/authz/task-resource";
 import { OperationRepository } from "../infrastructure/operation-repository";
 import {
   taskStates,
@@ -42,21 +44,6 @@ export type OperationDeps = {
 export type OperationTask = NonNullable<
   Awaited<ReturnType<OperationRepository["task"]>>
 >;
-export function taskResource(task: OperationTask): Resource {
-  return {
-    type: "task",
-    organizationId: task.organizationId,
-    id: task.id,
-    taskId: task.id,
-    jobId: task.id,
-    propertyId: task.propertyId,
-    status: task.state,
-    assignedUserAccountId: task.assignedToUserAccountId,
-    assignedPersonId: task.assignedToPersonId,
-    city: task.property.cityId ?? task.property.city,
-    region: task.property.regionId ?? task.property.region,
-  };
-}
 export function operationAllowed(
   ctx: ReservationActorContext,
   action: Action,

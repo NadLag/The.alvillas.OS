@@ -6,10 +6,10 @@ const assignmentFields = { id: true, personId: true, roleId: true, scopeType: tr
 const rateFields = { id: true, configRuleId: true, version: true, mode: true, amount: true, currency: true, effectiveFrom: true } as const;
 const propertyFields = { id: true, cityId: true, regionId: true } as const;
 const completedWorkFields = (organizationId: string) => ({
-  id: true, propertyId: true, requiredRoleKey: true, version: true, state: true, completedAt: true, completedByPersonId: true,
+  id: true, organizationId:true,archivedAt:true,assignedToUserAccountId:true,assignedToPersonId:true,propertyId: true, requiredRoleKey: true, version: true, state: true, completedAt: true, completedByPersonId: true,
   completedByUserAccountId: true, completionSource: true, completionIdempotencyKey: true,
   validatedByPersonId: true, validatedByUserAccountId: true, validatedAt: true, validationReason: true,
-  property: { select: propertyFields },
+  property: { select: {...propertyFields,city:true,region:true} },
   checklistItems: { orderBy: { sortOrder: "asc" }, select: { id: true, completedAt: true, completedByPersonId: true, completedByUserAccountId: true } },
   events: { where: { organizationId, kind: "CHANGED", after: { path: ["state"], equals: "COMPLETED" },
     NOT: { before: { path: ["state"], equals: "COMPLETED" } } }, orderBy: { version: "asc" }, take: 2,
