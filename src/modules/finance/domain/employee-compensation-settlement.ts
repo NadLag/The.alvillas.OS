@@ -7,4 +7,5 @@ export const employeeCompensationSettlementVoidInput=z.object({id,claimId:id,pay
 export const employeeCompensationSettlementRecoveryInput=z.object({id,claimId:id,key:id}).strict();
 export const employeeCompensationSettlementReceiptSchema=z.object({id:z.uuid(),claimId:z.uuid(),paymentId:z.uuid(),kind:employeeCompensationSettlementInput.shape.kind,idempotent:z.boolean()}).strict();
 export const employeeCompensationSettlementVoidReceiptSchema=z.object({id:z.uuid(),claimId:z.uuid(),paymentId:z.uuid(),reversalTransactionId:z.uuid(),idempotent:z.boolean()}).strict();
+export const employeeCompensationSettlementFormInput=employeeCompensationSettlementInput.extend({paidLocal:z.string().trim().min(1).max(32),occurrence:z.enum(["reject","earlier","later"]).default("reject"),calendarRuleId:id,calendarRuleVersion:z.number().int().positive()}).strict();
 export const employeeCompensationSettlementAuditSchema=z.object({input:employeeCompensationSettlementInput,recognitionId:z.uuid(),transactionId:z.uuid(),sourcePeriodId:z.uuid().nullable(),sourcePeriodEventId:z.uuid().nullable(),postedAt:z.iso.datetime()}).strict();
