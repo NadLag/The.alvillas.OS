@@ -286,6 +286,14 @@ export class FinanceRepository {
     };
   }
 
+  async paymentAccountChoicePage(input:{after?:string;query?:string;ids?:string[];expense?:boolean;take:number}) {
+    return this.tx.ledgerAccount.findMany({where:{organizationId:this.organizationId,accountType:input.expense?{in:["ASSET_LOCATION","ASSET","STAFF_WALLET"]}:"ASSET_LOCATION",normalSide:"DEBIT",archivedAt:null,
+      ...(input.after?{id:{gt:input.after}}:{}),...(input.ids?{id:{in:input.ids}}:{}),
+      ...(input.query?{OR:[{name:{contains:input.query,mode:"insensitive" as const}},{code:{contains:input.query,mode:"insensitive" as const}},.../^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.query)?[{id:input.query}]:[]]}:{})},
+      orderBy:{id:"asc"},take:input.take,select:{id:true,name:true,code:true,accountType:true,normalSide:true,archivedAt:true,
+        teamWallet:{select:{id:true,personId:true,person:{select:{archivedAt:true}}}}}});
+  }
+
   async listRevenuePostingAccounts(): Promise<Array<{ id: string; name: string; code: string }>> {
     return this.tx.ledgerAccount.findMany({
       where: {
