@@ -1,3 +1,4 @@
+import { selectPaymentAccount } from "./support/payment-account-picker";
 import { randomInt,randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect,test } from "@playwright/test";
@@ -56,7 +57,7 @@ for(const locale of ["en","fr","ar"] as const)test(`Native advances, approved ex
     const denied=await page.request.post(request.url(),{data:request.postDataBuffer()!,headers});expect(await denied.text()).toContain('"code":"forbidden"');expect((await page.request.get(`/${locale}/app/finance/transfers`)).status()).toBe(404);
     const expenses:string[]=[];
     for(const [amount,category] of [["850","groceries"],["200","supplies"]] as const){
-      await admin.goto(`/${locale}/app/properties/${propertyId}/expenses/new?fundingAccountId=${link.ledgerAccountId}`);const draft=admin.getByTestId("expense-draft-form");await draft.getByTestId("expense-amount").fill(amount);await draft.getByTestId("expense-category").fill(category);await draft.getByTestId("expense-purpose").fill(`Native wallet ${category} ${suffix}`);await draft.getByTestId("expense-funding-account").selectOption(link.ledgerAccountId);await draft.getByTestId("expense-reason").fill("Dedicated native wallet expense entry");await draft.getByTestId("expense-create").click();
+      await admin.goto(`/${locale}/app/properties/${propertyId}/expenses/new?fundingAccountId=${link.ledgerAccountId}`);const draft=admin.getByTestId("expense-draft-form");await draft.getByTestId("expense-amount").fill(amount);await draft.getByTestId("expense-category").fill(category);await draft.getByTestId("expense-purpose").fill(`Native wallet ${category} ${suffix}`);await selectPaymentAccount(draft,"expense-funding-account",link.ledgerAccountId);await draft.getByTestId("expense-reason").fill("Dedicated native wallet expense entry");await draft.getByTestId("expense-create").click();
       await expect(admin.getByTestId("expense-detail-page")).toBeVisible();const id=new URL(admin.url()).pathname.split("/").at(-1)!;expenses.push(id);
       await admin.getByTestId("expense-submit-reason").fill("Dedicated configured wallet approval");await admin.getByTestId("expense-submit").click();await expect(admin.getByTestId("expense-post-form")).toBeVisible();
       await admin.getByTestId("expense-post-reason").fill("Dedicated approved native wallet payment");await admin.getByTestId("expense-post").click();await expect(admin.getByTestId("expense-void-form")).toBeVisible();

@@ -1,3 +1,4 @@
+import { selectPaymentAccount } from "./support/payment-account-picker";
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import AxeBuilder from "@axe-core/playwright";
@@ -56,7 +57,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`ALVILLAS company ledger 
     await expect(page.getByTestId("expense-draft-form")).toBeVisible();
     await page.getByTestId("expense-amount").fill(locale === "en" ? "500.25" : "500,25");
     await page.getByTestId("expense-category").fill("cleaning"); await page.getByTestId("expense-purpose").fill("Private employee compensation details");
-    await page.getByTestId("expense-funding-account").selectOption(f.bank.id); await page.getByTestId("expense-occurred-on").fill(f.sourceOn);
+    await selectPaymentAccount(page,"expense-funding-account",f.bank.id); await page.getByTestId("expense-occurred-on").fill(f.sourceOn);
     await page.getByTestId("expense-reason").fill("Dedicated configured company expense"); await page.getByTestId("expense-create").click();
     await expect(page.getByTestId("expense-detail-page")).toBeVisible();
     const expenseUrl = page.url(), expenseId = new URL(expenseUrl).pathname.split("/").at(-1)!;

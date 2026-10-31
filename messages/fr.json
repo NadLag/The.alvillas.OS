@@ -3474,5 +3474,25 @@
       "POLICY_UNAVAILABLE": "Les règles sont indisponibles. Vérifiez la configuration avant de commencer une nouvelle demande.",
       "EXECUTION_UNAVAILABLE": "La création n’a pas pu aboutir. La demande est clôturée ; commencez une nouvelle vérification."
     }
+  },
+  "PaymentAccounts": {
+    "searchLabel": "Rechercher un compte de paiement",
+    "search": "Rechercher",
+    "choose": "Choisir un compte",
+    "loading": "Chargement des comptes autorisés…",
+    "offline": "Reconnectez-vous pour choisir un compte.",
+    "forbidden": "Vous n’avez plus accès à ces comptes.",
+    "unavailable": "Impossible de charger les comptes. Réessayez.",
+    "empty": "Aucun compte correspondant sur cette page.",
+    "next": "Comptes suivants",
+    "refresh": "Actualiser"
+  },
+  "AccountSearch": {
+    "label": "Rechercher un compte par nom, e-mail ou téléphone",
+    "search": "Rechercher les comptes",
+    "loading": "Chargement des comptes…",
+    "unavailable": "Impossible de charger les comptes. Relancez la recherche.",
+    "empty": "Aucun compte correspondant.",
+    "next": "Comptes suivants"
   }
 }

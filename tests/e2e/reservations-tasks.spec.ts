@@ -1,3 +1,4 @@
+import { selectPaymentAccount } from "./support/payment-account-picker";
 import { expect, test } from "@playwright/test";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { setPropertyCity } from "./support/property-form";
@@ -163,7 +164,7 @@ test.describe("manual reservation to operations tasks journey", () => {
     const reservationRow = page.getByTestId("reservation-row").filter({ hasText: guestName });
     await expect(reservationRow).toBeVisible();
     await reservationRow.getByTestId("reservation-revenue-amount").fill("8000.00");
-    await reservationRow.getByTestId("reservation-revenue-account").selectOption({
+    await selectPaymentAccount(reservationRow,"reservation-revenue-account",{
       label: financeSetup.bankName
     });
     await reservationRow.getByTestId("reservation-revenue-submit").click();
@@ -250,7 +251,7 @@ test.describe("manual reservation to operations tasks journey", () => {
     await page.goto("/en/app/reservations");
     const reservationRow = page.getByTestId("reservation-row").filter({ hasText: guestName });
     await expect(reservationRow).toBeVisible();
-    await page.getByTestId("airbnb-settlement-account").selectOption({
+    await selectPaymentAccount(page,"airbnb-settlement-account",{
       label: financeSetup.bankName
     });
     await page.getByTestId("airbnb-settlement-csv").fill(

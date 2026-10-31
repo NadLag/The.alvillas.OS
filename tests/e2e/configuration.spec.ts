@@ -1,3 +1,4 @@
+import { selectPaymentAccount } from "./support/payment-account-picker";
 import { expect, test, type Page } from "@playwright/test";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { setPropertyCity } from "./support/property-form";
@@ -195,7 +196,7 @@ test.describe("configuration engine journey", () => {
     await page.goto("/en/app/reservations");
     const reservationRow = page.getByTestId("reservation-row").filter({ hasText: guestName });
     await reservationRow.getByTestId("reservation-revenue-amount").fill("1000.00");
-    await reservationRow.getByTestId("reservation-revenue-account").selectOption({
+    await selectPaymentAccount(reservationRow,"reservation-revenue-account",{
       label: financeSetup.bankName
     });
     await reservationRow.getByTestId("reservation-revenue-submit").click();

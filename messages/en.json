@@ -3474,5 +3474,25 @@
       "POLICY_UNAVAILABLE": "The earning rules are unavailable. Review the configuration before starting a new request.",
       "EXECUTION_UNAVAILABLE": "Creation could not finish. The request is closed; start a new review to try again."
     }
+  },
+  "PaymentAccounts": {
+    "searchLabel": "Find a payment account",
+    "search": "Search",
+    "choose": "Choose an account",
+    "loading": "Loading authorized accounts…",
+    "offline": "Reconnect to choose an account.",
+    "forbidden": "You no longer have access to these accounts.",
+    "unavailable": "Accounts could not be loaded. Try again.",
+    "empty": "No matching accounts on this page.",
+    "next": "Next accounts",
+    "refresh": "Refresh"
+  },
+  "AccountSearch": {
+    "label": "Find an account by name, email or phone",
+    "search": "Search accounts",
+    "loading": "Loading accounts…",
+    "unavailable": "Accounts could not be loaded. Search again.",
+    "empty": "No matching accounts.",
+    "next": "Next accounts"
   }
 }
