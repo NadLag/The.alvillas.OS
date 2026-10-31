@@ -11,6 +11,7 @@ import { employeeCompensationRunFacts,recheckEmployeeCompensationRun } from "./e
 import { employeeCompensationRunModel,persistEmployeeCompensationRun } from "./employee-compensation-run-service";
 import { prepareEmployeeHourlyRunSources } from "./employee-hourly-run-source";
 import type { FinanceActorContext } from "./finance-access";
+import { requireCompensationCreationIntent } from "./employee-compensation-creation-intent";
 const json=(value:unknown)=>JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
 
 /** Retain approved actual intervals and every original effective contract in the shared immutable writer. */
@@ -20,6 +21,7 @@ export async function createEmployeeHourlyCompensationRun(ctx:FinanceActorContex
   const runs=new EmployeeCompensationRunRepository(tx,ctx.organizationId),finance=new FinanceRepository(tx,ctx.organizationId);await runs.lockKey(input.idempotencyKey);
   const existing=await runs.byKey(input.idempotencyKey);
   if(existing){await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),employeeCompensationRunFacts(ctx.organizationId,existing),"create");if(deps.expectedSourceFingerprint||existing.earningKind!=="PER_HOUR"||existing.createdBy!==ctx.actorId||existing.requestFingerprint!==fingerprint)throw new EmployeeCompensationRunConflictError();return{...employeeCompensationRunModel(ctx,existing),idempotent:true};}
+  await requireCompensationCreationIntent(tx,ctx.organizationId,input.idempotencyKey,{actorId:ctx.actorId,earningKind:"PER_HOUR",requestFingerprint:fingerprint,expectedSourceFingerprint:deps.expectedSourceFingerprint});
   const source=await prepareEmployeeHourlyRunSources(ctx,{fromOn:input.fromOn,toOn:input.toOn,currency:input.currency,jobs:input.jobs},tx);
   if(deps.expectedSourceFingerprint&&deps.expectedSourceFingerprint!==source.sourceFingerprint)throw new EmployeeCompensationRunConflictError();
   const lines=source.lines.map(line=>({id:crypto.randomUUID(),earningKind:"PER_HOUR",personId:line.personId,assignmentId:line.assignmentId,compensationId:line.compensationId,configRuleId:line.configRuleId,taskId:line.taskId,completionEventId:line.completionEventId,propertyId:line.propertyId,recordedCompletionAt:line.recordedCompletionAt,workTimeEvidenceId:line.evidenceId,workTimeDecisionId:line.decisionId,rate:line.rate.amount,amount:line.amount.amount,currency:input.currency,sourceSnapshot:json(line.sourceSnapshot)}));

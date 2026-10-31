@@ -199,6 +199,10 @@ model Organization {
   inventoryMovements    InventoryMovement[]
 
   @@map("organization")
+  employeeEarningRunRequests EmployeeEarningRunRequest[]
+  employeeEarningRequestWorks EmployeeEarningRequestWork[]
+  employeeEarningRequestHourlyWitnesses EmployeeEarningRequestHourlyWitness[]
+  employeeEarningRunOutcomes EmployeeEarningRunOutcome[]
 }
 
 model Region {
@@ -295,6 +299,8 @@ model TeamCompensation {
   @@unique([organizationId, id], map: "team_compensation_org_id_unique")
   @@index([organizationId, assignmentId, effectiveFrom], map: "team_compensation_org_assignment_effective_idx")
   @@map("team_compensation")
+  employeeEarningRequestWorks EmployeeEarningRequestWork[] @relation("EmployeeEarningWorkCompensation")
+  employeeEarningRequestHourlyWitnesses EmployeeEarningRequestHourlyWitness[] @relation("EmployeeEarningWitnessCompensation")
 }
 
 model TeamAvailability {
@@ -389,6 +395,7 @@ model Person {
   @@index([organizationId, phone], map: "person_org_phone_idx")
   @@index([organizationId, displayName], map: "person_org_display_name_idx")
   @@map("person")
+  employeeEarningRequestWorks EmployeeEarningRequestWork[]
 }
 
 model UserAccount {
@@ -467,6 +474,7 @@ model UserAccount {
   @@index([organizationId, personId], map: "user_account_org_person_idx")
   @@index([organizationId, status], map: "user_account_org_status_idx")
   @@map("user_account")
+  employeeEarningRunRequests EmployeeEarningRunRequest[] @relation("EmployeeEarningRunRequester")
 }
 
 model AuthCredential {
@@ -680,6 +688,7 @@ model RoleAssignment {
   @@index([organizationId, userAccountId, archivedAt], map: "role_assignment_org_account_idx")
   @@index([organizationId, roleId, scopeType, scopeId], map: "role_assignment_org_role_scope_idx")
   @@map("role_assignment")
+  employeeEarningRequestWorks EmployeeEarningRequestWork[]
 }
 
 model Owner {
@@ -1636,6 +1645,9 @@ model ConfigRule {
   @@index([organizationId, key, scopeType, effectiveFrom], map: "config_rule_org_key_scope_effective_idx")
   @@index([organizationId, key, scopeType, lifecycle, effectiveFrom], map: "config_rule_org_key_lifecycle_effective_idx")
   @@map("config_rule")
+  employeeEarningRunRequests EmployeeEarningRunRequest[] @relation("EmployeeEarningRunPolicy")
+  employeeEarningRequestWorks EmployeeEarningRequestWork[] @relation("EmployeeEarningWorkConfig")
+  employeeEarningRequestHourlyWitnesses EmployeeEarningRequestHourlyWitness[] @relation("EmployeeEarningWitnessConfig")
 }
 
 model ReservationConfigSnapshot {
@@ -2777,6 +2789,7 @@ model EmployeeCompensationRun {
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, createdAt, id])
   @@map("employee_compensation_run")
+  earningRunOutcomes EmployeeEarningRunOutcome[]
 }
 
 model EmployeeCompensationRunLine {
@@ -3166,6 +3179,7 @@ model EmployeeWorkTimeEvidence {
   @@index([organizationId,propertyId,submittedAt(sort:Desc),id(sort:Desc)],map:"employee_work_time_property_history_idx")
   @@index([organizationId,performedByPersonId,submittedAt(sort:Desc),id(sort:Desc)],map:"employee_work_time_person_history_idx")
   @@map("employee_work_time_evidence")
+  earningRequestSources EmployeeEarningRequestWork[] @relation("EmployeeEarningWorkEvidence")
 }
 
 model EmployeeWorkTimeInterval {
@@ -3184,6 +3198,7 @@ model EmployeeWorkTimeInterval {
   @@unique([organizationId,evidenceId,position],map:"employee_work_time_interval_position_unique")
   @@index([organizationId,evidenceId,startsAt],map:"employee_work_time_interval_evidence_idx")
   @@map("employee_work_time_interval")
+  earningRequestHourlyWitnesses EmployeeEarningRequestHourlyWitness[]
 }
 
 model EmployeeWorkTimeDecision {
@@ -3207,6 +3222,7 @@ model EmployeeWorkTimeDecision {
   @@unique([organizationId,evidenceId],map:"employee_work_time_decision_once_unique")
   @@unique([organizationId,idempotencyKey],map:"employee_work_time_decision_nonce_unique")
   @@map("employee_work_time_decision")
+  earningRequestSources EmployeeEarningRequestWork[] @relation("EmployeeEarningWorkDecision")
 }
 
 model EmployeeCompensationHourlyWitness {
@@ -3230,4 +3246,104 @@ model EmployeeCompensationHourlyWitness {
   @@unique([organizationId,runLineId,intervalId,startsAt],map:"employee_hourly_witness_interval_start_unique")
   @@index([organizationId,intervalId],map:"employee_hourly_witness_interval_idx")
   @@map("employee_compensation_hourly_witness")
+}
+
+model EmployeeEarningRunRequest {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  requestedBy String @map("requested_by") @db.Uuid
+  earningKind String @map("earning_kind") @db.VarChar(16)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  reviewedSourceFingerprint String @map("reviewed_source_fingerprint") @db.Char(64)
+  policyRuleId String @map("policy_rule_id") @db.Uuid
+  fromOn DateTime @map("from_on") @db.Date
+  toOn DateTime @map("to_on") @db.Date
+  timezone String @db.VarChar(80)
+  currency String @db.VarChar(3)
+  amount Decimal @db.Decimal(128,2)
+  input Json
+  policySnapshot Json @map("policy_snapshot")
+  authorizationCap Json @map("authorization_cap")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  requester UserAccount @relation("EmployeeEarningRunRequester",fields:[organizationId,requestedBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_request_actor_fk")
+  policy ConfigRule @relation("EmployeeEarningRunPolicy",fields:[organizationId,policyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_request_policy_fk")
+  sources EmployeeEarningRequestWork[]
+  outcome EmployeeEarningRunOutcome?
+  @@unique([organizationId,id])
+  @@unique([organizationId,idempotencyKey],map:"employee_earning_request_nonce_unique")
+  @@index([organizationId,requestedBy,id],map:"employee_earning_request_actor_idx")
+  @@map("employee_earning_run_request")
+}
+
+model EmployeeEarningRequestWork {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  requestId String @map("request_id") @db.Uuid
+  personId String @map("person_id") @db.Uuid
+  assignmentId String @map("assignment_id") @db.Uuid
+  compensationId String @map("compensation_id") @db.Uuid
+  configRuleId String @map("config_rule_id") @db.Uuid
+  evidenceId String @map("evidence_id") @db.Uuid
+  decisionId String @map("decision_id") @db.Uuid
+  recordedCompletionAt DateTime @map("recorded_completion_at") @db.Timestamptz(3)
+  currency String @db.VarChar(3)
+  rate Decimal @db.Decimal(18,2)
+  amount Decimal @db.Decimal(18,2)
+  sourceSnapshot Json @map("source_snapshot")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  request EmployeeEarningRunRequest @relation(fields:[organizationId,requestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_work_request_fk")
+  person Person @relation(fields:[organizationId,personId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_work_person_fk")
+  assignment RoleAssignment @relation(fields:[organizationId,assignmentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_work_assignment_fk")
+  compensation TeamCompensation @relation("EmployeeEarningWorkCompensation",fields:[organizationId,compensationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_work_contract_fk")
+  configRule ConfigRule @relation("EmployeeEarningWorkConfig",fields:[organizationId,configRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_work_config_fk")
+  evidence EmployeeWorkTimeEvidence @relation("EmployeeEarningWorkEvidence",fields:[organizationId,evidenceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_work_evidence_fk")
+  decision EmployeeWorkTimeDecision @relation("EmployeeEarningWorkDecision",fields:[organizationId,decisionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_work_decision_fk")
+  witnesses EmployeeEarningRequestHourlyWitness[]
+  @@unique([organizationId,id])
+  @@unique([organizationId,requestId,evidenceId],map:"employee_earning_work_source_unique")
+  @@index([organizationId,assignmentId],map:"employee_earning_work_assignment_idx")
+  @@map("employee_earning_request_work")
+}
+
+model EmployeeEarningRequestHourlyWitness {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  sourceId String @map("source_id") @db.Uuid
+  intervalId String @map("interval_id") @db.Uuid
+  compensationId String @map("compensation_id") @db.Uuid
+  configRuleId String @map("config_rule_id") @db.Uuid
+  position Int
+  startsAt DateTime @map("starts_at") @db.Timestamptz(3)
+  endsAt DateTime @map("ends_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  source EmployeeEarningRequestWork @relation(fields:[organizationId,sourceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_witness_source_fk")
+  interval EmployeeWorkTimeInterval @relation(fields:[organizationId,intervalId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_witness_interval_fk")
+  compensation TeamCompensation @relation("EmployeeEarningWitnessCompensation",fields:[organizationId,compensationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_witness_contract_fk")
+  configRule ConfigRule @relation("EmployeeEarningWitnessConfig",fields:[organizationId,configRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_witness_config_fk")
+  @@unique([organizationId,id])
+  @@unique([organizationId,sourceId,position],map:"employee_earning_witness_position_unique")
+  @@unique([organizationId,sourceId,intervalId,startsAt],map:"employee_earning_witness_interval_unique")
+  @@index([organizationId,intervalId],map:"employee_earning_witness_interval_idx")
+  @@map("employee_earning_request_hourly_witness")
+}
+
+model EmployeeEarningRunOutcome {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  requestId String @map("request_id") @db.Uuid
+  runId String? @map("run_id") @db.Uuid
+  state String @db.VarChar(16)
+  failureCode String? @map("failure_code") @db.VarChar(80)
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  request EmployeeEarningRunRequest @relation(fields:[organizationId,requestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_outcome_request_fk")
+  run EmployeeCompensationRun? @relation(fields:[organizationId,runId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_earning_outcome_run_fk")
+  @@unique([organizationId,id])
+  @@unique([organizationId,requestId],map:"employee_earning_outcome_request_unique")
+  @@unique([organizationId,runId],map:"employee_earning_outcome_run_unique")
+  @@map("employee_earning_run_outcome")
 }

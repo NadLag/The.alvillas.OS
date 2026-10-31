@@ -26,6 +26,29 @@ export class EmployeeCompensationPickerRepository{
       ${input.after?Prisma.sql`AND (completed_at,id)<(${input.after.at}::timestamptz,${input.after.id}::uuid)`:Prisma.empty}
       ORDER BY completed_at DESC,id DESC LIMIT 26`);
   }
+  hourlyWork(input:{startsAt:Date;endsAt:Date;after?:{at:string;id:string}}){
+    return this.tx.$queryRaw<Array<{id:string;at:string;evidenceId:string;decisionId:string;startsAt:Date;endsAt:Date}>>(Prisma.sql`SELECT t.id,
+      to_char(t.completed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at,e.id AS "evidenceId",d.id AS "decisionId",bounds."startsAt",bounds."endsAt"
+      FROM operation_task t
+      JOIN LATERAL(SELECT q.id,q.kind FROM employee_work_time_evidence q WHERE q.organization_id=t.organization_id AND q.task_id=t.id ORDER BY q.version DESC LIMIT 1)e ON e.kind='ACTUAL_INTERVALS'
+      JOIN employee_work_time_decision d ON d.organization_id=t.organization_id AND d.evidence_id=e.id AND d.verdict='APPROVED'
+      JOIN LATERAL(SELECT min(i.starts_at) AS "startsAt",max(i.ends_at) AS "endsAt" FROM employee_work_time_interval i WHERE i.organization_id=t.organization_id AND i.evidence_id=e.id)bounds ON bounds."startsAt" IS NOT NULL
+      WHERE t.organization_id=${this.organizationId}::uuid AND t.state='COMPLETED' AND t.completed_at>=${input.startsAt} AND t.completed_at<${input.endsAt}
+      ${input.after?Prisma.sql`AND (t.completed_at,t.id)<(${input.after.at}::timestamptz,${input.after.id}::uuid)`:Prisma.empty}
+      ORDER BY t.completed_at DESC,t.id DESC LIMIT 26`);
+  }
+  hourlyAssignments(work:readonly {id:string;startsAt:Date;endsAt:Date}[],currency:string){
+    if(!work.length)return Promise.resolve([] as Array<{taskId:string;assignmentId:string}>);
+    return this.tx.$queryRaw<Array<{taskId:string;assignmentId:string}>>(Prisma.sql`SELECT t.id AS "taskId",a.id AS "assignmentId"
+      FROM jsonb_to_recordset(${JSON.stringify(work.map(row=>({taskId:row.id,startsAt:row.startsAt,endsAt:row.endsAt})))}::jsonb) AS selected("taskId" uuid,"startsAt" timestamptz,"endsAt" timestamptz)
+      JOIN operation_task t ON t.organization_id=${this.organizationId}::uuid AND t.id=selected."taskId"
+      JOIN property p ON p.organization_id=t.organization_id AND p.id=t.property_id
+      JOIN role_assignment a ON a.organization_id=t.organization_id AND a.person_id=t.completed_by_person_id AND a.valid_from<selected."endsAt" AND(a.valid_to IS NULL OR a.valid_to>selected."startsAt") AND(a.archived_at IS NULL OR a.archived_at>selected."startsAt")
+      JOIN role r ON r.organization_id=a.organization_id AND r.id=a.role_id AND(t.required_role_key IS NULL OR t.required_role_key=r.key)
+      WHERE(a.scope_type='organization' OR a.scope_type='property' AND a.scope_id=t.property_id OR a.scope_type='job' AND a.scope_id=t.id OR a.scope_type='city' AND a.scope_id=p.city_id OR a.scope_type='region' AND a.scope_id=p.region_id)
+      AND EXISTS(SELECT 1 FROM team_compensation c WHERE c.organization_id=a.organization_id AND c.assignment_id=a.id AND c.mode='PER_HOUR' AND c.currency=${currency} AND c.effective_from<selected."endsAt")
+      ORDER BY t.id,a.id`);
+  }
   assignments(people:readonly string[],startsAt:Date,endsAt:Date){
     return this.tx.roleAssignment.findMany({where:{organizationId:this.organizationId,personId:{in:[...new Set(people)]},validFrom:{lt:endsAt},
       OR:[{validTo:null},{validTo:{gt:startsAt}}]},select:{id:true,personId:true},orderBy:{id:"asc"}});

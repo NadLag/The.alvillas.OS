@@ -18,6 +18,11 @@ export class EmployeeCompensationRunRepository {
   async lockKey(key: string) {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":employee-compensation-run-key:" + key},0))::text`);
   }
+  creationIntentsByKey(key:string){return this.tx.$queryRaw<Array<{earningKind:string;requestedBy:string;requestFingerprint:string;reviewedSourceFingerprint:string;outcomeId:string|null}>>(Prisma.sql`
+    SELECT 'PER_MONTH'::text AS "earningKind",q.requested_by AS "requestedBy",q.request_fingerprint AS "requestFingerprint",q.reviewed_source_fingerprint AS "reviewedSourceFingerprint",o.id AS "outcomeId"
+    FROM employee_monthly_run_request q LEFT JOIN employee_monthly_run_outcome o ON o.organization_id=q.organization_id AND o.request_id=q.id WHERE q.organization_id=${this.organizationId}::uuid AND q.idempotency_key=${key}::uuid
+    UNION ALL
+    SELECT q.earning_kind,q.requested_by,q.request_fingerprint,q.reviewed_source_fingerprint,o.id FROM employee_earning_run_request q LEFT JOIN employee_earning_run_outcome o ON o.organization_id=q.organization_id AND o.request_id=q.id WHERE q.organization_id=${this.organizationId}::uuid AND q.idempotency_key=${key}::uuid`);}
   async lock(id: string) {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":employee-compensation-run:" + id},0))::text`);
   }

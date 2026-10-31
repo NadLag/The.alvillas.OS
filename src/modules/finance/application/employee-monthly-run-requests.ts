@@ -18,6 +18,7 @@ import { createEmployeeMonthlyCompensationRun } from "./employee-monthly-run-ser
 import { retainEmployeeMonthlyRunRequestAccess } from "./employee-monthly-run-request-access";
 import { employeeCompensationRunFacts,recheckEmployeeCompensationRun } from "./employee-compensation-run-access";
 import { recheckFinanceAuthorization,type FinanceActorContext } from "./finance-access";
+import { requireUnusedCompensationCreationIntent } from "./employee-compensation-creation-intent";
 
 export const employeeMonthlyRunRequested="EmployeeMonthlyRunRequested";
 const referenceSchema=z.object({organizationId:z.uuid(),outboxEventId:z.uuid()}).strict(),eventPayload=z.object({requestId:z.uuid()}).strict();
@@ -36,7 +37,7 @@ export async function requestEmployeeMonthlyRun(ctx:FinanceActorContext,raw:unkn
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     const requests=new EmployeeMonthlyRunRequestRepository(tx,ctx.organizationId),runs=new EmployeeCompensationRunRepository(tx,ctx.organizationId);await requests.lockKey(input.idempotencyKey);await runs.lockKey(input.idempotencyKey);
     const existing=await requests.byKey(input.idempotencyKey);if(existing){if(existing.requestedBy!==ctx.actorId||existing.requestFingerprint!==fingerprint||existing.reviewedSourceFingerprint!==reviewFingerprint)throw new EmployeeCompensationRunConflictError();await checkReader(ctx,existing,tx);return view(existing,true);}
-    if(await runs.byKey(input.idempotencyKey))throw new EmployeeCompensationRunConflictError();
+    if(await runs.byKey(input.idempotencyKey))throw new EmployeeCompensationRunConflictError();await requireUnusedCompensationCreationIntent(tx,ctx.organizationId,input.idempotencyKey);
     const source=await prepareEmployeeMonthlyRunSources(ctx,{month:input.month,currency:input.currency,assignments:input.assignments},tx);if(employeeMonthlyRunSourceFingerprint(source)!==reviewFingerprint)throw new EmployeeCompensationRunConflictError();
     const beneficiaries=new Map<string,Money>();for(const line of source.lines)beneficiaries.set(line.personId,(beneficiaries.get(line.personId)??Money.zero(input.currency)).add(Money.of(line.amount.amount,input.currency)));
     const request=await requests.create({requestedBy:ctx.actorId,idempotencyKey:input.idempotencyKey,requestFingerprint:fingerprint,reviewedSourceFingerprint:reviewFingerprint,policyRuleId:source.policy.id,input:json(input),review:json(employeeMonthlyRunRequestReviewSchema.parse({amount:source.amount,beneficiaries:[...beneficiaries].map(([personId,amount])=>({personId,amount:amount.toJSON()})),sources:source.lines.map(line=>({assignmentId:line.assignmentId,personId:line.personId,scopeType:line.sourceSnapshot.days[0].assignment.scopeType,scopeId:line.sourceSnapshot.days[0].assignment.scopeId,days:line.sourceSnapshot.days.map(day=>({on:day.on,compensationId:day.compensation?.id??null}))}))})),authorizationCap:cap});

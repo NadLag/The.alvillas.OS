@@ -12,6 +12,7 @@ export { employeeMonthlyRunCreateInput } from "../domain/employee-monthly-run-re
 import { employeeCompensationRunFacts,recheckEmployeeCompensationRun } from "./employee-compensation-run-access";
 import { employeeCompensationRunModel,persistEmployeeCompensationRun } from "./employee-compensation-run-service";
 import type { FinanceActorContext } from "./finance-access";
+import { requireCompensationCreationIntent } from "./employee-compensation-creation-intent";
 const json=(value:unknown)=>JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
 /** Persist actual completed calendar coverage through the existing immutable run writer and receipts. */
 export async function createEmployeeMonthlyCompensationRun(ctx:FinanceActorContext,raw:unknown,deps:{db?:TenantTransactionRunner;requestId?:string;expectedSourceFingerprint?:string}={}){
@@ -19,6 +20,7 @@ export async function createEmployeeMonthlyCompensationRun(ctx:FinanceActorConte
  return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
   const runs=new EmployeeCompensationRunRepository(tx,ctx.organizationId),finance=new FinanceRepository(tx,ctx.organizationId);await runs.lockKey(input.idempotencyKey);const existing=await runs.byKey(input.idempotencyKey);
   if(existing){await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),employeeCompensationRunFacts(ctx.organizationId,existing),"create");if(deps.expectedSourceFingerprint||existing.earningKind!=="PER_MONTH"||existing.createdBy!==ctx.actorId||existing.requestFingerprint!==fingerprint)throw new EmployeeCompensationRunConflictError();return{...employeeCompensationRunModel(ctx,existing),idempotent:true};}
+  await requireCompensationCreationIntent(tx,ctx.organizationId,input.idempotencyKey,{actorId:ctx.actorId,earningKind:"PER_MONTH",requestFingerprint:fingerprint,expectedSourceFingerprint:deps.expectedSourceFingerprint});
   const source=await prepareEmployeeMonthlyRunSources(ctx,{month:input.month,currency:input.currency,assignments:input.assignments},tx),earnedAt=new Date(source.endsAt.getTime()-1),calendar=new Map(source.calendarPoints.map(point=>[point.on,point.startsAt]));
   if(deps.expectedSourceFingerprint&&employeeMonthlyRunSourceFingerprint(source)!==deps.expectedSourceFingerprint)throw new EmployeeCompensationRunConflictError();
   const lines=source.lines.map(line=>({earningKind:"PER_MONTH",earningPeriodKey:source.month,personId:line.personId,assignmentId:line.assignmentId,compensationId:line.compensationId,configRuleId:line.configRuleId,taskId:line.taskId,completionEventId:null,propertyId:line.propertyId,sourceCityId:line.sourceCityId,sourceRegionId:line.sourceRegionId,recordedCompletionAt:earnedAt,rate:line.rate.amount,amount:line.amount.amount,currency:input.currency,sourceSnapshot:json(line.sourceSnapshot)}));

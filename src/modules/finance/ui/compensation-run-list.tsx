@@ -8,11 +8,11 @@ import { employeeCompensationRunListSchema } from "../domain/employee-compensati
 import { useCompensationRead } from "./use-compensation-read";
 
 export function CompensationRunList({locale,query,state,after}:{locale:AppLocale;query:string;state:string;after?:string}){
-  const t=useTranslations("CompensationRuns"),monthly=useTranslations("MonthlyCompensation"),params=new URLSearchParams({query,state});if(after)params.set("after",after);
+  const t=useTranslations("CompensationRuns"),monthly=useTranslations("MonthlyCompensation"),hourly=useTranslations("HourlyCompensation"),params=new URLSearchParams({query,state});if(after)params.set("after",after);
   const resource=useCompensationRead(`/api/finance/compensation/runs/list?${params}`,employeeCompensationRunListSchema);
   const next=new URLSearchParams({q:query,state});if(resource.data?.next)next.set("after",resource.data.next);
   return <div aria-busy={resource.pending} data-testid="compensation-list">
-    {resource.data?.canCreate?<div className="app-actions"><Link className="primary-button" href={`/${locale}/app/finance/compensation/new`} prefetch={false} data-testid="compensation-new">{t("create")}</Link><Link className="secondary-button" href={`/${locale}/app/finance/compensation/monthly/new`} prefetch={false} data-testid="compensation-new-monthly">{monthly("create")}</Link></div>:null}
+    {resource.data?.canCreate?<div className="app-actions"><Link className="primary-button" href={`/${locale}/app/finance/compensation/new`} prefetch={false} data-testid="compensation-new">{t("create")}</Link><Link className="secondary-button" href={`/${locale}/app/finance/compensation/monthly/new`} prefetch={false} data-testid="compensation-new-monthly">{monthly("create")}</Link><Link className="secondary-button" href={`/${locale}/app/finance/compensation/hourly/new`} prefetch={false} data-testid="compensation-new-hourly">{hourly("create")}</Link></div>:null}
     <form className="compensation-filters" method="get">
       <label className="field"><span>{t("search")}</span><input type="search" name="q" defaultValue={query} maxLength={160} dir="auto" data-testid="compensation-search" /></label>
       <label className="field"><span>{t("state")}</span><select name="state" defaultValue={state} data-testid="compensation-state"><option value="all">{t("allStates")}</option><option value="draft">{t("states.DRAFT")}</option><option value="cancelled">{t("states.CANCELLED")}</option></select></label>

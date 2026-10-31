@@ -19,6 +19,7 @@ import { validateEmployeeCompensationAssignment,validateEmployeeCompletedWorkSou
 import { employeeCompensationSourceLabels } from "./employee-compensation-source-labels";
 import { employeeCompensationEditorSchema,employeeCompensationWorkSchema } from "../domain/employee-compensation-picker";
 import { recheckFinanceAuthorization,type FinanceActorContext } from "./finance-access";
+import { employeeHourlyRunPolicyKey,employeeHourlyRunPolicySchema } from "../domain/employee-hourly-run";
 
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 const filters=z.object({fromOn:z.iso.date(),toOn:z.iso.date(),currency:z.string().regex(/^[A-Z]{3}$/u)});
@@ -28,13 +29,19 @@ const rootResource=(organizationId:string,at:Date,amount="0.00"):Resource=>({typ
 
 /** Policy and currency choices contain no employee rate or earned amount. */
 export async function getEmployeeCompensationRunEditor(ctx:FinanceActorContext,deps:Deps={}){
+  return getEmployeeWorkRunEditor(ctx,"PER_JOB",deps);
+}
+export async function getEmployeeHourlyRunEditor(ctx:FinanceActorContext,deps:Deps={}){
+  return getEmployeeWorkRunEditor(ctx,"PER_HOUR",deps);
+}
+async function getEmployeeWorkRunEditor(ctx:FinanceActorContext,mode:"PER_JOB"|"PER_HOUR",deps:Deps){
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     const finance=new FinanceRepository(tx,ctx.organizationId),now=await finance.clock(),resource=rootResource(ctx.organizationId,now),checks=[{action:"view" as const,resource},{action:"create" as const,resource}];
     await recheckFinanceAuthorization(ctx,tx,now,checks,new EmployeeCompensationRunAccessError());
-    const config=new ConfigRuleRepository(tx,ctx.organizationId),rule=await config.resolve({key:employeeCompensationRunPolicyKey,scopes:[{scopeType:"organization",scopeId:null}],asOf:await finance.clock()});
+    const config=new ConfigRuleRepository(tx,ctx.organizationId),key=mode==="PER_HOUR"?employeeHourlyRunPolicyKey:employeeCompensationRunPolicyKey,rule=await config.resolve({key,scopes:[{scopeType:"organization",scopeId:null}],asOf:await finance.clock()});
     if(!rule||rule.scopeType!=="organization"||rule.scopeId!==null)throw new EmployeeCompensationRunPolicyError();
-    const policy=employeeCompensationRunPolicySchema.parse(rule.parsedValue),choices=await new EmployeeCompensationPickerRepository(tx,ctx.organizationId).editor();
-    const current=await config.resolve({key:employeeCompensationRunPolicyKey,scopes:[{scopeType:"organization",scopeId:null}],asOf:await finance.clock()});
+    const policy=(mode==="PER_HOUR"?employeeHourlyRunPolicySchema:employeeCompensationRunPolicySchema).parse(rule.parsedValue),choices=await new EmployeeCompensationPickerRepository(tx,ctx.organizationId).editor();
+    const current=await config.resolve({key,scopes:[{scopeType:"organization",scopeId:null}],asOf:await finance.clock()});
     if(JSON.stringify(rule)!==JSON.stringify(current))throw new EmployeeCompensationRunPolicyError();
     await recheckFinanceAuthorization(ctx,tx,await finance.clock(),checks,new EmployeeCompensationRunAccessError());
     return employeeCompensationEditorSchema.parse({...choices,date:calendarDateAt(now,policy.timezone),timezone:policy.timezone,maxPeriodDays:policy.max_period_days});
