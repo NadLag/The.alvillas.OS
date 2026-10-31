@@ -1,4 +1,5 @@
 import { prepareEmployeeMonthlyRunSources } from "./employee-monthly-run-source";
+import { prepareEmployeeHourlyRunSources } from "./employee-hourly-run-source";
 import type { FinanceActorContext } from "./finance-access";
 import { EmployeeCompensationRunRepository } from "../infrastructure/employee-compensation-run-repository";
 import { sameSubmittedCostPolicy } from "../domain/submitted-cost-allocation";
@@ -13,6 +14,13 @@ import { validateEmployeeCompensationAssignment,validateEmployeeCompensationRate
 
 /** A saved expectation must still bind the canonical earning terms when it becomes a new claim proposal. */
 export async function retainCurrentEmployeeClaimWork(organizationId:string,run:CompensationRunRecord,tx:TenantTransaction,actor?:FinanceActorContext){
+  if(run.earningKind==="PER_HOUR"){
+   if(!actor)throw new EmployeeCompensationClaimSourceError();
+   const runs=new EmployeeCompensationRunRepository(tx,organizationId),snapshots=await runs.sourceSnapshots(run.id);
+   const current=await prepareEmployeeHourlyRunSources(actor,{fromOn:run.fromOn.toISOString().slice(0,10),toOn:run.toOn.toISOString().slice(0,10),currency:run.currency,jobs:run.lines.map(line=>({taskId:line.taskId,assignmentId:line.assignmentId,evidenceId:line.workTimeEvidenceId,decisionId:line.workTimeDecisionId,confirmedAssignment:true}))},tx,"edit"),byTask=new Map(current.lines.map(line=>[line.taskId,line]));
+   for(const line of run.lines){const actual=line.taskId?byTask.get(line.taskId):null,snapshot=snapshots.find(row=>row.id===line.id);if(!actual||!snapshot||line.earningKind!=="PER_HOUR"||line.compensationId!==actual.compensationId||line.configRuleId!==actual.configRuleId||line.personId!==actual.personId||line.propertyId!==actual.propertyId||line.completionEventId!==actual.completionEventId||line.workTimeEvidenceId!==actual.evidenceId||line.workTimeDecisionId!==actual.decisionId||line.recordedCompletionAt.getTime()!==actual.recordedCompletionAt.getTime()||!Money.of(line.amount.toString(),run.currency).equals(Money.of(actual.amount.amount,run.currency))||!sameSubmittedCostPolicy(snapshot.sourceSnapshot,JSON.parse(JSON.stringify(actual.sourceSnapshot))))throw new EmployeeCompensationClaimSourceError();}
+   const recheck=async()=>{await current.recheck();if(!sameSubmittedCostPolicy(await runs.sourceSnapshots(run.id),snapshots))throw new EmployeeCompensationClaimSourceError();};await recheck();return recheck;
+  }
   if(run.earningKind==="PER_MONTH"){
    if(!actor)throw new EmployeeCompensationClaimSourceError();const runs=new EmployeeCompensationRunRepository(tx,organizationId),snapshots=await runs.sourceSnapshots(run.id),current=await prepareEmployeeMonthlyRunSources(actor,{month:run.fromOn.toISOString().slice(0,7),currency:run.currency,assignments:run.lines.map(line=>({assignmentId:line.assignmentId,confirmedAssignment:true}))},tx,"edit"),byAssignment=new Map(current.lines.map(line=>[line.assignmentId,line]));
    for(const line of run.lines){const actual=byAssignment.get(line.assignmentId),snapshot=snapshots.find(row=>row.id===line.id);if(!actual||!snapshot||line.earningKind!=="PER_MONTH"||line.compensationId!==actual.compensationId||line.configRuleId!==actual.configRuleId||line.personId!==actual.personId||line.propertyId!==actual.propertyId||line.taskId!==actual.taskId||line.completionEventId!==null||!Money.of(line.amount.toString(),run.currency).equals(Money.of(actual.amount.amount,run.currency))||!sameSubmittedCostPolicy(monthlyMaterial(snapshot.sourceSnapshot),monthlyMaterial(JSON.parse(JSON.stringify(actual.sourceSnapshot)))))throw new EmployeeCompensationClaimSourceError();}

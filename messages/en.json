@@ -3157,7 +3157,21 @@
     "monthlyContractCount": "Contracts",
     "monthlySources": "Monthly contractual earning evidence",
     "monthlyTimezone": "Contract calendar · {timezone}",
-    "beneficiary": "Beneficiary"
+    "beneficiary": "Beneficiary",
+    "perHour": "{amount} / hour",
+    "hourlyEvidence": "Validated actual hourly work",
+    "hourlyActualDuration": "Actual earned time",
+    "hourlyDuration": "{hours} h {minutes} min {seconds} s",
+    "hourlyValidation": "Original work-time approval",
+    "hourlyEvidenceVersion": "Approved evidence version {version}",
+    "hourlyUTC": "All interval and approval times are shown in UTC.",
+    "hourlyAppliedRates": "Original effective hourly rates",
+    "hourlyContractVersion": "Contract version {version}",
+    "hourlyRatesNavigation": "Hourly rate segments",
+    "hourlyPreviousRates": "Previous rate segments",
+    "hourlyNextRates": "Next rate segments",
+    "hourlyRatePage": "Segments {from}–{to} of {total}",
+    "hourlyRounding": "All original interval and rate contributions are added before rounding once to the completed-work earning total."
   },
   "EmployeeCostNotices": {
     "eyebrow": "Finance · Owner notice",
