@@ -5,8 +5,9 @@ import { calendarDateStart } from "@/platform/time/calendar";
 import { Money } from "@/platform/money/money";
 import { employeeCompensationAuthorityLineFields,employeeCompensationRunFacts,employeeCompensationSubmittedFinancialSources } from "@/platform/authz/employee-compensation-resource";
 import { employeeSettlementAuditSources } from "@/platform/ledger/employee-settlement-audit";
+import { employeeMonthlyRequestAuthorityFacts } from "@/platform/authz/employee-monthly-request-resource";
 
-export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];financialSources?:readonly Resource[];companyFinancialSources?:readonly Resource[];walletSources?:readonly Resource[];compensationRoot?:Resource;sourceRecordId?:string };
+export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];financialSources?:readonly Resource[];companyFinancialSources?:readonly Resource[];walletSources?:readonly Resource[];compensationRoot?:Resource;sourceRecordId?:string;organizationOnlyEmployeeSource?:boolean };
 const employeeSubmissionAuditFields={id:true,costOn:true,run:{select:{id:true,createdBy:true,currency:true,createdAt:true,
   lines:{select:employeeCompensationAuthorityLineFields}}},
   costs:{select:{propertyId:true,reservationId:true,amount:true,timezone:true,runLine:{select:{taskId:true,recordedCompletionAt:true}},property:{select:{cityId:true,regionId:true}}}}} as const;
@@ -97,6 +98,10 @@ export class AuditRepository {
       select: { id: true, currency: true, createdAt: true, lines: { select: employeeCompensationAuthorityLineFields } } });
     return new Map(rows.map(row => { const facts = employeeCompensationRunFacts(this.organizationId,row);
       return [row.id,{ ...facts.resource, salarySources:facts.salarySources }]; }));
+  }
+  async employeeMonthlyRunRequestResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
+    const rows=await this.tx.employeeMonthlyRunRequest.findMany({where:{organizationId:this.organizationId,id:{in:ids}}}),facts=await employeeMonthlyRequestAuthorityFacts(this.organizationId,rows,this.tx);
+    return new Map([...facts].map(([id,source])=>[id,{...source.resource,sourceRecordId:id,salarySources:source.salarySources,organizationOnlyEmployeeSource:source.legacy}]));
   }
   async employeeCompensationSubmissionResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     if(!ids.length)return new Map();

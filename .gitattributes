@@ -10,3 +10,11 @@ prisma/migrations/20261031110000_employee_own_wallet_offset_mode/migration.sql t
 prisma/migrations/20261031120000_employee_monthly_contract_sources/migration.sql text eol=lf
 
 prisma/migrations/20261031130000_employee_contract_witness_policy_name/migration.sql text eol=lf
+
+prisma/migrations/20261031140000_employee_monthly_run_requests/migration.sql text eol=lf
+
+prisma/migrations/20261031150000_employee_monthly_request_original_sources/migration.sql text eol=lf
+
+prisma/migrations/20261031160000_employee_monthly_request_indexed_lookups/migration.sql text eol=lf
+
+prisma/migrations/20261031170000_employee_monthly_request_policy_names/migration.sql text eol=lf

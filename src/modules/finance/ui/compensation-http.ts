@@ -16,11 +16,12 @@ const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
 
 /** One session, origin, size and private-error boundary for compensation reads and commands. */
-export async function compensationHttp(request:NextRequest,work:(actor:FinanceActorContext,input:unknown,requestId:string)=>Promise<unknown>,options:{json?:boolean;maxBytes?:number;feature:string;status?:200|202}){
+export async function compensationHttp(request:NextRequest,work:(actor:FinanceActorContext,input:unknown,requestId:string)=>Promise<unknown>,options:{json?:boolean;maxBytes?:number;feature:string;status?:200|202;rejectQuery?:boolean}){
   const requestId=crypto.randomUUID();
   try{
     const actor=await financeActorContextFromSession(await auth());
     if(!actor)return failure("unauthorized",401);
+    if(options.rejectQuery&&request.nextUrl.searchParams.size)return failure("validation",400);
     let input:unknown;
     if(options.json){
       if(!isSameOriginContentType(request,"application/json"))return failure("forbidden",403);

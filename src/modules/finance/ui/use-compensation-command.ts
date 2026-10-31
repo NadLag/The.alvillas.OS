@@ -3,7 +3,7 @@ import { useCallback,useEffect,useRef,useState } from "react";
 import { z } from "zod";
 type Receipt={requestId:string;state:"PENDING"|"SUCCEEDED"|"DENIED"|"CONFLICT"|"FAILED";failureCode:string|null};
 type State="checking"|"ready"|"sending"|"pending"|"uncertain"|"offline"|"forbidden"|"recoveryUnavailable"|"terminal"|"succeeded";
-type Options<I extends {idempotencyKey:string},R extends Receipt>={storageKey:string;inputSchema:z.ZodType<I>;receiptSchema:z.ZodType<R>;requestPath:string;recoveryPath:string;statusPath?:(id:string)=>string;recoverySchema?:z.ZodType<{request:R|null}>;recoveryInput:(key:string)=>unknown;accept:(receipt:R)=>boolean;onSuccess:(receipt:R)=>void;onInvalidate:()=>void};
+type Options<I extends {idempotencyKey:string},R extends Receipt>={storageKey:string;inputSchema:z.ZodType<I>;receiptSchema:z.ZodType<R>;requestPath:string;recoveryPath:string;statusPath?:(id:string)=>string;recoverySchema?:z.ZodType<{request:R|null}>;recoveryInput:(key:string)=>unknown;accept:(receipt:R,input:I|null,nonce:string|null)=>boolean;onSuccess:(receipt:R)=>void;onInvalidate:()=>void};
 const readNonce=(key:string)=>{try{const value=z.uuid().safeParse(sessionStorage.getItem(key));return value.success?value.data:null;}catch{return null;}};
 const storeNonce=(key:string,value:string)=>{try{sessionStorage.setItem(key,value);}catch{/* Exact retries remain available in memory. */}};
 const removeNonce=(key:string,value:string)=>{try{if(sessionStorage.getItem(key)===value)sessionStorage.removeItem(key);}catch{/* Storage is optional. */}};
@@ -12,7 +12,7 @@ export function useCompensationCommand<I extends {idempotencyKey:string},R exten
   const [state,setState]=useState<State>("checking"),[error,setError]=useState<string|null>(null),[requestId,setRequestId]=useState<string|null>(null);
   const nonce=useRef<string|null>(null),intent=useRef<I|null>(null),busy=useRef(false),generation=useRef(0),alive=useRef(false);
   const invalidateGeneration=useCallback(()=>{generation.current++;},[]);
-  const receive=useCallback((receipt:R)=>{if(!accept(receipt)||receipt.state==="PENDING"&&receipt.failureCode!==null||receipt.state!=="PENDING"&&receipt.state!=="SUCCEEDED"&&!receipt.failureCode)throw Error("Invalid source acknowledgement");
+  const receive=useCallback((receipt:R)=>{if(!accept(receipt,intent.current,nonce.current)||receipt.state==="PENDING"&&receipt.failureCode!==null||receipt.state!=="PENDING"&&receipt.state!=="SUCCEEDED"&&!receipt.failureCode)throw Error("Invalid source acknowledgement");
     if(receipt.state==="SUCCEEDED"){if(nonce.current)removeNonce(storageKey,nonce.current);intent.current=null;setRequestId(null);setState("succeeded");setError(null);onSuccess(receipt);return;}
     if(receipt.state==="PENDING"&&!statusPath)throw Error("Pending acknowledgement requires a status endpoint");
     if(receipt.state==="PENDING"){setRequestId(receipt.requestId);setState("pending");setError(null);return;}

@@ -1,0 +1,10 @@
+import { z } from "zod";
+import { employeeMonthlyEarningsPolicySchema } from "./employee-monthly-earnings";
+import { employeeMonthlyRunSourceInput } from "./employee-monthly-run-request";
+const id=z.uuid(),money=z.object({amount:z.string().max(128).regex(/^(?:0|[1-9]\d*)\.\d{2}$/u),currency:z.string().regex(/^[A-Z]{3}$/u)}).strict();
+export const employeeMonthlyPickerInput=z.object({month:z.string().regex(/^\d{4}-(?:0[1-9]|1[0-2])$/u),currency:z.string().regex(/^[A-Z]{3}$/u),search:z.string().trim().max(120).default(""),after:z.string().min(1).max(4096).optional()}).strict();
+export const employeeMonthlyReviewInput=employeeMonthlyRunSourceInput.safeExtend({after:id.optional()});
+export const employeeMonthlyEditorSchema=z.object({baseCurrency:z.string().regex(/^[A-Z]{3}$/u),currencies:z.array(z.string().regex(/^[A-Z]{3}$/u)),month:z.string(),timezone:z.string(),policy:employeeMonthlyEarningsPolicySchema}).strict();
+export const employeeMonthlyChoiceSchema=z.object({assignmentId:id,propertyId:id.nullable(),personName:z.string().nullable(),propertyName:z.string().nullable(),roleName:z.string(),contractVersion:z.number().int().positive(),amount:money,eligibleDays:z.number().int().positive(),calendarDays:z.number().int().min(28).max(31),rates:z.array(z.object({compensationId:id,version:z.number().int().positive(),effectiveFrom:z.iso.datetime(),rate:money}).strict()).min(1).max(31)}).strict();
+export const employeeMonthlyPickerSchema=z.object({timezone:z.string(),items:z.array(employeeMonthlyChoiceSchema).max(25),next:z.string().nullable()}).strict();
+export const employeeMonthlyReviewSchema=z.object({reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),month:z.string(),currency:z.string().regex(/^[A-Z]{3}$/u),timezone:z.string(),total:money,lineCount:z.number().int().positive(),policy:employeeMonthlyEarningsPolicySchema,lines:z.array(employeeMonthlyChoiceSchema).max(50),next:id.nullable()}).strict();

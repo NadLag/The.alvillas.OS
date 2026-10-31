@@ -349,7 +349,7 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
-  ...(["purpose", "currency", "fromOn", "toOn", "timezone", "total", "lines", "history"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "employee_payable", field, dataClass: "financial", requiredPermission: permissionKey("employee_payable", "view"), mask: "placeholder" })),
+  ...(["purpose", "currency", "fromOn", "toOn", "timezone", "total", "lines", "history", "baseCurrency", "currencies", "month", "policy", "reviewFingerprint", "lineCount", "next", "items"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "employee_payable", field, dataClass: "financial", requiredPermission: permissionKey("employee_payable", "view"), mask: "placeholder" })),
   ...(["amount", "currency", "purpose", "invoiceNumber", "issuedOn", "dueOn", "lines", "history"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "supplier_invoice", field, dataClass: "financial", requiredPermission: permissionKey("supplier_invoice", "view"), mask: "placeholder" })),
   { resource: "supplier_invoice", field: "supplierName", dataClass: "personal", requiredPermission: permissionKey("supplier", "view"), mask: "placeholder" },
   ...(["contactName", "email", "phone", "address", "externalReference"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "supplier", field, dataClass: "personal", requiredPermission: permissionKey("supplier", "view"), mask: "placeholder" })),

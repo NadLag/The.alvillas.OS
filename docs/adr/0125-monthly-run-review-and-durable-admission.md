@@ -1,0 +1,15 @@
+# 0125 — Reviewed monthly contracts and durable run creation
+
+F-FIN-24 needs employee selection, a review of complete calendar earnings and creation that remains bounded for a portfolio of 500 properties. Recognition, approvals and settlement retain their existing independent boundaries.
+
+The monthly workspace selects real effective-dated role assignments. The picker and final review share the canonical calendar, rate validation and exact `Money` calculation. A picker choice is independently authorized; final review checks the complete selected total and the aggregate amount for each beneficiary. Names and property labels require their own current permissions. Private filters are POST bodies, and encrypted picker cursors bind the actor, tenant, policy, month, currency and search.
+
+Creation admits immutable intent, the caller's retained authorization cap, a fingerprint of reviewed source material and original daily contract references. Each reference is validated against actual tenant assignments and immutable contractual versions. A later lower rate cannot remove the permission requirement for a higher original rate. These references select real rows; they grant no authority. Receipt and audit reads use one shared source-authority helper and fresh stored grants. Historical requests without retained references require unconditional organization authority and cannot create a new successful run.
+
+The existing outbox and shared financial command worker execute the canonical monthly writer. A request, its audit attribution and its private worker reference commit together. A successful outcome, its audit attribution, the new run and all original daily witnesses commit together. Source or policy changes require a new review. Revocation and interrupted execution roll back candidate earning rows; delivery exhaustion produces an immutable failure receipt. Replays preserve the first terminal result.
+
+The browser stores only a scoped random nonce. Acknowledgements must match that nonce. Lost or substituted responses permit an exact retry or recovery; a pending request survives reload. Offline and denied states remove private data. Creation does not post a liability or payment.
+
+Migrations are ordered after the actual monthly source migrations: request/outcome admission, original-reference enforcement, then equivalent UUID lookups that use existing indexes, and canonical tenant policy names with identical forced-RLS predicates. Previously applied migration bytes remain unchanged. Source preparation groups calendar entries once and reuses the digest of the captured material; final source and authorization checks still run. The canonical contract validator is shared across earning days without rebuilding its schema.
+
+Roll out the schema, compatible application readers and registered worker handler before admitting monthly requests. A rollback must retain support for pending requests and monthly nullable source identities; use a forward fix if a selected older application cannot read them. Monthly earning policy activation remains explicit. This decision adds no legal, statutory payroll, tax or proration default.
