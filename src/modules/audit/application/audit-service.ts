@@ -9,9 +9,10 @@ import type { AuditActorContext } from "@/modules/audit/application/audit-access
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
+import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction,type TenantTransactionRunner } from "@/platform/db/tenant";
 
 export const auditLogResource = "audit_log";
 
@@ -84,10 +85,11 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
-  if (row.resourceType === "employee_compensation_run"||row.resourceType==="employee_compensation_submission") {
+  if (row.resourceType === "employee_compensation_run"||row.resourceType==="employee_compensation_submission"||row.resourceType==="employee_compensation_claim") {
     const now = new Date();
-    const allowed = Boolean(financialResource?.type === "employee_payable" && (row.resourceType==="employee_compensation_submission"?financialResource.sourceRecordId===row.resourceId:financialResource.id === row.resourceId) &&
+    const allowed = Boolean(financialResource?.type === "employee_payable" && (row.resourceType!=="employee_compensation_run"?financialResource.sourceRecordId===row.resourceId:financialResource.id === row.resourceId) &&
       financialResource.organizationId === ctx.organizationId && financialResource.salarySources?.length &&
+      (row.resourceType==="employee_compensation_run"||Boolean(financialResource.financialSources?.length&&financialResource.financialSources.every(source=>source.organizationId===ctx.organizationId&&source.type==="financial_transaction"&&authorize(ctx.authContext,"view",source,now))))&&
       authorize(ctx.authContext,action,financialResource,now) && financialResource.salarySources.every(source =>
         source.type === "staff_compensation" && source.organizationId === ctx.organizationId && authorize(ctx.authContext,"view",source,now)));
     return present({ ...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[]) },action,
@@ -115,6 +117,9 @@ export function presentAuditHistoryRow(
       { type: "financial_transaction", organizationId: ctx.organizationId, dataClass: "financial" as const } : financialResource;
     const allowed = Boolean(financialResource && financialResource.type === expectedType &&
       (!requiresSourceId || financialResource.id === row.resourceId) && permissionResource && authorize(ctx.authContext, action, permissionResource) &&
+      (!financialResource.salarySources||Boolean(financialResource.compensationRoot?.type==="employee_payable"&&financialResource.compensationRoot.organizationId===ctx.organizationId&&authorize(ctx.authContext,action,financialResource.compensationRoot)&&
+        financialResource.salarySources.length&&financialResource.salarySources.every(source=>source.type==="staff_compensation"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source))&&
+        financialResource.financialSources?.length&&financialResource.financialSources.every(source=>source.type==="financial_transaction"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source))))&&
       [row.before, row.after].every(value => {
         if (!value || typeof value !== "object" || Array.isArray(value) || !Object.hasOwn(value, "amount")) return true;
         return typeof value.amount === "string" && /^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u.test(value.amount) &&
@@ -209,7 +214,7 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions] = await Promise.all([
+  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
@@ -217,7 +222,8 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     read("transaction_group", ids => repository.transactionGroupResources(ids)),
     read("accounting_period", ids => repository.accountingPeriodResources(ids)),
     read("employee_compensation_run", ids => repository.employeeCompensationRunResources(ids)),
-    read("employee_compensation_submission",ids=>repository.employeeCompensationSubmissionResources(ids))
+    read("employee_compensation_submission",ids=>repository.employeeCompensationSubmissionResources(ids)),
+    read("employee_compensation_claim",ids=>repository.employeeCompensationClaimResources(ids))
   ]);
   return new Map([
     ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),
@@ -227,7 +233,8 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     ...[...groups].map(([id, resource]) => [`transaction_group:${id}`, resource] as const),
     ...[...periods].map(([id, resource]) => [`accounting_period:${id}`, resource] as const),
     ...[...employeeRuns].map(([id,resource])=>[`employee_compensation_run:${id}`,resource] as const),
-    ...[...employeeSubmissions].map(([id,resource])=>[`employee_compensation_submission:${id}`,resource] as const)
+    ...[...employeeSubmissions].map(([id,resource])=>[`employee_compensation_submission:${id}`,resource] as const),
+    ...[...employeeClaims].map(([id,resource])=>[`employee_compensation_claim:${id}`,resource] as const)
   ]);
 }
 
@@ -246,9 +253,15 @@ export async function listAuditHistory(
       repository.count(filters)
     ]);
 
-    const resources = await financialAuditResources(repository, rows);
-    return { rows: rows.map((row) => presentAuditHistoryRow(ctx, row, "view", row.resourceId ? resources.get(`${row.resourceType}:${row.resourceId}`) : undefined)), total, limit };
+    return { rows:await presentCurrentAuditRows(ctx,tx,repository,rows,"view"), total, limit };
   });
+}
+
+/** A caller's retained restrictions and the final stored authority must both permit disclosure. */
+async function presentCurrentAuditRows(ctx:AuditActorContext,tx:TenantTransaction,repository:AuditRepository,rows:AuditHistoryRow[],action:"view"|"export"){
+  const resources=await financialAuditResources(repository,rows),authContext=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId),current={...ctx,authContext};
+  if(authContext.organizationId!==ctx.organizationId||authContext.userAccountId!==ctx.actorId)throw new AuditAuthorizationError();assertAllowed(ctx,action);assertAllowed(current,action);
+  return rows.map(row=>{const source=row.resourceId?resources.get(`${row.resourceType}:${row.resourceId}`):undefined;return presentAuditHistoryRow(current,presentAuditHistoryRow(ctx,row,action,source),action,source);});
 }
 
 function csvCell(value: unknown): string {
@@ -343,7 +356,6 @@ export async function exportAuditHistoryCsv(
       occurredAt: new Date()
     });
 
-    const resources = await financialAuditResources(repository, rows);
-    return auditHistoryCsv(rows.map((row) => presentAuditHistoryRow(ctx, row, "export", row.resourceId ? resources.get(`${row.resourceType}:${row.resourceId}`) : undefined)));
+    return auditHistoryCsv(await presentCurrentAuditRows(ctx,tx,repository,rows,"export"));
   });
 }

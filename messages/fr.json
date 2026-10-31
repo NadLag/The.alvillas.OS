@@ -1348,6 +1348,7 @@
       "push": "Notifications push"
     },
     "resolution": {
+      "CANCELLED": "Proposition retirée",
       "PENDING": "En attente de décision",
       "APPROVED": "Approuvée",
       "REJECTED": "Refusée"

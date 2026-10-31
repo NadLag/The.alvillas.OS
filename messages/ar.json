@@ -1348,6 +1348,7 @@
       "push": "إشعارات فورية"
     },
     "resolution": {
+      "CANCELLED": "تم سحب المقترح",
       "PENDING": "بانتظار القرار",
       "APPROVED": "تمت الموافقة",
       "REJECTED": "مرفوض"

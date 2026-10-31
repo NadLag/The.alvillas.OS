@@ -514,6 +514,13 @@ describe("PostgreSQL baseline", () => {
     expect(masked.templates[0].values).toBeNull(); expect(masked.templates[0].restricted).toBe(true);
     await expect(changePropertyTemplate(operational, command, f.deps)).rejects.toBeInstanceOf(TemplateAccessError);
     const auditPermissions = new Set(['audit_log:view', 'audit_log:export']);
+    await ensureStandardIdentitySetup(f.organization.id,f.deps);
+    await withTenant(prisma,f.organization.id,async tx=>{
+      const permissions=await tx.permission.findMany({where:{organizationId:f.organization.id,key:{in:[...auditPermissions,'financial_transaction:view']}}});expect(permissions).toHaveLength(3);
+      const role=await tx.role.create({data:{organizationId:f.organization.id,key:'template_audit_'+randomUUID(),name:'Persisted template audit reader',rolePermissions:{create:permissions.map(permission=>({organizationId:f.organization.id,permissionId:permission.id}))}}});
+      await tx.userAccount.update({where:{id:f.ctx.actorId},data:{status:'ACTIVE'}});
+      await tx.roleAssignment.create({data:{organizationId:f.organization.id,personId:f.ctx.personId,userAccountId:f.ctx.actorId,roleId:role.id,scopeType:'organization',validFrom:new Date('2020-01-01')}});
+    });
     const reader = { ...operational, authContext: { ...operational.authContext, permissions: auditPermissions } };
     const financeReader = { ...reader, authContext: { ...reader.authContext, permissions: new Set([...auditPermissions, 'financial_transaction:view']) } };
     const rawAudits = await withTenant(prisma, f.organization.id, tx => tx.auditLog.findMany({ where: { action: { startsWith: 'property_template.' } }, orderBy: { id: 'asc' } }));

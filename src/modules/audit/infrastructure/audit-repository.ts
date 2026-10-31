@@ -3,9 +3,12 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { Money } from "@/platform/money/money";
-import { employeeCompensationRunFacts } from "@/platform/authz/employee-compensation-resource";
+import { employeeCompensationRunFacts,employeeCompensationSubmittedFinancialSources } from "@/platform/authz/employee-compensation-resource";
 
-export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];sourceRecordId?:string };
+export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];financialSources?:readonly Resource[];compensationRoot?:Resource;sourceRecordId?:string };
+const employeeSubmissionAuditFields={id:true,costOn:true,run:{select:{id:true,createdBy:true,currency:true,createdAt:true,
+  lines:{select:{personId:true,propertyId:true,taskId:true,recordedCompletionAt:true,currency:true,amount:true,rate:true,property:{select:{cityId:true,regionId:true}}}}}},
+  costs:{select:{propertyId:true,reservationId:true,amount:true,timezone:true,runLine:{select:{taskId:true,recordedCompletionAt:true}},property:{select:{cityId:true,regionId:true}}}}} as const;
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -95,9 +98,13 @@ export class AuditRepository {
   }
   async employeeCompensationSubmissionResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     if(!ids.length)return new Map();
-    const rows=await this.tx.employeeCompensationSubmission.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:{id:true,run:{select:{id:true,currency:true,createdAt:true,
-      lines:{select:{personId:true,propertyId:true,taskId:true,recordedCompletionAt:true,currency:true,amount:true,rate:true,property:{select:{cityId:true,regionId:true}}}}}}}});
-    return new Map(rows.map(row=>{const facts=employeeCompensationRunFacts(this.organizationId,row.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources}];}));
+    const rows=await this.tx.employeeCompensationSubmission.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:employeeSubmissionAuditFields});
+    return new Map(rows.map(row=>{const facts=employeeCompensationRunFacts(this.organizationId,row.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,financialSources:employeeCompensationSubmittedFinancialSources(this.organizationId,row,facts.total)}];}));
+  }
+  async employeeCompensationClaimResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
+    if(!ids.length)return new Map();
+    const rows=await this.tx.employeeCompensationClaim.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:{id:true,submission:{select:employeeSubmissionAuditFields}}});
+    return new Map(rows.map(row=>{const source=row.submission,facts=employeeCompensationRunFacts(this.organizationId,source.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,financialSources:employeeCompensationSubmittedFinancialSources(this.organizationId,source,facts.total)}];}));
   }
   async cashResources(ids: string[]): Promise<Map<string, Resource>> {
     if (!ids.length) return new Map();
@@ -129,13 +136,14 @@ export class AuditRepository {
     const rows = await this.tx.accountingPeriod.findMany({ where: { organizationId: this.organizationId, id: { in: ids } }, select: { id: true } });
     return new Map(rows.map(row => [row.id, { type: "financial_transaction", organizationId: this.organizationId, id: row.id, dataClass: "financial" }]));
   }
-  async transactionResources(ids: string[]): Promise<Map<string, Resource>> {
+  async transactionResources(ids: string[]): Promise<Map<string, FinancialAuditResource>> {
     if (!ids.length) return new Map();
     const rows = await this.tx.financialTransaction.findMany({
       where: { organizationId: this.organizationId, id: { in: ids } },
-      select: { id: true, createdBy: true, occurredAt: true,
+      select: { id: true, createdBy: true, occurredAt: true,employeeRecognitionLine:{select:{recognition:{select:{claimId:true}}}},
         postings: { select: { side: true, amount: true, currency: true, dimensions: true } } }
     });
+    const claims=await this.employeeCompensationClaimResources(rows.flatMap(row=>row.employeeRecognitionLine?[row.employeeRecognitionLine.recognition.claimId]:[]));
     return new Map(rows.map(row => {
       const totals = new Map<string, Money>();
       for (const line of row.postings) if (line.side === "DEBIT") {
@@ -155,7 +163,8 @@ export class AuditRepository {
         type: "financial_transaction", organizationId: this.organizationId, id: row.id, financialRecordId: row.id,
         assignedUserAccountId: row.createdBy, occurredAt: row.occurredAt, status: "POSTED",
         propertyId: dimension("property_id"), ownerId: dimension("owner_id"), reservationId: dimension("reservation_id"),
-        amount: totals.size === 1 ? [...totals.values()][0].amount.toString() : undefined, dataClass: "financial"
+        amount: totals.size === 1 ? [...totals.values()][0].amount.toString() : undefined, dataClass: "financial",
+        ...(row.employeeRecognitionLine?{compensationRoot:claims.get(row.employeeRecognitionLine.recognition.claimId),salarySources:claims.get(row.employeeRecognitionLine.recognition.claimId)?.salarySources??[],financialSources:claims.get(row.employeeRecognitionLine.recognition.claimId)?.financialSources??[]}: {})
       }];
     }));
   }

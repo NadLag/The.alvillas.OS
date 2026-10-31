@@ -41,7 +41,7 @@ export class OwnerStatementRepository {
         p.transaction_id AS "transactionId",
         ft.reference,
         ft.occurred_at AS "occurredAt",
-        ft.description,
+        CASE WHEN employee_link.id IS NOT NULL THEN employee_cost.note ELSE ft.description END AS description,
         p.side,
         p.amount::text AS amount,
         p.currency,
@@ -56,6 +56,8 @@ export class OwnerStatementRepository {
       INNER JOIN financial_transaction ft
         ON ft.id = p.transaction_id
        AND ft.organization_id = p.organization_id
+      LEFT JOIN employee_compensation_recognition_line employee_link ON employee_link.organization_id=ft.organization_id AND employee_link.transaction_id=ft.id
+      LEFT JOIN employee_compensation_cost employee_cost ON employee_cost.organization_id=employee_link.organization_id AND employee_cost.id=employee_link.cost_id
       LEFT JOIN property ON property.organization_id=p.organization_id AND property.id::text=p.dimensions->>'property_id'
       ${input.includeLocations === false ? Prisma.empty : Prisma.sql`LEFT JOIN LATERAL (
         SELECT location_account.name, location_account.code
