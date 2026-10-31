@@ -1,12 +1,14 @@
 "use client";
 
-import { useActionState, useMemo } from "react";
+import { useActionState, useMemo, useCallback } from "react";
 import { z } from "zod";
 import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { safeLocale } from "@/i18n/routing";
 import type { AirbnbSettlementFormState } from "@/modules/finance/application/airbnb-settlement-actions";
 import { importAirbnbSettlementAction } from "@/modules/finance/application/airbnb-settlement-actions";
+
+import { PaymentAccountPicker } from "./payment-account-picker";
 
 type FormLabels = {
   validation: string;
@@ -145,9 +147,11 @@ export function AirbnbSettlementPanel({
   );
   const form = useZodForm(schema, {
     defaultValues: {
+      receivedAccountId:accounts[0]?.id??"",
       csv: ""
     }
   });
+  const changeAccount=useCallback((value:string)=>form.setValue("receivedAccountId",value,{shouldDirty:true,shouldValidate:true}),[form]);
   const validateSubmit = useServerActionValidation(form, formAction);
   const message = messageForState(state, labels);
   const hasAccounts = accounts.length > 0;
@@ -170,26 +174,8 @@ export function AirbnbSettlementPanel({
         onSubmit={validateSubmit}
       >
         <input name="idempotencyKey" type="hidden" value={idempotencyKey} />
-        <label className="field">
-          <span>{labels.account}</span>
-          <select
-            data-testid="airbnb-settlement-account"
-            defaultValue={accounts[0]?.id ?? ""}
-            disabled={!hasAccounts}
-            required
-            {...form.register("receivedAccountId")}
-          >
-            {accounts.map((account) => (
-              <option key={account.id} label={account.name} value={account.id}>
-                {account.name}
-              </option>
-            ))}
-          </select>
-          {!hasAccounts ? <p className="field-hint">{labels.noAccounts}</p> : null}
-          <ErrorText testId="airbnb-settlement-account-error">
-            {firstClientError(form.formState.errors.receivedAccountId) ?? fieldError(state, "receivedAccountId")}
-          </ErrorText>
-        </label>
+        <div className="field"><PaymentAccountPicker source={{kind:"revenue"}} testId="airbnb-settlement-account" name="receivedAccountId" label={labels.account} initialValue={accounts[0]?.id??""} onValueChange={changeAccount} inputRef={form.register("receivedAccountId").ref} disabled={pending}/>
+          <ErrorText testId="airbnb-settlement-account-error">{firstClientError(form.formState.errors.receivedAccountId) ?? fieldError(state, "receivedAccountId")}</ErrorText></div>
         <label className="field settlement-csv-field">
           <span>{labels.csv}</span>
           <textarea

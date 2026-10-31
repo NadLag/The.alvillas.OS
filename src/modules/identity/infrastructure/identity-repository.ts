@@ -804,14 +804,18 @@ export class IdentityRepository {
     }));
   }
 
-  listAccounts(): Promise<IdentityAccountSummary[]> {
+  async listAccounts(input:{query?:string;after?:string;take?:number}={}): Promise<IdentityAccountSummary[]> {
+    const cursor=input.after?await this.tx.userAccount.findFirst({where:{id:input.after,organizationId:this.organizationId},select:{id:true,createdAt:true}}):null;
+    if(input.after&&!cursor)return [];
     return this.tx.userAccount
       .findMany({
         where: {
-          organizationId: this.organizationId
+          organizationId: this.organizationId,
+          AND:[...(cursor?[{OR:[{createdAt:{lt:cursor.createdAt}},{createdAt:cursor.createdAt,id:{lt:cursor.id}}]}]:[]),
+            ...(input.query?[{OR:[{email:{contains:input.query,mode:"insensitive" as const}},{phone:{contains:input.query,mode:"insensitive" as const}},{person:{displayName:{contains:input.query,mode:"insensitive" as const}}}]}]:[])]
         },
-        orderBy: [{ createdAt: "desc" }],
-        take: 100,
+        orderBy: [{ createdAt: "desc" },{id:"desc"}],
+        take: input.take??100,
         include: {
           person: true,
           authCredentials: true,

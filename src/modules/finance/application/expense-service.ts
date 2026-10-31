@@ -69,6 +69,19 @@ function sourceProperty(row: ExpenseRecord) {
   const frozen = z.object({ timezone: z.string().min(1) }).safeParse(row.submission?.snapshot ?? row.correctsExpense?.submission?.snapshot);
   return frozen.success ? { ...row.property, timezone: frozen.data.timezone } : row.property;
 }
+
+/** Actual draft/property facts for the shared private funding picker; caller and current grants are checked by its reader. */
+export async function expenseFundingChoiceSource(ctx:FinanceActorContext,tx:TenantTransaction,input:{propertyId:string;expenseId?:string},sourceId:string){
+  const repository=new ExpenseRepository(tx,ctx.organizationId),clock=await repository.clock();
+  if(input.expenseId){
+    const row=await repository.find(input.expenseId);
+    if(!row||row.propertyId!==input.propertyId||row.property.archivedAt||row.state!=="DRAFT"||row.correctsExpenseId)throw new ExpenseAccessError();
+    return{target:resource(ctx,sourceProperty(row),{...row,amount:row.amount.toString()}),action:"edit" as const,version:row.version,now:clock.now};
+  }
+  const property=await repository.property(input.propertyId);if(!property)throw new ExpenseAccessError();
+  const today=calendarDateAt(clock.now,property.timezone);
+  return{target:resource(ctx,property,{id:sourceId,amount:"0",state:"DRAFT",createdBy:ctx.actorId,occurredOn:new Date(`${today}T00:00:00Z`)}),action:"create" as const,version:null,now:clock.now};
+}
 function sameDraft(row: ExpenseRecord, input: ExpenseDraftInput) {
   return row.propertyId === input.propertyId && row.reservationId === (input.reservationId ?? null) && row.fundingAccountId === input.fundingAccountId &&
     row.amount.eq(input.amount) && row.currency === input.currency && row.category === input.category && row.purpose === input.purpose &&

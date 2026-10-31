@@ -1,3 +1,4 @@
+import { selectPaymentAccount } from "./support/payment-account-picker";
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { ensureE2EAdmin, e2eEmail, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
@@ -52,7 +53,7 @@ test.describe("F-RES-01-16 complete reservation management", () => {
       await page.goto(`/${locale}/app/reservations`);
       const payoutCsv = `source_reservation_id,source_payout_id,source_transaction_id,currency,gross_amount,platform_fee,expected_payout,actual_receipt,reason,action\n${sourceId},PO-${suffix},${transactionId},MAD,5500.00,300.00,5200.00,5150.00,Bank fee,Review payout`;
       for (let attempt = 0; attempt < 2; attempt++) {
-        await page.getByTestId("airbnb-settlement-account").selectOption(bank.id); await page.getByTestId("airbnb-settlement-csv").fill(payoutCsv);
+        await selectPaymentAccount(page,"airbnb-settlement-account",bank.id); await page.getByTestId("airbnb-settlement-csv").fill(payoutCsv);
         const completed = page.waitForResponse(response => response.request().method() === "POST" && Boolean(response.request().headers()["next-action"]) && new URL(response.url()).pathname.endsWith("/reservations"));
         await page.getByTestId("airbnb-settlement-submit").click(); expect((await completed).status()).toBeLessThan(400);
         await expect(page.getByTestId("airbnb-settlement-variance").filter({ hasText: fixture.propertyName }).filter({ hasText: payoutReference })).toHaveAttribute("data-variance", "50.00");

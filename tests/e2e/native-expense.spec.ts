@@ -1,3 +1,4 @@
+import { selectPaymentAccount } from "./support/payment-account-picker";
 import { randomInt, randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
@@ -73,7 +74,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await expect(admin.getByTestId("expense-new-page")).toBeVisible();
     const form = admin.getByTestId("expense-draft-form"); await form.getByTestId("expense-amount").fill("500,25");
     await form.getByTestId("expense-category").fill("maintenance"); await form.getByTestId("expense-purpose").fill(purpose);
-    await form.getByTestId("expense-funding-account").selectOption(setup.bankId); await form.getByTestId("expense-occurred-on").fill(setup.sourceOn);
+    await selectPaymentAccount(form,"expense-funding-account",setup.bankId); await form.getByTestId("expense-occurred-on").fill(setup.sourceOn);
     await form.getByTestId("expense-reason").fill("Dedicated native expense entry");
     expect((await new AxeBuilder({ page: admin }).analyze()).violations).toEqual([]);
     await form.getByTestId("expense-create").click(); await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
@@ -219,7 +220,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
     await admin.goto(`/${locale}/app/properties/${setup.propertyId}/expenses/new`);
     const emergencyForm=admin.getByTestId("expense-draft-form"); await emergencyForm.getByTestId("expense-amount").fill("500.25");
     await emergencyForm.getByTestId("expense-category").fill("maintenance"); await emergencyForm.getByTestId("expense-purpose").fill(`Dedicated emergency ${suffix}`);
-    await emergencyForm.getByTestId("expense-funding-account").selectOption(setup.bankId); await emergencyForm.getByTestId("expense-occurred-on").fill("2026-10-26");
+    await selectPaymentAccount(emergencyForm,"expense-funding-account",setup.bankId); await emergencyForm.getByTestId("expense-occurred-on").fill("2026-10-26");
     await emergencyForm.getByTestId("expense-emergency").check(); await emergencyForm.getByTestId("expense-reason").fill("Dedicated emergency entry");
     await emergencyForm.getByTestId("expense-create").click(); await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
     const emergencyId=new URL(admin.url()).pathname.split("/").at(-1)!;
@@ -243,7 +244,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       effectiveFrom:new Date("2020-01-02"),reason:"Dedicated configured three-party allocation",value:{default_treatment:"OWNER_PAID",categories:{maintenance:{treatment:"CUSTOM",owner_share_bps:2500,alvillas_share_bps:2500,guest_share_bps:5000}}}}));
     await admin.goto(`/${locale}/app/properties/${setup.propertyId}/expenses/new`);
     const customForm=admin.getByTestId("expense-draft-form");await customForm.getByTestId("expense-amount").fill("100.11");await customForm.getByTestId("expense-category").fill("maintenance");
-    await customForm.getByTestId("expense-purpose").fill(`Dedicated custom expense ${suffix}`);await customForm.getByTestId("expense-funding-account").selectOption(setup.bankId);
+    await customForm.getByTestId("expense-purpose").fill(`Dedicated custom expense ${suffix}`);await selectPaymentAccount(customForm,"expense-funding-account",setup.bankId);
     await customForm.getByTestId("expense-occurred-on").fill("2026-10-26");await customForm.getByTestId("expense-reason").fill("Dedicated custom allocation entry");
     await customForm.getByTestId("expense-create").click();await expect(admin.getByTestId("expense-detail-page")).toBeVisible();
     const customId=new URL(admin.url()).pathname.split("/").at(-1)!;

@@ -1,3 +1,4 @@
+import { selectPaymentAccount } from "./support/payment-account-picker";
 import { randomInt, randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Locator, type Page } from "@playwright/test";
@@ -47,10 +48,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native business actions 
     await admin.getByTestId("reservation-guest-email").fill(`guard-guest-${suffix}@example.test`); await admin.getByTestId("reservation-check-in").fill("2028-06-10"); await admin.getByTestId("reservation-check-out").fill("2028-06-14");
     await admin.getByTestId("reservation-adults").fill("2"); await admin.getByTestId("reservation-children").fill("0"); await admin.getByTestId("reservation-submit").click(); await expect(admin).toHaveURL(/\/app\/operations/u);
     await admin.goto(`/${locale}/app/reservations`); const row = admin.getByTestId("reservation-row").filter({ hasText: guestName });
-    await row.getByTestId("reservation-revenue-amount").fill("100.00"); await row.getByTestId("reservation-revenue-account").selectOption({ label: setup.bankName });
+    await row.getByTestId("reservation-revenue-amount").fill("100.00"); await selectPaymentAccount(row,"reservation-revenue-account",{ label: setup.bankName });
     const bankId = await row.getByTestId("reservation-revenue-account").inputValue();
     const revenue = await captureAction(admin, row.getByTestId("reservation-revenue-submit")); await expect(row.getByTestId("reservation-revenue-posted")).toBeVisible();
-    await admin.getByTestId("airbnb-settlement-account").selectOption(bankId); await admin.getByTestId("airbnb-settlement-csv").fill("Invalid private CSV must be rejected before parsing for a restricted actor");
+    await selectPaymentAccount(admin,"airbnb-settlement-account",bankId); await admin.getByTestId("airbnb-settlement-csv").fill("Invalid private CSV must be rejected before parsing for a restricted actor");
     const settlement = await captureAction(admin, admin.getByTestId("airbnb-settlement-submit")); await expect(admin.getByTestId("airbnb-settlement-form-error")).toBeVisible();
 
     await admin.goto("/en/app/identity"); await admin.getByTestId("invite-display-name").fill(`Dedicated authorization employee ${suffix}`); await admin.getByTestId("invite-phone").fill(phone);

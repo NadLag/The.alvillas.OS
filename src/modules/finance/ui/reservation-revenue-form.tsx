@@ -1,10 +1,12 @@
 "use client";
 
-import { useActionState, useMemo } from "react";
+import { useActionState, useMemo, useCallback } from "react";
 import { z } from "zod";
 import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import type { ReservationRevenueFormState } from "@/modules/finance/application/reservation-revenue-actions";
 import { recordReservationRevenueAction } from "@/modules/finance/application/reservation-revenue-actions";
+
+import { PaymentAccountPicker } from "./payment-account-picker";
 
 type FormLabels = {
   saving: string;
@@ -108,10 +110,12 @@ export function ReservationRevenueForm({
   );
   const form = useZodForm(schema, {
     defaultValues: {
+      receivedAccountId:accounts[0]?.id??"",
       amount: "",
       currency: "MAD"
     }
   });
+  const changeAccount=useCallback((value:string)=>form.setValue("receivedAccountId",value,{shouldDirty:true,shouldValidate:true}),[form]);
   const validateSubmit = useServerActionValidation(form, formAction);
   const message = messageForState(state, labels);
   const hasAccounts = accounts.length > 0;
@@ -147,26 +151,8 @@ export function ReservationRevenueForm({
           {firstClientError(form.formState.errors.currency) ?? fieldError(state, "currency")}
         </ErrorText>
       </label>
-      <label className="field">
-        <span>{labels.account}</span>
-        <select
-          data-testid="reservation-revenue-account"
-          defaultValue={accounts[0]?.id ?? ""}
-          disabled={!hasAccounts}
-          required
-          {...form.register("receivedAccountId")}
-        >
-          {accounts.map((account) => (
-            <option key={account.id} label={account.name} value={account.id}>
-              {account.name}
-            </option>
-          ))}
-        </select>
-        {!hasAccounts ? <p className="field-hint">{labels.noAccounts}</p> : null}
-        <ErrorText testId="reservation-revenue-account-error">
-          {firstClientError(form.formState.errors.receivedAccountId) ?? fieldError(state, "receivedAccountId")}
-        </ErrorText>
-      </label>
+      <div className="field"><PaymentAccountPicker source={{kind:"revenue"}} testId="reservation-revenue-account" name="receivedAccountId" label={labels.account} initialValue={accounts[0]?.id??""} onValueChange={changeAccount} inputRef={form.register("receivedAccountId").ref} disabled={pending}/>
+        <ErrorText testId="reservation-revenue-account-error">{firstClientError(form.formState.errors.receivedAccountId) ?? fieldError(state, "receivedAccountId")}</ErrorText></div>
       {message ? (
         <p className="form-error" data-testid="reservation-revenue-form-error" role="alert">
           {message}

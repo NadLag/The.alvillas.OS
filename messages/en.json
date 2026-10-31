@@ -3382,5 +3382,25 @@
       "forbidden": "Current access does not permit this amount or payment time.",
       "wallet_unavailable": "This employee has no sufficient authorized advance to offset."
     }
+  },
+  "PaymentAccounts": {
+    "searchLabel": "Find a payment account",
+    "search": "Search",
+    "choose": "Choose an account",
+    "loading": "Loading authorized accounts…",
+    "offline": "Reconnect to choose an account.",
+    "forbidden": "You no longer have access to these accounts.",
+    "unavailable": "Accounts could not be loaded. Try again.",
+    "empty": "No matching accounts on this page.",
+    "next": "Next accounts",
+    "refresh": "Refresh"
+  },
+  "AccountSearch": {
+    "label": "Find an account by name, email or phone",
+    "search": "Search accounts",
+    "loading": "Loading accounts…",
+    "unavailable": "Accounts could not be loaded. Search again.",
+    "empty": "No matching accounts.",
+    "next": "Next accounts"
   }
 }
