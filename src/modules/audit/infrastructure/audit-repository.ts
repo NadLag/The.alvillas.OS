@@ -4,8 +4,9 @@ import type { Resource } from "@/platform/authz/authorize";
 import { calendarDateStart } from "@/platform/time/calendar";
 import { Money } from "@/platform/money/money";
 import { employeeCompensationRunFacts,employeeCompensationSubmittedFinancialSources } from "@/platform/authz/employee-compensation-resource";
+import { employeeSettlementAuditSources } from "@/platform/ledger/employee-settlement-audit";
 
-export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];financialSources?:readonly Resource[];compensationRoot?:Resource;sourceRecordId?:string };
+export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];financialSources?:readonly Resource[];walletSources?:readonly Resource[];compensationRoot?:Resource;sourceRecordId?:string };
 const employeeSubmissionAuditFields={id:true,costOn:true,run:{select:{id:true,createdBy:true,currency:true,createdAt:true,
   lines:{select:{personId:true,propertyId:true,taskId:true,recordedCompletionAt:true,currency:true,amount:true,rate:true,property:{select:{cityId:true,regionId:true}}}}}},
   costs:{select:{propertyId:true,reservationId:true,amount:true,timezone:true,runLine:{select:{taskId:true,recordedCompletionAt:true}},property:{select:{cityId:true,regionId:true}}}}} as const;
@@ -140,10 +141,11 @@ export class AuditRepository {
     if (!ids.length) return new Map();
     const rows = await this.tx.financialTransaction.findMany({
       where: { organizationId: this.organizationId, id: { in: ids } },
-      select: { id: true, createdBy: true, occurredAt: true,employeeRecognitionLine:{select:{recognition:{select:{claimId:true}}}},
-        postings: { select: { side: true, amount: true, currency: true, dimensions: true } } }
+      select: { id: true, createdBy: true, occurredAt: true,reversesTransactionId:true,employeeRecognitionLine:{select:{recognition:{select:{claimId:true}}}},
+        postings: { select: { side: true, amount: true, currency: true, dimensions: true,ledgerAccount:{select:{id:true,code:true,accountType:true,normalSide:true,archivedAt:true,teamWallet:{select:{id:true,personId:true,person:{select:{archivedAt:true}}}}}} } } }
     });
-    const claims=await this.employeeCompensationClaimResources(rows.flatMap(row=>row.employeeRecognitionLine?[row.employeeRecognitionLine.recognition.claimId]:[]));
+    const employeeClaims=new Map(rows.map(row=>{const ids=new Set(row.postings.flatMap(posting=>{const value=posting.dimensions;if(!value||typeof value!=="object"||Array.isArray(value)||!["EMPLOYEE_PAYMENT","EMPLOYEE_COMPENSATION_OFFSET"].includes(typeof value.source==="string"?value.source:""))return[];const claimId=value.employee_compensation_claim_id;return typeof claimId==="string"&&uuidPattern.test(claimId)?[claimId]:[];}));return[row.id,row.employeeRecognitionLine?.recognition.claimId??(ids.size===1?[...ids][0]:undefined)];}));
+    const claims=await this.employeeCompensationClaimResources([...employeeClaims.values()].filter((id):id is string=>Boolean(id))),paymentIds=rows.filter(row=>!row.employeeRecognitionLine&&employeeClaims.get(row.id)).map(row=>row.reversesTransactionId??row.id),paymentAudits=await this.tx.auditLog.findMany({where:{organizationId:this.organizationId,resourceType:"financial_transaction",resourceId:{in:paymentIds},action:"finance.employee_settlement.posted"},select:{resourceId:true,after:true}}),receipts=new Map(paymentAudits.map(audit=>[audit.resourceId,audit.after]));
     return new Map(rows.map(row => {
       const totals = new Map<string, Money>();
       for (const line of row.postings) if (line.side === "DEBIT") {
@@ -158,13 +160,15 @@ export class AuditRepository {
         }));
         return ids.size === 1 ? [...ids][0] : undefined;
       };
+      const claimId=employeeClaims.get(row.id),claim=claimId?claims.get(claimId):undefined,settlement=Boolean(claimId&&!row.employeeRecognitionLine),sources=settlement&&claimId?employeeSettlementAuditSources({organizationId:this.organizationId,claimId,originalJournalId:row.reversesTransactionId??row.id,postedAt:row.occurredAt,receipt:receipts.get(row.reversesTransactionId??row.id),accounts:row.postings.map(posting=>posting.ledgerAccount)}):null;
+      const bound=!settlement||sources?.bound,fundingSources=sources?.financialSources??[],walletSources=sources?.walletSources??[];
       // Different currencies cannot be compared with one grant amount limit.
       return [row.id, {
         type: "financial_transaction", organizationId: this.organizationId, id: row.id, financialRecordId: row.id,
         assignedUserAccountId: row.createdBy, occurredAt: row.occurredAt, status: "POSTED",
         propertyId: dimension("property_id"), ownerId: dimension("owner_id"), reservationId: dimension("reservation_id"),
         amount: totals.size === 1 ? [...totals.values()][0].amount.toString() : undefined, dataClass: "financial",
-        ...(row.employeeRecognitionLine?{compensationRoot:claims.get(row.employeeRecognitionLine.recognition.claimId),salarySources:claims.get(row.employeeRecognitionLine.recognition.claimId)?.salarySources??[],financialSources:claims.get(row.employeeRecognitionLine.recognition.claimId)?.financialSources??[]}: {})
+        ...(claimId?{compensationRoot:bound?claim:undefined,salarySources:claim?.salarySources??[],financialSources:[...(claim?.financialSources??[]),...fundingSources],...(settlement?{walletSources}:{})}: {})
       }];
     }));
   }

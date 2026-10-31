@@ -1,4 +1,9 @@
 import { getEmployeeCompensationCostWorkspace } from "@/modules/finance/application/employee-compensation-cost-workspace";
+import { postEmployeeCompensationSettlement,voidEmployeeCompensationSettlement,recoverEmployeeCompensationSettlement } from "@/modules/finance/application/employee-compensation-settlement";
+import { EmployeePayableRepository } from "@/modules/finance/infrastructure/employee-payable-repository";
+import { TeamRepository } from "@/modules/identity/infrastructure/team-repository";
+import { linkTeamWallet } from "@/modules/identity/application/team-service";
+import { postFinancialTransfer } from "@/modules/finance/application/financial-transfer-service";
 import { getEmployeeCompensationClaimWorkspace,getEmployeeCompensationClaimDetail } from "@/modules/finance/application/employee-compensation-claim-workspace";
 import { EmployeeCompensationRecognitionRequestRepository } from "@/modules/finance/infrastructure/employee-compensation-recognition-request-repository";
 import { recognizeEmployeeCompensation } from "@/modules/finance/application/employee-compensation-recognition";
@@ -17,6 +22,7 @@ import { mkdirSync,writeFileSync } from "node:fs";
 import { PrismaClient,type Prisma } from "@prisma/client";
 import { afterAll,beforeAll,describe,expect,it,vi } from "vitest";
 import { withTenant } from "@/platform/db/tenant";
+import { Money } from "@/platform/money/money";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { EmployeeCompensationRunRepository } from "@/modules/finance/infrastructure/employee-compensation-run-repository";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
@@ -103,6 +109,12 @@ async function recognitionFixture(costOn?:string){
   return{...f,writer,actor,source,command:{id:source.id,claimId:source.claims[0].id,idempotencyKey:randomUUID(),reason:"Recognize original actual approved employee work costs"}};
 }
 
+async function settlementFixture(){
+  const f=await recognitionFixture(),writer=await fixtures.reader(f,{permissions:["financial_transaction:pay","financial_transaction:void","wallet:view","wallet:create","wallet:pay","wallet:void"]}),actor={...writer.ctx,personId:f.person.id};
+  const recognition=await recognizeEmployeeCompensation(actor,f.command,{db}),funding=await withTenant(db,f.org,tx=>new FinanceRepository(tx,f.org).ensureLedgerAccount({code:"EMPLOYEE_TEST_BANK",name:"Actual employee settlement test bank",accountType:"ASSET_LOCATION",normalSide:"DEBIT"})),paidAt=await withTenant(db,f.org,tx=>new FinanceRepository(tx,f.org).clock());
+  return{...f,settlementWriter:writer,actor,recognition,funding,payment:{id:f.source.id,claimId:f.command.claimId,kind:"PAYMENT" as const,fundingAccountId:funding.id,idempotencyKey:randomUUID(),amount:"200.00",currency:"MAD",paidAt:paidAt.toISOString(),reference:"Actual recorded staff payment",currentPeriod:false,reason:"Record actual partial payment against this earned beneficiary claim"}};
+}
+
 describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
   beforeAll(async()=>{
     if(!url||!["localhost","127.0.0.1"].includes(new URL(url).hostname))throw Error("Dedicated local PostgreSQL required");
@@ -111,6 +123,109 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     const scoped=new URL(url);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});
   });
   afterAll(async()=>{vi.restoreAllMocks();await db?.$disconnect();await admin?.$disconnect();});
+
+  it("employee settlement records a partial actual payment once and preserves the original earned costs",async()=>{
+    const f=await settlementFixture(),before=await facts(f.org),original=await withTenant(db,f.org,tx=>tx.employeeCompensationRecognitionLine.findMany({where:{recognitionId:f.recognition.recognitionId},include:{transaction:{include:{postings:true}}}}));
+    expect(await recoverEmployeeCompensationSettlement(f.actor,{id:f.source.id,claimId:f.command.claimId,key:f.payment.idempotencyKey},{db})).toEqual({payment:null});
+    const paid=await postEmployeeCompensationSettlement(f.actor,f.payment,{db});expect(paid.idempotent).toBe(false);expect(await postEmployeeCompensationSettlement(f.actor,f.payment,{db})).toEqual({...paid,idempotent:true});
+    expect(await recoverEmployeeCompensationSettlement(f.actor,{id:f.source.id,claimId:f.command.claimId,key:f.payment.idempotencyKey},{db})).toEqual({payment:{...paid,idempotent:true}});
+    const journal=await withTenant(db,f.org,tx=>tx.financialTransaction.findUniqueOrThrow({where:{id:paid.paymentId},include:{postings:{include:{ledgerAccount:true}}}}));expect(journal.postings.map(row=>[row.side,row.amount.toFixed(2),row.ledgerAccount.code]).sort()).toEqual([["CREDIT","200.00","EMPLOYEE_TEST_BANK"],["DEBIT","200.00","EMPLOYEE_PAYABLE"]]);
+    expect((await withTenant(db,f.org,tx=>new EmployeePayableRepository(tx,f.org).outstanding({claimId:f.command.claimId,personId:f.performer.id,currency:"MAD"}))).toJSON().amount).toBe("300.25");
+    expect(await withTenant(db,f.org,tx=>tx.employeeCompensationRecognitionLine.findMany({where:{recognitionId:f.recognition.recognitionId},include:{transaction:{include:{postings:true}}}}))).toEqual(original);expect(await facts(f.org)).toMatchObject({journals:before.journals+1,postings:before.postings+2});
+    await expect(postEmployeeCompensationSettlement(f.actor,{...f.payment,reason:"Changed original partial staff payment reason"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
+  });
+
+  it("employee settlement refuses overpayment, substituted sources and changed currency before writing money",async()=>{
+    const f=await settlementFixture(),before=await facts(f.org),foreign=await settlementFixture();
+    await expect(postEmployeeCompensationSettlement(f.actor,{...f.payment,amount:"500.26"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
+    await expect(postEmployeeCompensationSettlement(f.actor,{...f.payment,currency:"EUR"},{db})).rejects.toBeInstanceOf(ExpensePolicyUnavailableError);
+    await expect(postEmployeeCompensationSettlement(f.actor,{...f.payment,claimId:foreign.command.claimId},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);
+    await expect(postEmployeeCompensationSettlement(foreign.actor,f.payment,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);expect(await facts(f.org)).toEqual(before);
+  });
+
+  it("employee settlement serializes actual competing payments against one derived outstanding claim",async()=>{
+    const f=await settlementFixture(),attempts=await Promise.allSettled([postEmployeeCompensationSettlement(f.actor,{...f.payment,amount:"400.00"},{db}),postEmployeeCompensationSettlement(f.actor,{...f.payment,amount:"400.00",idempotencyKey:randomUUID()},{db})]);
+    expect(attempts.filter(value=>value.status==="fulfilled")).toHaveLength(1);expect(attempts.filter(value=>value.status==="rejected")).toHaveLength(1);expect((await withTenant(db,f.org,tx=>new EmployeePayableRepository(tx,f.org).outstanding({claimId:f.command.claimId,personId:f.performer.id,currency:"MAD"}))).toJSON().amount).toBe("100.25");
+  });
+
+  it("employee settlement appends an exact attributed reversal and restores the derived liability",async()=>{
+    const f=await settlementFixture(),paid=await postEmployeeCompensationSettlement(f.actor,f.payment,{db}),before=await withTenant(db,f.org,tx=>tx.financialTransaction.findUniqueOrThrow({where:{id:paid.paymentId},include:{postings:true}})),command={id:f.source.id,claimId:f.command.claimId,paymentId:paid.paymentId,reason:"Reverse the actual recorded employee payment with retained history"},reversed=await voidEmployeeCompensationSettlement(f.actor,command,{db});
+    expect(reversed.idempotent).toBe(false);expect(await voidEmployeeCompensationSettlement(f.actor,command,{db})).toEqual({...reversed,idempotent:true});expect(await withTenant(db,f.org,tx=>tx.financialTransaction.findUniqueOrThrow({where:{id:paid.paymentId},include:{postings:true}}))).toEqual(before);
+    expect((await withTenant(db,f.org,tx=>new EmployeePayableRepository(tx,f.org).outstanding({claimId:f.command.claimId,personId:f.performer.id,currency:"MAD"}))).toJSON().amount).toBe("500.25");
+    await expect(voidEmployeeCompensationSettlement(f.actor,{...command,reason:"Replace the retained actual reversal reason"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
+  });
+
+  it("employee settlement offsets only the beneficiary's actual available wallet after a genuine advance",async()=>{
+    const f=await settlementFixture();await linkTeamWallet({...f.actor,personId:f.person.id},{personId:f.performer.id,accountName:"Actual beneficiary advance wallet",reason:"Link actual beneficiary wallet before original advance"},{db});
+    const wallet=await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id));if(!wallet)throw Error("Actual linked beneficiary wallet required");
+    await postFinancialTransfer(f.actor,{fromAccountId:f.funding.id,toAccountId:wallet.ledgerAccountId,kind:"ADVANCE",amount:"150.00",currency:"MAD",purpose:"Actual staff work advance",reason:"Record a genuine advance before explicit employee offset",idempotencyKey:randomUUID()},{db});
+    const input={...f.payment,kind:"WALLET_OFFSET",fundingAccountId:wallet.ledgerAccountId,amount:"100.00"},result=await postEmployeeCompensationSettlement(f.actor,input,{db});expect(result.kind).toBe("WALLET_OFFSET");
+    expect(await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id))).toMatchObject({balances:[{amount:"50.00",currency:"MAD"}]});expect((await withTenant(db,f.org,tx=>new EmployeePayableRepository(tx,f.org).outstanding({claimId:f.command.claimId,personId:f.performer.id,currency:"MAD"}))).toJSON().amount).toBe("400.25");
+    await expect(postEmployeeCompensationSettlement(f.actor,{...input,amount:"50.01",idempotencyKey:randomUUID()},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
+    await voidEmployeeCompensationSettlement(f.actor,{id:f.source.id,claimId:f.command.claimId,paymentId:result.paymentId,reason:"Reverse actual offset without rewriting wallet or earned history"},{db});expect(await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id))).toMatchObject({balances:[{amount:"150.00",currency:"MAD"}]});
+  });
+
+  it("employee settlement rejects another person's funded wallet despite otherwise sufficient financial grants",async()=>{
+    const f=await settlementFixture();await linkTeamWallet({...f.actor,personId:f.person.id},{personId:f.person.id,accountName:"Actual separate officer wallet",reason:"Link a genuinely different person wallet for isolation checks"},{db});const wallet=await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.person.id));if(!wallet)throw Error("Actual independent wallet required");
+    await postFinancialTransfer(f.actor,{fromAccountId:f.funding.id,toAccountId:wallet.ledgerAccountId,kind:"ADVANCE",amount:"150.00",currency:"MAD",purpose:"Actual other person work advance",reason:"Fund actual separate wallet before rejecting beneficiary substitution",idempotencyKey:randomUUID()},{db});const before=await facts(f.org);
+    await expect(postEmployeeCompensationSettlement(f.actor,{...f.payment,kind:"WALLET_OFFSET",fundingAccountId:wallet.ledgerAccountId,amount:"100.00"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);expect(await facts(f.org)).toEqual(before);expect(await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.person.id))).toMatchObject({balances:[{amount:"150.00",currency:"MAD"}]});
+  });
+
+  it("employee settlement serializes different earned claims against the same actual beneficiary wallet",async()=>{
+    const f=await settlementFixture(),taskId=await fixtures.completeTask({...f,ctx:{...f.actor,personId:f.person.id}}),run=await createEmployeeCompensationRun(f.actor,{...f.input,idempotencyKey:randomUUID(),jobs:[{taskId,assignmentId:f.contract.id,confirmedAssignment:true}]},{db}),submitted=await submitEmployeeCompensation(f.actor,{...f.claimInput,runId:run.id,idempotencyKey:randomUUID(),reason:"Retain a second independent actual beneficiary claim",costs:run.lines.map(line=>({runLineId:line.id,category:"staff",costCenter:null,note:"Actual second earned claim for shared wallet concurrency"}))},{db}),source=await withTenant(db,f.org,tx=>new EmployeeCompensationClaimRepository(tx,f.org).find(submitted.id));if(!source)throw Error("Actual second earned source required");
+    await recognizeEmployeeCompensation(f.actor,{id:source.id,claimId:source.claims[0].id,idempotencyKey:randomUUID(),reason:"Recognize the second actual liability before shared wallet offset"},{db});await linkTeamWallet({...f.actor,personId:f.person.id},{personId:f.performer.id,accountName:"Actual shared beneficiary wallet",reason:"Link one actual wallet for independent earned claims"},{db});const wallet=await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id));if(!wallet)throw Error("Actual shared beneficiary wallet required");
+    await postFinancialTransfer(f.actor,{fromAccountId:f.funding.id,toAccountId:wallet.ledgerAccountId,kind:"ADVANCE",amount:"150.00",currency:"MAD",purpose:"Actual shared wallet advance",reason:"Fund one real wallet before concurrent different-claim offsets",idempotencyKey:randomUUID()},{db});const offset={...f.payment,kind:"WALLET_OFFSET",fundingAccountId:wallet.ledgerAccountId,amount:"100.00"},attempts=await Promise.allSettled([postEmployeeCompensationSettlement(f.actor,offset,{db}),postEmployeeCompensationSettlement(f.actor,{...offset,id:source.id,claimId:source.claims[0].id,idempotencyKey:randomUUID()},{db})]);
+    expect(attempts.filter(result=>result.status==="fulfilled")).toHaveLength(1);expect(attempts.filter(result=>result.status==="rejected")).toHaveLength(1);expect(await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id))).toMatchObject({balances:[{amount:"50.00",currency:"MAD"}]});
+    const totals=await withTenant(db,f.org,async tx=>{const repository=new EmployeePayableRepository(tx,f.org);return(await repository.outstanding({claimId:f.command.claimId,personId:f.performer.id,currency:"MAD"})).add(await repository.outstanding({claimId:source.claims[0].id,personId:f.performer.id,currency:"MAD"}));});expect(totals.toJSON().amount).toBe("900.50");
+  });
+
+  it("employee settlement requires explicit offset mode for the beneficiary's own wallet",async()=>{
+    const f=await settlementFixture();await linkTeamWallet({...f.actor,personId:f.person.id},{personId:f.performer.id,accountName:"Actual beneficiary wallet requiring explicit offset",reason:"Link actual beneficiary wallet before payment-kind isolation"},{db});const wallet=await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id));if(!wallet)throw Error("Actual beneficiary wallet required");const before=await facts(f.org);
+    await expect(postEmployeeCompensationSettlement(f.actor,{...f.payment,kind:"PAYMENT",fundingAccountId:wallet.ledgerAccountId,amount:"100.00"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);expect(await facts(f.org)).toEqual(before);
+  });
+
+  it("employee settlement SQL admission rejects own-wallet payment even when the application is bypassed",async()=>{
+    const f=await settlementFixture();await linkTeamWallet({...f.actor,personId:f.person.id},{personId:f.performer.id,accountName:"Actual raw-admission beneficiary wallet",reason:"Link an actual beneficiary wallet for SQL mode admission"},{db});const wallet=await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id));if(!wallet)throw Error("Actual beneficiary wallet required");const liability=await withTenant(db,f.org,tx=>tx.posting.findFirstOrThrow({where:{transactionId:f.recognition.transactionIds[0],ledgerAccount:{code:"EMPLOYEE_PAYABLE"}}})),before=await facts(f.org),key=randomUUID(),dimensions={employee_person_id:f.performer.id,employee_compensation_claim_id:f.command.claimId,employee_compensation_payment_id:key,source:"EMPLOYEE_PAYMENT"};
+    await expect(withTenant(db,f.org,tx=>new FinanceRepository(tx,f.org).createFinancialTransaction({reference:`EMPLOYEE-SETTLEMENT:${key}`,description:"Bypass attempted against actual own-wallet payment admission",occurredAt:new Date(f.payment.paidAt),idempotencyKey:`employee-settlement:${key}`,createdBy:f.actor.actorId,postings:[{ledgerAccountId:liability.ledgerAccountId,side:"DEBIT",amount:Money.of("100.00","MAD"),bucket:"EMPLOYEE_PAYMENT",dimensions},{ledgerAccountId:wallet.ledgerAccountId,side:"CREDIT",amount:Money.of("100.00","MAD"),bucket:"EMPLOYEE_PAYMENT",dimensions}]}))).rejects.toThrow(/explicit offset mode/u);expect(await facts(f.org)).toEqual(before);
+  });
+
+  it("employee settlement requires independent current claim, salary, financial and funding authority",async()=>{
+    const f=await settlementFixture(),before=await facts(f.org);
+    for(const permission of["employee_payable:pay","staff_compensation:view","financial_transaction:pay","financial_transaction:create","financial_transaction:view"]){const actor={...f.actor,authContext:{...f.actor.authContext,permissions:new Set([...f.actor.authContext.permissions].filter(value=>value!==permission))}};await expect(postEmployeeCompensationSettlement(actor,f.payment,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);}
+    expect(await facts(f.org)).toEqual(before);
+  });
+
+  it("employee settlement retains the actual closed paid instant only through an explicit current-period adjustment",async()=>{
+    const f=await settlementFixture(),now=new Date(),on=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth()-1,15)).toISOString().slice(0,10);
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),value:{timezone:"UTC",allow_early_close:false,max_reopen_seconds:60},reason:"Actual employee settlement accounting calendar"}));const closed=await closeAccountingPeriod(f.actor,{month:on.slice(0,7),expectedVersion:0,idempotencyKey:randomUUID(),reason:"Close actual paid source month before retained adjustment"},{db});
+    const input={...f.payment,paidAt:on+"T12:00:00.000Z"};await expect(postEmployeeCompensationSettlement(f.actor,input,{db})).rejects.toBeInstanceOf(AccountingPeriodClosedError);const paid=await postEmployeeCompensationSettlement(f.actor,{...input,currentPeriod:true},{db}),journal=await withTenant(db,f.org,tx=>tx.financialTransaction.findUniqueOrThrow({where:{id:paid.paymentId}}));expect(journal.occurredAt.toISOString().slice(0,7)).toBe(now.toISOString().slice(0,7));
+    expect((await withTenant(db,f.org,tx=>new EmployeePayableRepository(tx,f.org).audits([paid.paymentId])))[0].after).toMatchObject({input:{paidAt:input.paidAt,currentPeriod:true},sourcePeriodId:closed.id,sourcePeriodEventId:closed.eventId});
+  });
+
+  it("employee settlement rejects a direct journal whose attributed receipt substitutes a null command kind",async()=>{
+    const f=await settlementFixture(),paid=await postEmployeeCompensationSettlement(f.actor,f.payment,{db}),original=await withTenant(db,f.org,tx=>tx.financialTransaction.findUniqueOrThrow({where:{id:paid.paymentId},include:{postings:true}})),key=randomUUID(),input={...f.payment,idempotencyKey:key,amount:"10.00",kind:null};
+    await expect(withTenant(db,f.org,async tx=>{const finance=new FinanceRepository(tx,f.org),journal=await finance.createFinancialTransaction({reference:`EMPLOYEE-SETTLEMENT:${key}`,description:input.reason,occurredAt:new Date(input.paidAt),idempotencyKey:`employee-settlement:${key}`,createdBy:f.actor.actorId,
+      postings:original.postings.map(posting=>({ledgerAccountId:posting.ledgerAccountId,side:z.enum(["DEBIT","CREDIT"]).parse(posting.side),amount:Money.of(input.amount,input.currency),bucket:"EMPLOYEE_PAYMENT",dimensions:{employee_person_id:f.performer.id,employee_compensation_claim_id:f.command.claimId,employee_compensation_payment_id:key,source:"EMPLOYEE_PAYMENT"}}))});
+      await writeAuditEvent(tx,{organizationId:f.org,actorId:f.actor.actorId,action:"finance.employee_settlement.posted",resourceType:"financial_transaction",resourceId:journal.id,after:{input,recognitionId:f.recognition.recognitionId,transactionId:journal.id,sourcePeriodId:null,sourcePeriodEventId:null,postedAt:input.paidAt},reason:input.reason,requestId:randomUUID(),occurredAt:await finance.clock()});await new EmployeeCompensationRecognitionRepository(tx,f.org).flushGuards();})).rejects.toThrow();
+  });
+
+  it("employee settlement masks actual bank payment audits without independent salary and root authority",async()=>{
+    const f=await settlementFixture(),paid=await postEmployeeCompensationSettlement(f.actor,f.payment,{db}),filters={resourceType:"financial_transaction",resourceId:paid.paymentId},visible=await listAuditHistory(f.actor,filters,{db});expect(visible.rows.some(row=>row.action==="finance.employee_settlement.posted"&&row.after!==maskedValue&&row.reason===f.payment.reason)).toBe(true);
+    for(const permission of["employee_payable:view","staff_compensation:view","financial_transaction:view"]){const actor={...f.actor,authContext:{...f.actor.authContext,permissions:new Set([...f.actor.authContext.permissions].filter(value=>value!==permission))}},hidden=await listAuditHistory(actor,filters,{db});expect(hidden.rows.filter(row=>row.action==="finance.employee_settlement.posted").every(row=>row.after===maskedValue&&row.reason===maskedValue)).toBe(true);}
+  });
+
+  it("employee settlement requires actual wallet view and final stored grants before showing offset audit history",async()=>{
+    const f=await settlementFixture();await linkTeamWallet({...f.actor,personId:f.person.id},{personId:f.performer.id,accountName:"Actual audited beneficiary wallet",reason:"Link actual wallet for private offset audit verification"},{db});const wallet=await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id));if(!wallet)throw Error("Actual beneficiary wallet required");
+    await postFinancialTransfer(f.actor,{fromAccountId:f.funding.id,toAccountId:wallet.ledgerAccountId,kind:"ADVANCE",amount:"150.00",currency:"MAD",purpose:"Actual audited staff advance",reason:"Record actual advance before private offset audit review",idempotencyKey:randomUUID()},{db});
+    const paid=await postEmployeeCompensationSettlement(f.actor,{...f.payment,kind:"WALLET_OFFSET",fundingAccountId:wallet.ledgerAccountId,amount:"100.00"},{db}),filters={resourceType:"financial_transaction",resourceId:paid.paymentId};expect((await listAuditHistory(f.actor,filters,{db})).rows.some(row=>row.action==="finance.employee_settlement.posted"&&row.after!==maskedValue)).toBe(true);
+    const cap={...f.actor,authContext:{...f.actor.authContext,permissions:new Set([...f.actor.authContext.permissions].filter(value=>value!=="wallet:view"))}};expect((await listAuditHistory(cap,filters,{db})).rows.filter(row=>row.action==="finance.employee_settlement.posted").every(row=>row.after===maskedValue&&row.reason===maskedValue)).toBe(true);
+    await withTenant(db,f.org,async tx=>tx.roleAssignment.update({where:{id:f.settlementWriter.grant.id},data:{validTo:await new FinanceRepository(tx,f.org).clock()}}));expect((await listAuditHistory(f.actor,filters,{db})).rows.filter(row=>row.action==="finance.employee_settlement.posted").every(row=>row.after===maskedValue&&row.reason===maskedValue)).toBe(true);
+  });
+
+  it("employee settlement rolls back its journal and receipt when actual stored posting grants expire after insertion",async()=>{
+    const f=await settlementFixture(),before=await facts(f.org),original=Object.getOwnPropertyDescriptor(FinanceRepository.prototype,"createFinancialTransaction")!.value as FinanceRepository["createFinancialTransaction"],spy=vi.spyOn(FinanceRepository.prototype,"createFinancialTransaction").mockImplementation(async function(this:FinanceRepository,input){const journal=await original.call(this,input);await withTenant(db,f.org,async tx=>tx.roleAssignment.update({where:{id:f.settlementWriter.grant.id},data:{validTo:await new FinanceRepository(tx,f.org).clock()}}));return journal;});
+    try{await expect(postEmployeeCompensationSettlement(f.actor,f.payment,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);}finally{spy.mockRestore();}expect(await facts(f.org)).toEqual(before);expect(await withTenant(db,f.org,tx=>tx.auditLog.count({where:{action:"finance.employee_settlement.posted"}}))).toBe(0);
+  });
 
   it("claim workspace reads the original beneficiary amount and work without creating a posting or request",async()=>{
     const f=await recognitionFixture(),before=await facts(f.org),input={id:f.source.id,claimId:f.command.claimId};

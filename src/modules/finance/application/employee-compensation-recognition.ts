@@ -31,6 +31,7 @@ async function prepare(ctx:FinanceActorContext,intent:Intent,tx:TenantTransactio
   if(input)await recognitions.lockKey(input.idempotencyKey);await runs.lock(initial.runId);await claims.lock(id);
   const row=await claims.find(id);if(!row)throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx);
   if(row.withdrawal||row.run.cancellation||employeeCompensationSubmissionState(row)!=="APPROVED"||row.approval?.financialStages.some(stage=>stage.state!=="APPROVED"))throw new EmployeeCompensationRunConflictError();
+  if(!row.claims.some(claim=>claim.id===claimId))throw new EmployeeCompensationRunAccessError();
   const retained=employeeCompensationRecognitionCosts({organizationId:ctx.organizationId,id:row.id,runId:row.runId,costOn:row.costOn.toISOString().slice(0,10),currency:row.run.currency,emergency:row.emergency,claims:row.claims,
     runLines:row.run.lines.map(line=>({...line,recordedCompletionAt:line.recordedCompletionAt.toISOString(),amount:line.amount.toString()})),costs:row.costs.map(cost=>({...cost,amount:cost.amount.toString()}))},claimId,row.snapshot);
   const person=await recognitions.person(retained.personId);if(!person)throw new EmployeeCompensationRunAccessError();
