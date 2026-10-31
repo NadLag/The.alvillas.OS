@@ -17,6 +17,7 @@ import { employeeCompensationRunCreateSchema, employeeCompensationRunCancelSchem
 import { validateEmployeeCompletedWorkSource, validateEmployeeCompensationAssignment, validateEmployeeCompensationRate } from "./employee-compensation-source";
 import { employeeCompensationRunFacts, recheckEmployeeCompensationRun } from "./employee-compensation-run-access";
 import type { FinanceActorContext } from "./finance-access";
+import { requireCompensationCreationIntent } from "./employee-compensation-creation-intent";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
@@ -59,6 +60,7 @@ export async function createEmployeeCompensationRun(ctx: FinanceActorContext, ra
       if (existing.createdBy!==ctx.actorId || existing.requestFingerprint!==fingerprint) throw new EmployeeCompensationRunConflictError();
       return { ...employeeCompensationRunModel(ctx,existing), idempotent: true };
     }
+    await requireCompensationCreationIntent(tx,ctx.organizationId,input.idempotencyKey,{actorId:ctx.actorId,earningKind:"PER_JOB",requestFingerprint:fingerprint});
     const now = await finance.clock(), sources = new EmployeeCompensationRepository(tx,ctx.organizationId), config = new ConfigRuleRepository(tx,ctx.organizationId);
     const tasks = orderedTasks(await sources.completedWorks(input.jobs.map(job=>job.taskId)));
     if (tasks.length!==input.jobs.length || tasks.some(task=>task.state!=="COMPLETED" || !task.completedAt || !task.completedByPersonId)) throw new EmployeeCompensationRunAccessError();

@@ -6,6 +6,7 @@ import { Money } from "@/platform/money/money";
 import { employeeCompensationAuthorityLineFields,employeeCompensationRunFacts,employeeCompensationSubmittedFinancialSources } from "@/platform/authz/employee-compensation-resource";
 import { employeeSettlementAuditSources } from "@/platform/ledger/employee-settlement-audit";
 import { employeeMonthlyRequestAuthorityFacts } from "@/platform/authz/employee-monthly-request-resource";
+import { employeeEarningRequestAuthorityFacts,employeeEarningRequestSourceFields } from "@/platform/authz/employee-earning-request-resource";
 
 export type FinancialAuditResource = Resource & { salarySources?: readonly Resource[];financialSources?:readonly Resource[];companyFinancialSources?:readonly Resource[];walletSources?:readonly Resource[];compensationRoot?:Resource;sourceRecordId?:string;organizationOnlyEmployeeSource?:boolean };
 const employeeSubmissionAuditFields={id:true,costOn:true,run:{select:{id:true,createdBy:true,currency:true,createdAt:true,
@@ -102,6 +103,10 @@ export class AuditRepository {
   async employeeMonthlyRunRequestResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     const rows=await this.tx.employeeMonthlyRunRequest.findMany({where:{organizationId:this.organizationId,id:{in:ids}}}),facts=await employeeMonthlyRequestAuthorityFacts(this.organizationId,rows,this.tx);
     return new Map([...facts].map(([id,source])=>[id,{...source.resource,sourceRecordId:id,salarySources:source.salarySources,organizationOnlyEmployeeSource:source.legacy}]));
+  }
+  async employeeEarningRunRequestResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
+    const rows=await this.tx.employeeEarningRunRequest.findMany({where:{organizationId:this.organizationId,id:{in:ids}},include:{sources:{orderBy:{id:"asc"},select:employeeEarningRequestSourceFields}}});
+    return new Map(rows.map(row=>{const facts=employeeEarningRequestAuthorityFacts(this.organizationId,row);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources}];}));
   }
   async employeeCompensationSubmissionResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     if(!ids.length)return new Map();

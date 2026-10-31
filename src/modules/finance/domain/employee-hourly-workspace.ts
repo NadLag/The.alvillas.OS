@@ -1,0 +1,10 @@
+import { z } from "zod";
+import { employeeHourlyRunSourceInput,employeeHourlyRunPolicySchema } from "./employee-hourly-run";
+import { employeeCompensationChoiceSchema } from "./employee-compensation-picker";
+import { employeeCompensationRunDetailSchema } from "./employee-compensation-workspace";
+import { employeeCompensationRunViewSchema } from "./employee-compensation-run";
+export const employeeHourlyPickerInput=z.object({fromOn:z.iso.date(),toOn:z.iso.date(),currency:z.string().regex(/^[A-Z]{3}$/u),search:z.string().trim().max(120).default(""),after:z.string().min(1).max(4096).optional()}).strict();
+export const employeeHourlyChoiceSchema=employeeCompensationChoiceSchema.omit({monthlyCoverage:true,earningPeriodKey:true,earningKind:true}).extend({earningKind:z.literal("PER_HOUR"),evidenceId:z.uuid(),decisionId:z.uuid(),amount:employeeCompensationRunViewSchema.shape.total,hourlyCoverage:employeeCompensationRunDetailSchema.shape.labels.element.shape.hourlyCoverage.unwrap()}).strict();
+export const employeeHourlyWorkSchema=z.object({timezone:z.string(),items:z.array(z.object({taskId:z.uuid(),recordedCompletionAt:z.iso.datetime(),choices:z.array(employeeHourlyChoiceSchema).min(1)}).strict()).max(25),next:z.string().nullable()}).strict();
+export const employeeHourlyReviewInput=employeeHourlyRunSourceInput.safeExtend({after:z.uuid().optional()});
+export const employeeHourlyReviewSchema=z.object({reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),fromOn:z.iso.date(),toOn:z.iso.date(),currency:z.string().regex(/^[A-Z]{3}$/u),timezone:z.string(),total:employeeCompensationRunViewSchema.shape.total,lineCount:z.number().int().positive(),policy:employeeHourlyRunPolicySchema,lines:z.array(employeeHourlyChoiceSchema.extend({taskId:z.uuid(),recordedCompletionAt:z.iso.datetime()})).max(50),next:z.uuid().nullable()}).strict();
