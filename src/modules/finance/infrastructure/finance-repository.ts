@@ -132,6 +132,11 @@ export class FinanceRepository {
     return clock.now;
   }
 
+  async financialCalendarMatches(day:string,timezone:string,expected:Date){
+    const[row]=await this.tx.$queryRaw<Array<{matches:boolean}>>(Prisma.sql`SELECT (${day}::date::timestamp AT TIME ZONE ${timezone})=${expected}::timestamptz AS matches`);
+    return row?.matches===true;
+  }
+
   async lockReservationFinancialCorrection(reservationId: string): Promise<Date> {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":reservation-financial-correction:" + reservationId},0))::text`);
     return this.clock();

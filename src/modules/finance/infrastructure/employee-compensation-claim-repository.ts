@@ -9,6 +9,7 @@ export type EmployeeSubmissionRecord=Prisma.EmployeeCompensationSubmissionGetPay
 
 export class EmployeeCompensationClaimRepository{
   constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
+  currency(code:string){return this.tx.currency.findUnique({where:{code},select:{code:true,minorUnit:true}});}
   async lockKey(key:string){await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":employee-submission-key:"+key},0))::text`);}
   async lock(id:string){await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":employee-submission:"+id},0))::text`);}
   async lockSources(ids:readonly string[]){for(const id of [...new Set(ids)].sort())await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":employee-earned-source:"+id},0))::text`);}

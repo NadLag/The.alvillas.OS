@@ -4,8 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/platform/db/client";
 import { withTenant,type TenantTransaction,type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
-import { calendarDateStart } from "@/platform/time/calendar";
-import { employeeCompensationFinancialSourceFacts } from "@/platform/authz/employee-compensation-resource";
+import { employeeCompensationSubmittedFinancialSources } from "@/platform/authz/employee-compensation-resource";
 import { Money } from "@/platform/money/money";
 import { ApprovalRepository } from "@/platform/approvals/approval-repository";
 import { approvalResource,invoiceApprovalSourceSnapshotSchema } from "@/platform/approvals/approval";
@@ -17,6 +16,7 @@ import { EmployeeCompensationRunAccessError,EmployeeCompensationRunConflictError
 import { EmployeeCompensationRunRepository } from "../infrastructure/employee-compensation-run-repository";
 import { EmployeeCompensationClaimRepository,type EmployeeSubmissionRecord } from "../infrastructure/employee-compensation-claim-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
+import { EmployeeCompensationRecognitionRepository } from "../infrastructure/employee-compensation-recognition-repository";
 import { employeeCompensationRunFacts,recheckEmployeeCompensationRun } from "./employee-compensation-run-access";
 import type { FinanceActorContext } from "./finance-access";
 import { prepareEmployeeCompensationClaimPolicy } from "./employee-compensation-claim-policy";
@@ -34,7 +34,7 @@ export const employeeCompensationSubmissionReadInput=z.object({id:z.uuid(),after
 export async function readEmployeeCompensationSubmissionInTransaction(ctx:FinanceActorContext,input:z.infer<typeof employeeCompensationSubmissionReadInput>,tx:TenantTransaction,deps:Deps={}){
     const repository=new EmployeeCompensationClaimRepository(tx,ctx.organizationId),row=await repository.find(input.id);if(!row)throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx);
     const boundary=input.after?row.costs.findIndex(cost=>cost.id===input.after):-1;if(input.after&&boundary<0)throw new EmployeeCompensationRunAccessError();const page=row.costs.slice(boundary+1,boundary+52);
-    let canWithdraw=!row.withdrawal;
+    let canWithdraw=!row.withdrawal&&!(await new EmployeeCompensationRecognitionRepository(tx,ctx.organizationId).forSubmission(row.id)).length;
     if(canWithdraw)try{await recheckEmployeeSubmission(ctx,row,tx,"void");}catch(error){if(error instanceof EmployeeCompensationRunAccessError)canWithdraw=false;else throw error;}
     const history:Array<{action:"SUBMITTED"|"APPROVED"|"REJECTED"|"WITHDRAWN";at:string;reason:string}>=[{action:"SUBMITTED",at:row.createdAt.toISOString(),reason:row.reason}];
     if(row.approval?.decidedAt&&row.approval.decisionReason&&(row.approval.state==="APPROVED"||row.approval.state==="REJECTED"))history.push({action:row.approval.state,at:row.approval.decidedAt.toISOString(),reason:row.approval.decisionReason});
@@ -59,12 +59,7 @@ export async function recheckEmployeeSubmission(ctx:FinanceActorContext,row:Empl
 }
 export function employeeCompensationSubmissionFinancialChecks(organizationId:string,row:{costOn:Date;run:{createdBy:string};costs:ReadonlyArray<{propertyId:string;reservationId:string|null;amount:{toString():string};timezone:string;
   runLine:{taskId:string;recordedCompletionAt:Date};property:{cityId:string|null;regionId:string|null}}>},total:Money){
-  const costOn=row.costOn.toISOString().slice(0,10),starts=new Map<string,Date>();
-  return row.costs.flatMap(cost=>{
-    let at=starts.get(cost.timezone);if(!at){at=calendarDateStart(costOn,cost.timezone);starts.set(cost.timezone,at);}
-    const{financial:resource}=employeeCompensationFinancialSourceFacts(organizationId,row.run.createdBy,{...cost,taskId:cost.runLine.taskId},at);
-    return[{action:"view" as const,resource},{action:"view" as const,resource:{...resource,amount:total.toJSON().amount}},{action:"view" as const,resource:{...resource,occurredAt:cost.runLine.recordedCompletionAt}}];
-  });
+  return employeeCompensationSubmittedFinancialSources(organizationId,row,total).map(resource=>({action:"view" as const,resource}));
 }
 
 export async function withdrawEmployeeCompensation(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
@@ -74,6 +69,7 @@ export async function withdrawEmployeeCompensation(ctx:FinanceActorContext,raw:u
     const initial=await repository.find(input.id);if(!initial)throw new EmployeeCompensationRunAccessError();await runs.lock(initial.runId);await repository.lock(input.id);
     const row=await repository.find(input.id);if(!row)throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx,"void");
     if(row.withdrawal){if(row.withdrawal.withdrawnBy!==ctx.actorId||row.withdrawal.reason!==input.reason)throw new EmployeeCompensationRunConflictError();return receipt(row,true);}
+    if((await new EmployeeCompensationRecognitionRepository(tx,ctx.organizationId).forSubmission(row.id)).length)throw new EmployeeCompensationRunConflictError();
     await repository.lockSources(row.costs.map(cost=>cost.completionEventId));const withdrawal=await repository.withdraw(row.id,ctx.actorId,input.reason);
     if(row.approval)await new ApprovalRepository(tx,ctx.organizationId).resolveNotifications(row.approval.id,"CANCELLED",await finance.clock());
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation.withdrawn",resourceType:"employee_compensation_submission",resourceId:row.id,

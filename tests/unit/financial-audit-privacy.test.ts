@@ -11,7 +11,7 @@ const row=(resourceType:string):AuditHistoryRow=>({id,actorId:org,resourceId:id,
   before:null,after:{amount:"8000.00",currency:"MAD",name:"Dedicated financial source"},reason:"Dedicated confidential financial reason",requestId:id,occurredAt:new Date(0),createdAt:new Date(0),ipAddress:null,deviceId:null});
 
 describe("financial transaction and account audit privacy",()=>{
-  it.each(["financial_transaction","ledger_account"])("masks %s payload and reason for an audit-only reader",type=>{
+  it.each(["financial_transaction","ledger_account","employee_compensation_claim"])("masks %s payload and reason for an audit-only reader",type=>{
     for(const action of ["view","export"] as const){const result=presentAuditHistoryRow(actor,row(type),action);
       expect(result.after).toBe(maskedValue);expect(result.reason).toBe(maskedValue);expect(JSON.stringify(result)).not.toContain("8000.00");}
   });
@@ -24,5 +24,12 @@ describe("financial transaction and account audit privacy",()=>{
     expect(presentAuditHistoryRow(viewer,row("financial_transaction"),"export",source).after).toBe(maskedValue);
     for(const subject of [undefined,{...source,amount:"9000.01"},{...source,propertyId:id},{...source,id:org},{...source,organizationId:id}])
       expect(presentAuditHistoryRow(viewer,row("financial_transaction"),"view",subject).after).toBe(maskedValue);
+  });
+  it("keeps employee journal audits private without the original root, salary and full financial source",()=>{
+    const base={...actor,authContext:{...actor.authContext,permissions:new Set([...actor.authContext.permissions,"financial_transaction:view","financial_transaction:export"]) }},
+      root={type:"employee_payable",organizationId:org,id:org,amount:"8000.00",dataClass:"financial" as const},salary={type:"staff_compensation",organizationId:org,id:propertyId,amount:"8000.00",dataClass:"financial" as const},financial={type:"financial_transaction",organizationId:org,id,amount:"8000.00",dataClass:"financial" as const},
+      source={...financial,compensationRoot:root,salarySources:[salary],financialSources:[financial]},full={...base,authContext:{...base.authContext,permissions:new Set([...base.authContext.permissions,"employee_payable:view","employee_payable:export","staff_compensation:view"])}};
+    for(const action of["view","export"] as const){expect(presentAuditHistoryRow(base,row("financial_transaction"),action,source).after).toBe(maskedValue);expect(presentAuditHistoryRow(full,row("financial_transaction"),action,source).after).toEqual(row("financial_transaction").after);
+      for(const changed of[{...source,salarySources:[]},{...source,financialSources:[]},{...source,compensationRoot:undefined},{...source,salarySources:[{...salary,organizationId:id}]}])expect(presentAuditHistoryRow(full,row("financial_transaction"),action,changed).after).toBe(maskedValue);}
   });
 });

@@ -1,5 +1,6 @@
 import type { Resource } from "./authorize";
 import { Money } from "@/platform/money/money";
+import { calendarDateStart } from "@/platform/time/calendar";
 
 type Amount = { toString(): string };
 export type EmployeeCompensationRunAuthoritySource = {
@@ -32,4 +33,15 @@ export function employeeCompensationFinancialSourceFacts(organizationId:string,c
   const scope={organizationId,propertyId:source.propertyId,city:source.property.cityId,region:source.property.regionId,reservationId:source.reservationId,
     jobId:source.taskId,assignedUserAccountId:createdBy,dataClass:"financial" as const};
   return{scope,financial:{...scope,type:"financial_transaction",amount:source.amount.toString(),occurredAt} satisfies Resource};
+}
+
+/** Historical business reads and audit views retain the same whole submitted financial source. */
+export function employeeCompensationSubmittedFinancialSources(organizationId:string,row:{costOn:Date;run:{createdBy:string};costs:ReadonlyArray<{propertyId:string;reservationId:string|null;amount:Amount;timezone:string;
+  runLine:{taskId:string;recordedCompletionAt:Date};property:{cityId:string|null;regionId:string|null}}>},total:Money){
+  const costOn=row.costOn.toISOString().slice(0,10),starts=new Map<string,Date>();
+  return row.costs.flatMap(cost=>{
+    let at=starts.get(cost.timezone);if(!at){at=calendarDateStart(costOn,cost.timezone);starts.set(cost.timezone,at);}
+    const{financial}=employeeCompensationFinancialSourceFacts(organizationId,row.run.createdBy,{...cost,taskId:cost.runLine.taskId},at);
+    return[financial,{...financial,amount:total.toJSON().amount},{...financial,occurredAt:cost.runLine.recordedCompletionAt}];
+  });
 }

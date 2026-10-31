@@ -1,10 +1,10 @@
 import { z } from "zod";
 import { Money } from "@/platform/money/money";
 import { calendarDateStart } from "@/platform/time/calendar";
+import { readSubmittedCostAllocation } from "./submitted-cost-allocation";
 
 const money = z.object({ amount: z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u), currency: z.string().regex(/^[A-Z]{3}$/u) });
 const allocation = z.object({ owner: money, alvillas: money, guest: money });
-const ownerPolicy = z.object({ ownerId: z.uuid(), ownerName: z.string(), shareBps: z.number().int().min(0).max(10000), sourceAmount: money, allocation });
 const frozenLine = z.object({ id: z.uuid(), position: z.number().int().positive(), propertyId: z.uuid().nullable(), reservationId: z.uuid().nullable(),
   amount: money, category: z.string(), costCenter: z.string().nullable(), policy: z.object({ schemaVersion: z.literal(1), sourceKind: z.literal("supplier_invoice_line"),
     invoiceId: z.uuid(), revisionId: z.uuid(), lineId: z.uuid(), propertyId: z.uuid().nullable(), reservationId: z.uuid().nullable(),
@@ -40,29 +40,11 @@ export function supplierInvoiceRecognitionCosts(source: SupplierInvoiceRecogniti
       policy.invoiceId !== source.invoiceId || policy.revisionId !== source.revisionId || policy.lineId !== line.id || policy.propertyId !== line.propertyId ||
       policy.reservationId !== line.reservationId || policy.occurredOn !== source.occurredOn || policy.category !== line.category || !read(policy.amount).equals(value)) denied();
     total = total.add(value);
-    const allocations = { ownerAmount: read(policy.allocation.owner), alvillasAmount: read(policy.allocation.alvillas), guestAmount: read(policy.allocation.guest) };
-    if (!allocations.ownerAmount.add(allocations.alvillasAmount).add(allocations.guestAmount).equals(value)) denied();
-    const policies = line.propertyId ? z.array(ownerPolicy).min(1).parse(policy.policies) : [];
-    if (!line.propertyId) {
-      const company = z.array(z.object({ organizationId: z.uuid() })).length(1).parse(policy.policies);
-      if (company[0].organizationId !== source.organizationId || line.reservationId || !allocations.ownerAmount.amount.isZero() || !allocations.guestAmount.amount.isZero()) denied();
-    } else {
-      if (new Set(policies.map(owner => owner.ownerId)).size !== policies.length || policies.reduce((sum, owner) => sum + owner.shareBps, 0) !== 10000) denied();
-      let slices = Money.zero(source.currency), owners = slices, company = slices, guests = slices;
-      for (const owner of policies) {
-        const slice = read(owner.sourceAmount), ownerAmount = read(owner.allocation.owner), companyAmount = read(owner.allocation.alvillas), guestAmount = read(owner.allocation.guest);
-        if (!ownerAmount.add(companyAmount).add(guestAmount).equals(slice)) denied();
-        slices = slices.add(slice); owners = owners.add(ownerAmount); company = company.add(companyAmount); guests = guests.add(guestAmount);
-      }
-      if (!slices.equals(value) || !owners.equals(allocations.ownerAmount) || !company.equals(allocations.alvillasAmount) || !guests.equals(allocations.guestAmount)) denied();
-    }
-    if (allocations.guestAmount.amount.gt(0) && !line.reservationId) denied();
+    const retained=readSubmittedCostAllocation({organizationId:source.organizationId,propertyId:line.propertyId,reservationId:line.reservationId,amount:value},policy,denied);
     let instant = sourceInstants.get(policy.timezone);
     if (!instant) { instant = calendarDateStart(source.occurredOn, policy.timezone); sourceInstants.set(policy.timezone, instant); }
     return { id: line.id, position: line.position, propertyId: line.propertyId, reservationId: line.reservationId, category: line.category, costCenter: line.costCenter,
-      amount: value, allocation: allocations, timezone: policy.timezone, sourceOccurredAt: new Date(instant.getTime()),
-      owners: policies.map(owner => ({ ownerId: owner.ownerId, ownerName: owner.ownerName, shareBps: owner.shareBps })),
-      ownerAmounts: policies.map(owner => ({ ownerId: owner.ownerId, amount: read(owner.allocation.owner) })) };
+      amount: value, ...retained, timezone: policy.timezone, sourceOccurredAt: new Date(instant.getTime()) };
   });
   if (!total.equals(amount)) denied();
   return costs;

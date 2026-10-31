@@ -1348,6 +1348,7 @@
       "push": "Push"
     },
     "resolution": {
+      "CANCELLED": "Proposal withdrawn",
       "PENDING": "Awaiting decision",
       "APPROVED": "Approved",
       "REJECTED": "Rejected"

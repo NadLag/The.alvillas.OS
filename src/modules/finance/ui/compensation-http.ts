@@ -9,6 +9,8 @@ import { EmployeeCompensationAccessError,EmployeeCompensationSourceUnavailableEr
 import { EmployeeCompensationRunAccessError,EmployeeCompensationRunConflictError,EmployeeCompensationRunPolicyError } from "../domain/employee-compensation-run";
 import { EmployeeCompensationClaimSourceError } from "../domain/employee-compensation-claim";
 import { ExpensePolicyUnavailableError } from "../application/expense-submission-policy";
+import { EmployeeCompensationRecognitionSourceError } from "../domain/employee-compensation-recognition";
+import { AccountingPeriodClosedError } from "../domain/accounting-period";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
@@ -28,7 +30,8 @@ export async function compensationHttp(request:NextRequest,work:(actor:FinanceAc
   }catch(error){
     if(error instanceof ZodError||error instanceof EmployeeCompensationBasisError)return failure("validation",400);
     if(error instanceof EmployeeCompensationAccessError||error instanceof EmployeeCompensationRunAccessError)return failure("forbidden",403);
-    if(error instanceof EmployeeCompensationSourceUnavailableError||error instanceof EmployeeCompensationClaimSourceError)return failure("source_unavailable",409);
+    if(error instanceof EmployeeCompensationSourceUnavailableError||error instanceof EmployeeCompensationClaimSourceError||error instanceof EmployeeCompensationRecognitionSourceError)return failure("source_unavailable",409);
+    if(error instanceof AccountingPeriodClosedError)return failure("period_closed",409);
     if(error instanceof EmployeeCompensationRunPolicyError||error instanceof ExpensePolicyUnavailableError)return failure("configuration_unavailable",409);
     if(error instanceof EmployeeCompensationRunConflictError)return failure("conflict",409);
     try{await captureException(error,{source:"api",requestId,tags:{feature:options.feature}});}catch{/* Preserve the private response if telemetry delivery fails. */}
