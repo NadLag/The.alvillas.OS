@@ -1,6 +1,6 @@
 import {randomUUID} from "node:crypto";
 import {execFileSync} from "node:child_process";
-import {PrismaClient,type Prisma} from "@prisma/client";
+import {PrismaClient,Prisma} from "@prisma/client";
 import {afterAll,beforeAll,describe,expect,it,vi} from "vitest";
 import {withTenant} from "@/platform/db/tenant";
 import {maskedValue} from "@/platform/authz/present";
@@ -26,6 +26,16 @@ describe.skipIf(!url)("durable original posted percentage earning admission",()=
   const f=await fixture(),before=await facts(f.org),admitted=await admit(f);expect(admitted.receipt).toMatchObject({state:"PENDING",runId:null,idempotent:false});expect(await facts(f.org)).toEqual(before);
   const rows=await withTenant(db,f.org,async tx=>({request:await tx.employeeEarningRunRequest.findUniqueOrThrow({where:{id:admitted.receipt.requestId}}),sources:await tx.employeeEarningRequestWork.findMany({where:{requestId:admitted.receipt.requestId}}),witnesses:await tx.employeeEarningRequestPercentageWitness.findMany({orderBy:{position:"asc"}}),audits:await tx.auditLog.count({where:{resourceId:admitted.receipt.requestId,action:"finance.employee_compensation.earning_run_requested"}})}));
   expect(rows.request.earningKind).toBe("PERCENTAGE");expect(rows.request.amount.toFixed(2)).toBe("80.25");expect(rows.sources).toHaveLength(1);expect(rows.sources[0]).toMatchObject({personId:f.staff.id,assignmentId:f.assignment.id,evidenceId:null,decisionId:null,propertyId:f.property.id});expect(rows.witnesses).toHaveLength(2);expect(rows.witnesses.filter(w=>w.isEarningBase).map(w=>w.postingId)).toEqual([f.base.source.id]);expect(rows.witnesses.every(w=>w.journalAmount.toFixed(2)==="1234.56"&&w.propertyId===f.property.id)).toBe(true);expect(rows.audits).toBe(1);
+ });
+ it("retains exact large-decimal witnesses, supplied IDs and database birth while binding the repository tenant",async()=>{
+  const f=await fixtures.fixture(),amount="9007199254740993.99",base=await fixtures.posting(f,{amount}),input=fixtures.input(f,[base.source.id]),review=await withTenant(db,f.org,tx=>prepareEmployeePercentageRunSources(f.actor,{fromOn:input.fromOn,toOn:input.toOn,currency:input.currency,bases:input.bases},tx)),before=await facts(f.org),foreign=await admin.organization.create({data:{name:"Separate witness context acceptance"}}),chosen=randomUUID(),original=Reflect.get<EmployeeEarningRunRequestRepository,"createPercentageWitnesses">(EmployeeEarningRunRequestRepository.prototype,"createPercentageWitnesses");
+  const spy=vi.spyOn(EmployeeEarningRunRequestRepository.prototype,"createPercentageWitnesses").mockImplementationOnce(function(this:EmployeeEarningRunRequestRepository,rows){return original.call(this,rows.map((row,index)=>({...row,organizationId:foreign.id,journalAmount:new Prisma.Decimal(typeof row.journalAmount==="object"?row.journalAmount.toFixed():row.journalAmount),...(index===0?{id:chosen,createdAt:new Date("1970-01-01T00:00:00Z")}:{} )})));});
+  let receipt:Awaited<ReturnType<typeof requestEmployeePercentageRun>>;
+  try{receipt=await requestEmployeePercentageRun(f.actor,{...input,reviewFingerprint:review.sourceFingerprint},{db});}finally{spy.mockRestore();}
+  const saved=await withTenant(db,f.org,async tx=>({request:await tx.employeeEarningRunRequest.findUniqueOrThrow({where:{id:receipt.requestId}}),witnesses:await tx.employeeEarningRequestPercentageWitness.findMany({where:{source:{requestId:receipt.requestId}},orderBy:{position:"asc"}})}));
+  expect(saved.request.amount.toFixed(2)).toBe("585467951558164.61");expect(saved.witnesses).toHaveLength(2);expect(saved.witnesses[0].id).toBe(chosen);
+  expect(saved.witnesses.every(row=>row.organizationId===f.org&&row.journalAmount.toFixed(2)===amount&&row.createdAt.getTime()>=saved.request.requestedAt.getTime())).toBe(true);
+  expect(await withTenant(db,foreign.id,tx=>tx.employeeEarningRequestPercentageWitness.count())).toBe(0);expect(await facts(f.org)).toEqual(before);
  });
  it("recovers one exact original admission and rejects a reused nonce with different intent",async()=>{const f=await fixture(),a=await admit(f);expect(await requestEmployeePercentageRun(f.actor,f.command,{db})).toEqual({...a.receipt,idempotent:true});expect(await recoverEmployeeEarningRunRequest(f.actor,{key:f.input.idempotencyKey},{db})).toEqual({request:{...a.receipt,idempotent:true}});await expect(requestEmployeePercentageRun(f.actor,{...f.command,purpose:"A different retained intent"},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);expect(await withTenant(db,f.org,tx=>tx.employeeEarningRunRequest.count())).toBe(1);});
  it("rejects a stale source review before admitting any intent",async()=>{const f=await fixture();await expect(requestEmployeePercentageRun(f.actor,{...f.command,reviewFingerprint:"0".repeat(64)},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);expect(await withTenant(db,f.org,tx=>tx.employeeEarningRunRequest.count())).toBe(0);});

@@ -35,7 +35,7 @@ export function SupplierPaymentPanel({ invoiceId, locale, onChanged }: { invoice
       if (current !== generation.current) return;
       if (!result.ok) { setReviewed(false); failed(result.code); return; }
       setData(result.data); setError(null); setReviewed(true);
-      if (initialize) { setAmount(result.data.outstanding.amount); setPaidLocal(result.data.preview.paidLocal); setOccurrence("reject"); setFundingId(""); setFundingQuery(""); }
+      if (initialize) { setAmount(result.data.outstanding.amount); setPaidLocal(result.data.preview.paidLocal); setOccurrence(result.data.preview.occurrence); setFundingId(""); setFundingQuery(""); }
     } catch { if (current === generation.current) { setReviewed(false); setError("error"); } }
   }, [failed]);
   useEffect(() => { startTransition(() => load({ id: invoiceId }, true)); return invalidate; }, [invoiceId, load, invalidate]);
