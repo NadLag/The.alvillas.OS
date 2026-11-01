@@ -5,8 +5,8 @@ import { expect, test } from "@playwright/test";
 import { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
-import { nextReferenceNumber } from "@/platform/references/reference-number";
 import { AccountingPeriodRepository } from "@/modules/finance/infrastructure/accounting-period-repository";
+import { reserveHistoricalAccountingMonth } from "./support/historical-accounting-period";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { ownerLedgerPath } from "@/modules/finance/domain/owner-ledger";
 import { openFieldFixture } from "./support/field-fixture";
@@ -44,17 +44,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native expense approval,
       await config.createVersion({key:"finance.accounting_periods",scopeType:"organization",scopeId:null,effectiveFrom:new Date("2000-01-01"),
         reason:"Dedicated native historical accounting calendar",value:{timezone:"Europe/Paris",allow_early_close:false,max_reopen_seconds:60}});
       const periods = new AccountingPeriodRepository(tx, f.organizationId);
-      let sourceMonth = "", occupied = 1;
-      for (let attempt = 0; attempt < 36 && occupied; attempt++) {
-        const reference = await nextReferenceNumber(tx, f.organizationId, "EXP_ADJ_QA");
-        const slot = Number(reference.split("-").at(-1));
-        sourceMonth = new Date(Date.UTC(2025, -slot, 1)).toISOString().slice(0, 7);
-        if (sourceMonth < "2020-01") throw new Error("Historical expense acceptance calendar is exhausted; preserve all existing records");
-        const bounds = await periods.bounds(sourceMonth, "Europe/Paris");
-        occupied = await tx.financialTransaction.count({ where: { occurredAt: { gte: bounds.startsAt, lt: bounds.endsAt } } }) +
-          Number(Boolean(await periods.byMonth(sourceMonth)));
-      }
-      expect(occupied).toBe(0);
+      const sourceMonth = await reserveHistoricalAccountingMonth(tx, f.organizationId, "Europe/Paris");
+      expect(await periods.byMonth(sourceMonth)).toBeNull();
       const bounds = await periods.bounds(sourceMonth, "Europe/Paris");
       expect(await tx.financialTransaction.count({where:{occurredAt:{gte:bounds.startsAt,lt:bounds.endsAt}}})).toBe(0);
       const unrelatedOwner=await tx.owner.create({data:{organizationId:f.organizationId,displayName:`Unrelated private ledger owner ${suffix}`}});
