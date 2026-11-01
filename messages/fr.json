@@ -1989,7 +1989,21 @@
     "noCompensation": "Aucune r?mun?ration convenue pour le moment.",
     "accountNumber": "Compte actif {number}",
     "noAccount": "Personne uniquement ? sans acc?s au compte",
-    "createWallet": "Cr?er un portefeuille personnel d?di?"
+    "createWallet": "Cr?er un portefeuille personnel d?di?",
+    "scopeChoices": {
+      "searchLabel": "Rechercher une villa, une ville ou une région",
+      "search": "Rechercher",
+      "choose": "Choisir une fiche",
+      "loading": "Chargement des fiches autorisées…",
+      "offline": "Connectez-vous pour rechercher des fiches d’affectation.",
+      "invalid": "Vérifiez la recherche et réessayez.",
+      "denied": "Vous n’avez plus accès à ces fiches d’affectation.",
+      "unavailable": "Impossible de charger les fiches. Réessayez.",
+      "empty": "Aucune fiche correspondante n’est accessible à votre compte.",
+      "first": "Première page",
+      "next": "Autres fiches",
+      "retry": "Réessayer"
+    }
   },
   "ReservationManagement": {
     "eyebrow": "Réservations",

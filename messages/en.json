@@ -1989,7 +1989,21 @@
     "noCompensation": "No compensation agreed yet.",
     "accountNumber": "Active account {number}",
     "noAccount": "Person only ? no account access",
-    "createWallet": "Create a dedicated staff wallet"
+    "createWallet": "Create a dedicated staff wallet",
+    "scopeChoices": {
+      "searchLabel": "Find a property, city or region",
+      "search": "Search",
+      "choose": "Choose a record",
+      "loading": "Loading authorized records…",
+      "offline": "Connect to search for assignment records.",
+      "invalid": "Check the search and try again.",
+      "denied": "You no longer have access to these assignment records.",
+      "unavailable": "The records could not be loaded. Try again.",
+      "empty": "No matching records are available to your account.",
+      "first": "First page",
+      "next": "More records",
+      "retry": "Try again"
+    }
   },
   "ReservationManagement": {
     "eyebrow": "Reservations",
