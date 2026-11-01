@@ -13,6 +13,7 @@ export class EmployeeEarningRunRequestRepository{
  create(input:Omit<Prisma.EmployeeEarningRunRequestUncheckedCreateInput,"organizationId"|"sources"|"outcome">){return this.tx.employeeEarningRunRequest.create({data:{...input,organizationId:this.organizationId}});}
  createSources(requestId:string,rows:readonly Omit<Prisma.EmployeeEarningRequestWorkCreateManyInput,"organizationId"|"requestId">[]){return this.tx.employeeEarningRequestWork.createMany({data:rows.map(row=>({...row,organizationId:this.organizationId,requestId}))});}
  createWitnesses(rows:readonly Omit<Prisma.EmployeeEarningRequestHourlyWitnessCreateManyInput,"organizationId">[]){return this.tx.employeeEarningRequestHourlyWitness.createMany({data:rows.map(row=>({...row,organizationId:this.organizationId}))});}
+ async createPercentageWitnesses(rows:readonly Omit<Prisma.EmployeeEarningRequestPercentageWitnessCreateManyInput,"organizationId">[]){return this.tx.employeeEarningRequestPercentageWitness.createMany({data:rows.map(row=>({...row,organizationId:this.organizationId}))});}
  outcome(input:Omit<Prisma.EmployeeEarningRunOutcomeUncheckedCreateInput,"organizationId">){return this.tx.employeeEarningRunOutcome.create({data:{...input,organizationId:this.organizationId}});}
  async flushGuards(){await this.tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");}
 }

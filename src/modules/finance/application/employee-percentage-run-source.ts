@@ -22,13 +22,13 @@ export async function prepareEmployeePercentageRunSources(ctx:FinanceActorContex
  if(database.startsAt.getTime()!==window.startsAt.getTime()||database.endsAt.getTime()!==window.endsAt.getTime())throw new EmployeeCompensationRunPolicyError();
  const source=await prepareEmployeePercentageSources(ctx,{currency:input.currency,bases:input.bases},tx);
  if(source.lines.some(line=>line.sources.some(row=>row.earnedAt<window.startsAt||row.earnedAt>=window.endsAt)))throw new EmployeeCompensationRunPolicyError();
- const sourceFingerprint=commandFingerprint({input,policy:{id:policy.id,version:policy.version,value:policy.value},sourceFingerprint:source.sourceFingerprint});
+ const sourceFingerprint=commandFingerprint({input,policy:{id:policy.id,version:policy.version,value:policy.value},sourceFingerprint:source.earningFingerprint});
  return{policy,window,source,sourceFingerprint};
 }
 
 
 /** Retain the same typed original evidence for a request and its eventual run. */
-export function retainEmployeePercentageRunSources(prepared:Awaited<ReturnType<typeof prepareEmployeePercentageRunSources>>,input:ReturnType<typeof employeePercentageRunSourceInput.parse>){
+export function retainEmployeePercentageRunSources(prepared:Awaited<ReturnType<typeof prepareEmployeePercentageRunSources>>,input:Pick<ReturnType<typeof employeePercentageRunSourceInput.parse>,"currency">){
  return prepared.source.lines.map(line=>{
    const journals=[...new Map(line.sources.map(row=>[row.original.transaction.id,row.original.transaction])).values()].sort((a,b)=>a.id.localeCompare(b.id)),baseById=new Map(line.sources.map(row=>[row.postingId,row])),byJournal=new Map(line.sources.map(row=>[row.original.transaction.id,row]));
    const journalTotals=new Map(journals.map(journal=>[journal.id,employeePostedJournalAmounts(journal.postings)]));

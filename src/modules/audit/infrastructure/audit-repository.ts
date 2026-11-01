@@ -106,7 +106,7 @@ export class AuditRepository {
   }
   async employeeEarningRunRequestResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     const rows=await this.tx.employeeEarningRunRequest.findMany({where:{organizationId:this.organizationId,id:{in:ids}},include:{sources:{orderBy:{id:"asc"},select:employeeEarningRequestSourceFields}}});
-    return new Map(rows.map(row=>{const facts=employeeEarningRequestAuthorityFacts(this.organizationId,row);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources}];}));
+    return new Map(rows.map(row=>{const facts=employeeEarningRequestAuthorityFacts(this.organizationId,row);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,...facts.financialSources?.length?{financialSources:facts.financialSources}:{}}];}));
   }
   async employeeCompensationSubmissionResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     if(!ids.length)return new Map();

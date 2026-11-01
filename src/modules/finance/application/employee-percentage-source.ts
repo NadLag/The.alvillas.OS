@@ -62,7 +62,10 @@ export async function prepareEmployeePercentageSources(ctx:FinanceActorContext,r
   }
   await recheckFinanceAuthorization(ctx,tx,await finance.clock(),checks,new EmployeeCompensationRunAccessError());
   const journalScopes=[...scopes].sort(([a],[b])=>a.localeCompare(b)),snapshot={input,policy:{id:policy.id,version:policy.version,value:policy.value},journals,journalScopes,lines:lines.map(line=>({...line,sources:line.sources.map(row=>({posting:row.original.posting,account:row.original.account,assignment:row.source.assignment,compensation:row.source.rate,rule:{id:row.rule.id,version:row.rule.version,value:row.rule.value,effectiveFrom:row.rule.effectiveFrom},scope:row.scope}))}))};
-  return{policy,lines,journals,journalScopes:new Map(journalScopes),amount:total.toJSON(),sourceFingerprint:commandFingerprint(snapshot)};
+  // Review binds earned identity and economics. Current eligibility is checked above;
+  // later retirement or account changes do not reprice an already earned source.
+  const earnedSnapshot={...snapshot,lines:snapshot.lines.map(line=>({...line,sources:line.sources.map(row=>({...row,assignment:{id:row.assignment.id,personId:row.assignment.personId,roleId:row.assignment.roleId,scopeType:row.assignment.scopeType,scopeId:row.assignment.scopeId,validFrom:row.assignment.validFrom}}))}))};
+  return{policy,lines,journals,journalScopes:new Map(journalScopes),amount:total.toJSON(),sourceFingerprint:commandFingerprint(snapshot),earningFingerprint:commandFingerprint(earnedSnapshot)};
  };
  const prepared=await build();return{...prepared,recheck:async()=>{if((await build()).sourceFingerprint!==prepared.sourceFingerprint)throw new EmployeeCompensationRunConflictError();}};
 }

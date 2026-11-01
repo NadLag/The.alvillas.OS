@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient,type Prisma } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant } from "@/platform/db/tenant";
@@ -37,10 +37,10 @@ describe("native payment accounts on real PostgreSQL", () => {
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw Error("Local PostgreSQL is required");
     execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"], { env: { ...process.env, DATABASE_URL: url }, stdio: "pipe" });
-    admin = new PrismaClient({ datasourceUrl: url });
+    admin = new PrismaClient<Prisma.PrismaClientOptions>({ datasourceUrl: url });
     await provisionIntegrationRole(admin, "alvillas_ops_tests");
     const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests";
-    db = new PrismaClient({ datasourceUrl: scoped.toString() });
+    db = new PrismaClient<Prisma.PrismaClientOptions>({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
 
