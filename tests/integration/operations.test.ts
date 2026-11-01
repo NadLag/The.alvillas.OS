@@ -2,7 +2,7 @@ import { provisionIntegrationRole } from "./support/database-role";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { PrismaClient } from "@prisma/client";
-import { beforeAll, afterAll, describe, it, expect } from "vitest";
+import { beforeAll, afterAll, describe, it, expect, vi } from "vitest";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { permissionCatalog } from "@/platform/authz/catalog";
 import { fieldProxyTasks } from "@/modules/reservations/application/field-proxy-service";
@@ -1558,6 +1558,12 @@ describe("operations on real PostgreSQL", () => {
     } finally {
       await probe.$disconnect();
     }
+  });
+  it("keeps an explicitly filtered property board bounded under500 unrelated properties and denies foreign filters",async()=>{
+    const f=await fixture();await crew(f);const target=await createOperationTask(f.ctx,input(f),deps());
+    await withTenant(db,f.org,tx=>tx.property.createMany({data:Array.from({length:500},(_,i)=>({organizationId:f.org,name:"Unrelated filtered-board property "+i,addressLine1:"Actual scale source",city:"Marrakech",propertyType:"VILLA",bedrooms:1,bathrooms:1,maxGuests:2,amenities:[],photoUrls:[]}))}));
+    const all=vi.spyOn(OperationRepository.prototype,"properties"),policies=vi.spyOn(OperationRepository.prototype,"policies");
+    try{const board=await operationManagement(f.ctx,{propertyId:f.property.id},deps());expect(board.count).toBe(1);expect(board.tasks.map(row=>row.id)).toEqual([target.id]);expect(all).not.toHaveBeenCalled();expect(policies).toHaveBeenCalledWith([f.property.id],expect.any(Date));const foreign=await fixture();const hidden=await operationManagement(f.ctx,{propertyId:foreign.property.id},deps());expect(hidden.count).toBe(0);expect(hidden.tasks).toEqual([]);expect(all).not.toHaveBeenCalled();}finally{all.mockRestore();policies.mockRestore();}
   });
   it("filters before pagination, keeps saved views private and applies bulk changes atomically and idempotently", async () => {
     const f = await fixture();

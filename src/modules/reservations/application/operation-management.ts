@@ -83,7 +83,8 @@ export async function operationManagement(
     now = deps.now ?? new Date();
   return withTenant(deps.db ?? prisma, ctx.organizationId, async (tx) => {
     const repo = new OperationRepository(tx, ctx.organizationId),
-      properties = await repo.properties(),
+      selectedProperty = query.propertyId ? await repo.property(query.propertyId) : null,
+      properties = query.propertyId ? selectedProperty ? [selectedProperty] : [] : await repo.properties(),
       range = taskDateRange(
         query,
         now,
