@@ -44,17 +44,22 @@ export class EmployeePercentageSourceRepository{
  async preciseContracts(entries:readonly {postingId:string;assignmentId:string;compensationId:string;configRuleId:string}[]){
   if(!entries.length)return[];
   return this.tx.$queryRaw<Array<{postingId:string;assignmentId:string}>>(Prisma.sql`
-   WITH requested AS(SELECT * FROM jsonb_to_recordset(${JSON.stringify(entries.map(({postingId,assignmentId,compensationId,configRuleId})=>({postingId,assignmentId,compensationId,configRuleId})))}::jsonb) AS x("postingId" uuid,"assignmentId" uuid,"compensationId" uuid,"configRuleId" uuid))
-   SELECT p.id AS "postingId",a.id AS "assignmentId" FROM requested x
-   JOIN posting p ON p.id=x."postingId" AND p.organization_id=${this.organizationId}::uuid
-   JOIN financial_transaction t ON t.id=p.transaction_id AND t.organization_id=p.organization_id
-   JOIN role_assignment a ON a.id=x."assignmentId" AND a.organization_id=p.organization_id
-   JOIN team_compensation c ON c.id=x."compensationId" AND c.organization_id=p.organization_id AND c.assignment_id=a.id
-   JOIN config_rule r ON r.id=x."configRuleId" AND r.organization_id=p.organization_id AND r.id=c.config_rule_id
-   WHERE date_trunc('milliseconds',t.occurred_at)=t.occurred_at
-   AND a.valid_from<=t.occurred_at AND (a.valid_to IS NULL OR a.valid_to>t.occurred_at) AND (a.archived_at IS NULL OR a.archived_at>t.occurred_at)
-   AND c.effective_from<=t.occurred_at AND r.effective_from<=t.occurred_at AND (r.effective_to IS NULL OR r.effective_to>t.occurred_at)
-   AND NOT EXISTS(SELECT 1 FROM team_compensation newer WHERE newer.organization_id=c.organization_id AND newer.assignment_id=a.id AND newer.effective_from<=t.occurred_at AND newer.version>c.version)
-   ORDER BY p.id,a.id`);
+   WITH requested AS(SELECT * FROM jsonb_to_recordset(${JSON.stringify(entries.map(({postingId,assignmentId,compensationId,configRuleId})=>({postingId,assignmentId,compensationId,configRuleId})))}::jsonb) AS x("postingId" uuid,"assignmentId" uuid,"compensationId" uuid,"configRuleId" uuid)),
+   selected_postings AS MATERIALIZED(
+    SELECT x.*,p.organization_id,p.transaction_id FROM requested x
+    JOIN posting p ON p.id=x."postingId" AND p.organization_id=${this.organizationId}::uuid
+   ),originals AS MATERIALIZED(
+    SELECT p.*,t.occurred_at FROM selected_postings p
+    JOIN financial_transaction t ON t.id=p.transaction_id AND t.organization_id=p.organization_id
+   )
+   SELECT x."postingId" AS "postingId",a.id AS "assignmentId" FROM originals x
+   JOIN role_assignment a ON a.id=x."assignmentId" AND a.organization_id=x.organization_id
+   JOIN team_compensation c ON c.id=x."compensationId" AND c.organization_id=x.organization_id AND c.assignment_id=a.id
+   JOIN config_rule r ON r.id=x."configRuleId" AND r.organization_id=x.organization_id AND r.id=c.config_rule_id
+   WHERE date_trunc('milliseconds',x.occurred_at)=x.occurred_at
+   AND a.valid_from<=x.occurred_at AND (a.valid_to IS NULL OR a.valid_to>x.occurred_at) AND (a.archived_at IS NULL OR a.archived_at>x.occurred_at)
+   AND c.effective_from<=x.occurred_at AND r.effective_from<=x.occurred_at AND (r.effective_to IS NULL OR r.effective_to>x.occurred_at)
+   AND NOT EXISTS(SELECT 1 FROM team_compensation newer WHERE newer.organization_id=c.organization_id AND newer.assignment_id=a.id AND newer.effective_from<=x.occurred_at AND newer.version>c.version)
+   ORDER BY x."postingId",a.id`);
  }
 }
