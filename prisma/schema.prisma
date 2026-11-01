@@ -3072,6 +3072,7 @@ model EmployeeCompensationSubmissionOutcome {
 }
 
 model EmployeeCompensationCorrection {
+  outcomes EmployeeCompensationRecognitionOutcome[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   submissionId String @map("submission_id") @db.Uuid
@@ -3121,6 +3122,7 @@ model EmployeeCompensationCorrectionLine {
 }
 
 model EmployeeCompensationRecognition {
+  correctionRequests EmployeeCompensationRecognitionRequest[] @relation("EmployeeCorrectionRequestSource")
   correction EmployeeCompensationCorrection?
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -3167,6 +3169,9 @@ model EmployeeCompensationRecognitionLine {
 }
 
 model EmployeeCompensationRecognitionRequest {
+  operation String @default("RECOGNIZE") @db.VarChar(16)
+  originalRecognitionId String? @map("original_recognition_id") @db.Uuid
+  originalRecognition EmployeeCompensationRecognition? @relation("EmployeeCorrectionRequestSource",fields:[organizationId,originalRecognitionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_correction_request_source_fk")
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   submissionId String @map("submission_id") @db.Uuid
@@ -3184,11 +3189,14 @@ model EmployeeCompensationRecognitionRequest {
   outcome EmployeeCompensationRecognitionOutcome?
   @@unique([organizationId,id],map:"employee_recognition_request_org_id_unique")
   @@unique([organizationId,idempotencyKey],map:"employee_recognition_request_nonce_unique")
+  @@index([organizationId,claimId,operation,requestedBy,requestedAt,id],map:"employee_recognition_request_actor_operation_idx")
   @@index([organizationId,claimId,id],map:"employee_recognition_request_claim_idx")
   @@map("employee_compensation_recognition_request")
 }
 
 model EmployeeCompensationRecognitionOutcome {
+  correctionId String? @map("correction_id") @db.Uuid
+  correction EmployeeCompensationCorrection? @relation(fields:[organizationId,correctionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_correction_outcome_source_fk")
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   requestId String @map("request_id") @db.Uuid
@@ -3202,6 +3210,7 @@ model EmployeeCompensationRecognitionOutcome {
   @@unique([organizationId,id],map:"employee_recognition_outcome_org_id_unique")
   @@unique([organizationId,requestId],map:"employee_recognition_outcome_request_unique")
   @@index([organizationId,recognitionId],map:"employee_recognition_outcome_source_idx")
+  @@index([organizationId,correctionId],map:"employee_correction_outcome_idx")
   @@map("employee_compensation_recognition_outcome")
 }
 
