@@ -44,7 +44,7 @@ export class EmployeePercentageSourceRepository{
  async preciseContracts(entries:readonly {postingId:string;assignmentId:string;compensationId:string;configRuleId:string}[]){
   if(!entries.length)return[];
   return this.tx.$queryRaw<Array<{postingId:string;assignmentId:string}>>(Prisma.sql`
-   WITH requested AS(SELECT * FROM jsonb_to_recordset(${JSON.stringify(entries)}::jsonb) AS x("postingId" uuid,"assignmentId" uuid,"compensationId" uuid,"configRuleId" uuid))
+   WITH requested AS(SELECT * FROM jsonb_to_recordset(${JSON.stringify(entries.map(({postingId,assignmentId,compensationId,configRuleId})=>({postingId,assignmentId,compensationId,configRuleId})))}::jsonb) AS x("postingId" uuid,"assignmentId" uuid,"compensationId" uuid,"configRuleId" uuid))
    SELECT p.id AS "postingId",a.id AS "assignmentId" FROM requested x
    JOIN posting p ON p.id=x."postingId" AND p.organization_id=${this.organizationId}::uuid
    JOIN financial_transaction t ON t.id=p.transaction_id AND t.organization_id=p.organization_id
