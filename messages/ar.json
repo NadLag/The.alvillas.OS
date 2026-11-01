@@ -3189,7 +3189,10 @@
     "percentageNext": "أسس الدخل التالية",
     "percentagePage": "الأسس {from}–{to} من {total}",
     "percentageRounding": "تُجمع مساهمات القيود الأصلية قبل تقريب إجمالي استحقاق هذا العقد مرة واحدة.",
-    "percentageVariedRates": "بحسب القيد الأصلي"
+    "percentageVariedRates": "بحسب القيد الأصلي",
+    "percentagePreviousGroup": "مجموعة المستحقات السابقة",
+    "percentageNextGroup": "مجموعة المستحقات التالية",
+    "percentageGroupPage": "مجموعة المستحقات {current} من {total}"
   },
   "EmployeeCostNotices": {
     "eyebrow": "المالية · إشعار المالك",

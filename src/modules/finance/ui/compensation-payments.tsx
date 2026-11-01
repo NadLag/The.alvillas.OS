@@ -1,4 +1,5 @@
 "use client";
+import {CompensationPercentageEvidenceGroups} from "./compensation-percentage-evidence";
 import { useCallback,useEffect,useRef,useState,type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import { SkeletonBlock,StatusBadge } from "@/design-system/shells";
@@ -31,6 +32,7 @@ export function CompensationPayments({locale,submissionId,claimId,recoveryScope}
     {resource.pending?<><p role="status">{common("loading")}</p><SkeletonBlock rows={5}/></>:null}
     {resource.error?<div role="alert" className="compensation-notice"><p>{common(resource.error)}</p><button className="secondary-button" onClick={()=>{void resource.refresh();}}>{common("retryRead")}</button></div>:null}
     {data?<><section className="compensation-summary"><div><h2 dir="auto">{data.personName??t("restrictedPerson")}</h2><p dir="auto">{data.purpose}</p></div><dl><div><dt>{t("earned")}</dt><dd data-testid="compensation-payment-earned">{formatCurrencyAmount(locale,data.earned.amount,data.earned.currency)}</dd></div><div><dt>{t("outstanding")}</dt><dd className="compensation-total" data-testid="compensation-payment-outstanding">{formatCurrencyAmount(locale,data.outstanding.amount,data.outstanding.currency)}</dd></div></dl></section>
+      {data.percentageEvidence?.length?<CompensationPercentageEvidenceGroups locale={locale} groups={data.percentageEvidence}/>:null}
       {data.blocked?<p className="compensation-notice" role="status">{t(`blocked.${data.blocked}`)}</p>:null}
       {data.canPrepare&&command.state!=="succeeded"?<form className="resource-form" onSubmit={event=>{void submit(event);}} data-testid="compensation-payment-form" aria-busy={command.state==="sending"}><h2>{t("recordTitle")}</h2><p>{t("recordGuidance")}</p><fieldset disabled={command.state!=="ready"}><legend className="sr-only">{t("recordTitle")}</legend>
         <label className="field"><span>{t("kind")}</span><select value={draft.kind} data-testid="compensation-payment-kind" onChange={event=>{change("kind",event.target.value as Draft["kind"]);change("fundingAccountId","");}}><option value="PAYMENT">{t("kinds.PAYMENT")}</option><option value="WALLET_OFFSET">{t("kinds.WALLET_OFFSET")}</option></select></label>
