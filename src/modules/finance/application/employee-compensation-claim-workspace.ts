@@ -17,11 +17,11 @@ import { employeeCompensationRecognitionInput,employeeCompensationRecognitionReq
 import { EmployeeCompensationRunAccessError,EmployeeCompensationRunConflictError } from "../domain/employee-compensation-run";
 import { employeeCompensationCostResource } from "../domain/employee-compensation-cost-resource";
 import { employeeCompletedWorkEvidence } from "../domain/employee-completed-work";
-import { readEmployeeCompensationSubmissionInTransaction,recheckEmployeeSubmission,employeeCompensationSubmissionState,employeeCompensationCostRows } from "./employee-compensation-submission";
+import { readEmployeeCompensationSubmissionInTransaction,recheckEmployeeSubmission,employeeCompensationSubmissionState,employeeCompensationCostRows,employeeCompensationSubmissionFinancialChecks } from "./employee-compensation-submission";
 import { inspectEmployeeCompensationRecognition,prepareEmployeeCompensationRecognition } from "./employee-compensation-recognition";
 import { employeeCompensationSourceLabels } from "./employee-compensation-source-labels";
 import { recheckFinanceAuthorization,type FinanceActorContext } from "./finance-access";
-import { employeeCompensationRunFacts } from "./employee-compensation-run-access";
+import { employeeCompensationRunFacts,recheckEmployeeCompensationRun } from "./employee-compensation-run-access";
 
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 type Receipts=Awaited<ReturnType<EmployeeCompensationRecognitionRepository["workspaceForSubmission"]>>;
@@ -47,12 +47,12 @@ async function labels(ctx:FinanceActorContext,row:EmployeeSubmissionRecord,lineI
 /** Present original evidence from a locked, already authorized recognition source without loading it again. */
 export async function employeeCompensationClaimEvidence(ctx:FinanceActorContext,input:z.infer<typeof employeeCompensationClaimDetailInput>,row:EmployeeSubmissionRecord,receipt:Receipts[number],tx:TenantTransaction,deps:Deps={}){
   if(row.organizationId!==ctx.organizationId||row.id!==input.id||receipt.claimId!==input.claimId||!row.claims.some(claim=>claim.id===input.claimId))throw new EmployeeCompensationRunAccessError();
-  await recheckEmployeeSubmission(ctx,row,tx);const selected=row.costs.filter(cost=>cost.claimId===input.claimId),boundary=input.after?selected.findIndex(cost=>cost.id===input.after):-1;
+  const selected=row.costs.filter(cost=>cost.claimId===input.claimId),boundary=input.after?selected.findIndex(cost=>cost.id===input.after):-1,facts=employeeCompensationRunFacts(ctx.organizationId,row.run);
   if(input.after&&boundary<0)throw new EmployeeCompensationRunAccessError();const page=selected.slice(boundary+1,boundary+52),visible=page.slice(0,50),checks=claimChecks(ctx.organizationId,row,input.claimId,[receipt]);
-  await recheckFinanceAuthorization(ctx,tx,await new FinanceRepository(tx,ctx.organizationId).clock(),checks,new EmployeeCompensationRunAccessError());
+  await recheckEmployeeCompensationRun(ctx,tx,await new FinanceRepository(tx,ctx.organizationId).clock(),facts,"view",[...employeeCompensationSubmissionFinancialChecks(ctx.organizationId,row,facts.total),...checks]);
   const metadata=await labels(ctx,row,visible.map(cost=>cost.runLineId),tx),pending=await new EmployeeCompensationRecognitionRequestRepository(tx,ctx.organizationId).pendingClaims([input.claimId]),pageIds=new Set(visible.map(cost=>cost.id)),byCost=new Map(visible.map(cost=>[cost.id,cost])),claim=row.claims.find(claim=>claim.id===input.claimId)!;
   const model=employeeCompensationClaimDetailSchema.pick({source:true,claim:true,costs:true,labels:true,next:true,recognition:true}).parse({
-    source:{id:row.id,runId:row.runId,purpose:row.run.purpose,state:employeeCompensationSubmissionState(row),costOn:row.costOn.toISOString().slice(0,10),total:employeeCompensationRunFacts(ctx.organizationId,row.run).total.toJSON()},
+    source:{id:row.id,runId:row.runId,purpose:row.run.purpose,state:employeeCompensationSubmissionState(row),costOn:row.costOn.toISOString().slice(0,10),total:facts.total.toJSON()},
     claim:{id:claim.id,personId:claim.personId,personName:metadata.labels[0]?.personName??null,...claimAmount(row,claim.id),recognized:true,pending:Boolean(pending.length),canOpen:true},
     costs:employeeCompensationCostRows(visible).map(cost=>{const original=byCost.get(cost.id)!;return{...cost,recordedCompletionAt:original.runLine.recordedCompletionAt.toISOString(),timezone:original.timezone};}),labels:metadata.labels,next:page.length>50?visible[49].id:null,
     recognition:{id:receipt.id,at:receipt.createdAt.toISOString(),reason:receipt.reason,journalCount:receipt.lines.length,lines:receipt.lines.filter(line=>pageIds.has(line.costId)).map(line=>({costId:line.costId,transactionId:line.transactionId,sourceOccurredAt:line.sourceOccurredAt.toISOString(),postedAt:line.transaction.occurredAt.toISOString()}))}
