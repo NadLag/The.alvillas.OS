@@ -40,27 +40,34 @@ export class TeamRepository {
       orderBy: [{ assignmentId: "asc" }, { version: "desc" }]
     });
   }
-  properties() {
+  properties(ids:readonly string[]) {
     return this.tx.property.findMany({
-      where: { organizationId: this.organizationId, archivedAt: null },
+      where: { organizationId: this.organizationId, archivedAt: null, id:{in:[...new Set(ids)]} },
       select: { id: true, name: true },
-      take: 1000
+      orderBy:{id:"asc"}
     });
   }
-  regions() {
+  regions(ids:readonly string[]) {
     return this.tx.region.findMany({
-      where: { organizationId: this.organizationId, archivedAt: null },
+      where: { organizationId: this.organizationId, archivedAt: null, id:{in:[...new Set(ids)]} },
       select: { id: true, name: true },
-      take: 1000
+      orderBy:{id:"asc"}
     });
   }
-  cities() {
+  cities(ids:readonly string[]) {
     return this.tx.city.findMany({
-      where: { organizationId: this.organizationId, archivedAt: null },
+      where: { organizationId: this.organizationId, archivedAt: null, id:{in:[...new Set(ids)]} },
       select: { id: true, name: true },
-      take: 1000
+      orderBy:{id:"asc"}
     });
   }
+  async scopeChoices(input:{type:"property"|"region"|"city";query:string;after?:string}):Promise<Array<{id:string;name:string;cityId:string|null;regionId:string|null}>>{
+    const where={organizationId:this.organizationId,archivedAt:null,...input.query?{name:{contains:input.query,mode:"insensitive" as const}}:{},...input.after?{id:{gt:input.after}}:{}},page={where,orderBy:{id:"asc" as const},take:26};
+    if(input.type==="property")return this.tx.property.findMany({...page,select:{id:true,name:true,cityId:true,regionId:true}});
+    if(input.type==="city")return(await this.tx.city.findMany({...page,select:{id:true,name:true,regionId:true}})).map(row=>({...row,cityId:row.id}));
+    return(await this.tx.region.findMany({...page,select:{id:true,name:true}})).map(row=>({...row,cityId:null,regionId:row.id}));
+  }
+  async scopeChoiceExists(type:"property"|"region"|"city",id:string):Promise<{id:string}|null>{const where={id,organizationId:this.organizationId,archivedAt:null};return type==="property"?this.tx.property.findFirst({where,select:{id:true}}):type==="city"?this.tx.city.findFirst({where,select:{id:true}}):this.tx.region.findFirst({where,select:{id:true}});}
   organization() {
     return this.tx.organization.findUniqueOrThrow({
       where: { id: this.organizationId },

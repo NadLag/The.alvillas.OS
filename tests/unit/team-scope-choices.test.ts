@@ -1,0 +1,21 @@
+import {randomUUID} from "node:crypto";
+import {beforeEach,describe,expect,it,vi} from "vitest";
+import {z} from "zod";
+import {teamScopeChoiceInput,teamScopeChoicePage} from "@/modules/identity/domain/team-scope-choices";
+import {IdentityAuthorizationError} from "@/modules/identity/application/identity-access";
+const boundary=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),list:vi.fn(),capture:vi.fn()}));
+vi.mock("@/platform/auth/session",()=>({auth:boundary.auth}));
+vi.mock("@/modules/identity/application/team-service",()=>({teamActorContextFromSession:boundary.actor}));
+vi.mock("@/modules/identity/application/team-scope-choices",()=>({listTeamScopeChoices:boundary.list}));
+vi.mock("@/platform/observability/sentry",()=>({captureException:boundary.capture}));
+import {teamScopeChoicesAction} from "@/modules/identity/application/team-actions";
+const actor={organizationId:randomUUID(),actorId:randomUUID(),personId:randomUUID()},data={items:[{id:randomUUID(),name:"Actual authorized scope label"}],next:null};
+describe("bounded private team assignment scope search",()=>{
+ beforeEach(()=>{vi.clearAllMocks();boundary.auth.mockResolvedValue({user:{id:actor.actorId}});boundary.actor.mockResolvedValue(actor);boundary.list.mockImplementation((_actor,input:unknown)=>{teamScopeChoiceInput.parse(input);return Promise.resolve(data);});});
+ it("requires the current application session before returning source labels",async()=>{boundary.actor.mockResolvedValue(null);expect(await teamScopeChoicesAction({type:"property"})).toEqual({status:"denied"});expect(boundary.list).not.toHaveBeenCalled();});
+ it("uses the server actor and preserves only the bounded authorized page",async()=>{expect(await teamScopeChoicesAction({type:"property",query:"Actual"})).toEqual({status:"ready",data});expect(boundary.list.mock.calls[0]?.slice(0,2)).toEqual([actor,{type:"property",query:"Actual"}]);});
+ it.each(["organizationId","actorId","take"])("rejects caller-supplied %s",async field=>{expect(await teamScopeChoicesAction({type:"property",[field]:field==="take"?1000:randomUUID()})).toEqual({status:"invalid"});});
+ it("rejects unsupported source types, malformed cursors and oversized searches",async()=>{for(const input of[{type:"financial_transaction"},{type:"property",after:"invalid"},{type:"city",query:"x".repeat(121)}])expect(await teamScopeChoicesAction(input)).toEqual({status:"invalid"});});
+ it.each([[new IdentityAuthorizationError(),"denied"],[new Error("Private scope details must stay on the server"),"unavailable"]] as const)("keeps failure %# private",async(error,status)=>{boundary.list.mockRejectedValue(error);expect(await teamScopeChoicesAction({type:"region"})).toEqual({status});});
+ it("rejects unbounded or undeclared data returned by the source",()=>{expect(teamScopeChoicePage.safeParse({items:Array.from({length:26},()=>({id:randomUUID(),name:"Authorized source"})),next:null}).success).toBe(false);expect(teamScopeChoicePage.safeParse({...data,authorizationCap:{}}).success).toBe(false);expect(z.uuid().safeParse(data.items[0].id).success).toBe(true);});
+});

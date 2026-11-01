@@ -186,9 +186,6 @@ export default async function TeamMemberPage({
             <TeamAssignmentForm
               personId={personId}
               roles={data.roles}
-              properties={data.properties}
-              regions={data.regions}
-              cities={data.cities}
               accounts={data.accounts}
               today={today}
             />

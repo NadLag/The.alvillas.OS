@@ -23,11 +23,17 @@ import {
 } from "./team-service";
 import { uploadTeamDocument, archiveTeamDocument } from "./team-documents";
 import { parseTeamForm, teamOperations } from "../domain/team";
+import {listTeamScopeChoices} from "./team-scope-choices";
+import {teamScopeChoiceResult} from "../domain/team-scope-choices";
 
 export type TeamActionState = {
   status: "idle" | "saved" | "invalid" | "denied" | "conflict" | "unavailable";
   id?: string;
 };
+export async function teamScopeChoicesAction(raw:unknown){
+  try{const ctx=await teamActorContextFromSession(await auth());if(!ctx)return teamScopeChoiceResult.parse({status:"denied"});return teamScopeChoiceResult.parse({status:"ready",data:await listTeamScopeChoices(ctx,raw)});}
+  catch(error){if(error instanceof z.ZodError)return teamScopeChoiceResult.parse({status:"invalid"});if(error instanceof IdentityAuthorizationError)return teamScopeChoiceResult.parse({status:"denied"});try{await captureException(new Error("team_scope_choices_failed"),{source:"api"});}catch{/* Keep the private failure boundary. */}return teamScopeChoiceResult.parse({status:"unavailable"});}
+}
 export async function teamMutationAction(
   locale: string,
   operation: string,
