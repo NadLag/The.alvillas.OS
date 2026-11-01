@@ -3,7 +3,7 @@ import { authorize, type Action, type Resource } from "@/platform/authz/authoriz
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
-import { localClockInstant, localClockLabel } from "@/platform/time/local-instant";
+import { localClockInstant, localClockDefault } from "@/platform/time/local-instant";
 import { present, catalogFieldPolicy } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
@@ -210,7 +210,9 @@ export async function getSupplierSettlement(ctx: FinanceActorContext, raw: unkno
     try { await source.checkSourceAction("pay", now); sourcePay = true; } catch (error) { if (!(error instanceof SupplierInvoiceAccessError)) throw error; }
     try { await source.checkSourceAction("void", now); sourceVoid = true; } catch (error) { if (!(error instanceof SupplierInvoiceAccessError)) throw error; }
     const periods = new AccountingPeriodRepository(tx, ctx.organizationId), calendar = await periods.policy(now), timezone = calendar?.value.timezone ?? "UTC";
-    const paidLocal = input.paidLocal ?? localClockLabel(now.toISOString(), timezone), paidAt = new Date(localClockInstant(paidLocal, timezone, input.occurrence)).toISOString();
+    const defaultClock=input.paidLocal===undefined?localClockDefault(now.toISOString(),timezone):null;
+    const paidLocal=input.paidLocal??defaultClock!.local,occurrence=input.paidLocal===undefined&&input.occurrence==="reject"?defaultClock!.occurrence:input.occurrence;
+    const paidAt=new Date(localClockInstant(paidLocal,timezone,occurrence)).toISOString();
     const amount = input.amount ?? outstanding.toJSON().amount, target = paymentResource(ctx, source, amount, new Date(paidAt));
     const dateView = allows([{ action: "view", resource: target, organizationOnly: !target.propertyId }]);
     if (sourcePay && input.paidLocal && !dateView) throw new SupplierInvoiceAccessError();
@@ -239,7 +241,7 @@ export async function getSupplierSettlement(ctx: FinanceActorContext, raw: unkno
     const currency = await source.invoices.currency(source.revision.currency); if (!currency) throw new ExpensePolicyUnavailableError();
     const payments = source.journals.filter(journal => !journal.reversesTransactionId && journal.postings.some(posting => posting.bucket === "SUPPLIER_PAYMENT") && (!input.before || journal.id < input.before));
     const result = { id: input.id, version: source.row.version, outstanding: outstanding.toJSON(), timezone, canPay, canPreparePayment, claimReversed, minorUnit: currency.minorUnit,
-      preview: { paidLocal, paidAt, occurrence: input.occurrence, closed, canAdjust, calendarRuleId: calendar?.id ?? null, calendarRuleVersion: calendar?.version ?? null },
+      preview: { paidLocal, paidAt, occurrence, closed, canAdjust, calendarRuleId: calendar?.id ?? null, calendarRuleVersion: calendar?.version ?? null },
       accounts: choices.map(account => ({ id: account.id, name: account.name })), fundingNext,
       payments: payments.slice(0, 50).map(journal => {
         const saved = source.paymentReceipts.get(journal.id), funding = journal.postings.find(posting => posting.ledgerAccount.code !== "SUPPLIER_PAYABLE")?.ledgerAccount;
