@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
-const include={lines:{orderBy:{costId:"asc" as const},include:{transaction:{select:{id:true,occurredAt:true}},periodAdjustment:{select:{id:true,periodId:true,periodEventId:true}}}}} satisfies Prisma.EmployeeCompensationRecognitionInclude;
+const include={correction:{include:{lines:{include:{reversalTransaction:{select:{id:true,occurredAt:true,createdBy:true}}}}}},lines:{orderBy:{costId:"asc" as const},include:{transaction:{select:{id:true,occurredAt:true}},periodAdjustment:{select:{id:true,periodId:true,periodEventId:true}}}}} satisfies Prisma.EmployeeCompensationRecognitionInclude;
 export class EmployeeCompensationRecognitionRepository{
   constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
   async lockKey(key:string){await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":employee-recognition-key:"+key},0))::text`);}
