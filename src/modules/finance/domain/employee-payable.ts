@@ -1,23 +1,23 @@
-import { employeeCompensationSourceIdentity } from "./employee-compensation-source-identity";
+import {type EmployeeEarningSourceIdentityInput, employeeCompensationSourceIdentity } from "./employee-compensation-source-identity";
 import { Money } from "@/platform/money/money";
 import { expensePostings,isExpenseFundingAccount } from "./expense";
 import { assertFinancePostingsBalanced,type FinancePostingDraft } from "./reservation-revenue";
 
 type Cost=Omit<Parameters<typeof expensePostings>[0],"fundingAccountId"|"dimensions">;
-export type EmployeeClaimPostingLine=Cost&{id:string;runLineId:string;completionEventId:string|null;personId:string;propertyId:string|null;earningKind?:string;assignmentId?:string;earningPeriodKey?:string;workTimeEvidenceId?:string;workTimeDecisionId?:string;taskId?:string|null;reservationId:string|null;category:string;costCenter:string|null};
+export type EmployeeClaimPostingLine=Cost&Pick<EmployeeEarningSourceIdentityInput,"percentageWitnesses">&{id:string;runLineId:string;completionEventId:string|null;personId:string;propertyId:string|null;earningKind?:string;assignmentId?:string;earningPeriodKey?:string;workTimeEvidenceId?:string;workTimeDecisionId?:string;taskId?:string|null;reservationId:string|null;category:string;costCenter:string|null};
 
 /** Recognition reuses the configured cost recipe and credits the actual employee claim. */
 export function employeeClaimPostings(input:{claimId:string;personId:string;runId:string;liabilityAccountId:string;amount:Money;lines:readonly EmployeeClaimPostingLine[]}):FinancePostingDraft[]{
   if(!input.lines.length||!input.amount.amount.gt(0))throw Error("Employee claim requires positive actual work costs");
   const ids=new Set<string>(),sources=new Set<string>();let total=Money.zero(input.amount.currency);
   const postings=input.lines.flatMap(line=>{
-    const monthly=line.earningKind==="PER_MONTH"?employeeCompensationSourceIdentity({...line,taskId:line.taskId??null}):null,key=monthly?.key??line.completionEventId;
+    const monthly=line.earningKind==="PER_MONTH"?employeeCompensationSourceIdentity({...line,taskId:line.taskId??null}):null,percentage=line.earningKind==="PERCENTAGE"?employeeCompensationSourceIdentity({...line,id:line.runLineId,taskId:line.taskId??null}):null,key=monthly?.key??percentage?.key??line.completionEventId;
     const hourly=line.earningKind==="PER_HOUR"?employeeCompensationSourceIdentity({...line,taskId:line.taskId??null}):null;
-    if(!key||line.earningKind!==undefined&&!["PER_JOB","PER_MONTH","PER_HOUR"].includes(line.earningKind)||ids.has(line.id)||sources.has(key)||!input.personId||line.personId!==input.personId||!monthly&&!line.propertyId||!line.propertyId&&(line.reservationId||line.allocation.ownerAmount.amount.gt(0)||line.allocation.guestAmount.amount.gt(0)))throw Error("Employee claim requires distinct work for its actual beneficiary");
+    if(!key||line.earningKind!==undefined&&!["PER_JOB","PER_MONTH","PER_HOUR","PERCENTAGE"].includes(line.earningKind)||ids.has(line.id)||sources.has(key)||!input.personId||line.personId!==input.personId||!monthly&&!percentage&&!line.propertyId||!line.propertyId&&(line.reservationId||line.allocation.ownerAmount.amount.gt(0)||line.allocation.guestAmount.amount.gt(0)))throw Error("Employee claim requires distinct work for its actual beneficiary");
     ids.add(line.id);sources.add(key);total=total.add(line.amount);
     if(line.allocation.guestAmount.amount.gt(0)&&!line.reservationId)throw Error("Guest work costs require their actual reservation");
     const dimensions={employee_person_id:line.personId,employee_compensation_claim_id:input.claimId,employee_compensation_run_id:input.runId,
-      employee_compensation_cost_id:line.id,employee_compensation_run_line_id:line.runLineId,...monthly?{employee_compensation_earning_kind:"PER_MONTH",employee_compensation_assignment_id:monthly.assignmentId!,employee_compensation_earning_period:monthly.month!}:{completion_event_id:line.completionEventId!},
+      employee_compensation_cost_id:line.id,employee_compensation_run_line_id:line.runLineId,...monthly?{employee_compensation_earning_kind:"PER_MONTH",employee_compensation_assignment_id:monthly.assignmentId!,employee_compensation_earning_period:monthly.month!}:percentage?{employee_compensation_earning_kind:"PERCENTAGE",employee_compensation_assignment_id:percentage.assignmentId!}:{completion_event_id:line.completionEventId!},
       ...hourly?{employee_compensation_earning_kind:"PER_HOUR",employee_compensation_assignment_id:hourly.assignmentId!,employee_work_time_evidence_id:line.workTimeEvidenceId!,employee_work_time_decision_id:line.workTimeDecisionId!}:{},
       ...(line.propertyId?{property_id:line.propertyId}:{}),...(line.reservationId?{reservation_id:line.reservationId}:{}),category:line.category,...(line.costCenter?{cost_center:line.costCenter}:{}),source:"EMPLOYEE_COMPENSATION"};
     return expensePostings({...line,fundingAccountId:input.liabilityAccountId,dimensions}).map(posting=>posting.ledgerAccountId===input.liabilityAccountId?{...posting,bucket:"EMPLOYEE_COMPENSATION"}:posting);

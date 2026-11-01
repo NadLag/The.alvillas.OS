@@ -71,6 +71,7 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   hourlyEarningWitnesses EmployeeCompensationHourlyWitness[]
 
   workTimeEvidence EmployeeWorkTimeEvidence[]
@@ -206,6 +207,7 @@ model Organization {
 }
 
 model Region {
+  percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   employeeCompensationSources EmployeeCompensationRunLine[] @relation("EmployeeRunSourceRegion")
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
@@ -227,6 +229,7 @@ model Region {
 }
 
 model City {
+  percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   employeeCompensationSources EmployeeCompensationRunLine[] @relation("EmployeeRunSourceCity")
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
@@ -274,6 +277,7 @@ model OrganizationProfile {
 }
 
 model TeamCompensation {
+  percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   hourlyEarningWitnesses EmployeeCompensationHourlyWitness[]
 
   monthlyWitnesses EmployeeCompensationContractWitness[]
@@ -692,6 +696,7 @@ model RoleAssignment {
 }
 
 model Owner {
+  percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   expenseApprovalStages ApprovalStage[]
   id                    String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId        String                @map("organization_id") @db.Uuid
@@ -791,6 +796,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   workTimeEvidence EmployeeWorkTimeEvidence[]
   employeeCompensationCosts EmployeeCompensationCost[]
   compensationRunLines EmployeeCompensationRunLine[]
@@ -1043,6 +1049,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   employeeCompensationCosts                            EmployeeCompensationCost[]
   invoiceApprovalStages                                ApprovalStage[]                @relation("InvoiceApprovalReservation")
   supplierInvoiceLines                                 SupplierInvoiceLine[]
@@ -1120,6 +1127,7 @@ model ReservationConflict {
 }
 
 model OperationTask {
+  percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   workTimeEvidence EmployeeWorkTimeEvidence[]
   compensationRunLines EmployeeCompensationRunLine[]
   cashCollections          CashCollection[]
@@ -1518,6 +1526,7 @@ model TransactionGroupEntry {
 }
 
 model Posting {
+  percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   id              String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId  String               @map("organization_id") @db.Uuid
   transactionId   String               @map("transaction_id") @db.Uuid
@@ -1533,6 +1542,7 @@ model Posting {
   ledgerAccount   LedgerAccount        @relation(fields: [ledgerAccountId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   currencyRef     Currency             @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
 
+  @@unique([organizationId,id],map:"posting_org_id_unique")
   @@index([organizationId, transactionId], map: "posting_org_transaction_idx")
   @@index([organizationId, ledgerAccountId], map: "posting_org_account_idx")
   @@index([dimensions(ops: JsonbPathOps)], type: Gin, map: "posting_dimensions_gin_idx")
@@ -1608,6 +1618,8 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  percentageEarningRateWitnesses EmployeeCompensationPercentageWitness[] @relation("EmployeePercentageRate")
+  percentageEarningPolicyWitnesses EmployeeCompensationPercentageWitness[] @relation("EmployeePercentagePolicy")
   hourlyEarningWitnesses EmployeeCompensationHourlyWitness[] @relation("EmployeeHourlyWitnessRule")
 
   workTimeEvidence EmployeeWorkTimeEvidence[]
@@ -2793,6 +2805,7 @@ model EmployeeCompensationRun {
 }
 
 model EmployeeCompensationRunLine {
+  percentageWitnesses EmployeeCompensationPercentageWitness[]
   hourlyWitnesses EmployeeCompensationHourlyWitness[]
   workTimeEvidenceId String? @map("work_time_evidence_id") @db.Uuid
   workTimeDecisionId String? @map("work_time_decision_id") @db.Uuid
@@ -3223,6 +3236,46 @@ model EmployeeWorkTimeDecision {
   @@unique([organizationId,idempotencyKey],map:"employee_work_time_decision_nonce_unique")
   @@map("employee_work_time_decision")
   earningRequestSources EmployeeEarningRequestWork[] @relation("EmployeeEarningWorkDecision")
+}
+
+model EmployeeCompensationPercentageWitness {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  runLineId String @map("run_line_id") @db.Uuid
+  postingId String @map("posting_id") @db.Uuid
+  compensationId String @map("compensation_id") @db.Uuid
+  configRuleId String @map("config_rule_id") @db.Uuid
+  policyRuleId String @map("policy_rule_id") @db.Uuid
+  position Int
+  isEarningBase Boolean @map("is_earning_base")
+  journalAmount Decimal @map("journal_amount") @db.Decimal(128,2)
+  propertyId String? @map("property_id") @db.Uuid
+  sourceCityId String? @map("source_city_id") @db.Uuid
+  sourceRegionId String? @map("source_region_id") @db.Uuid
+  reservationId String? @map("reservation_id") @db.Uuid
+  taskId String? @map("task_id") @db.Uuid
+  ownerId String? @map("owner_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  runLine EmployeeCompensationRunLine @relation(fields:[organizationId,runLineId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_line_fk")
+  posting Posting @relation(fields:[organizationId,postingId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_posting_fk")
+  compensation TeamCompensation @relation(fields:[organizationId,compensationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_contract_fk")
+  configRule ConfigRule @relation("EmployeePercentageRate",fields:[organizationId,configRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_rate_rule_fk")
+  policyRule ConfigRule @relation("EmployeePercentagePolicy",fields:[organizationId,policyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_policy_fk")
+  property Property? @relation(fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_property_fk")
+  sourceCity City? @relation(fields:[organizationId,sourceCityId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_city_fk")
+  sourceRegion Region? @relation(fields:[organizationId,sourceRegionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_region_fk")
+  reservation Reservation? @relation(fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_reservation_fk")
+  task OperationTask? @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_task_fk")
+  owner Owner? @relation(fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_percentage_owner_fk")
+
+  @@unique([organizationId,id],map:"employee_percentage_org_id_unique")
+  @@unique([organizationId,runLineId,position],map:"employee_percentage_position_unique")
+  @@unique([organizationId,runLineId,postingId],map:"employee_percentage_line_posting_unique")
+  @@index([organizationId,postingId,runLineId],map:"employee_percentage_posting_idx")
+  @@index([organizationId,compensationId],map:"employee_percentage_contract_idx")
+  @@index([organizationId,policyRuleId],map:"employee_percentage_policy_idx")
+  @@map("employee_compensation_percentage_witness")
 }
 
 model EmployeeCompensationHourlyWitness {

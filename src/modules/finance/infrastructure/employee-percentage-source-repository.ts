@@ -8,7 +8,7 @@ export class EmployeePercentageSourceRepository{
   const postings=await this.tx.posting.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]}},orderBy:{id:"asc"},select:{id:true,organizationId:true,transactionId:true,ledgerAccountId:true,side:true,amount:true,currency:true,bucket:true,dimensions:true,createdAt:true}});
   const transactionIds=[...new Set(postings.map(row=>row.transactionId))],accountIds=[...new Set(postings.map(row=>row.ledgerAccountId))];
   const[transactions,accounts]=await Promise.all([
-   transactionIds.length?this.tx.financialTransaction.findMany({where:{organizationId:this.organizationId,id:{in:transactionIds}},orderBy:{id:"asc"},select:{id:true,organizationId:true,occurredAt:true,createdAt:true,createdBy:true,sealed:true,reversesTransactionId:true,reversedByTransactions:{where:{organizationId:this.organizationId},orderBy:{id:"asc"},select:{id:true}},postings:{where:{organizationId:this.organizationId},orderBy:{id:"asc"},select:{id:true,side:true,amount:true,currency:true,dimensions:true}}}}):[],
+   transactionIds.length?this.tx.financialTransaction.findMany({where:{organizationId:this.organizationId,id:{in:transactionIds}},orderBy:{id:"asc"},select:{id:true,organizationId:true,occurredAt:true,createdAt:true,createdBy:true,sealed:true,reversesTransactionId:true,reversedByTransactions:{where:{organizationId:this.organizationId},orderBy:{id:"asc"},select:{id:true}},postings:{where:{organizationId:this.organizationId},orderBy:{id:"asc"},select:{id:true,ledgerAccountId:true,side:true,amount:true,currency:true,bucket:true,dimensions:true}}}}):[],
    accountIds.length?this.tx.ledgerAccount.findMany({where:{organizationId:this.organizationId,id:{in:accountIds}},select:{id:true,organizationId:true,code:true,accountType:true,normalSide:true,archivedAt:true}}):[]
   ]);
   const byTransaction=new Map(transactions.map(row=>[row.id,row])),byAccount=new Map(accounts.map(row=>[row.id,row]));
@@ -18,6 +18,7 @@ export class EmployeePercentageSourceRepository{
  reservations(ids:readonly string[]){return this.tx.reservation.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]}},select:{id:true,propertyId:true}});}
  tasks(ids:readonly string[]){return this.tx.operationTask.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]}},select:{id:true,propertyId:true,reservationId:true}});}
  owners(ids:readonly string[]){return this.tx.owner.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]}},select:{id:true}});}
+ async lockJournals(ids:readonly string[]){for(const id of [...new Set(ids)].sort())await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":journal-reversal:"+id},0))::text`);}
  /** SQL checks the actual instant before any JavaScript timestamp conversion can select a future boundary. */
  async preciseContracts(entries:readonly {postingId:string;assignmentId:string;compensationId:string;configRuleId:string}[]){
   if(!entries.length)return[];

@@ -1,5 +1,7 @@
 import { prepareEmployeeMonthlyRunSources } from "./employee-monthly-run-source";
 import { prepareEmployeeHourlyRunSources } from "./employee-hourly-run-source";
+import {prepareEmployeePercentageSources} from "./employee-percentage-source";
+import {EmployeePercentageSourceRepository} from "../infrastructure/employee-percentage-source-repository";
 import type { FinanceActorContext } from "./finance-access";
 import { EmployeeCompensationRunRepository } from "../infrastructure/employee-compensation-run-repository";
 import { sameSubmittedCostPolicy } from "../domain/submitted-cost-allocation";
@@ -14,6 +16,18 @@ import { validateEmployeeCompensationAssignment,validateEmployeeCompensationRate
 
 /** A saved expectation must still bind the canonical earning terms when it becomes a new claim proposal. */
 export async function retainCurrentEmployeeClaimWork(organizationId:string,run:CompensationRunRecord,tx:TenantTransaction,actor?:FinanceActorContext){
+  if(run.earningKind==="PERCENTAGE"){
+   if(!actor)throw new EmployeeCompensationClaimSourceError();
+   const bases=run.lines.flatMap(line=>line.percentageWitnesses.filter(row=>row.isEarningBase).map(row=>({postingId:row.posting.id,assignmentId:line.assignmentId}))),current=await prepareEmployeePercentageSources(actor,{currency:run.currency,bases},tx);
+   await new EmployeePercentageSourceRepository(tx,organizationId).lockJournals(current.journals.map(row=>row.id));
+   if(current.lines.length!==run.lines.length)throw new EmployeeCompensationClaimSourceError();
+   for(const line of run.lines){
+    const actual=current.lines.find(row=>row.assignmentId===line.assignmentId&&row.personId===line.personId),originals=line.percentageWitnesses.filter(row=>row.isEarningBase);
+    if(line.earningKind!=="PERCENTAGE"||!actual||originals.length!==actual.sources.length||!Money.of(line.amount.toString(),run.currency).equals(Money.of(actual.amount.amount,run.currency)))throw new EmployeeCompensationClaimSourceError();
+    for(const original of originals){const source=actual.sources.find(row=>row.postingId===original.posting.id);if(!source||source.compensationId!==original.compensation.id||source.configRuleId!==original.configRule.id||current.policy.id!==original.policyRule.id)throw new EmployeeCompensationClaimSourceError();}
+   }
+   await current.recheck();return current.recheck;
+  }
   if(run.earningKind==="PER_HOUR"){
    if(!actor)throw new EmployeeCompensationClaimSourceError();
    const runs=new EmployeeCompensationRunRepository(tx,organizationId),snapshots=await runs.sourceSnapshots(run.id);

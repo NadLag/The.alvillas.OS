@@ -13,7 +13,7 @@ const employeeSubmissionAuditFields={id:true,costOn:true,run:{select:{id:true,cr
   lines:{select:employeeCompensationAuthorityLineFields}}},
   costs:{select:{propertyId:true,reservationId:true,amount:true,timezone:true,runLine:{select:{taskId:true,recordedCompletionAt:true}},property:{select:{cityId:true,regionId:true}}}}} as const;
 
-function employeeFinancialAuditSources(organizationId:string,row:Parameters<typeof employeeCompensationSubmittedFinancialSources>[1],total:Money){const resources=employeeCompensationSubmittedFinancialSources(organizationId,row,total);return{financialSources:resources,companyFinancialSources:resources.filter(source=>!source.propertyId)};}
+function employeeFinancialAuditSources(organizationId:string,row:Parameters<typeof employeeCompensationSubmittedFinancialSources>[1],total:Money,originalSources:readonly Resource[]=[]){const resources=employeeCompensationSubmittedFinancialSources(organizationId,row,total);return{financialSources:[...resources,...originalSources],companyFinancialSources:resources.filter(source=>!source.propertyId)};}
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -98,7 +98,7 @@ export class AuditRepository {
     const rows = await this.tx.employeeCompensationRun.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
       select: { id: true, currency: true, createdAt: true, lines: { select: employeeCompensationAuthorityLineFields } } });
     return new Map(rows.map(row => { const facts = employeeCompensationRunFacts(this.organizationId,row);
-      return [row.id,{ ...facts.resource, salarySources:facts.salarySources }]; }));
+      return [row.id,{ ...facts.resource, salarySources:facts.salarySources,...facts.financialSources?{financialSources:facts.financialSources}:{} }]; }));
   }
   async employeeMonthlyRunRequestResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     const rows=await this.tx.employeeMonthlyRunRequest.findMany({where:{organizationId:this.organizationId,id:{in:ids}}}),facts=await employeeMonthlyRequestAuthorityFacts(this.organizationId,rows,this.tx);
@@ -111,12 +111,12 @@ export class AuditRepository {
   async employeeCompensationSubmissionResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     if(!ids.length)return new Map();
     const rows=await this.tx.employeeCompensationSubmission.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:employeeSubmissionAuditFields});
-    return new Map(rows.map(row=>{const facts=employeeCompensationRunFacts(this.organizationId,row.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,...employeeFinancialAuditSources(this.organizationId,row,facts.total)}];}));
+    return new Map(rows.map(row=>{const facts=employeeCompensationRunFacts(this.organizationId,row.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,...employeeFinancialAuditSources(this.organizationId,row,facts.total,facts.financialSources)}];}));
   }
   async employeeCompensationClaimResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     if(!ids.length)return new Map();
     const rows=await this.tx.employeeCompensationClaim.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:{id:true,submission:{select:employeeSubmissionAuditFields}}});
-    return new Map(rows.map(row=>{const source=row.submission,facts=employeeCompensationRunFacts(this.organizationId,source.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,...employeeFinancialAuditSources(this.organizationId,source,facts.total)}];}));
+    return new Map(rows.map(row=>{const source=row.submission,facts=employeeCompensationRunFacts(this.organizationId,source.run);return[row.id,{...facts.resource,sourceRecordId:row.id,salarySources:facts.salarySources,...employeeFinancialAuditSources(this.organizationId,source,facts.total,facts.financialSources)}];}));
   }
   async cashResources(ids: string[]): Promise<Map<string, Resource>> {
     if (!ids.length) return new Map();

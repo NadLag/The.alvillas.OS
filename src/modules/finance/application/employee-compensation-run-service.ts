@@ -23,7 +23,7 @@ type Deps = { db?: TenantTransactionRunner; requestId?: string };
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
 const stable = (value: unknown) => JSON.stringify(value);
 const orderedTasks = <T extends { id: string }>(rows: readonly T[]) => [...rows].sort((a,b) => a.id.localeCompare(b.id));
-const runKind=(kind:string|undefined)=>kind==="PER_MONTH"?"MONTHLY_CONTRACT_DRAFT" as const:kind==="PER_HOUR"?"HOURLY_WORK_DRAFT" as const:"COMPLETED_WORK_DRAFT" as const;
+const runKind=(kind:string|undefined)=>kind==="PER_MONTH"?"MONTHLY_CONTRACT_DRAFT" as const:kind==="PER_HOUR"?"HOURLY_WORK_DRAFT" as const:kind==="PERCENTAGE"?"PERCENTAGE_POSTED_DRAFT" as const:"COMPLETED_WORK_DRAFT" as const;
 
 export function employeeCompensationRunModel(ctx: FinanceActorContext, row: CompensationRunRecord, after?: string) {
   if (after && !row.lines.some(line => line.id === after)) throw new EmployeeCompensationRunAccessError();
@@ -32,7 +32,7 @@ export function employeeCompensationRunModel(ctx: FinanceActorContext, row: Comp
   const data = { id: row.id, kind: runKind(row.earningKind), state: row.cancellation ? "CANCELLED" as const : "DRAFT" as const,
     purpose: row.purpose, fromOn: row.fromOn.toISOString().slice(0,10), toOn: row.toOn.toISOString().slice(0,10), timezone: row.timezone,
     currency: row.currency, createdAt: row.createdAt.toISOString(), total: facts.total.toJSON(), lineCount: row.lines.length,
-    lines: page.map(line => ({ ...line.earningKind==="PER_MONTH"?{earningKind:"PER_MONTH" as const,earningPeriodKey:line.earningPeriodKey!}:line.earningKind==="PER_HOUR"?{earningKind:"PER_HOUR" as const}:{},id: line.id, taskId: line.taskId, personId: line.personId, propertyId: line.propertyId, assignmentId: line.assignmentId,
+    lines: page.map(line => ({ ...line.earningKind==="PER_MONTH"?{earningKind:"PER_MONTH" as const,earningPeriodKey:line.earningPeriodKey!}:line.earningKind==="PER_HOUR"?{earningKind:"PER_HOUR" as const}:line.earningKind==="PERCENTAGE"?{earningKind:"PERCENTAGE" as const}:{},id: line.id, taskId: line.taskId, personId: line.personId, propertyId: line.propertyId, assignmentId: line.assignmentId,
       completionEventId: line.completionEventId, recordedCompletionAt: line.recordedCompletionAt.toISOString(),
       rate: Money.of(line.rate.toString(), line.currency).toJSON(), amount: Money.of(line.amount.toString(), line.currency).toJSON() })),
     nextCursor: remaining.length>50 ? page.at(-1)!.id : null,

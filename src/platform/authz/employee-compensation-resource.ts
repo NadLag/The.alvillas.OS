@@ -1,16 +1,18 @@
 import type { Resource } from "./authorize";
 import { Money } from "@/platform/money/money";
 import { calendarDateStart } from "@/platform/time/calendar";
+import {employeePercentageAuthorityFacts,employeePercentageAuthorityWitnessFields,type EmployeePercentageAuthorityWitness} from "./employee-percentage-resource";
+import {financialJournalExposure} from "@/platform/ledger/journal-exposure";
 
 type Amount = { toString(): string };
 export const employeeCompensationContractWitnessFields={occurredAt:true,sourceOn:true,eligible:true,compensation:{select:{id:true,version:true,amount:true,currency:true}},configRule:{select:{id:true,version:true}}} as const;
 export const employeeCompensationHourlyWitnessFields={startsAt:true,endsAt:true,intervalId:true,compensationId:true,configRuleId:true,position:true,compensation:{select:{id:true,version:true,amount:true,currency:true,assignment:{select:{personId:true,scopeType:true,scopeId:true}}}},configRule:{select:{id:true,version:true}}} as const;
-export const employeeCompensationAuthorityLineFields={personId:true,propertyId:true,taskId:true,recordedCompletionAt:true,currency:true,amount:true,rate:true,property:{select:{cityId:true,regionId:true}},sourceCity:{select:{id:true,regionId:true}},sourceRegion:{select:{id:true}},contractWitnesses:{orderBy:{sourceOn:"asc" as const},select:employeeCompensationContractWitnessFields},hourlyWitnesses:{orderBy:{position:"asc" as const},select:employeeCompensationHourlyWitnessFields}} as const;
+export const employeeCompensationAuthorityLineFields={personId:true,propertyId:true,taskId:true,recordedCompletionAt:true,currency:true,amount:true,rate:true,property:{select:{cityId:true,regionId:true}},sourceCity:{select:{id:true,regionId:true}},sourceRegion:{select:{id:true}},contractWitnesses:{orderBy:{sourceOn:"asc" as const},select:employeeCompensationContractWitnessFields},hourlyWitnesses:{orderBy:{position:"asc" as const},select:employeeCompensationHourlyWitnessFields},percentageWitnesses:{orderBy:{position:"asc" as const},select:employeePercentageAuthorityWitnessFields}} as const;
 export type EmployeeCompensationRunAuthoritySource = {
   id?: string; currency: string; createdAt: Date;
   lines: ReadonlyArray<{ personId: string; propertyId: string|null; taskId: string|null; recordedCompletionAt: Date; currency: string;
     amount: Amount; rate: Amount; property: { cityId: string | null; regionId: string | null }|null;sourceCity?:{id:string;regionId:string|null}|null;sourceRegion?:{id:string}|null;contractWitnesses?:ReadonlyArray<{occurredAt:Date;compensation:{amount:Amount;currency:string}|null}>;originalRateSources?:ReadonlyArray<{occurredAt:Date;compensation:{amount:Amount;currency:string}}>;
-    hourlyWitnesses?:ReadonlyArray<{startsAt:Date;compensation:{amount:Amount;currency:string;assignment:{personId:string;scopeType:string;scopeId:string|null}}}> }>;
+    hourlyWitnesses?:ReadonlyArray<{startsAt:Date;compensation:{amount:Amount;currency:string;assignment:{personId:string;scopeType:string;scopeId:string|null}}}>;percentageWitnesses?:readonly EmployeePercentageAuthorityWitness[] }>;
 };
 
 /** Business views and audit views authorize the same real run total and original per-person amounts. */
@@ -22,6 +24,7 @@ export function employeeCompensationRunFacts(organizationId: string, run: Employ
     total = total.add(amount); totals.set(line.personId, (totals.get(line.personId) ?? Money.zero(run.currency)).add(amount));
   }
   const resource: Resource = { type: "employee_payable", organizationId, id: run.id || undefined, dataClass: "financial", amount: total.toJSON().amount, occurredAt: run.createdAt };
+  const financialSources:Resource[]=[],percentageExposure=financialJournalExposure(run.lines.flatMap(line=>(line.percentageWitnesses??[]).map(row=>({transactionId:row.posting.transaction.id,currency:row.posting.currency,amount:row.journalAmount.toString()}))));
   const salarySources: Resource[] = run.lines.flatMap(line => {
     const source: Resource = { type: "staff_compensation", organizationId, id: line.personId, assignedPersonId: line.personId,
       propertyId: line.propertyId, city: line.property?.cityId??line.sourceCity?.id, region: line.property?.regionId??line.sourceCity?.regionId??line.sourceRegion?.id, jobId: line.taskId,
@@ -35,9 +38,10 @@ export function employeeCompensationRunFacts(organizationId: string, run: Employ
         region:assignment.scopeType==="region"?assignment.scopeId:assignment.scopeType==="city"||["property","job"].includes(assignment.scopeType)?line.property?.regionId:undefined};
       return[{...source,occurredAt:witness.startsAt,amount:rate},{...source,occurredAt:witness.startsAt,amount:total},{...contract,amount:rate},{...contract,amount:total}];
     });
-    return [{ ...source, amount: Money.of(line.rate.toString(), run.currency).toJSON().amount }, { ...source, amount: totals.get(line.personId)!.toJSON().amount },...[...(line.contractWitnesses??[]),...(line.originalRateSources??[])].flatMap(witness=>witness.compensation?[{...source,occurredAt:witness.occurredAt,amount:Money.of(witness.compensation.amount.toString(),witness.compensation.currency).toJSON().amount},{...source,occurredAt:witness.occurredAt,amount:totals.get(line.personId)!.toJSON().amount}]:[]),...hourly];
+    const percentage=employeePercentageAuthorityFacts(organizationId,line.personId,run.currency,totals.get(line.personId)!,source,line.percentageWitnesses??[],percentageExposure);financialSources.push(...percentage.financialSources);
+    return [{ ...source, amount: Money.of(line.rate.toString(), run.currency).toJSON().amount }, { ...source, amount: totals.get(line.personId)!.toJSON().amount },...[...(line.contractWitnesses??[]),...(line.originalRateSources??[])].flatMap(witness=>witness.compensation?[{...source,occurredAt:witness.occurredAt,amount:Money.of(witness.compensation.amount.toString(),witness.compensation.currency).toJSON().amount},{...source,occurredAt:witness.occurredAt,amount:totals.get(line.personId)!.toJSON().amount}]:[]),...hourly,...percentage.salarySources];
   });
-  return { resource, salarySources, total };
+  return { resource, salarySources, total,...financialSources.length?{financialSources}:{} };
 }
 
 /** Submission, queued admission and historical reads retain the same actual source assignment. */

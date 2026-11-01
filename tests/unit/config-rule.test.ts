@@ -83,6 +83,7 @@ describe("config rule registry", () => {
       "staff.compensation_hourly_runs",
       "staff.compensation_monthly_earnings",
       "staff.compensation_percentage_earnings",
+      "staff.compensation_percentage_runs",
       "staff.compensation_runs",
       "staff.management_policy"
     ]);
@@ -91,6 +92,10 @@ describe("config rule registry", () => {
   });
 
   it("parses known config values and rejects unregistered keys", () => {
+    const percentageRun={earning_date:"ACTUAL_POSTED_FINANCIAL_BASE",earning_unit:"PERSON_ASSIGNMENT_SELECTED_POSTINGS",timezone:"UTC",max_period_days:31};
+    expect(parseConfigRuleValue("staff.compensation_percentage_runs",percentageRun)).toEqual(percentageRun);
+    for(const key of Object.keys(percentageRun))expect(()=>parseConfigRuleValue("staff.compensation_percentage_runs",Object.fromEntries(Object.entries(percentageRun).filter(([name])=>name!==key)))).toThrow();
+    expect(()=>parseConfigRuleValue("staff.compensation_percentage_runs",{...percentageRun,earning_date:"RECORDED_COMPLETION"})).toThrow();
     const monthly={timezone:"UTC",proration:"COMPLETE_ELIGIBLE_CALENDAR_DAYS",rate_selection:"DAILY_EFFECTIVE",rounding:"HALF_UP_AT_PERIOD_TOTAL"};
     expect(parseConfigRuleValue("staff.compensation_monthly_earnings",monthly)).toEqual(monthly);
     for(const key of Object.keys(monthly))expect(()=>parseConfigRuleValue("staff.compensation_monthly_earnings",Object.fromEntries(Object.entries(monthly).filter(([name])=>name!==key)))).toThrow();
