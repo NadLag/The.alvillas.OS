@@ -3,9 +3,16 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import { employeeCompensationRunLineFields } from "./employee-compensation-run-repository";
 
 const include={run:{include:{lines:{select:employeeCompensationRunLineFields},cancellation:true}},
-  costs:{orderBy:{id:"asc" as const},include:{claim:true,runLine:{select:employeeCompensationRunLineFields},property:{select:{cityId:true,regionId:true}}}},claims:true,withdrawal:true,
+  costs:{orderBy:{id:"asc" as const},include:{claim:true,property:{select:{cityId:true,regionId:true}}}},claims:true,withdrawal:true,
   approval:{include:{financialStages:{orderBy:{position:"asc" as const}}}}} satisfies Prisma.EmployeeCompensationSubmissionInclude;
-export type EmployeeSubmissionRecord=Prisma.EmployeeCompensationSubmissionGetPayload<{include:typeof include}>;
+type StoredSubmission=Prisma.EmployeeCompensationSubmissionGetPayload<{include:typeof include}>;
+export type EmployeeSubmissionRecord=Omit<StoredSubmission,"costs">&{costs:Array<StoredSubmission["costs"][number]&{runLine:StoredSubmission["run"]["lines"][number]}>};
+
+/** Each cost uses its actual complete run source; the typed witness graph is fetched once per run. */
+function withRunSources(row:StoredSubmission|null):EmployeeSubmissionRecord|null{
+  if(!row)return null;const sources=new Map(row.run.lines.map(line=>[line.id,line]));
+  return{...row,costs:row.costs.map(cost=>{const runLine=sources.get(cost.runLineId);if(!runLine)throw Error("Employee cost original run source is unavailable");return{...cost,runLine};})};
+}
 
 export class EmployeeCompensationClaimRepository{
   constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
@@ -13,8 +20,8 @@ export class EmployeeCompensationClaimRepository{
   async lockKey(key:string){await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":employee-submission-key:"+key},0))::text`);}
   async lock(id:string){await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":employee-submission:"+id},0))::text`);}
   async lockSources(ids:readonly string[]){for(const id of [...new Set(ids)].sort())await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":employee-earned-source:"+id},0))::text`);}
-  find(id:string){return this.tx.employeeCompensationSubmission.findFirst({where:{organizationId:this.organizationId,id},include});}
-  byKey(key:string){return this.tx.employeeCompensationSubmission.findUnique({where:{organizationId_idempotencyKey:{organizationId:this.organizationId,idempotencyKey:key}},include});}
+  async find(id:string){return withRunSources(await this.tx.employeeCompensationSubmission.findFirst({where:{organizationId:this.organizationId,id},include}));}
+  async byKey(key:string){return withRunSources(await this.tx.employeeCompensationSubmission.findUnique({where:{organizationId_idempotencyKey:{organizationId:this.organizationId,idempotencyKey:key}},include}));}
   listForRun(runId:string,after?:string){return this.tx.employeeCompensationSubmission.findMany({where:{organizationId:this.organizationId,runId,...(after?{id:{lt:after}}:{})},orderBy:{id:"desc"},take:25,
     select:{id:true,runId:true,costOn:true,createdAt:true,withdrawal:{select:{id:true}},approval:{select:{id:true,state:true}},_count:{select:{claims:true}},
       costs:{select:{id:true,propertyId:true,reservationId:true,amount:true,currency:true,timezone:true,runLine:{select:{taskId:true,recordedCompletionAt:true}},property:{select:{cityId:true,regionId:true}}}}}});}
