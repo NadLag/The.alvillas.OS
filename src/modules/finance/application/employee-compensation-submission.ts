@@ -32,6 +32,10 @@ const receipt=(row:EmployeeSubmissionRecord,idempotent:boolean)=>({id:row.id,run
 
 /** Complete artifact authority precedes the paged DTO; no policy, request restriction or private rate dump is returned. */
 export const employeeCompensationSubmissionReadInput=z.object({id:z.uuid(),after:z.uuid().optional()}).strict();
+/** Shared projection of already authorized original costs; callers retain complete artifact and field authority. */
+export function employeeCompensationCostRows(costs:EmployeeSubmissionRecord["costs"]){return costs.map(cost=>({id:cost.id,claimId:cost.claimId,personId:cost.claim.personId,runLineId:cost.runLineId,propertyId:cost.propertyId,reservationId:cost.reservationId,completionEventId:cost.completionEventId,
+ amount:Money.of(cost.amount.toString(),cost.currency).toJSON(),category:cost.category,costCenter:cost.costCenter,note:cost.note,
+ allocation:z.object({allocation:employeeCompensationSubmissionViewSchema.shape.costs.element.shape.allocation}).passthrough().parse(cost.policySnapshot).allocation}));}
 export async function readEmployeeCompensationSubmissionInTransaction(ctx:FinanceActorContext,input:z.infer<typeof employeeCompensationSubmissionReadInput>,tx:TenantTransaction,deps:Deps={},selection?:{claimId:string}){
     const repository=new EmployeeCompensationClaimRepository(tx,ctx.organizationId),row=await repository.find(input.id);if(!row)throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx);
     if(selection&&!row.claims.some(claim=>claim.id===selection.claimId))throw new EmployeeCompensationRunAccessError();
@@ -43,9 +47,7 @@ export async function readEmployeeCompensationSubmissionInTransaction(ctx:Financ
     if(row.withdrawal)history.push({action:"WITHDRAWN",at:row.withdrawal.createdAt.toISOString(),reason:row.withdrawal.reason});
     const view=employeeCompensationSubmissionViewSchema.parse({id:row.id,runId:row.runId,state:employeeCompensationSubmissionState(row),purpose:row.run.purpose,costOn:row.costOn.toISOString().slice(0,10),createdAt:row.createdAt.toISOString(),
       total:employeeCompensationRunFacts(ctx.organizationId,row.run).total.toJSON(),claimCount:row.claims.length,costCount:row.costs.length,approvalId:row.approval?.id??null,canWithdraw,
-      costs:page.slice(0,50).map(cost=>({id:cost.id,claimId:cost.claimId,personId:cost.claim.personId,runLineId:cost.runLineId,propertyId:cost.propertyId,reservationId:cost.reservationId,completionEventId:cost.completionEventId,
-        amount:Money.of(cost.amount.toString(),cost.currency).toJSON(),category:cost.category,costCenter:cost.costCenter,note:cost.note,
-        allocation:z.object({allocation:employeeCompensationSubmissionViewSchema.shape.costs.element.shape.allocation}).passthrough().parse(cost.policySnapshot).allocation})),nextCursor:page.length>50?page[49].id:null,history});
+      costs:employeeCompensationCostRows(page.slice(0,50)),nextCursor:page.length>50?page[49].id:null,history});
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_compensation.viewed",resourceType:"employee_compensation_submission",resourceId:row.id,
       after:{submissionId:row.id},reason:"Viewed the authorized original employee cost proposal",requestId:deps.requestId??crypto.randomUUID(),occurredAt:await new FinanceRepository(tx,ctx.organizationId).clock()});
     const final=await repository.find(row.id);if(JSON.stringify(final)!==JSON.stringify(row))throw new EmployeeCompensationRunAccessError();await recheckEmployeeSubmission(ctx,row,tx);return{model:view,record:row};
