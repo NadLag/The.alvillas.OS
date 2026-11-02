@@ -14,6 +14,8 @@ export const receivableOriginalSnapshot=z.object({schemaVersion:z.literal(1),pos
 export class ReceivableAssignmentRepository{
   constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
   async lockIntent(key:string){await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":receivable-intent:"+key},0))::text`);}
+  async commandKind(key:string){const[row]=await this.tx.$queryRaw<Array<{kind:string|null}>>(Prisma.sql`SELECT app_receivable_command_kind(${this.organizationId}::uuid,${key}::uuid) kind`);return row?.kind??null;}
+  async collectedAmount(assignmentId:string,currency:string){const[row]=await this.tx.$queryRaw<Array<{collected:string}>>(Prisma.sql`SELECT collected::text FROM app_receivable_collection_movements(${this.organizationId}::uuid,${assignmentId}::uuid,${currency})`);if(!row)throw Error("Actual receivable movement aggregate required");return row.collected;}
   async lockSource(postingId:string,journalId:string){
     await new EmployeePercentageSourceRepository(this.tx,this.organizationId).lockJournals([journalId]);
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":receivable-source:"+postingId},0))::text`);
@@ -54,7 +56,7 @@ export class ReceivableAssignmentRepository{
   byKey(idempotencyKey:string){return this.tx.receivableAssignment.findFirst({where:{organizationId:this.organizationId,idempotencyKey},include:{release:true}});}
   get(id:string){return this.tx.receivableAssignment.findFirst({where:{organizationId:this.organizationId,id},include:{release:true}});}
   releaseByKey(idempotencyKey:string){return this.tx.receivableAssignmentRelease.findFirst({where:{organizationId:this.organizationId,idempotencyKey},include:{assignment:{include:{release:true}}}});}
-  create(data:Omit<Prisma.ReceivableAssignmentUncheckedCreateInput,"organizationId">){return this.tx.receivableAssignment.create({data:{...data,organizationId:this.organizationId},include:{release:true}});}
+  create(data:Omit<Prisma.ReceivableAssignmentUncheckedCreateInput,"organizationId"|"collections"|"release">){return this.tx.receivableAssignment.create({data:{...data,organizationId:this.organizationId},include:{release:true}});}
   release(data:Omit<Prisma.ReceivableAssignmentReleaseUncheckedCreateInput,"organizationId">){return this.tx.receivableAssignmentRelease.create({data:{...data,organizationId:this.organizationId}});}
   async flushGuards(){await this.tx.$executeRawUnsafe("SET CONSTRAINTS ALL IMMEDIATE");await this.tx.$executeRawUnsafe("SET CONSTRAINTS ALL DEFERRED");}
 }

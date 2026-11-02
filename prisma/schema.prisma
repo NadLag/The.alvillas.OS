@@ -71,6 +71,7 @@ model AutomationSuggestion {
 }
 
 model ReceivableAssignment {
+  collections ReceivableCollection[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   postingId String @map("posting_id") @db.Uuid
@@ -138,7 +139,84 @@ model ReceivableAssignmentRelease {
   @@map("receivable_assignment_release")
 }
 
+model ReceivableCollection {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  assignmentId String @map("assignment_id") @db.Uuid
+  transactionId String @map("transaction_id") @db.Uuid
+  destinationAccountId String @map("destination_account_id") @db.Uuid
+  amount Decimal @db.Decimal(18,2)
+  currency String @db.Char(3)
+  method String @db.VarChar(120)
+  receivedAt DateTime @map("received_at") @db.Timestamptz(6)
+  externalReference String? @map("external_reference") @db.VarChar(160)
+  purpose String @db.VarChar(1000)
+  reason String @db.VarChar(500)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  sourcePolicyRuleId String @map("source_policy_rule_id") @db.Uuid
+  collectionPolicyRuleId String @map("collection_policy_rule_id") @db.Uuid
+  calendarPolicyRuleId String @map("calendar_policy_rule_id") @db.Uuid
+  sourceSnapshot Json @map("source_snapshot") @db.JsonB
+  policySnapshot Json @map("policy_snapshot") @db.JsonB
+  authorizationCap Json @map("authorization_cap") @db.JsonB
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  assignment ReceivableAssignment @relation(fields:[organizationId,assignmentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  transaction FinancialTransaction @relation("ReceivableCollectionJournal",fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  destination LedgerAccount @relation("ReceivableCollectionDestination",fields:[organizationId,destinationAccountId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  currencyRecord Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+  sourcePolicy ConfigRule @relation("ReceivableCollectionSourcePolicy",fields:[organizationId,sourcePolicyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  collectionPolicy ConfigRule @relation("ReceivableCollectionPolicy",fields:[organizationId,collectionPolicyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  calendarPolicy ConfigRule @relation("ReceivableCollectionCalendar",fields:[organizationId,calendarPolicyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("ReceivableCollectionCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  reversal ReceivableCollectionReversal?
+
+  @@unique([organizationId,id],map:"receivable_collection_org_id")
+  @@unique([organizationId,transactionId],map:"receivable_collection_journal_unique")
+  @@unique([organizationId,idempotencyKey],map:"receivable_collection_org_key")
+  @@index([organizationId,assignmentId,createdAt,id],map:"receivable_collection_assignment_idx")
+  @@index([organizationId,destinationAccountId,receivedAt,id],map:"receivable_collection_destination_idx")
+  @@index([organizationId,currency,receivedAt,id],map:"receivable_collection_currency_idx")
+  @@map("receivable_collection")
+}
+
+model ReceivableCollectionReversal {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  collectionId String @map("collection_id") @db.Uuid
+  transactionId String @map("transaction_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  collectionPolicyRuleId String @map("collection_policy_rule_id") @db.Uuid
+  calendarPolicyRuleId String @map("calendar_policy_rule_id") @db.Uuid
+  sourceSnapshot Json @map("source_snapshot") @db.JsonB
+  policySnapshot Json @map("policy_snapshot") @db.JsonB
+  authorizationCap Json @map("authorization_cap") @db.JsonB
+  reason String @db.VarChar(500)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  collection ReceivableCollection @relation(fields:[organizationId,collectionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"receivable_collection_reversal_original_fk")
+  transaction FinancialTransaction @relation("ReceivableCollectionOppositeJournal",fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  collectionPolicy ConfigRule @relation("ReceivableCollectionReversalPolicy",fields:[organizationId,collectionPolicyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"receivable_collection_reversal_policy_fk")
+  calendarPolicy ConfigRule @relation("ReceivableCollectionReversalCalendar",fields:[organizationId,calendarPolicyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("ReceivableCollectionReversalCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+
+  @@unique([organizationId,id],map:"receivable_collection_reversal_org_id")
+  @@unique([organizationId,collectionId],map:"receivable_collection_reversal_original_unique")
+  @@unique([organizationId,transactionId],map:"receivable_collection_reversal_journal_unique")
+  @@unique([organizationId,idempotencyKey],map:"receivable_collection_reversal_org_key")
+  @@index([organizationId,createdAt,id],map:"receivable_collection_reversal_created_idx")
+  @@map("receivable_collection_reversal")
+}
+
 model Organization {
+  receivableCollections ReceivableCollection[]
+  receivableCollectionReversals ReceivableCollectionReversal[]
   receivableAssignments ReceivableAssignment[]
   receivableAssignmentReleases ReceivableAssignmentRelease[]
   employeeCorrections EmployeeCompensationCorrection[]
@@ -482,6 +560,8 @@ model Person {
 }
 
 model UserAccount {
+  receivableCollections ReceivableCollection[] @relation("ReceivableCollectionCreator")
+  receivableCollectionReversals ReceivableCollectionReversal[] @relation("ReceivableCollectionReversalCreator")
   receivableAssignmentsCreated ReceivableAssignment[] @relation("ReceivableAssignmentCreator")
   receivableAssignmentReleasesCreated ReceivableAssignmentRelease[] @relation("ReceivableAssignmentReleaseCreator")
   employeeCorrections EmployeeCompensationCorrection[] @relation("EmployeeCorrectionCreator")
@@ -1468,6 +1548,7 @@ model SyncOp {
 }
 
 model LedgerAccount {
+  receivedReceivableCollections ReceivableCollection[] @relation("ReceivableCollectionDestination")
   fundedExpenses  Expense[]
   cashCollections CashCollection[]
   teamWallet      TeamWallet?
@@ -1489,6 +1570,8 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  receivableCollection ReceivableCollection? @relation("ReceivableCollectionJournal")
+  receivableCollectionReversal ReceivableCollectionReversal? @relation("ReceivableCollectionOppositeJournal")
   employeeCorrectionOriginal EmployeeCompensationCorrectionLine? @relation("EmployeeCorrectionOriginal")
   employeeCorrectionOpposite EmployeeCompensationCorrectionLine? @relation("EmployeeCorrectionOpposite")
   employeeRecognitionLine EmployeeCompensationRecognitionLine?
@@ -1672,6 +1755,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  receivableCollections ReceivableCollection[]
   receivableAssignments ReceivableAssignment[]
   employeeCompensationCosts    EmployeeCompensationCost[]
   employeeCompensationRuns EmployeeCompensationRun[]
@@ -1712,6 +1796,11 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  receivableCollectionSourcePolicies ReceivableCollection[] @relation("ReceivableCollectionSourcePolicy")
+  receivableCollectionPolicies ReceivableCollection[] @relation("ReceivableCollectionPolicy")
+  receivableCollectionCalendars ReceivableCollection[] @relation("ReceivableCollectionCalendar")
+  receivableCollectionReversalPolicies ReceivableCollectionReversal[] @relation("ReceivableCollectionReversalPolicy")
+  receivableCollectionReversalCalendars ReceivableCollectionReversal[] @relation("ReceivableCollectionReversalCalendar")
   receivableSourcePolicies ReceivableAssignment[] @relation("ReceivableSourcePolicy")
   receivableAssignmentPolicies ReceivableAssignment[] @relation("ReceivableAssignmentPolicy")
   percentageEarningRateWitnesses EmployeeCompensationPercentageWitness[] @relation("EmployeePercentageRate")
