@@ -3866,6 +3866,37 @@
       "OWNER": "Propriétaire",
       "SUPPLIER": "Fournisseur",
       "PERSON": "Personne"
-    }
+    },
+    "claimSearch": "Rechercher une créance par objet",
+    "applySearch": "Rechercher les créances"
+  },
+  "ReceivableAging": {
+    "title": "Créances par échéance",
+    "guidance": "Cette vue présente les créances attribuées. Celles sans date d’échéance explicite apparaissent séparément.",
+    "filters": "Filtres des échéances de créances",
+    "search": "Rechercher une créance par objet",
+    "currency": "Devise",
+    "band": "Groupe d’échéance",
+    "allBands": "Tous les groupes",
+    "apply": "Appliquer les filtres",
+    "refresh": "Actualiser la vue",
+    "loading": "Chargement des créances actuelles…",
+    "forbidden": "Votre accès a changé. Les informations financières ont été effacées.",
+    "offline": "Reconnectez-vous pour consulter les créances actuelles. Les informations financières sont effacées hors connexion.",
+    "configuration": "Renseignez le fuseau horaire de l’entreprise et les tranches d’ancienneté explicites dans la configuration.",
+    "unavailable": "Cette vue a changé ou est indisponible. Actualisez-la pour consulter les montants actuels.",
+    "asOf": "À jour au {date}",
+    "total": "Créances attribuées restant dues",
+    "claims": "Créances : {count}",
+    "unscheduled": "Sans échéance",
+    "notDue": "Échéance aujourd’hui ou plus tard",
+    "empty": "Aucune créance attribuée restant due ne correspond à cette vue.",
+    "dueOn": "Échéance le {date}",
+    "daysPastDue": "Jours de retard : {count}",
+    "assigned": "Attribué",
+    "collected": "Reçu",
+    "outstanding": "Restant dû",
+    "firstPage": "Première page",
+    "nextPage": "Page suivante"
   }
 }

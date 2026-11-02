@@ -3,7 +3,7 @@ import {receivablePartyKind,receivableAssignmentViewSchema} from "./receivable-a
 const id=z.uuid().transform(value=>value.toLowerCase()),currency=z.string().regex(/^[A-Z]{3}$/u),money=z.object({amount:z.string().regex(/^-?(?:0|[1-9]\d*)\.\d{2}$/u),currency}).strict();
 export const receivableSourcesInput=z.object({currency,after:id.optional()}).strict();
 export const receivablePartiesInput=z.object({kind:receivablePartyKind,search:z.string().trim().max(120).default(""),after:id.optional()}).strict();
-export const receivableHistoryInput=z.object({after:id.optional()}).strict();
+export const receivableHistoryInput=z.object({after:id.optional(),search:z.string().trim().max(120).optional()}).strict();
 export const receivableEditorSchema=z.object({source:z.object({currencies:z.array(currency),baseCurrency:currency,partyKinds:z.array(receivablePartyKind),canCreate:z.boolean(),canRelease:z.boolean()}).strict()}).strict();
 export const receivableSourcesSchema=z.object({source:z.object({items:z.array(z.object({id,reference:z.string(),occurredAt:z.iso.datetime(),originalAmount:money,unassignedAmount:money}).strict()),next:id.nullable()}).strict()}).strict();
 export const receivablePartiesSchema=z.object({source:z.object({items:z.array(z.object({id,name:z.string()}).strict()),next:id.nullable()}).strict()}).strict();

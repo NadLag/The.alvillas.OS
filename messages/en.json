@@ -3866,6 +3866,37 @@
       "OWNER": "Owner",
       "SUPPLIER": "Supplier",
       "PERSON": "Person"
-    }
+    },
+    "claimSearch": "Find a claim by purpose",
+    "applySearch": "Search claims"
+  },
+  "ReceivableAging": {
+    "title": "Receivables by due date",
+    "guidance": "This view covers assigned claims. Claims without an explicit due date appear separately.",
+    "filters": "Receivable aging filters",
+    "search": "Find a claim by purpose",
+    "currency": "Currency",
+    "band": "Due-date group",
+    "allBands": "All groups",
+    "apply": "Apply filters",
+    "refresh": "Refresh view",
+    "loading": "Loading current receivables…",
+    "forbidden": "Your access changed. Current financial details have been cleared.",
+    "offline": "Reconnect to view current receivables. Financial details are cleared while offline.",
+    "configuration": "Set the company timezone and explicit aging bands in configuration to view receivables by due date.",
+    "unavailable": "This view changed or is unavailable. Refresh it to see current amounts.",
+    "asOf": "Current as of {date}",
+    "total": "Outstanding assigned claims",
+    "claims": "Claims: {count}",
+    "unscheduled": "No due date",
+    "notDue": "Due today or later",
+    "empty": "No open assigned claims match this view.",
+    "dueOn": "Due {date}",
+    "daysPastDue": "Days overdue: {count}",
+    "assigned": "Assigned",
+    "collected": "Received",
+    "outstanding": "Outstanding",
+    "firstPage": "First page",
+    "nextPage": "Next page"
   }
 }
