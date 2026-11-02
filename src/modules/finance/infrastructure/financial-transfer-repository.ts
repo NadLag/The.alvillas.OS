@@ -7,8 +7,10 @@ export class FinancialTransferRepository {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":financial-transfer:"+key},0))::text`);
   }
   async lockAccounts(ids:string[]){
+    // Posting birth already takes FOR UPDATE in the wallet/offboarding guard.
+    // Acquire that strongest mode in a stable order before policy/source locks.
     await this.tx.$queryRaw(Prisma.sql`SELECT id FROM ledger_account WHERE organization_id=${this.organizationId}::uuid
-      AND id IN (${Prisma.join([...new Set(ids)].sort().map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY id FOR SHARE`);
+      AND id IN (${Prisma.join([...new Set(ids)].sort().map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY id FOR UPDATE`);
   }
   currency(code:string){return this.tx.currency.findUnique({where:{code},select:{code:true,minorUnit:true}})}
   async currencyChoices(){
