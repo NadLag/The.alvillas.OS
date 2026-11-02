@@ -8,6 +8,10 @@ import { encryptSecret } from "@/platform/auth/secret-encryption";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { Money } from "@/platform/money/money";
+import {authContextForAccount} from "@/platform/authz/account-context";
+import {createOwnerPayout,submitOwnerPayout} from "@/modules/finance/application/owner-payout-service";
+import {scheduleRecurringPayouts} from "@/modules/finance/application/recurring-payout-service";
+import {recurringPayoutPolicyKey} from "@/modules/finance/domain/recurring-payout";
 import { ownerLedgerPath } from "@/modules/finance/domain/owner-ledger";
 import { ownerPayoutWorkspacePath } from "@/modules/finance/domain/owner-payout";
 import { formatCurrencyAmount } from "@/i18n/format";
@@ -59,7 +63,7 @@ for(const locale of ["en","fr","ar"] as const)test(`Native owner payout review, 
       const opening=await finance.createFinancialTransaction({reference:`QA-PAYOUT-REVENUE:${suffix}`,idempotencyKey:randomUUID(),createdBy:author.id,occurredAt:at,description:"Dedicated native owner opening revenue",
         postings:[{ledgerAccountId:bank.id,side:"DEBIT",amount,bucket:"REVENUE_RECEIPT",dimensions:{owner_id:owner.id,property_id:property.id}},
           {ledgerAccountId:claim.id,side:"CREDIT",amount,bucket:"OWNER_REVENUE",dimensions:{owner_id:owner.id,property_id:property.id}}]});
-      return{ownerId:owner.id,propertyId:property.id,unrelatedOwnerId:unrelated.id,bankId:bank.id,bankName:bank.name,methodId:method.id,openingId:opening.id,reviewerId:recipient.id};
+      return{ownerId:owner.id,propertyId:property.id,unrelatedOwnerId:unrelated.id,bankId:bank.id,bankName:bank.name,methodId:method.id,openingId:opening.id,reviewerId:recipient.id,authorId:author.id};
     });
     const workspace=ownerPayoutWorkspacePath(locale,source.ownerId,source.propertyId),purpose=`Dedicated reviewed payout ${suffix}`;
     await operator.goto(`${origin}${ownerLedgerPath(locale,source.ownerId,source.propertyId)}`);await operator.getByTestId("owner-ledger-payouts").click();
@@ -119,6 +123,16 @@ for(const locale of ["en","fr","ar"] as const)test(`Native owner payout review, 
       expect(row.reversalTransaction?.reversesTransactionId).toBe(row.transactionId);expect(await tx.financialTransaction.count({where:{reference:`PAYOUT:${id}`}})).toBe(1);
       for(const action of ["created","submitted","approved","scheduled","paid","reversed"])expect(await tx.auditLog.count({where:{resourceId:id,action:`finance.owner_payout.${action}`}})).toBe(1);
     });
+    // A distinct approved source reaches the existing payment queue through the actual recurring job.
+    await withTenant(db,org,async tx=>{
+      const role=await tx.role.create({data:{organizationId:org,key:"native_recurring_payout_"+suffix,name:"Explicit recurring payout scheduler"}}),keys=["financial_transaction:view","financial_transaction:edit","config_rule:configure"],permissions=await tx.permission.findMany({where:{organizationId:org,key:{in:keys}}});expect(permissions).toHaveLength(keys.length);await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:org,roleId:role.id,permissionId:permission.id}))});const author=await tx.userAccount.findUniqueOrThrow({where:{id:source.authorId}});await tx.roleAssignment.create({data:{organizationId:org,roleId:role.id,userAccountId:author.id,personId:author.personId,scopeType:"organization",validFrom:new Date("2020-01-01")}});
+      await new ConfigRuleRepository(tx,org).createVersion({key:recurringPayoutPolicyKey,scopeType:"organization",scopeId:null,createdBy:source.authorId,effectiveFrom:await new FinanceRepository(tx,org).clock(),reason:"Actual native approved recurring payout scheduling",value:{source:"CURRENT_APPROVED_OWNER_PAYOUTS",principal:"CURRENT_CONFIGURATION_AUTHOR",schedule:"FROZEN_APPROVED_ELIGIBILITY",batch_size:25}});
+    });
+    const actor={organizationId:org,actorId:source.authorId,authContext:await authContextForAccount(org,source.authorId,{db})},recurring=await createOwnerPayout(actor,{propertyId:source.propertyId,ownerId:source.ownerId,payoutMethodId:source.methodId,fundingAccountId:source.bankId,amount:"0.07",currency:"MAD",purpose:"Actual native recurring payout "+suffix,expectedSettlementAt:"2026-03-07T11:00:00.000Z",idempotencyKey:randomUUID(),reason:"Create original recurring payout for independent review"},{db});
+    expect((await scheduleRecurringPayouts(org,{db})).scheduled).toBe(0);const proposed=await submitOwnerPayout(actor,{id:recurring.id,expectedVersion:1,reason:"Actual recurring source still requires owner review"},{db});expect(proposed.state).toBe("PENDING_APPROVAL");expect((await scheduleRecurringPayouts(org,{db})).scheduled).toBe(0);
+    await operator.goto(`${origin}/${locale}/app/payouts/${recurring.id}`);await expect(operator.getByTestId("payout-approval-link")).toBeVisible();const recurringApproval=await operator.getByTestId("payout-approval-link").getAttribute("href");if(!recurringApproval)throw Error("Actual recurring payout approval source required");await reviewer.goto(`${origin}${recurringApproval}`);await expect(reviewer.getByTestId("approval-financial-summary")).toBeVisible();await reviewer.getByTestId("approval-reason").fill("Approve this actual recurring payout without transferring funds");await reviewer.getByTestId("approval-approve").click();await expect(reviewer.getByTestId("approval-approve")).toHaveCount(0);
+    const history=()=>withTenant(db,org,async tx=>({transactions:await tx.$queryRaw`SELECT id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${org}::uuid ORDER BY id`,postings:await tx.$queryRaw`SELECT id::text,xmin::text,to_jsonb(p) AS body FROM posting p WHERE organization_id=${org}::uuid ORDER BY id`})),beforeRecurring=await history();expect((await scheduleRecurringPayouts(org,{db})).scheduled).toBe(1);expect((await scheduleRecurringPayouts(org,{db})).scheduled).toBe(0);expect(await history()).toEqual(beforeRecurring);
+    await operator.reload();await expect(operator.getByTestId("payout-total")).toHaveText(formatCurrencyAmount(locale,"0.07","MAD"));await expect(operator.getByTestId("payout-pay-form")).toBeVisible();await expect(operator.getByTestId("payout-schedule-form")).toHaveCount(0);await expect(operator.getByTestId("payout-reverse-form")).toHaveCount(0);await withTenant(db,org,async tx=>{const row=await tx.ownerPayout.findUniqueOrThrow({where:{id:recurring.id}});expect(row.state).toBe("SCHEDULED");expect(row.scheduledFor).toEqual(row.eligibleAt);expect(row.transactionId).toBeNull();expect(row.paymentReference).toBeNull();expect(await tx.outboxEvent.count({where:{type:"PayoutScheduled",payload:{path:["payoutId"],equals:row.id}}})).toBe(1);expect(await tx.auditLog.count({where:{resourceId:row.id,action:"finance.owner_payout.recurring_scheduled"}})).toBe(1);});
     expect(errors).toEqual([]);
   }finally{await reviewerContext.close();await db.$disconnect();}
 });

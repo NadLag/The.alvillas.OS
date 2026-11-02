@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { Prisma, PrismaClient } from "@prisma/client";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it,vi } from "vitest";
+import * as auditWriter from "@/platform/audit/audit-writer";
+import {scheduleRecurringPayouts,tickRecurringPayouts} from "@/modules/finance/application/recurring-payout-service";
+import {recurringPayoutPolicyKey} from "@/modules/finance/domain/recurring-payout";
 import { z } from "zod";
 import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant } from "@/platform/db/tenant";
@@ -749,6 +752,37 @@ describe("native owner payout persistence on real PostgreSQL", () => {
       payout:(await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}})).policySnapshot,
       invoice:(await tx.supplierInvoiceSubmission.findUniqueOrThrow({where:{id:submitted.submissionId}})).snapshot
     }))).toEqual(frozen);
+  });
+
+  describe("recurring approved payout scheduling jobs",()=>{
+    async function ready(options:{configured?:boolean;batch?:number;future?:boolean}={}){
+      const f=await fixture(),ctx=await submissionPolicy(f,{balance:"1000.00",payout:options.future?{cadence:"MONTHLY",schedule:{at:"23:59",month_day:"LAST"}}:{cadence:"CUSTOM_CRON",cron:"* * * * * *",schedule:{timezone:"UTC"}}}),draft=await createOwnerPayout(ctx,{...f.input,amount:"0.07"},{db}),approved=await submitOwnerPayout(ctx,{id:draft.id,expectedVersion:1,reason:"Actual recurring approved source"},{db});expect(approved.state).toBe("APPROVED");
+      const grant=await withTenant(db,f.org,async tx=>{
+        const role=await tx.role.create({data:{organizationId:f.org,key:"recurring_job_"+randomUUID(),name:"Actual approved-payout scheduler"}}),keys=["config_rule:configure","financial_transaction:view","financial_transaction:edit"],permissions=await tx.permission.findMany({where:{organizationId:f.org,key:{in:keys}}});expect(permissions).toHaveLength(keys.length);await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:role.id,permissionId:permission.id}))});
+        const assignment=await tx.roleAssignment.create({data:{organizationId:f.org,roleId:role.id,userAccountId:f.account.id,personId:f.account.personId,scopeType:"organization",validFrom:new Date("2020-01-01")}});
+        if(options.configured!==false)await new ConfigRuleRepository(tx,f.org).createVersion({key:recurringPayoutPolicyKey,scopeType:"organization",scopeId:null,createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),reason:"Actual explicitly configured approved-payout scheduling",value:{source:"CURRENT_APPROVED_OWNER_PAYOUTS",principal:"CURRENT_CONFIGURATION_AUTHOR",schedule:"FROZEN_APPROVED_ELIGIBILITY",batch_size:options.batch??25}});return assignment;
+      });if(!options.future)await expect.poll(()=>withTenant(db,f.org,async tx=>{const row=await tx.ownerPayout.findUniqueOrThrow({where:{id:draft.id}}),now=await new FinanceRepository(tx,f.org).clock();return Boolean(row.eligibleAt&&row.eligibleAt<=now);})).toBe(true);return{f,ctx,draft,approved,grant};
+    }
+    const financial=(org:string)=>withTenant(db,org,tx=>tx.$queryRaw`SELECT 'transaction' AS kind,id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p) FROM posting p WHERE organization_id=${org}::uuid ORDER BY kind,id`);
+    it("requires explicit scheduling configuration for an actual approved payout",async()=>{const p=await ready({configured:false});expect(await scheduleRecurringPayouts(p.f.org,{db})).toEqual({configured:false,scheduled:0,pending:false});await withTenant(db,p.f.org,async tx=>expect((await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}})).state).toBe("APPROVED"));});
+    it("schedules the frozen approved occurrence exactly once without recording an actual payment",async()=>{
+      const p=await ready(),before=await financial(p.f.org),source=await withTenant(db,p.f.org,tx=>tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}}));expect(before).toHaveLength(3);expect(await scheduleRecurringPayouts(p.f.org,{db})).toEqual({configured:true,scheduled:1,pending:false});expect((await scheduleRecurringPayouts(p.f.org,{db})).scheduled).toBe(0);
+      await withTenant(db,p.f.org,async tx=>{const row=await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}});expect(row.state).toBe("SCHEDULED");expect(row.scheduledFor).toEqual(source.eligibleAt);expect(row.policySnapshot).toEqual(source.policySnapshot);expect(row.amount.toFixed(2)).toBe("0.07");expect(row.transactionId).toBeNull();expect(row.paidAt).toBeNull();expect(row.paymentReference).toBeNull();expect(await tx.outboxEvent.count({where:{type:"PayoutScheduled",payload:{path:["payoutId"],equals:row.id}}})).toBe(1);expect(await tx.auditLog.count({where:{resourceId:row.id,action:"finance.owner_payout.recurring_scheduled"}})).toBe(1);});expect(await financial(p.f.org)).toEqual(before);
+    });
+    it("preserves future approved occurrences and unsubmitted native drafts",async()=>{const p=await ready({future:true}),draft=await createOwnerPayout(p.ctx,{...p.f.input,amount:"0.01",idempotencyKey:randomUUID()},{db});expect((await scheduleRecurringPayouts(p.f.org,{db})).scheduled).toBe(0);await withTenant(db,p.f.org,async tx=>{expect((await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}})).state).toBe("APPROVED");expect((await tx.ownerPayout.findUniqueOrThrow({where:{id:draft.id}})).state).toBe("DRAFT");});});
+    it("serializes competing recurring ticks into one original transition, audit and event",async()=>{const p=await ready();expect((await Promise.all([scheduleRecurringPayouts(p.f.org,{db}),scheduleRecurringPayouts(p.f.org,{db})])).reduce((sum,row)=>sum+row.scheduled,0)).toBe(1);await withTenant(db,p.f.org,async tx=>{expect(await tx.auditLog.count({where:{resourceId:p.draft.id,action:"finance.owner_payout.scheduled"}})).toBe(1);expect(await tx.outboxEvent.count({where:{type:"PayoutScheduled"}})).toBe(1);});});
+    it("resumes bounded batches without duplicating earlier approved sources",async()=>{
+      const p=await ready({batch:1});for(let index=0;index<2;index++){const draft=await createOwnerPayout(p.ctx,{...p.f.input,amount:"0.07",idempotencyKey:randomUUID()},{db});expect((await submitOwnerPayout(p.ctx,{id:draft.id,expectedVersion:1,reason:"Actual additional recurring source"},{db})).state).toBe("APPROVED");}
+      await expect.poll(()=>withTenant(db,p.f.org,async tx=>tx.ownerPayout.count({where:{organizationId:p.f.org,state:"APPROVED",eligibleAt:{lte:await new FinanceRepository(tx,p.f.org).clock()}}}))).toBe(3);
+      expect(await scheduleRecurringPayouts(p.f.org,{db})).toEqual({configured:true,scheduled:1,pending:true});expect(await scheduleRecurringPayouts(p.f.org,{db})).toEqual({configured:true,scheduled:1,pending:true});expect(await scheduleRecurringPayouts(p.f.org,{db})).toEqual({configured:true,scheduled:1,pending:false});expect((await scheduleRecurringPayouts(p.f.org,{db})).scheduled).toBe(0);
+    });
+    it("denies a revoked or merely owner-scoped job principal and allows another tenant to continue",async()=>{const p=await ready(),other=await ready();await withTenant(db,p.f.org,tx=>tx.roleAssignment.update({where:{id:p.grant.id},data:{archivedAt:new Date()}}));expect((await tickRecurringPayouts(p.f.org,{db})).blocked).toBe("authority_unavailable");expect((await tickRecurringPayouts(other.f.org,{db})).scheduled).toBe(1);await withTenant(db,p.f.org,async tx=>expect((await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}})).state).toBe("APPROVED"));});
+    it("rolls back the transition, scheduling outbox and both audits after final authority revocation",async()=>{
+      const p=await ready(),original=auditWriter.writeAuditEvent,spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{await original(tx,event);if(event.action==="finance.owner_payout.recurring_scheduled")await withTenant(db,p.f.org,t=>t.roleAssignment.update({where:{id:p.grant.id},data:{archivedAt:new Date()}}));});
+      try{await expect(scheduleRecurringPayouts(p.f.org,{db})).rejects.toBeInstanceOf(OwnerPayoutAccessError);}finally{spy.mockRestore();}
+      await withTenant(db,p.f.org,async tx=>{expect((await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}})).state).toBe("APPROVED");expect(await tx.outboxEvent.count({where:{type:"PayoutScheduled"}})).toBe(0);expect(await tx.auditLog.count({where:{resourceId:p.draft.id,action:{in:["finance.owner_payout.scheduled","finance.owner_payout.recurring_scheduled"]}}})).toBe(0);});
+    });
+    it("keeps identical policies and approved source identities isolated between tenants",async()=>{const p=await ready(),other=await ready();await scheduleRecurringPayouts(p.f.org,{db});await withTenant(db,other.f.org,async tx=>{expect(await tx.ownerPayout.findFirst({where:{id:p.draft.id}})).toBeNull();expect((await tx.ownerPayout.findUniqueOrThrow({where:{id:other.draft.id}})).state).toBe("APPROVED");expect(await tx.outboxEvent.count({where:{type:"PayoutScheduled"}})).toBe(0);});});
   });
 
   it("rechecks stored permissions after a payment waits for the shared accounting-period lock",async()=>{
