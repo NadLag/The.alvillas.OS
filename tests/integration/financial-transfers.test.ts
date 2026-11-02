@@ -56,6 +56,11 @@ describe("native financial transfers on real PostgreSQL",()=>{
     for(const changed of[{amount:"1501"},{reason:"Different financial intent"},{purpose:"Different stated purpose"},{toAccountId:f.otherBank.id,kind:"TRANSFER"}])await expect(postFinancialTransfer(ctx,{...f.input,...changed},{db})).rejects.toBeInstanceOf(FinancialTransferConflictError);
     expect((await listFinancialTransfers(ctx,{}, {db})).rows).toHaveLength(1);
   });
+  it("posts independent opposite-direction bank commands with one exact journal each",async()=>{
+    const f=await fixture(),ctx=await actor(f),inputs=["0.01","0.02","0.03","0.04"].map((amount,index)=>({...f.input,fromAccountId:index%2?f.otherBank.id:f.bank.id,toAccountId:index%2?f.bank.id:f.otherBank.id,kind:"TRANSFER",amount,purpose:"Independent actual bank movement "+index,idempotencyKey:randomUUID()})),results=await Promise.allSettled(inputs.map(input=>postFinancialTransfer(ctx,input,{db})));
+    expect(results.filter(row=>row.status==="rejected").map(row=>row.reason as unknown)).toEqual([]);const committed=results.flatMap(row=>row.status==="fulfilled"?[row.value]:[]);expect(new Set(committed.map(row=>row.id)).size).toBe(4);expect(committed.every(row=>!row.idempotent)).toBe(true);
+    await withTenant(db,f.org,async tx=>{expect(await tx.financialTransaction.count()).toBe(4);expect(await tx.posting.count()).toBe(8);const audits=await tx.auditLog.findMany({where:{action:"finance.transfer.posted"}});expect(audits).toHaveLength(4);expect(audits.every(row=>row.actorId===f.user.id&&row.reason===f.input.reason)).toBe(true);const lines=await tx.posting.findMany({where:{ledgerAccountId:f.bank.id}}),balance=lines.reduce((sum,row)=>row.side==="DEBIT"?sum.add(Money.of(row.amount.toString(),row.currency)):sum.subtract(Money.of(row.amount.toString(),row.currency)),Money.zero("MAD"));expect(balance.toJSON()).toEqual({amount:"0.02",currency:"MAD"});});
+  });
   it("requires independent caller and current stored wallet read authority for transfer history",async()=>{
     const f=await fixture(true),ctx=await actor(f),advance=await postFinancialTransfer(ctx,f.input,{db});
     const bank=await postFinancialTransfer(ctx,{...f.input,toAccountId:f.otherBank.id,kind:"TRANSFER",idempotencyKey:randomUUID(),purpose:"Dedicated visible bank movement"},{db});
