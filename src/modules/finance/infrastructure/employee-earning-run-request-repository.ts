@@ -10,8 +10,20 @@ export class EmployeeEarningRunRequestRepository{
  async lockRequest(id:string){await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId+":employee-earning-run-request:"+id},0))::text`);}
  find(id:string){return this.tx.employeeEarningRunRequest.findFirst({where:{organizationId:this.organizationId,id},include});}
  byKey(idempotencyKey:string){return this.tx.employeeEarningRunRequest.findUnique({where:{organizationId_idempotencyKey:{organizationId:this.organizationId,idempotencyKey}},include});}
- create(input:Omit<Prisma.EmployeeEarningRunRequestUncheckedCreateInput,"organizationId"|"sources"|"outcome">){return this.tx.employeeEarningRunRequest.create({data:{...input,organizationId:this.organizationId}});}
- createSources(requestId:string,rows:readonly Omit<Prisma.EmployeeEarningRequestWorkCreateManyInput,"organizationId"|"requestId">[]){return this.tx.employeeEarningRequestWork.createMany({data:rows.map(row=>({...row,organizationId:this.organizationId,requestId}))});}
+ create(input:Omit<Prisma.EmployeeEarningRunRequestUncheckedCreateInput,"organizationId"|"sources"|"outcome">){return this.tx.employeeEarningRunRequest.create({data:{...input,organizationId:this.organizationId},select:{id:true,idempotencyKey:true,requestedAt:true}});}
+ async createSources(requestId:string,rows:readonly Omit<Prisma.EmployeeEarningRequestWorkCreateManyInput,"organizationId"|"requestId">[]){
+  if(!rows.length)return{count:0};
+  const input=rows.map(row=>({...row,rate:typeof row.rate==="object"?row.rate.toFixed():row.rate,amount:typeof row.amount==="object"?row.amount.toFixed():row.amount,sourceSnapshot:row.sourceSnapshot===Prisma.JsonNull?null:row.sourceSnapshot}));
+  const count=await this.tx.$executeRaw(Prisma.sql`INSERT INTO employee_earning_request_work
+   (id,organization_id,request_id,person_id,assignment_id,compensation_id,config_rule_id,evidence_id,decision_id,
+    recorded_completion_at,rate,amount,currency,source_snapshot,property_id,task_id,source_city_id,source_region_id,created_at)
+   SELECT COALESCE(x.id,app_uuid_v7()),${this.organizationId}::uuid,${requestId}::uuid,x."personId",x."assignmentId",x."compensationId",x."configRuleId",x."evidenceId",x."decisionId",
+    x."recordedCompletionAt",x.rate,x.amount,x.currency,entry.value->'sourceSnapshot',x."propertyId",x."taskId",x."sourceCityId",x."sourceRegionId",COALESCE(x."createdAt",CURRENT_TIMESTAMP)
+   FROM jsonb_array_elements(${JSON.stringify(input)}::jsonb) entry(value)
+   CROSS JOIN LATERAL jsonb_to_record(entry.value) AS x(id uuid,"personId" uuid,"assignmentId" uuid,"compensationId" uuid,"configRuleId" uuid,"evidenceId" uuid,"decisionId" uuid,
+    "recordedCompletionAt" timestamptz,rate numeric,amount numeric,currency text,"propertyId" uuid,"taskId" uuid,"sourceCityId" uuid,"sourceRegionId" uuid,"createdAt" timestamptz)`);
+  return{count};
+ }
  createWitnesses(rows:readonly Omit<Prisma.EmployeeEarningRequestHourlyWitnessCreateManyInput,"organizationId">[]){return this.tx.employeeEarningRequestHourlyWitness.createMany({data:rows.map(row=>({...row,organizationId:this.organizationId}))});}
  async createPercentageWitnesses(rows:readonly Omit<Prisma.EmployeeEarningRequestPercentageWitnessCreateManyInput,"organizationId">[]){
   if(!rows.length)return{count:0};
