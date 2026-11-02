@@ -1,5 +1,5 @@
 import { z } from "zod";
-import {containsRecurringExpenseRule,recurringExpenseRuleFinancialAccess} from "@/platform/config/recurring-expense-rule-authority";
+import {containsRecurringExpenseRule,containsRecurringCompanyExpenseRule,recurringCompanyExpensePolicyKey,recurringExpenseRuleFinancialAccess} from "@/platform/config/recurring-expense-rule-authority";
 import {
   AuditRepository,
   type AuditHistoryFilters,
@@ -86,6 +86,10 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
+  if(row.resourceType==="company_expense"||["config_rule","property_template","property_template_revision"].includes(row.resourceType)&&[row.before,row.after].some(containsRecurringCompanyExpenseRule)){
+    const allowed=recurringExpenseRuleFinancialAccess(ctx.authContext,action,new Date(),recurringCompanyExpensePolicyKey);
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
+  }
   if(["config_rule","property_template","property_template_revision"].includes(row.resourceType)&&
     (containsRecurringExpenseRule(row.before)||containsRecurringExpenseRule(row.after))){
     const allowed=recurringExpenseRuleFinancialAccess(ctx.authContext,action);

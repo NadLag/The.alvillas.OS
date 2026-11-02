@@ -22,6 +22,7 @@ export const permissionResources = [
   "team_member",
   "staff_compensation",
   "employee_payable",
+  "company_expense",
   "receivable",
   "staff_document",
   "role",
@@ -88,7 +89,7 @@ const operationalFull = permissionsFor(
 const geographyView = permissionsFor(["region", "city"], ["view"]);
 
 const financeFull = permissionsFor(
-  ["financial_transaction", "wallet", "cash_collection", "expense", "supplier_invoice", "employee_payable", "owner_statement", "company_ledger", "report"],
+  ["financial_transaction", "wallet", "cash_collection", "expense", "supplier_invoice", "employee_payable", "company_expense", "owner_statement", "company_ledger", "report"],
   ["view", "create", "edit", "void", "approve", "reject", "export", "pay", "reconcile"]
 );
 

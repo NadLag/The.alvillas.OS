@@ -22,6 +22,7 @@ import { scheduleTeamDocumentReminders } from "@/modules/identity/application/te
 import { scheduleOperationTasks,operationSchedulerProperties } from "@/modules/reservations/application/operation-automation";
 import {tickReceivableReminders} from "@/modules/finance/application/receivable-reminder-service";
 import {tickRecurringExpenses} from "@/modules/finance/application/recurring-expense-service";
+import {tickRecurringCompanyExpenses} from "@/modules/finance/application/recurring-company-expense-service";
 
 export { outboxDispatchEvent };
 export const outboxDispatchInput = z.object({ organizationId: z.string().uuid(), outboxEventId: z.string().uuid() }).strict();
@@ -62,6 +63,7 @@ export const dispatchOutbox = inngest.createFunction({ id: "dispatch-outbox", na
     await step.run(`schedule-staff-documents-${id}`, () => scheduleTeamDocumentReminders(id));
     await step.run(`schedule-receivable-reminders-${id}`,()=>tickReceivableReminders(id));
     await step.run(`schedule-recurring-expenses-${id}`,()=>tickRecurringExpenses(id));
+    await step.run(`schedule-recurring-company-expenses-${id}`,()=>tickRecurringCompanyExpenses(id));
     await step.run(`schedule-digests-${id}`, () => scheduleDigests(id));
     await step.run(`automation-recovery-${id}`, () => automationTick(id));
     const result = await step.run(`dispatch-${id}`, () => dispatchOrganization(id));

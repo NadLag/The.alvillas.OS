@@ -21,7 +21,7 @@ import type { ConfigActorContext } from "@/modules/config/application/config-acc
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
 import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
-import {recurringExpensePolicyKey,recurringExpenseRuleFinancialAccess,recheckRecurringExpenseRuleAccess} from "@/platform/config/recurring-expense-rule-authority";
+import {protectedFinancialRecurrenceKey,recurringExpenseRuleFinancialAccess,recheckRecurringExpenseRuleAccess} from "@/platform/config/recurring-expense-rule-authority";
 
 export class ConfigAuthorizationError extends Error {
   constructor(message = "Configuration action is not authorized") {
@@ -157,7 +157,7 @@ function hasRuleFinancialAccess(
 ): boolean {
   // Assignment compensation is changed only through the immutable Team workflow.
   if (scopeType === "role_assignment") return false;
-  if(key===recurringExpensePolicyKey)return recurringExpenseRuleFinancialAccess(ctx.authContext);
+  if(protectedFinancialRecurrenceKey(key))return recurringExpenseRuleFinancialAccess(ctx.authContext,"view",new Date(),key);
   if (key === "staff.compensation") return authorize(ctx.authContext, "view", {
     type: "staff_compensation", organizationId: ctx.organizationId,
     propertyId: scopeType === "property" ? scopeId : undefined
@@ -340,7 +340,7 @@ export async function getConfigAdminModel(
         id: rule.id,
         propertyId: rule.scopeType === "property" ? rule.scopeId : undefined
       }) && hasRuleFinancialAccess(ctx, rule.key, rule.scopeType, rule.scopeId)&&
-      (rule.key!==recurringExpensePolicyKey||authorize(freshContext.authContext,"view",{type:"config_rule",organizationId:ctx.organizationId,id:rule.id,propertyId:rule.scopeType==="property"?rule.scopeId:undefined})&&hasRuleFinancialAccess(freshContext,rule.key,rule.scopeType,rule.scopeId));
+      (!protectedFinancialRecurrenceKey(rule.key)||authorize(freshContext.authContext,"view",{type:"config_rule",organizationId:ctx.organizationId,id:rule.id,propertyId:rule.scopeType==="property"?rule.scopeId:undefined})&&hasRuleFinancialAccess(freshContext,rule.key,rule.scopeType,rule.scopeId));
     const filter = { key: browse.ruleKey, scopeType: browse.ruleScopeType,
       scopeId: browse.ruleScopeType === "organization" ? null : browse.ruleScopeId, excludeScopeTypes: ["role_assignment"] };
     const matches = (rule: ConfigRuleRecord) => (!filter.key || rule.key === filter.key) && (!filter.scopeType || rule.scopeType === filter.scopeType) &&
@@ -377,8 +377,8 @@ export async function getConfigAdminModel(
         ? await previewRule(repository, canView, properties, input)
         : null;
 
-    const protectedRules=[...visibleRules,...visibleRules.flatMap(rule=>{const previous=predecessors.get(rule.id);return previous&&canView(previous)?[previous]:[]}),...(preview?.resolved?[preview.resolved]:[])].filter(rule=>rule.key===recurringExpensePolicyKey);
-    if(protectedRules.length)await recheckRecurringExpenseRuleAccess(ctx,tx,recurringExpensePolicyKey,protectedRules.map(rule=>({action:"view",resource:{type:"config_rule",organizationId:ctx.organizationId,id:rule.id,propertyId:rule.scopeType==="property"?rule.scopeId:undefined}})),new ConfigAuthorizationError());
+    const protectedRules=[...visibleRules,...visibleRules.flatMap(rule=>{const previous=predecessors.get(rule.id);return previous&&canView(previous)?[previous]:[]}),...(preview?.resolved?[preview.resolved]:[])].filter(rule=>protectedFinancialRecurrenceKey(rule.key));
+    for(const key of new Set(protectedRules.map(rule=>rule.key)))await recheckRecurringExpenseRuleAccess(ctx,tx,key,protectedRules.filter(rule=>rule.key===key).map(rule=>({action:"view",resource:{type:"config_rule",organizationId:ctx.organizationId,id:rule.id,propertyId:rule.scopeType==="property"?rule.scopeId:undefined}})),new ConfigAuthorizationError());
     return {
       rules: visibleRules.map(rule => { const previous = predecessors.get(rule.id); return toView(rule, properties, previous && canView(previous) ? previous : null); }),
       properties,
