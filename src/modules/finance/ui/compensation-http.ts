@@ -19,6 +19,8 @@ import {ReceivableAssignmentSourceError,ReceivableAssignmentConflictError} from 
 import {ReceivableCollectionSourceError,ReceivableCollectionConflictError} from "../domain/receivable-collection";
 import {ReceivableAgingSourceError,ReceivableAgingChangedError} from "../domain/receivable-aging";
 import {ReceivableExportRateLimitError} from "../domain/receivable-export";
+import {RecurringExpenseAccessError,RecurringExpenseConfigurationError} from "../domain/recurring-expense";
+import {RecurringExpenseChangedError} from "../domain/recurring-expense-settings";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
@@ -39,6 +41,9 @@ export async function compensationHttp<T extends Promise<unknown>>(request:NextR
     for(const[key,value]of Object.entries(headers))response.headers.set(key,value);return response;
   }catch(error){
     if(error instanceof ZodError||error instanceof EmployeeCompensationBasisError)return failure("validation",400);
+    if(error instanceof RecurringExpenseAccessError)return failure("forbidden",403);
+    if(error instanceof RecurringExpenseConfigurationError)return failure("configuration_unavailable",409);
+    if(error instanceof RecurringExpenseChangedError)return failure("conflict",409);
     if(error instanceof ReceivableAccessError)return failure("forbidden",403);
     if(error instanceof ReceivablePolicyError)return failure("configuration_unavailable",409);
     if(error instanceof ReceivableExportRateLimitError){const response=failure("rate_limited",429);response.headers.set("Retry-After",String(Math.max(1,Math.ceil((error.resetAt.getTime()-Date.now())/1000))));return response;}
