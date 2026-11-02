@@ -3,15 +3,19 @@ import {LedgerCalendarRepository} from "./ledger-calendar-repository";
 import {receivablePolicySchema,ReceivablePolicyError,type ReceivableAccountTotals} from "../domain/receivable";
 
 export class ReceivableRepository extends LedgerCalendarRepository{
+  async assertConfiguredAccounts(policy:unknown){
+    const config=receivablePolicySchema.parse(policy),accounts=await this.tx.ledgerAccount.findMany({where:{organizationId:this.organizationId,code:{in:config.account_codes}},
+      select:{id:true,accountType:true,normalSide:true}});
+    if(accounts.length!==config.account_codes.length||accounts.some(row=>row.accountType!=="CLAIM_OWNERSHIP"||row.normalSide!=="DEBIT"))
+      throw new ReceivablePolicyError("Configured receivable ownership accounts are unavailable");
+    return config;
+  }
   /** Uses original postings only; a reservation's current guest never changes a historical claim. */
   async accountTotals(policy:unknown,input:{startsAt:Date;endsAt:Date;currency:string}){
     const config=receivablePolicySchema.parse(policy);
     if(!Number.isFinite(input.startsAt.getTime())||!Number.isFinite(input.endsAt.getTime())||input.startsAt>=input.endsAt)
       throw Error("Receivable movement range is invalid");
-    const accounts=await this.tx.ledgerAccount.findMany({where:{organizationId:this.organizationId,code:{in:config.account_codes}},
-      select:{id:true,accountType:true,normalSide:true}});
-    if(accounts.length!==config.account_codes.length||accounts.some(row=>row.accountType!=="CLAIM_OWNERSHIP"||row.normalSide!=="DEBIT"))
-      throw new ReceivablePolicyError("Configured receivable ownership accounts are unavailable");
+    await this.assertConfiguredAccounts(config);
     return this.tx.$queryRaw<ReceivableAccountTotals[]>(Prisma.sql`
       SELECT a.id::text,a.code,a.name,a.account_type AS "accountType",a.normal_side AS "normalSide",${input.currency}::text AS currency,
         COALESCE(SUM(CASE WHEN t.occurred_at<${input.startsAt} THEN CASE WHEN p.side='DEBIT' THEN p.amount ELSE -p.amount END ELSE 0 END),0)::text AS opening,

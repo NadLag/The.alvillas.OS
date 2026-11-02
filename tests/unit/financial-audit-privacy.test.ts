@@ -11,6 +11,22 @@ const row=(resourceType:string):AuditHistoryRow=>({id,actorId:org,resourceId:id,
   before:null,after:{amount:"8000.00",currency:"MAD",name:"Dedicated financial source"},reason:"Dedicated confidential financial reason",requestId:id,occurredAt:new Date(0),createdAt:new Date(0),ipAddress:null,deviceId:null});
 
 describe("financial transaction and account audit privacy",()=>{
+  it("requires independent company receivable, financial and salary authority for assignment history",()=>{
+    const entry={...row("receivable"),action:"finance.receivables.assigned",after:{assignmentId:id,partyId:propertyId,amount:"8000.00"}},
+      permissions=[...actor.authContext.permissions,"receivable:view","receivable:export","financial_transaction:view","staff_compensation:view"],
+      full={...actor,authContext:{...actor.authContext,permissions:new Set(permissions)}};
+    for(const action of["view","export"] as const)expect(presentAuditHistoryRow(full,entry,action).after).toEqual(entry.after);
+    for(const missing of["receivable:view","financial_transaction:view","staff_compensation:view"]){const denied={...full,authContext:{...full.authContext,permissions:new Set(permissions.filter(key=>key!==missing))}};
+      expect(presentAuditHistoryRow(denied,entry,"view").after).toBe(maskedValue);expect(presentAuditHistoryRow(denied,entry,"view").reason).toBe(maskedValue);}
+    const viewer={...full,authContext:{...full.authContext,permissions:new Set(permissions.filter(key=>key!=="receivable:export"))}};
+    expect(presentAuditHistoryRow(viewer,entry,"view").after).toEqual(entry.after);expect(presentAuditHistoryRow(viewer,entry,"export").after).toBe(maskedValue);
+  });
+  it("cannot relabel a receivable audit or use a narrow financial scope to expose its original party",()=>{
+    const entry={...row("task"),action:"finance.receivables.assignment_released",after:{assignmentId:id,partyId:propertyId}},permissions=new Set(["receivable:view","financial_transaction:view","staff_compensation:view"]),
+      auditScope={organizationId:org,scopeType:"organization" as const},narrowScope={organizationId:org,scopeType:"property" as const,scopeId:propertyId},
+      narrow={...actor,authContext:{...actor.authContext,permissions:new Set([...actor.authContext.permissions,...permissions]),assignments:[{scope:auditScope,permissions:actor.authContext.permissions},{scope:narrowScope,permissions}]}};
+    for(const viewer of[actor,narrow]){const presented=presentAuditHistoryRow(viewer,entry,"view");expect(presented.after).toBe(maskedValue);expect(presented.reason).toBe(maskedValue);}
+  });
   it.each(["financial_transaction","ledger_account","employee_compensation_claim"])("masks %s payload and reason for an audit-only reader",type=>{
     for(const action of ["view","export"] as const){const result=presentAuditHistoryRow(actor,row(type),action);
       expect(result.after).toBe(maskedValue);expect(result.reason).toBe(maskedValue);expect(JSON.stringify(result)).not.toContain("8000.00");}

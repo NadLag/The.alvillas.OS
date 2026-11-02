@@ -80,6 +80,8 @@ export default async function AppPage({
             <Link className="secondary-button" data-testid="company-ledger-link" href={`/${appLocale}/app/finance/company-ledger`}>{t("companyLedger")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "employee_payable", organizationId: session.user.organizationId, dataClass: "financial", amount: "0.00", occurredAt: new Date() }) ?
             <Link className="secondary-button" data-testid="compensation-link" href={`/${appLocale}/app/finance/compensation`} prefetch={false}>{t("compensation")}</Link> : null}
+          {reservationContext && ["receivable","financial_transaction","staff_compensation"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"financial"},new Date())) ?
+            <Link className="secondary-button" data-testid="receivables-link" href={`/${appLocale}/app/finance/receivables`} prefetch={false}>{t("receivables")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?
             <Link className="secondary-button" data-testid="financial-accounts-link" href={`/${appLocale}/app/finance/accounts`}>{t("financialAccounts")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?

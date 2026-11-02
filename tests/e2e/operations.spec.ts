@@ -305,7 +305,11 @@ for (const locale of ["en", "fr", "ar"] as const)
       const generate = page.getByTestId("operation-recurring-form");
       await generate.locator('[name="from"]').fill(today);
       await generate.locator('[name="until"]').fill(today);
+      const generationResponse = page.waitForResponse(response =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === `/${locale}/app/operations`);
       await generate.locator('button[type="submit"]').click();
+      expect((await generationResponse).status()).toBe(200);
       await expect(page.getByTestId("operation-task-row")).toHaveCount(1);
       const catalog = { en: enMessages, fr: frMessages, ar: arMessages }[locale]
         .Operations;

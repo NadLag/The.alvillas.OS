@@ -131,6 +131,12 @@ export function presentAuditHistoryRow(
       { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
       { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
   }
+  if(row.resourceType==="receivable"||row.action.startsWith("finance.receivables.")){
+    const now=new Date(),allowed=authorizeOrganizationSource(ctx.authContext,action,{type:"receivable",organizationId:ctx.organizationId,dataClass:"financial"},now)&&
+      ["financial_transaction","staff_compensation"].every(type=>authorizeOrganizationSource(ctx.authContext,"view",{type,organizationId:ctx.organizationId,dataClass:"financial"},now));
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,
+      {type:auditLogResource,organizationId:ctx.organizationId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}}) as AuditHistoryRow;
+  }
   const teamResource = row.action.startsWith("team.compensation.")
     ? "staff_compensation"
     : row.action.startsWith("team.document.")

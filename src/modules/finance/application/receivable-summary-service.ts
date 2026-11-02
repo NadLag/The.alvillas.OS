@@ -1,22 +1,15 @@
 import {prisma} from "@/platform/db/client";
-import {withTenant,type TenantTransaction,type TenantTransactionRunner} from "@/platform/db/tenant";
+import {withTenant,type TenantTransactionRunner} from "@/platform/db/tenant";
 import {present,catalogFieldPolicy} from "@/platform/authz/present";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {receivableAccountBalances,receivableSummaryInput,receivablePolicyKey,ReceivableAccessError,ReceivablePolicyError} from "../domain/receivable";
 import {ReceivableRepository} from "../infrastructure/receivable-repository";
-import {FinanceRepository} from "../infrastructure/finance-repository";
-import {recheckFinanceAuthorization,type FinanceActorContext} from "./finance-access";
+import type {FinanceActorContext} from "./finance-access";
+import {recheckReceivableAuthority as authority} from "./receivable-access";
 
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 const target=(organizationId:string)=>({type:"receivable",id:organizationId,organizationId,dataClass:"financial" as const});
-async function authority(ctx:FinanceActorContext,tx:TenantTransaction){
-  const now=await new FinanceRepository(tx,ctx.organizationId).clock();
-  // This complete organization aggregate includes salary-funded claims. Narrow source reads have their own authority.
-  await recheckFinanceAuthorization(ctx,tx,now,["receivable","financial_transaction","staff_compensation"].map(type=>({action:"view" as const,
-    resource:{...target(ctx.organizationId),type},organizationOnly:true})),new ReceivableAccessError());
-  return now;
-}
 
 export async function getReceivableSummary(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
   const input=receivableSummaryInput.parse(raw);
