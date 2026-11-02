@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import {CompensationPercentageEvidenceGroups} from "./compensation-percentage-evidence";
 import { useCallback,useEffect,useRef,useState,type FormEvent } from "react";
 import { useTranslations } from "next-intl";
@@ -14,7 +15,7 @@ import { useCompensationPaymentCommand } from "./use-compensation-payment-comman
 type Draft={kind:"PAYMENT"|"WALLET_OFFSET";amount?:string;paidLocal?:string;occurrence:"reject"|"earlier"|"later";fundingQuery:string;fundingAccountId:string;reason:string;reference:string;currentPeriod:boolean};
 const emptyDraft=():Draft=>({kind:"PAYMENT",occurrence:"reject",fundingQuery:"",fundingAccountId:"",reason:"",reference:"",currentPeriod:false});
 export function CompensationPayments({locale,submissionId,claimId,recoveryScope}:{locale:AppLocale;submissionId:string;claimId:string;recoveryScope:string}){
-  const t=useTranslations("CompensationPayments"),common=useTranslations("CompensationCosts"),[draft,setDraft]=useState<Draft>(emptyDraft),[body,setBody]=useState("{}"),[validation,setValidation]=useState(false),refreshRef=useRef<(()=>Promise<void>)|null>(null);
+  const correctionText=useTranslations("CompensationCorrections"),t=useTranslations("CompensationPayments"),common=useTranslations("CompensationCosts"),[draft,setDraft]=useState<Draft>(emptyDraft),[body,setBody]=useState("{}"),[validation,setValidation]=useState(false),refreshRef=useRef<(()=>Promise<void>)|null>(null);
   const invalidate=useCallback(()=>{setDraft(emptyDraft());setBody("{}");setValidation(false);},[]),success=useCallback(()=>{setDraft(emptyDraft());setBody("{}");setValidation(false);void refreshRef.current?.();},[]);
   const command=useCompensationPaymentCommand({submissionId,claimId,scope:recoveryScope,onSuccess:success,onInvalidate:invalidate}),deny=command.deny;
   const invalidateRead=useCallback(()=>{if(navigator.onLine)deny();else invalidate();},[deny,invalidate]);
@@ -31,7 +32,7 @@ export function CompensationPayments({locale,submissionId,claimId,recoveryScope}
     {command.state==="uncertain"?<div className="compensation-notice" role="alert"><p>{t("uncertain")}</p><div className="app-actions"><button className="primary-button" onClick={()=>{void command.send();}} data-testid="compensation-payment-retry">{t("retryExact")}</button><button className="secondary-button" onClick={()=>{void command.recover();}}>{t("recover")}</button></div></div>:null}
     {resource.pending?<><p role="status">{common("loading")}</p><SkeletonBlock rows={5}/></>:null}
     {resource.error?<div role="alert" className="compensation-notice"><p>{common(resource.error)}</p><button className="secondary-button" onClick={()=>{void resource.refresh();}}>{common("retryRead")}</button></div>:null}
-    {data?<><section className="compensation-summary"><div><h2 dir="auto">{data.personName??t("restrictedPerson")}</h2><p dir="auto">{data.purpose}</p></div><dl><div><dt>{t("earned")}</dt><dd data-testid="compensation-payment-earned">{formatCurrencyAmount(locale,data.earned.amount,data.earned.currency)}</dd></div><div><dt>{t("outstanding")}</dt><dd className="compensation-total" data-testid="compensation-payment-outstanding">{formatCurrencyAmount(locale,data.outstanding.amount,data.outstanding.currency)}</dd></div></dl></section>
+    {data?<><nav className="app-actions" aria-label={correctionText("relatedActions")}><Link className="secondary-button" href={`/${locale}/app/finance/compensation/proposals/${submissionId}/claims/${claimId}/correction`} prefetch={false} data-testid="compensation-payment-corrections">{correctionText("review")}</Link></nav><section className="compensation-summary"><div><h2 dir="auto">{data.personName??t("restrictedPerson")}</h2><p dir="auto">{data.purpose}</p></div><dl><div><dt>{t("earned")}</dt><dd data-testid="compensation-payment-earned">{formatCurrencyAmount(locale,data.earned.amount,data.earned.currency)}</dd></div><div><dt>{t("outstanding")}</dt><dd className="compensation-total" data-testid="compensation-payment-outstanding">{formatCurrencyAmount(locale,data.outstanding.amount,data.outstanding.currency)}</dd></div></dl></section>
       {data.percentageEvidence?.length?<CompensationPercentageEvidenceGroups locale={locale} groups={data.percentageEvidence}/>:null}
       {data.blocked?<p className="compensation-notice" role="status">{t(`blocked.${data.blocked}`)}</p>:null}
       {data.canPrepare&&command.state!=="succeeded"?<form className="resource-form" onSubmit={event=>{void submit(event);}} data-testid="compensation-payment-form" aria-busy={command.state==="sending"}><h2>{t("recordTitle")}</h2><p>{t("recordGuidance")}</p><fieldset disabled={command.state!=="ready"}><legend className="sr-only">{t("recordTitle")}</legend>

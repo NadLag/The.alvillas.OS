@@ -44,10 +44,11 @@ async function prepare(ctx:FinanceActorContext,intent:Intent,tx:TenantTransactio
     if(input?.currentPeriod&&!await periods.postingOpen(cost.sourceOccurredAt)){const closed=await periods.postingPeriod(cost.sourceOccurredAt);if(!closed?.events[0])throw new EmployeeCompensationRunConflictError();adjustments.set(cost.id,closed);postAt.set(cost.id,current);}
     else postAt.set(cost.id,cost.sourceOccurredAt);
   }
+  const retainedFacts=employeeCompensationRunFacts(ctx.organizationId,row.run);
   const recheck=async()=>{
     const actual=await claims.find(id),beneficiary=await recognitions.person(retained.personId);
     if(!actual||JSON.stringify(actual)!==JSON.stringify(row)||!beneficiary)throw new EmployeeCompensationRunAccessError();
-    const facts=employeeCompensationRunFacts(ctx.organizationId,actual.run),checks:Parameters<typeof recheckFinanceAuthorization>[3][number][]=[...employeeCompensationSubmissionFinancialChecks(ctx.organizationId,actual,facts.total)];
+    const facts=retainedFacts,checks:Parameters<typeof recheckFinanceAuthorization>[3][number][]=[...employeeCompensationSubmissionFinancialChecks(ctx.organizationId,actual,facts.total)];
     for(const cost of retained.costs){
       const source=actual.costs.find(line=>line.id===cost.id),postingAt=postAt.get(cost.id);if(!source||!postingAt)throw new EmployeeCompensationRunAccessError();
       const {financial}=employeeCompensationFinancialSourceFacts(ctx.organizationId,row.run.createdBy,{...source,taskId:source.runLine.taskId},cost.sourceOccurredAt),link=existing?.lines.find(line=>line.costId===cost.id);
