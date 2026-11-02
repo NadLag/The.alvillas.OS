@@ -6,7 +6,7 @@ import type {z} from "zod";
 
 export type ReceivableAgingPosition={id:string;postingId:string;partyKind:z.infer<typeof receivablePartyKind>;partyId:string;purpose:string;dueOn:string|null;daysPastDue:number|null;bucket:string;assigned:string;collected:string;outstanding:string};
 export type ReceivableAgingSnapshot={at:Date;on:string;fingerprint:string;valid:boolean;groups:Array<{key:string;outstanding:string;count:string}>;items:ReceivableAgingPosition[]};
-type Input={currency:string;timezone:string;policy:ReceivableAgingPolicy;accountCodes:readonly string[];bucket?:string;partyKind?:z.infer<typeof receivablePartyKind>;partyId?:string;search:string;after?:{id:string;dueOn:string|null}};
+type Input={currency:string;timezone:string;policy:ReceivableAgingPolicy;accountCodes:readonly string[];bucket?:string;partyKind?:z.infer<typeof receivablePartyKind>;partyId?:string;search:string;after?:{id:string;dueOn:string|null};all?:boolean};
 
 /** One MVCC statement derives bounded output from the shared original/opposite movement calculation. */
 export class ReceivableAgingRepository{
@@ -47,7 +47,7 @@ export class ReceivableAgingRepository{
     SELECT * FROM open a WHERE true
      ${input.bucket?Prisma.sql`AND a.bucket=${input.bucket}`:Prisma.empty}
      ${after?after.dueOn===null?Prisma.sql`AND a.due_on IS NULL AND a.id>${after.id}::uuid`:Prisma.sql`AND(a.due_on>${after.dueOn}::date OR a.due_on IS NULL OR a.due_on=${after.dueOn}::date AND a.id>${after.id}::uuid)`:Prisma.empty}
-    ORDER BY due_on ASC NULLS LAST,id ASC LIMIT 51
+    ORDER BY due_on ASC NULLS LAST,id ASC ${input.all?Prisma.empty:Prisma.sql`LIMIT 51`}
    )
    SELECT period.at,period.on::text AS on,
     NOT EXISTS(SELECT 1 FROM facts WHERE amount<=0 OR collected<0 OR collected>amount OR bucket IS NULL)

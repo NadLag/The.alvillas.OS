@@ -56,6 +56,7 @@ describe("config rule registry", () => {
       "finance.receivable_aging",
       "finance.receivable_assignments",
       "finance.receivable_collections",
+      "finance.receivable_exports",
       "finance.receivables",
       "finance.tax",
       "identity.pin_lockout",

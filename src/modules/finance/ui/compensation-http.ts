@@ -18,12 +18,13 @@ import {ReceivableAccessError,ReceivablePolicyError} from "../domain/receivable"
 import {ReceivableAssignmentSourceError,ReceivableAssignmentConflictError} from "../domain/receivable-assignment";
 import {ReceivableCollectionSourceError,ReceivableCollectionConflictError} from "../domain/receivable-collection";
 import {ReceivableAgingSourceError,ReceivableAgingChangedError} from "../domain/receivable-aging";
+import {ReceivableExportRateLimitError} from "../domain/receivable-export";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
 
 /** One session, origin, size and private-error boundary for compensation reads and commands. */
-export async function compensationHttp(request:NextRequest,work:(actor:FinanceActorContext,input:unknown,requestId:string)=>Promise<unknown>,options:{json?:boolean;maxBytes?:number;feature:string;status?:200|202;rejectQuery?:boolean}){
+export async function compensationHttp<T extends Promise<unknown>>(request:NextRequest,work:(actor:FinanceActorContext,input:unknown,requestId:string)=>T,options:{json?:boolean;maxBytes?:number;feature:string;status?:200|202;rejectQuery?:boolean;respond?:(value:Awaited<T>)=>Response}){
   const requestId=crypto.randomUUID();
   try{
     const actor=await financeActorContextFromSession(await auth());
@@ -34,11 +35,13 @@ export async function compensationHttp(request:NextRequest,work:(actor:FinanceAc
       if(!isSameOriginContentType(request,"application/json"))return failure("forbidden",403);
       try{input=await readBoundedJsonRequest(request,options.maxBytes??65536);}catch{return failure("validation",400);}
     }
-    return NextResponse.json(await work(actor,input,requestId),{headers,status:options.status??200});
+    const value=await work(actor,input,requestId),response=options.respond?options.respond(value):NextResponse.json(value,{headers,status:options.status??200});
+    for(const[key,value]of Object.entries(headers))response.headers.set(key,value);return response;
   }catch(error){
     if(error instanceof ZodError||error instanceof EmployeeCompensationBasisError)return failure("validation",400);
     if(error instanceof ReceivableAccessError)return failure("forbidden",403);
     if(error instanceof ReceivablePolicyError)return failure("configuration_unavailable",409);
+    if(error instanceof ReceivableExportRateLimitError){const response=failure("rate_limited",429);response.headers.set("Retry-After",String(Math.max(1,Math.ceil((error.resetAt.getTime()-Date.now())/1000))));return response;}
     if(error instanceof ReceivableAssignmentSourceError)return failure("source_unavailable",409);
     if(error instanceof ReceivableAssignmentConflictError)return failure("conflict",409);
     if(error instanceof ReceivableCollectionSourceError)return failure("source_unavailable",409);
