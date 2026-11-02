@@ -47,7 +47,7 @@ beforeAll(async()=>{
  const target=url?new URL(url):null,localAcceptance=target?.pathname.startsWith("/alvillas_automation_"),isolatedActionsAcceptance=process.env.GITHUB_ACTIONS==="true"&&target?.pathname==="/alvillas_os";
  if(!target||!["localhost","127.0.0.1"].includes(target.hostname)||!(localAcceptance||isolatedActionsAcceptance))throw Error("Dedicated local or isolated Actions financial acceptance database required");
  execFileSync(process.execPath,["node_modules/prisma/build/index.js","migrate","deploy"],{env:{...process.env,DATABASE_URL:url},stdio:"pipe"});
- admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});
+ admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(target);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});
 });
 afterAll(async()=>{await db?.$disconnect();await admin?.$disconnect();});
 

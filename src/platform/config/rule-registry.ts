@@ -1,5 +1,6 @@
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
+import {companyExpensePolicyKey,companyExpensePolicySchema,recurringCompanyExpensePolicyKey,recurringCompanyExpensePolicySchema} from "@/modules/finance/domain/company-expense";
 import {recurringExpensePolicyKey,recurringExpensePolicySchema} from "@/modules/finance/domain/recurring-expense";
 import { automationRuleSchema, ruleConditionSchema } from "@/platform/automation/rule";
 import { operationPolicySchema, recurringTasksSchema } from "./operation-policy";
@@ -371,6 +372,8 @@ export const configRuleSchemas = {
   "finance.approval_thresholds": approvalThresholdsConfigSchema,
   "finance.payout_schedule": payoutScheduleConfigSchema,
   [recurringExpensePolicyKey]:recurringExpensePolicySchema,
+  [companyExpensePolicyKey]:companyExpensePolicySchema,
+  [recurringCompanyExpensePolicyKey]:recurringCompanyExpensePolicySchema,
   [accountingPeriodPolicyKey]: accountingPeriodPolicySchema,
   [agreementResponsibilitiesConfigKey]: agreementResponsibilitiesConfigSchema,
   [agreementNoticeConfigKey]: agreementNoticeConfigSchema,

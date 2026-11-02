@@ -215,6 +215,10 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  companyExpensePlans CompanyExpensePlan[]
+  companyExpenseRevisions CompanyExpenseRevision[]
+  recurringCompanyExpenseOccurrences RecurringCompanyExpenseOccurrence[]
+
   recurringExpenseOccurrences RecurringExpenseOccurrence[]
   receivableCollections ReceivableCollection[]
   receivableCollectionReversals ReceivableCollectionReversal[]
@@ -561,6 +565,10 @@ model Person {
 }
 
 model UserAccount {
+  companyExpensePlans CompanyExpensePlan[]
+  companyExpenseRevisions CompanyExpenseRevision[]
+  recurringCompanyExpenseOccurrences RecurringCompanyExpenseOccurrence[]
+
   recurringExpenseOccurrences RecurringExpenseOccurrence[]
   receivableCollections ReceivableCollection[] @relation("ReceivableCollectionCreator")
   receivableCollectionReversals ReceivableCollectionReversal[] @relation("ReceivableCollectionReversalCreator")
@@ -1757,6 +1765,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  companyExpenseRevisions CompanyExpenseRevision[]
   receivableCollections ReceivableCollection[]
   receivableAssignments ReceivableAssignment[]
   employeeCompensationCosts    EmployeeCompensationCost[]
@@ -1798,6 +1807,9 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  companyExpenseRevisions CompanyExpenseRevision[]
+  recurringCompanyExpenseOccurrences RecurringCompanyExpenseOccurrence[]
+
   recurringExpenseOccurrences RecurringExpenseOccurrence[]
   receivableCollectionSourcePolicies ReceivableCollection[] @relation("ReceivableCollectionSourcePolicy")
   receivableCollectionPolicies ReceivableCollection[] @relation("ReceivableCollectionPolicy")
@@ -3724,4 +3736,66 @@ model EmployeeEarningRequestPercentageWitness {
   @@index([organizationId,compensationId],map:"employee_earning_percentage_contract_idx")
   @@index([organizationId,policyRuleId],map:"employee_earning_percentage_policy_idx")
   @@map("employee_earning_request_percentage_witness")
+}
+
+model CompanyExpensePlan {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ idempotencyKey String @map("idempotency_key") @db.Uuid
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ revisions CompanyExpenseRevision[]
+ recurringOccurrence RecurringCompanyExpenseOccurrence?
+ @@unique([organizationId,id])
+ @@unique([organizationId,idempotencyKey])
+ @@map("company_expense_plan")
+}
+model CompanyExpenseRevision {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ companyExpenseId String @map("company_expense_id") @db.Uuid
+ version Int
+ state String
+ amount Decimal @db.Decimal(18,2)
+ currency String @db.Char(3)
+ currencyRef Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction,map:"company_expense_revision_currency_fk")
+ category String
+ costCenter String @map("cost_center")
+ purpose String
+ dueOn DateTime @map("due_on") @db.Date
+ timezone String
+ dataClass String @map("data_class")
+ configRuleId String @map("config_rule_id") @db.Uuid
+ policySnapshot Json @map("policy_snapshot")
+ reason String
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ plan CompanyExpensePlan @relation(fields:[organizationId,companyExpenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"company_expense_revision_organization_id_company_expense_id_fke")
+ configRule ConfigRule @relation(fields:[organizationId,configRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"company_expense_revision_policy_fk")
+ creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ @@unique([organizationId,id])
+ @@unique([organizationId,companyExpenseId,version],map:"company_expense_revision_org_source_version_key")
+ @@index([organizationId,dueOn,companyExpenseId],map:"company_expense_revision_org_due_source_idx")
+ @@map("company_expense_revision")
+}
+model RecurringCompanyExpenseOccurrence {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ scheduleId String @map("schedule_id") @db.Uuid
+ on DateTime @db.Date
+ configRuleId String @map("config_rule_id") @db.Uuid
+ companyExpenseId String @map("company_expense_id") @db.Uuid
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ plan CompanyExpensePlan @relation(fields:[organizationId,companyExpenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"recurring_company_expense_plan_fk")
+ configRule ConfigRule @relation(fields:[organizationId,configRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"recurring_company_expense_policy_fk")
+ creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"recurring_company_expense_actor_fk")
+ @@unique([organizationId,id])
+ @@unique([organizationId,scheduleId,on],map:"recurring_company_expense_schedule_on_key")
+ @@unique([organizationId,companyExpenseId],map:"recurring_company_expense_plan_key")
+ @@map("recurring_company_expense_occurrence")
 }
