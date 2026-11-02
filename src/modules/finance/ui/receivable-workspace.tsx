@@ -11,6 +11,7 @@ import {useCompensationRead} from "./use-compensation-read";
 import {useReceivableCreateCommand,useReceivableReleaseCommand} from "./use-receivable-assignment-command";
 import {ReceivableCollectionWorkspace} from "./receivable-collection-workspace";
 import {ReceivableAgingWorkspace} from "./receivable-aging-workspace";
+import {ReceivableReminderSettingsControl} from "./receivable-reminder-settings";
 type Assignment=z.infer<typeof receivableAssignmentViewSchema>;
 type Kind=z.infer<typeof receivablePartyKind>;
 const readReceiptSchema=z.object({assignment:receivableAssignmentViewSchema}).strict();
@@ -68,5 +69,5 @@ export function ReceivableWorkspace({locale,scope}:{locale:AppLocale;scope:strin
  const[financialRevision,setFinancialRevision]=useState(0);
  const changed=useCallback(()=>setRevision(value=>value+1),[setRevision]);
  const financialChanged=useCallback(()=>setFinancialRevision(value=>value+1),[setFinancialRevision]);
- return <div className="compensation-create-form"><ReceivableAgingWorkspace key={`aging-${scope}-${revision}-${financialRevision}`} locale={locale}/><section aria-labelledby="receivable-create-title"><h2 id="receivable-create-title">{t("newAssignment")}</h2><ReceivableCreate locale={locale} scope={scope} onChanged={changed}/></section><ReceivableCollectionWorkspace key={"collections-"+revision} locale={locale} scope={scope} onChanged={financialChanged}/><History locale={locale} scope={scope} onChanged={changed} revision={revision}/></div>;
+ return <div className="compensation-create-form"><ReceivableAgingWorkspace key={`aging-${scope}-${revision}-${financialRevision}`} locale={locale}/><ReceivableReminderSettingsControl key={`reminders-${scope}`} locale={locale}/><section aria-labelledby="receivable-create-title"><h2 id="receivable-create-title">{t("newAssignment")}</h2><ReceivableCreate locale={locale} scope={scope} onChanged={changed}/></section><ReceivableCollectionWorkspace key={"collections-"+revision} locale={locale} scope={scope} onChanged={financialChanged}/><History locale={locale} scope={scope} onChanged={changed} revision={revision}/></div>;
 }

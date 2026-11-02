@@ -1285,7 +1285,8 @@
       "task_overdue": "An assigned task is overdue.",
       "expense_emergency": "Emergency expense approval exception",
       "supplier_invoice_emergency": "Emergency invoice cost submitted",
-      "employee_cost_emergency": "Emergency employee work cost notice"
+      "employee_cost_emergency": "Emergency employee work cost notice",
+      "receivable_reminder": "A receivable needs your review."
     },
     "settings": {
       "eyebrow": "Your account",
@@ -1346,7 +1347,8 @@
       "offline": "Reconnect to update event routing.",
       "empty": "No eligible recipients.",
       "email": "Email",
-      "push": "Push"
+      "push": "Push",
+      "receivablePolicy": "Only explicitly selected people with current organization access to receivables, journals and staff compensation receive these reminders. Each reminder uses the current outstanding claim and the configured company calendar."
     },
     "resolution": {
       "CANCELLED": "Proposal withdrawn",
@@ -3936,5 +3938,36 @@
       "outstanding": "Outstanding",
       "claimCount": "Claim count"
     }
+  },
+  "ReceivableReminders": {
+    "title": "Receivable reminders",
+    "description": "Schedule reminders from current unpaid claims. Receipts and opposite corrections determine what remains due.",
+    "principal": "The person saving this schedule must retain company-wide financial authority for it to run.",
+    "calendar": "Company calendar: {timezone}",
+    "calendarMissing": "Set the company timezone before reminders can run.",
+    "audience": "Audience: {people} selected people and {roles} selected roles. Channels: {channels}.",
+    "audienceMissing": "Select the recipients and channels before reminders can be sent.",
+    "configureAudience": "Configure reminder recipients and channels",
+    "lastRun": "Last completed run: {at}, company date {on}, {currency}. {occurrences} reminder occurrences; {requested} notification requests.",
+    "noRun": "No completed reminder run has been recorded.",
+    "schedule": "Company reminder schedule",
+    "sendAt": "Local send time",
+    "offsetGuidance": "Use negative days for advance reminders, zero for the due date, and positive days for overdue claims. Leave the repeat interval empty to remind once at that stage.",
+    "stage": "Reminder stage {number}",
+    "english": "Stage name in English",
+    "french": "Stage name in French",
+    "arabic": "Stage name in Arabic (optional)",
+    "offset": "Days after the due date",
+    "repeat": "Repeat every number of days (optional)",
+    "removeStage": "Remove stage",
+    "addStage": "Add reminder stage",
+    "reason": "Reason for changing the schedule",
+    "reasonGuidance": "The schedule, author and reason are retained in configuration history.",
+    "save": "Save reminder schedule",
+    "saving": "Saving schedule…",
+    "validation": "Enter a local send time, names in English and French, distinct day offsets, positive repeat intervals and a reason.",
+    "changed": "The schedule has changed. Refresh it before saving your changes.",
+    "unavailable": "The reminder settings could not be verified. Refresh to check the current saved schedule.",
+    "refresh": "Refresh saved schedule"
   }
 }

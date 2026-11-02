@@ -4,6 +4,7 @@ import { notificationDestination } from "@/platform/notifications/notification";
 import { shouldDeliverNotification, defaultNotificationPreferences } from "@/platform/notifications/notification-preferences";
 
 describe("event routing contracts", () => {
+  it("keeps financial receivable reminders at organization scope with explicit recipients",()=>{const input={kind:"receivable_reminder",propertyId:null,routing:{roles:[],people:[],assigned:false,channels:["in_app"]},reason:"Select current financial recipients"};expect(notificationRoutingSaveSchema.safeParse(input).success).toBe(true);expect(notificationRoutingSaveSchema.safeParse({...input,propertyId:"00000000-0000-4000-8000-000000000001"}).success).toBe(false);expect(notificationRoutingSaveSchema.safeParse({...input,routing:{...input.routing,assigned:true}}).success).toBe(false);});
   it("rejects arbitrary channels, unknown events, unvalidated recipients and injected targets", () => {
     const routing = { roles: [], people: [], assigned: true, channels: ["in_app"] };
     expect(notificationRoutingSchema.safeParse(routing).success).toBe(true);

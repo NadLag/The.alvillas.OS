@@ -1285,7 +1285,8 @@
       "task_overdue": "Une tâche attribuée est en retard.",
       "expense_emergency": "Exception de validation pour une dépense urgente",
       "supplier_invoice_emergency": "Coût de facture urgente soumis",
-      "employee_cost_emergency": "Avis de coûts urgents du personnel"
+      "employee_cost_emergency": "Avis de coûts urgents du personnel",
+      "receivable_reminder": "Une créance nécessite votre attention."
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -1346,7 +1347,8 @@
       "offline": "Reconnectez-vous pour modifier le routage.",
       "empty": "Aucun destinataire éligible.",
       "email": "E-mail",
-      "push": "Notifications push"
+      "push": "Notifications push",
+      "receivablePolicy": "Seules les personnes sélectionnées ayant un accès actuel aux créances, aux écritures et à la rémunération du personnel pour toute l’organisation reçoivent ces rappels. Chaque rappel suit le solde actuel et le calendrier configuré de l’entreprise."
     },
     "resolution": {
       "CANCELLED": "Proposition retirée",
@@ -3936,5 +3938,36 @@
       "outstanding": "Reste à encaisser",
       "claimCount": "Nombre de créances"
     }
+  },
+  "ReceivableReminders": {
+    "title": "Rappels des créances",
+    "description": "Planifiez les rappels à partir des créances actuellement impayées. Les encaissements et leurs corrections déterminent le solde restant dû.",
+    "principal": "La personne qui enregistre ce calendrier doit conserver les autorisations financières pour toute l’entreprise afin qu’il soit exécuté.",
+    "calendar": "Calendrier de l’entreprise : {timezone}",
+    "calendarMissing": "Définissez le fuseau horaire de l’entreprise avant l’exécution des rappels.",
+    "audience": "Destinataires : {people} personnes et {roles} rôles sélectionnés. Canaux : {channels}.",
+    "audienceMissing": "Sélectionnez les destinataires et les canaux avant l’envoi des rappels.",
+    "configureAudience": "Configurer les destinataires et les canaux",
+    "lastRun": "Dernière exécution terminée : {at}, date de l’entreprise {on}, {currency}. {occurrences} occurrences ; {requested} demandes de notification.",
+    "noRun": "Aucune exécution terminée des rappels n’a été enregistrée.",
+    "schedule": "Calendrier des rappels de l’entreprise",
+    "sendAt": "Heure locale d’envoi",
+    "offsetGuidance": "Utilisez des jours négatifs avant l’échéance, zéro le jour de l’échéance et des jours positifs après l’échéance. Laissez l’intervalle vide pour un seul rappel à cette étape.",
+    "stage": "Étape de rappel {number}",
+    "english": "Nom de l’étape en anglais",
+    "french": "Nom de l’étape en français",
+    "arabic": "Nom de l’étape en arabe (facultatif)",
+    "offset": "Jours après la date d’échéance",
+    "repeat": "Répéter tous les jours indiqués (facultatif)",
+    "removeStage": "Supprimer l’étape",
+    "addStage": "Ajouter une étape de rappel",
+    "reason": "Motif de la modification du calendrier",
+    "reasonGuidance": "Le calendrier, son auteur et le motif sont conservés dans l’historique de configuration.",
+    "save": "Enregistrer le calendrier des rappels",
+    "saving": "Enregistrement du calendrier…",
+    "validation": "Saisissez une heure locale, des noms en anglais et en français, des décalages distincts, des intervalles positifs et un motif.",
+    "changed": "Le calendrier a changé. Actualisez-le avant d’enregistrer vos modifications.",
+    "unavailable": "Les paramètres des rappels n’ont pas pu être vérifiés. Actualisez pour consulter le calendrier enregistré.",
+    "refresh": "Actualiser le calendrier enregistré"
   }
 }

@@ -62,10 +62,10 @@ export function NotificationRoutingSettings() {
     {offline ? <p aria-live="polite">{t("offline")}</p> : null}
     <fieldset className="notification-channel" disabled={pending || offline}>
       <legend>{t("eventScope")}</legend>
-      <label className="field"><span>{t("event")}</span><select data-testid="routing-event" value={kind} onChange={(event) => setKind(event.target.value as RoutedNotificationKind)}>
+      <label className="field"><span>{t("event")}</span><select data-testid="routing-event" value={kind} onChange={(event) => {const next=event.target.value as RoutedNotificationKind;setKind(next);if(next==="receivable_reminder")setPropertyId("");}}>
         {routedNotificationKinds.map((value) => <option value={value} key={value}>{kinds(value)}</option>)}
       </select></label>
-      <label className="field"><span>{t("scope")}</span><select data-testid="routing-scope" value={propertyId} onChange={(event) => setPropertyId(event.target.value)}>
+      <label className="field"><span>{t("scope")}</span><select data-testid="routing-scope" value={propertyId} disabled={kind==="receivable_reminder"} onChange={(event) => setPropertyId(event.target.value)}>
         <option value="">{t("organization")}</option>
         {model?.properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
       </select></label>
@@ -73,10 +73,10 @@ export function NotificationRoutingSettings() {
     {error ? <div role="alert"><p>{t("error")}</p>{!draft ? <button type="button" className="secondary-button" onClick={load} disabled={pending || offline}>{t("retry")}</button> : null}</div> : null}
     {!draft && !error ? <><p aria-live="polite">{t("loading")}</p><SkeletonBlock rows={3} /></> : null}
     {draft && model ? <form onSubmit={(event) => { event.preventDefault(); save(); }}>
-      <p className="notification-policy">{identity ? t("securityPolicy") : t("scopePolicy")}</p>
+      <p className="notification-policy">{kind==="receivable_reminder"?t("receivablePolicy"):identity ? t("securityPolicy") : t("scopePolicy")}</p>
       {!identity ? <fieldset className="notification-channel" disabled={pending || offline}>
         <legend>{t("recipients")}</legend>
-        {kind !== "reservation_created" && kind !== "approval_requested" ? <label className="notification-choice"><input type="checkbox" data-testid="routing-assigned" checked={draft.assigned} onChange={(event) => { setSaved(false); setDraft({ ...draft, assigned: event.target.checked }); }} /><span>{t("assigned")}</span></label> : null}
+        {kind !== "reservation_created" && kind !== "approval_requested" && kind!=="receivable_reminder" ? <label className="notification-choice"><input type="checkbox" data-testid="routing-assigned" checked={draft.assigned} onChange={(event) => { setSaved(false); setDraft({ ...draft, assigned: event.target.checked }); }} /><span>{t("assigned")}</span></label> : null}
         <label className="field"><span>{t("search")}</span><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         <fieldset className="notification-channel"><legend>{t("roles")}</legend>
           {model.roles.filter((role) => role.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map((role) => <label className="notification-choice" key={role.id}>

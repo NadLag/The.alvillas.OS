@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const routedNotificationKinds = ["language_updated", "task_assigned", "reservation_created", "task_completed", "task_overdue", "security_session_revoked", "approval_requested", "approval_decided", "staff_document_expiring"] as const;
+export const routedNotificationKinds = ["language_updated", "task_assigned", "reservation_created", "task_completed", "task_overdue", "security_session_revoked", "approval_requested", "approval_decided", "staff_document_expiring", "receivable_reminder"] as const;
 export const routedNotificationKindSchema = z.enum(routedNotificationKinds);
 export type RoutedNotificationKind = z.infer<typeof routedNotificationKindSchema>;
 export const notificationRoutingSchema = z.object({
@@ -22,4 +22,4 @@ export const notificationRoutingSaveSchema = z.object({
   propertyId: z.string().uuid().nullable(),
   routing: notificationRoutingSchema,
   reason: z.string().trim().min(6).max(500)
-}).strict();
+}).strict().superRefine((value,ctx)=>{if(value.kind==="receivable_reminder"){if(value.propertyId!==null)ctx.addIssue({code:"custom",path:["propertyId"],message:"Receivable reminder routing requires organization scope"});if(value.routing.assigned)ctx.addIssue({code:"custom",path:["routing","assigned"],message:"Receivable reminder recipients must be explicitly configured"});}});

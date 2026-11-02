@@ -24,6 +24,26 @@ export const receivableAgingPageSchema=z.object({source:z.object({
  next:z.string().nullable()
 }).strict()}).strict();
 
+/** Internal complete snapshots share the page contract without its presentation limit. */
+export const receivableAgingCompleteSourceSchema=receivableAgingPageSchema.shape.source.extend({items:z.array(receivableAgingPageSchema.shape.source.shape.items.element),next:z.null()});
+
+/** A complete financial consumer cannot accept a truncated or inconsistent aggregate. */
+export function receivableAgingCompleteSource(raw:unknown){
+ const parsed=receivableAgingCompleteSourceSchema.safeParse(raw);if(!parsed.success)throw new ReceivableAgingSourceError();
+ const source=parsed.data,currency=source.currency,ids=new Set<string>(),groups=new Map<string,{count:bigint;amount:Money}>();
+ for(const group of source.buckets){if(groups.has(group.key)||group.outstanding.currency!==currency||group.labels===null&&!["UNSCHEDULED","NOT_DUE"].includes(group.key))throw new ReceivableAgingSourceError();groups.set(group.key,{count:0n,amount:Money.zero(currency)});}
+ let assigned=Money.zero(currency),collected=Money.zero(currency),outstanding=Money.zero(currency);
+ for(const item of source.items){
+  if(ids.has(item.id)||![item.assigned,item.collected,item.outstanding].every(value=>value.currency===currency))throw new ReceivableAgingSourceError();ids.add(item.id);
+  const amount=receivableAgingAmounts(item.assigned.amount,item.collected.amount,currency),group=groups.get(item.bucket);
+  if(!group||amount.outstanding.amount!==item.outstanding.amount||!Money.of(item.outstanding.amount,currency).amount.gt(0))throw new ReceivableAgingSourceError();
+  assigned=assigned.add(Money.of(item.assigned.amount,currency));collected=collected.add(Money.of(item.collected.amount,currency));outstanding=outstanding.add(Money.of(item.outstanding.amount,currency));group.count++;group.amount=group.amount.add(Money.of(item.outstanding.amount,currency));
+ }
+ if(source.totalOutstanding.currency!==currency||BigInt(source.totalCount)!==BigInt(source.items.length)||!outstanding.equals(Money.of(source.totalOutstanding.amount,currency)))throw new ReceivableAgingSourceError();
+ for(const bucket of source.buckets){const group=groups.get(bucket.key)!;if(group.count!==BigInt(bucket.count)||!group.amount.equals(Money.of(bucket.outstanding.amount,currency)))throw new ReceivableAgingSourceError();}
+ return{source,assigned,collected,outstanding};
+}
+
 /** These are civil-date ordinals; timezone/DST conversion happens once at the actual database clock. */
 export function receivableDaysPastDue(on:string,dueOn:string){
  if(!date.safeParse(on).success||!date.safeParse(dueOn).success)throw new ReceivableAgingSourceError();

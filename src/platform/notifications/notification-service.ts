@@ -68,7 +68,7 @@ export async function saveDigestPreferences(actor: NotificationActor, settings: 
 export async function publishNotification(tx: TenantTransaction, organizationId: string, input: NotificationInput, key: string) {
   await new NotificationRepository(tx, organizationId).publish(input, key);
 }
-export async function publishNotifications(tx: TenantTransaction, organizationId: string, entries: Array<{ input: NotificationInput; key: string }>) {
+export async function publishNotifications(tx: TenantTransaction, organizationId: string, entries: Parameters<NotificationRepository["publishMany"]>[0]) {
   await new NotificationRepository(tx, organizationId).publishMany(entries);
 }
 export async function deliverNotificationEvent(event: OutboxEvent, deps: Deps = {}) {
@@ -76,7 +76,7 @@ export async function deliverNotificationEvent(event: OutboxEvent, deps: Deps = 
 }
 
 export async function getNotificationRouting(actor: NotificationActor, input: unknown, deps: Deps = {}) {
-  const parsed = z.object({ kind: routedNotificationKindSchema, propertyId: z.string().uuid().nullable() }).strict().parse(input);
+  const parsed = z.object({ kind: routedNotificationKindSchema, propertyId: z.string().uuid().nullable() }).strict().refine(value=>value.kind!=="receivable_reminder"||value.propertyId===null).parse(input);
   if (actor.accountId !== actor.authContext.userAccountId || actor.authContext.organizationId !== actor.organizationId || !authorize(actor.authContext, "configure", {
     type: "config_rule", organizationId: actor.organizationId
   })) throw new NotificationAccessError();

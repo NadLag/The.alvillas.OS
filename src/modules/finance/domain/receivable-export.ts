@@ -1,13 +1,12 @@
 import {z} from "zod";
 import {appLocales,type AppLocale} from "@/i18n/routing";
 import {localizedText} from "@/i18n/content";
-import {Money} from "@/platform/money/money";
-import {receivableAgingInput,receivableAgingPageSchema,receivableAgingAmounts,ReceivableAgingSourceError} from "./receivable-aging";
+import {receivableAgingInput,receivableAgingCompleteSourceSchema,receivableAgingCompleteSource,ReceivableAgingSourceError} from "./receivable-aging";
 import type {receivablePartyKind} from "./receivable-assignment";
 
 export const receivableExportInput=z.object({query:receivableAgingInput.refine(value=>value.after===undefined),locale:z.enum(appLocales),reason:z.string().trim().min(6).max(1000)}).strict();
 export class ReceivableExportRateLimitError extends Error{constructor(readonly resetAt:Date){super("receivable_export_rate_limited");}}
-export const receivableExportSourceSchema=receivableAgingPageSchema.shape.source.extend({items:z.array(receivableAgingPageSchema.shape.source.shape.items.element),next:z.null()});
+export const receivableExportSourceSchema=receivableAgingCompleteSourceSchema;
 export const receivableExportColumns=["recordType","asOf","civilOn","timezone","currency","agingRuleId","agingRuleVersion","assignmentId","postingId","partyKind","partyId","purpose","dueOn","daysPastDue","band","assigned","collected","outstanding","claimCount"] as const;
 export type ReceivableExportLabels={headers:Record<typeof receivableExportColumns[number],string>;claim:string;total:string;unscheduled:string;notDue:string;kinds:Record<z.infer<typeof receivablePartyKind>,string>};
 
@@ -22,18 +21,7 @@ const csvRow=(values:readonly string[],header=false)=>values.map((value,index)=>
 
 /** Validate the complete snapshot before a response can expose any bytes. Pagination is never silently exported. */
 export function receivableAgingCsv(raw:unknown,locale:AppLocale,labels:ReceivableExportLabels){
- const parsed=receivableExportSourceSchema.safeParse(raw);if(!parsed.success)throw new ReceivableAgingSourceError();
- const source=parsed.data,currency=source.currency,ids=new Set<string>(),groups=new Map<string,{count:bigint;amount:Money}>();
- for(const group of source.buckets){if(groups.has(group.key)||group.outstanding.currency!==currency||group.labels===null&&!["UNSCHEDULED","NOT_DUE"].includes(group.key))throw new ReceivableAgingSourceError();groups.set(group.key,{count:0n,amount:Money.zero(currency)});}
- let assigned=Money.zero(currency),collected=Money.zero(currency),outstanding=Money.zero(currency);
- for(const item of source.items){
-  if(ids.has(item.id)||![item.assigned,item.collected,item.outstanding].every(value=>value.currency===currency))throw new ReceivableAgingSourceError();ids.add(item.id);
-  const amount=receivableAgingAmounts(item.assigned.amount,item.collected.amount,currency),group=groups.get(item.bucket);
-  if(!group||amount.outstanding.amount!==item.outstanding.amount||!Money.of(item.outstanding.amount,currency).amount.gt(0))throw new ReceivableAgingSourceError();
-  assigned=assigned.add(Money.of(item.assigned.amount,currency));collected=collected.add(Money.of(item.collected.amount,currency));outstanding=outstanding.add(Money.of(item.outstanding.amount,currency));group.count++;group.amount=group.amount.add(Money.of(item.outstanding.amount,currency));
- }
- if(source.totalOutstanding.currency!==currency||BigInt(source.totalCount)!==BigInt(source.items.length)||!outstanding.equals(Money.of(source.totalOutstanding.amount,currency)))throw new ReceivableAgingSourceError();
- for(const bucket of source.buckets){const group=groups.get(bucket.key)!;if(group.count!==BigInt(bucket.count)||!group.amount.equals(Money.of(bucket.outstanding.amount,currency)))throw new ReceivableAgingSourceError();}
+ const{source,assigned,collected,outstanding}=receivableAgingCompleteSource(raw),currency=source.currency;
  const metadata=[source.at,source.on,source.timezone,currency,source.rule.id,String(source.rule.version)],bands=new Map(source.buckets.map(bucket=>[bucket.key,bucket.labels?localizedText(bucket.labels,locale):bucket.key==="UNSCHEDULED"?labels.unscheduled:labels.notDue]));
  function* records(){
   yield "\uFEFF"+csvRow(receivableExportColumns.map(column=>labels.headers[column]),true);
