@@ -1155,7 +1155,9 @@ it("retains actual emergency employee owner notices as separate authorized slice
     expect(await facts(f.org)).toMatchObject({runs:0,lines:0,createdAudits:0,outbox:0});
   });
 
-  it("persists actual completed work across 500 properties with constant source query count and paginated reads",async()=>{
+  describe("500-property completed-work acceptance",()=>{
+    // Native Operations setup is separate from the 120-second Finance command budget.
+    const prepareNativeSources=async()=>{
     const f=await fixture(),contract=await assignTeamRole(f.ctx,{personId:f.staff.id,roleId:f.role.id,scopeType:"organization",scopeId:null,validFrom:"2020-01-01",validTo:null,
       assignedToMe:false,reason:"Actual portfolio-wide per-job contract"},{db});
     await fixtures.rate(f,"PER_JOB","500.25",0,"2020-01-01",contract.id);
@@ -1163,6 +1165,12 @@ it("retains actual emergency employee owner notices as separate authorized slice
       addressLine1:"Dedicated local capacity fixture",city:f.city.name,cityId:f.city.id,regionId:f.region.id,timezone:"UTC",propertyType:"VILLA",bedrooms:1,bathrooms:1,maxGuests:2,amenities:[],photoUrls:[]}))}));
     const jobs:typeof f.input.jobs=[];
     for(const property of properties){const taskId=await fixtures.completeTask({...f,property});jobs.push({taskId,assignmentId:contract.id,confirmedAssignment:true});}
+      return{f,contract,properties,jobs};
+    };
+    let nativeSources:Awaited<ReturnType<typeof prepareNativeSources>>;
+    beforeAll(async()=>{nativeSources=await prepareNativeSources();},120000);
+  it("persists actual completed work across 500 properties with constant source query count and paginated reads",async()=>{
+    const{f,contract,properties,jobs}=nativeSources;
     const scoped=new URL(url!);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";
     const measured=new PrismaClient({datasourceUrl:scoped.toString(),log:[{emit:"event",level:"query"}]});let queryCount=0;measured.$on("query",()=>{queryCount++;});
     try{
@@ -1209,5 +1217,6 @@ it("retains actual emergency employee owner notices as separate authorized slice
       if(process.env.AUT_RECORD_RUN_CAPACITY==="1"){mkdirSync(".tmp",{recursive:true});writeFileSync(".tmp/employee-run-capacity-500.json",JSON.stringify(measurement,null,2),{flag:"wx"});}
       console.info(JSON.stringify(measurement));
     }finally{await measured.$disconnect();}
+  });
   });
 });

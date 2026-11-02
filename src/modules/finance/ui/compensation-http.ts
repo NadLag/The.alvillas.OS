@@ -15,6 +15,7 @@ import { PaymentAccountChoiceAccessError } from "../domain/payment-account-choic
 import { ExpenseAccessError } from "../application/expense-service";
 import { EmployeeWorkTimeAccessError,EmployeeWorkTimeConflictError,EmployeeWorkTimePolicyError,EmployeeWorkTimeSourceError } from "../domain/employee-work-time";
 import {ReceivableAccessError,ReceivablePolicyError} from "../domain/receivable";
+import {ReceivableAssignmentSourceError,ReceivableAssignmentConflictError} from "../domain/receivable-assignment";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
@@ -36,6 +37,8 @@ export async function compensationHttp(request:NextRequest,work:(actor:FinanceAc
     if(error instanceof ZodError||error instanceof EmployeeCompensationBasisError)return failure("validation",400);
     if(error instanceof ReceivableAccessError)return failure("forbidden",403);
     if(error instanceof ReceivablePolicyError)return failure("configuration_unavailable",409);
+    if(error instanceof ReceivableAssignmentSourceError)return failure("source_unavailable",409);
+    if(error instanceof ReceivableAssignmentConflictError)return failure("conflict",409);
     if(error instanceof EmployeeCompensationAccessError||error instanceof EmployeeCompensationRunAccessError||error instanceof PaymentAccountChoiceAccessError||error instanceof ExpenseAccessError||error instanceof EmployeeWorkTimeAccessError)return failure("forbidden",403);
     if(error instanceof EmployeeWorkTimeConflictError)return failure("conflict",409);
     if(error instanceof EmployeeWorkTimePolicyError)return failure("configuration_unavailable",409);
