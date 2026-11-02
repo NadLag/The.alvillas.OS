@@ -1,4 +1,9 @@
 import { randomUUID } from "node:crypto";
+import {createCompanyExpensePlan,getCompanyExpensePlan,reviseCompanyExpensePlan} from "@/modules/finance/application/company-expense-service";
+import {changeCompanyExpenseCompensationSource,getCompanyExpenseCompensationSources} from "@/modules/finance/application/company-expense-compensation-service";
+import {CompanyExpenseAccessError,CompanyExpenseChangedError} from "@/modules/finance/domain/company-expense";
+import * as auditWriter from "@/platform/audit/audit-writer";
+import {correctEmployeeCompensationClaim} from "@/modules/finance/application/employee-compensation-correction";
 import { reviewEmployeeMonthlyRun } from "@/modules/finance/application/employee-monthly-workspace";
 import { requestEmployeeMonthlyRun } from "@/modules/finance/application/employee-monthly-run-requests";
 import { execFileSync } from "node:child_process";
@@ -17,7 +22,7 @@ import { getEmployeeCompensationPaymentWorkspace } from "@/modules/finance/appli
 import { getEmployeeCompensationCostDetail } from "@/modules/finance/application/employee-compensation-cost-detail";
 import { EmployeeCompensationRunRepository } from "@/modules/finance/infrastructure/employee-compensation-run-repository";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
-import { EmployeeCompensationRunAccessError } from "@/modules/finance/domain/employee-compensation-run";
+import { EmployeeCompensationRunAccessError,EmployeeCompensationRunConflictError } from "@/modules/finance/domain/employee-compensation-run";
 import { getApproval,decideApproval } from "@/platform/approvals/approval-service";
 import { ApprovalAccessError } from "@/platform/approvals/approval";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
@@ -49,6 +54,98 @@ async function claim(f:Fixture,run:Awaited<ReturnType<typeof create>>){const cos
 describe("immutable monthly contractual earnings through actual PostgreSQL commands",()=>{
  beforeAll(async()=>{if(!url||!["localhost","127.0.0.1"].includes(new URL(url).hostname))throw Error("Dedicated local PostgreSQL required");execFileSync(process.execPath,["node_modules/prisma/build/index.js","migrate","deploy"],{env:{...process.env,DATABASE_URL:url},stdio:"pipe"});admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});});
  afterAll(async()=>{vi.restoreAllMocks();await db?.$disconnect();await admin?.$disconnect();});
+
+ describe("company compensation expense sources",()=>{
+  async function ready(options:{recognized?:boolean;property?:boolean}={}){
+   const f=await fixture(),assignment=options.property?f.propertyAssignment:f.assignment;
+   if(options.property)await withTenant(db,f.org,async tx=>{const owner=await tx.owner.create({data:{organizationId:f.org,displayName:"Actual property salary cost owner"}});await tx.propertyOwner.create({data:{organizationId:f.org,propertyId:f.property.id,ownerId:owner.id}});});
+   await fixtures.rate(f,"PER_MONTH","0.09",options.property?0:1,"2020-01-02",assignment.id);
+   const run=await createEmployeeMonthlyCompensationRun(f.actor,{...f.input,assignments:[{assignmentId:assignment.id,confirmedAssignment:true}]},{db});
+   const costOn=(await withTenant(db,f.org,tx=>new FinanceRepository(tx,f.org).clock())).toISOString().slice(0,10);
+   const submitted=await submitEmployeeCompensation(f.actor,{runId:run.id,costOn,emergency:false,reason:"Retain actual original native salary source",idempotencyKey:randomUUID(),costs:run.lines.map(line=>({runLineId:line.id,category:"salary",costCenter:"payroll",note:"Actual company monthly earned salary source"}))},{db});
+   const source=await getEmployeeCompensationSubmission(f.actor,{id:submitted.id},{db}),cost=source.costs[0];expect(cost.amount.amount).toBe("0.09");
+   const recognized=options.recognized===false?null:await recognizeEmployeeCompensation(f.actor,{id:submitted.id,claimId:cost.claimId,currentPeriod:false,idempotencyKey:randomUUID(),reason:"Recognize actual original company salary liability"},{db});
+   const authority=await fixtures.reader(f,{permissions:["company_expense:view","company_expense:create","company_expense:edit","company_expense:void","company_expense:export"]});
+   const actor={...authority.ctx,personId:f.person.id};
+   await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.company_expenses",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:f.account.id,reason:"Actual classified company salary planning policy",value:{categories:[{key:"salary",labels:{en:"Salary",fr:"Salaire",ar:"راتب"},data_class:"STAFF_COMPENSATION"}],cost_centers:[{key:"payroll",labels:{en:"Payroll",fr:"Paie",ar:"رواتب"}}]}}));
+   const draft={amount:"0.07",currency:"MAD",category:"salary",costCenter:"payroll",dueOn:costOn,purpose:"Actual company salary cost plan",reason:"Plan company cost without inventing an actual salary",idempotencyKey:randomUUID()};
+   const plan=await createCompanyExpensePlan(actor,draft,{db});
+   return{f,actor,authority,run,submitted,cost,recognized,plan,draft,command:{operation:"ATTACH" as const,companyExpenseId:plan.id,employeeCostId:cost.id,expectedSourceVersion:0,expectedPlanVersion:1,reason:"Associate actual recognized company salary cost"}};
+  }
+  const financial=(org:string)=>withTenant(db,org,tx=>tx.$queryRaw<Array<{kind:string;id:string;xmin:string;body:unknown}>>`SELECT 'transaction' AS kind,id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p) FROM posting p WHERE organization_id=${org}::uuid ORDER BY kind,id`);
+  it("links the actual recognized salary once without changing its seven-cent estimate or nine-cent journal",async()=>{
+   const p=await ready(),before=await financial(p.f.org),results=await Promise.all([changeCompanyExpenseCompensationSource(p.actor,p.command,{db}),changeCompanyExpenseCompensationSource(p.actor,p.command,{db})]);expect(results.filter(row=>row.idempotent)).toHaveLength(1);expect(results[0].id).toBe(results[1].id);
+   const shown=await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db});expect(shown.items).toHaveLength(1);expect(shown.items[0]).toMatchObject({amount:"0.09",currency:"MAD",active:true,employeeCostId:p.cost.id,sourceReversed:false,dataClass:"STAFF_COMPENSATION",settlement:{scope:"EMPLOYEE_CLAIM",value:{earned:{amount:"0.09"},outstanding:{amount:"0.09"},payments:[]}}});
+   expect((await getCompanyExpensePlan(p.actor,p.plan.id,{db})).current.amount).toBe("0.07");expect(await financial(p.f.org)).toEqual(before);
+  });
+  it("rejects unrecognized, property-attributed and foreign actual employee costs",async()=>{
+   const unrecognized=await ready({recognized:false}),property=await ready({property:true}),foreign=await ready();
+   await expect(changeCompanyExpenseCompensationSource(unrecognized.actor,unrecognized.command,{db})).rejects.toBeInstanceOf(EmployeeCompensationRunConflictError);
+   await expect(changeCompanyExpenseCompensationSource(property.actor,property.command,{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);
+   await expect(changeCompanyExpenseCompensationSource(foreign.actor,{...foreign.command,employeeCostId:unrecognized.cost.id},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);
+   for(const p of[unrecognized,property,foreign])await withTenant(db,p.f.org,async tx=>expect(await tx.companyExpenseCompensationLink.count()).toBe(0));
+  });
+  it("requires the actual current plan and source versions",async()=>{
+   const p=await ready();await expect(changeCompanyExpenseCompensationSource(p.actor,{...p.command,expectedPlanVersion:2},{db})).rejects.toBeInstanceOf(CompanyExpenseChangedError);
+   await changeCompanyExpenseCompensationSource(p.actor,p.command,{db});await expect(changeCompanyExpenseCompensationSource(p.actor,{...p.command,operation:"RELEASE",reason:"Release with a stale original source version"},{db})).rejects.toBeInstanceOf(CompanyExpenseChangedError);
+   expect((await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db})).items).toHaveLength(1);
+  });
+  it("releases and reassigns through append-only history with unchanged native financial tuples",async()=>{
+   const p=await ready(),before=await financial(p.f.org);await changeCompanyExpenseCompensationSource(p.actor,p.command,{db});
+   const release={...p.command,operation:"RELEASE",expectedSourceVersion:1,reason:"Release the original salary planning association"};await changeCompanyExpenseCompensationSource(p.actor,release,{db});expect((await changeCompanyExpenseCompensationSource(p.actor,release,{db})).idempotent).toBe(true);
+   const second=await createCompanyExpensePlan(p.actor,{...p.draft,idempotencyKey:randomUUID(),purpose:"Separate actual company salary estimate"},{db});await changeCompanyExpenseCompensationSource(p.actor,{...p.command,companyExpenseId:second.id,expectedSourceVersion:2},{db});
+   const original=await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db});expect(original.items.map(row=>row.state)).toEqual(["RELEASED","ATTACHED"]);expect(original.items.every(row=>!row.active)).toBe(true);expect((await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:second.id},{db})).items[0].active).toBe(true);expect(await financial(p.f.org)).toEqual(before);
+  });
+  it("tracks the actual partial payment and exact opposite at employee-claim scope",async()=>{
+   const p=await ready();await changeCompanyExpenseCompensationSource(p.actor,p.command,{db});
+   const bank=await withTenant(db,p.f.org,tx=>new FinanceRepository(tx,p.f.org).ensureLedgerAccount({code:"COMPANY_SALARY_TEST_BANK",name:"Actual company salary funding bank",accountType:"ASSET_LOCATION",normalSide:"DEBIT"})),now=await withTenant(db,p.f.org,tx=>new FinanceRepository(tx,p.f.org).clock());
+   const payment={id:p.submitted.id,claimId:p.cost.claimId,kind:"PAYMENT",fundingAccountId:bank.id,amount:"0.03",currency:"MAD",paidAt:now.toISOString(),reference:"Actual partial company salary transfer",idempotencyKey:randomUUID(),currentPeriod:false,reason:"Record actual partial original salary disbursement"};
+   const paid=await postEmployeeCompensationSettlement(p.actor,payment,{db}),afterPayment=await financial(p.f.org),shown=await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db});
+   expect(shown.items[0].settlement).toMatchObject({scope:"EMPLOYEE_CLAIM",value:{earned:{amount:"0.09"},outstanding:{amount:"0.06"},payments:[{id:paid.paymentId,amount:{amount:"0.03"},reversal:null}]}});expect(await financial(p.f.org)).toEqual(afterPayment);
+   await voidEmployeeCompensationSettlement(p.actor,{id:p.submitted.id,claimId:p.cost.claimId,paymentId:paid.paymentId,reason:"Reverse original company salary payment exactly"},{db});
+   const afterOpposite=await financial(p.f.org),restored=await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db});expect(restored.items[0].settlement.value.outstanding.amount).toBe("0.09");expect(restored.items[0].settlement.value.payments[0].reversal?.id).toBeTruthy();expect(await financial(p.f.org)).toEqual(afterOpposite);
+  });
+  it("retains the original salary and opposite history after native financial correction",async()=>{
+   const p=await ready();await changeCompanyExpenseCompensationSource(p.actor,p.command,{db});const before=await financial(p.f.org);
+   const correction=await correctEmployeeCompensationClaim(p.actor,{id:p.submitted.id,claimId:p.cost.claimId,recognitionId:p.recognized!.recognitionId,idempotencyKey:randomUUID(),reason:"Correct the actual original company salary through exact opposite journals"},{db});expect(correction.originalTransactionIds).toHaveLength(1);expect(correction.reversalTransactionIds).toHaveLength(1);
+   const after=await financial(p.f.org),ids=new Set(before.map(row=>row.kind+":"+row.id));expect(after.filter(row=>ids.has(row.kind+":"+row.id))).toEqual(before);
+   const shown=await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db});expect(shown.items[0]).toMatchObject({amount:"0.09",sourceReversed:true,settlement:{value:{earned:{amount:"0.09"},outstanding:{amount:"0.00"},blocked:"source_reversed",payments:[]}}});expect(await financial(p.f.org)).toEqual(after);
+   await changeCompanyExpenseCompensationSource(p.actor,{...p.command,operation:"RELEASE",expectedSourceVersion:1,reason:"Release the explicitly corrected salary source from its estimate"},{db});const second=await createCompanyExpensePlan(p.actor,{...p.draft,idempotencyKey:randomUUID()},{db});
+   await expect(changeCompanyExpenseCompensationSource(p.actor,{...p.command,companyExpenseId:second.id,expectedSourceVersion:2},{db})).rejects.toBeInstanceOf(CompanyExpenseChangedError);expect(await financial(p.f.org)).toEqual(after);
+  });
+  it("keeps native employee-payable access independent from company-plan access",async()=>{
+   const p=await ready();await changeCompanyExpenseCompensationSource(p.actor,p.command,{db});
+   await withTenant(db,p.f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:p.f.org,key:"employee_payable:view"}});await tx.rolePermission.deleteMany({where:{organizationId:p.f.org,roleId:p.f.writer.grant.roleId,permissionId:permission.id}});});
+   await expect(getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db})).rejects.toBeInstanceOf(EmployeeCompensationRunAccessError);expect((await getCompanyExpensePlan(p.actor,p.plan.id,{db})).current.amount).toBe("0.07");
+  });
+  it("prevents salary source downgrades while preserving the original plan's monotonic classification",async()=>{
+   const p=await ready();await withTenant(db,p.f.org,tx=>new ConfigRuleRepository(tx,p.f.org).createVersion({key:"finance.company_expenses",scopeType:"organization",effectiveFrom:new Date("2021-01-01"),createdBy:p.f.account.id,reason:"Actual changed general company estimate classification",value:{categories:[{key:"salary",labels:{en:"Salary estimate",fr:"Estimation de salaire",ar:"تقدير الراتب"},data_class:"FINANCIAL"}],cost_centers:[{key:"payroll",labels:{en:"Payroll",fr:"Paie",ar:"رواتب"}}]}}));
+   const financialPlan=await createCompanyExpensePlan(p.actor,{...p.draft,idempotencyKey:randomUUID()},{db});expect((await getCompanyExpensePlan(p.actor,financialPlan.id,{db})).current.dataClass).toBe("FINANCIAL");
+   await expect(changeCompanyExpenseCompensationSource(p.actor,{...p.command,companyExpenseId:financialPlan.id},{db})).rejects.toBeInstanceOf(CompanyExpenseChangedError);
+   await reviseCompanyExpensePlan(p.actor,{id:p.plan.id,expectedVersion:1,amount:p.draft.amount,currency:p.draft.currency,category:p.draft.category,costCenter:p.draft.costCenter,dueOn:p.draft.dueOn,purpose:p.draft.purpose,reason:"Retain salary privacy through company policy classification changes"},{db});
+   expect((await getCompanyExpensePlan(p.actor,p.plan.id,{db})).current.dataClass).toBe("STAFF_COMPENSATION");await changeCompanyExpenseCompensationSource(p.actor,{...p.command,expectedPlanVersion:2},{db});expect((await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db})).items[0].dataClass).toBe("STAFF_COMPENSATION");
+  });
+  it("requires independent current salary access even with held financial and company grants",async()=>{
+   const p=await ready();await changeCompanyExpenseCompensationSource(p.actor,p.command,{db});
+   await withTenant(db,p.f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:p.f.org,key:"staff_compensation:view"}});await tx.rolePermission.deleteMany({where:{organizationId:p.f.org,permissionId:permission.id}});});
+   await expect(getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);
+   await expect(changeCompanyExpenseCompensationSource(p.actor,{...p.command,operation:"RELEASE",expectedSourceVersion:1,reason:"Denied salary association release after permission revocation"},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);
+  });
+  it("rolls back association and audit after final company-authority revocation",async()=>{
+   const p=await ready(),before=await financial(p.f.org),original=auditWriter.writeAuditEvent;
+   const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{await original(tx,event);if(event.action==="company_expense.compensation_attached")await withTenant(db,p.f.org,t=>t.roleAssignment.update({where:{id:p.authority.grant.id},data:{validTo:new Date(Date.now()-1000)}}));});
+   try{await expect(changeCompanyExpenseCompensationSource(p.actor,p.command,{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);}finally{spy.mockRestore();}
+   await withTenant(db,p.f.org,async tx=>{expect(await tx.companyExpenseCompensationLink.count()).toBe(0);expect(await tx.auditLog.count({where:{action:"company_expense.compensation_attached"}})).toBe(0);});expect(await financial(p.f.org)).toEqual(before);
+  });
+  it("enforces forced tenant isolation, append-only sources and atomic attributed salary audit",async()=>{
+   const p=await ready(),other=await ready();const attached=await changeCompanyExpenseCompensationSource(p.actor,p.command,{db});
+   await withTenant(db,other.f.org,async tx=>expect(await tx.companyExpenseCompensationLink.findFirst({where:{id:attached.id}})).toBeNull());
+   await expect(withTenant(db,p.f.org,tx=>tx.companyExpenseCompensationLink.update({where:{id:attached.id},data:{state:"RELEASED"}}))).rejects.toThrow(/append-only/u);
+   await expect(withTenant(db,p.f.org,tx=>tx.companyExpenseCompensationLink.delete({where:{id:attached.id}}))).rejects.toThrow(/append-only/u);
+   await expect(withTenant(db,p.f.org,async tx=>tx.companyExpenseCompensationLink.create({data:{organizationId:p.f.org,employeeCostId:p.cost.id,companyExpenseId:p.plan.id,planVersion:1,dataClass:"STAFF_COMPENSATION",version:2,state:"RELEASED",reason:"Unaudited direct original salary association release",createdBy:p.f.account.id,createdAt:await new FinanceRepository(tx,p.f.org).clock()}}))).rejects.toThrow(/atomic attributed salary audit/u);
+   const rows=await admin.$queryRaw<Array<{relrowsecurity:boolean;relforcerowsecurity:boolean}>>`SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE relname='company_expense_compensation_link'`;expect(rows).toEqual([{relrowsecurity:true,relforcerowsecurity:true}]);
+  });
+ });
 
  it("approves, recognizes, pays and reverses an actual company monthly salary without inventing tasks",async()=>{
   const f=await fixture(),run=await create(f),submitted=await claim(f,run);expect(submitted.approvalId).toBeTruthy();
