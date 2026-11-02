@@ -1,0 +1,29 @@
+import {describe,expect,it} from "vitest";
+import {receivableAgingAmounts,receivableAgingBucket,receivableAgingInput,receivableAgingPolicySchema,receivableAgingTotals,receivableDaysPastDue,ReceivableAgingSourceError} from "@/modules/finance/domain/receivable-aging";
+const policy={source:"ORIGINAL_ASSIGNMENTS_AND_POSTED_COLLECTIONS",calendar:"ORGANIZATION_PROFILE",unscheduled:"SEPARATE",bands:[{key:"first",from_days:1,through_days:7,labels:{en:"First configured period",fr:"Première période configurée",ar:"الفترة المحددة الأولى"}},{key:"later",from_days:8,through_days:null,labels:{en:"Later configured days",fr:"Jours configurés suivants",ar:"الأيام المحددة التالية"}}]} as const;
+const parsed=()=>receivableAgingPolicySchema.parse(policy);
+describe("receivable aging from explicit dates and original posted receipts",()=>{
+ it("requires explicit gapless translated policy without default terms",()=>{expect(parsed().bands).toHaveLength(2);expect(receivableAgingPolicySchema.safeParse({}).success).toBe(false);expect(receivableAgingPolicySchema.safeParse({...policy,default_due_days:30}).success).toBe(false);});
+ it.each([
+  [{...policy.bands[0],from_days:2},policy.bands[1]],
+  [policy.bands[0],{...policy.bands[1],from_days:9}],
+  [policy.bands[0],{...policy.bands[1],from_days:7}],
+  [policy.bands[0],{...policy.bands[1],key:"first"}],
+  [{...policy.bands[0],through_days:null},policy.bands[1]],
+  [policy.bands[0],{...policy.bands[1],through_days:31}],
+  [{...policy.bands[0],through_days:0},policy.bands[1]],
+  [{...policy.bands[0],from_days:1.1},policy.bands[1]],
+  [{...policy.bands[0],labels:{en:"No French translation"}},policy.bands[1]]
+ ].map(bands=>[bands] as const))("rejects missing, overlapping, unordered or ambiguous overdue coverage %#",bands=>{expect(receivableAgingPolicySchema.safeParse({...policy,bands}).success).toBe(false);});
+ it("uses changed explicit boundaries rather than a default aging schedule",()=>{const changed=receivableAgingPolicySchema.parse({...policy,bands:[{...policy.bands[0],through_days:30},{...policy.bands[1],from_days:31}]});expect(receivableAgingBucket(changed,"2026-11-02","2026-10-20")).toBe("first");expect(receivableAgingBucket(parsed(),"2026-11-02","2026-10-20")).toBe("later");});
+ it.each([[null,"UNSCHEDULED"],["2026-11-03","NOT_DUE"],["2026-11-02","NOT_DUE"],["2026-11-01","first"],["2026-10-26","first"],["2026-10-25","later"],["2020-01-01","later"]])("classifies the actual retained due date %s",(due,key)=>{expect(receivableAgingBucket(parsed(),"2026-11-02",due)).toBe(key);});
+ it.each([["2024-03-01","2024-02-28",2],["2025-03-01","2025-02-28",1],["2026-03-09","2026-03-07",2],["2026-11-02","2026-10-31",2],["0001-01-02","0001-01-01",1]])("uses civil dates across leap years and DST boundaries",(on,due,days)=>{expect(receivableDaysPastDue(on,due)).toBe(days);});
+ it.each(["2025-02-29","2026-13-01","2026-11-31","2026-11-02T00:00:00Z",""])("rejects malformed due dates %s",due=>{expect(()=>receivableDaysPastDue("2026-11-02",due)).toThrow(ReceivableAgingSourceError);});
+ it("retains exact partial collections and a corrected collection without rounding",()=>{expect(receivableAgingAmounts("100.01","33.33","MAD").outstanding).toEqual({amount:"66.68",currency:"MAD"});expect(receivableAgingAmounts("100.01","0.00","MAD").outstanding.amount).toBe("100.01");expect(receivableAgingAmounts("100.01","100.01","MAD").outstanding.amount).toBe("0.00");});
+ it.each([["1.001","0.00"],["1.00","0.001"],["1.00","1.01"],["-1.00","0.00"],["1.00","-0.01"],["NaN","0.00"]])("rejects invalid financial evidence %s/%s",(assigned,collected)=>{expect(()=>receivableAgingAmounts(assigned,collected,"MAD")).toThrow(ReceivableAgingSourceError);});
+ it("retains large exact totals and counts beyond the JavaScript integer range",()=>{const result=receivableAgingTotals(parsed(),"MAD",[{key:"first",outstanding:"9007199254740991.01",count:"9007199254740993"},{key:"later",outstanding:"0.99",count:"1"}]);expect(result.totalOutstanding).toEqual({amount:"9007199254740992.00",currency:"MAD"});expect(result.totalCount).toBe("9007199254740994");expect(result.buckets.map(b=>b.key)).toEqual(["UNSCHEDULED","NOT_DUE","first","later"]);});
+ it("shows every configured zero bucket without inventing a due date",()=>{const result=receivableAgingTotals(parsed(),"MAD",[]);expect(result.totalOutstanding.amount).toBe("0.00");expect(result.buckets.every(b=>b.count==="0"&&b.outstanding.amount==="0.00")).toBe(true);});
+ it.each([[{key:"unknown",outstanding:"1.00",count:"1"}],[{key:"first",outstanding:"0.00",count:"1"}],[{key:"first",outstanding:"1.00",count:"0"}],[{key:"first",outstanding:"1.00",count:"01"}],[{key:"first",outstanding:"1.001",count:"1"}],[{key:"first",outstanding:"1.00",count:"1"},{key:"first",outstanding:"2.00",count:"1"}]].map(groups=>[groups] as const))("rejects inconsistent aggregate evidence %#",groups=>{expect(()=>receivableAgingTotals(parsed(),"MAD",groups)).toThrow(ReceivableAgingSourceError);});
+ it("matches an independent bigint oracle across many original partial receipts",()=>{const decimal=(cents:bigint)=>(cents/100n).toString()+"."+(cents%100n).toString().padStart(2,"0");for(let n=1n;n<=300n;n++){const original=900719925474099100n+n*101n,received=n*33n,actual=receivableAgingAmounts(decimal(original),decimal(received),"MAD");expect(actual.outstanding.amount).toBe(decimal(original-received));}});
+ it("requires the actual party kind, strict input and bounded opaque cursors",()=>{expect(receivableAgingInput.parse({currency:"MAD"}).search).toBe("");expect(receivableAgingInput.safeParse({currency:"MAD",partyId:crypto.randomUUID()}).success).toBe(false);expect(receivableAgingInput.safeParse({currency:"MAD",asOn:"2020-01-01"}).success).toBe(false);expect(receivableAgingInput.safeParse({currency:"MAD",after:"x".repeat(4097)}).success).toBe(false);});
+});

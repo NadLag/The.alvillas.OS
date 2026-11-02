@@ -22,7 +22,7 @@ export const multilingualCatalogContentSchema = z.object({
 export type LocalizedText = z.infer<typeof localizedTextSchema>;
 export type MultilingualCatalogContent = z.infer<typeof multilingualCatalogContentSchema>;
 
-export function localizedText(value: Record<string, string>, locale: AppLocale): string {
+export function localizedText(value: Record<string, string | undefined>, locale: AppLocale): string {
   return value[locale] ?? value.en ?? value.fr ?? Object.values(value)[0] ?? "";
 }
 

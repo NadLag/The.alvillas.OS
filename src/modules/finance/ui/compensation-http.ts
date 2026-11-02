@@ -17,6 +17,7 @@ import { EmployeeWorkTimeAccessError,EmployeeWorkTimeConflictError,EmployeeWorkT
 import {ReceivableAccessError,ReceivablePolicyError} from "../domain/receivable";
 import {ReceivableAssignmentSourceError,ReceivableAssignmentConflictError} from "../domain/receivable-assignment";
 import {ReceivableCollectionSourceError,ReceivableCollectionConflictError} from "../domain/receivable-collection";
+import {ReceivableAgingSourceError,ReceivableAgingChangedError} from "../domain/receivable-aging";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
@@ -42,6 +43,8 @@ export async function compensationHttp(request:NextRequest,work:(actor:FinanceAc
     if(error instanceof ReceivableAssignmentConflictError)return failure("conflict",409);
     if(error instanceof ReceivableCollectionSourceError)return failure("source_unavailable",409);
     if(error instanceof ReceivableCollectionConflictError)return failure("conflict",409);
+    if(error instanceof ReceivableAgingSourceError)return failure("source_unavailable",409);
+    if(error instanceof ReceivableAgingChangedError)return failure("conflict",409);
     if(error instanceof EmployeeCompensationAccessError||error instanceof EmployeeCompensationRunAccessError||error instanceof PaymentAccountChoiceAccessError||error instanceof ExpenseAccessError||error instanceof EmployeeWorkTimeAccessError)return failure("forbidden",403);
     if(error instanceof EmployeeWorkTimeConflictError)return failure("conflict",409);
     if(error instanceof EmployeeWorkTimePolicyError)return failure("configuration_unavailable",409);

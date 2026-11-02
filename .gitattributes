@@ -46,3 +46,5 @@ prisma/migrations/20261102001000_employee_percentage_bulk_scope_validation/migra
 prisma/migrations/20261102013000_employee_percentage_snapshot_projection/migration.sql text eol=lf
 
 prisma/migrations/20261102020000_native_receivable_collections/migration.sql text eol=lf
+
+prisma/migrations/20261102040000_receivable_collection_batch_movements/migration.sql text eol=lf

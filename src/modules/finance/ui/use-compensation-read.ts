@@ -4,7 +4,7 @@ import type { z } from "zod";
 
 export type CompensationReadError="forbidden"|"offline"|"unavailable"|"validation"|"configuration_unavailable";
 /** Financial data stays in memory and is cleared before revalidation, on denied access, and on connection loss. */
-export function useCompensationRead<T>(url:string|null,schema:z.ZodType<T>,onInvalidate?:()=>void,body?:string){
+export function useCompensationRead<T>(url:string|null,schema:z.ZodType<T>,onInvalidate?:()=>void,body?:string,revision?:number){
   const [data,setData]=useState<T|null>(null),[error,setError]=useState<CompensationReadError|null>(null),[pending,setPending]=useState(true);
   const controller=useRef<AbortController|null>(null),generation=useRef(0);
   const clear=useCallback((reason:CompensationReadError)=>{generation.current++;controller.current?.abort();setData(null);setPending(false);setError(reason);onInvalidate?.();},[onInvalidate]);
@@ -32,6 +32,6 @@ export function useCompensationRead<T>(url:string|null,schema:z.ZodType<T>,onInv
     queueMicrotask(()=>{if(!disposed)void refresh();});const offline=()=>clear("offline"),revalidate=()=>{void refresh();};
     window.addEventListener("offline",offline);window.addEventListener("online",revalidate);window.addEventListener("focus",revalidate);
     return()=>{disposed=true;invalidate();window.removeEventListener("offline",offline);window.removeEventListener("online",revalidate);window.removeEventListener("focus",revalidate);};
-  },[refresh,clear]);
+  },[refresh,clear,revision]);
   return{data,error,pending,refresh,clear};
 }

@@ -38,5 +38,5 @@ export async function getReceivableParties(ctx:FinanceActorContext,raw:unknown,d
   return complete(ctx,tx,result,"finance.receivables.parties_viewed",{kind:input.kind,count:items.length},deps,async()=>{await currentPartyAuthority(ctx,tx,input.kind);if((await policies(ctx,tx)).identity!==config.identity)throw new ReceivablePolicyError();});
 });}
 export async function getReceivableAssignmentHistory(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){const input=receivableHistoryInput.parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
-  await recheckReceivableAuthority(ctx,tx);const rows=await new ReceivableAssignmentRepository(tx,ctx.organizationId).history(input.after),result=receivableHistorySchema.parse({source:{items:rows.slice(0,25).map(receivableAssignmentView),next:rows.length>25?rows[24].id:null}});return complete(ctx,tx,result,"finance.receivables.assignments_viewed",input,deps);
+  await recheckReceivableAuthority(ctx,tx);const rows=await new ReceivableAssignmentRepository(tx,ctx.organizationId).history(input.after,input.search),result=receivableHistorySchema.parse({source:{items:rows.slice(0,25).map(receivableAssignmentView),next:rows.length>25?rows[24].id:null}});return complete(ctx,tx,result,"finance.receivables.assignments_viewed",input,deps);
 });}

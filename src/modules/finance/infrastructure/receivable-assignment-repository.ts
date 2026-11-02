@@ -51,7 +51,7 @@ export class ReceivableAssignmentRepository{
       (s.amount-COALESCE((SELECT sum(a.amount) FROM receivable_assignment a WHERE a.organization_id=${this.organizationId}::uuid AND a.posting_id=s.id
         AND NOT EXISTS(SELECT 1 FROM receivable_assignment_release r WHERE r.organization_id=a.organization_id AND r.assignment_id=a.id)),0))::text AS unassigned
     FROM selected s ORDER BY s.id`);}
-  history(after?:string){return this.tx.receivableAssignment.findMany({where:{organizationId:this.organizationId,...after?{id:{gt:after}}:{}},orderBy:{id:"asc"},take:26,include:{release:true}});}
+  history(after?:string,search?:string){return this.tx.receivableAssignment.findMany({where:{organizationId:this.organizationId,...after?{id:{gt:after}}:{},...search?{purpose:{contains:search,mode:"insensitive" as const}}:{}},orderBy:{id:"asc"},take:26,include:{release:true}});}
   activeAssignments(postingId:string,exceptId?:string){return this.tx.receivableAssignment.findMany({where:{organizationId:this.organizationId,postingId,release:{is:null},...(exceptId?{id:{not:exceptId}}:{})},orderBy:{id:"asc"},select:{id:true,amount:true,currency:true}});}
   byKey(idempotencyKey:string){return this.tx.receivableAssignment.findFirst({where:{organizationId:this.organizationId,idempotencyKey},include:{release:true}});}
   get(id:string){return this.tx.receivableAssignment.findFirst({where:{organizationId:this.organizationId,id},include:{release:true}});}
