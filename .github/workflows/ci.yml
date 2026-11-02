@@ -5,9 +5,96 @@ on:
   push:
     branches: [main]
 
+# Only a superseded PR can cancel its earlier verification. Every main run is unique.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  checks:
+  static:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os?schema=public
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os?schema=public
+      POSTGRES_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres?schema=public
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os_shadow?schema=public
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Record exact verification source
+        run: node scripts/ci/record-verification.mjs start
+      - run: npm audit --audit-level=high
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run check:i18n
+      - run: npm run check:rtl-css
+      - run: npm run check:design-system
+      - run: npm run check:boundaries
+      - run: npm run check:organization-id
+      - run: npm run check:ledger
+      - run: npm run check:audit
+      - run: npm run check:progress
+      - name: Record verification outcome
+        if: always()
+        run: node scripts/ci/record-verification.mjs end
+        env:
+          CI_GATE_STATUS: ${{ job.status }}
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  unit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os?schema=public
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os?schema=public
+      POSTGRES_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres?schema=public
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os_shadow?schema=public
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Record exact verification source
+        run: node scripts/ci/record-verification.mjs start
+      - run: npm run test:unit -- --reporter=default --reporter=json --outputFile=ci-evidence/unit.json
+      - name: Record verification outcome
+        if: always()
+        run: node scripts/ci/record-verification.mjs end
+        env:
+          CI_GATE_STATUS: ${{ job.status }}
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  postgres:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
     services:
       postgres:
         image: postgres:17-alpine
@@ -29,29 +116,127 @@ jobs:
       SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os_shadow?schema=public
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npm audit --audit-level=high
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run check:i18n
-      - run: npm run check:rtl-css
-      - run: npm run check:design-system
-      - run: npm run check:boundaries
-      - run: npm run check:organization-id
+      - name: Record exact verification source
+        run: node scripts/ci/record-verification.mjs start
       - name: Prepare schema drift database
         run: |
           echo "CREATE DATABASE alvillas_os_shadow;" | npx prisma db execute --stdin --url "$POSTGRES_ADMIN_URL"
       - run: npm run check:schema-drift
-      - run: npm run check:ledger
-      - run: npm run check:audit
-      - run: npm run check:progress
-      - run: npm run test:unit
-      - run: npm run test:integration
+      - run: npm run test:integration -- --reporter=default --reporter=json --outputFile=ci-evidence/postgres.json
+      - name: Record verification outcome
+        if: always()
+        run: node scripts/ci/record-verification.mjs end
+        env:
+          CI_GATE_STATUS: ${{ job.status }}
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  restore-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: alvillas_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d alvillas_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os?schema=public
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os?schema=public
+      POSTGRES_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres?schema=public
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os_shadow?schema=public
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Record exact verification source
+        run: node scripts/ci/record-verification.mjs start
+      - name: Prepare independent build database
+        run: npx prisma migrate deploy
       - run: npm run rehearse:restore
+      - run: npm run build
+      - name: Record verification outcome
+        if: always()
+        run: node scripts/ci/record-verification.mjs end
+        env:
+          CI_GATE_STATUS: ${{ job.status }}
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  playwright:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, field-mobile]
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: alvillas_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d alvillas_os"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      CI_BROWSER_PROJECT: ${{ matrix.project }}
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os?schema=public
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os?schema=public
+      POSTGRES_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres?schema=public
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/alvillas_os_shadow?schema=public
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Record exact verification source
+        run: node scripts/ci/record-verification.mjs start
+      - name: Prepare isolated browser database
+        run: npx prisma migrate deploy
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - name: Configure isolated browser push signing
@@ -72,18 +257,87 @@ jobs:
             ""
           ].join("\n"));
           NODE
-      - run: npm run test:e2e -- --retries=0
+      - name: Discover every original browser project case
+        run: node node_modules/playwright/cli.js test --list --retries=0 --config playwright.ci.config.ts --project '${{ matrix.project }}' --reporter=json > ci-evidence/playwright-expected.json
         env:
           PLAYWRIGHT_PRODUCTION: "1"
           NODE_ENV: production
           AUTH_TRUST_HOST: "true"
           APP_URL: http://localhost:3000
-      - name: Retain failed browser evidence
-        if: failure()
+      - run: npm run test:e2e -- --retries=0 --config playwright.ci.config.ts --project '${{ matrix.project }}'
+        env:
+          PLAYWRIGHT_PRODUCTION: "1"
+          NODE_ENV: production
+          AUTH_TRUST_HOST: "true"
+          APP_URL: http://localhost:3000
+      - name: Retain failed or superseded browser evidence
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
-          name: browser-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          name: browser-failure-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Record verification outcome
+        if: always()
+        run: node scripts/ci/record-verification.mjs end
+        env:
+          CI_GATE_STATUS: ${{ job.status }}
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ github.job }}-${{ matrix.project }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  checks:
+    if: always()
+    needs: [static, unit, postgres, restore-build, playwright]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/ci/record-verification.mjs start
+      - name: Require every mandatory verification job
+        env:
+          MANDATORY_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'NODE'
+          const jobs = JSON.parse(process.env.MANDATORY_RESULTS);
+          const expected = ["static", "unit", "postgres", "restore-build", "playwright"];
+          if (Object.keys(jobs).length !== expected.length || expected.some(name => jobs[name]?.result !== "success")) {
+            console.error(JSON.stringify(Object.fromEntries(expected.map(name => [name, jobs[name]?.result ?? "missing"]))));
+            process.exit(1);
+          }
+          console.log("All five mandatory jobs passed for this exact source head.");
+          NODE
+      - name: Read both original browser project reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: verification-playwright-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-browser-evidence/
+          merge-multiple: false
+      - name: Require complete original browser coverage
+        run: node scripts/ci/check-browser-coverage.mjs
+      - name: Record verification outcome
+        if: always()
+        run: node scripts/ci/record-verification.mjs end
+        env:
+          CI_GATE_STATUS: ${{ job.status }}
+      - name: Retain verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-evidence/
           if-no-files-found: ignore
           retention-days: 7
 
