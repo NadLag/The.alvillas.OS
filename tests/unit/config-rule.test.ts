@@ -59,6 +59,7 @@ describe("config rule registry", () => {
       "finance.receivable_exports",
       "finance.receivable_reminders",
       "finance.receivables",
+      "finance.recurring_expenses",
       "finance.tax",
       "identity.pin_lockout",
       "inventory.minimums",

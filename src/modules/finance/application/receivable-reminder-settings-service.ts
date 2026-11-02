@@ -6,7 +6,7 @@ import{authorizeOrganizationSource}from"@/platform/authz/organization-authority"
 import{ConfigRuleRepository}from"@/platform/config/config-rule-repository";
 import{writeAuditEvent}from"@/platform/audit/audit-writer";
 import{notificationRoutingSchema}from"@/platform/notifications/notification-routing";
-import{createConfigRuleVersion}from"@/modules/config/application/config-service";
+import{createConfigRuleVersion}from"@/platform/config/rule-version-writer";
 import{FinanceRepository}from"../infrastructure/finance-repository";
 import{ReceivableRepository}from"../infrastructure/receivable-repository";
 import{ReceivableReminderRepository}from"../infrastructure/receivable-reminder-repository";

@@ -57,7 +57,15 @@ async function validateFacts(ctx: FinanceActorContext, tx: TenantTransaction, in
   if (!authorize(ctx.authContext, "view", { ...target, id: funding.id, financialRecordId: funding.id, type: "financial_transaction" }, now)) throw new ExpenseAccessError();
   const wallet = expenseFundingWalletResource(ctx.organizationId, funding, input.amount, target.occurredAt instanceof Date ? target.occurredAt : undefined);
   if (wallet && !authorize(ctx.authContext, "view", wallet, now)) throw new ExpenseAccessError();
-  return { target, property };
+  return { target, property, funding, wallet };
+}
+/** Background batches retain their original principal restrictions through their final write. */
+export async function recheckExpenseDraftCreation(ctx:FinanceActorContext,tx:TenantTransaction,input:ExpenseDraftInput,id:string){
+  assertActor(ctx);const now=(await new ExpenseRepository(tx,ctx.organizationId).clock()).now;
+  const {target,funding,wallet}=await validateFacts(await current(ctx,tx),tx,input,id,now,"create");
+  const checks:Parameters<typeof recheckFinanceAuthorization>[3][number][]=[{action:"create",resource:target},{action:"view",resource:{...target,type:"financial_transaction",id:funding.id,financialRecordId:funding.id}}];
+  if(wallet)checks.push({action:"view",resource:wallet});
+  await recheckFinanceAuthorization(ctx,tx,now,checks,new ExpenseAccessError());
 }
 function facts(row: ExpenseRecord) {
   return { id: row.id, propertyId: row.propertyId, reservationId: row.reservationId, fundingAccountId: row.fundingAccountId,

@@ -215,6 +215,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  recurringExpenseOccurrences RecurringExpenseOccurrence[]
   receivableCollections ReceivableCollection[]
   receivableCollectionReversals ReceivableCollectionReversal[]
   receivableAssignments ReceivableAssignment[]
@@ -560,6 +561,7 @@ model Person {
 }
 
 model UserAccount {
+  recurringExpenseOccurrences RecurringExpenseOccurrence[]
   receivableCollections ReceivableCollection[] @relation("ReceivableCollectionCreator")
   receivableCollectionReversals ReceivableCollectionReversal[] @relation("ReceivableCollectionReversalCreator")
   receivableAssignmentsCreated ReceivableAssignment[] @relation("ReceivableAssignmentCreator")
@@ -1796,6 +1798,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  recurringExpenseOccurrences RecurringExpenseOccurrence[]
   receivableCollectionSourcePolicies ReceivableCollection[] @relation("ReceivableCollectionSourcePolicy")
   receivableCollectionPolicies ReceivableCollection[] @relation("ReceivableCollectionPolicy")
   receivableCollectionCalendars ReceivableCollection[] @relation("ReceivableCollectionCalendar")
@@ -2603,6 +2606,7 @@ model AccountingPeriodAdjustment {
 }
 
 model Expense {
+  recurringOccurrence RecurringExpenseOccurrence?
   correctsExpenseId      String?                     @map("corrects_expense_id") @db.Uuid
   correctsExpenseVersion Int?                        @map("corrects_expense_version")
   correctsExpense        Expense?                    @relation("ExpenseCorrection", fields: [organizationId, correctsExpenseId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
@@ -2644,6 +2648,25 @@ model Expense {
   @@index([organizationId, propertyId, state, occurredOn, id])
   @@index([organizationId, correctsExpenseId, createdAt, id])
   @@map("expense")
+}
+
+model RecurringExpenseOccurrence {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ scheduleId String @map("schedule_id") @db.Uuid
+ on DateTime @db.Date
+ configRuleId String @map("config_rule_id") @db.Uuid
+ expenseId String @map("expense_id") @db.Uuid
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ configRule ConfigRule @relation(fields:[organizationId,configRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"recurring_expense_occurrence_organization_id_config_rule_id_fke")
+ expense Expense @relation(fields:[organizationId,expenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ actor UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ @@unique([organizationId,id],map:"recurring_expense_occurrence_org_id_unique")
+ @@unique([organizationId,scheduleId,on],map:"recurring_expense_occurrence_schedule_on_unique")
+ @@unique([organizationId,expenseId],map:"recurring_expense_occurrence_expense_unique")
+ @@map("recurring_expense_occurrence")
 }
 
 model ExpenseSubmission {

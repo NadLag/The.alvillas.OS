@@ -1,5 +1,5 @@
 import { z } from "zod";
-import Decimal from "decimal.js";
+export {expenseDraftSchema,type ExpenseDraftInput} from "./expense-input";
 import type { Money } from "@/platform/money/money";
 import type { ConfiguredExpenseAllocation } from "./configured-finance-rules";
 import { allocateGrossRevenueByOwnerShare, assertFinancePostingsBalanced, type FinancePostingDraft, type PropertyOwnerShare } from "./reservation-revenue";
@@ -21,15 +21,6 @@ export function viewableExpenseResource(ctx: AuthContext, property: ExpensePrope
   if (authorize(ctx,"view",base,at)) return base;
   return ownerIds.map(ownerId=>expenseResource(ctx.organizationId,property,facts,ownerId)).find(resource=>authorize(ctx,"view",resource,at)) ?? null;
 }
-
-export const expenseDraftSchema = z.object({
-  propertyId: z.uuid(), reservationId: z.uuid().optional(), category: z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/u),
-  amount: z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u).pipe(z.string().refine(value => new Decimal(value).gt(0))),
-  currency: z.string().regex(/^[A-Z]{3}$/u), purpose: z.string().trim().min(3).max(1000),
-  occurredOn: z.iso.date(), fundingAccountId: z.uuid(), emergency: z.boolean().default(false), idempotencyKey: z.uuid(),
-  reason: z.string().trim().min(6).max(500)
-}).strict();
-export type ExpenseDraftInput = z.infer<typeof expenseDraftSchema>;
 
 type ExpenseFundingAccount = { id?: string; code: string; accountType: string; normalSide: string; archivedAt: Date | null;
   teamWallet?: { id: string; personId: string; person: { archivedAt: Date | null } } | null };
