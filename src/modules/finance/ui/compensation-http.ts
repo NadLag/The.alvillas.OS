@@ -21,6 +21,9 @@ import {ReceivableAgingSourceError,ReceivableAgingChangedError} from "../domain/
 import {ReceivableExportRateLimitError} from "../domain/receivable-export";
 import {RecurringExpenseAccessError,RecurringExpenseConfigurationError} from "../domain/recurring-expense";
 import {RecurringExpenseChangedError} from "../domain/recurring-expense-settings";
+import {CompanyExpenseAccessError,CompanyExpenseChangedError,CompanyExpenseConfigurationError} from "../domain/company-expense";
+import {SupplierInvoiceAccessError,SupplierInvoiceConflictError} from "../application/supplier-invoice-access";
+import {ConfigAuthorizationError,ConfigValidationError,ConfigNotFoundError} from "@/platform/config/rule-version-writer";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
@@ -40,6 +43,11 @@ export async function compensationHttp<T extends Promise<unknown>>(request:NextR
     const value=await work(actor,input,requestId),response=options.respond?options.respond(value):NextResponse.json(value,{headers,status:options.status??200});
     for(const[key,value]of Object.entries(headers))response.headers.set(key,value);return response;
   }catch(error){
+    if(error instanceof CompanyExpenseAccessError||error instanceof SupplierInvoiceAccessError||error instanceof ConfigAuthorizationError)return failure("forbidden",403);
+    if(error instanceof ConfigValidationError)return failure("validation",400);
+    if(error instanceof ConfigNotFoundError)return failure("conflict",409);
+    if(error instanceof CompanyExpenseChangedError||error instanceof SupplierInvoiceConflictError)return failure("conflict",409);
+    if(error instanceof CompanyExpenseConfigurationError)return failure("configuration_unavailable",409);
     if(error instanceof ZodError||error instanceof EmployeeCompensationBasisError)return failure("validation",400);
     if(error instanceof RecurringExpenseAccessError)return failure("forbidden",403);
     if(error instanceof RecurringExpenseConfigurationError)return failure("configuration_unavailable",409);

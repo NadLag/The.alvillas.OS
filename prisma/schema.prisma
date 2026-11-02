@@ -215,6 +215,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+ companyExpenseCommandReceipts CompanyExpenseCommandReceipt[]
  companyExpenseCompensationLinks CompanyExpenseCompensationLink[]
   companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
   companyExpensePlans CompanyExpensePlan[]
@@ -567,6 +568,7 @@ model Person {
 }
 
 model UserAccount {
+ companyExpenseCommandReceipts CompanyExpenseCommandReceipt[]
  companyExpenseCompensationLinks CompanyExpenseCompensationLink[]
   companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
   companyExpensePlans CompanyExpensePlan[]
@@ -3745,6 +3747,7 @@ model EmployeeEarningRequestPercentageWitness {
 }
 
 model CompanyExpensePlan {
+ companyExpenseCommandReceipts CompanyExpenseCommandReceipt[]
  companyExpenseCompensationLinks CompanyExpenseCompensationLink[]
   companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -3854,4 +3857,25 @@ model CompanyExpenseCompensationLink {
  @@unique([organizationId,employeeCostId,version],map:"company_compensation_source_version_key")
  @@index([organizationId,companyExpenseId,id],map:"company_compensation_plan_history_idx")
  @@map("company_expense_compensation_link")
+}
+
+model CompanyExpenseCommandReceipt {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ idempotencyKey String @map("idempotency_key") @db.Uuid
+ requestHash String @map("request_hash") @db.Char(64)
+ operation String
+ companyExpenseId String @map("company_expense_id") @db.Uuid
+ resultId String @map("result_id") @db.Uuid
+ resultVersion Int @map("result_version")
+ dataClass String @map("data_class")
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"company_command_org_fk")
+ plan CompanyExpensePlan @relation(fields:[organizationId,companyExpenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"company_command_plan_fk")
+ creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"company_command_actor_fk")
+ @@unique([organizationId,id],map:"company_command_org_id_key")
+ @@unique([organizationId,idempotencyKey],map:"company_command_nonce_key")
+ @@index([organizationId,createdBy,id],map:"company_command_actor_history_idx")
+ @@map("company_expense_command_receipt")
 }

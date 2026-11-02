@@ -1,3 +1,6 @@
+import {readCompanyExpenseWorkspace} from "@/modules/finance/application/company-expense-workspace-service";
+import {companyExpenseCandidatesSchema,companyExpenseSourceHistorySchema} from "@/modules/finance/domain/company-expense-workspace";
+import {executeCompanyExpenseCommand,recoverCompanyExpenseCommand} from "@/modules/finance/application/company-expense-command-service";
 import { randomUUID } from "node:crypto";
 import {createCompanyExpensePlan,getCompanyExpensePlan,reviseCompanyExpensePlan} from "@/modules/finance/application/company-expense-service";
 import {changeCompanyExpenseCompensationSource,getCompanyExpenseCompensationSources} from "@/modules/finance/application/company-expense-compensation-service";
@@ -73,6 +76,19 @@ describe("immutable monthly contractual earnings through actual PostgreSQL comma
    return{f,actor,authority,run,submitted,cost,recognized,plan,draft,command:{operation:"ATTACH" as const,companyExpenseId:plan.id,employeeCostId:cost.id,expectedSourceVersion:0,expectedPlanVersion:1,reason:"Associate actual recognized company salary cost"}};
   }
   const financial=(org:string)=>withTenant(db,org,tx=>tx.$queryRaw<Array<{kind:string;id:string;xmin:string;body:unknown}>>`SELECT 'transaction' AS kind,id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p) FROM posting p WHERE organization_id=${org}::uuid ORDER BY kind,id`);
+  it("recovers the actual employee source command while preserving recognized salary facts",async()=>{
+   const p=await ready(),before=await financial(p.f.org),command={operation:"EMPLOYEE_SOURCE",idempotencyKey:randomUUID(),input:p.command};
+   const first=await executeCompanyExpenseCommand(p.actor,command,{db}),again=await executeCompanyExpenseCommand(p.actor,command,{db});
+   expect(first).toMatchObject({state:"SUCCEEDED",companyExpenseId:p.plan.id,version:1,idempotent:false});expect(again).toMatchObject({requestId:first.requestId,resultId:first.resultId,idempotent:true});
+   expect((await recoverCompanyExpenseCommand(p.actor,{key:command.idempotencyKey},{db})).request?.resultId).toBe(first.resultId);
+   expect((await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db})).items[0].id).toBe(first.resultId);
+   expect(await withTenant(db,p.f.org,tx=>tx.companyExpenseCommandReceipt.count())).toBe(1);expect(await financial(p.f.org)).toEqual(before);
+  });
+  it("picks the actual recognized company salary cost and presents the whole employee claim",async()=>{
+   const p=await ready(),before=await financial(p.f.org),candidates=companyExpenseCandidatesSchema.parse(await readCompanyExpenseWorkspace(p.actor,{operation:"CANDIDATES",id:p.plan.id,kind:"EMPLOYEE"},{db}));expect(candidates.items).toHaveLength(1);expect(candidates.items[0]).toMatchObject({id:p.cost.id,amount:"0.09",currency:"MAD",sourceVersion:0});
+   await changeCompanyExpenseCompensationSource(p.actor,p.command,{db});expect(companyExpenseCandidatesSchema.parse(await readCompanyExpenseWorkspace(p.actor,{operation:"CANDIDATES",id:p.plan.id,kind:"EMPLOYEE"},{db})).items).toEqual([]);
+   const shown=companyExpenseSourceHistorySchema.parse(await readCompanyExpenseWorkspace(p.actor,{operation:"EMPLOYEE_HISTORY",id:p.plan.id},{db}));expect(shown.items[0]).toMatchObject({sourceId:p.cost.id,active:true,amount:"0.09",scope:"EMPLOYEE_CLAIM",outstanding:{amount:"0.09",currency:"MAD"},payments:[]});expect(await financial(p.f.org)).toEqual(before);
+  });
   it("links the actual recognized salary once without changing its seven-cent estimate or nine-cent journal",async()=>{
    const p=await ready(),before=await financial(p.f.org),results=await Promise.all([changeCompanyExpenseCompensationSource(p.actor,p.command,{db}),changeCompanyExpenseCompensationSource(p.actor,p.command,{db})]);expect(results.filter(row=>row.idempotent)).toHaveLength(1);expect(results[0].id).toBe(results[1].id);
    const shown=await getCompanyExpenseCompensationSources(p.actor,{companyExpenseId:p.plan.id},{db});expect(shown.items).toHaveLength(1);expect(shown.items[0]).toMatchObject({amount:"0.09",currency:"MAD",active:true,employeeCostId:p.cost.id,sourceReversed:false,dataClass:"STAFF_COMPENSATION",settlement:{scope:"EMPLOYEE_CLAIM",value:{earned:{amount:"0.09"},outstanding:{amount:"0.09"},payments:[]}}});

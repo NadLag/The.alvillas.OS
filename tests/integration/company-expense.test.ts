@@ -1,4 +1,8 @@
+import {getCompanyExpenseSettings,saveCompanyExpenseSettings} from "@/modules/finance/application/company-expense-settings-service";
+import {readCompanyExpenseWorkspace} from "@/modules/finance/application/company-expense-workspace-service";
+import {companyExpenseListSchema,companyExpenseDetailSchema,companyExpenseWorkspaceSettingsSchema} from "@/modules/finance/domain/company-expense-workspace";
 import {randomUUID} from "node:crypto";
+import {executeCompanyExpenseCommand,recoverCompanyExpenseCommand,requestCompanyExpenseCommand} from "@/modules/finance/application/company-expense-command-service";
 import {execFileSync} from "node:child_process";
 import {PrismaClient,type Prisma} from "@prisma/client";
 import {afterAll,beforeAll,describe,expect,it,vi} from "vitest";
@@ -38,4 +42,113 @@ describe("actual independent company cost planning and recurring admission",()=>
  it("reaches every immutable company revision beyond the first page while preserving the actual current source",async()=>{const f=await fixture(),ctx=await actor(f),command=input(f),created=await createCompanyExpensePlan(ctx,command,{db}),{idempotencyKey,...base}=command;void idempotencyKey;for(let version=2;version<=52;version++)await reviseCompanyExpensePlan(ctx,{...base,id:created.id,expectedVersion:version-1,amount:Money.of("0.07","MAD").add(Money.of("0.01","MAD").multiply(String(version-1))).toJSON().amount,reason:"Actual complete company revision history "+version},{db});const first=await getCompanyExpensePlan(ctx,created.id,{db});expect(first.history).toHaveLength(50);expect(first.next).toBe(3);const second=await getCompanyExpensePlan(ctx,{id:created.id,beforeVersion:first.next},{db});expect(second.history).toHaveLength(2);expect(second.next).toBeNull();expect(second.current).toMatchObject({version:52,amount:"0.58"});expect(new Set([...first.history,...second.history].map(row=>row.revisionId)).size).toBe(52);expect(second.history.at(-1)).toMatchObject({version:1,amount:"0.07"});});
  it("requires a native recurring audit even for an otherwise valid original configured company plan",async()=>{const f=await fixture(),rule=await recurring(f),ctx=await actor(f),created=await createCompanyExpensePlan(ctx,{...input(f),purpose:"Actual company recurring software"},{db});const schedule=(rule.value as{expenses:Array<{id:string}>}).expenses[0];await expect(withTenant(db,f.org,async tx=>new CompanyExpenseRepository(tx,f.org).recordOccurrence({scheduleId:schedule.id,on:f.on,configRuleId:rule.id,companyExpenseId:created.id,createdBy:f.account.id,createdAt:await new FinanceRepository(tx,f.org).clock()}))).rejects.toThrow("company recurrence occurrence and native audit must commit atomically");expect(await withTenant(db,f.org,tx=>tx.recurringCompanyExpenseOccurrence.count())).toBe(0);expect((await getCompanyExpensePlan(ctx,created.id,{db})).history).toHaveLength(1);});
  it("rolls back generated plans, occurrences and audits after revocation at the final write fence",async()=>{const f=await fixture();await recurring(f);const writer=auditWriter.writeAuditEvent;let revoked=false;const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{await writer(tx,event);if(!revoked&&event.organizationId===f.org&&event.action==="company_expense.recurring_generated"){revoked=true;await(tx as unknown as TenantTransaction).roleAssignment.update({where:{id:f.grant.id},data:{validTo:new Date(Date.now()-1000)}});}});try{await expect(scheduleRecurringCompanyExpenses(f.org,{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);expect(revoked).toBe(true);}finally{spy.mockRestore();}expect(await withTenant(db,f.org,async tx=>({plans:await tx.companyExpensePlan.count(),occurrences:await tx.recurringCompanyExpenseOccurrence.count(),audits:await tx.auditLog.count({where:{resourceType:"company_expense"}})}))).toEqual({plans:0,occurrences:0,audits:0});});
+});
+
+describe("company workspace native command acknowledgements",()=>{
+ const commandFixture=async()=>{const f=await fixture();return{...f,ctx:await actor(f)};};
+ const createCommand=(f:Fixture)=>{const{idempotencyKey,...draft}=input(f);return{operation:"CREATE" as const,idempotencyKey,input:draft};};
+ it("recovers one actual native result after concurrent delivery without persisting financial payloads",async()=>{
+  const f=await commandFixture(),command=createCommand(f),before=await financial(f),results=await Promise.all([executeCompanyExpenseCommand(f.ctx,command,{db}),executeCompanyExpenseCommand(f.ctx,command,{db})]);
+  expect(new Set(results.map(row=>row.requestId)).size).toBe(1);expect(results.filter(row=>row.idempotent)).toHaveLength(1);expect(results[0].state).toBe("SUCCEEDED");
+  expect(await recoverCompanyExpenseCommand(f.ctx,{key:command.idempotencyKey},{db})).toMatchObject({request:{requestId:results[0].requestId,companyExpenseId:results[0].companyExpenseId,version:1,idempotent:true}});
+  await withTenant(db,f.org,async tx=>{expect(await tx.companyExpensePlan.count()).toBe(1);expect(await tx.companyExpenseRevision.count()).toBe(1);expect(await tx.companyExpenseCommandReceipt.count()).toBe(1);expect(await tx.auditLog.count({where:{action:"company_expense.command_acknowledged"}})).toBe(1);const row=await tx.companyExpenseCommandReceipt.findFirstOrThrow();expect(Object.keys(row)).not.toContain("input");expect(Object.keys(row)).not.toContain("amount");expect(row.requestHash).toMatch(/^[a-f0-9]{64}$/u);});expect(await financial(f)).toEqual(before);
+ });
+ it("rejects altered intent under the same nonce without another native write",async()=>{
+  const f=await commandFixture(),command=createCommand(f),created=await executeCompanyExpenseCommand(f.ctx,command,{db});
+  await expect(executeCompanyExpenseCommand(f.ctx,{...command,input:{...command.input,amount:"0.09"}},{db})).rejects.toBeInstanceOf(CompanyExpenseChangedError);
+  expect((await getCompanyExpensePlan(f.ctx,created.companyExpenseId,{db})).current.amount).toBe("0.07");await withTenant(db,f.org,async tx=>expect(await tx.companyExpenseCommandReceipt.count()).toBe(1));
+ });
+ it("acknowledges native revision and cancellation exactly once and keeps the original creation receipt",async()=>{
+  const f=await commandFixture(),create=createCommand(f),created=await executeCompanyExpenseCommand(f.ctx,create,{db}),before=await financial(f);
+  const revise={operation:"REVISE",idempotencyKey:randomUUID(),input:{...create.input,id:created.companyExpenseId,expectedVersion:1,amount:"0.09",reason:"Revise the original company estimate with an explicit reason"}};
+  const revised=await executeCompanyExpenseCommand(f.ctx,revise,{db});expect(revised.version).toBe(2);expect((await executeCompanyExpenseCommand(f.ctx,revise,{db})).idempotent).toBe(true);
+  const cancel={operation:"CANCEL",idempotencyKey:randomUUID(),input:{id:created.companyExpenseId,expectedVersion:2,reason:"Cancel the original company estimate without deleting its history"}};
+  expect((await executeCompanyExpenseCommand(f.ctx,cancel,{db})).version).toBe(3);expect((await executeCompanyExpenseCommand(f.ctx,cancel,{db})).idempotent).toBe(true);
+  expect((await recoverCompanyExpenseCommand(f.ctx,{key:create.idempotencyKey},{db})).request?.version).toBe(1);expect((await getCompanyExpensePlan(f.ctx,created.companyExpenseId,{db})).history).toHaveLength(3);expect(await financial(f)).toEqual(before);
+ });
+ it("waits for the original transaction before recovery can report presence or absence",async()=>{
+  const f=await commandFixture(),command=createCommand(f),original=auditWriter.writeAuditEvent;let release!:()=>void,started!:(pid:number)=>void;
+  const gate=new Promise<void>(resolve=>{release=resolve;}),ready=new Promise<number>(resolve=>{started=resolve;});
+  const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{await original(tx,event);if(event.action==="company_expense.command_acknowledged"){const[connection]=await(tx as unknown as TenantTransaction).$queryRaw<Array<{pid:number}>>`SELECT pg_backend_pid() AS pid`;started(connection.pid);await gate;}});
+  const writing=executeCompanyExpenseCommand(f.ctx,command,{db});let recovering:ReturnType<typeof recoverCompanyExpenseCommand>|undefined;
+  try{const pid=await ready;recovering=recoverCompanyExpenseCommand(f.ctx,{key:command.idempotencyKey},{db});await expect.poll(async()=>{const[observed]=await admin.$queryRaw<Array<{blocked:boolean}>>`SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND ${pid}::int=ANY(pg_blocking_pids(pid))) AS blocked`;return observed.blocked;}).toBe(true);}
+  finally{release();spy.mockRestore();}
+  const created=await writing;expect((await recovering)?.request?.requestId).toBe(created.requestId);
+ });
+ it("rolls back the native effect and acknowledgement after final authority revocation",async()=>{
+  const f=await commandFixture(),command=createCommand(f),before=await financial(f),original=auditWriter.writeAuditEvent;
+  const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{await original(tx,event);if(event.action==="company_expense.command_acknowledged")await withTenant(db,f.org,t=>t.roleAssignment.updateMany({where:{organizationId:f.org,userAccountId:f.account.id},data:{validTo:new Date(Date.now()-1000)}}));});
+  try{await expect(executeCompanyExpenseCommand(f.ctx,command,{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);}finally{spy.mockRestore();}
+  await withTenant(db,f.org,async tx=>{expect(await tx.companyExpensePlan.count()).toBe(0);expect(await tx.companyExpenseCommandReceipt.count()).toBe(0);expect(await tx.auditLog.count({where:{action:{startsWith:"company_expense."}}})).toBe(0);});expect(await financial(f)).toEqual(before);
+ });
+ it("converts a known rejected attempt only after all native writes have rolled back",async()=>{
+  const f=await commandFixture(),command=createCommand(f),original=auditWriter.writeAuditEvent;
+  const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{await original(tx,event);if(event.action==="company_expense.command_acknowledged")throw new CompanyExpenseChangedError();});
+  try{expect(await requestCompanyExpenseCommand(f.ctx,command,{db})).toMatchObject({state:"CONFLICT",failureCode:"SOURCE_CHANGED",idempotencyKey:command.idempotencyKey});}finally{spy.mockRestore();}
+  expect(await recoverCompanyExpenseCommand(f.ctx,{key:command.idempotencyKey},{db})).toEqual({request:null});await withTenant(db,f.org,async tx=>{expect(await tx.companyExpensePlan.count()).toBe(0);expect(await tx.companyExpenseCommandReceipt.count()).toBe(0);});
+ });
+ it("keeps receipt ownership, tenant scope and current financial authority independent",async()=>{
+  const f=await commandFixture(),other=await commandFixture(),command=createCommand(f),created=await executeCompanyExpenseCommand(f.ctx,command,{db});
+  expect(await recoverCompanyExpenseCommand(other.ctx,{key:command.idempotencyKey},{db})).toEqual({request:null});await withTenant(db,other.org,async tx=>expect(await tx.companyExpenseCommandReceipt.findFirst({where:{id:created.requestId}})).toBeNull());
+  await withTenant(db,f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.org,key:"financial_transaction:view"}});await tx.rolePermission.deleteMany({where:{organizationId:f.org,permissionId:permission.id}});});
+  await expect(recoverCompanyExpenseCommand(f.ctx,{key:command.idempotencyKey},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);await expect(recoverCompanyExpenseCommand(f.ctx,{key:randomUUID()},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);
+ });
+ it("requires actual source results, atomic acknowledgement audit and append-only tenant receipts",async()=>{
+  const f=await commandFixture(),command=createCommand(f),created=await executeCompanyExpenseCommand(f.ctx,command,{db});
+  await expect(withTenant(db,f.org,tx=>tx.companyExpenseCommandReceipt.update({where:{id:created.requestId},data:{resultVersion:9}}))).rejects.toThrow(/append-only/u);
+  await expect(withTenant(db,f.org,tx=>tx.companyExpenseCommandReceipt.delete({where:{id:created.requestId}}))).rejects.toThrow(/append-only/u);
+  const fresh=input(f),plan=await createCompanyExpensePlan(f.ctx,fresh,{db}),revision=await withTenant(db,f.org,tx=>tx.companyExpenseRevision.findFirstOrThrow({where:{organizationId:f.org,companyExpenseId:plan.id,version:1}}));
+  const direct=async(resultId:string)=>withTenant(db,f.org,async tx=>tx.companyExpenseCommandReceipt.create({data:{organizationId:f.org,idempotencyKey:fresh.idempotencyKey,requestHash:"a".repeat(64),operation:"CREATE",companyExpenseId:plan.id,resultId,resultVersion:1,dataClass:revision.dataClass,createdBy:f.account.id,createdAt:await new FinanceRepository(tx,f.org).clock()}}));
+  await expect(direct(randomUUID())).rejects.toThrow(/actual tenant-owned native result/u);await expect(direct(revision.id)).rejects.toThrow(/atomic native-result audit/u);
+  const[isolation]=await admin.$queryRaw<Array<{relrowsecurity:boolean;relforcerowsecurity:boolean}>>`SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE relname='company_expense_command_receipt'`;expect(isolation).toEqual({relrowsecurity:true,relforcerowsecurity:true});
+ });
+});
+
+describe("company financial workspace current native sources",()=>{
+ it("reads configured human labels and the actual current immutable revision",async()=>{
+  const f=await fixture(),ctx=await actor(f),command=input(f),created=await createCompanyExpensePlan(ctx,command,{db});
+  const settings=companyExpenseWorkspaceSettingsSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"SETTINGS"},{db}));expect(settings).toMatchObject({timezone:"UTC",today:f.on,capabilities:{staff:false,create:true,edit:true,void:true}});expect(settings.categories.map(row=>row.key)).toEqual(["software"]);
+  const first=companyExpenseListSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"LIST"},{db}));expect(first.items).toHaveLength(1);expect(first.items[0]).toMatchObject({id:created.id,amount:"0.07",categoryLabels:labels,costCenterLabels:labels});
+  const{idempotencyKey,...draft}=command;void idempotencyKey;await reviseCompanyExpensePlan(ctx,{...draft,id:created.id,expectedVersion:1,purpose:"Corrected current company purpose",amount:"0.09"},{db});
+  expect(companyExpenseListSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"LIST",query:command.purpose},{db})).items).toEqual([]);
+  const detail=companyExpenseDetailSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"DETAIL",id:created.id},{db}));expect(detail.current).toMatchObject({version:2,amount:"0.09",purpose:"Corrected current company purpose"});expect(detail.history.map(row=>row.amount)).toEqual(["0.09","0.07"]);
+  await cancelCompanyExpensePlan(ctx,{id:created.id,expectedVersion:2,reason:"Keep cancelled company plans in complete financial history"},{db});expect(companyExpenseListSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"LIST",state:"PLANNED"},{db})).items).toEqual([]);expect(companyExpenseListSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"LIST",state:"CANCELLED"},{db})).items[0].version).toBe(3);
+ });
+ it("reaches every plan beyond the first keyset page without losing the original amounts",async()=>{
+  const f=await fixture(),ctx=await actor(f),before=await financial(f);for(let index=0;index<52;index++)await createCompanyExpensePlan(ctx,{...input(f),purpose:"Actual complete company plan "+index},{db});
+  const first=companyExpenseListSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"LIST"},{db})),second=companyExpenseListSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"LIST",after:first.next},{db}));expect(first.items).toHaveLength(50);expect(second.items).toHaveLength(2);expect(second.next).toBeNull();expect(new Set([...first.items,...second.items].map(row=>row.id)).size).toBe(52);expect([...first.items,...second.items].every(row=>row.amount==="0.07")).toBe(true);expect(await financial(f)).toEqual(before);
+ });
+ it("hides an entire salary-classified plan after salary access is revoked",async()=>{
+  const f=await fixture();await withTenant(db,f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{key:"staff_compensation:view"}});await tx.rolePermission.create({data:{organizationId:f.org,roleId:f.role.id,permissionId:permission.id}});});const ctx=await actor(f),draft={...input(f),category:"salary"},created=await createCompanyExpensePlan(ctx,draft,{db});
+  expect(companyExpenseListSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"LIST"},{db})).items).toHaveLength(1);await withTenant(db,f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{key:"staff_compensation:view"}});await tx.rolePermission.deleteMany({where:{roleId:f.role.id,permissionId:permission.id}});});
+  expect(companyExpenseListSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"LIST"},{db})).items).toEqual([]);await expect(readCompanyExpenseWorkspace(ctx,{operation:"DETAIL",id:created.id},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);
+ });
+ it("denies foreign IDs, held restrictions and revoked independent financial grants",async()=>{
+  const f=await fixture(),other=await fixture(),ctx=await actor(f),created=await createCompanyExpensePlan(ctx,input(f),{db});await expect(readCompanyExpenseWorkspace(await actor(other),{operation:"DETAIL",id:created.id},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);
+  const narrowed={...ctx,authContext:{...ctx.authContext,permissions:new Set<string>(),assignments:[],scopes:[]}};await expect(readCompanyExpenseWorkspace(narrowed,{operation:"LIST"},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);
+  await withTenant(db,f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{key:"financial_transaction:view"}});await tx.rolePermission.deleteMany({where:{roleId:f.role.id,permissionId:permission.id}});});await expect(readCompanyExpenseWorkspace(ctx,{operation:"LIST"},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);await expect(readCompanyExpenseWorkspace(ctx,{operation:"SETTINGS"},{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);
+ });
+});
+
+describe("structured company policy and recurrence authoring",()=>{
+ const setup=async(configure=true)=>{const f=await fixture(configure);await withTenant(db,f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{key:"staff_compensation:view"}});await tx.rolePermission.create({data:{organizationId:f.org,roleId:f.role.id,permissionId:permission.id}});});const ctx={...await actor(f),authContext:{...(await actor(f)).authContext,personId:f.person.id}};return{f,ctx};};
+ it("initializes required labels together and preserves prior configuration versions when labels change",async()=>{
+  const{f,ctx}=await setup(false),before=await financial(f);expect((await getCompanyExpenseSettings(ctx,{db})).policyId).toBeNull();const initialized=await saveCompanyExpenseSettings(ctx,{operation:"INITIALIZE",expectedPolicyId:null,policy,reason:"Initialize actual localized company taxonomy"},{db});expect(initialized.policy).toEqual(policy);expect(initialized.policyId).not.toBeNull();
+  const original=await withTenant(db,f.org,tx=>tx.$queryRaw<Array<{id:string;xmin:string;body:unknown}>>`SELECT id::text,xmin::text,to_jsonb(c) AS body FROM config_rule c WHERE id=${initialized.policyId}::uuid`);
+  const revised=await saveCompanyExpenseSettings(ctx,{operation:"CATEGORY",expectedPolicyId:initialized.policyId,category:{...policy.categories[0],labels:{...labels,en:"Corrected original company category"}},reason:"Revise actual category labels with preserved history"},{db});expect(revised.policyId).not.toBe(initialized.policyId);expect(revised.policy?.categories).toHaveLength(2);expect(await withTenant(db,f.org,tx=>tx.$queryRaw`SELECT id::text,xmin::text,to_jsonb(c) AS body FROM config_rule c WHERE id=${initialized.policyId}::uuid`)).toEqual(original);expect(await financial(f)).toEqual(before);
+  await expect(saveCompanyExpenseSettings(ctx,{operation:"INITIALIZE",expectedPolicyId:null,policy,reason:"Reject stale initialization instead of overwriting labels"},{db})).rejects.toBeInstanceOf(CompanyExpenseChangedError);
+ });
+ it("authors an explicit company schedule, admits its actual civil occurrence once and removes it without deleting history",async()=>{
+  const{f,ctx}=await setup(),before=await financial(f),schedule={id:randomUUID(),start_on:f.on,end_on:f.on,run_at:"00:00",cadence:{kind:"DAY",every:1},draft:{amount:"0.07",currency:"MAD",category:"software",costCenter:"office",purpose:"Actual company recurrence from structured authoring"}};
+  const saved=await saveCompanyExpenseSettings(ctx,{operation:"SCHEDULE",expectedPolicyId:null,batchSize:25,schedule,reason:"Author an actual explicit company recurring estimate"},{db});expect(saved.schedules).toEqual([schedule]);expect((await scheduleRecurringCompanyExpenses(f.org,{db})).created).toBe(1);expect((await scheduleRecurringCompanyExpenses(f.org,{db})).created).toBe(0);
+  const generated=await withTenant(db,f.org,tx=>tx.recurringCompanyExpenseOccurrence.findFirstOrThrow({where:{scheduleId:schedule.id}}));expect((await getCompanyExpensePlan(ctx,generated.companyExpenseId,{db})).current.amount).toBe("0.07");
+  const removed=await saveCompanyExpenseSettings(ctx,{operation:"REMOVE_SCHEDULE",expectedPolicyId:saved.recurringPolicyId,batchSize:25,scheduleId:schedule.id,reason:"Remove future recurrence while retaining its original occurrence"},{db});expect(removed.schedules).toEqual([]);expect((await scheduleRecurringCompanyExpenses(f.org,{db})).created).toBe(0);expect(await withTenant(db,f.org,tx=>tx.recurringCompanyExpenseOccurrence.count())).toBe(1);expect(await financial(f)).toEqual(before);
+ });
+ it("rejects stale policy versions and invalid native financial sources without partial configuration writes",async()=>{
+  const{f,ctx}=await setup(),before=await withTenant(db,f.org,tx=>tx.configRule.count()),schedule={id:randomUUID(),start_on:f.on,end_on:f.on,run_at:"00:00",cadence:{kind:"MONTH",every:1,day:31,missing_day:"LAST_DAY"},draft:{amount:"0.07",currency:"MAD",category:"missing",costCenter:"office",purpose:"Reject unconfigured company source"}};
+  await expect(saveCompanyExpenseSettings(ctx,{operation:"CATEGORY",expectedPolicyId:randomUUID(),category:policy.categories[0],reason:"Reject a stale immutable policy version"},{db})).rejects.toBeInstanceOf(CompanyExpenseChangedError);await expect(saveCompanyExpenseSettings(ctx,{operation:"SCHEDULE",expectedPolicyId:null,batchSize:25,schedule,reason:"Reject an invalid native company financial source"},{db})).rejects.toBeInstanceOf(CompanyExpenseConfigurationError);expect(await withTenant(db,f.org,tx=>tx.configRule.count())).toBe(before);
+ });
+ it("requires independent staff authority even when the actor can configure company financial rules",async()=>{
+  const f=await fixture(),ctx=await actor(f);await expect(getCompanyExpenseSettings(ctx,{db})).rejects.toBeInstanceOf(CompanyExpenseAccessError);const current=companyExpenseWorkspaceSettingsSchema.parse(await readCompanyExpenseWorkspace(ctx,{operation:"SETTINGS"},{db}));expect(current.capabilities.configure).toBe(false);
+ });
 });
