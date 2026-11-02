@@ -71,7 +71,7 @@ export async function createReceivableAssignment(ctx:FinanceActorContext,raw:unk
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     await recheckReceivableAuthority(ctx,tx);const repository=new ReceivableAssignmentRepository(tx,ctx.organizationId);await repository.lockIntent(idempotencyKey);
     const existing=await repository.byKey(idempotencyKey);if(existing){if(existing.createdBy!==ctx.actorId)throw new ReceivableAccessError();if(existing.requestFingerprint!==requestFingerprint)throw new ReceivableAssignmentConflictError();return{...await readReceipt(ctx,existing,tx,deps),idempotent:true,idempotencyKey:existing.idempotencyKey,operation:"ASSIGN" as const};}
-    if(await repository.releaseByKey(idempotencyKey))throw new ReceivableAssignmentConflictError();await recheckReceivableAuthority(ctx,tx,"create");
+    if(await repository.commandKind(idempotencyKey))throw new ReceivableAssignmentConflictError();await recheckReceivableAuthority(ctx,tx,"create");
     const initial=await repository.original(input.postingId);if(!initial)throw new ReceivableAssignmentSourceError();await repository.lockSource(input.postingId,initial.source.transaction.id);
     const reviewed=await prepare(ctx,input,tx);if(reviewed.reviewFingerprint!==reviewFingerprint)throw new ReceivableAssignmentConflictError();
     const row=await repository.create({postingId:input.postingId,partyKind:input.partyKind,guestId:input.partyKind==="GUEST"?input.partyId:null,ownerId:input.partyKind==="OWNER"?input.partyId:null,
@@ -92,7 +92,7 @@ export async function getReceivableAssignment(ctx:FinanceActorContext,raw:unknow
 
 async function releaseSource(ctx:FinanceActorContext,id:string,tx:TenantTransaction){
   const now=await recheckReceivableAuthority(ctx,tx,"edit"),repository=new ReceivableAssignmentRepository(tx,ctx.organizationId),row=await repository.get(id);
-  if(!row)throw new ReceivableAssignmentSourceError();if(row.release)throw new ReceivableAssignmentConflictError();const original=await repository.original(row.postingId);if(!original)throw new ReceivableAssignmentSourceError();
+  if(!row)throw new ReceivableAssignmentSourceError();if(row.release||!Money.of(await repository.collectedAmount(row.id,row.currency),row.currency).equals(Money.zero(row.currency)))throw new ReceivableAssignmentConflictError();const original=await repository.original(row.postingId);if(!original)throw new ReceivableAssignmentSourceError();
   return{now,row,original,reviewFingerprint:commandFingerprint({operation:"RELEASE",assignment:receivableAssignmentView(row),originalSource:original.snapshot})};
 }
 
@@ -107,7 +107,7 @@ export async function releaseReceivableAssignment(ctx:FinanceActorContext,raw:un
   const input=receivableAssignmentReleaseInput.parse(raw),requestFingerprint=frame("RELEASE",{id:input.id,reviewFingerprint:input.reviewFingerprint,reason:input.reason});
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{await recheckReceivableAuthority(ctx,tx);const repository=new ReceivableAssignmentRepository(tx,ctx.organizationId);await repository.lockIntent(input.idempotencyKey);
     const existing=await repository.releaseByKey(input.idempotencyKey);if(existing){if(existing.createdBy!==ctx.actorId)throw new ReceivableAccessError();if(existing.requestFingerprint!==requestFingerprint)throw new ReceivableAssignmentConflictError();return{...await readReceipt(ctx,existing.assignment,tx,deps),idempotent:true,idempotencyKey:existing.idempotencyKey,operation:"RELEASE" as const};}
-    if(await repository.byKey(input.idempotencyKey))throw new ReceivableAssignmentConflictError();const initial=await releaseSource(ctx,input.id,tx);await repository.lockSource(initial.row.postingId,initial.original.source.transaction.id);
+    if(await repository.commandKind(input.idempotencyKey))throw new ReceivableAssignmentConflictError();const initial=await releaseSource(ctx,input.id,tx);await repository.lockSource(initial.row.postingId,initial.original.source.transaction.id);
     const source=await releaseSource(ctx,input.id,tx);if(source.reviewFingerprint!==input.reviewFingerprint)throw new ReceivableAssignmentConflictError();
     const release=await repository.release({assignmentId:input.id,idempotencyKey:input.idempotencyKey,requestFingerprint,reviewFingerprint:input.reviewFingerprint,reason:input.reason,createdBy:ctx.actorId});
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.receivables.assignment_released",resourceType:"receivable",resourceId:release.id,

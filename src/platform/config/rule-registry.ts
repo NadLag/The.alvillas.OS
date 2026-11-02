@@ -23,6 +23,7 @@ import { employeePercentageEarningsPolicyKey,employeePercentageEarningsPolicySch
 import { employeeCompensationRunPolicyKey, employeeCompensationRunPolicySchema } from "@/modules/finance/domain/employee-compensation-run";
 import {receivablePolicyKey,receivablePolicySchema} from "@/modules/finance/domain/receivable";
 import {receivableAssignmentPolicyKey,receivableAssignmentPolicySchema} from "@/modules/finance/domain/receivable-assignment";
+import {receivableCollectionPolicyKey,receivableCollectionPolicySchema} from "@/modules/finance/domain/receivable-collection-policy";
 export { inventoryMinimumsSchema } from "./inventory-policy";
 
 const moneyAmountSchema = z
@@ -377,6 +378,7 @@ export const configRuleSchemas = {
   [employeePercentageEarningsPolicyKey]: employeePercentageEarningsPolicySchema,
   [receivablePolicyKey]:receivablePolicySchema,
   [receivableAssignmentPolicyKey]:receivableAssignmentPolicySchema,
+  [receivableCollectionPolicyKey]:receivableCollectionPolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
   "ops.workflows": workflowSchema,

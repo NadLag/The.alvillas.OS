@@ -54,6 +54,7 @@ describe("config rule registry", () => {
       "finance.ota_fee",
       "finance.payout_schedule",
       "finance.receivable_assignments",
+      "finance.receivable_collections",
       "finance.receivables",
       "finance.tax",
       "identity.pin_lockout",
