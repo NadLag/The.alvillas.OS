@@ -42,6 +42,7 @@ async function validateAmount(repository: ExpenseRepository, amount: string, cur
   if (!currency || currency.minorUnit > 2 || money.amount.decimalPlaces() > currency.minorUnit) throw new ExpenseConfigurationError("Expense currency precision is unavailable");
   return money;
 }
+export {validateAmount as validateExpenseAmount};
 async function validateFacts(ctx: FinanceActorContext, tx: TenantTransaction, input: ExpenseDraftInput, id: string, now: Date, action: "create" | "edit", sourceTimezone?: string) {
   const repository = new ExpenseRepository(tx, ctx.organizationId), property = await repository.property(input.propertyId);
   if (!property) throw new ExpenseAccessError();
