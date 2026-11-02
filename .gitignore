@@ -6,6 +6,7 @@ out
 coverage
 playwright-report
 test-results
+ci-evidence/
 .env
 .env.*
 !.env.example

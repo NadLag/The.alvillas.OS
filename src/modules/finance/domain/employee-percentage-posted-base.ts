@@ -2,6 +2,7 @@ import {z} from "zod";
 import {Money} from "@/platform/money/money";
 import {EmployeeCompensationSourceUnavailableError} from "./employee-compensation";
 import {employeePercentageEarningsPolicySchema} from "./employee-percentage-earnings";
+const postedSourceId=z.uuid();
 
 export type EmployeePercentagePostedSource={
  posting:{id:string;organizationId:string;transactionId:string;ledgerAccountId:string;side:string;amount:{toString():string};currency:string;bucket:string|null};
@@ -17,7 +18,7 @@ export function employeePostedJournalAmounts(postings:readonly {side:string;curr
 /** Only an actual sealed, unreversed journal posting can supply a contractual percentage base. */
 export function employeePercentagePostedBase(organizationId:string,currency:string,rawPolicy:unknown,source:EmployeePercentagePostedSource){
  const policy=employeePercentageEarningsPolicySchema.parse(rawPolicy),{posting,transaction,account}=source;
- if(![organizationId,posting.id,posting.transactionId,posting.ledgerAccountId,transaction.id,account.id].every(id=>z.uuid().safeParse(id).success)||
+ if(![organizationId,posting.id,posting.transactionId,posting.ledgerAccountId,transaction.id,account.id].every(id=>postedSourceId.safeParse(id).success)||
   [posting.organizationId,transaction.organizationId,account.organizationId].some(id=>id!==organizationId)||posting.transactionId!==transaction.id||posting.ledgerAccountId!==account.id||
   !transaction.sealed||transaction.reversesTransactionId!==null||transaction.reversedByTransactions.length!==0||!Number.isFinite(transaction.occurredAt.getTime())||
   posting.currency!==currency||posting.side!==policy.base_side||posting.bucket===null||!policy.base_buckets.includes(posting.bucket))throw new EmployeeCompensationSourceUnavailableError();
