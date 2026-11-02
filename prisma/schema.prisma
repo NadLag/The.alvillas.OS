@@ -215,6 +215,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
   companyExpensePlans CompanyExpensePlan[]
   companyExpenseRevisions CompanyExpenseRevision[]
   recurringCompanyExpenseOccurrences RecurringCompanyExpenseOccurrence[]
@@ -565,6 +566,7 @@ model Person {
 }
 
 model UserAccount {
+  companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
   companyExpensePlans CompanyExpensePlan[]
   companyExpenseRevisions CompanyExpenseRevision[]
   recurringCompanyExpenseOccurrences RecurringCompanyExpenseOccurrence[]
@@ -2842,6 +2844,7 @@ model SupplierInvoiceRevision {
 }
 
 model SupplierInvoiceLine {
+  companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
   recognition    SupplierInvoiceRecognitionLine?
   approvalStages ApprovalStage[]
   id             String                          @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -3739,6 +3742,7 @@ model EmployeeEarningRequestPercentageWitness {
 }
 
 model CompanyExpensePlan {
+  companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
  organizationId String @map("organization_id") @db.Uuid
  idempotencyKey String @map("idempotency_key") @db.Uuid
@@ -3753,6 +3757,7 @@ model CompanyExpensePlan {
  @@map("company_expense_plan")
 }
 model CompanyExpenseRevision {
+ invoiceLinks CompanyExpenseInvoiceLink[]
  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
  organizationId String @map("organization_id") @db.Uuid
  companyExpenseId String @map("company_expense_id") @db.Uuid
@@ -3798,4 +3803,27 @@ model RecurringCompanyExpenseOccurrence {
  @@unique([organizationId,scheduleId,on],map:"recurring_company_expense_schedule_on_key")
  @@unique([organizationId,companyExpenseId],map:"recurring_company_expense_plan_key")
  @@map("recurring_company_expense_occurrence")
+}
+
+model CompanyExpenseInvoiceLink {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ invoiceLineId String @map("invoice_line_id") @db.Uuid
+ companyExpenseId String @map("company_expense_id") @db.Uuid
+ planVersion Int @map("plan_version")
+ dataClass String @map("data_class")
+ version Int
+ state String
+ reason String
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ invoiceLine SupplierInvoiceLine @relation(fields:[organizationId,invoiceLineId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"company_expense_invoice_line_fk")
+ plan CompanyExpensePlan @relation(fields:[organizationId,companyExpenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"company_expense_invoice_plan_fk")
+ planRevision CompanyExpenseRevision @relation(fields:[organizationId,companyExpenseId,planVersion],references:[organizationId,companyExpenseId,version],onDelete:Restrict,onUpdate:NoAction,map:"company_expense_invoice_revision_fk")
+ creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"company_expense_invoice_actor_fk")
+ @@unique([organizationId,id])
+ @@unique([organizationId,invoiceLineId,version],map:"company_expense_invoice_source_version_key")
+ @@index([organizationId,companyExpenseId,id],map:"company_expense_invoice_plan_history_idx")
+ @@map("company_expense_invoice_link")
 }
