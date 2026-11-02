@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { Money } from "@/platform/money/money";
-import { financialTransferSchema } from "./financial-transfer";
+import { financialTransferSchema } from "./financial-transfer-input";
 import { assertFinancePostingsBalanced, type FinancePostingDraft } from "./reservation-revenue";
 import type { Action, Resource } from "@/platform/authz/authorize";
 import { expenseFundingWalletResource } from "./expense";
@@ -10,20 +10,8 @@ export type OwnerPayoutState = (typeof ownerPayoutStates)[number];
 export type OwnerPayoutCommand = "submit" | "approve" | "schedule" | "pay" | "reconcile" | "fail" | "cancel" | "reverse";
 
 const id = z.uuid().transform(value => value.toLowerCase());
-export const ownerPayoutDraftSchema = z.object({
-  propertyId: id,
-  ownerId: id,
-  reservationId: id.optional(),
-  expectedSettlementAt: z.iso.datetime({ offset: true }).transform(value => new Date(value).toISOString()).optional(),
-  payoutMethodId: id,
-  fundingAccountId: id,
-  amount: financialTransferSchema.shape.amount,
-  currency: financialTransferSchema.shape.currency,
-  purpose: financialTransferSchema.shape.purpose,
-  reason: financialTransferSchema.shape.reason,
-  idempotencyKey: financialTransferSchema.shape.idempotencyKey
-}).strict();
-
+import {ownerPayoutDraftSchema} from "./owner-payout-input";
+export {ownerPayoutDraftSchema};
 export const ownerPayoutCommandSchema = z.object({ id, expectedVersion: z.number().int().positive(), reason: financialTransferSchema.shape.reason }).strict();
 export const ownerPayoutScheduleSchema = ownerPayoutCommandSchema.extend({ scheduledFor: z.iso.datetime({offset:true}).transform(value=>new Date(value).toISOString()) }).strict();
 export const ownerPayoutPaymentSchema = ownerPayoutCommandSchema.extend({ paymentReference:z.string().trim().min(3).max(160) }).strict();

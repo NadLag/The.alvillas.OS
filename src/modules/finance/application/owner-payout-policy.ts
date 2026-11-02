@@ -36,7 +36,9 @@ export function ownerPayoutMethodHash(method: OwnerPayoutMethod) {
 }
 
 /** Reuse the canonical owner ledger; pending commitments are source amounts, never editable balances. */
-export async function ownerPayoutCapacity(ctx: FinanceActorContext, row: OwnerPayoutRecord, tx: TenantTransaction, now: Date) {
+export async function ownerPayoutCapacity(ctx: FinanceActorContext, row: Pick<OwnerPayoutRecord, "ownerId" | "propertyId" | "currency"> & {
+  id?: string; owner: Pick<OwnerPayoutRecord["owner"], "displayName">; property: Pick<OwnerPayoutRecord["property"], "name">;
+}, tx: TenantTransaction, now: Date) {
   const ledger = await readOwnerLedgerStatement(tx, ctx.organizationId, { ownerId: row.ownerId, ownerName: row.owner.displayName,
     propertyId: row.propertyId, propertyName: row.property.name, currency: row.currency, startsAt: now, endsAt: now });
   const committed = Money.of(await new OwnerPayoutRepository(tx, ctx.organizationId).committedAmount(row.ownerId, row.propertyId, row.currency, row.id), row.currency);

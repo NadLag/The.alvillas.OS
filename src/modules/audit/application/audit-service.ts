@@ -1,3 +1,4 @@
+import {containsRecurringPayoutDraftRule,recurringPayoutDraftRuleAccess} from "@/platform/config/recurring-payout-rule-authority";
 import { z } from "zod";
 import {
   AuditRepository,
@@ -84,6 +85,11 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: Resource
 ): AuditHistoryRow {
+  if (containsRecurringPayoutDraftRule(row.before) || containsRecurringPayoutDraftRule(row.after)) {
+    const allowed = recurringPayoutDraftRuleAccess(ctx.authContext,action);
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,data:row},
+      {before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}}) as AuditHistoryRow;
+  }
   if (row.resourceType === "supplier_invoice") {
     const now = new Date();
     const allowed = authorizeOrganizationSource(ctx.authContext, action, { type: "supplier_invoice", organizationId: ctx.organizationId, dataClass: "financial" }, now) &&

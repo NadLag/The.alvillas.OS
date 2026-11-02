@@ -53,6 +53,7 @@ describe("config rule registry", () => {
       "finance.expense_treatment",
       "finance.ota_fee",
       "finance.payout_schedule",
+      "finance.recurring_payout_drafts",
       "finance.recurring_payouts",
       "finance.tax",
       "identity.pin_lockout",
