@@ -245,8 +245,8 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw Error("Dedicated local PostgreSQL required");
     execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"], { env: { ...process.env, DATABASE_URL: url }, stdio: "pipe" });
-    admin = new PrismaClient({ datasourceUrl: url }); await provisionIntegrationRole(admin, "alvillas_ops_tests");
-    const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
+    admin = new PrismaClient<Prisma.PrismaClientOptions>({ datasourceUrl: url }); await provisionIntegrationRole(admin, "alvillas_ops_tests");
+    const scoped = new URL(url); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient<Prisma.PrismaClientOptions>({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
   it("reverses every original supplier claim exactly once under concurrent retries and preserves every original journal", async () => {
@@ -404,6 +404,18 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
       calendar: { id: preview.preview.calendarRuleId!, version: preview.preview.calendarRuleVersion!, local: preview.preview.paidLocal, occurrence: "reject" } })).rejects.toBeInstanceOf(SupplierInvoiceConflictError);
     expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
     expect((await getSupplierSettlement(f.ctx, { id: f.invoice.id }, { db })).outstanding.amount).toBe("3320.02");
+  });
+  it.each([
+    ["2026-11-01T08:30:00.123Z","earlier","2026-11-01T08:30:00.000Z"],
+    ["2026-11-01T09:30:00.123Z","later","2026-11-01T09:30:00.000Z"]
+  ] as const)("reads the actual supplier claim during the %s fall-back occurrence without moving money",async(instant,occurrence,paidAt)=>{
+    const f=await invoiceSettlementFixture();await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),reason:"Use the actual repeated-hour supplier payment calendar",value:{timezone:"America/Los_Angeles",allow_early_close:false,max_reopen_seconds:60}}));
+    const counts=()=>withTenant(db,f.org,async tx=>({journals:await tx.financialTransaction.count(),postings:await tx.posting.count()})),before=await counts(),clock=vi.spyOn(FinanceRepository.prototype,"clock").mockResolvedValue(new Date(instant));
+    try{
+      const workspace=await getSupplierSettlement(f.ctx,{id:f.invoice.id,amount:"1.00"},{db});expect(workspace.preview).toMatchObject({paidLocal:"2026-11-01T01:30:00",paidAt,occurrence});expect(workspace.canPay).toBe(true);expect(workspace.outstanding.amount).toBe("3320.02");
+      await expect(getSupplierSettlement(f.ctx,{id:f.invoice.id,amount:"1.00",paidLocal:"2026-11-01T01:30:00",occurrence:"reject"},{db})).rejects.toBeInstanceOf(RangeError);
+      const reviewed=await getSupplierSettlement(f.ctx,{id:f.invoice.id,amount:"1.00",paidLocal:workspace.preview.paidLocal,occurrence},{db});expect(reviewed.preview.paidAt).toBe(paidAt);expect(reviewed.canPay).toBe(true);expect(await counts()).toEqual(before);
+    }finally{clock.mockRestore();}
   });
   it("keeps canonical payment replay valid after the accounting calendar changes", async () => {
     const f = await invoiceSettlementFixture(), preview = await getSupplierSettlement(f.ctx, { id: f.invoice.id, paidLocal: "2026-10-28T10:00:00", amount: "1.00" }, { db });

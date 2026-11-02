@@ -241,6 +241,8 @@ test.describe("Team Management", () => {
       ).toContain(fixture.role.id);
       await assignment.getByLabel("Role", { exact: true }).selectOption(fixture.role.id);
       await assignment.getByLabel("Scope", { exact: true }).selectOption("property");
+      await assignment.getByTestId("team-scope-query").fill(fixture.property.name);
+      await assignment.getByTestId("team-scope-search").click();
       await assignment.getByLabel("Scope record").selectOption(fixture.property.id);
       await assignment.getByLabel("Assignment starts").fill("2027-01-01");
       await assignment.getByLabel("Restrict access").check();

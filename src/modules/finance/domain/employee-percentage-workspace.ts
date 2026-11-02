@@ -1,0 +1,10 @@
+import {z} from "zod";
+import {employeePercentageRunSourceInput,employeePercentageRunPolicySchema} from "./employee-percentage-run";
+import {employeeCompensationRunDetailSchema} from "./employee-compensation-workspace";
+import {employeeCompensationRunViewSchema} from "./employee-compensation-run";
+const money=employeeCompensationRunViewSchema.shape.total;
+export const employeePercentagePickerInput=z.object({fromOn:z.iso.date(),toOn:z.iso.date(),currency:z.string().regex(/^[A-Z]{3}$/u),search:z.string().trim().max(120).default(""),after:z.string().min(1).max(4096).optional()}).strict();
+export const employeePercentageChoiceSchema=z.object({postingId:z.uuid(),assignmentId:z.uuid(),personId:z.uuid(),personName:z.string().nullable(),propertyName:z.string().nullable(),roleName:z.string(),contractVersion:z.number().int().positive(),effectiveFrom:z.iso.datetime(),earnedAt:z.iso.datetime(),reference:z.string(),baseAmount:money,rate:money,amount:money}).strict();
+export const employeePercentageBasesSchema=z.object({timezone:z.string(),items:z.array(employeePercentageChoiceSchema).max(25),next:z.string().nullable()}).strict();
+export const employeePercentageReviewInput=employeePercentageRunSourceInput.safeExtend({after:z.uuid().optional()});
+export const employeePercentageReviewSchema=z.object({reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),fromOn:z.iso.date(),toOn:z.iso.date(),currency:z.string().regex(/^[A-Z]{3}$/u),timezone:z.string(),total:money,lineCount:z.number().int().positive(),policy:employeePercentageRunPolicySchema,lines:z.array(z.object({assignmentId:z.uuid(),personName:z.string().nullable(),propertyName:z.string().nullable(),roleName:z.string(),percentageCoverage:employeeCompensationRunDetailSchema.shape.labels.element.shape.percentageCoverage.unwrap()}).strict()).max(25),next:z.uuid().nullable()}).strict();

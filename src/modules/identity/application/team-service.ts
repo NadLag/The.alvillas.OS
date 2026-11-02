@@ -235,13 +235,13 @@ export async function teamMember(ctx: IdentityActorContext, input: unknown, deps
         ? new IdentityRepository(tx, ctx.organizationId).listRoles()
         : [],
       authorize(ctx.authContext, "assign", { type: "role", organizationId: ctx.organizationId })
-        ? repository.properties()
+        ? repository.properties(assignments.filter(assignment=>assignment.scopeType==="property"&&assignment.scopeId).map(assignment=>assignment.scopeId!))
         : [],
       authorize(ctx.authContext, "assign", { type: "role", organizationId: ctx.organizationId })
-        ? repository.regions()
+        ? repository.regions(assignments.filter(assignment=>assignment.scopeType==="region"&&assignment.scopeId).map(assignment=>assignment.scopeId!))
         : [],
       authorize(ctx.authContext, "assign", { type: "role", organizationId: ctx.organizationId })
-        ? repository.cities()
+        ? repository.cities(assignments.filter(assignment=>assignment.scopeType==="city"&&assignment.scopeId).map(assignment=>assignment.scopeId!))
         : [],
       repository.organization(),
       canWallet &&

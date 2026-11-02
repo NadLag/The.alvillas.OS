@@ -19,7 +19,7 @@ import { updateAccountEmail } from "@/modules/identity/application/identity-serv
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient,type Prisma } from "@prisma/client";
 import Decimal from "decimal.js";
 import type { Session } from "next-auth";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -345,7 +345,7 @@ function signedLedgerAmount(row: { side: string; amount: string }): Decimal {
 }
 
 async function configureAppRole(databaseUrl: string): Promise<string> {
-  adminPrisma = new PrismaClient({
+  adminPrisma = new PrismaClient<Prisma.PrismaClientOptions>({
     datasources: { db: { url: databaseUrl } }
   });
 
@@ -640,7 +640,7 @@ describe("PostgreSQL baseline", () => {
     databaseUrl = await configureAppRole(databaseUrl);
     notificationTestDatabaseUrl = databaseUrl;
 
-    prisma = new PrismaClient({
+    prisma = new PrismaClient<Prisma.PrismaClientOptions>({
       datasources: { db: { url: databaseUrl } }
     });
   }, 120000);

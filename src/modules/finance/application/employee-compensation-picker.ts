@@ -20,6 +20,7 @@ import { employeeCompensationSourceLabels } from "./employee-compensation-source
 import { employeeCompensationEditorSchema,employeeCompensationWorkSchema } from "../domain/employee-compensation-picker";
 import { recheckFinanceAuthorization,type FinanceActorContext } from "./finance-access";
 import { employeeHourlyRunPolicyKey,employeeHourlyRunPolicySchema } from "../domain/employee-hourly-run";
+import {employeePercentageRunPolicyKey,employeePercentageRunPolicySchema} from "../domain/employee-percentage-run";
 
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 const filters=z.object({fromOn:z.iso.date(),toOn:z.iso.date(),currency:z.string().regex(/^[A-Z]{3}$/u)});
@@ -34,13 +35,16 @@ export async function getEmployeeCompensationRunEditor(ctx:FinanceActorContext,d
 export async function getEmployeeHourlyRunEditor(ctx:FinanceActorContext,deps:Deps={}){
   return getEmployeeWorkRunEditor(ctx,"PER_HOUR",deps);
 }
-async function getEmployeeWorkRunEditor(ctx:FinanceActorContext,mode:"PER_JOB"|"PER_HOUR",deps:Deps){
+export async function getEmployeePercentageRunEditor(ctx:FinanceActorContext,deps:Deps={}){
+  return getEmployeeWorkRunEditor(ctx,"PERCENTAGE",deps);
+}
+async function getEmployeeWorkRunEditor(ctx:FinanceActorContext,mode:"PER_JOB"|"PER_HOUR"|"PERCENTAGE",deps:Deps){
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     const finance=new FinanceRepository(tx,ctx.organizationId),now=await finance.clock(),resource=rootResource(ctx.organizationId,now),checks=[{action:"view" as const,resource},{action:"create" as const,resource}];
     await recheckFinanceAuthorization(ctx,tx,now,checks,new EmployeeCompensationRunAccessError());
-    const config=new ConfigRuleRepository(tx,ctx.organizationId),key=mode==="PER_HOUR"?employeeHourlyRunPolicyKey:employeeCompensationRunPolicyKey,rule=await config.resolve({key,scopes:[{scopeType:"organization",scopeId:null}],asOf:await finance.clock()});
+    const config=new ConfigRuleRepository(tx,ctx.organizationId),key=mode==="PERCENTAGE"?employeePercentageRunPolicyKey:mode==="PER_HOUR"?employeeHourlyRunPolicyKey:employeeCompensationRunPolicyKey,rule=await config.resolve({key,scopes:[{scopeType:"organization",scopeId:null}],asOf:await finance.clock()});
     if(!rule||rule.scopeType!=="organization"||rule.scopeId!==null)throw new EmployeeCompensationRunPolicyError();
-    const policy=(mode==="PER_HOUR"?employeeHourlyRunPolicySchema:employeeCompensationRunPolicySchema).parse(rule.parsedValue),choices=await new EmployeeCompensationPickerRepository(tx,ctx.organizationId).editor();
+    const policy=(mode==="PERCENTAGE"?employeePercentageRunPolicySchema:mode==="PER_HOUR"?employeeHourlyRunPolicySchema:employeeCompensationRunPolicySchema).parse(rule.parsedValue),choices=await new EmployeeCompensationPickerRepository(tx,ctx.organizationId).editor();
     const current=await config.resolve({key,scopes:[{scopeType:"organization",scopeId:null}],asOf:await finance.clock()});
     if(JSON.stringify(rule)!==JSON.stringify(current))throw new EmployeeCompensationRunPolicyError();
     await recheckFinanceAuthorization(ctx,tx,await finance.clock(),checks,new EmployeeCompensationRunAccessError());

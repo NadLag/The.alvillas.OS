@@ -1989,7 +1989,21 @@
     "noCompensation": "No compensation agreed yet.",
     "accountNumber": "Active account {number}",
     "noAccount": "Person only ? no account access",
-    "createWallet": "Create a dedicated staff wallet"
+    "createWallet": "Create a dedicated staff wallet",
+    "scopeChoices": {
+      "searchLabel": "Find a property, city or region",
+      "search": "Search",
+      "choose": "Choose a record",
+      "loading": "Loading authorized records…",
+      "offline": "Connect to search for assignment records.",
+      "invalid": "Check the search and try again.",
+      "denied": "You no longer have access to these assignment records.",
+      "unavailable": "The records could not be loaded. Try again.",
+      "empty": "No matching records are available to your account.",
+      "first": "First page",
+      "next": "More records",
+      "retry": "Try again"
+    }
   },
   "ReservationManagement": {
     "eyebrow": "Reservations",
@@ -3623,6 +3637,58 @@
     "overlap": {
       "REJECT_PER_PERSON": "The configured policy rejects overlapping work intervals for the same person.",
       "ALLOW_PER_VALIDATED_SOURCE": "The configured policy calculates each independently validated completed source."
+    }
+  },
+  "PercentageCompensation": {
+    "clearSelection": "Clear selection",
+    "completeAmount": "Complete earned amount",
+    "creationGuidance": "Creation continues in the background. Posting and payment follow the configured approval process.",
+    "retryExact": "Retry the same request",
+    "recover": "Recover saved request",
+    "startNew": "Start a new review",
+    "retryRead": "Reload authorized data",
+    "checking": "Checking your saved request…",
+    "offline": "You are offline. Private compensation details have been cleared. Reconnect to recover your request.",
+    "forbidden": "You no longer have access to these compensation records.",
+    "recoveryUnavailable": "The saved request could not be checked. Recover it before creating another request.",
+    "uncertain": "The response could not be confirmed. Recover the saved request or retry the same selection.",
+    "title": "Create percentage compensation",
+    "description": "Select original posted income and review the earnings from each original effective percentage contract.",
+    "calendar": "Earning period",
+    "calendarGuidance": "Income is selected by its actual posting date in {timezone}.",
+    "search": "Visible employee, property, role or journal reference",
+    "applySearch": "Search income",
+    "loading": "Loading authorized original income…",
+    "reviewing": "Reviewing complete percentage earnings…",
+    "emptyPage": "No matching income on this page. Continue to the next page to search further.",
+    "empty": "No matching eligible income on this page.",
+    "selection": "Selected income and beneficiaries",
+    "selectedCount": "Selected income and beneficiary pairs: {count}",
+    "review": "Review selected earnings",
+    "reviewGuidance": "Check every original income posting and effective percentage rate. Each beneficiary contract is rounded once across its selected bases, so the complete amount can differ from the sum of individual previews.",
+    "create": "Create percentage draft",
+    "sending": "Saving the percentage request…",
+    "pending": "Your percentage draft is being created. You can reload this page to recover its result.",
+    "succeeded": "The percentage draft is ready.",
+    "validation": "Check the earning dates, selected income, purpose and reason.",
+    "unavailable": "Percentage compensation is temporarily unavailable.",
+    "configuration_unavailable": "Percentage earning rules are unavailable. Contact an authorized administrator.",
+    "fromOn": "From",
+    "toOn": "Through",
+    "bases": "Original posted income",
+    "baseGuidance": "Select an explicit original contract for each income posting and beneficiary. Every journal and effective rate must be independently visible.",
+    "firstBases": "First income",
+    "nextBases": "Next income",
+    "baseAmount": "Original income base: {amount}",
+    "individualAmount": "Individual earning preview: {amount}",
+    "groups": "Beneficiary contracts",
+    "firstGroups": "First contracts",
+    "nextGroups": "Next contracts",
+    "failures": {
+      "ACCESS_DENIED": "Authority changed before creation. Ask an authorized administrator to review your access.",
+      "SOURCE_CHANGED": "The original income or contracts changed. Start a new request and review the actual amount again.",
+      "POLICY_UNAVAILABLE": "The earning rules are unavailable. Review the configuration before starting a new request.",
+      "EXECUTION_UNAVAILABLE": "Creation could not finish. The request is closed; start a new review to try again."
     }
   }
 }

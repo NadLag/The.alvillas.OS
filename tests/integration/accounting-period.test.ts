@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient,type Prisma } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { provisionIntegrationRole } from "./support/database-role";
 import { withTenant, type TenantTransaction } from "@/platform/db/tenant";
@@ -62,8 +62,8 @@ describe("monthly accounting locks on real PostgreSQL", () => {
     const target = url ? new URL(url) : null, ci = process.env.GITHUB_ACTIONS === "true" && process.env.CI === "true" && target?.pathname === "/alvillas_os";
     if (!target || !["localhost", "127.0.0.1"].includes(target.hostname) || !(target.pathname.startsWith("/alvillas_automation_") || ci)) throw Error("Dedicated local PostgreSQL required");
     execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"], { env: { ...process.env, DATABASE_URL: url }, stdio: "pipe" });
-    admin = new PrismaClient({ datasourceUrl: url }); await provisionIntegrationRole(admin, "alvillas_ops_tests");
-    const scoped = new URL(target); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: scoped.toString() });
+    admin = new PrismaClient<Prisma.PrismaClientOptions>({ datasourceUrl: url }); await provisionIntegrationRole(admin, "alvillas_ops_tests");
+    const scoped = new URL(target); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests"; db = new PrismaClient<Prisma.PrismaClientOptions>({ datasourceUrl: scoped.toString() });
   });
   afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
 

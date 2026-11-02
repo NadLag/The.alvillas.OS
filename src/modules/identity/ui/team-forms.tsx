@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import Link from "next/link";
 import { teamMutationAction, type TeamActionState } from "../application/team-actions";
 import { parseTeamForm, type TeamOperation } from "../domain/team";
+import {TeamScopePicker} from "./team-scope-picker";
 
 const initialState: TeamActionState = { status: "idle" };
 function Field({
@@ -150,24 +151,17 @@ export function TeamProfileForm({
 export function TeamAssignmentForm({
   personId,
   roles,
-  properties,
-  regions,
-  cities,
   today,
   accounts
 }: {
   personId: string;
   roles: { id: string; name: string }[];
-  properties: { id: string; name: string }[];
-  regions: { id: string; name: string }[];
-  cities: { id: string; name: string }[];
   today: string;
   accounts: { id: string }[];
 }) {
   const t = useTranslations("Team");
   const [scope, setScope] = useState("organization");
   const id = useId();
-  const options = scope === "property" ? properties : scope === "region" ? regions : cities;
   return (
     <TeamForm operation="assignment">
       <Hidden name="personId" value={personId} />
@@ -201,13 +195,7 @@ export function TeamAssignmentForm({
       ) : scope === "job" ? (
         <Field name="scopeId" />
       ) : (
-        <Field name="scopeId">
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </Field>
+        <TeamScopePicker key={scope} type={scope as "property"|"region"|"city"}/>
       )}
       <Field name="validFrom" type="date" value={today} />
       <Field name="validTo" type="date" required={false} />

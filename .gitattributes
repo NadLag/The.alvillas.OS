@@ -19,7 +19,22 @@ prisma/migrations/20261031160000_employee_monthly_request_indexed_lookups/migrat
 
 prisma/migrations/20261031170000_employee_monthly_request_policy_names/migration.sql text eol=lf
 
+# Retain the exact qualified and locally admitted bytes, including function bodies.
+prisma/migrations/20261101050000_employee_percentage_request_admission/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+prisma/migrations/20261101060000_employee_percentage_request_slot_batches/migration.sql text eol=lf
+
+
 # Preserve the exact already-qualified percentage SQL bytes across checkouts.
 prisma/migrations/20261101020000_employee_percentage_earning_witnesses/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 prisma/migrations/20261101030000_employee_percentage_claim_source_admission/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 prisma/migrations/20261101040000_employee_percentage_tenant_policy_name/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+
+prisma/migrations/20261101063000_employee_percentage_record_projection/migration.sql text eol=lf
+
+prisma/migrations/20261101190000_employee_percentage_parameterized_validation/migration.sql text eol=lf
+
+prisma/migrations/20261101200000_employee_percentage_bounded_original_validation/migration.sql text eol=lf
+
+prisma/migrations/20261101202500_employee_percentage_original_journal_coverage/migration.sql text eol=lf
+
+prisma/migrations/20261102001000_employee_percentage_bulk_scope_validation/migration.sql text eol=lf

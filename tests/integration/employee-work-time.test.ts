@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient,type Prisma } from "@prisma/client";
 import { afterAll,beforeAll,describe,expect,it,vi } from "vitest";
 import type { z } from "zod";
 import { withTenant } from "@/platform/db/tenant";
@@ -20,7 +20,7 @@ async function evidenceId(f:Fixture,command:z.input<typeof employeeWorkTimeSubmi
 async function counts(f:Fixture){return withTenant(db,f.org,async tx=>({evidence:await tx.employeeWorkTimeEvidence.count(),intervals:await tx.employeeWorkTimeInterval.count(),decisions:await tx.employeeWorkTimeDecision.count(),costs:await tx.expense.count(),postings:await tx.posting.count(),audit:await tx.auditLog.count({where:{action:{startsWith:"operations.work_time."}}}),outbox:await tx.outboxEvent.count({where:{type:{in:["EmployeeWorkTimeSubmitted","EmployeeWorkTimeDecided"]}}})}));}
 
 describe.skipIf(!url)("actual operational work intervals",()=>{
- beforeAll(async()=>{execFileSync(process.execPath,["node_modules/prisma/build/index.js","migrate","deploy"],{env:{...process.env,DATABASE_URL:url},stdio:"pipe"});admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url!);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});});
+ beforeAll(async()=>{execFileSync(process.execPath,["node_modules/prisma/build/index.js","migrate","deploy"],{env:{...process.env,DATABASE_URL:url},stdio:"pipe"});admin=new PrismaClient<Prisma.PrismaClientOptions>({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url!);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient<Prisma.PrismaClientOptions>({datasourceUrl:scoped.toString()});});
  afterAll(async()=>{vi.restoreAllMocks();await db?.$disconnect();await admin?.$disconnect();});
  for(const method of ["SELF","OFFLINE_SYNC","PROXY"] as const)it(`retains actual ${method} completion, original intervals, validation, atomic history and exact replays without financial access`,async()=>{
   const f=await fixture(method),created=await evidenceId(f),initial=await counts(f);expect(initial).toMatchObject({evidence:1,intervals:1,decisions:0,costs:0,postings:0,audit:1,outbox:1});
