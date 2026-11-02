@@ -57,6 +57,8 @@ async function prepare(ctx:FinanceActorContext,intent:Intent,tx:TenantTransactio
       if(input)checks.push({action:"create",resource:{...financial,occurredAt:postingAt},organizationOnly});
       if(input&&(adjustments.has(cost.id)||link?.periodAdjustment))checks.push({action:"override",resource:financial,organizationOnly});
       if(link&&postingAt.getTime()!==cost.sourceOccurredAt.getTime())checks.push({action:"view",resource:{...financial,id:link.transactionId,financialRecordId:link.transactionId,occurredAt:postingAt},organizationOnly});
+      const correction=existing?.correction?.lines.find(line=>line.costId===cost.id);
+      if(correction)checks.push({action:"view",resource:{...financial,id:correction.reversalTransactionId,financialRecordId:correction.reversalTransactionId,assignedUserAccountId:correction.reversalTransaction.createdBy??undefined,occurredAt:correction.reversalTransaction.occurredAt},organizationOnly});
     }
     await recheckEmployeeCompensationRun(ctx,tx,await finance.clock(),facts,input?"pay":"view",checks);
   };

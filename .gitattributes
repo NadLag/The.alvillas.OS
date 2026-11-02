@@ -23,6 +23,9 @@ prisma/migrations/20261031170000_employee_monthly_request_policy_names/migration
 prisma/migrations/20261101050000_employee_percentage_request_admission/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 prisma/migrations/20261101060000_employee_percentage_request_slot_batches/migration.sql text eol=lf
 
+prisma/migrations/20261101070000_employee_compensation_claim_corrections/migration.sql text eol=lf
+
+
 
 # Preserve the exact already-qualified percentage SQL bytes across checkouts.
 prisma/migrations/20261101020000_employee_percentage_earning_witnesses/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
