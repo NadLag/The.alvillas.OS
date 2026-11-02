@@ -84,7 +84,7 @@ describe("actual recurring expense durable jobs",()=>{
   const f=await fixture(),date=new Date(f.schedule.start_on+"T00:00:00Z");date.setUTCDate(date.getUTCDate()+1);const on=date.toISOString().slice(0,10),schedule={...f.schedule,end_on:null},rule=await configure(f,[schedule]);
   const draft=await createExpenseDraft(await actor(f),{...schedule.draft,occurredOn:on,emergency:false,idempotencyKey:randomUUID(),reason:"Actual future occurrence admission rejection"},{db});
   const data={organizationId:f.org,scheduleId:schedule.id,on:date,configRuleId:rule.id,expenseId:draft.id,createdBy:f.account.id};
-  await expect(withTenant(db,f.org,tx=>tx.recurringExpenseOccurrence.create({data}))).rejects.toThrow(/not due/u);
+  await expect(withTenant(db,f.org,async tx=>tx.recurringExpenseOccurrence.create({data:{...data,createdAt:await new FinanceRepository(tx,f.org).clock()}}))).rejects.toThrow(/not due/u);
   await expect(withTenant(db,f.org,tx=>tx.recurringExpenseOccurrence.create({data:{...data,createdAt:new Date(Date.now()+86400000)}}))).rejects.toThrow(/actual clock/u);
  });
  it("rejects an old policy version even when a native draft still matches its original amount",async()=>{
