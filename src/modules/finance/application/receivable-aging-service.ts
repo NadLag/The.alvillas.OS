@@ -7,6 +7,7 @@ import {commandFingerprint} from "@/platform/http/command-fingerprint";
 import {present,catalogFieldPolicy} from "@/platform/authz/present";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {requireCurrentTimezoneData} from "@/platform/time/timezone-data";
+import {calendarDateAt} from "@/i18n/format";
 import {ReceivableRepository} from "../infrastructure/receivable-repository";
 import {ReceivableAgingRepository} from "../infrastructure/receivable-aging-repository";
 import {receivablePolicyKey,ReceivableAccessError,ReceivablePolicyError} from "../domain/receivable";
@@ -35,7 +36,7 @@ export async function getReceivableAging(ctx:FinanceActorContext,raw:unknown,dep
   if(input.after){try{cursor=cursorSchema.parse(JSON.parse(decryptSecret(input.after)));if(cursor.organizationId!==ctx.organizationId||cursor.actorId!==ctx.actorId||cursor.filter!==filter)throw new ReceivableAccessError();}catch{throw new ReceivableAccessError();}
    if(cursor.policy!==source.identity)throw new ReceivableAgingChangedError();}
   const report=await new ReceivableAgingRepository(tx,ctx.organizationId).snapshot({...input,timezone:source.timezone,policy:source.policy,accountCodes:source.source.account_codes,after:cursor?.after});
-  if(!report.valid)throw new ReceivableAgingSourceError();if(cursor&&(cursor.snapshot!==report.fingerprint||cursor.on!==report.on))throw new ReceivableAgingChangedError();
+  if(!report.valid||calendarDateAt(report.at,source.timezone)!==report.on)throw new ReceivableAgingSourceError();if(cursor&&(cursor.snapshot!==report.fingerprint||cursor.on!==report.on))throw new ReceivableAgingChangedError();
   const totals=receivableAgingTotals(source.policy,input.currency,report.groups),page=report.items.slice(0,50),items=page.map(row=>{
    const amounts=receivableAgingAmounts(row.assigned,row.collected,input.currency),bucket=receivableAgingBucket(source.policy,report.on,row.dueOn);
    if(bucket!==row.bucket||amounts.outstanding.amount!==row.outstanding||row.daysPastDue!==(row.dueOn===null?null:receivableDaysPastDue(report.on,row.dueOn)))throw new ReceivableAgingSourceError();
