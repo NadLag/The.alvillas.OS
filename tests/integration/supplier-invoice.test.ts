@@ -862,6 +862,9 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     let onCommit: (() => void) | undefined;
     measured.$on("query", event => { queries.push(event.query); if (event.query.trim() === "COMMIT") onCommit?.(); });
     const readStatus = async (before?: string) => {
+      // Finish connection readiness before measuring application work after an idle interval.
+      const ready=new Promise<void>(resolve=>{onCommit=resolve;});
+      await measured.$transaction(tx=>tx.$queryRaw`SELECT 1`);await ready;onCommit=undefined;
       queries.length = 0; const committed = new Promise<void>(resolve => { onCommit = resolve; });
       const result = await getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id, ...(before ? { before } : {}) }, { db: measured });
       await committed; onCommit = undefined; return result;
@@ -872,9 +875,9 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
         const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { type: "SupplierInvoiceReversalRequested", payload: { path: ["requestId"], equals: requested.requestId } } }));
         await failSupplierInvoiceRecognitionReference({ organizationId: f.org, outboxEventId: event.id }, { db });
       };
-      await record(0); await readStatus(); const initialQueries = queries.length;
+      await record(0); await readStatus(); const initialQueries = queries.length; const initialStatements=[...queries];
       for (let index = 1; index < 52; index++) await record(index);
-      const first = await readStatus(); expect(queries.length).toBe(initialQueries); expect(first.history).toHaveLength(50); expect(first.next).not.toBeNull();
+      const first = await readStatus(); if(queries.length!==initialQueries){const normalize=(sql:string)=>sql.replace(/\s+/gu," ").replace(/'(?:''|[^'])*'/gu,"[literal]").trim(),counts=(rows:string[])=>{const result=new Map<string,number>();for(const row of rows){const key=normalize(row);result.set(key,(result.get(key)??0)+1);}return result;},before=counts(initialStatements),after=counts(queries);console.log(JSON.stringify({diagnostic:"actual-supplier-history-query-delta",initial:initialQueries,current:queries.length,delta:[...new Set([...before.keys(),...after.keys()])].filter(sql=>before.get(sql)!==after.get(sql)).map(sql=>({before:before.get(sql)??0,after:after.get(sql)??0,statement:sql.slice(0,180)}))}));} expect(queries.length).toBe(initialQueries); expect(first.history).toHaveLength(50); expect(first.next).not.toBeNull();
       const second = await readStatus(first.next!); expect(second.history).toHaveLength(2);
       expect(new Set([...first.history, ...second.history].map(row => row.id)).size).toBe(52);
       expect(await withTenant(db, f.org, tx => tx.financialTransaction.count())).toBe(2);
