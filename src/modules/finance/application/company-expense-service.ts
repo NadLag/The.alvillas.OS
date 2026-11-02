@@ -10,6 +10,8 @@ import {Money} from "@/platform/money/money";
 import {requireCurrentTimezoneData} from "@/platform/time/timezone-data";
 import {CompanyExpenseRepository} from "../infrastructure/company-expense-repository";
 import {FinanceRepository} from "../infrastructure/finance-repository";
+import {ExpenseRepository} from "../infrastructure/expense-repository";
+import {validateExpenseAmount,ExpenseConfigurationError} from "./expense-service";
 import {companyExpensePolicyKey,companyExpensePolicySchema,companyExpenseDraftSchema,companyExpenseRevisionSchema,companyExpenseCancellationSchema,CompanyExpenseAccessError,CompanyExpenseConfigurationError,CompanyExpenseChangedError,type CompanyExpenseDraftInput} from "../domain/company-expense";
 import {recheckFinanceAuthorization,type FinanceActorContext} from "./finance-access";
 
@@ -29,7 +31,9 @@ async function configured(ctx:FinanceActorContext,tx:TenantTransaction,input:Omi
  const repository=new CompanyExpenseRepository(tx,ctx.organizationId),rules=new ConfigRuleRepository(tx,ctx.organizationId);await rules.lockVersion(companyExpensePolicyKey,"organization",null);
  const now=await new FinanceRepository(tx,ctx.organizationId).clock(),rule=await rules.resolve({key:companyExpensePolicyKey,scopes:[{scopeType:"organization",scopeId:null}],asOf:now});
  if(!rule)throw new CompanyExpenseConfigurationError();const parsed=companyExpensePolicySchema.safeParse(rule.value);if(!parsed.success)throw new CompanyExpenseConfigurationError();const policy=parsed.data,category=policy.categories.find(row=>row.key===input.category),costCenter=policy.cost_centers.find(row=>row.key===input.costCenter),calendar=await repository.configuredCalendar();
- if(!category||!costCenter||!calendar.timezone||!calendar.currencies.some(row=>row.code===input.currency))throw new CompanyExpenseConfigurationError();requireCurrentTimezoneData();new Intl.DateTimeFormat("en",{timeZone:calendar.timezone});
+ if(!category||!costCenter||!calendar.timezone||!calendar.currencies.some(row=>row.code===input.currency))throw new CompanyExpenseConfigurationError();
+ try{await validateExpenseAmount(new ExpenseRepository(tx,ctx.organizationId),input.amount,input.currency);}catch(error){if(error instanceof ExpenseConfigurationError)throw new CompanyExpenseConfigurationError();throw error;}
+ requireCurrentTimezoneData();new Intl.DateTimeFormat("en",{timeZone:calendar.timezone});
  return{now,configRuleId:rule.id,policySnapshot:{category,costCenter},timezone:calendar.timezone,dataClass:previous?.dataClass==="STAFF_COMPENSATION"?previous.dataClass:category.data_class};
 }
 async function audit(ctx:FinanceActorContext,tx:TenantTransaction,row:CompanyExpenseRevision,deps:Deps,before?:CompanyExpenseRevision){await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:row.version===1?"company_expense.created":row.state==="CANCELLED"?"company_expense.cancelled":"company_expense.revised",resourceType:"company_expense",resourceId:row.companyExpenseId,...before?{before:facts(before)}:{},after:facts(row),reason:row.reason,requestId:deps.requestId??randomUUID(),occurredAt:row.createdAt});}
