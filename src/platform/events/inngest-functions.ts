@@ -1,3 +1,4 @@
+import {tickRecurringPayoutDrafts} from "@/modules/finance/application/recurring-payout-draft-service";
 import { scheduleReservationSyncs } from "@/modules/reservations/application/reservation-management-service";
 import { cleanupFieldUploadParts } from "@/modules/reservations/application/field-upload-cleanup";
 import {tickRecurringPayouts} from "@/modules/finance/application/recurring-payout-service";
@@ -57,6 +58,7 @@ export const dispatchOutbox = inngest.createFunction({ id: "dispatch-outbox", na
     await step.run(`schedule-staff-documents-${id}`, () => scheduleTeamDocumentReminders(id));
     await step.run(`schedule-digests-${id}`, () => scheduleDigests(id));
     await step.run(`schedule-recurring-payouts-${id}`,()=>tickRecurringPayouts(id));
+    await step.run(`create-recurring-payout-drafts-${id}`,()=>tickRecurringPayoutDrafts(id));
     await step.run(`automation-recovery-${id}`, () => automationTick(id));
     const result = await step.run(`dispatch-${id}`, () => dispatchOrganization(id));
     total.dispatched += result.dispatched; total.failed += result.failed; total.skipped += result.skipped;

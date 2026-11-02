@@ -1,10 +1,50 @@
 import { describe, expect, it, vi } from "vitest";
 import { Money } from "@/platform/money/money";
 import { planConfiguredPayout } from "@/modules/finance/domain/configured-finance-rules";
-import { payoutScheduleSlot, PayoutScheduleConfigurationError } from "@/modules/finance/domain/payout-schedule";
+import { latestPayoutCalendarSlot, payoutScheduleSlot, PayoutScheduleConfigurationError } from "@/modules/finance/domain/payout-schedule";
 import * as timezoneData from "@/platform/time/timezone-data";
 
 const subject = (at: string, timezone = "UTC") => ({ triggeredAt: new Date(at), timezone, availableBalance: Money.of("10000.00", "MAD") });
+
+describe("periodic payout proposal slots", () => {
+  const clock = (asOf: string, timezone = "UTC", startsAt = "2026-01-01T00:00:00Z") => ({ asOf: new Date(asOf), startsAt: new Date(startsAt), timezone, hashSeed: "owner-property-schedule" });
+  it("chooses only the latest missed weekly slot and includes the exact scheduled instant", () => {
+    const config = { cadence: "WEEKLY" as const, schedule: { weekday: 1, at: "09:00" } };
+    expect(latestPayoutCalendarSlot(config, clock("2026-11-02T09:00:00Z"))?.at.toISOString()).toBe("2026-11-02T09:00:00.000Z");
+    expect(latestPayoutCalendarSlot(config, clock("2026-11-02T08:59:59Z"))?.at.toISOString()).toBe("2026-10-26T09:00:00.000Z");
+    expect(latestPayoutCalendarSlot(config, clock("2026-11-02T08:59:59Z", "UTC", "2026-10-27T00:00:00Z"))).toBeNull();
+  });
+  it("uses configured month ends and skips months without the explicit day 31", () => {
+    expect(latestPayoutCalendarSlot({ cadence: "MONTHLY", schedule: { month_day: "LAST", at: "09:00" } }, clock("2028-03-01T00:00:00Z"))?.at.toISOString()).toBe("2028-02-29T09:00:00.000Z");
+    expect(latestPayoutCalendarSlot({ cadence: "MONTHLY", schedule: { month_day: 31, at: "09:00" } }, clock("2028-03-01T00:00:00Z"))?.at.toISOString()).toBe("2028-01-31T09:00:00.000Z");
+  });
+  it("keeps fifteen civil days across DST and refuses slots before its anchor", () => {
+    const config = { cadence: "FIFTEEN_DAY" as const, schedule: { anchor_on: "2026-02-22", at: "09:00" } };
+    expect(latestPayoutCalendarSlot(config, clock("2026-03-09T15:00:00Z", "America/Denver"))?.at.toISOString()).toBe("2026-03-09T15:00:00.000Z");
+    expect(latestPayoutCalendarSlot(config, clock("2026-03-09T14:59:59Z", "America/Denver"))?.at.toISOString()).toBe("2026-02-22T16:00:00.000Z");
+    expect(latestPayoutCalendarSlot(config, clock("2026-02-22T15:59:59Z", "America/Denver"))).toBeNull();
+  });
+  it("uses one civil identity for a cron slot through the repeated DST hour", () => {
+    const config = { cadence: "CUSTOM_CRON" as const, cron: "30 1 * * *" };
+    const early = latestPayoutCalendarSlot(config, clock("2026-11-01T07:30:00Z", "America/Denver"));
+    const late = latestPayoutCalendarSlot(config, clock("2026-11-01T08:30:00Z", "America/Denver"));
+    expect(early?.slot).toBe("2026-11-01T01:30:00");expect(late?.slot).toBe(early?.slot);
+    expect(early!.at.getTime()).toBeLessThanOrEqual(new Date("2026-11-01T07:30:00Z").getTime());
+    expect(late!.at.getTime()).toBeLessThanOrEqual(new Date("2026-11-01T08:30:00Z").getTime());
+  });
+  it("uses a reproducible hashed cron and the configured timezone", () => {
+    const config = { cadence: "CUSTOM_CRON" as const, cron: "H 9 * * *", schedule: { timezone: "Europe/Paris" } };
+    const first = latestPayoutCalendarSlot(config, clock("2026-10-27T12:00:00Z"));
+    expect(first).toEqual(latestPayoutCalendarSlot(config, clock("2026-10-27T12:00:00Z")));
+    expect(first?.timezone).toBe("Europe/Paris");expect(first?.slot).toMatch(/^2026-10-27T09:/u);
+  });
+  it("fails closed for invalid clocks, cron and incomplete calendars", () => {
+    expect(() => latestPayoutCalendarSlot({ cadence: "WEEKLY" }, clock("2026-11-02T12:00:00Z"))).toThrow(PayoutScheduleConfigurationError);
+    expect(() => latestPayoutCalendarSlot({ cadence: "CUSTOM_CRON", cron: "not a cron" }, clock("2026-11-02T12:00:00Z"))).toThrow(PayoutScheduleConfigurationError);
+    expect(() => latestPayoutCalendarSlot({ cadence: "MONTHLY", schedule: { at: "09:00", month_day: 1 } }, clock("invalid"))).toThrow(PayoutScheduleConfigurationError);
+    expect(latestPayoutCalendarSlot({ cadence: "WEEKLY", schedule: { at: "09:00", weekday: 1 } }, clock("2026-11-02T09:00:00Z", "UTC", "2026-11-03T00:00:00Z"))).toBeNull();
+  });
+});
 
 describe("configured owner payout calendars", () => {
   it("retains the configured checkout clock through the 23-hour spring calendar day", () => {

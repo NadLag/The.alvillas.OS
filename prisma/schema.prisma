@@ -71,6 +71,7 @@ model AutomationSuggestion {
 }
 
 model Organization {
+  recurringPayoutDraftOccurrences RecurringPayoutDraftOccurrence[]
   ownerPayouts                                   OwnerPayout[]
   supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
   supplierInvoiceRecognitionOutcomes SupplierInvoiceRecognitionOutcome[]
@@ -358,6 +359,7 @@ model Person {
 }
 
 model UserAccount {
+  recurringPayoutDraftOccurrences RecurringPayoutDraftOccurrence[]
   createdOwnerPayouts         OwnerPayout[]                @relation("OwnerPayoutCreator")
   updatedOwnerPayouts         OwnerPayout[]                @relation("OwnerPayoutUpdater")
   supplierInvoiceRecognitionRequests SupplierInvoiceRecognitionRequest[]
@@ -1551,6 +1553,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  recurringPayoutDraftOccurrences RecurringPayoutDraftOccurrence[]
   accountingPeriods      AccountingPeriod[]          @relation("AccountingPeriodCalendarPolicy")
   accountingPeriodEvents AccountingPeriodEvent[]     @relation("AccountingPeriodEventPolicy")
   automationRuns         AutomationRun[]
@@ -2377,6 +2380,7 @@ model Expense {
 }
 
 model OwnerPayout {
+  recurringDraftOccurrence RecurringPayoutDraftOccurrence?
   id                    String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId        String                @map("organization_id") @db.Uuid
   propertyId            String                @map("property_id") @db.Uuid
@@ -2737,4 +2741,27 @@ model SupplierInvoiceRecognitionOutcome {
   @@index([organizationId, occurredAt, id])
   @@index([organizationId, recognitionId])
   @@map("supplier_invoice_recognition_outcome")
+}
+
+model RecurringPayoutDraftOccurrence {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  targetId String @map("target_id") @db.Uuid
+  slot String @db.VarChar(32)
+  configRuleId String @map("config_rule_id") @db.Uuid
+  payoutId String @map("payout_id") @db.Uuid
+  scheduledAt DateTime @map("scheduled_at") @db.Timestamptz(6)
+  timezone String @db.VarChar(100)
+  evidence Json
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "recurring_payout_draft_org_fk")
+  configRule ConfigRule @relation(fields: [organizationId, configRuleId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "recurring_payout_draft_rule_fk")
+  payout OwnerPayout @relation(fields: [organizationId, payoutId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "recurring_payout_draft_payout_fk")
+  actor UserAccount @relation(fields: [organizationId, createdBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "recurring_payout_draft_actor_fk")
+  @@unique([organizationId, id], map: "recurring_payout_draft_org_id_key")
+  @@unique([organizationId, targetId, slot], map: "recurring_payout_draft_slot_key")
+  @@unique([organizationId, payoutId], map: "recurring_payout_draft_payout_key")
+  @@index([organizationId, createdAt, id], map: "recurring_payout_draft_history_idx")
+  @@map("recurring_payout_draft_occurrence")
 }

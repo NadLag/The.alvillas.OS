@@ -44,9 +44,9 @@ export class OwnerPayoutRepository {
       before: { path: ["status"], equals: "FINANCIAL_RECONCILIATION" }, after: { path: ["status"], equals: "CLOSED" } },
       orderBy: { version: "desc" }, select: { id: true, version: true, createdAt: true } });
   }
-  async committedAmount(ownerId: string, propertyId: string, currency: string, excludeId: string) {
+  async committedAmount(ownerId: string, propertyId: string, currency: string, excludeId?: string) {
     const value = await this.tx.ownerPayout.aggregate({ where: { organizationId: this.organizationId, ownerId, propertyId, currency,
-      id: { not: excludeId }, state: { in: ["APPROVED", "SCHEDULED"] } }, _sum: { amount: true } });
+      ...(excludeId ? { id: { not: excludeId } } : {}), state: { in: ["APPROVED", "SCHEDULED"] } }, _sum: { amount: true } });
     return value._sum.amount?.toString() ?? "0";
   }
   page(input:{ownerId:string;propertyId:string;after?:string}){
@@ -64,13 +64,17 @@ export class OwnerPayoutRepository {
   async lockOwner(ownerId: string, propertyId: string, currency: string) {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${[this.organizationId,"owner-payout-balance",ownerId,propertyId,currency].join(":")},0))::text`);
   }
+  openForOwner(ownerId: string, propertyId: string, currency: string) {
+    return this.tx.ownerPayout.findFirst({ where: { organizationId: this.organizationId, ownerId, propertyId, currency,
+      state: { in: ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SCHEDULED"] } }, select: { id: true } });
+  }
   audit(id: string, action: string) { return this.tx.auditLog.findFirst({ where: { organizationId: this.organizationId, resourceType: "owner_payout", resourceId: id, action }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }); }
-  create(input: z.infer<typeof ownerPayoutDraftSchema>, actorId: string) {
+  create(input: z.infer<typeof ownerPayoutDraftSchema>, actorId: string, createdAt?: Date) {
     return this.tx.ownerPayout.create({ data: { organizationId: this.organizationId, propertyId: input.propertyId, ownerId: input.ownerId,
       reservationId: input.reservationId, payoutMethodId: input.payoutMethodId, fundingAccountId: input.fundingAccountId,
       expectedSettlementAt: input.expectedSettlementAt,
       amount: input.amount, currency: input.currency, purpose: input.purpose, idempotencyKey: input.idempotencyKey,
-      createdBy: actorId, updatedBy: actorId }, include });
+      createdBy: actorId, updatedBy: actorId, ...(createdAt ? { createdAt } : {}) }, include });
   }
   transition(id: string, expectedVersion: number, from: OwnerPayoutState, to: OwnerPayoutState, actorId: string,
     fields: TransitionFields = {}) {

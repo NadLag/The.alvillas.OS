@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { authorize, type Resource } from "@/platform/authz/authorize";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { present } from "@/platform/authz/present";
@@ -23,10 +23,32 @@ export class OwnerPayoutAccessError extends Error {}
 export class OwnerPayoutConflictError extends Error {}
 export class OwnerPayoutConfigurationError extends Error {}
 
+
+/** Native draft source checks are reused at durable admission and the final authority fence. */
+export async function recheckOwnerPayoutDraftCreation(ctx: FinanceActorContext, input: z.infer<typeof ownerPayoutDraftSchema>, tx: TenantTransaction, now: Date) {
+    const repository = new OwnerPayoutRepository(tx, ctx.organizationId), finance = new FinanceRepository(tx, ctx.organizationId);
+    const property = await repository.property(input.propertyId);
+    if (!property || property.archivedAt) throw new OwnerPayoutAccessError();
+    const target: Resource = { type: "financial_transaction", organizationId: ctx.organizationId, propertyId: property.id, ownerId: input.ownerId,
+      amount: input.amount, status: "DRAFT", assignedUserAccountId: ctx.actorId, city: property.cityId, region: property.regionId, dataClass: "financial" };
+    await recheckFinanceAuthorization(ctx, tx, now, [{ action: "view", resource: target }, { action: "create", resource: target }], new OwnerPayoutAccessError());
+    const ledger = new OwnerLedgerRepository(tx, ctx.organizationId), owner = await ledger.owner(input.ownerId);
+    if (!owner || !owner.propertyOwners.some(row => row.property.id === property.id) && !await ledger.hasPropertyHistory(owner.id, property.id)) throw new OwnerPayoutAccessError();
+    const method = await repository.method(input.payoutMethodId), funding = await finance.findLedgerAccountById(input.fundingAccountId);
+    const currency = await new ExpenseRepository(tx, ctx.organizationId).currency(input.currency);
+    if (!currency || currency.minorUnit > 2 || Money.of(input.amount,input.currency).amount.decimalPlaces() > currency.minorUnit ||
+      !method || method.ownerId !== owner.id || method.currency !== input.currency || method.status !== "ACTIVE" || method.archivedAt || !funding || !isExpenseFundingAccount(funding)) throw new OwnerPayoutConfigurationError();
+    const source: Resource = { type: "financial_transaction", organizationId: ctx.organizationId, id: funding.id, financialRecordId: funding.id, dataClass: "financial" };
+    const wallet = expenseFundingWalletResource(ctx.organizationId, funding, input.amount, now);
+    await recheckFinanceAuthorization(ctx, tx, now, [{ action: "view", resource: source }, ...(wallet ? [{ action: "view" as const, resource: wallet }] : [])], new OwnerPayoutAccessError());
+    if (input.reservationId && (await repository.booking(input.reservationId))?.propertyId !== property.id) throw new OwnerPayoutAccessError();
+}
+
 export async function createOwnerPayout(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
   const input = ownerPayoutDraftSchema.parse(raw);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new OwnerPayoutRepository(tx, ctx.organizationId);
+    await repository.lockOwner(input.ownerId, input.propertyId, input.currency);
     await repository.lockKey(input.idempotencyKey);
     const finance = new FinanceRepository(tx, ctx.organizationId), now = await finance.clock();
     const property = await repository.property(input.propertyId);
@@ -42,19 +64,11 @@ export async function createOwnerPayout(ctx: FinanceActorContext, raw: unknown, 
       if (!audit || audit.actorId !== ctx.actorId || !saved.success || JSON.stringify(saved.data.request) !== JSON.stringify(input)) throw new OwnerPayoutConflictError();
       return { id: existing.id, idempotent: true };
     }
-    const ledger = new OwnerLedgerRepository(tx, ctx.organizationId), owner = await ledger.owner(input.ownerId);
-    if (!owner || !owner.propertyOwners.some(row => row.property.id === property.id) && !await ledger.hasPropertyHistory(owner.id, property.id)) throw new OwnerPayoutAccessError();
-    const method = await repository.method(input.payoutMethodId), funding = await finance.findLedgerAccountById(input.fundingAccountId);
-    const currency = await new ExpenseRepository(tx, ctx.organizationId).currency(input.currency);
-    if (!currency || currency.minorUnit > 2 || Money.of(input.amount,input.currency).amount.decimalPlaces() > currency.minorUnit ||
-      !method || method.ownerId !== owner.id || method.currency !== input.currency || method.status !== "ACTIVE" || method.archivedAt || !funding || !isExpenseFundingAccount(funding)) throw new OwnerPayoutConfigurationError();
-    const source: Resource = { type: "financial_transaction", organizationId: ctx.organizationId, id: funding.id, financialRecordId: funding.id, dataClass: "financial" };
-    const wallet = expenseFundingWalletResource(ctx.organizationId, funding, input.amount, now);
-    await recheckFinanceAuthorization(ctx, tx, now, [{ action: "view", resource: source }, ...(wallet ? [{ action: "view" as const, resource: wallet }] : [])], new OwnerPayoutAccessError());
-    if (input.reservationId && (await repository.booking(input.reservationId))?.propertyId !== property.id) throw new OwnerPayoutAccessError();
-    const row = await repository.create(input, ctx.actorId);
+    await recheckOwnerPayoutDraftCreation(ctx, input, tx, now);
+    const row = await repository.create(input, ctx.actorId, now);
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.owner_payout.created", resourceType: "owner_payout", resourceId: row.id,
       propertyScopeId: property.id, after: { request: input, payoutId: row.id, state: row.state, version: row.version }, reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: now });
+    await recheckOwnerPayoutDraftCreation(ctx, input, tx, await finance.clock());
     return { id: row.id, idempotent: false };
   });
 }

@@ -2,6 +2,8 @@ import { CronExpressionParser } from "cron-parser";
 import { Temporal } from "temporal-polyfill";
 import type { PayoutScheduleConfig } from "@/platform/config/rule-registry";
 import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
+import type { z } from "zod";
+import type { periodicPayoutDraftCalendarSchema } from "./recurring-payout-draft";
 
 export class PayoutScheduleConfigurationError extends Error {}
 function requirePayoutTimezoneData() {
@@ -21,6 +23,60 @@ function cronAtOrAfter(expression: string, minimum: Date, timezone: string, seed
   try {
     return CronExpressionParser.parse(expression, { currentDate: new Date(minimum.getTime() - 1), tz: timezone, hashSeed: seed ?? expression }).next().toDate();
   } catch { throw new PayoutScheduleConfigurationError("Payout cron schedule is invalid"); }
+}
+
+type PeriodicCalendar = z.infer<typeof periodicPayoutDraftCalendarSchema>;
+function periodicExpression(config: Pick<PayoutScheduleConfig, "cadence" | "cron" | "schedule">): string | null {
+  if (config.cadence === "CUSTOM_CRON") {
+    if (!config.cron) throw new PayoutScheduleConfigurationError("Custom payout schedule requires its cron expression");
+    return config.cron;
+  }
+  const at = config.schedule?.at;
+  if (!at) throw new PayoutScheduleConfigurationError("Payout schedule requires its configured local time");
+  const [hour, minute] = at.split(":").map(Number);
+  if (config.cadence === "WEEKLY") {
+    if (config.schedule?.weekday === undefined) throw new PayoutScheduleConfigurationError("Weekly payout schedule requires its configured weekday");
+    return `${minute} ${hour} * * ${config.schedule.weekday}`;
+  }
+  if (config.cadence === "MONTHLY") {
+    if (config.schedule?.month_day === undefined) throw new PayoutScheduleConfigurationError("Monthly payout schedule requires its configured day");
+    return `${minute} ${hour} ${config.schedule.month_day === "LAST" ? "L" : config.schedule.month_day} * *`;
+  }
+  return null;
+}
+
+/** One latest proposal slot, never a separate claim on today's balance for every missed tick. */
+export function latestPayoutCalendarSlot(config: PeriodicCalendar, subject: { asOf: Date; startsAt: Date; timezone: string; hashSeed: string }): { at: Date; slot: string; timezone: string } | null {
+  requirePayoutTimezoneData();
+  const timezone = config.schedule?.timezone ?? subject.timezone;
+  if (![subject.asOf, subject.startsAt].every(date => Number.isFinite(date.getTime()))) throw new PayoutScheduleConfigurationError("Payout source instant is invalid");
+  if (subject.startsAt > subject.asOf) return null;
+  let at: Date;
+  try {
+    const expression = periodicExpression(config);
+    if (expression) {
+      at = CronExpressionParser.parse(expression, { currentDate: new Date(subject.asOf.getTime() + 1), tz: timezone, hashSeed: subject.hashSeed }).prev().toDate();
+    } else {
+      if (!config.schedule?.anchor_on || !config.schedule.at) throw new PayoutScheduleConfigurationError("Fifteen-day payout schedule requires its configured anchor and local time");
+      const anchor = Temporal.PlainDate.from(config.schedule.anchor_on);
+      const local = Temporal.Instant.fromEpochMilliseconds(subject.asOf.getTime()).toZonedDateTimeISO(timezone);
+      const elapsed = anchor.until(local.toPlainDate(), { largestUnit: "day" }).days;
+      if (elapsed < 0) return null;
+      let day = anchor.add({ days: Math.floor(elapsed / 15) * 15 });
+      let candidate = day.toZonedDateTime({ timeZone: timezone, plainTime: Temporal.PlainTime.from(config.schedule.at) });
+      if (candidate.epochMilliseconds > subject.asOf.getTime()) {
+        day = day.subtract({ days: 15 });
+        if (Temporal.PlainDate.compare(day, anchor) < 0) return null;
+        candidate = day.toZonedDateTime({ timeZone: timezone, plainTime: Temporal.PlainTime.from(config.schedule.at) });
+      }
+      at = new Date(candidate.epochMilliseconds);
+    }
+    if (at < subject.startsAt) return null;
+    return { at, slot: payoutScheduleSlot(at, timezone), timezone };
+  } catch (error) {
+    if (error instanceof PayoutScheduleConfigurationError) throw error;
+    throw new PayoutScheduleConfigurationError("Payout proposal calendar is invalid");
+  }
 }
 
 /** A local clock label identifies one slot even when its offset repeats at DST fall-back. */
@@ -47,23 +103,14 @@ export function payoutEligibility(config: PayoutScheduleConfig, subject: PayoutS
   const eventBased = ["AFTER_CHECKOUT", "PER_BOOKING", "OTA_SPLIT_EXPECTED_SETTLEMENT"].includes(config.cadence);
   if (eventBased && !config.schedule?.at) return { eligibleOn: minimum, timezone: timezone ?? "UTC" };
   if (!timezone) throw new PayoutScheduleConfigurationError("Payout schedule requires its configured timezone");
-  if (config.cadence === "CUSTOM_CRON") {
-    if (!config.cron) throw new PayoutScheduleConfigurationError("Custom payout schedule requires its cron expression");
-    return { eligibleOn: cronAtOrAfter(config.cron, minimum, timezone, subject.hashSeed), timezone };
+  if (!eventBased) {
+    const expression = periodicExpression(config);
+    if (expression) return { eligibleOn: cronAtOrAfter(expression, minimum, timezone, subject.hashSeed), timezone };
   }
   const at = config.schedule?.at;
   if (!at) throw new PayoutScheduleConfigurationError("Payout schedule requires its configured local time");
   const [hour, minute] = at.split(":").map(Number);
   if (eventBased) return { eligibleOn: cronAtOrAfter(`${minute} ${hour} * * *`, minimum, timezone), timezone };
-  if (config.cadence === "WEEKLY") {
-    if (config.schedule?.weekday === undefined) throw new PayoutScheduleConfigurationError("Weekly payout schedule requires its configured weekday");
-    return { eligibleOn: cronAtOrAfter(`${minute} ${hour} * * ${config.schedule.weekday}`, minimum, timezone), timezone };
-  }
-  if (config.cadence === "MONTHLY") {
-    if (config.schedule?.month_day === undefined) throw new PayoutScheduleConfigurationError("Monthly payout schedule requires its configured day");
-    const day = config.schedule.month_day === "LAST" ? "L" : config.schedule.month_day;
-    return { eligibleOn: cronAtOrAfter(`${minute} ${hour} ${day} * *`, minimum, timezone), timezone };
-  }
   if (!config.schedule?.anchor_on) throw new PayoutScheduleConfigurationError("Fifteen-day payout schedule requires its configured anchor");
   const anchor = Temporal.PlainDate.from(config.schedule.anchor_on), localMinimum = Temporal.Instant.fromEpochMilliseconds(minimum.getTime()).toZonedDateTimeISO(timezone);
   const elapsed = anchor.until(localMinimum.toPlainDate(), { largestUnit: "day" }).days;

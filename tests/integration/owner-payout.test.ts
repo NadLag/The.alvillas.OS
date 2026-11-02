@@ -1,3 +1,10 @@
+import {createRecurringPayoutDrafts,tickRecurringPayoutDrafts} from "@/modules/finance/application/recurring-payout-draft-service";
+import {recurringPayoutDraftPolicyKey} from "@/modules/finance/domain/recurring-payout-draft";
+import {getConfigAdminModel,createConfigRuleVersion,activateConfigRuleVersion,retireConfigRuleVersion,ConfigAuthorizationError} from "@/modules/config/application/config-service";
+import {prepareOwnerPayoutPolicy} from "@/modules/finance/application/owner-payout-policy";
+import {ownerPayoutResource} from "@/modules/finance/domain/owner-payout";
+import {OwnerPayoutRepository} from "@/modules/finance/infrastructure/owner-payout-repository";
+import {latestPayoutCalendarSlot} from "@/modules/finance/domain/payout-schedule";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -752,6 +759,103 @@ describe("native owner payout persistence on real PostgreSQL", () => {
       payout:(await tx.ownerPayout.findUniqueOrThrow({where:{id:p.draft.id}})).policySnapshot,
       invoice:(await tx.supplierInvoiceSubmission.findUniqueOrThrow({where:{id:submitted.submissionId}})).snapshot
     }))).toEqual(frozen);
+  });
+
+
+  describe("periodic native payout draft creation",()=>{
+    async function proposal(options:{balance?:string;configured?:boolean;future?:boolean}={}){
+      const f=await fixture();await submissionPolicy(f,{balance:options.balance??"0.10",payout:{cadence:"MONTHLY",schedule:{at:"09:00",month_day:"LAST"},holdback_bps:3000}});
+      const targetId=randomUUID(),source=await withTenant(db,f.org,async tx=>{
+        const role=await tx.role.create({data:{organizationId:f.org,key:"proposal_"+randomUUID(),name:"Actual payout proposal author"}});
+        const keys=["config_rule:view","config_rule:create","config_rule:configure","financial_transaction:view","financial_transaction:create","financial_transaction:edit","financial_transaction:void","owner_statement:view"];
+        const permissions=await tx.permission.findMany({where:{organizationId:f.org,key:{in:keys}}});expect(permissions).toHaveLength(keys.length);
+        await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:role.id,permissionId:permission.id}))});
+        const grant=await tx.roleAssignment.create({data:{organizationId:f.org,roleId:role.id,userAccountId:f.account.id,personId:f.account.personId,scopeType:"organization",validFrom:new Date("2020-01-01")}});
+        const value={source:"CURRENT_DERIVED_OWNER_PAYABLE",principal:"CURRENT_CONFIGURATION_AUTHOR",amount_source:"NATIVE_UNCOMMITTED_PAYABLE",missed_slots:"LATEST_DUE_SLOT",open_payouts:"WAIT_FOR_TERMINAL",batch_size:25,targets:[{id:targetId,starts_at:options.future?"2099-01-01T00:00:00Z":"2020-01-01T00:00:00Z",calendar:{cadence:"CUSTOM_CRON",cron:"0 0 * * *",schedule:{timezone:"UTC"}},draft:{ownerId:f.owner.id,propertyId:f.property.id,currency:"MAD",fundingAccountId:f.bank.id,payoutMethodId:f.method.id,purpose:"Actual current payable proposal"}}]};
+        const rule=options.configured===false?null:await new ConfigRuleRepository(tx,f.org).createVersion({key:recurringPayoutDraftPolicyKey,scopeType:"organization",scopeId:null,createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),reason:"Actual configured periodic payout proposal",value});
+        return{grant,rule,value};
+      });return{f,targetId,...source,ctx:{...f.ctx,authContext:await authContextForAccount(f.org,f.account.id,{db})}};
+    }
+    const financial=(org:string)=>withTenant(db,org,tx=>tx.$queryRaw`SELECT 'transaction' AS kind,id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p) FROM posting p WHERE organization_id=${org}::uuid ORDER BY kind,id`);
+    it("hides payout templates and denies preview, creation and lifecycle changes without independent ledger access",async()=>{
+      const p=await proposal();
+      const ctx={...p.ctx,personId:p.f.account.personId,authContext:{...p.ctx.authContext,personId:p.f.account.personId}};
+      const original=await getConfigAdminModel(ctx,{ruleKey:recurringPayoutDraftPolicyKey},{db});expect(original.rules).toHaveLength(1);expect(original.catalogKeys).toContain(recurringPayoutDraftPolicyKey);
+      await withTenant(db,p.f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:p.f.org,key:"owner_statement:view"}});await tx.rolePermission.deleteMany({where:{organizationId:p.f.org,roleId:p.grant.roleId,permissionId:permission.id}});});
+      const shown=await getConfigAdminModel(ctx,{ruleKey:recurringPayoutDraftPolicyKey},{db});expect(shown.rules).toEqual([]);expect(shown.catalogKeys).not.toContain(recurringPayoutDraftPolicyKey);expect(JSON.stringify(shown)).not.toContain("Actual current payable proposal");
+      await expect(getConfigAdminModel(ctx,{previewKey:recurringPayoutDraftPolicyKey},{db})).rejects.toBeInstanceOf(ConfigAuthorizationError);
+      const input={key:recurringPayoutDraftPolicyKey,scopeType:"organization" as const,lifecycle:"ACTIVE" as const,effectiveFrom:new Date("2021-01-01"),valueJson:JSON.stringify(p.value),reason:"Actual denied source configuration change"};
+      await expect(createConfigRuleVersion(ctx,input,{db,requestId:randomUUID()})).rejects.toBeInstanceOf(ConfigAuthorizationError);
+      for(const change of[activateConfigRuleVersion,retireConfigRuleVersion])await expect(change(ctx,{ruleId:p.rule!.id,effectiveFrom:new Date(),reason:"Actual denied source lifecycle change"},{db,requestId:randomUUID()})).rejects.toBeInstanceOf(ConfigAuthorizationError);
+      await withTenant(db,p.f.org,async tx=>expect(await tx.configRule.count({where:{key:recurringPayoutDraftPolicyKey}})).toBe(1));
+    });
+    it("rolls back configuration and its audit after late independent ledger revocation",async()=>{
+      const p=await proposal(),ctx={...p.ctx,personId:p.f.account.personId,authContext:{...p.ctx.authContext,personId:p.f.account.personId}},original=auditWriter.writeAuditEvent;
+      const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{await original(tx,event);if(event.action==="config_rule.version.created")await withTenant(db,p.f.org,async t=>{const permission=await t.permission.findFirstOrThrow({where:{organizationId:p.f.org,key:"owner_statement:view"}});await t.rolePermission.deleteMany({where:{organizationId:p.f.org,roleId:p.grant.roleId,permissionId:permission.id}});});});
+      try{await expect(createConfigRuleVersion(ctx,{key:recurringPayoutDraftPolicyKey,scopeType:"organization",lifecycle:"ACTIVE",effectiveFrom:new Date("2021-01-01"),valueJson:JSON.stringify(p.value),reason:"Actual audited template change"},{db,requestId:randomUUID()})).rejects.toBeInstanceOf(ConfigAuthorizationError);}finally{spy.mockRestore();}
+      await withTenant(db,p.f.org,async tx=>{expect(await tx.configRule.count({where:{key:recurringPayoutDraftPolicyKey}})).toBe(1);expect(await tx.auditLog.count({where:{action:"config_rule.version.created"}})).toBe(0);});
+    });
+    it("resumes configured one-draft batches across separate real property payables",async()=>{
+      const p=await proposal(),additional=await withTenant(db,p.f.org,async tx=>{
+        const property=await tx.property.create({data:{organizationId:p.f.org,name:"Second actual payout villa",addressLine1:"Local acceptance",city:"Marrakech",propertyType:"VILLA",bedrooms:1,bathrooms:1,maxGuests:2,amenities:[],photoUrls:[]}});
+        await tx.propertyOwner.create({data:{organizationId:p.f.org,propertyId:property.id,ownerId:p.f.owner.id}});
+        const finance=new FinanceRepository(tx,p.f.org),claim=await tx.ledgerAccount.findFirstOrThrow({where:{organizationId:p.f.org,code:"OWNER_PAYABLE"}}),amount=Money.of("0.09","MAD"),dimensions={owner_id:p.f.owner.id,property_id:property.id};
+        await finance.createFinancialTransaction({reference:"QA-PROPOSAL-SECOND:"+randomUUID(),idempotencyKey:randomUUID(),createdBy:p.f.account.id,occurredAt:new Date("2026-01-01"),description:"Actual separate property payable",postings:[{ledgerAccountId:p.f.bank.id,amount,side:"DEBIT",bucket:"REVENUE_RECEIPT",dimensions},{ledgerAccountId:claim.id,amount,side:"CREDIT",bucket:"OWNER_REVENUE",dimensions}]});
+        const rules=new ConfigRuleRepository(tx,p.f.org);await rules.createVersion({key:"finance.payout_schedule",scopeType:"property",scopeId:property.id,effectiveFrom:new Date("2020-01-01"),value:{cadence:"MONTHLY",schedule:{at:"09:00",month_day:"LAST"}},reason:"Actual separate property payout policy"});
+        await rules.createVersion({key:"finance.approval_thresholds",scopeType:"property",scopeId:property.id,effectiveFrom:new Date("2020-01-01"),value:{thresholds:[]},reason:"Actual separate property approval policy"});
+        return{...p.value.targets[0],id:randomUUID(),draft:{...p.value.targets[0].draft,propertyId:property.id}};
+      });
+      await withTenant(db,p.f.org,tx=>new ConfigRuleRepository(tx,p.f.org).createVersion({key:recurringPayoutDraftPolicyKey,scopeType:"organization",createdBy:p.f.account.id,effectiveFrom:new Date("2021-01-01"),value:{...p.value,batch_size:1,targets:[...p.value.targets,additional]},reason:"Actual bounded two-property proposal schedule"}));
+      const before=await financial(p.f.org);expect(await createRecurringPayoutDrafts(p.f.org,{db})).toEqual({configured:true,created:1,pending:true});expect(await createRecurringPayoutDrafts(p.f.org,{db})).toEqual({configured:true,created:1,pending:false});expect((await createRecurringPayoutDrafts(p.f.org,{db})).created).toBe(0);
+      await withTenant(db,p.f.org,async tx=>expect((await tx.ownerPayout.findMany({orderBy:{amount:"asc"}})).map(row=>row.amount.toFixed(2))).toEqual(["0.07","0.09"]));expect(await financial(p.f.org)).toEqual(before);
+    });
+    it("rejects unaudited direct occurrence admission and future clocks atomically",async()=>{
+      const p=await proposal();
+      async function insert(mode:"audit"|"future"|"clock"|"calendar"){
+        return withTenant(db,p.f.org,async tx=>{
+          const runner={ $transaction:async<T>(work:(tx:Prisma.TransactionClient)=>Promise<T>)=>work(tx) };
+          const created=await createOwnerPayout(p.ctx,{...p.f.input,purpose:p.value.targets[0].draft.purpose,amount:"0.07",idempotencyKey:randomUUID()},{db:runner});
+          const row=await new OwnerPayoutRepository(tx,p.f.org).find(created.id);expect(row).not.toBeNull();
+          const now=await new FinanceRepository(tx,p.f.org).clock(),native=await prepareOwnerPayoutPolicy(p.ctx,row!,ownerPayoutResource(p.f.org,row!,row!.property),tx,now);
+          const due=latestPayoutCalendarSlot({cadence:"CUSTOM_CRON",cron:"0 0 * * *",schedule:{timezone:"UTC"}},{asOf:now,startsAt:new Date("2020-01-01"),timezone:"UTC",hashSeed:p.f.org+":"+p.targetId})!;
+          const configRuleId=mode==="calendar"?(await tx.configRule.create({data:{organizationId:p.f.org,key:recurringPayoutDraftPolicyKey,scopeType:"organization",createdBy:p.f.account.id,effectiveFrom:new Date("2021-01-01"),version:2,reason:"Malformed direct configuration admission acceptance",value:{...p.value,targets:[{...p.value.targets[0],calendar:{schedule:{timezone:"UTC"},cron:"0 0 * * *"}}]}}})).id:p.rule!.id;
+          await tx.recurringPayoutDraftOccurrence.create({data:{organizationId:p.f.org,targetId:p.targetId,slot:mode==="future"?"2099-01-01T00:00:00":due.slot,configRuleId,payoutId:row!.id,
+            scheduledAt:mode==="future"?new Date("2099-01-01"):due.at,timezone:"UTC",createdBy:p.f.account.id,createdAt:mode==="clock"?new Date("2099-01-01"):now,
+            evidence:{schemaVersion:1,nativeValidation:native.snapshot}}});
+        });
+      }
+      await expect(insert("audit")).rejects.toThrow(/atomic attributed audit/u);await expect(insert("future")).rejects.toThrow(/actual due civil slot/u);await expect(insert("clock")).rejects.toThrow(/actual due civil slot/u);await expect(insert("calendar")).rejects.toThrow(/actual due civil slot/u);
+      await withTenant(db,p.f.org,async tx=>{expect(await tx.ownerPayout.count()).toBe(0);expect(await tx.recurringPayoutDraftOccurrence.count()).toBe(0);});
+    });
+    it("creates one exact native seven-cent draft and immutable occurrence without approving or paying",async()=>{
+      const p=await proposal(),before=await financial(p.f.org);expect(before).toHaveLength(3);
+      expect(await createRecurringPayoutDrafts(p.f.org,{db})).toEqual({configured:true,created:1,pending:false});
+      expect(await createRecurringPayoutDrafts(p.f.org,{db})).toEqual({configured:true,created:0,pending:false});
+      await withTenant(db,p.f.org,async tx=>{const occurrence=await tx.recurringPayoutDraftOccurrence.findFirstOrThrow({where:{organizationId:p.f.org}}),row=await tx.ownerPayout.findUniqueOrThrow({where:{id:occurrence.payoutId}});
+        expect(row.amount.toFixed(2)).toBe("0.07");expect(row.state).toBe("DRAFT");expect(row.version).toBe(1);expect(row.policySnapshot).toBeNull();expect(row.approvedAt).toBeNull();expect(row.paidAt).toBeNull();expect(row.scheduledFor).toBeNull();expect(row.transactionId).toBeNull();expect(row.paymentReference).toBeNull();
+        expect(occurrence.targetId).toBe(p.targetId);expect(occurrence.configRuleId).toBe(p.rule!.id);expect(occurrence.createdBy).toBe(p.f.account.id);expect(occurrence.scheduledAt.getTime()).toBeLessThanOrEqual(occurrence.createdAt.getTime());
+        expect(await tx.approvalRequest.count()).toBe(0);expect(await tx.outboxEvent.count({where:{type:"PayoutScheduled"}})).toBe(0);expect(await tx.auditLog.count({where:{action:"finance.owner_payout.recurring_draft_created"}})).toBe(1);
+        const audit=await tx.auditLog.findFirstOrThrow({where:{action:"finance.owner_payout.recurring_draft_created"}});expect(JSON.stringify(audit.after)).not.toContain("availableBalance");
+      });expect(await financial(p.f.org)).toEqual(before);
+    });
+    it("serializes competing proposal ticks into exactly one original draft",async()=>{const p=await proposal();expect((await Promise.all([createRecurringPayoutDrafts(p.f.org,{db}),createRecurringPayoutDrafts(p.f.org,{db})])).reduce((n,row)=>n+row.created,0)).toBe(1);await withTenant(db,p.f.org,async tx=>{expect(await tx.ownerPayout.count()).toBe(1);expect(await tx.recurringPayoutDraftOccurrence.count()).toBe(1);});});
+    it("waits for an open manual proposal instead of multiplying today's payable",async()=>{const p=await proposal();await createOwnerPayout(p.ctx,{...p.f.input,amount:"0.01"},{db});expect(await createRecurringPayoutDrafts(p.f.org,{db})).toEqual({configured:true,created:0,pending:true});await withTenant(db,p.f.org,async tx=>{expect(await tx.ownerPayout.count()).toBe(1);expect(await tx.recurringPayoutDraftOccurrence.count()).toBe(0);});});
+    it("does not invent a source without configuration or admit a future start",async()=>{const unconfigured=await proposal({configured:false}),future=await proposal({future:true});expect(await createRecurringPayoutDrafts(unconfigured.f.org,{db})).toEqual({configured:false,created:0,pending:false});expect(await createRecurringPayoutDrafts(future.f.org,{db})).toEqual({configured:true,created:0,pending:false});});
+    it("does not create a payout against a zero derived payable",async()=>{const p=await proposal({balance:"0.10"});await withTenant(db,p.f.org,tx=>new ConfigRuleRepository(tx,p.f.org).createVersion({key:"finance.payout_schedule",scopeType:"property",scopeId:p.f.property.id,effectiveFrom:new Date("2021-01-01"),value:{cadence:"MONTHLY",schedule:{at:"09:00",month_day:"LAST"},holdback_bps:10000},reason:"Actual complete reserve"}));expect((await createRecurringPayoutDrafts(p.f.org,{db})).created).toBe(0);await withTenant(db,p.f.org,async tx=>expect(await tx.ownerPayout.count()).toBe(0));});
+    it("denies revoked independent owner-ledger authority and lets another tenant proceed",async()=>{const p=await proposal(),other=await proposal();await withTenant(db,p.f.org,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:p.f.org,key:"owner_statement:view"}});await tx.rolePermission.deleteMany({where:{organizationId:p.f.org,roleId:p.grant.roleId,permissionId:permission.id}});});expect((await tickRecurringPayoutDrafts(p.f.org,{db})).blocked).toBe("authority_unavailable");expect((await tickRecurringPayoutDrafts(other.f.org,{db})).created).toBe(1);});
+    it("rolls back draft, occurrence and native audits after final author revocation",async()=>{
+      const p=await proposal(),before=await financial(p.f.org),original=auditWriter.writeAuditEvent,spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{await original(tx,event);if(event.action==="finance.owner_payout.recurring_draft_created")await withTenant(db,p.f.org,t=>t.roleAssignment.update({where:{id:p.grant.id},data:{archivedAt:new Date()}}));});
+      try{await expect(createRecurringPayoutDrafts(p.f.org,{db})).rejects.toBeInstanceOf(OwnerPayoutAccessError);}finally{spy.mockRestore();}
+      await withTenant(db,p.f.org,async tx=>{expect(await tx.ownerPayout.count()).toBe(0);expect(await tx.recurringPayoutDraftOccurrence.count()).toBe(0);expect(await tx.auditLog.count({where:{action:{in:["finance.owner_payout.created","finance.owner_payout.recurring_draft_created"]}}})).toBe(0);});expect(await financial(p.f.org)).toEqual(before);
+    });
+    it("keeps occurrence identities and financial histories isolated and append-only",async()=>{
+      const p=await proposal(),other=await proposal();await createRecurringPayoutDrafts(p.f.org,{db});const occurrence=await withTenant(db,p.f.org,tx=>tx.recurringPayoutDraftOccurrence.findFirstOrThrow());
+      await withTenant(db,other.f.org,async tx=>{expect(await tx.recurringPayoutDraftOccurrence.findFirst({where:{id:occurrence.id}})).toBeNull();expect(await tx.ownerPayout.findFirst({where:{id:occurrence.payoutId}})).toBeNull();});
+      await expect(withTenant(db,p.f.org,tx=>tx.recurringPayoutDraftOccurrence.update({where:{id:occurrence.id},data:{slot:"2099-01-01T00:00:00"}}))).rejects.toThrow(/append-only/u);
+      await expect(withTenant(db,p.f.org,tx=>tx.recurringPayoutDraftOccurrence.delete({where:{id:occurrence.id}}))).rejects.toThrow(/append-only/u);
+      const policies=await admin.$queryRaw<Array<{relrowsecurity:boolean;relforcerowsecurity:boolean}>>`SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE relname='recurring_payout_draft_occurrence'`;expect(policies).toEqual([{relrowsecurity:true,relforcerowsecurity:true}]);
+    });
+    it("requires the source booking for event-based payment policies even when draft creation is periodic",async()=>{const p=await proposal();await withTenant(db,p.f.org,tx=>new ConfigRuleRepository(tx,p.f.org).createVersion({key:"finance.payout_schedule",scopeType:"property",scopeId:p.f.property.id,effectiveFrom:new Date("2021-01-01"),value:{cadence:"AFTER_CHECKOUT"},reason:"Actual booking-dependent payment policy"}));expect((await tickRecurringPayoutDrafts(p.f.org,{db})).blocked).toBe("configuration_unavailable");await withTenant(db,p.f.org,async tx=>{expect(await tx.ownerPayout.count()).toBe(0);expect(await tx.recurringPayoutDraftOccurrence.count()).toBe(0);});});
   });
 
   describe("recurring approved payout scheduling jobs",()=>{
