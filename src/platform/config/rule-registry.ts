@@ -26,6 +26,7 @@ import {receivableAssignmentPolicyKey,receivableAssignmentPolicySchema} from "@/
 import {receivableCollectionPolicyKey,receivableCollectionPolicySchema} from "@/modules/finance/domain/receivable-collection-policy";
 import {receivableAgingPolicyKey,receivableAgingPolicySchema} from "@/modules/finance/domain/receivable-aging-policy";
 import {receivableExportPolicyKey,receivableExportPolicySchema} from "@/modules/finance/domain/receivable-export-policy";
+import {receivableReminderPolicyKey,receivableReminderPolicySchema,receivableReminderRoutingKey} from "@/modules/finance/domain/receivable-reminder-policy";
 export { inventoryMinimumsSchema } from "./inventory-policy";
 
 const moneyAmountSchema = z
@@ -360,6 +361,7 @@ export const configRuleSchemas = {
   "notification.routing.task_overdue": notificationRoutingSchema,
   "notification.routing.reservation_created": notificationRoutingSchema,
   "notification.routing.security_session_revoked": notificationRoutingSchema,
+  [receivableReminderRoutingKey]: notificationRoutingSchema.extend({assigned:z.literal(false)}),
   [pinLockoutConfigKey]: pinLockoutPolicySchema,
   [commissionConfigKey]: commissionRuleValueSchema,
   "finance.ota_fee": feeRuleSchema,
@@ -383,6 +385,7 @@ export const configRuleSchemas = {
   [receivableCollectionPolicyKey]:receivableCollectionPolicySchema,
   [receivableAgingPolicyKey]:receivableAgingPolicySchema,
   [receivableExportPolicyKey]:receivableExportPolicySchema,
+  [receivableReminderPolicyKey]:receivableReminderPolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
   "ops.workflows": workflowSchema,

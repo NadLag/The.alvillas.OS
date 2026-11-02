@@ -1,0 +1,21 @@
+import{randomUUID}from"node:crypto";
+import{NextRequest}from"next/server";
+import{beforeEach,describe,expect,it,vi}from"vitest";
+import{ReceivableAccessError}from"@/modules/finance/domain/receivable";
+import{ReceivableAgingChangedError}from"@/modules/finance/domain/receivable-aging";
+const boundary=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),read:vi.fn(),save:vi.fn(),capture:vi.fn()}));
+vi.mock("@/platform/auth/session",()=>({auth:boundary.auth}));vi.mock("@/modules/finance/application/finance-access",()=>({financeActorContextFromSession:boundary.actor}));vi.mock("@/modules/finance/application/receivable-reminder-settings-service",()=>({getReceivableReminderSettings:boundary.read,saveReceivableReminderSettings:boundary.save}));vi.mock("@/platform/observability/sentry",()=>({captureException:boundary.capture}));
+import{GET,POST}from"@/app/api/finance/receivables/reminders/route";
+const origin="http://localhost:3194",actor={organizationId:randomUUID(),actorId:randomUUID()},input={expectedPolicyId:null,policy:{source:"CURRENT_ORIGINAL_AGING"},reason:"Save the explicitly selected current company reminder schedule"};
+const request=(method:"GET"|"POST",options:{origin?:string;type?:string;query?:string}={})=>new NextRequest(origin+"/api/finance/receivables/reminders"+(options.query??""),{method,headers:{origin:options.origin??origin,host:"localhost:3194","content-type":options.type??"application/json"},...method==="POST"?{body:JSON.stringify(input)}:{}});
+function privateResponse(response:Response){expect(response.headers.get("cache-control")).toBe("private, no-store");expect(response.headers.get("vary")).toBe("Cookie, Origin");}
+describe("private current receivable reminder settings boundary",()=>{
+ beforeEach(()=>{vi.clearAllMocks();boundary.auth.mockResolvedValue({user:{id:actor.actorId}});boundary.actor.mockResolvedValue(actor);boundary.read.mockResolvedValue({source:{canConfigure:false}});boundary.save.mockResolvedValue({source:{canConfigure:false}});});
+ it("reads the current settings through the original private session boundary",async()=>{const response=await GET(request("GET"));expect(response.status).toBe(200);expect(await response.json()).toEqual({source:{canConfigure:false}});expect(boundary.read).toHaveBeenCalledWith(actor,expect.objectContaining({requestId:expect.any(String) as unknown}));privateResponse(response);});
+ it("saves only the bounded same-origin JSON supplied to the canonical service",async()=>{const response=await POST(request("POST"));expect(response.status).toBe(200);expect(boundary.save).toHaveBeenCalledWith(actor,input,expect.objectContaining({requestId:expect.any(String) as unknown}));privateResponse(response);});
+ it.each(["GET","POST"]as const)("requires authenticated financial context for %s",async method=>{boundary.actor.mockResolvedValue(null);const response=await(method==="GET"?GET:POST)(request(method));expect(response.status).toBe(401);expect(boundary.read).not.toHaveBeenCalled();expect(boundary.save).not.toHaveBeenCalled();privateResponse(response);});
+ it.each([{origin:"https://foreign.example.test"},{type:"text/plain"}])("denies cross-origin and non-JSON schedule writes %#",async options=>{const response=await POST(request("POST",options));expect(response.status).toBe(403);expect(boundary.save).not.toHaveBeenCalled();privateResponse(response);});
+ it.each(["GET","POST"]as const)("rejects caller-selected query parameters for %s",async method=>{const response=await(method==="GET"?GET:POST)(request(method,{query:"?organizationId="+randomUUID()}));expect(response.status).toBe(400);expect(boundary.read).not.toHaveBeenCalled();expect(boundary.save).not.toHaveBeenCalled();privateResponse(response);});
+ it("maps revoked source authority to a private denial",async()=>{boundary.save.mockRejectedValue(new ReceivableAccessError());const response=await POST(request("POST"));expect(response.status).toBe(403);expect(await response.json()).toEqual({error:"forbidden"});privateResponse(response);});
+ it("requires refresh after another saved configuration version",async()=>{boundary.save.mockRejectedValue(new ReceivableAgingChangedError());const response=await POST(request("POST"));expect(response.status).toBe(409);expect(await response.json()).toEqual({error:"conflict"});privateResponse(response);});
+});

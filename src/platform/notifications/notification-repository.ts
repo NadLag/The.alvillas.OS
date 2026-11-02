@@ -20,10 +20,17 @@ import { Money } from "@/platform/money/money";
 import { supplierInvoiceCostResource } from "@/modules/finance/domain/supplier-invoice";
 import { employeeCompensationCostResource } from "@/modules/finance/domain/employee-compensation-cost-resource";
 import type { employeeCompensationNoticeSchema } from "@/modules/finance/domain/employee-compensation-notice";
+import {ReceivableReminderRepository} from "@/modules/finance/infrastructure/receivable-reminder-repository";
+import {canReadReceivableReminder} from "@/modules/finance/domain/receivable-reminder-notification";
+import {receivableReminderOccurrence} from "@/modules/finance/domain/receivable-reminder";
+import {calendarDateAt} from "@/i18n/format";
+import {commandFingerprint} from "@/platform/http/command-fingerprint";
 
 type InvoiceEmergencyNotice = ExpenseEmergencyNotice & { lineId: string; propertyId: string | null };
 const invoiceEmergencyNoticeSchema = expenseEmergencyNoticeSchema.extend({ lineId: z.uuid(), propertyId: z.uuid().nullable() });
 type CurrentAuthorizationStates = Awaited<ReturnType<IdentityRepository["authorizationStates"]>>;
+type ReminderAuthority=NonNullable<ReturnType<CurrentAuthorizationStates["states"]["get"]>>;
+type ReminderNoticeSource={notice:{routing:NotificationRouting};target:Resource};
 const employeeNoticeCostInclude={submission:{select:{id:true,emergency:true,submittedBy:true,costOn:true,withdrawal:{select:{id:true}},approval:{select:{state:true}}}},property:{select:{name:true,cityId:true,regionId:true}}} satisfies Prisma.EmployeeCompensationCostInclude;
 type EmployeeNoticeCost=Prisma.EmployeeCompensationCostGetPayload<{include:typeof employeeNoticeCostInclude}>;
 type EmployeeNoticeSource={notice:ExpenseEmergencyNotice;target:Resource;data:z.infer<typeof employeeCompensationNoticeSchema>};
@@ -38,6 +45,8 @@ type DeliveryBatch = {
   observations: Map<string, Awaited<ReturnType<IdentityRepository["authorizationObservation"]>>>;
   employeeNotices?:Map<string,EmployeeNoticeSource>;
   employeeStates?:CurrentAuthorizationStates;
+  reminderNotices?:Map<string,ReminderNoticeSource>;
+  reminderStates?:CurrentAuthorizationStates;
 };
 
 export class NotificationRepository {
@@ -81,10 +90,10 @@ export class NotificationRepository {
   private async deliverLocked(event: OutboxEvent, batch?: DeliveryBatch): Promise<void> {
     const input = notificationInputSchema.parse(event.payload);
     const financialNotice=input.kind==="expense_emergency"?await this.expenseEmergencySource(event,input):
-      input.kind==="supplier_invoice_emergency"?await this.invoiceEmergencySource(event,input):input.kind==="employee_cost_emergency"?(batch?.employeeNotices?batch.employeeNotices.get(event.id)??null:await this.employeeCostEmergencySource(event,input)):null;
+      input.kind==="supplier_invoice_emergency"?await this.invoiceEmergencySource(event,input):input.kind==="employee_cost_emergency"?(batch?.employeeNotices?batch.employeeNotices.get(event.id)??null:await this.employeeCostEmergencySource(event,input)):input.kind==="receivable_reminder"?(batch?.reminderNotices?batch.reminderNotices.get(event.id)??null:(await this.receivableReminderSources([event])).notices.get(event.id)??null):null;
     const target = financialNotice?.target ?? (batch ? batch.targets.get(`${input.kind}:${input.targetId}`) :
       (await this.targets([{ kind: input.kind, targetId: input.targetId }])).get(input.targetId));
-    if((input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency")&&!financialNotice)return this.finish(event.id,batch);
+    if((input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder")&&!financialNotice)return this.finish(event.id,batch);
     if (!target) return this.finish(event.id, batch);
     if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id, batch);
     const identity = target.type === "identity";
@@ -96,7 +105,7 @@ export class NotificationRepository {
     const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
     let routing:NotificationRouting;
-    if(input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency")routing=financialNotice!.notice.routing;
+    if(input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder")routing=financialNotice!.notice.routing;
     else routing=approval?notificationRoutingSchema.parse(stage?.routingSnapshot??approval.routingSnapshot):batch?.routing.get(routingKey)??await this.routing(input.kind,target.propertyId??null,event.occurredAt);
     if (batch && !approval&&!financialNotice) batch.routing.set(routingKey, routing);
     const mandatory = input.kind === "security_session_revoked";
@@ -120,10 +129,11 @@ export class NotificationRepository {
       const explicit = routing.people.includes(candidate.personId);
       const assignments = observation ? candidate.roleAssignments.filter(assignment => observation.ids.includes(assignment.id)) : candidate.roleAssignments;
       const roleAssignments = assignments.filter(assignment => routing.roles.includes(assignment.role.id));
-      const batchState=input.kind==="employee_cost_emergency"?batch?.employeeStates:undefined,captured=batchState?.states.get(candidate.id);
+      const batchState=input.kind==="employee_cost_emergency"?batch?.employeeStates:input.kind==="receivable_reminder"?batch?.reminderStates:undefined,captured=batchState?.states.get(candidate.id);
       const current=financialNotice?(batchState?{account:captured?.account??null,assignments:captured?.assignments??[],now:batchState.now}:await new IdentityRepository(this.tx,this.organizationId).authorizationState(candidate.id)):null;
       const ctx = contextForRoleAssignments(this.organizationId, candidate.id, current?current.assignments:explicit || selected || approval ? assignments : roleAssignments);
       if(current&&(!current.account||securityEnrollment(current.account,current.now).setupRequired))continue;
+      if(input.kind==="receivable_reminder"&&!canReadReceivableReminder(ctx,target,current!.now))continue;
       if (!identity && !current&&securityEnrollment({ ...candidate, roleAssignments: assignments }, observation!.now).setupRequired) continue;
       if (!identity && !authorizeApprovalResource(ctx, "view", target,current?.now ?? observation?.now)) continue;
       if (approval && !authorizeApprovalResource(ctx, "approve", target, current?.now ?? observation?.now) && !authorizeApprovalResource(ctx, "reject", target, current?.now ?? observation?.now)) continue;
@@ -132,13 +142,41 @@ export class NotificationRepository {
         await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } }, update: {},
           create: { organizationId: this.organizationId, type: "notification.channel.requested", payload: { channel, recipientId: candidate.id, kind: input.kind, targetId: input.targetId, sourceEventId: event.id }, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } });
       }
-      if (!mandatory && !financialNotice&&(!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
+      if (!mandatory && (!financialNotice||input.kind==="receivable_reminder")&&(!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
       data.push({ organizationId: this.organizationId, recipientId: candidate.id,
         eventId: event.id, kind: input.kind, targetId: input.targetId, createdAt: event.occurredAt });
     }
     if (batch) batch.inbox.push(...data);
     else if (data.length) await this.tx.notification.createMany({ data, skipDuplicates: true });
     await this.finish(event.id, batch);
+  }
+
+  private reminderRecipient(state:ReminderAuthority|undefined,personId:string|undefined,routing:NotificationRouting,now:Date){
+    if(!state?.account||!personId||securityEnrollment(state.account,now).setupRequired)return false;
+    if(!routing.people.includes(personId)&&!state.assignments.some(assignment=>routing.roles.includes(assignment.role.id)))return false;
+    return canReadReceivableReminder(contextForRoleAssignments(this.organizationId,state.account.id,state.assignments),{type:"receivable",organizationId:this.organizationId,dataClass:"financial"},now);
+  }
+
+  async receivableReminderRecipients(routing:NotificationRouting){
+    if(routing.assigned)throw new NotificationAudienceUnavailableError();
+    const candidates=await this.candidates(routing,undefined,undefined,true),states=await new IdentityRepository(this.tx,this.organizationId).authorizationStates(candidates.map(candidate=>candidate.id));
+    return candidates.filter(candidate=>this.reminderRecipient(states.states.get(candidate.id),candidate.personId,routing,states.now)).map(candidate=>candidate.id).sort();
+  }
+
+  /** One current financial projection and batched authority read cover the original notices. */
+  private async receivableReminderSources(events:readonly OutboxEvent[]){
+    const parsed=events.flatMap(event=>{const value=notificationInputSchema.safeParse(event.payload);return value.success&&value.data.kind==="receivable_reminder"&&value.data.receivableNotice&&value.data.targetId===event.id&&event.organizationId===this.organizationId&&event.type===notificationEventType?[{event,input:value.data,metadata:value.data.receivableNotice}]:[];}),ids=[...new Set(parsed.map(value=>value.input.recipientId))],
+      candidates=ids.length?await this.candidates({roles:[],people:[],assigned:false,channels:[]},undefined,ids,true):[],people=new Map(candidates.map(candidate=>[candidate.id,candidate.personId])),states=await new IdentityRepository(this.tx,this.organizationId).authorizationStates(ids),
+      eligible=parsed.filter(value=>this.reminderRecipient(states.states.get(value.input.recipientId),people.get(value.input.recipientId),value.metadata.routing,states.now)),notices=new Map<string,ReminderNoticeSource>();
+    if(!eligible.length)return{notices,states};const current=await new ReceivableReminderRepository(this.tx,this.organizationId).current(eligible.map(value=>value.metadata.currency),states.now);if(!current)return{notices,states};
+    for(const{event,input,metadata}of eligible){
+      if(current.policy.id!==metadata.policyId||current.routing.id!==metadata.routingRuleId||commandFingerprint(current.routingValue)!==commandFingerprint(metadata.routing)||calendarDateAt(event.occurredAt,current.timezone)!==metadata.on)continue;
+      const item=current.items.get(metadata.assignmentId);if(!item||item.currency!==metadata.currency)continue;const localTime=new Intl.DateTimeFormat("en-GB",{timeZone:current.timezone,hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(event.occurredAt);if(localTime<current.reminders.send_at)continue;
+      const occurrence=receivableReminderOccurrence(current.reminders,{assignmentId:item.id,policyId:metadata.policyId,on:metadata.on,localTime,dueOn:item.dueOn,outstanding:item.outstanding});
+      if(!occurrence||occurrence.stage!==metadata.stage||occurrence.on!==metadata.occurrenceOn||event.idempotencyKey!==occurrence.idempotencyKey+":"+input.recipientId)continue;
+      notices.set(event.id,{notice:{routing:metadata.routing},target:{type:"receivable",organizationId:this.organizationId,id:item.id,dataClass:"financial",notificationEventId:event.id}});
+    }
+    return{notices,states};
   }
 
   private async expenseEmergencySource(event:OutboxEvent,input:Extract<NotificationInput,{kind:"expense_emergency"}>) {
@@ -379,12 +417,12 @@ export class NotificationRepository {
     await this.deliver(event);
   }
 
-  async publishMany(entries: Array<{ input: NotificationInput; key: string;eventId?:string }>): Promise<void> {
+  async publishMany(entries: Array<{ input: NotificationInput; key: string;eventId?:string;occurredAt?:Date }>): Promise<void> {
     if (!entries.length) return;
-    const parsed = entries.map(entry => ({ input: notificationInputSchema.parse(entry.input), key: entry.key,eventId:entry.eventId }));
+    const parsed = entries.map(entry => ({ input: notificationInputSchema.parse(entry.input), key: entry.key,eventId:entry.eventId,occurredAt:entry.occurredAt }));
     parsed.sort((a, b) => a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
     await this.tx.outboxEvent.createMany({ skipDuplicates: true, data: parsed.map(entry => ({
-      id:entry.eventId,organizationId: this.organizationId, type: notificationEventType, payload: entry.input, idempotencyKey: entry.key
+      id:entry.eventId,organizationId: this.organizationId, type: notificationEventType, payload: entry.input, idempotencyKey: entry.key,...entry.occurredAt?{occurredAt:entry.occurredAt}:{}
     })) });
     const keys = [...new Set(parsed.map(entry => entry.key))];
     // One lock/read covers the whole command; replay still reads durable status.
@@ -397,13 +435,15 @@ export class NotificationRepository {
     const inputs = pending.map(event => notificationInputSchema.parse(event.payload));
     const targets = new Map<string, Resource>();
     for (const kind of new Set(inputs.map(input => input.kind))) {
-      if(kind==="expense_emergency"||kind==="supplier_invoice_emergency"||kind==="employee_cost_emergency")continue;
+      if(kind==="expense_emergency"||kind==="supplier_invoice_emergency"||kind==="employee_cost_emergency"||kind==="receivable_reminder")continue;
       for (const [id, target] of await this.targets(inputs.filter(input => input.kind === kind)))
         targets.set(`${kind}:${id}`, target);
     }
     const batch: DeliveryBatch = { targets, routing: new Map(), candidates: new Map(), inbox: [], finished: [], observations: new Map() };
     const employeeEvents=pending.filter(event=>notificationInputSchema.parse(event.payload).kind==="employee_cost_emergency");
     if(employeeEvents.length){batch.employeeNotices=await this.employeeCostEmergencySources(employeeEvents);batch.employeeStates=await new IdentityRepository(this.tx,this.organizationId).authorizationStates([...new Set(employeeEvents.map(event=>notificationInputSchema.parse(event.payload).recipientId))]);}
+    const reminderEvents=pending.filter(event=>notificationInputSchema.parse(event.payload).kind==="receivable_reminder");
+    if(reminderEvents.length){const projected=await this.receivableReminderSources(reminderEvents);batch.reminderNotices=projected.notices;batch.reminderStates=projected.states;}
     for (const event of pending) await this.deliverLocked(event, batch);
     if (batch.inbox.length) await this.tx.notification.createMany({ data: batch.inbox, skipDuplicates: true });
     if (batch.finished.length) await this.tx.outboxEvent.updateMany({
@@ -495,6 +535,9 @@ export class NotificationRepository {
       const resource=owners.length?viewableExpenseResource(reader,expense.property,{...expense,amount:expense.amount.toString()},owners):null;
       if(resource)targets.set(expense.id,resource);
     }
+    const reminderIds=rows.filter(row=>row.kind==="receivable_reminder").map(row=>row.targetId),reminderEvents=reminderIds.length?await this.tx.outboxEvent.findMany({where:{organizationId:this.organizationId,id:{in:reminderIds},type:notificationEventType}}):[];
+    const originals=readerId?reminderEvents.filter(event=>{const value=notificationInputSchema.safeParse(event.payload);return value.success&&value.data.recipientId===readerId;}):reminderEvents;
+    if(originals.length)for(const[id,source]of(await this.receivableReminderSources(originals)).notices)targets.set(id,source.target);
     return targets;
   }
   async approvalDeliveryAllowed(approvalId: string, recipientId: string, sourceEventId?: string) {

@@ -53,9 +53,9 @@ async function rate(f: Fixture, mode = "PER_JOB", amount = "500.25", expectedVer
 }
 const input = (f: Fixture, basis: Record<string, string> = { mode: "PER_JOB", jobs: "3" }) => ({ assignmentId: f.assignment.id, earnedAt: "2027-01-15T12:00:00Z", basis });
 
-async function completedFixture(method: "SELF" | "OFFLINE_SYNC" | "PROXY", noLogin = false) {
-  const f = await fixture();
-  const operations = await reader(f, { permissions: ["task:view", "task:create", "task:edit", "task:assign", "task:validate"] });
+async function completedFixture(method: "SELF" | "OFFLINE_SYNC" | "PROXY", noLogin = false, prepareReservation?: (fixture:Fixture)=>Promise<string>) {
+  const f = await fixture(), reservationId=prepareReservation?await prepareReservation(f):undefined;
+  const operations = await reader(f, { permissions: ["task:view", "task:create", "task:edit", "task:assign", "task:validate",...reservationId?["reservation:view"]:[]] });
   const ctx = { ...operations.ctx, personId: f.person.id };
   await withTenant(db, f.org, async tx => {
     const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: ["task:view", "task:edit"] } } });
@@ -72,13 +72,13 @@ async function completedFixture(method: "SELF" | "OFFLINE_SYNC" | "PROXY", noLog
     userAccountId: null, validFrom: "2020-01-01", validTo: null, assignedToMe: false, reason: "Actual contract for person-only completed work" }, { db }) : f.assignment;
   await saveTeamCompensation(ctx, { assignmentId: contract.id, expectedVersion: 0, mode: "PER_JOB", amount: "500.25", currency: "MAD", effectiveFrom: "2020-01-01",
     reason: "Actual configured per-job compensation" }, { db });
-  const taskId = await completeTask({ ...f, ctx }, method, performer);
+  const taskId = await completeTask({ ...f, ctx }, method, performer,reservationId);
   return { ...f, ctx, performer, contract, taskId };
 }
 
-async function completeTask(f: Fixture, method: "SELF" | "OFFLINE_SYNC" | "PROXY" = "SELF", performer = f.staff) {
+async function completeTask(f: Fixture, method: "SELF" | "OFFLINE_SYNC" | "PROXY" = "SELF", performer = f.staff,reservationId?:string) {
   const ctx = f.ctx;
-  const created = await createOperationTask(ctx, { propertyId: f.property.id, type: "INSPECTION", title: { en: "Perform contracted work", fr: "Réaliser le travail contractuel" },
+  const created = await createOperationTask(ctx, { propertyId: f.property.id,...reservationId?{reservationId}:{}, type: "INSPECTION", title: { en: "Perform contracted work", fr: "Réaliser le travail contractuel" },
     dueDate: "2027-04-10", priority: "NORMAL", checklistTemplateKey: "compensation_work", idempotencyKey: randomUUID(), reason: "Actual completed-work source creation" }, { db, requestId: randomUUID() });
   const assigned = await assignOperationTask(ctx, { taskId: created.id, expectedVersion: created.version, personId: performer.id,
     startMinute: 600, idempotencyKey: randomUUID(), reason: "Actual performer assignment before completion" }, { db, requestId: randomUUID() });
