@@ -67,7 +67,8 @@ describe("actual recurring expense durable jobs",()=>{
   const cadence:RecurringExpenseSchedule["cadence"]=kind==="DAY"?{kind,every:2}:kind==="WEEK"?{kind,every:1,weekdays:[weekday===7?1:weekday+1]}:{kind,every:1,day:Number(f.schedule.start_on.slice(8))===1?2:1,missing_day:"SKIP"};
   const schedule={...f.schedule,start_on:date.toISOString().slice(0,10),cadence},rule=await configure(f,[schedule]),ctx={organizationId:f.org,actorId:f.account.id,authContext:await authContextForAccount(f.org,f.account.id,{db})};
   const draft=await createExpenseDraft(ctx,{...f.schedule.draft,occurredOn:f.schedule.start_on,emergency:false,idempotencyKey:randomUUID(),reason:"Actual forged recurrence rejection"},{db});
-  await expect(withTenant(db,f.org,tx=>tx.recurringExpenseOccurrence.create({data:{organizationId:f.org,scheduleId:schedule.id,on:new Date(f.schedule.start_on+"T00:00:00Z"),configRuleId:rule.id,expenseId:draft.id,createdBy:f.account.id}}))).rejects.toThrow(/actual configured tenant draft/u);
+  // Target the cadence guard with the actual database clock, independently of the host/client clock.
+  await expect(withTenant(db,f.org,async tx=>tx.recurringExpenseOccurrence.create({data:{organizationId:f.org,scheduleId:schedule.id,on:new Date(f.schedule.start_on+"T00:00:00Z"),configRuleId:rule.id,expenseId:draft.id,createdBy:f.account.id,createdAt:await new FinanceRepository(tx,f.org).clock()}}))).rejects.toThrow(/actual configured tenant draft/u);
   await withTenant(db,f.org,async tx=>{expect(await tx.recurringExpenseOccurrence.count()).toBe(0);expect(await tx.posting.count()).toBe(0);});
  });
  it("denies direct admission of a future civil occurrence and future creation clock",async()=>{
