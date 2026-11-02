@@ -41,3 +41,5 @@ prisma/migrations/20261101190000_employee_percentage_parameterized_validation/mi
 prisma/migrations/20261101200000_employee_percentage_bounded_original_validation/migration.sql text eol=lf
 
 prisma/migrations/20261101202500_employee_percentage_original_journal_coverage/migration.sql text eol=lf
+
+prisma/migrations/20261102001000_employee_percentage_bulk_scope_validation/migration.sql text eol=lf
