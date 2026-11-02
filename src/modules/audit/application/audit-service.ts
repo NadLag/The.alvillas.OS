@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {containsRecurringExpenseRule,recurringExpenseRuleFinancialAccess} from "@/platform/config/recurring-expense-rule-authority";
 import {
   AuditRepository,
   type AuditHistoryFilters,
@@ -85,6 +86,13 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
+  if(["config_rule","property_template","property_template_revision"].includes(row.resourceType)&&
+    (containsRecurringExpenseRule(row.before)||containsRecurringExpenseRule(row.after))){
+    const allowed=recurringExpenseRuleFinancialAccess(ctx.authContext,action);
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,
+      {type:auditLogResource,organizationId:ctx.organizationId,data:row},
+      {before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
+  }
   if (row.resourceType === "employee_compensation_run"||row.resourceType==="employee_compensation_submission"||row.resourceType==="employee_compensation_claim"||row.resourceType==="employee_monthly_run_request"||row.resourceType==="employee_earning_run_request") {
     const now = new Date();
     const allowed = Boolean(financialResource?.type === "employee_payable" && (row.resourceType!=="employee_compensation_run"?financialResource.sourceRecordId===row.resourceId:financialResource.id === row.resourceId) &&

@@ -20,6 +20,8 @@ import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import type { ConfigActorContext } from "@/modules/config/application/config-access";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
+import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
+import {recurringExpensePolicyKey,recurringExpenseRuleFinancialAccess,recheckRecurringExpenseRuleAccess} from "@/platform/config/recurring-expense-rule-authority";
 
 export class ConfigAuthorizationError extends Error {
   constructor(message = "Configuration action is not authorized") {
@@ -155,6 +157,7 @@ function hasRuleFinancialAccess(
 ): boolean {
   // Assignment compensation is changed only through the immutable Team workflow.
   if (scopeType === "role_assignment") return false;
+  if(key===recurringExpensePolicyKey)return recurringExpenseRuleFinancialAccess(ctx.authContext);
   if (key === "staff.compensation") return authorize(ctx.authContext, "view", {
     type: "staff_compensation", organizationId: ctx.organizationId,
     propertyId: scopeType === "property" ? scopeId : undefined
@@ -329,13 +332,15 @@ export async function getConfigAdminModel(
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
+    const freshContext={...ctx,authContext:await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId)};
     const canView = (rule: ConfigRuleRecord) =>
       authorize(ctx.authContext, "view", {
         type: "config_rule",
         organizationId: ctx.organizationId,
         id: rule.id,
         propertyId: rule.scopeType === "property" ? rule.scopeId : undefined
-      }) && hasRuleFinancialAccess(ctx, rule.key, rule.scopeType, rule.scopeId);
+      }) && hasRuleFinancialAccess(ctx, rule.key, rule.scopeType, rule.scopeId)&&
+      (rule.key!==recurringExpensePolicyKey||authorize(freshContext.authContext,"view",{type:"config_rule",organizationId:ctx.organizationId,id:rule.id,propertyId:rule.scopeType==="property"?rule.scopeId:undefined})&&hasRuleFinancialAccess(freshContext,rule.key,rule.scopeType,rule.scopeId));
     const filter = { key: browse.ruleKey, scopeType: browse.ruleScopeType,
       scopeId: browse.ruleScopeType === "organization" ? null : browse.ruleScopeId, excludeScopeTypes: ["role_assignment"] };
     const matches = (rule: ConfigRuleRecord) => (!filter.key || rule.key === filter.key) && (!filter.scopeType || rule.scopeType === filter.scopeType) &&
@@ -365,12 +370,15 @@ export async function getConfigAdminModel(
         throw new ConfigValidationError();
       }
       assertRuleAllowed(ctx, "view", { id: input.previewKey, key: input.previewKey, scopeType, scopeId });
+      await recheckRecurringExpenseRuleAccess(ctx,tx,input.previewKey,[{action:"view",resource:{type:"config_rule",organizationId:ctx.organizationId,id:input.previewKey,propertyId:scopeType==="property"?scopeId:undefined}}],new ConfigAuthorizationError());
     }
     const preview =
       input.previewKey && schemaForConfigKey(input.previewKey)
         ? await previewRule(repository, canView, properties, input)
         : null;
 
+    const protectedRules=[...visibleRules,...visibleRules.flatMap(rule=>{const previous=predecessors.get(rule.id);return previous&&canView(previous)?[previous]:[]}),...(preview?.resolved?[preview.resolved]:[])].filter(rule=>rule.key===recurringExpensePolicyKey);
+    if(protectedRules.length)await recheckRecurringExpenseRuleAccess(ctx,tx,recurringExpensePolicyKey,protectedRules.map(rule=>({action:"view",resource:{type:"config_rule",organizationId:ctx.organizationId,id:rule.id,propertyId:rule.scopeType==="property"?rule.scopeId:undefined}})),new ConfigAuthorizationError());
     return {
       rules: visibleRules.map(rule => { const previous = predecessors.get(rule.id); return toView(rule, properties, previous && canView(previous) ? previous : null); }),
       properties,
@@ -415,7 +423,7 @@ async function previewRule(
   return {
     key,
     asOf,
-    resolved: resolved
+    resolved: resolved&&canView(resolvedToRecord(resolved))
       ? toView(resolvedToRecord(resolved), properties, previous && canView(previous) ? previous : null)
       : null
   };
@@ -442,6 +450,8 @@ export async function createConfigRuleVersion(
       scopeType: scope.scopeType,
       scopeId: scope.scopeId
     });
+    const checks=[{action:input.lifecycle==="DRAFT"?"create"as const:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:key,propertyId:scope.scopeType==="property"?scope.scopeId:undefined}}];
+    await recheckRecurringExpenseRuleAccess(ctx,tx,key,checks,new ConfigAuthorizationError());
 
     if (key.startsWith("notification.routing.")) await new NotificationRepository(tx, ctx.organizationId)
       .validateRoutingReferences(notificationRoutingSchema.parse(rawValue), scope.scopeId);
@@ -472,6 +482,7 @@ export async function createConfigRuleVersion(
       occurredAt: new Date()
     });
 
+    await recheckRecurringExpenseRuleAccess(ctx,tx,key,checks,new ConfigAuthorizationError());
     return created;
   });
 }
@@ -493,6 +504,8 @@ export async function activateConfigRuleVersion(
     }
 
     assertRuleAllowed(ctx, "configure", source);
+    const checks=[{action:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:source.id,propertyId:source.scopeType==="property"?source.scopeId:undefined}}];
+    await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
     if (source.key.startsWith("notification.routing.")) await new NotificationRepository(tx, ctx.organizationId)
       .validateRoutingReferences(notificationRoutingSchema.parse(source.value), source.scopeId);
     const created = await repository.activateVersion({
@@ -517,6 +530,7 @@ export async function activateConfigRuleVersion(
       occurredAt: new Date()
     });
 
+    await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
     return created;
   });
 }
@@ -538,6 +552,8 @@ export async function retireConfigRuleVersion(
     }
 
     assertRuleAllowed(ctx, "configure", source);
+    const checks=[{action:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:source.id,propertyId:source.scopeType==="property"?source.scopeId:undefined}}];
+    await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
     const created = await repository.retireVersion({
       ruleId: input.ruleId,
       effectiveFrom: input.effectiveFrom,
@@ -560,6 +576,7 @@ export async function retireConfigRuleVersion(
       occurredAt: new Date()
     });
 
+    await recheckRecurringExpenseRuleAccess(ctx,tx,source.key,checks,new ConfigAuthorizationError());
     return created;
   });
 }
