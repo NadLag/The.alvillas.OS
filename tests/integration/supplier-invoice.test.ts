@@ -656,6 +656,7 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     let onCommit: (() => void) | undefined;
     measured.$on("query", query => { queries.push(query.query); if (query.query.trim() === "COMMIT") onCommit?.(); });
     const readStatus = async (before?: string) => {
+      await withTenant(measured, f.org, tx => tx.$queryRaw`SELECT 1`);
       queries.length = 0;
       const committed = new Promise<void>(resolve => { onCommit = resolve; });
       const result = await getSupplierInvoiceRecognitionStatus(f.ctx, { id: f.invoice.id, ...(before ? { before } : {}) }, { db: measured });
@@ -876,6 +877,7 @@ describe("immutable supplier invoice authoring on PostgreSQL", () => {
     let onCommit: (() => void) | undefined;
     measured.$on("query", event => { queries.push(event.query); if (event.query.trim() === "COMMIT") onCommit?.(); });
     const readStatus = async (before?: string) => {
+      await withTenant(measured, f.org, tx => tx.$queryRaw`SELECT 1`);
       queries.length = 0; const committed = new Promise<void>(resolve => { onCommit = resolve; });
       const result = await getSupplierInvoiceReversalStatus(f.ctx, { id: f.invoice.id, ...(before ? { before } : {}) }, { db: measured });
       await committed; onCommit = undefined; return result;

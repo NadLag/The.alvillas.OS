@@ -70,7 +70,77 @@ model AutomationSuggestion {
   @@map("automation_suggestion")
 }
 
+model ReceivableAssignment {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  postingId String @map("posting_id") @db.Uuid
+  partyKind String @map("party_kind") @db.VarChar(16)
+  guestId String? @map("guest_id") @db.Uuid
+  ownerId String? @map("owner_id") @db.Uuid
+  supplierId String? @map("supplier_id") @db.Uuid
+  personId String? @map("person_id") @db.Uuid
+  amount Decimal @db.Decimal(18,2)
+  currency String @db.Char(3)
+  dueOn DateTime? @map("due_on") @db.Date
+  purpose String @db.VarChar(1000)
+  reason String @db.VarChar(500)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  sourcePolicyRuleId String @map("source_policy_rule_id") @db.Uuid
+  assignmentPolicyRuleId String @map("assignment_policy_rule_id") @db.Uuid
+  sourceSnapshot Json @map("source_snapshot") @db.JsonB
+  policySnapshot Json @map("policy_snapshot") @db.JsonB
+  authorizationCap Json @map("authorization_cap") @db.JsonB
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  posting Posting @relation("ReceivableOriginalPosting",fields:[organizationId,postingId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  guest GuestRecord? @relation("ReceivableGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  owner Owner? @relation("ReceivableOwner",fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  supplier Supplier? @relation("ReceivableSupplier",fields:[organizationId,supplierId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  person Person? @relation("ReceivablePerson",fields:[organizationId,personId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  currencyRecord Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+  sourcePolicy ConfigRule @relation("ReceivableSourcePolicy",fields:[organizationId,sourcePolicyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  assignmentPolicy ConfigRule @relation("ReceivableAssignmentPolicy",fields:[organizationId,assignmentPolicyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("ReceivableAssignmentCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  release ReceivableAssignmentRelease?
+
+  @@unique([organizationId,id],map:"receivable_assignment_org_id")
+  @@unique([organizationId,idempotencyKey],map:"receivable_assignment_org_key")
+  @@index([organizationId,postingId,id],map:"receivable_assignment_source_idx")
+  @@index([organizationId,currency,dueOn,id],map:"receivable_assignment_due_idx")
+  @@index([organizationId,guestId,createdAt,id],map:"receivable_assignment_guest_idx")
+  @@index([organizationId,ownerId,createdAt,id],map:"receivable_assignment_owner_idx")
+  @@index([organizationId,supplierId,createdAt,id],map:"receivable_assignment_supplier_idx")
+  @@index([organizationId,personId,createdAt,id],map:"receivable_assignment_person_idx")
+  @@map("receivable_assignment")
+}
+
+model ReceivableAssignmentRelease {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  assignmentId String @map("assignment_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  reason String @db.VarChar(500)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  assignment ReceivableAssignment @relation(fields:[organizationId,assignmentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("ReceivableAssignmentReleaseCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+
+  @@unique([organizationId,id],map:"receivable_release_org_id")
+  @@unique([organizationId,assignmentId],map:"receivable_release_original_unique")
+  @@unique([organizationId,idempotencyKey],map:"receivable_release_org_key")
+  @@index([organizationId,createdAt,id],map:"receivable_release_created_idx")
+  @@map("receivable_assignment_release")
+}
+
 model Organization {
+  receivableAssignments ReceivableAssignment[]
+  receivableAssignmentReleases ReceivableAssignmentRelease[]
   employeeCorrections EmployeeCompensationCorrection[]
   employeeCorrectionLines EmployeeCompensationCorrectionLine[]
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
@@ -375,6 +445,7 @@ model TeamWallet {
 }
 
 model Person {
+  receivableAssignments ReceivableAssignment[] @relation("ReceivablePerson")
   performedWorkTimeEvidence EmployeeWorkTimeEvidence[] @relation("WorkTimePerformer")
   submittedWorkTimeEvidence EmployeeWorkTimeEvidence[] @relation("WorkTimeSubmitterPerson")
   validatedWorkTimeDecisions EmployeeWorkTimeDecision[] @relation("WorkTimeValidatorPerson")
@@ -411,6 +482,8 @@ model Person {
 }
 
 model UserAccount {
+  receivableAssignmentsCreated ReceivableAssignment[] @relation("ReceivableAssignmentCreator")
+  receivableAssignmentReleasesCreated ReceivableAssignmentRelease[] @relation("ReceivableAssignmentReleaseCreator")
   employeeCorrections EmployeeCompensationCorrection[] @relation("EmployeeCorrectionCreator")
   submittedWorkTimeEvidence EmployeeWorkTimeEvidence[] @relation("WorkTimeSubmitterAccount")
   validatedWorkTimeDecisions EmployeeWorkTimeDecision[] @relation("WorkTimeValidatorAccount")
@@ -705,6 +778,7 @@ model RoleAssignment {
 }
 
 model Owner {
+  receivableAssignments ReceivableAssignment[] @relation("ReceivableOwner")
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   expenseApprovalStages ApprovalStage[]
   id                    String                @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -1543,6 +1617,7 @@ model TransactionGroupEntry {
 }
 
 model Posting {
+  receivableAssignments ReceivableAssignment[] @relation("ReceivableOriginalPosting")
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   id              String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId  String               @map("organization_id") @db.Uuid
@@ -1597,6 +1672,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  receivableAssignments ReceivableAssignment[]
   employeeCompensationCosts    EmployeeCompensationCost[]
   employeeCompensationRuns EmployeeCompensationRun[]
   employeeCompensationRunLines EmployeeCompensationRunLine[]
@@ -1636,6 +1712,8 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  receivableSourcePolicies ReceivableAssignment[] @relation("ReceivableSourcePolicy")
+  receivableAssignmentPolicies ReceivableAssignment[] @relation("ReceivableAssignmentPolicy")
   percentageEarningRateWitnesses EmployeeCompensationPercentageWitness[] @relation("EmployeePercentageRate")
   percentageEarningPolicyWitnesses EmployeeCompensationPercentageWitness[] @relation("EmployeePercentagePolicy")
   hourlyEarningWitnesses EmployeeCompensationHourlyWitness[] @relation("EmployeeHourlyWitnessRule")
@@ -2042,6 +2120,7 @@ model NotificationEmailSuppression {
 }
 
 model GuestRecord {
+  receivableAssignments ReceivableAssignment[] @relation("ReceivableGuest")
   id                                 String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId                     String        @map("organization_id") @db.Uuid
   displayName                        String?       @map("display_name")
@@ -2543,6 +2622,7 @@ model ApprovalStageRecipient {
 }
 
 model Supplier {
+  receivableAssignments ReceivableAssignment[] @relation("ReceivableSupplier")
   invoices           SupplierInvoice[]
   id                 String            @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId     String            @map("organization_id") @db.Uuid

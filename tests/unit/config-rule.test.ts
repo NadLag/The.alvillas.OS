@@ -53,6 +53,7 @@ describe("config rule registry", () => {
       "finance.expense_treatment",
       "finance.ota_fee",
       "finance.payout_schedule",
+      "finance.receivable_assignments",
       "finance.receivables",
       "finance.tax",
       "identity.pin_lockout",
@@ -95,6 +96,8 @@ describe("config rule registry", () => {
   it("parses known config values and rejects unregistered keys", () => {
     const receivables={source:"POSTED_OWNERSHIP_CLAIMS",account_codes:["EXPLICIT_GUEST_CLAIM"]};
     expect(parseConfigRuleValue("finance.receivables",receivables)).toEqual(receivables);
+    const assignments={source:"ORIGINAL_POSTED_DEBIT",party_types:["GUEST","OWNER","SUPPLIER","PERSON"],due_date:"EXPLICIT_OR_UNSCHEDULED"};
+    expect(parseConfigRuleValue("finance.receivable_assignments",assignments)).toEqual(assignments);
     for(const key of Object.keys(receivables))expect(()=>parseConfigRuleValue("finance.receivables",Object.fromEntries(Object.entries(receivables).filter(([name])=>name!==key)))).toThrow();
     for(const value of[{...receivables,source:"CASH_LOCATION"},{...receivables,account_codes:[]},{...receivables,account_codes:["CLAIM","CLAIM"]},{...receivables,guestId:"current-reservation-guest"}])expect(()=>parseConfigRuleValue("finance.receivables",value)).toThrow();
     const percentageRun={earning_date:"ACTUAL_POSTED_FINANCIAL_BASE",earning_unit:"PERSON_ASSIGNMENT_SELECTED_POSTINGS",timezone:"UTC",max_period_days:31};
