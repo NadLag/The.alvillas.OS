@@ -21,6 +21,7 @@ import { employeeHourlyRunPolicyKey,employeeHourlyRunPolicySchema } from "@/modu
 import {employeePercentageRunPolicyKey,employeePercentageRunPolicySchema} from "@/modules/finance/domain/employee-percentage-run";
 import { employeePercentageEarningsPolicyKey,employeePercentageEarningsPolicySchema } from "@/modules/finance/domain/employee-percentage-earnings";
 import { employeeCompensationRunPolicyKey, employeeCompensationRunPolicySchema } from "@/modules/finance/domain/employee-compensation-run";
+import {receivablePolicyKey,receivablePolicySchema} from "@/modules/finance/domain/receivable";
 export { inventoryMinimumsSchema } from "./inventory-policy";
 
 const moneyAmountSchema = z
@@ -373,6 +374,7 @@ export const configRuleSchemas = {
   [employeeHourlyRunPolicyKey]: employeeHourlyRunPolicySchema,
   [employeePercentageRunPolicyKey]:employeePercentageRunPolicySchema,
   [employeePercentageEarningsPolicyKey]: employeePercentageEarningsPolicySchema,
+  [receivablePolicyKey]:receivablePolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
   "ops.workflows": workflowSchema,
