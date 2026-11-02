@@ -30,13 +30,13 @@ test("Field checklist progress and language preserve unsaved and queued work", a
     await expect(note).toHaveValue("Keep my unsaved completion note"); await expect(checks.nth(0)).toBeChecked();
     await note.clear(); await language.getByTestId("locale-switch-fr").click();
     await expect(page.getByTestId("field-language-notice")).toHaveText(en.Field.saveBeforeLanguage);
-    await save.click(); await expect(form.getByRole("status")).toHaveText(en.Operations.manage.saved);
+    await save.click(); await expect(form.getByTestId("field-task-progress-status")).toHaveText(en.Operations.manage.saved);
     await expect(form).not.toHaveAttribute("data-field-dirty", "true");
     await checks.nth(0).uncheck(); await save.click();
-    await expect(form.getByRole("status")).toHaveText(en.Operations.manage.saved);
+    await expect(form.getByTestId("field-task-progress-status")).toHaveText(en.Operations.manage.saved);
     await expect(form).not.toHaveAttribute("data-field-dirty", "true");
     await checks.nth(0).check(); await save.click();
-    await expect(form.getByRole("status")).toHaveText(en.Operations.manage.saved);
+    await expect(form.getByTestId("field-task-progress-status")).toHaveText(en.Operations.manage.saved);
     await expect(form).not.toHaveAttribute("data-field-dirty", "true");
     await language.getByTestId("locale-switch-fr").focus(); await page.keyboard.press("Enter");
     await expect(page).toHaveURL(new RegExp(`/fr/app/field/${fixture.taskId}$`, "u"));
@@ -46,7 +46,7 @@ test("Field checklist progress and language preserve unsaved and queued work", a
     await checks.nth(1).check(); await expect(counter).toHaveText(label("fr", 2));
     await expect(finish).toBeDisabled(); await save.click();
     await expect(page.getByTestId("field-cash-review-required")).toHaveCount(0);
-    await expect(form.getByRole("status")).toHaveText(fr.Operations.manage.saved);
+    await expect(form.getByTestId("field-task-progress-status")).toHaveText(fr.Operations.manage.saved);
     await expect(form).not.toHaveAttribute("data-field-dirty", "true");
     expect(await withTenant(fixture.db, fixture.organizationId, tx => tx.auditLog.count({ where: { action: "task.checklist.progress", resourceId: fixture.taskId } }))).toBe(4);
     await page.screenshot({ path: info.outputPath("field-progress-fr.png"), fullPage: true });
