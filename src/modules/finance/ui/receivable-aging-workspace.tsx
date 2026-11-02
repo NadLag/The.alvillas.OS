@@ -8,21 +8,27 @@ import type {AppLocale} from "@/i18n/routing";
 import {receivableAgingPageSchema} from "../domain/receivable-aging";
 import {receivableEditorSchema} from "../domain/receivable-workspace";
 import {useCompensationRead} from "./use-compensation-read";
+import {ReceivableExportControl} from "./receivable-export-control";
 
 export function ReceivableAgingWorkspace({locale}:{locale:AppLocale}){
  const t=useTranslations("ReceivableAging");
  const common=useTranslations("Receivables");
+ const exportText=useTranslations("ReceivableExports");
  const[selectedCurrency,setSelectedCurrency]=useState("");
  const[draftBucket,setDraftBucket]=useState("");
  const[bucket,setBucket]=useState("");
  const[draftSearch,setDraftSearch]=useState("");
  const[search,setSearch]=useState("");
  const[after,setAfter]=useState<string>();
- const invalidate=useCallback(()=>{setSelectedCurrency("");setDraftBucket("");setBucket("");setDraftSearch("");setSearch("");setAfter(undefined);},[]);
+ const[exportDenied,setExportDenied]=useState(false);
+ const invalidate=useCallback(()=>{setSelectedCurrency("");setDraftBucket("");setBucket("");setDraftSearch("");setSearch("");setAfter(undefined);setExportDenied(false);},[]);
  const editor=useCompensationRead("/api/finance/receivables/editor",receivableEditorSchema,invalidate);
  const currency=selectedCurrency||editor.data?.source.baseCurrency;
  const body=currency?JSON.stringify({currency,search,...bucket?{bucket}:{},...after?{after}:{}}):undefined;
  const read=useCompensationRead(currency?"/api/finance/receivables/aging":null,receivableAgingPageSchema,invalidate,body);
+ const refreshAging=read.refresh;
+ const deniedExport=useCallback(()=>{setExportDenied(true);void refreshAging();},[refreshAging]);
+ const startExport=useCallback(()=>setExportDenied(false),[]);
  const error=editor.error??read.error;
  const pending=editor.pending||read.pending;
  const source=!error&&!pending?read.data?.source:null;
@@ -43,6 +49,7 @@ export function ReceivableAgingWorkspace({locale}:{locale:AppLocale}){
    </form>
    {pending?<><p role="status">{t("loading")}</p><SkeletonBlock rows={3}/></>:null}
    {error?<p role={error==="offline"?"status":"alert"}>{t(error==="offline"?"offline":error==="configuration_unavailable"?"configuration":"unavailable")}</p>:null}
+   {exportDenied?<p role="alert">{exportText("forbidden")}</p>:null}
    {source?<>
     <p>{t("asOf",{date:formatDateTime(locale,new Date(source.at),{timeZone:source.timezone})})}</p>
     <p>{t("total")} <strong className="compensation-numeric" data-testid="receivable-aging-total">{money(source.totalOutstanding)}</strong> <span>{t("claims",{count:count(source.totalCount)})}</span></p>
@@ -55,6 +62,7 @@ export function ReceivableAgingWorkspace({locale}:{locale:AppLocale}){
      <dl className="compensation-cost-allocation"><div><dt>{t("assigned")}</dt><dd className="compensation-numeric">{money(item.assigned)}</dd></div><div><dt>{t("collected")}</dt><dd className="compensation-numeric">{money(item.collected)}</dd></div><div><dt>{t("outstanding")}</dt><dd className="compensation-numeric">{money(item.outstanding)}</dd></div></dl>
     </li>)}</ol>
     <div className="app-actions">{after?<button type="button" className="secondary-button" onClick={()=>setAfter(undefined)} data-testid="receivable-aging-first">{t("firstPage")}</button>:null}{source.next?<button type="button" className="secondary-button" onClick={()=>setAfter(source.next!)} data-testid="receivable-aging-next">{t("nextPage")}</button>:null}</div>
+    <ReceivableExportControl key={source.currency+":"+bucket+":"+search} locale={locale} currency={source.currency} bucket={bucket} search={search} onDenied={deniedExport} onStart={startExport}/>
    </>:null}
   </>}
  </section>;

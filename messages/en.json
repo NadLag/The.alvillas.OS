@@ -3898,5 +3898,43 @@
     "outstanding": "Outstanding",
     "firstPage": "First page",
     "nextPage": "Next page"
+  },
+  "ReceivableExports": {
+    "title": "Export receivables",
+    "guidance": "Download every matching open claim, with exact decimal amounts, net receipts and the snapshot date.",
+    "reason": "Reason for this export",
+    "submit": "Download CSV",
+    "sending": "Preparing file…",
+    "success": "The file is ready to save.",
+    "offline": "Connect to download the file.",
+    "forbidden": "You do not have permission to export this financial information.",
+    "configuration": "Configure receivable exports before downloading.",
+    "rateLimited": "The export limit has been reached. Try again later.",
+    "unavailable": "The file could not be prepared. Refresh the data and try again.",
+    "validation": "Enter a clear export reason and check the filters.",
+    "fileName": "receivables-{date}-{currency}.csv",
+    "claim": "Claim",
+    "total": "Total",
+    "columns": {
+      "recordType": "Row type",
+      "asOf": "Snapshot at",
+      "civilOn": "Civil date",
+      "timezone": "Timezone",
+      "currency": "Currency",
+      "agingRuleId": "Aging rule",
+      "agingRuleVersion": "Rule version",
+      "assignmentId": "Claim reference",
+      "postingId": "Original posting",
+      "partyKind": "Debtor type",
+      "partyId": "Debtor reference",
+      "purpose": "Purpose",
+      "dueOn": "Due date",
+      "daysPastDue": "Days past due",
+      "band": "Aging band",
+      "assigned": "Assigned amount",
+      "collected": "Net receipts",
+      "outstanding": "Outstanding",
+      "claimCount": "Claim count"
+    }
   }
 }

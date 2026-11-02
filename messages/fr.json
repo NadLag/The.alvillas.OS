@@ -3898,5 +3898,43 @@
     "outstanding": "Restant dû",
     "firstPage": "Première page",
     "nextPage": "Page suivante"
+  },
+  "ReceivableExports": {
+    "title": "Exporter les créances",
+    "guidance": "Téléchargez toutes les créances ouvertes correspondant aux filtres, avec les montants décimaux exacts, les encaissements nets et la date de l’instantané.",
+    "reason": "Motif de cet export",
+    "submit": "Télécharger le CSV",
+    "sending": "Préparation du fichier…",
+    "success": "Le fichier est prêt à être enregistré.",
+    "offline": "Connectez-vous pour télécharger le fichier.",
+    "forbidden": "Vous n’avez pas l’autorisation d’exporter ces données financières.",
+    "configuration": "Configurez les exports de créances avant le téléchargement.",
+    "rateLimited": "La limite d’export est atteinte. Réessayez plus tard.",
+    "unavailable": "Le fichier n’a pas pu être préparé. Actualisez les données et réessayez.",
+    "validation": "Saisissez un motif d’export clair et vérifiez les filtres.",
+    "fileName": "creances-{date}-{currency}.csv",
+    "claim": "Créance",
+    "total": "Total",
+    "columns": {
+      "recordType": "Type de ligne",
+      "asOf": "Instantané à",
+      "civilOn": "Date civile",
+      "timezone": "Fuseau horaire",
+      "currency": "Devise",
+      "agingRuleId": "Règle d’ancienneté",
+      "agingRuleVersion": "Version de la règle",
+      "assignmentId": "Référence de la créance",
+      "postingId": "Écriture d’origine",
+      "partyKind": "Type de débiteur",
+      "partyId": "Référence du débiteur",
+      "purpose": "Objet",
+      "dueOn": "Échéance",
+      "daysPastDue": "Jours de retard",
+      "band": "Tranche d’ancienneté",
+      "assigned": "Montant affecté",
+      "collected": "Encaissements nets",
+      "outstanding": "Reste à encaisser",
+      "claimCount": "Nombre de créances"
+    }
   }
 }
