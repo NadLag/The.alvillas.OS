@@ -1,0 +1,13 @@
+# Shared durable employee financial commands
+
+Employee claim corrections must survive an uncertain HTTP acknowledgement and worker redelivery while retaining the original actor's authority. Recognition already supplies durable request and outcome records, private outbox references, dispatch, recovery, and terminal delivery handling. Corrections extend that same path.
+
+The request has an explicit `RECOGNIZE` or `REVERSE` operation. A reverse request also binds the original recognition through a tenant composite foreign key. A successful outcome names either its actual recognition or its actual typed correction. Operation-specific entry points preserve the existing recognition receipt shape and reject references belonging to the other operation. The existing Inngest event, consumer, concurrency setting and durable step identifiers remain unchanged; execution dispatches from the stored operation.
+
+Admission uses the same original source preparation as direct correction. It captures the held authorization cap, intersects it with current stored authority, and atomically writes the immutable request, attributed audit, private worker reference and dispatch record. Admission creates no correction or financial movement. The worker rechecks the retained cap and current source before appending the original engine's exact opposite journals and its immutable outcome. Intervening payments, period closure or another correction produce conflicts. Revoked authority and new financial history outside the held cap produce denial. A later grant cannot expand an admitted command's authority.
+
+Existing recognition history and pending queries default to the recognition operation. Correction history uses the explicit reverse operation. Recovery accepts only the original submission, beneficiary claim and nonce; status and recovery remain private to the original requesting account and its current access to the source.
+
+Forward migration 119 adds constant-default metadata, nullable typed references and bounded history indexes. The original recognition branch retains its input and outcome requirements. Atomic checks additionally require the actual dispatch and attributed completion. The qualified migration preserves every old column and row version across all 130 original tables, including a real legacy request and successful outcome created through the original application before admission. No prior migration is edited.
+
+The correction HTTP handlers reuse the existing compensation session, origin, bounded JSON, private caching and error boundary. Native correction controls remain separate integration work within F-FIN-24; its overall completion still requires the entire financial flow and authenticated staging acceptance.

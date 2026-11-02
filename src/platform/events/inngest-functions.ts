@@ -15,7 +15,7 @@ import { executeSupplierInvoiceRecognitionReference, failSupplierInvoiceRecognit
 import { employeeCompensationSubmissionRequested,executeEmployeeCompensationSubmissionReference,failEmployeeCompensationSubmissionReference } from "@/modules/finance/application/employee-compensation-submission-requests";
 import { employeeMonthlyRunRequested,executeEmployeeMonthlyRunReference,failEmployeeMonthlyRunReference } from "@/modules/finance/application/employee-monthly-run-requests";
 import { employeeEarningRunRequested,executeEmployeeEarningRunReference,failEmployeeEarningRunReference } from "@/modules/finance/application/employee-earning-run-requests";
-import { employeeCompensationRecognitionRequested,executeEmployeeCompensationRecognitionReference,failEmployeeCompensationRecognitionReference } from "@/modules/finance/application/employee-compensation-recognition-requests";
+import { employeeCompensationRecognitionRequested,executeEmployeeCompensationFinancialReference,failEmployeeCompensationFinancialReference } from "@/modules/finance/application/employee-compensation-recognition-requests";
 
 import { scheduleDigests } from "@/platform/notifications/digest-service";
 import { scheduleTeamDocumentReminders } from "@/modules/identity/application/team-documents";
@@ -102,7 +102,7 @@ export const recognizeSupplierInvoices = inngest.createFunction({ id: "supplier-
   event.name===employeeMonthlyRunRequested?
   step.run("create-reviewed-monthly-contractual-run",()=>executeEmployeeMonthlyRunReference(event.data,{eventType:event.name})):
   event.name===employeeCompensationRecognitionRequested?
-  step.run("recognize-actual-approved-employee-claim",()=>executeEmployeeCompensationRecognitionReference(event.data,{eventType:event.name})):
+  step.run("recognize-actual-approved-employee-claim",()=>executeEmployeeCompensationFinancialReference(event.data,{eventType:event.name})):
   event.name===employeeCompensationSubmissionRequested?
   step.run("submit-actual-completed-employee-work",()=>executeEmployeeCompensationSubmissionReference(event.data,{eventType:event.name})):
   step.run(event.name === supplierInvoiceReversalRequested ? "reverse-actual-recognized-invoice" : "recognize-actual-approved-invoice",
@@ -118,7 +118,7 @@ export const failSupplierInvoiceRecognitions = inngest.createFunction({ id: "sup
   if (!failure.success) throw new NonRetriableError("supplier_invoice_failure_reference_denied");
   if(failure.data.event.name===employeeEarningRunRequested)return step.run("record-terminal-earning-run-failure",()=>failEmployeeEarningRunReference(failure.data.event.data,{eventType:employeeEarningRunRequested}));
   if(failure.data.event.name===employeeMonthlyRunRequested)return step.run("record-terminal-monthly-run-failure",()=>failEmployeeMonthlyRunReference(failure.data.event.data,{eventType:employeeMonthlyRunRequested}));
-  if(failure.data.event.name===employeeCompensationRecognitionRequested)return step.run("record-terminal-employee-recognition-failure",()=>failEmployeeCompensationRecognitionReference(failure.data.event.data,{eventType:employeeCompensationRecognitionRequested}));
+  if(failure.data.event.name===employeeCompensationRecognitionRequested)return step.run("record-terminal-employee-recognition-failure",()=>failEmployeeCompensationFinancialReference(failure.data.event.data,{eventType:employeeCompensationRecognitionRequested}));
   if(failure.data.event.name===employeeCompensationSubmissionRequested)return step.run("record-terminal-employee-submission-failure",()=>failEmployeeCompensationSubmissionReference(failure.data.event.data,{eventType:employeeCompensationSubmissionRequested}));
   return step.run(failure.data.event.name === supplierInvoiceReversalRequested ? "record-terminal-reversal-failure" : "record-terminal-recognition-failure",
     () => failSupplierInvoiceRecognitionReference(failure.data.event.data, { eventType: failure.data.event.name }));
