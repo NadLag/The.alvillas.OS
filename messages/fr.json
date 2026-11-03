@@ -4252,6 +4252,16 @@
     "cancelReview": "Revenir à la répartition validée"
   },
   "GuestDeposits": {
+    "ADMIT_CASH": "Affectation d’un acompte en espèces",
+    "REVERSE_CASH_ADMISSION": "Correction d’affectation des espèces",
+    "cashAdmissionTitle": "Utiliser un encaissement en espèces existant",
+    "cashGuidance": "Choisissez l’encaissement d’origine de cette réservation et le montant à conserver comme acompte du client.",
+    "cashCollection": "Encaissement en espèces d’origine",
+    "cashAvailable": "Espèces non affectées disponibles",
+    "cashCustody": "Détention d’origine des espèces",
+    "cashConfirmation": "Cette opération attribue les espèces sélectionnées au client. Leur détention physique reste dans le compte existant.",
+    "admitCash": "Enregistrer l’acompte en espèces",
+    "noCashSources": "Aucun encaissement en espèces non affecté et admissible n’est disponible pour cette réservation.",
     "eyebrow": "FINANCES",
     "title": "Acomptes, cautions et remboursements",
     "description": "Suivez les fonds reçus avant le séjour et les cautions remboursables.",

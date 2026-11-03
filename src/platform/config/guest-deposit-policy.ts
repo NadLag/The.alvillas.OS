@@ -21,6 +21,8 @@ export const guestDepositPolicySchema=z.object({
  payment_methods:z.array(receivableCollectionMethodSchema).min(1).refine(rows=>new Set(rows.map(row=>row.key)).size===rows.length,"Payment method keys must be unique"),
  refund_limit:z.literal("ORIGINAL_UNAPPLIED_UNREFUNDED_LIABILITY"),
  closed_period:z.literal("REJECT"),
- correction_date:z.literal("CURRENT_OPEN_PERIOD")
+ correction_date:z.literal("CURRENT_OPEN_PERIOD"),
+ application:z.object({source:z.literal("POSTED_ACCOMMODATION_RECEIVABLE"),recognition:z.literal("ORIGINAL_BOOKING_ACCRUAL_EVENT"),receivable_account_code:accountCodes.element,bucket:z.string().regex(/^[A-Z][A-Z0-9_]{0,119}$/u)}).strict().optional(),
+ cash_admission:z.object({source:z.literal("ORIGINAL_FIELD_COLLECTION"),limit:z.literal("ORIGINAL_UNALLOCATED_CASH"),task_types:z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/u)).min(1).refine(rows=>new Set(rows).size===rows.length),bucket:z.string().regex(/^[A-Z][A-Z0-9_]{0,119}$/u)}).strict().optional()
 }).strict();
 export type GuestDepositPolicy=z.infer<typeof guestDepositPolicySchema>;

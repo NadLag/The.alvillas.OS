@@ -21,6 +21,15 @@ export class GuestDepositRepository{
  byCommand(key:string){return this.tx.financialTransaction.findFirst({where:{organizationId:this.organizationId,idempotencyKey:guestDepositCommandKey(key)},include});}
  async receipt(depositId:string){const row=await this.byCommand(depositId);return row?.reference==="GUEST_DEPOSIT:"+depositId&&!row.reversesTransactionId?row:null;}
  journal(id:string){return this.tx.financialTransaction.findFirst({where:{organizationId:this.organizationId,id},include});}
+ cashSource(id:string){return this.tx.cashCollection.findFirst({where:{organizationId:this.organizationId,id},include:{transaction:{include},property:{select:{city:true,cityId:true,region:true,regionId:true}}}});}
+ cashSources(reservationId:string,before?:string){return this.tx.cashCollection.findMany({where:{organizationId:this.organizationId,reservationId,...before?{id:{lt:before}}:{}},orderBy:{id:"desc"},take:51,include:{transaction:{include}}});}
+ cashBookingRevision(reservationId:string,recordedAt:Date){return this.tx.reservationRevision.findFirst({where:{organizationId:this.organizationId,reservationId,createdAt:{lte:recordedAt}},orderBy:{version:"desc"},select:{id:true,after:true}});}
+ async cashRemaining(collectionId:string,accountId:string,currency:string){const row=(await this.cashPositions([{collectionId,accountId,currency}])).get(collectionId);if(!row)throw Error("Actual cash source position required");return row;}
+ async cashPositions(entries:readonly{collectionId:string;accountId:string;currency:string}[]){
+  if(!entries.length)return new Map<string,{amount:string;fingerprint:string}>();
+  const rows=await this.tx.$queryRaw<Array<{collectionId:string;amount:string;fingerprint:string}>>(Prisma.sql`WITH requested(collection_id,account_id,currency) AS(VALUES ${Prisma.join(entries.map(row=>Prisma.sql`(${row.collectionId}::text,${row.accountId}::uuid,${row.currency}::text)`))}) SELECT r.collection_id AS "collectionId",coalesce(sum(CASE p.side WHEN 'CREDIT' THEN p.amount ELSE -p.amount END),0)::text AS amount,md5(coalesce(string_agg(p.id::text||':'||p.side||':'||p.amount::text,',' ORDER BY p.id),'')) AS fingerprint FROM requested r LEFT JOIN posting p ON p.organization_id=${this.organizationId}::uuid AND p.ledger_account_id=r.account_id AND p.currency=r.currency AND(p.dimensions ? 'cash_collection_id' OR p.dimensions ? 'cashCollectionId') AND lower(coalesce(p.dimensions->>'cash_collection_id',p.dimensions->>'cashCollectionId'))=r.collection_id GROUP BY r.collection_id`);
+  return new Map(rows.map(({collectionId,...row})=>[collectionId,row]));
+ }
  audit(id:string,action:string){return this.tx.auditLog.findFirst({where:{organizationId:this.organizationId,resourceType:"financial_transaction",resourceId:id,action},orderBy:{id:"asc"},select:{id:true,actorId:true,reason:true,after:true,occurredAt:true}});}
  commandAudit(id:string){return this.tx.auditLog.findFirst({where:{organizationId:this.organizationId,resourceType:"financial_transaction",resourceId:id,action:{in:["finance.guest_deposit.received","finance.guest_deposit.refunded","finance.guest_deposit.reversed"]}},orderBy:{id:"asc"},select:{id:true,actorId:true,reason:true,after:true,occurredAt:true}});}
  audits(ids:string[]){return this.tx.auditLog.findMany({where:{organizationId:this.organizationId,resourceType:"financial_transaction",resourceId:{in:ids},action:{in:["finance.guest_deposit.received","finance.guest_deposit.refunded","finance.guest_deposit.reversed"]}},select:{resourceId:true,actorId:true,reason:true,after:true}});}
@@ -39,7 +48,7 @@ export class GuestDepositRepository{
  async positions(entries:readonly{depositId:string;liabilityAccountId:string;currency:string}[]){
   if(!entries.length)return new Map<string,z.infer<typeof totals>>();
   const rows=await this.tx.$queryRaw<Array<z.infer<typeof totals>&{depositId:string}>>(Prisma.sql`WITH requested(deposit_id,claim_id,currency) AS(VALUES ${Prisma.join(entries.map(row=>Prisma.sql`(${row.depositId}::text,${row.liabilityAccountId}::uuid,${row.currency}::text)`))}) SELECT r.deposit_id AS "depositId",
-   COALESCE(sum(CASE WHEN p.dimensions->>'deposit_operation'='RECEIPT' THEN CASE p.side WHEN 'CREDIT' THEN p.amount ELSE -p.amount END ELSE 0 END),0)::text AS received,
+   COALESCE(sum(CASE WHEN p.dimensions->>'deposit_operation' IN ('RECEIPT','CASH_ADMISSION') THEN CASE p.side WHEN 'CREDIT' THEN p.amount ELSE -p.amount END ELSE 0 END),0)::text AS received,
    COALESCE(sum(CASE WHEN p.dimensions->>'deposit_operation'='REFUND' THEN CASE p.side WHEN 'DEBIT' THEN p.amount ELSE -p.amount END ELSE 0 END),0)::text AS refunded,
    COALESCE(sum(CASE WHEN p.dimensions->>'deposit_operation'='APPLICATION' THEN CASE p.side WHEN 'DEBIT' THEN p.amount ELSE -p.amount END ELSE 0 END),0)::text AS applied,
    md5(COALESCE(string_agg(p.id::text||':'||p.transaction_id::text||':'||p.side||':'||p.amount::text,',' ORDER BY p.id),'')) AS fingerprint,count(p.id)::text AS movements

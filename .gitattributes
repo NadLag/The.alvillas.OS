@@ -68,3 +68,8 @@ prisma/migrations/20261103060000_service_period_adjustments/migration.sql text e
 prisma/migrations/20261103070000_service_journal_source_identity/migration.sql text eol=lf
 
 prisma/migrations/20261103080000_guest_deposit_source_guards/migration.sql text eol=lf
+
+prisma/migrations/20261103090000_original_cash_source_budget/migration.sql text eol=lf
+prisma/migrations/20261103100000_cash_guard_source_precedence/migration.sql text eol=lf
+prisma/migrations/20261103110000_guest_cash_admission/migration.sql text eol=lf
+prisma/migrations/20261103120000_guest_cash_original_period/migration.sql text eol=lf
