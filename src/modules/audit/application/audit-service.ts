@@ -10,6 +10,7 @@ import type { AuditActorContext } from "@/modules/audit/application/audit-access
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
+import {canViewCompletePropertyFinance} from "@/platform/authz/property-finance-resource";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
@@ -143,6 +144,11 @@ export function presentAuditHistoryRow(
       { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
       { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
   }
+  if(row.resourceType==="property_finance"){
+    const allowed=Boolean(financialResource?.type==="property_finance"&&financialResource.propertyId===row.propertyScopeId&&canViewCompletePropertyFinance(ctx.authContext,financialResource,new Date(),action==="export"?"export":"view"));
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,
+      {type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
+  }
   if(row.resourceType==="receivable"||row.action.startsWith("finance.receivables.")){
     const now=new Date(),allowed=authorizeOrganizationSource(ctx.authContext,action,{type:"receivable",organizationId:ctx.organizationId,dataClass:"financial"},now)&&
       ["financial_transaction","staff_compensation"].every(type=>authorizeOrganizationSource(ctx.authContext,"view",{type,organizationId:ctx.organizationId,dataClass:"financial"},now));
@@ -234,7 +240,7 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims,monthlyRequests,earningRequests] = await Promise.all([
+  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims,monthlyRequests,earningRequests,propertyFinance] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
@@ -245,9 +251,11 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     read("employee_compensation_submission",ids=>repository.employeeCompensationSubmissionResources(ids)),
     read("employee_compensation_claim",ids=>repository.employeeCompensationClaimResources(ids)),
     read("employee_monthly_run_request",ids=>repository.employeeMonthlyRunRequestResources(ids)),
-    read("employee_earning_run_request",ids=>repository.employeeEarningRunRequestResources(ids))
+    read("employee_earning_run_request",ids=>repository.employeeEarningRunRequestResources(ids)),
+    read("property_finance",ids=>repository.propertyFinanceResources(ids))
   ]);
   return new Map([
+    ...[...propertyFinance].map(([id,resource])=>[`property_finance:${id}`,resource]as const),
     ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),
     ...[...expenses].map(([id, resource]) => [`expense:${id}`, resource] as const),
     ...[...transactions].map(([id, resource]) => [`financial_transaction:${id}`, resource] as const),

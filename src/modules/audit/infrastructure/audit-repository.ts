@@ -152,6 +152,10 @@ export class AuditRepository {
     const rows = await this.tx.accountingPeriod.findMany({ where: { organizationId: this.organizationId, id: { in: ids } }, select: { id: true } });
     return new Map(rows.map(row => [row.id, { type: "financial_transaction", organizationId: this.organizationId, id: row.id, dataClass: "financial" }]));
   }
+  async propertyFinanceResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
+    if(!ids.length)return new Map();const rows=await this.tx.property.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:{id:true,cityId:true,regionId:true}});
+    return new Map(rows.map(row=>[row.id,{type:"property_finance",organizationId:this.organizationId,id:row.id,propertyId:row.id,city:row.cityId,region:row.regionId,dataClass:"financial"}]));
+  }
   async transactionResources(ids: string[]): Promise<Map<string, FinancialAuditResource>> {
     if (!ids.length) return new Map();
     const rows = await this.tx.financialTransaction.findMany({

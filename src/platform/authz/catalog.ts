@@ -23,6 +23,7 @@ export const permissionResources = [
   "staff_compensation",
   "employee_payable",
   "company_expense",
+  "property_finance",
   "receivable",
   "staff_document",
   "role",
@@ -89,7 +90,7 @@ const operationalFull = permissionsFor(
 const geographyView = permissionsFor(["region", "city"], ["view"]);
 
 const financeFull = permissionsFor(
-  ["financial_transaction", "wallet", "cash_collection", "expense", "supplier_invoice", "employee_payable", "company_expense", "owner_statement", "company_ledger", "report"],
+  ["financial_transaction", "wallet", "cash_collection", "expense", "supplier_invoice", "employee_payable", "company_expense", "property_finance", "owner_statement", "company_ledger", "report"],
   ["view", "create", "edit", "void", "approve", "reject", "export", "pay", "reconcile"]
 );
 
@@ -259,7 +260,7 @@ export const standardRoleTemplates: readonly StandardRoleTemplate[] = [
     name: "Accountant",
     description: "Audited read/export financial access for accounting review.",
     permissions: permissionsFor(
-      ["financial_transaction", "owner_statement", "company_ledger", "supplier", "supplier_invoice", "report"],
+      ["financial_transaction", "owner_statement", "company_ledger", "property_finance", "supplier", "supplier_invoice", "report"],
       ["view", "export"]
     ),
     mfaRequired: true
@@ -351,6 +352,7 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
+  ...(["accounts","items","currency","next","fingerprint","rowCount"]as const).map<FieldPolicyCatalogEntry>(field=>({resource:"property_finance",field,dataClass:"financial",requiredPermission:permissionKey("property_finance","view"),mask:"placeholder"})),
   ...(["purpose", "currency", "fromOn", "toOn", "timezone", "total", "lines", "history", "baseCurrency", "currencies", "month", "policy", "reviewFingerprint", "lineCount", "next", "items"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "employee_payable", field, dataClass: "financial", requiredPermission: permissionKey("employee_payable", "view"), mask: "placeholder" })),
   ...(["amount", "currency", "purpose", "invoiceNumber", "issuedOn", "dueOn", "lines", "history"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "supplier_invoice", field, dataClass: "financial", requiredPermission: permissionKey("supplier_invoice", "view"), mask: "placeholder" })),
   { resource: "supplier_invoice", field: "supplierName", dataClass: "personal", requiredPermission: permissionKey("supplier", "view"), mask: "placeholder" },

@@ -1,3 +1,4 @@
+import {canViewCompletePropertyFinance} from "@/platform/authz/property-finance-resource";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
@@ -462,7 +463,7 @@ export default async function PropertyDetailPage({
     <AdminShell className="resource-page" testId="property-detail-page">
       <ShellHeader
         actions={
-        <>{authorize(ctx.authContext, "create", { ...propertyScopedResource, type: "expense", amount: "0", status: "DRAFT", assignedUserAccountId: ctx.actorId }) ? <Link className="secondary-button" data-testid="property-new-expense" href={`/${appLocale}/app/properties/${property.id}/expenses/new`}>{expenseText("new")}</Link> : null}
+        <>{canViewCompletePropertyFinance(ctx.authContext,{...propertyScopedResource,type:"property",id:property.id},new Date())?<Link className="secondary-button" data-testid="property-finance-link" prefetch={false} href={`/${appLocale}/app/properties/${property.id}/finance`}>{(await getTranslations("PropertyFinance"))("title")}</Link>:null}{authorize(ctx.authContext, "create", { ...propertyScopedResource, type: "expense", amount: "0", status: "DRAFT", assignedUserAccountId: ctx.actorId }) ? <Link className="secondary-button" data-testid="property-new-expense" href={`/${appLocale}/app/properties/${property.id}/expenses/new`}>{expenseText("new")}</Link> : null}
           {canEditOwnership ? <Link className="secondary-button" href={`/${appLocale}/app/properties/${property.id}/approvals/new`}>{t("properties.requestApproval")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/templates?property=${property.id}`}>{t("properties.templates")}</Link>
         <Link className="secondary-button" href={`/${appLocale}/app/properties`}>
