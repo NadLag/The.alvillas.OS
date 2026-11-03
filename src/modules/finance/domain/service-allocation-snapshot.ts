@@ -1,4 +1,4 @@
-import {z} from "zod";
+import type {z} from "zod";
 import {commandFingerprint} from "@/platform/http/command-fingerprint";
 import {Money} from "@/platform/money/money";
 import {serviceAllocationPolicyKey,serviceAllocationPolicySchema} from "@/platform/config/service-allocation-policy";
@@ -6,10 +6,22 @@ import {allocateServiceProceeds,ServiceAllocationConfigurationError} from "./ser
 import {assessConfiguredServiceTaxes,type ServiceTaxPolicySource} from "./service-tax-assessment";
 import {allocateGrossRevenueByOwnerShare} from "./reservation-revenue";
 import type {ServiceProviderCost} from "./service-allocation-postings";
+import {assertServiceProviderCosts} from "./service-allocation-postings";
 
-const identity=z.uuid().transform(value=>value.toLowerCase());
-const sourceSchema=z.object({kind:z.literal("COMPLETED_SERVICE_COLLECTION"),collectionId:identity,transactionId:identity,taskId:identity,propertyId:identity,reservationId:identity.nullable(),completionEventId:identity,performedByPersonId:identity,completedAt:z.iso.datetime(),recordedAt:z.iso.datetime(),currencyMinorUnit:z.number().int().min(0).max(2)}).strict();
-export const serviceAllocationOwnerSchema=z.object({ownerId:identity,ownerName:z.string().min(1),shareBps:z.number().int().min(0).max(10000)}).strict();
+import {identity,sourceSchema,serviceAllocationOwnerSchema,serviceAllocationSnapshotSchema} from "./service-allocation-snapshot-schema";
+export {serviceAllocationOwnerSchema,serviceAllocationSnapshotSchema} from "./service-allocation-snapshot-schema";
+
+/** Decode the immutable admission and reuse the original arithmetic; current configuration cannot silently reprice it. */
+export function readServiceAllocationSnapshot(raw:unknown){
+ const snapshot=serviceAllocationSnapshotSchema.parse(raw),gross=Money.of(snapshot.source.amount.amount,snapshot.source.amount.currency),taxes=snapshot.taxes.map(tax=>({...tax,amount:Money.of(tax.amount.amount,tax.amount.currency)})),parts=allocateServiceProceeds(gross,snapshot.recipe,taxes),providerCosts=snapshot.providerCosts.map(cost=>({...cost,amount:Money.of(cost.amount.amount,cost.amount.currency)}));
+ function denied():never{throw new ServiceAllocationConfigurationError("Retained service allocation no longer matches its original exact decision");}
+ if(gross.amount.decimalPlaces()>snapshot.source.currencyMinorUnit||JSON.stringify(parts.map(part=>({...part,amount:part.amount.toJSON()})))!==JSON.stringify(snapshot.parts))denied();
+ for(const tax of taxes){if(tax.policyRuleId!==snapshot.rules.tax.id||tax.policyVersion!==snapshot.rules.tax.version||JSON.stringify(tax.gross)!==JSON.stringify(gross.toJSON()))denied();
+  let expected:Money;if(tax.method==="FIXED"){if(!('amount'in tax.configuredValue))denied();expected=Money.of(tax.configuredValue.amount,gross.currency);}else{if(!('rateBps'in tax.configuredValue))denied();expected=gross.multiplyRatio(BigInt(tax.configuredValue.rateBps),10000n);}if(!expected.equals(tax.amount)||tax.amount.amount.decimalPlaces()>snapshot.source.currencyMinorUnit)denied();
+ }
+ assertServiceProviderCosts(parts,providerCosts);const owners=parts.some(part=>part.beneficiary==="OWNER"&&part.amount.amount.gt(0))?snapshot.owners:[];if(owners.length!==snapshot.owners.length||new Set(owners.map(owner=>owner.ownerId)).size!==owners.length)denied();if(owners.length)allocateGrossRevenueByOwnerShare(gross,owners);else if(parts.some(part=>part.beneficiary==="OWNER"&&part.amount.amount.gt(0)))denied();
+ return{snapshot,gross,parts,providerCosts,owners};
+}
 type PolicySource=ServiceTaxPolicySource;
 type Input={source:z.input<typeof sourceSchema>;gross:Money;allocationRule:PolicySource;taxRule:PolicySource;serviceKey:string;owners:readonly z.input<typeof serviceAllocationOwnerSchema>[];providerCosts:readonly ServiceProviderCost[]};
 

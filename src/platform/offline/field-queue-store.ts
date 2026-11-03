@@ -420,7 +420,14 @@ export class FieldQueueStore extends Dexie {
       const key = fieldCacheIdentity(scope, audience);
       if ((await this.metadata.get("identity"))?.value !== fieldIdentity(scope)) return;
       const state = await this.cacheState.get(key);
+      // Cursor invalidation discards server visibility, not an acknowledged
+      // user's unsent financial intent. Keep its original nonce and payload;
+      // fresh task authority is still required before a new cash operation.
+      const cashDrafts = audience === "assigned"
+        ? (await this.drafts.where("[organizationId+userId]").equals([scope.organizationId,scope.userId]).toArray()).filter(draft=>draft.cash)
+        : [];
       await jobs.clear(); await drafts.clear();
+      if(cashDrafts.length)await this.drafts.bulkPut(cashDrafts.map(draft=>({...draft,checklistItemIds:[],note:""})));
       await this.cacheState.put({ ...scope, key, incarnation: state?.incarnation ?? crypto.randomUUID(), generation: (state?.generation ?? 0) + 1, invalidated: true });
     });
   }

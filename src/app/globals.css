@@ -1,5 +1,13 @@
 .compensation-page { max-inline-size: 80rem; grid-template-columns: minmax(0, 1fr); }
 .compensation-page > * { min-inline-size: 0; }
+.service-allocation-page { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.service-allocation-page :is(.resource-form, .field, .form-actions, section, details, ul, ol, li) { min-inline-size: 0; max-inline-size: 100%; }
+.service-allocation-page :is(.primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.service-allocation-page :is(input, select, textarea) { min-inline-size: 0; max-inline-size: 100%; }
+.service-allocation-page :is(ul, ol) { padding-inline-start: var(--space-5); }
+.service-allocation-page table { inline-size: 100%; table-layout: fixed; border-collapse: collapse; text-align: start; }
+.service-allocation-page :is(th, td) { padding: var(--space-3); border-block-end: 1px solid var(--border-subtle); text-align: start; vertical-align: top; }
+.service-allocation-page caption { padding-block: var(--space-3); text-align: start; color: var(--text-secondary); }
 .company-expense-page { overflow-wrap: anywhere; }
 .company-expense-page :is(fieldset, .resource-form, .field, .form-actions, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
 .company-expense-page :is(legend, .primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }

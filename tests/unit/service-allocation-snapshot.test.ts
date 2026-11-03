@@ -1,7 +1,7 @@
 import {randomUUID} from "node:crypto";
 import {describe,expect,it} from "vitest";
 import {Money} from "@/platform/money/money";
-import {buildServiceAllocationSnapshot} from "@/modules/finance/domain/service-allocation-snapshot";
+import {buildServiceAllocationSnapshot,readServiceAllocationSnapshot} from "@/modules/finance/domain/service-allocation-snapshot";
 import type {ServiceAllocationRecipe} from "@/platform/config/service-allocation-policy";
 
 function fixture(){
@@ -9,6 +9,17 @@ function fixture(){
  return{source:{kind:"COMPLETED_SERVICE_COLLECTION"as const,collectionId:randomUUID(),transactionId:randomUUID(),taskId:randomUUID(),propertyId:randomUUID(),reservationId:null,completionEventId:randomUUID(),performedByPersonId:randomUUID(),completedAt:"2026-11-01T10:00:00.000Z",recordedAt:"2026-11-01T09:00:00.000Z",currencyMinorUnit:2},gross:Money.of("1200","MAD"),serviceKey:"private_chef",allocationRule:{id:randomUUID(),key:"finance.service_allocation",version:4,value:{source:"COMPLETED_SERVICE_COLLECTION",rule_selection:"AT_ACTUAL_SERVICE_COMPLETION",ownership_basis:"CURRENT_PROPERTY_OWNERS_AT_ADMISSION",services:[recipe,{...recipe,service_key:"unrelated_private_service",components:[{key:"unrelated_private_margin",beneficiary:"COMPANY",mode:"REMAINDER"}],rounding_priority:["unrelated_private_margin"]}]}},taxRule:{id:randomUUID(),key:"finance.tax",version:7,value:{taxes:[{key:"approved_tax",currency:"MAD",amount:"0.00",service_assessment:{basis:"ACTUAL_COLLECTED_GROSS",method:"FIXED",rounding:"HALF_UP_AT_LEDGER_PRECISION"}},{key:"unrelated_private_tax",rate_bps:7183}]}},owners:[{ownerId:randomUUID(),ownerName:"Actual owner",shareBps:10000}],providerCosts:[{componentKey:"provider",bindingId:randomUUID(),sourceKind:"EMPLOYEE_COST"as const,costId:randomUUID(),transactionId:randomUUID(),partyId:randomUUID(),amount:Money.of("700","MAD")}]};
 }
 describe("immutable selected service admission snapshot",()=>{
+ it("decodes an immutable database snapshot with reordered JSON object keys and reuses the original exact arithmetic",()=>{
+  function jsonb(value:unknown):unknown{if(Array.isArray(value))return value.map(jsonb);if(value&&typeof value==="object")return Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,child])=>[key,jsonb(child)]));return value;}
+  const original=buildServiceAllocationSnapshot(fixture()).snapshot,read=readServiceAllocationSnapshot(jsonb(original));expect(read.gross.toJSON()).toEqual(original.source.amount);expect(read.parts.map(part=>part.amount.toJSON().amount)).toEqual(["700.00","100.00","400.00"]);expect(read.providerCosts[0].amount.toJSON().amount).toBe("700.00");expect(read.owners).toEqual(original.owners);
+ });
+ it("rejects tampered retained amounts, tax decisions, provider witnesses and ownership shares before constructing a journal",()=>{
+  const original=buildServiceAllocationSnapshot(fixture()).snapshot;
+  const changed=structuredClone(original);changed.parts[1].amount.amount="100.01";expect(()=>readServiceAllocationSnapshot(changed)).toThrow();
+  const tax=structuredClone(original);tax.taxes[0].configuredValue={amount:"0.01"};expect(()=>readServiceAllocationSnapshot(tax)).toThrow();
+  const provider=structuredClone(original);provider.providerCosts[0].amount.amount="699.99";expect(()=>readServiceAllocationSnapshot(provider)).toThrow();
+  const owner=structuredClone(original);owner.owners[0].shareBps=9999;expect(()=>readServiceAllocationSnapshot(owner)).toThrow();
+ });
  it("retains exact source, policy versions and configured tax treatment without copying unrelated financial catalogs",()=>{
   const input=fixture(),result=buildServiceAllocationSnapshot(input),json=JSON.stringify(result.snapshot);
   expect(result.snapshot.source.amount).toEqual({amount:"1200.00",currency:"MAD"});expect(result.snapshot.rules).toMatchObject({allocation:{id:input.allocationRule.id,version:4,ownershipBasis:"CURRENT_PROPERTY_OWNERS_AT_ADMISSION"},tax:{id:input.taxRule.id,version:7}});
