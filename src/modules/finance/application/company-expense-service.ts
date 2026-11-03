@@ -37,6 +37,11 @@ async function configured(ctx:FinanceActorContext,tx:TenantTransaction,input:Omi
  return{now,configRuleId:rule.id,policySnapshot:{category,costCenter},timezone:calendar.timezone,dataClass:previous?.dataClass==="STAFF_COMPENSATION"?previous.dataClass:category.data_class};
 }
 async function audit(ctx:FinanceActorContext,tx:TenantTransaction,row:CompanyExpenseRevision,deps:Deps,before?:CompanyExpenseRevision){await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:row.version===1?"company_expense.created":row.state==="CANCELLED"?"company_expense.cancelled":"company_expense.revised",resourceType:"company_expense",resourceId:row.companyExpenseId,...before?{before:facts(before)}:{},after:facts(row),reason:row.reason,requestId:deps.requestId??randomUUID(),occurredAt:row.createdAt});}
+/** Configuration authoring uses the same native rules, currency precision and independent creation grants. */
+export async function recheckCompanyExpenseDraftCreation(ctx:FinanceActorContext,tx:TenantTransaction,input:CompanyExpenseDraftInput,id:string){
+ const parsed=companyExpenseDraftSchema.parse(input),config=await configured(ctx,tx,parsed);
+ await recheckCompanyExpenseAccess(ctx,tx,{companyExpenseId:id,amount:Money.of(parsed.amount,parsed.currency).amount,currency:parsed.currency,dataClass:config.dataClass,state:"PLANNED"},"create");
+}
 export async function createCompanyExpensePlan(ctx:FinanceActorContext,raw:unknown,deps:Deps={}){
  const input=companyExpenseDraftSchema.parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
   const repository=new CompanyExpenseRepository(tx,ctx.organizationId);await repository.lock("nonce:"+input.idempotencyKey);

@@ -1,5 +1,11 @@
 .compensation-page { max-inline-size: 80rem; grid-template-columns: minmax(0, 1fr); }
 .compensation-page > * { min-inline-size: 0; }
+.company-expense-page { overflow-wrap: anywhere; }
+.company-expense-page :is(fieldset, .resource-form, .field, .form-actions, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
+.company-expense-page :is(legend, .primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.company-expense-page :is(input, select, textarea) { min-inline-size: 0; max-inline-size: 100%; }
+.company-expense-page :is(ul, ol) { padding-inline-start: var(--space-5); }
+.company-expense-page dd { margin-inline-start: 0; }
 .recurring-expense-page fieldset { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
 .recurring-expense-page .field,
 .recurring-expense-page section,

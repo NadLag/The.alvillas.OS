@@ -84,7 +84,7 @@ export async function getCompanyExpenseCompensationSources(ctx: FinanceActorCont
       const source = sources.get(row.employeeCost.claimId), settlement = settlements.get(row.employeeCost.claimId);
       if (!source || !settlement) throw new CompanyExpenseAccessError();
       const { cost, recognition, journal } = actualCost(source, row.employeeCostId);
-      return { id: row.id, version: row.version, planVersion: row.planVersion, employeeCostId: cost.id, submissionId: cost.submissionId, claimId: cost.claimId,
+      return { id: row.id, version: row.version, currentVersion: current.get(cost.id)?.version ?? 0, planVersion: row.planVersion, employeeCostId: cost.id, submissionId: cost.submissionId, claimId: cost.claimId,
         runId: source.row.runId, state: row.state, dataClass: "STAFF_COMPENSATION" as const,
         active: current.get(cost.id)?.state === "ATTACHED" && current.get(cost.id)?.companyExpenseId === input.companyExpenseId,
         ...Money.of(cost.amount, cost.currency).toJSON(), transactionId: recognition.transactionId, sourceReversed: journal.reversedByTransactions.length > 0,

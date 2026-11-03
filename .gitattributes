@@ -48,3 +48,6 @@ prisma/migrations/20261102013000_employee_percentage_snapshot_projection/migrati
 prisma/migrations/20261102020000_native_receivable_collections/migration.sql text eol=lf
 
 prisma/migrations/20261102040000_receivable_collection_batch_movements/migration.sql text eol=lf
+
+# Keep the actual admitted company-command SQL bytes identical on every checkout.
+prisma/migrations/20261102130000_company_expense_command_receipts/migration.sql text eol=lf
