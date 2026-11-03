@@ -54,3 +54,11 @@ prisma/migrations/20261102130000_company_expense_command_receipts/migration.sql 
 
 # Freeze service admission SQL on its first actual database application.
 prisma/migrations/20261103020000_service_allocation_admissions/migration.sql text eol=lf
+
+# Freeze the original service journal acknowledgement SQL before first application.
+prisma/migrations/20261103040000_service_allocation_postings/migration.sql text eol=lf
+
+# Explicit tenant policy declarations preserve all original applied SQL bytes.
+prisma/migrations/20261103030000_service_admission_explicit_tenant_policies/migration.sql text eol=lf
+
+prisma/migrations/20261103050000_service_posting_explicit_tenant_policy/migration.sql text eol=lf

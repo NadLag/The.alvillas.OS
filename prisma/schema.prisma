@@ -215,6 +215,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  serviceAllocationPostings ServiceAllocationPosting[]
   serviceFinancialSources ServiceFinancialSource[]
   serviceAllocationAdmissions ServiceAllocationAdmission[]
   serviceAllocationProviderBindings ServiceAllocationProviderBinding[]
@@ -572,6 +573,7 @@ model Person {
 }
 
 model UserAccount {
+  serviceAllocationPostings ServiceAllocationPosting[]
   serviceFinancialSources ServiceFinancialSource[]
   serviceAllocationAdmissions ServiceAllocationAdmission[]
   serviceAllocationProviderBindings ServiceAllocationProviderBinding[]
@@ -1594,6 +1596,7 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  serviceAllocationPosting ServiceAllocationPosting?
   receivableCollection ReceivableCollection? @relation("ReceivableCollectionJournal")
   receivableCollectionReversal ReceivableCollectionReversal? @relation("ReceivableCollectionOppositeJournal")
   employeeCorrectionOriginal EmployeeCompensationCorrectionLine? @relation("EmployeeCorrectionOriginal")
@@ -3893,7 +3896,42 @@ model CompanyExpenseCommandReceipt {
  @@map("company_expense_command_receipt")
 }
 
+model ServiceAllocationPosting {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  sourceId String @map("source_id") @db.Uuid
+  admissionId String @map("admission_id") @db.Uuid
+  transactionId String @map("transaction_id") @db.Uuid
+  version Int
+  previousPostingId String? @map("previous_posting_id") @db.Uuid
+  kind String @db.VarChar(16)
+  reversesPostingId String? @map("reverses_posting_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  reason String @db.VarChar(500)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"service_posting_org_fk")
+  source ServiceFinancialSource @relation(fields:[organizationId,sourceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_posting_source_fk")
+  admission ServiceAllocationAdmission @relation(fields:[organizationId,admissionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_posting_admission_fk")
+  transaction FinancialTransaction @relation(fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_posting_journal_fk")
+  creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_posting_actor_fk")
+  previousPosting ServiceAllocationPosting? @relation("ServicePostingChain",fields:[organizationId,previousPostingId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_posting_previous_fk")
+  nextPosting ServiceAllocationPosting? @relation("ServicePostingChain")
+  reversesPosting ServiceAllocationPosting? @relation("ServicePostingOpposite",fields:[organizationId,reversesPostingId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_posting_original_fk")
+  reversedByPosting ServiceAllocationPosting? @relation("ServicePostingOpposite")
+  @@unique([organizationId,id],map:"service_posting_org_id_key")
+  @@unique([organizationId,sourceId,version],map:"service_posting_source_version_key")
+  @@unique([organizationId,previousPostingId],map:"service_posting_previous_key")
+  @@unique([organizationId,reversesPostingId],map:"service_posting_original_key")
+  @@unique([organizationId,transactionId],map:"service_posting_journal_key")
+  @@unique([organizationId,idempotencyKey],map:"service_posting_nonce_key")
+  @@index([organizationId,sourceId,id],map:"service_posting_history_idx")
+  @@map("service_allocation_posting")
+}
+
 model ServiceFinancialSource {
+  postings ServiceAllocationPosting[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   sourceKind String @map("source_kind")
@@ -3914,6 +3952,7 @@ model ServiceFinancialSource {
 }
 
 model ServiceAllocationAdmission {
+  postings ServiceAllocationPosting[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   sourceId String @map("source_id") @db.Uuid
