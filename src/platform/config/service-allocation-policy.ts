@@ -24,7 +24,7 @@ export const serviceAllocationRecipeSchema=z.object({
  if(recipe.components.some(c=>(c.beneficiary==="TAX")!==Boolean(c.tax_rule_key)))ctx.addIssue({code:"custom",message:"Tax components require an explicit tax policy; other components cannot impersonate tax"});
  if(new Set(recipe.tax_rule_keys).size!==recipe.tax_rule_keys.length||recipe.components.some(c=>c.tax_rule_key&&!recipe.tax_rule_keys.includes(c.tax_rule_key)))ctx.addIssue({code:"custom",message:"Every tax allocation must bind a separately assessed configured policy"});
 });
-export const serviceAllocationPolicySchema=z.object({source:z.literal("COMPLETED_SERVICE_COLLECTION"),services:z.array(serviceAllocationRecipeSchema).min(1).max(200)}).strict().superRefine((value,ctx)=>{
+export const serviceAllocationPolicySchema=z.object({source:z.literal("COMPLETED_SERVICE_COLLECTION"),rule_selection:z.literal("AT_ACTUAL_SERVICE_COMPLETION"),ownership_basis:z.enum(["RESERVATION_SNAPSHOT","CURRENT_PROPERTY_OWNERS_AT_ADMISSION"]),services:z.array(serviceAllocationRecipeSchema).min(1).max(200)}).strict().superRefine((value,ctx)=>{
  if(new Set(value.services.map(s=>s.service_key)).size!==value.services.length)ctx.addIssue({code:"custom",message:"Service allocation identities must be unique"});
 });
 export type ServiceAllocationRecipe=z.infer<typeof serviceAllocationRecipeSchema>;

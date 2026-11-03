@@ -51,3 +51,6 @@ prisma/migrations/20261102040000_receivable_collection_batch_movements/migration
 
 # Keep the actual admitted company-command SQL bytes identical on every checkout.
 prisma/migrations/20261102130000_company_expense_command_receipts/migration.sql text eol=lf
+
+# Freeze service admission SQL on its first actual database application.
+prisma/migrations/20261103020000_service_allocation_admissions/migration.sql text eol=lf

@@ -1,5 +1,7 @@
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
+import {serviceTaxAssessmentConfigSchema} from "./service-tax-policy";
+import {serviceAllocationPolicyKey,serviceAllocationPolicySchema} from "./service-allocation-policy";
 import {companyExpensePolicyKey,companyExpensePolicySchema,recurringCompanyExpensePolicyKey,recurringCompanyExpensePolicySchema} from "@/modules/finance/domain/company-expense";
 import {recurringExpensePolicyKey,recurringExpensePolicySchema} from "@/modules/finance/domain/recurring-expense";
 import { automationRuleSchema, ruleConditionSchema } from "@/platform/automation/rule";
@@ -310,7 +312,7 @@ export const servicePricingSchema = z
   })
   .passthrough();
 
-const taxRuleSchema = z
+export const taxRuleSchema = z
   .object({
     taxes: z.array(
       z
@@ -318,7 +320,8 @@ const taxRuleSchema = z
           key: configSlugSchema,
           rate_bps: z.number().int().min(0).max(10000).optional(),
           amount: moneyAmountSchema.optional(),
-          currency: currencySchema.optional()
+          currency: currencySchema.optional(),
+          service_assessment:serviceTaxAssessmentConfigSchema.optional()
         })
         .passthrough()
     )
@@ -374,6 +377,7 @@ export const configRuleSchemas = {
   [recurringExpensePolicyKey]:recurringExpensePolicySchema,
   [companyExpensePolicyKey]:companyExpensePolicySchema,
   [recurringCompanyExpensePolicyKey]:recurringCompanyExpensePolicySchema,
+  [serviceAllocationPolicyKey]:serviceAllocationPolicySchema,
   [accountingPeriodPolicyKey]: accountingPeriodPolicySchema,
   [agreementResponsibilitiesConfigKey]: agreementResponsibilitiesConfigSchema,
   [agreementNoticeConfigKey]: agreementNoticeConfigSchema,

@@ -21,7 +21,7 @@ import type { ConfigActorContext } from "@/modules/config/application/config-acc
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
 import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
-import {protectedFinancialRecurrenceKey,recurringExpenseRuleFinancialAccess,recheckRecurringExpenseRuleAccess} from "@/platform/config/recurring-expense-rule-authority";
+import {protectedFinancialRuleKey as protectedFinancialRecurrenceKey,financialRuleAccess as recurringExpenseRuleFinancialAccess,recheckFinancialRuleAccess as recheckRecurringExpenseRuleAccess} from "@/platform/config/financial-rule-authority";
 
 export class ConfigAuthorizationError extends Error {
   constructor(message = "Configuration action is not authorized") {
