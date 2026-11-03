@@ -18,8 +18,9 @@ export class PropertyFinanceRepository extends LedgerCalendarRepository{
      a.id AS account_id,a.name AS account_name,a.account_type,a.normal_side
     FROM posting p JOIN financial_transaction t ON t.organization_id=p.organization_id AND t.id=p.transaction_id
     JOIN ledger_account a ON a.organization_id=p.organization_id AND a.id=p.ledger_account_id
+    LEFT JOIN cash_collection cash ON cash.organization_id=p.organization_id AND cash.transaction_id=COALESCE(t.reverses_transaction_id,t.id)
     WHERE p.organization_id=${this.organizationId}::uuid AND p.currency=${input.currency}
-     AND p.dimensions->>'property_id'=${input.propertyId} AND t.sealed AND t.occurred_at<${input.endsAt}
+     AND COALESCE(cash.property_id::text,p.dimensions->>'property_id')=${input.propertyId} AND t.sealed AND t.occurred_at<${input.endsAt}
    ),positions AS(
     SELECT account_id AS id,account_name AS name,account_type AS "accountType",normal_side AS "normalSide",currency,
      COALESCE(sum(amount) FILTER(WHERE occurred_at<${input.startsAt} AND side='DEBIT'),0)::text AS "openingDebits",
