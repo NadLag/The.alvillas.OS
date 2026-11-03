@@ -52,6 +52,7 @@ describe("config rule registry", () => {
       "finance.company_expenses",
       "finance.expense_allocation",
       "finance.expense_treatment",
+      "finance.guest_deposits",
       "finance.ota_fee",
       "finance.payout_schedule",
       "finance.receivable_aging",
