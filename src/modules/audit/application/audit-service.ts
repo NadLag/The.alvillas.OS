@@ -1,5 +1,5 @@
 import { z } from "zod";
-import {containsRecurringExpenseRule,containsRecurringCompanyExpenseRule,recurringCompanyExpensePolicyKey,recurringExpenseRuleFinancialAccess} from "@/platform/config/recurring-expense-rule-authority";
+import {financialRuleKeysIn,financialRuleAccess,recurringCompanyExpensePolicyKey} from "@/platform/config/financial-rule-authority";
 import {
   AuditRepository,
   type AuditHistoryFilters,
@@ -11,6 +11,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import {canViewCompletePropertyFinance} from "@/platform/authz/property-finance-resource";
+import {canViewServiceAllocation} from "@/platform/authz/service-allocation-resource";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
@@ -87,13 +88,17 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
-  if(row.resourceType==="company_expense"||["config_rule","property_template","property_template_revision"].includes(row.resourceType)&&[row.before,row.after].some(containsRecurringCompanyExpenseRule)){
-    const allowed=recurringExpenseRuleFinancialAccess(ctx.authContext,action,new Date(),recurringCompanyExpensePolicyKey);
+  if(row.resourceType==="service_allocation"){
+    const allowed=Boolean(financialResource?.type==="service_allocation"&&financialResource.id===row.resourceId&&financialResource.propertyId===row.propertyScopeId&&canViewServiceAllocation(ctx.authContext,financialResource,new Date(),action));
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
+  }
+  if(row.resourceType==="company_expense"){
+    const allowed=financialRuleAccess(ctx.authContext,action,new Date(),recurringCompanyExpensePolicyKey);
     return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
   }
-  if(["config_rule","property_template","property_template_revision"].includes(row.resourceType)&&
-    (containsRecurringExpenseRule(row.before)||containsRecurringExpenseRule(row.after))){
-    const allowed=recurringExpenseRuleFinancialAccess(ctx.authContext,action);
+  const financialRules=[...new Set([row.before,row.after].flatMap(financialRuleKeysIn))];
+  if(["config_rule","property_template","property_template_revision"].includes(row.resourceType)&&financialRules.length){
+    const allowed=financialRules.every(key=>financialRuleAccess(ctx.authContext,action,new Date(),key));
     return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,
       {type:auditLogResource,organizationId:ctx.organizationId,data:row},
       {before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
@@ -240,7 +245,7 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims,monthlyRequests,earningRequests,propertyFinance] = await Promise.all([
+  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims,monthlyRequests,earningRequests,propertyFinance,serviceAllocations] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
@@ -252,9 +257,11 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     read("employee_compensation_claim",ids=>repository.employeeCompensationClaimResources(ids)),
     read("employee_monthly_run_request",ids=>repository.employeeMonthlyRunRequestResources(ids)),
     read("employee_earning_run_request",ids=>repository.employeeEarningRunRequestResources(ids)),
-    read("property_finance",ids=>repository.propertyFinanceResources(ids))
+    read("property_finance",ids=>repository.propertyFinanceResources(ids)),
+    read("service_allocation",ids=>repository.serviceAllocationResources(ids))
   ]);
   return new Map([
+    ...[...serviceAllocations].map(([id,resource])=>[`service_allocation:${id}`,resource]as const),
     ...[...propertyFinance].map(([id,resource])=>[`property_finance:${id}`,resource]as const),
     ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),
     ...[...expenses].map(([id, resource]) => [`expense:${id}`, resource] as const),

@@ -62,6 +62,7 @@ describe("config rule registry", () => {
       "finance.receivables",
       "finance.recurring_company_expenses",
       "finance.recurring_expenses",
+      "finance.service_allocation",
       "finance.tax",
       "identity.pin_lockout",
       "inventory.minimums",

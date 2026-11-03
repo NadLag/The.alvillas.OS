@@ -1,7 +1,7 @@
 import type { Session } from "next-auth";
-import { type Action, type AuthContext, type Resource } from "@/platform/authz/authorize";
+import { type AuthContext } from "@/platform/authz/authorize";
 import { authContextForAccount } from "@/platform/authz/account-context";
-import { recheckAccountAuthorization } from "@/platform/authz/current-authority";
+import { recheckAccountAuthorization,type CurrentAuthorityCheck } from "@/platform/authz/current-authority";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
 export type FinanceActorContext = {
@@ -12,7 +12,7 @@ export type FinanceActorContext = {
 
 /** Called after the period lock: retain caller restrictions and re-read stored grants. */
 export async function recheckFinanceAuthorization(ctx: FinanceActorContext, tx: TenantTransaction, now: Date,
-  checks: ReadonlyArray<{ action: Action; resource: Resource; organizationOnly?: boolean }>, denied: Error) {
+  checks: readonly CurrentAuthorityCheck[], denied: Error) {
   await recheckAccountAuthorization(ctx, tx, now, checks, denied);
 }
 

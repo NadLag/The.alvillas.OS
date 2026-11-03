@@ -215,6 +215,10 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  serviceFinancialSources ServiceFinancialSource[]
+  serviceAllocationAdmissions ServiceAllocationAdmission[]
+  serviceAllocationProviderBindings ServiceAllocationProviderBinding[]
+  serviceAllocationProviderParts ServiceAllocationProviderPart[]
  companyExpenseCommandReceipts CompanyExpenseCommandReceipt[]
  companyExpenseCompensationLinks CompanyExpenseCompensationLink[]
   companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
@@ -568,6 +572,9 @@ model Person {
 }
 
 model UserAccount {
+  serviceFinancialSources ServiceFinancialSource[]
+  serviceAllocationAdmissions ServiceAllocationAdmission[]
+  serviceAllocationProviderBindings ServiceAllocationProviderBinding[]
  companyExpenseCommandReceipts CompanyExpenseCommandReceipt[]
  companyExpenseCompensationLinks CompanyExpenseCompensationLink[]
   companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
@@ -1380,6 +1387,7 @@ model OperationTask {
 }
 
 model OperationTaskEvent {
+  serviceFinancialSources ServiceFinancialSource[]
   workTimeEvidence EmployeeWorkTimeEvidence[]
   employeeCompensationCosts EmployeeCompensationCost[]
   compensationRunLines EmployeeCompensationRunLine[]
@@ -1813,6 +1821,8 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  serviceAllocationAdmissions ServiceAllocationAdmission[] @relation("ServiceAllocationPolicy")
+  serviceTaxAdmissions ServiceAllocationAdmission[] @relation("ServiceAllocationTaxPolicy")
   companyExpenseRevisions CompanyExpenseRevision[]
   recurringCompanyExpenseOccurrences RecurringCompanyExpenseOccurrence[]
 
@@ -2554,6 +2564,7 @@ model InventoryMovement {
 }
 
 model CashCollection {
+  serviceFinancialSources ServiceFinancialSource[]
   id                     String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId         String               @map("organization_id") @db.Uuid
   taskId                 String               @map("task_id") @db.Uuid
@@ -2848,6 +2859,7 @@ model SupplierInvoiceRevision {
 }
 
 model SupplierInvoiceLine {
+  serviceAllocationProviderBindings ServiceAllocationProviderBinding[]
   companyExpenseInvoiceLinks CompanyExpenseInvoiceLink[]
   recognition    SupplierInvoiceRecognitionLine?
   approvalStages ApprovalStage[]
@@ -3154,6 +3166,7 @@ model EmployeeCompensationClaim {
 }
 
 model EmployeeCompensationCost {
+  serviceAllocationProviderBindings ServiceAllocationProviderBinding[]
  companyExpenseCompensationLinks CompanyExpenseCompensationLink[]
   correctionLine EmployeeCompensationCorrectionLine?
   recognitionLine EmployeeCompensationRecognitionLine?
@@ -3878,4 +3891,102 @@ model CompanyExpenseCommandReceipt {
  @@unique([organizationId,idempotencyKey],map:"company_command_nonce_key")
  @@index([organizationId,createdBy,id],map:"company_command_actor_history_idx")
  @@map("company_expense_command_receipt")
+}
+
+model ServiceFinancialSource {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  sourceKind String @map("source_kind")
+  cashCollectionId String @map("cash_collection_id") @db.Uuid
+  completionEventId String @map("completion_event_id") @db.Uuid
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"service_source_org_fk")
+  collection CashCollection @relation(fields:[organizationId,cashCollectionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_source_collection_fk")
+  completion OperationTaskEvent @relation(fields:[organizationId,completionEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_source_completion_fk")
+  creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_source_actor_fk")
+  admissions ServiceAllocationAdmission[]
+  providerBindings ServiceAllocationProviderBinding[]
+  @@unique([organizationId,id],map:"service_source_org_id_key")
+  @@unique([organizationId,cashCollectionId],map:"service_source_collection_key")
+  @@index([organizationId,createdAt,id],map:"service_source_history_idx")
+  @@map("service_financial_source")
+}
+
+model ServiceAllocationAdmission {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  sourceId String @map("source_id") @db.Uuid
+  version Int
+  previousAdmissionId String? @map("previous_admission_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  reviewFingerprint String @map("review_fingerprint") @db.Char(64)
+  allocationRuleId String @map("allocation_rule_id") @db.Uuid
+  taxRuleId String @map("tax_rule_id") @db.Uuid
+  serviceKey String @map("service_key") @db.VarChar(100)
+  snapshot Json
+  reason String @db.VarChar(500)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"service_admission_org_fk")
+  source ServiceFinancialSource @relation(fields:[organizationId,sourceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_admission_source_fk")
+  previousAdmission ServiceAllocationAdmission? @relation("ServiceAdmissionChain",fields:[organizationId,previousAdmissionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_admission_previous_fk")
+  nextAdmission ServiceAllocationAdmission? @relation("ServiceAdmissionChain")
+  allocationRule ConfigRule @relation("ServiceAllocationPolicy",fields:[organizationId,allocationRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_admission_policy_fk")
+  taxRule ConfigRule @relation("ServiceAllocationTaxPolicy",fields:[organizationId,taxRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_admission_tax_fk")
+  creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_admission_actor_fk")
+  providerParts ServiceAllocationProviderPart[]
+  @@unique([organizationId,id],map:"service_admission_org_id_key")
+  @@unique([organizationId,idempotencyKey],map:"service_admission_nonce_key")
+  @@unique([organizationId,sourceId,version],map:"service_admission_version_key")
+  @@unique([organizationId,previousAdmissionId],map:"service_admission_successor_key")
+  @@index([organizationId,sourceId,id],map:"service_admission_history_idx")
+  @@map("service_allocation_admission")
+}
+
+model ServiceAllocationProviderBinding {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  sourceId String @map("source_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  supplierInvoiceLineId String? @map("supplier_invoice_line_id") @db.Uuid
+  employeeCostId String? @map("employee_cost_id") @db.Uuid
+  version Int
+  previousBindingId String? @map("previous_binding_id") @db.Uuid
+  state String
+  reason String @db.VarChar(500)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"service_provider_org_fk")
+  source ServiceFinancialSource @relation(fields:[organizationId,sourceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_provider_source_fk")
+  invoiceLine SupplierInvoiceLine? @relation(fields:[organizationId,supplierInvoiceLineId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_provider_invoice_fk")
+  employeeCost EmployeeCompensationCost? @relation(fields:[organizationId,employeeCostId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_provider_employee_fk")
+  previousBinding ServiceAllocationProviderBinding? @relation("ServiceProviderChain",fields:[organizationId,previousBindingId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_provider_previous_fk")
+  nextBinding ServiceAllocationProviderBinding? @relation("ServiceProviderChain")
+  creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_provider_actor_fk")
+  admissionParts ServiceAllocationProviderPart[]
+  @@unique([organizationId,id],map:"service_provider_org_id_key")
+  @@unique([organizationId,idempotencyKey],map:"service_provider_nonce_key")
+  @@unique([organizationId,supplierInvoiceLineId,version],map:"service_provider_invoice_version_key")
+  @@unique([organizationId,employeeCostId,version],map:"service_provider_employee_version_key")
+  @@unique([organizationId,previousBindingId],map:"service_provider_successor_key")
+  @@index([organizationId,sourceId,id],map:"service_provider_history_idx")
+  @@map("service_allocation_provider_binding")
+}
+
+model ServiceAllocationProviderPart {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  admissionId String @map("admission_id") @db.Uuid
+  bindingId String @map("binding_id") @db.Uuid
+  componentKey String @map("component_key") @db.VarChar(100)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"service_part_org_fk")
+  admission ServiceAllocationAdmission @relation(fields:[organizationId,admissionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_part_admission_fk")
+  binding ServiceAllocationProviderBinding @relation(fields:[organizationId,bindingId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_part_binding_fk")
+  @@unique([organizationId,id],map:"service_part_org_id_key")
+  @@unique([organizationId,admissionId,componentKey],map:"service_part_component_key")
+  @@unique([organizationId,admissionId,bindingId],map:"service_part_binding_key")
+  @@map("service_allocation_provider_part")
 }

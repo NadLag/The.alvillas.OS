@@ -152,6 +152,10 @@ export class AuditRepository {
     const rows = await this.tx.accountingPeriod.findMany({ where: { organizationId: this.organizationId, id: { in: ids } }, select: { id: true } });
     return new Map(rows.map(row => [row.id, { type: "financial_transaction", organizationId: this.organizationId, id: row.id, dataClass: "financial" }]));
   }
+  async serviceAllocationResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
+    if(!ids.length)return new Map();const rows=await this.tx.serviceFinancialSource.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]}},select:{id:true,collection:{select:{propertyId:true,reservationId:true,taskId:true,amount:true,currency:true,property:{select:{city:true,region:true,cityId:true,regionId:true}}}}}});
+    return new Map(rows.map(row=>[row.id,{type:"service_allocation",organizationId:this.organizationId,id:row.id,financialRecordId:row.id,propertyId:row.collection.propertyId,reservationId:row.collection.reservationId,jobId:row.collection.taskId,taskId:row.collection.taskId,city:row.collection.property.cityId??row.collection.property.city,region:row.collection.property.regionId??row.collection.property.region,amount:row.collection.amount.toFixed(2),dataClass:"financial"}]));
+  }
   async propertyFinanceResources(ids:string[]):Promise<Map<string,FinancialAuditResource>>{
     if(!ids.length)return new Map();const rows=await this.tx.property.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:{id:true,cityId:true,regionId:true}});
     return new Map(rows.map(row=>[row.id,{type:"property_finance",organizationId:this.organizationId,id:row.id,propertyId:row.id,city:row.cityId,region:row.regionId,dataClass:"financial"}]));
