@@ -24,6 +24,27 @@ async function setup() {
 }
 afterEach(async () => { await Promise.all(stores.splice(0).map(store => store.delete())); });
 describe("cash uses the existing private draft and operation stores", () => {
+  it("retains unsent cash intent and its exact nonce across a work-cursor reset and cold reopen", async () => {
+    const f=await setup();await f.queue.saveDraft(scope,f.task.id,[],"Old operational detail",f.state.incarnation);await f.queue.saveCashDraft(scope,f.draft,f.state.incarnation);
+    await f.queue.invalidateCache(scope);f.queue.close();await f.queue.open();
+    const reset=await f.queue.cashSnapshot(scope,f.task.id);expect(reset.task).toBeUndefined();expect(reset.state?.invalidated).toBe(true);expect(reset.draft).toEqual(f.draft);
+    expect((await f.queue.drafts.toArray())[0]).toMatchObject({checklistItemIds:[],note:"",cash:f.draft});
+    await expect(f.queue.enqueueCash(scope,f.draft,f.state.incarnation)).rejects.toThrow("FIELD_CASH_UNAVAILABLE");
+    await f.queue.publishCache(scope,(await f.queue.readCache(scope)).state!,[f.task],[],"refreshed",stamp);
+    const queued=await f.queue.enqueueCash(scope,f.draft,f.state.incarnation);expect(queued.operation.client_op_id).toBe(f.draft.clientOpId);expect(queued.operation.payload).toMatchObject({amount:f.draft.amount,payer:f.draft.payer,purpose:f.draft.purpose});
+  });
+  it("preserves an already submitted receipt through cursor reset and recovers only its immutable command", async () => {
+    const f=await setup();await f.queue.saveCashDraft(scope,f.draft,f.state.incarnation);const original=await f.queue.enqueueCash(scope,f.draft,f.state.incarnation);
+    await f.queue.invalidateCache(scope);expect((await f.queue.cashSnapshot(scope,f.task.id)).draft).toMatchObject({...f.draft,submittedDeviceId:original.deviceId});
+    await f.queue.operations.delete(original.sequence!);await f.queue.restoreSubmittedCash(scope);expect((await f.queue.entries(scope))[0]).toMatchObject({deviceId:original.deviceId,operation:original.operation});
+    await f.queue.acknowledge(scope,(await f.queue.entries(scope))[0],{client_op_id:f.draft.clientOpId,status:"DUPLICATE",server_version:"c".repeat(43)});expect((await f.queue.cashSnapshot(scope,f.task.id)).draft).toBeUndefined();
+  });
+  it("requires fresh collect authority after cursor reset and still wipes retained financial intent on account change", async () => {
+    const f=await setup();await f.queue.saveCashDraft(scope,f.draft,f.state.incarnation);await f.queue.invalidateCache(scope);
+    await f.queue.publishCache(scope,(await f.queue.readCache(scope)).state!,[{...f.task,cash:{...f.task.cash!,canCollect:false}}],[],"revoked",stamp);
+    expect((await f.queue.cashSnapshot(scope,f.task.id)).draft).toEqual(f.draft);await expect(f.queue.enqueueCash(scope,f.draft,f.state.incarnation)).rejects.toThrow("FIELD_CASH_UNAVAILABLE");
+    await f.queue.activate({...scope,userId:randomUUID()});expect(await f.queue.drafts.count()).toBe(0);expect(await f.queue.operations.count()).toBe(0);
+  });
   it("keeps a cash subscription alive when it starts before local identity binding", async () => {
     const source = await setup(), queue = new FieldQueue(`cash-startup-${randomUUID()}`); stores.push(queue);
     const seen: Array<Awaited<ReturnType<FieldQueue["cashSnapshot"]>>> = [], errors: unknown[] = [];
