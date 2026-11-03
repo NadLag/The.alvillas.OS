@@ -1,12 +1,14 @@
 import {z} from "zod";
 import {guestDepositPolicySchema} from "@/platform/config/guest-deposit-policy";
-import {guestDepositReceiptInput,guestDepositRefundInput,guestDepositReversalInput} from "./guest-deposit-command";
+import {guestDepositReceiptInput,guestDepositRefundInput,guestDepositReversalInput,guestDepositCashAdmissionInput} from "./guest-deposit-command";
 export {guestDepositReversalReviewInput,guestDepositReversalInput} from "./guest-deposit-command";
 const id=z.uuid().transform(value=>value.toLowerCase()),hash=z.string().regex(/^[a-f0-9]{64}$/u);
 export const guestDepositSourceSnapshot=z.object({organizationId:id,depositId:id,reservationId:id,propertyId:id,guestId:id,kind:z.string(),city:z.string().nullable(),region:z.string().nullable()}).strict();
 const policy=z.object({id,version:z.number().int().positive(),value:guestDepositPolicySchema}).strict();
 const base={schemaVersion:z.literal(1),commandHash:hash,source:guestDepositSourceSnapshot,policy,liabilityAccountId:id};
 export const guestDepositReceiptSnapshot=z.object({...base,operation:z.literal("RECEIPT"),input:guestDepositReceiptInput}).strict();
+export const guestDepositCashAdmissionSnapshot=z.object({...base,operation:z.literal("ADMIT_CASH"),input:guestDepositCashAdmissionInput,unallocatedAccountId:id,cashSource:z.object({id,transactionId:id,custodyAccountId:id,taskId:id,taskType:z.string(),recordedAt:z.iso.datetime(),amount:z.string(),currency:z.string(),collectorUserAccountId:id,collectorPersonId:id,provenance:z.unknown()}).strict()}).strict();
+export const guestDepositRootSnapshot=z.discriminatedUnion("operation",[guestDepositReceiptSnapshot,guestDepositCashAdmissionSnapshot]);
 export const guestDepositRefundSnapshot=z.object({...base,operation:z.literal("REFUND"),input:guestDepositRefundInput,originalTransactionId:id}).strict();
 export const guestDepositReversalSnapshot=z.object({...base,operation:z.literal("REVERSE"),input:guestDepositReversalInput,originalTransactionId:id,originalTransactionIds:z.array(id).length(1),reversalTransactionIds:z.array(id).length(1)}).strict();
-export const guestDepositCommandSnapshot=z.discriminatedUnion("operation",[guestDepositReceiptSnapshot,guestDepositRefundSnapshot,guestDepositReversalSnapshot]);
+export const guestDepositCommandSnapshot=z.discriminatedUnion("operation",[guestDepositReceiptSnapshot,guestDepositCashAdmissionSnapshot,guestDepositRefundSnapshot,guestDepositReversalSnapshot]);

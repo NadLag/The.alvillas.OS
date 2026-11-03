@@ -4252,6 +4252,16 @@
     "cancelReview": "Return to admitted allocation"
   },
   "GuestDeposits": {
+    "ADMIT_CASH": "Cash deposit admission",
+    "REVERSE_CASH_ADMISSION": "Cash admission correction",
+    "cashAdmissionTitle": "Use an existing cash collection",
+    "cashGuidance": "Choose the original collection for this booking and the amount to hold as a guest deposit.",
+    "cashCollection": "Original cash collection",
+    "cashAvailable": "Unallocated cash available",
+    "cashCustody": "Original cash custody",
+    "cashConfirmation": "This records guest ownership of the selected cash. Physical custody stays in its existing account.",
+    "admitCash": "Record guest cash deposit",
+    "noCashSources": "No eligible unallocated cash collections are available for this booking.",
     "eyebrow": "FINANCE",
     "title": "Guest deposits & refunds",
     "description": "Track guest funds held before accommodation is earned, and refundable deposits.",
