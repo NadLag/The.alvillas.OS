@@ -10,7 +10,8 @@ import {ServiceAllocationAccessError,ServiceAllocationSourceUnavailableError,Ser
 import {validateEmployeeCompletedWorkEvidence} from "./employee-compensation-source";
 import {recheckFinanceAuthorization,type FinanceActorContext} from "./finance-access";
 
-export const serviceCollectionSourceInput=z.object({collectionId:z.uuid().transform(v=>v.toLowerCase()),completionEventId:z.uuid().transform(v=>v.toLowerCase())}).strict();
+import {serviceCollectionSourceInput} from "../domain/service-allocation-command";
+export {serviceCollectionSourceInput} from "../domain/service-allocation-command";
 /** Canonical completed-work evidence and original collected funds must both remain actual at the final write boundary. */
 export async function inspectServiceAllocationCollection(ctx:FinanceActorContext,raw:unknown,tx:TenantTransaction,action:"view"|"create"="view"){
  const input=serviceCollectionSourceInput.parse(raw),repository=new ServiceAllocationSourceRepository(tx,ctx.organizationId),work=new EmployeeCompensationRepository(tx,ctx.organizationId),finance=new FinanceRepository(tx,ctx.organizationId),collection=await repository.collection(input.collectionId);

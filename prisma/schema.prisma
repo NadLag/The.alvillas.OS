@@ -2607,6 +2607,8 @@ model CashCollection {
 }
 
 model AccountingPeriodAdjustment {
+  serviceAllocationPostingId String? @map("service_allocation_posting_id") @db.Uuid
+  serviceAllocationPosting ServiceAllocationPosting? @relation(fields:[organizationId,serviceAllocationPostingId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"service_posting_period_adjustment_fk")
   employeeRecognitionLineId String? @map("employee_recognition_line_id") @db.Uuid
   employeeRecognitionLine EmployeeCompensationRecognitionLine? @relation(fields:[organizationId,employeeRecognitionLineId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"employee_recognition_adjustment_source_fk")
   invoiceRecognitionLineId String?                         @map("invoice_recognition_line_id") @db.Uuid
@@ -2632,6 +2634,7 @@ model AccountingPeriodAdjustment {
   @@unique([organizationId, expenseId])
   @@unique([organizationId, invoiceRecognitionLineId])
   @@unique([organizationId, employeeRecognitionLineId], map:"employee_recognition_adjustment_unique")
+  @@unique([organizationId, serviceAllocationPostingId], map:"service_posting_period_adjustment_unique")
   @@unique([organizationId, transactionId])
   @@index([organizationId, periodId, createdAt])
   @@map("accounting_period_adjustment")
@@ -3897,6 +3900,7 @@ model CompanyExpenseCommandReceipt {
 }
 
 model ServiceAllocationPosting {
+  periodAdjustment AccountingPeriodAdjustment?
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   sourceId String @map("source_id") @db.Uuid

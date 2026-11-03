@@ -1,5 +1,4 @@
 import {randomUUID} from "node:crypto";
-import {z} from "zod";
 import {prisma} from "@/platform/db/client";
 import {withTenant,type TenantTransactionRunner} from "@/platform/db/tenant";
 import {commandFingerprint} from "@/platform/http/command-fingerprint";
@@ -8,12 +7,12 @@ import {serviceAllocationAuthorityChecks} from "@/platform/authz/service-allocat
 import {ServiceAllocationRepository} from "../infrastructure/service-allocation-repository";
 import {FinanceRepository} from "../infrastructure/finance-repository";
 import {ServiceAllocationAccessError,ServiceAllocationSourceChangedError} from "../domain/service-allocation";
-import {inspectServiceAllocationCollection,serviceCollectionSourceInput} from "./service-allocation-source";
+import {inspectServiceAllocationCollection} from "./service-allocation-source";
 import {inspectServiceProviderCost} from "./service-allocation-provider";
 import {recheckFinanceAuthorization,type FinanceActorContext} from "./finance-access";
 
-const identity=z.uuid().transform(value=>value.toLowerCase());
-export const serviceProviderBindingInput=serviceCollectionSourceInput.extend({sourceKind:z.enum(["SUPPLIER_INVOICE_LINE","EMPLOYEE_COST"]),costId:identity,operation:z.enum(["ATTACH","RELEASE"]),expectedVersion:z.number().int().min(0),idempotencyKey:identity,reason:z.string().trim().min(6).max(500)}).strict();
+import {serviceProviderBindingInput} from "../domain/service-allocation-command";
+export {serviceProviderBindingInput} from "../domain/service-allocation-command";
 
 /** Append a versioned native-cost association; never change the cost, its payable or any journal. */
 export async function changeServiceProviderBinding(ctx:FinanceActorContext,raw:unknown,deps:{db?:TenantTransactionRunner;requestId?:string}={}){

@@ -12,13 +12,12 @@ import {ServiceAllocationAccessError,ServiceAllocationSourceChangedError,Service
 import {buildServiceAllocationSnapshot,serviceAllocationOwnerSchema} from "../domain/service-allocation-snapshot";
 import {ServiceAllocationRepository} from "../infrastructure/service-allocation-repository";
 import {FinanceRepository} from "../infrastructure/finance-repository";
-import {inspectServiceAllocationCollection,serviceCollectionSourceInput} from "./service-allocation-source";
+import {inspectServiceAllocationCollection} from "./service-allocation-source";
 import {inspectServiceProviderCost,serviceProviderLockIdentity} from "./service-allocation-provider";
 import {recheckFinanceAuthorization,type FinanceActorContext} from "./finance-access";
 
-const identity=z.uuid().transform(value=>value.toLowerCase()),selection=z.object({componentKey:z.string().regex(/^[a-z][a-z0-9_.-]{0,99}$/u),bindingId:identity}).strict();
-export const serviceAllocationReviewInput=serviceCollectionSourceInput.extend({serviceKey:z.string().regex(/^[a-z][a-z0-9_.-]{0,99}$/u),providers:z.array(selection).max(100)}).strict();
-export const serviceAllocationAdmissionInput=serviceAllocationReviewInput.extend({expectedVersion:z.number().int().min(0),reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:identity,reason:z.string().trim().min(6).max(500)}).strict();
+import {serviceAllocationReviewInput,serviceAllocationAdmissionInput} from "../domain/service-allocation-command";
+export {serviceAllocationReviewInput,serviceAllocationAdmissionInput} from "../domain/service-allocation-command";
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 
 async function prepare(ctx:FinanceActorContext,input:z.infer<typeof serviceAllocationReviewInput>,tx:TenantTransaction,action:"view"|"create"){

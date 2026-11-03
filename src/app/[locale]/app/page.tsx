@@ -15,6 +15,7 @@ import {
 import { resolveFeatureFlag } from "@/platform/config/feature-flags";
 import { authorize } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
+import {canViewServiceAllocation} from "@/platform/authz/service-allocation-resource";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +79,8 @@ export default async function AppPage({
             <Link className="secondary-button" data-testid="supplier-invoices-link" href={`/${appLocale}/app/finance/supplier-invoices`}>{t("supplierInvoices")}</Link> : null}
           {reservationContext && ["company_expense","financial_transaction"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"financial"},new Date())) ?
             <Link className="secondary-button" data-testid="company-expenses-link" href={`/${appLocale}/app/finance/company-expenses`} prefetch={false}>{(await getTranslations("CompanyExpenses"))("title")}</Link> : null}
+          {reservationContext && canViewServiceAllocation(reservationContext.authContext,{type:"service_allocation",organizationId:session.user.organizationId,dataClass:"financial"},new Date()) ?
+            <Link className="secondary-button" data-testid="service-allocations-link" href={`/${appLocale}/app/finance/service-allocations`} prefetch={false}>{(await getTranslations("ServiceAllocations"))("title")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "company_ledger", organizationId: session.user.organizationId, dataClass: "financial" }) ?
             <Link className="secondary-button" data-testid="company-ledger-link" href={`/${appLocale}/app/finance/company-ledger`}>{t("companyLedger")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "employee_payable", organizationId: session.user.organizationId, dataClass: "financial", amount: "0.00", occurredAt: new Date() }) ?

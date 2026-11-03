@@ -25,6 +25,7 @@ import {CompanyExpenseAccessError,CompanyExpenseChangedError,CompanyExpenseConfi
 import {SupplierInvoiceAccessError,SupplierInvoiceConflictError} from "../application/supplier-invoice-access";
 import {ConfigAuthorizationError,ConfigValidationError,ConfigNotFoundError} from "@/platform/config/rule-version-writer";
 import {PropertyFinanceAccessError,PropertyFinanceConfigurationError,PropertyFinanceSourceChangedError} from "../domain/property-finance";
+import {ServiceAllocationAccessError,ServiceAllocationConfigurationError,ServiceAllocationSourceChangedError,ServiceAllocationSourceUnavailableError} from "../domain/service-allocation";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
@@ -44,6 +45,10 @@ export async function compensationHttp<T extends Promise<unknown>>(request:NextR
     const value=await work(actor,input,requestId),response=options.respond?options.respond(value):NextResponse.json(value,{headers,status:options.status??200});
     for(const[key,value]of Object.entries(headers))response.headers.set(key,value);return response;
   }catch(error){
+    if(error instanceof ServiceAllocationAccessError)return failure("forbidden",403);
+    if(error instanceof ServiceAllocationConfigurationError)return failure("configuration_unavailable",409);
+    if(error instanceof ServiceAllocationSourceChangedError)return failure("conflict",409);
+    if(error instanceof ServiceAllocationSourceUnavailableError)return failure("source_unavailable",409);
     if(error instanceof PropertyFinanceAccessError)return failure("forbidden",403);
     if(error instanceof PropertyFinanceConfigurationError)return failure("configuration_unavailable",409);
     if(error instanceof PropertyFinanceSourceChangedError)return failure("conflict",409);

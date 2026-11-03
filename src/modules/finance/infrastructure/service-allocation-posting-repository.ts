@@ -1,7 +1,7 @@
 import type {Prisma} from "@prisma/client";
 import type {TenantTransaction} from "@/platform/db/tenant";
 
-const include={source:true,admission:true,transaction:{include:{postings:{include:{ledgerAccount:true}},reversedByTransactions:true}},reversedByPosting:true} satisfies Prisma.ServiceAllocationPostingInclude;
+const include={source:true,admission:true,transaction:{include:{postings:{include:{ledgerAccount:true}},reversedByTransactions:true}},reversedByPosting:true,periodAdjustment:true} satisfies Prisma.ServiceAllocationPostingInclude;
 
 /** Journal acknowledgements contain no stored balance or duplicate provider obligation. */
 export class ServiceAllocationPostingRepository{
