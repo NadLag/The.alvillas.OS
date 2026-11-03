@@ -4238,6 +4238,17 @@
     "command_forbidden": "Current financial access is unavailable.",
     "command_recoveryUnavailable": "The original result cannot be checked yet.",
     "command_terminal": "The action was rejected. Review the source before continuing.",
-    "command_succeeded": "Your financial action was recorded."
+    "command_succeeded": "Your financial action was recorded.",
+    "viewPayments": "View original payments",
+    "originalCost": "Associated original cost: {amount}",
+    "scope_INVOICE": "Payments and outstanding balance cover the whole invoice.",
+    "scope_EMPLOYEE_CLAIM": "Payments and outstanding balance cover the employee’s whole claim.",
+    "outstanding": "Outstanding: {amount}",
+    "sourceReversed": "The original cost has an exact opposite in its history.",
+    "openOriginal": "Open original payable",
+    "paymentReversed": "Payment reversed; original movement retained.",
+    "noPayments": "No payments recorded.",
+    "reviewAgain": "Review a new allocation decision",
+    "cancelReview": "Return to admitted allocation"
   }
 }

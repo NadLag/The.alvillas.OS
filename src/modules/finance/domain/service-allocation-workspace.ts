@@ -8,6 +8,7 @@ export const serviceAllocationWorkspaceReadSchema=z.discriminatedUnion("operatio
  z.object({operation:z.literal("COLLECTIONS"),propertyId:id.optional(),after:id.optional()}).strict(),
  serviceCollectionSourceInput.extend({operation:z.literal("COLLECTION")}).strict(),
  z.object({operation:z.literal("DETAIL"),sourceId:id,beforeAdmissionVersion:z.number().int().positive().optional(),beforePostingVersion:z.number().int().positive().optional(),beforeBinding:id.optional()}).strict(),
+ z.object({operation:z.literal("PROVIDER_HISTORY"),sourceId:id,bindingId:id,before:id.optional()}).strict(),
  serviceCollectionSourceInput.extend({operation:z.literal("PROVIDERS"),kind,after:id.optional()}).strict(),
  serviceAllocationReviewInput.extend({operation:z.literal("REVIEW")}).strict()
 ]);
@@ -24,3 +25,7 @@ export const serviceAllocationDetailSchema=z.object({sourceId:id,collectionId:id
 export type ServiceAllocationCollections=z.infer<typeof serviceAllocationCollectionsSchema>;
 export type ServiceAllocationCollection=z.infer<typeof serviceAllocationCollectionSchema>;
 export type ServiceAllocationDetail=z.infer<typeof serviceAllocationDetailSchema>;
+export const serviceAllocationProviderHistorySchema=z.object({sourceId:id,bindingId:id,label:z.string(),cost:money,scope:z.enum(["INVOICE","EMPLOYEE_CLAIM"]),sourceReversed:z.boolean(),outstanding:money,
+ reference:z.discriminatedUnion("kind",[z.object({kind:z.literal("INVOICE"),id}).strict(),z.object({kind:z.literal("EMPLOYEE_CLAIM"),id,claimId:id}).strict()]),
+ payments:z.array(z.object({id,amount:money,paidAt:z.iso.datetime(),reason:z.string(),reference:z.string().nullable(),fundingName:z.string(),reversed:z.boolean()}).strict()).max(50),next:id.nullable()
+}).strict();

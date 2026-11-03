@@ -64,3 +64,5 @@ prisma/migrations/20261103030000_service_admission_explicit_tenant_policies/migr
 prisma/migrations/20261103050000_service_posting_explicit_tenant_policy/migration.sql text eol=lf
 
 prisma/migrations/20261103060000_service_period_adjustments/migration.sql text eol=lf
+
+prisma/migrations/20261103070000_service_journal_source_identity/migration.sql text eol=lf

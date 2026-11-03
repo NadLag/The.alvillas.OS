@@ -4238,6 +4238,17 @@
     "command_forbidden": "الوصول المالي الحالي غير متاح.",
     "command_recoveryUnavailable": "لا يمكن التحقق من النتيجة الأصلية بعد.",
     "command_terminal": "تم رفض الإجراء. راجع المصدر قبل المتابعة.",
-    "command_succeeded": "تم تسجيل الإجراء المالي."
+    "command_succeeded": "تم تسجيل الإجراء المالي.",
+    "viewPayments": "عرض الدفعات الأصلية",
+    "originalCost": "التكلفة الأصلية المرتبطة: {amount}",
+    "scope_INVOICE": "تخص الدفعات والرصيد المتبقي الفاتورة كاملة.",
+    "scope_EMPLOYEE_CLAIM": "تخص الدفعات والرصيد المتبقي مستحقات الموظف كاملة.",
+    "outstanding": "المتبقي: {amount}",
+    "sourceReversed": "تحتوي التكلفة الأصلية على قيد عكسي مطابق في سجلها.",
+    "openOriginal": "فتح المستحق الأصلي",
+    "paymentReversed": "تم عكس الدفعة مع الاحتفاظ بالحركة الأصلية.",
+    "noPayments": "لم تسجل أي دفعات.",
+    "reviewAgain": "مراجعة قرار توزيع جديد",
+    "cancelReview": "العودة إلى التوزيع المعتمد"
   }
 }

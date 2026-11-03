@@ -4238,6 +4238,17 @@
     "command_forbidden": "L’accès financier actuel est indisponible.",
     "command_recoveryUnavailable": "Le résultat d’origine ne peut pas encore être vérifié.",
     "command_terminal": "L’opération a été refusée. Vérifiez la source avant de continuer.",
-    "command_succeeded": "Votre opération financière a été enregistrée."
+    "command_succeeded": "Votre opération financière a été enregistrée.",
+    "viewPayments": "Voir les paiements d’origine",
+    "originalCost": "Coût d’origine associé : {amount}",
+    "scope_INVOICE": "Les paiements et le solde restant concernent la facture entière.",
+    "scope_EMPLOYEE_CLAIM": "Les paiements et le solde restant concernent la créance salariale entière.",
+    "outstanding": "Reste dû : {amount}",
+    "sourceReversed": "Le coût d’origine possède une contrepassation exacte dans son historique.",
+    "openOriginal": "Ouvrir la dette d’origine",
+    "paymentReversed": "Paiement contrepassé ; mouvement d’origine conservé.",
+    "noPayments": "Aucun paiement enregistré.",
+    "reviewAgain": "Vérifier une nouvelle décision de répartition",
+    "cancelReview": "Revenir à la répartition validée"
   }
 }

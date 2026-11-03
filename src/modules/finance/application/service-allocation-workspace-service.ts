@@ -17,6 +17,7 @@ import {recheckServiceAllocationRead} from "./service-allocation-command-service
 import {inspectServiceAllocationCollection} from "./service-allocation-source";
 import {inspectServiceProviderCost,serviceProviderLockIdentity} from "./service-allocation-provider";
 import {reviewServiceAllocation} from "./service-allocation-admission";
+import {readServiceProviderHistory} from "./service-allocation-provider-history";
 import {recheckFinanceAuthorization,type FinanceActorContext} from "./finance-access";
 
 type Deps={db?:TenantTransactionRunner;requestId?:string};
@@ -36,6 +37,7 @@ export async function readServiceAllocationWorkspace(ctx:FinanceActorContext,raw
  const input=serviceAllocationWorkspaceReadSchema.parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
   const repository=new ServiceAllocationWorkspaceRepository(tx,ctx.organizationId),native={db:repository.runner(),requestId:deps.requestId};
   if(input.operation==="REVIEW"){const {operation,...selection}=input;void operation;return serviceAllocationReviewSchema.parse(await reviewServiceAllocation(ctx,selection,native));}
+  if(input.operation==="PROVIDER_HISTORY"){const {operation,...selection}=input;void operation;return readServiceProviderHistory(ctx,selection,native);}
   if(input.operation==="DETAIL"){
    const root=await recheckServiceAllocationRead(ctx,tx,input.sourceId),target={type:"service_allocation",organizationId:ctx.organizationId,id:root.id,financialRecordId:root.id,propertyId:root.collection.propertyId,city:root.collection.property.cityId,region:root.collection.property.regionId,dataClass:"financial"as const},postings=new ServiceAllocationPostingRepository(tx,ctx.organizationId);
    const admissions=await repository.admissionHistory(root.id,input.beforeAdmissionVersion),bindings=await repository.bindingHistory(root.id,input.beforeBinding),journals=await postings.history(root.id,input.beforePostingVersion),latestAdmission=await repository.latestAdmission(root.id),latestPosting=await postings.latest(root.id),active=await postings.activeRecognition(root.id),bindingFacts=[];
