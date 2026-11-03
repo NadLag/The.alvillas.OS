@@ -8,6 +8,7 @@ import { createExpenseDraftAction,updateExpenseDraftAction, submitExpenseAction,
 import type { getExpenseEditor,getExpenseDraftEditor, getExpense } from "../application/expense-service";
 
 import { PaymentAccountPicker } from "./payment-account-picker";
+import {normalizeAmountInput} from "@/platform/money/amount-input";
 
 type ErrorCode = "forbidden" | "conflict" | "configuration" | "validation" | "periodClosed" | "error";
 export function ExpenseDraftForm({ editor,draft,fundingAccountId }: { editor: Awaited<ReturnType<typeof getExpenseEditor>>;draft?:Awaited<ReturnType<typeof getExpenseDraftEditor>>["draft"];fundingAccountId?:string }) {
@@ -20,7 +21,7 @@ export function ExpenseDraftForm({ editor,draft,fundingAccountId }: { editor: Aw
     const form = new FormData(event.currentTarget); setError(null);
     const reservation = form.get("reservationId"), amount = form.get("amount");
     const input = expenseDraftSchema.safeParse({ propertyId: editor.property.id, reservationId: typeof reservation === "string" ? reservation.trim() || undefined : reservation,
-      amount: typeof amount === "string" ? amount.replace(",", ".") : amount, currency: form.get("currency"), category: form.get("category"), purpose: form.get("purpose"),
+      amount: typeof amount === "string" ? normalizeAmountInput(amount) : amount, currency: form.get("currency"), category: form.get("category"), purpose: form.get("purpose"),
       occurredOn: form.get("occurredOn"), fundingAccountId: form.get("fundingAccountId"), emergency: form.get("emergency") === "on", idempotencyKey: key.current, reason: form.get("reason") });
     if (!input.success) { setError("validation"); return; }
     startTransition(async () => {
