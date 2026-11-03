@@ -32,5 +32,4 @@ export class ServiceAllocationRepository{
   return this.tx.serviceAllocationProviderBinding.findMany({where:{organizationId:this.organizationId,sourceId,id:{in:rows.map(row=>row.id)}},orderBy:[{createdAt:"desc"},{id:"desc"}]});
  }
  propertyOwners(propertyId:string){return this.tx.propertyOwner.findMany({where:{organizationId:this.organizationId,propertyId,archivedAt:null,owner:{archivedAt:null}},orderBy:{ownerId:"asc"},select:{id:true,ownerId:true,shareBps:true,owner:{select:{id:true,organizationId:true,displayName:true,archivedAt:true}}}});}
- sourceResources(ids:readonly string[]){return this.tx.serviceFinancialSource.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]}},select:{id:true,collection:{select:{propertyId:true,reservationId:true,taskId:true,amount:true,currency:true,property:{select:{city:true,region:true,cityId:true,regionId:true}}}}}});}
 }

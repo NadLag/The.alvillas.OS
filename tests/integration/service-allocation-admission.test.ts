@@ -10,6 +10,9 @@ import {ServiceAllocationRepository} from "@/modules/finance/infrastructure/serv
 import {reviewServiceAllocation,admitServiceAllocation} from "@/modules/finance/application/service-allocation-admission";
 import {ServiceAllocationAccessError,ServiceAllocationSourceChangedError} from "@/modules/finance/domain/service-allocation";
 import * as auditWriter from "@/platform/audit/audit-writer";
+import {listAuditHistory,exportAuditHistoryCsv} from "@/modules/audit/application/audit-service";
+import {maskedValue} from "@/platform/authz/present";
+import {authContextForAccount as auditContextForAccount} from "@/platform/authz/account-context";
 import {changeServiceProviderBinding} from "@/modules/finance/application/service-allocation-provider-binding";
 import {createSupplier} from "@/modules/finance/application/supplier-service";
 import {createSupplierInvoice,getSupplierInvoice} from "@/modules/finance/application/supplier-invoice-service";
@@ -60,6 +63,10 @@ async function employeeProvider(f:Fixture){
 }
 
 describe("durable actual service allocation admissions",()=>{
+ it("resolves actual source metadata inside audit boundaries and masks retained decisions after independent salary authority is revoked",async()=>{
+  const f=await fixture();await withTenant(db,f.org,async tx=>{const permissions=await tx.permission.findMany({where:{key:{in:["audit_log:view","audit_log:export"]}}});expect(permissions).toHaveLength(2);await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:f.role.id,permissionId:permission.id}))});});const ctx={...f.ctx,authContext:{...await auditContextForAccount(f.org,f.account.id,{db}),personId:f.person.id}},input={...await command(f),reason:"Actual private salary source review 7123.45 retained for audit"},admitted=await admitServiceAllocation(ctx,input,{db}),filter={resourceType:"service_allocation",resourceId:admitted.sourceId},shown=await listAuditHistory(ctx,filter,{db});expect(shown.rows).toHaveLength(2);expect(JSON.stringify(shown)).toContain("7123.45");
+  await withTenant(db,f.org,tx=>tx.rolePermission.deleteMany({where:{roleId:f.role.id,permission:{key:"staff_compensation:view"}}}));const hidden=await listAuditHistory(ctx,filter,{db});expect(hidden.rows).toHaveLength(2);for(const row of hidden.rows){expect(row.after).toBe(maskedValue);expect(row.reason).toBe(maskedValue);}expect(JSON.stringify(hidden)).not.toContain("7123.45");expect(await exportAuditHistoryCsv(ctx,filter,{db})).not.toContain("7123.45");
+ });
  it("requires current independent service view authority as well as creation authority at admission",async()=>{const f=await fixture(),input=await command(f);await withTenant(db,f.org,tx=>tx.rolePermission.deleteMany({where:{organizationId:f.org,roleId:f.role.id,permission:{key:"service_allocation:view"}}}));await expect(admitServiceAllocation(f.ctx,input,{db})).rejects.toBeInstanceOf(ServiceAllocationAccessError);await withTenant(db,f.org,async tx=>expect(await tx.serviceAllocationAdmission.count()).toBe(0));});
  it("commits the exact reviewed source, selected policies and atomic audit without changing original cash or journal rows",async()=>{
   const f=await fixture(),before=await financial(f),input=await command(f),result=await admitServiceAllocation(f.ctx,input,{db});expect(result).toMatchObject({version:1,idempotent:false});
