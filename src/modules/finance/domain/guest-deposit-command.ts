@@ -13,7 +13,9 @@ export const guestDepositCashAdmissionReviewInput=guestDepositReviewInput.omit({
 export const guestDepositCashAdmissionInput=guestDepositCashAdmissionReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
 export const guestDepositReversalReviewInput=z.object({transactionId:identity}).strict();
 export const guestDepositReversalInput=guestDepositReversalReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
-export const guestDepositApplicationReviewInput=guestDepositRefundReviewInput.pick({depositId:true,amount:true,currency:true}).extend({assignmentId:identity}).strict();
+export const guestDepositFundedApplicationReviewInput=guestDepositRefundReviewInput.pick({depositId:true,amount:true,currency:true}).strict();
+export const guestDepositFundedApplicationInput=guestDepositFundedApplicationReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
+export const guestDepositApplicationReviewInput=guestDepositFundedApplicationReviewInput.extend({assignmentId:identity}).strict();
 export const guestDepositApplicationInput=guestDepositApplicationReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
 export const guestDepositCommandSchema=z.discriminatedUnion("operation",[
  z.object({operation:z.literal("ADMIT_CASH"),input:guestDepositCashAdmissionInput.omit({idempotencyKey:true}),idempotencyKey:identity}).strict(),

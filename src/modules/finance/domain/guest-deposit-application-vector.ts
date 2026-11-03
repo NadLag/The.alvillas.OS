@@ -33,3 +33,17 @@ export function guestDepositApplicationVectorDelta(before:readonly FinancePostin
  if(result.length)assertBalancedPostings(result);
  return result;
 }
+
+/** Keep the actual original opposite exact; attribute any remaining native cent allocation separately. */
+export function guestDepositApplicationCorrectionVector(input:{before:readonly FinancePostingDraft[];after:readonly FinancePostingDraft[];original:readonly FinancePostingDraft[]}){
+ const opposite=input.original.map(row=>({...row,side:row.side==="DEBIT"?"CREDIT"as const:"DEBIT"as const}));
+ const adjustment=guestDepositApplicationVectorDelta(opposite,guestDepositApplicationVectorDelta(input.before,input.after));
+ return{opposite,adjustment};
+}
+
+/** Remove only the guest command envelope from retained canonical native dimensions. */
+export function guestDepositApplicationNativeDimensions(raw:unknown){
+ const parsed=dimensions.parse(raw),result:Record<string,unknown>={...parsed,source:parsed.booking_source};
+ for(const key of ["deposit_id","deposit_kind","deposit_operation","deposit_application_id","original_transaction_id","guest_id","application_source","booking_source","allocation_parent_transaction_id"])delete result[key];
+ return dimensions.parse(result);
+}
