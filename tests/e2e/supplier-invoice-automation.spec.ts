@@ -17,7 +17,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native company invoice a
   test.skip(!process.env.DATABASE_URL, "Dedicated local PostgreSQL required"); test.setTimeout(240000);
   if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw Error("Dedicated local PostgreSQL required");
   const f = await openFieldFixture(page, info, "en"), suffix = randomUUID().slice(0,8), key = `invoice-${suffix}`;
-  const number = `INV-AUT-${suffix}`, name = `Actual company invoice supplier ${suffix}`, text = { en, fr, ar }[locale];
+  const number = `INV-AUT-${suffix}`, name = `Actual company invoice supplier ${suffix}`, text = { en, fr, ar }[locale], economicDate = "2026-10-28";
   const anonymous = await browser.newContext({ baseURL: new URL(page.url()).origin, storageState: { cookies: [], origins: [] } }), errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
   try {
@@ -27,16 +27,18 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native company invoice a
         create: { organizationId: f.organizationId, brandName: "Native company invoice calendar", timezone: "UTC" } });
       const assignments = await tx.roleAssignment.findMany({ where: { userAccountId: user.id, organizationId: f.organizationId, scopeType: "organization", archivedAt: null } });
       expect(assignments.length).toBeGreaterThan(0); const rules = new ConfigRuleRepository(tx, f.organizationId);
-      await rules.createVersion({ key: "finance.expense_treatment", scopeType: "organization", effectiveFrom: new Date("2000-01-01"),
+      await rules.createVersion({ key: "finance.expense_treatment", scopeType: "organization", effectiveFrom: new Date(economicDate),
         reason: "Actual company invoice automation treatment", value: { default_treatment: "ALVILLAS_PAID" } });
       await rules.lockVersion("finance.accounting_periods", "organization", null);
       const calendar = await rules.resolve({ key: "finance.accounting_periods", scopes: [{ scopeType: "organization", scopeId: null }],
         asOf: await new FinanceRepository(tx, f.organizationId).clock() });
       if (!calendar) await rules.createVersion({ key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date("2000-01-01"),
         reason: "Actual company invoice automation calendar", value: { timezone: "UTC", allow_early_close: false, max_reopen_seconds: 60 } });
-      await rules.createVersion({ key: "finance.approval_thresholds", scopeType: "organization", effectiveFrom: new Date("2000-01-01"),
+      const approvalRule = await rules.createVersion({ key: "finance.approval_thresholds", scopeType: "organization", effectiveFrom: new Date(economicDate),
         reason: "Actual company invoice automation reviewer", value: { thresholds: [{ key: "native_company_invoice", requires_approval_from: ["finance"] }],
           routing: { finance: { people: [], roles: assignments.map(assignment => assignment.roleId), assigned: false, channels: ["in_app"] } } } });
+      const resolved = await rules.resolve({ key: "finance.approval_thresholds", scopes: [{ scopeType: "organization", scopeId: null }], asOf: new Date(economicDate) });
+      expect(resolved?.id).toBe(approvalRule.id);
     });
     await page.goto(`/${locale}/app/automations`);
     const form = page.getByTestId("automation-create-form");
@@ -58,12 +60,12 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native company invoice a
     await page.goto(`/${locale}/app/finance/supplier-invoices/new`); const draft = page.getByTestId("supplier-invoice-form");
     const supplier = draft.getByTestId("invoice-supplier-picker"); await supplier.fill(name);
     await expect(supplier.locator("..").getByRole("option")).toHaveCount(1); await supplier.press("ArrowDown"); await supplier.press("Enter");
-    await draft.getByTestId("invoice-number").fill(number); await draft.getByTestId("invoice-issued").fill("2026-10-28");
+    await draft.getByTestId("invoice-number").fill(number); await draft.getByTestId("invoice-issued").fill(economicDate);
     await draft.getByTestId("invoice-purpose").fill(`Private company invoice ${suffix}`); await draft.getByTestId("invoice-currency").selectOption("MAD");
     await draft.getByTestId("invoice-line-category").fill("office"); await draft.getByTestId("invoice-line-amount").fill("2400.00");
     await draft.getByTestId("invoice-reason").fill("Actual company invoice without any property allocation"); await draft.getByTestId("invoice-save").click();
     await expect(page.getByTestId("supplier-invoice-detail")).toBeVisible(); const invoiceId = new URL(page.url()).pathname.split("/").at(-1)!;
-    const submission = page.getByTestId("supplier-invoice-submission-form"); await submission.getByTestId("invoice-economic-date").fill("2026-10-28");
+    const submission = page.getByTestId("supplier-invoice-submission-form"); await submission.getByTestId("invoice-economic-date").fill(economicDate);
     await submission.getByTestId("invoice-preview-policy").click(); await expect(submission.getByTestId("invoice-policy-preview")).toBeVisible();
     await submission.getByTestId("invoice-line-review-note").fill("Actual private company line requiring configured finance review");
     await submission.getByTestId("invoice-submit-reason").fill("Submit actual company invoice for its configured review");
