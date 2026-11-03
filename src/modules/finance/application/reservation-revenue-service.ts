@@ -28,6 +28,8 @@ import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
 
+export {buildRevenuePostings as buildReservationRevenuePostings,buildCommissionPostings as buildReservationCommissionPostings};
+
 export class ReservationRevenueAuthorizationError extends Error {
   constructor(message = "Reservation revenue action is not authorized") {
     super(message);
