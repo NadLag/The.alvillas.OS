@@ -6,15 +6,7 @@ import {isExpenseFundingAccount} from "./expense";
 import type {FinancePostingDraft} from "./reservation-revenue";
 
 const identity=z.uuid().transform(value=>value.toLowerCase());
-const positiveMoney=z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u).refine(value=>/[1-9]/u.test(value));
-const moneyInput={amount:positiveMoney,currency:z.string().regex(/^[A-Z]{3}$/u)};
-const receiptFacts={reservationId:identity,kind:z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/u),accountId:identity,...moneyInput,
- method:z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/u),receivedAt:z.iso.datetime({precision:3}),externalReference:z.string().trim().max(160).nullable(),purpose:z.string().trim().min(3).max(1000)};
-export const guestDepositReviewInput=z.object(receiptFacts).strict();
-export const guestDepositReceiptInput=guestDepositReviewInput.extend({reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:identity,reason:z.string().trim().min(6).max(500)}).strict();
-export const guestDepositRefundReviewInput=z.object({depositId:identity,accountId:identity,...moneyInput,method:receiptFacts.method,externalReference:receiptFacts.externalReference,purpose:receiptFacts.purpose}).strict();
-export const guestDepositRefundInput=guestDepositRefundReviewInput.extend({reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:identity,reason:z.string().trim().min(6).max(500)}).strict();
-export const guestDepositRecoveryInput=z.object({key:identity}).strict();
+export {guestDepositReviewInput,guestDepositReceiptInput,guestDepositRefundReviewInput,guestDepositRefundInput,guestDepositRecoveryInput} from "./guest-deposit-command";
 export class GuestDepositSourceError extends Error{}
 export class GuestDepositConflictError extends Error{}
 export class GuestDepositAuthorizationError extends Error{}

@@ -32,6 +32,8 @@ const normalized=<T extends{amount:string;currency:string}>(input:T):T=>({...inp
 const intent=(operation:string,input:unknown)=>commandFingerprint({operation,input});
 const policySnapshot=(row:{id:string;version:number;value:unknown})=>({id:row.id,version:row.version,value:guestDepositPolicySchema.parse(row.value)});
 const denied=()=>new GuestDepositAuthorizationError();
+// Shared only with authorized callers that already own the tenant transaction.
+export {original as readGuestDepositSourceInTransaction,policyFor as resolveGuestDepositPolicyInTransaction};
 
 async function policyFor(tx:TenantTransaction,organizationId:string,propertyId:string,at:Date,reservationId:string){
  const source=await new GuestDepositRepository(tx,organizationId).policySource(reservationId);if(!source)throw new GuestDepositSourceError();
@@ -128,6 +130,6 @@ export async function reverseGuestDepositMovement(context:FinanceActorContext,ra
 });}
 
 export async function recoverGuestDepositCommand(context:FinanceActorContext,raw:unknown,deps:Deps={}){const ctx=captured(context),input=guestDepositRecoveryInput.parse(raw);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
- const repository=new GuestDepositRepository(tx,ctx.organizationId);await repository.lockCommand(input.key);const row=await repository.byCommand(input.key);if(!row)return{request:null};if(row.createdBy!==ctx.actorId)throw denied();const audit=await repository.commandAudit(row.id),saved=guestDepositCommandSnapshot.safeParse(audit?.after);if(!audit||!saved.success||audit.actorId!==ctx.actorId)throw new GuestDepositSourceError();
+ const repository=new GuestDepositRepository(tx,ctx.organizationId);await repository.lockCommand(input.key);const row=await repository.byCommand(input.key);if(!row){await recheckFinanceAuthorization(ctx,tx,await new FinanceRepository(tx,ctx.organizationId).clock(),[{action:"view",resource:{type:"financial_transaction",organizationId:ctx.organizationId,dataClass:"financial"}}],denied());return{request:null};}if(row.createdBy!==ctx.actorId)throw denied();const audit=await repository.commandAudit(row.id),saved=guestDepositCommandSnapshot.safeParse(audit?.after);if(!audit||!saved.success||audit.actorId!==ctx.actorId)throw new GuestDepositSourceError();
  const request=await replay(ctx,input.key,saved.data.commandHash,saved.data.operation,tx);if(!request)throw new GuestDepositSourceError();await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.guest_deposit.command_recovered",resourceType:"financial_transaction",resourceId:row.id,after:{depositId:request.depositId,operation:request.operation,idempotencyKey:input.key},reason:"Recovered original actor-bound guest deposit command",requestId:deps.requestId??crypto.randomUUID(),occurredAt:await new FinanceRepository(tx,ctx.organizationId).clock()});await replay(ctx,input.key,saved.data.commandHash,saved.data.operation,tx);return{request};
 });}
