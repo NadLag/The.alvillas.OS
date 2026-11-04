@@ -90,7 +90,7 @@ export function presentAuditHistoryRow(
 ): AuditHistoryRow {
   // Source-specific workflow history rechecks every original financial or task restriction.
   // A broad audit grant alone cannot disclose its explanations, source details or assignees.
-  if (row.resourceType === "variance_workflow_event" || row.resourceType === "variance_workflow_source") {
+  if (row.resourceType === "variance_workflow_event" || row.resourceType === "variance_workflow_source" || row.resourceType === "variance_workflow_queue") {
     return present({ ...ctx.authContext, visibleDataClasses: new Set() }, action,
       { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
       { before: { dataClass: "sensitive" }, after: { dataClass: "sensitive" }, reason: { dataClass: "sensitive" } }) as AuditHistoryRow;

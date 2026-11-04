@@ -1,4 +1,5 @@
 import { getTranslations, setRequestLocale } from "next-intl/server";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AdminShell, ShellHeader } from "@/design-system/shells";
 import { safeLocale } from "@/i18n/routing";
@@ -11,6 +12,6 @@ export default async function Page({ params }: { params: Promise<{ locale: strin
   const actor = await requireCompensationSession(locale), source = varianceSourceReferenceSchema.safeParse({ provider: values.provider, id: values.sourceId });
   if (!source.success) notFound();
   const t = await getTranslations("VarianceCenter"), scope = [actor.organizationId, actor.actorId, source.data.provider, source.data.id].join(".");
-  return <AdminShell className="resource-page compensation-page" testId="variance-workflow-page"><ShellHeader eyebrow={t("eyebrow")} title={t("title")} subtitle={t("guidance")}/>
+  return <AdminShell className="resource-page compensation-page variance-center-page" testId="variance-workflow-page"><ShellHeader eyebrow={t("eyebrow")} title={t("title")} subtitle={t("guidance")} actions={<Link className="secondary-button" prefetch={false} href={`/${locale}/app/finance/variances`}>{t("browse")}</Link>}/>
     <VarianceWorkspace key={scope} locale={locale} scope={scope} actorId={actor.actorId} source={source.data}/></AdminShell>;
 }

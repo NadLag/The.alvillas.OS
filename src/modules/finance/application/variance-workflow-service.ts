@@ -57,6 +57,10 @@ async function inspect(ctx: FinanceActorContext, source: VarianceSourceReference
   await recheck(); return { repository, finance, native, latest, facts, projection, display: authority.facts, recheck };
 }
 
+/** Shared native inspection for the bounded center; every disclosure still needs its final recheck. */
+export const inspectVarianceWorkflowSource = inspect;
+export const captureVarianceWorkflowActor = capture;
+
 export async function readVarianceWorkflow(context: FinanceActorContext, raw: unknown, deps: Deps) {
   const ctx = capture(context), input = readInput.parse(raw);
   return withTenant(deps.db, ctx.organizationId, async tx => {

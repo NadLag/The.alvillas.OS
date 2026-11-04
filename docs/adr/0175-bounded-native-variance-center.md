@@ -1,0 +1,7 @@
+# ADR0175 — Bounded native variance center
+
+Browse original OTA, bank, employee and stocktake sources through a fixed native page, ordered by original source time. Reuse the source adapters, exact measures, workflow projection and final held/current authorization from ADR0174. Do not maintain a second financial balance, copy editable money into a queue, infer access from assignment, or manufacture unsupported host sources.
+
+An organization-wide provider queue requires unconditional organization view on its independently protected roots. Each returned source additionally passes its complete native authority, including staff earnings, expense, original journals and funding. Existing source detail links retain their own narrower source scopes. Listing never extends those scopes. Filters apply only to authorized projections; a page and its continuation have fixed bounds and expose no total or aggregate across monetary and physical units.
+
+Continuation uses the existing authenticated encryption helper and binds organization, actor, provider, filters, held/current authority and trusted issue/expiry time. Preserve PostgreSQL microseconds in the source position to avoid duplicate or skipped observations. Source corrections and permission changes require fresh authorization, and final reads are audited before disclosure. The missing laundry and protected owner-payout hosts remain unavailable until their real dependencies qualify.
