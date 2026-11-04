@@ -28,6 +28,9 @@ import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
 
+// Native accommodation producers share the original owner and commission math.
+export {buildSnapshotAllocations as buildReservationRevenueAllocationsInTransaction,buildRevenuePostings as buildReservationRevenuePostings,buildCommissionPostings as buildReservationCommissionPostings};
+
 export class ReservationRevenueAuthorizationError extends Error {
   constructor(message = "Reservation revenue action is not authorized") {
     super(message);
