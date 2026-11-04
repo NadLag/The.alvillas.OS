@@ -1864,6 +1864,7 @@ model BankStatementLine {
   @@unique([organizationId, identityHash], map: "bank_statement_line_identity_unique")
   @@index([organizationId, ledgerAccountId, postedOn, id], map: "bank_statement_line_account_date_idx")
   @@index([organizationId, bankIdentityHash, correctsExternalId], map: "bank_statement_line_correction_idx")
+  @@index([organizationId, bankIdentityHash, externalId], map: "bank_statement_line_external_family_idx")
   @@index([organizationId, originalImportId], map: "bank_statement_line_original_import_idx")
   @@map("bank_statement_line")
 }
