@@ -7,6 +7,7 @@ import {FinanceRepository} from "@/modules/finance/infrastructure/finance-reposi
 import {formatCurrencyAmount} from "@/i18n/format";
 import {guestDepositCommandSchema,guestDepositCommandResultSchema} from "@/modules/finance/domain/guest-deposit-command";
 import {openFieldFixture} from "./support/field-fixture";
+import {datetimeLocalValue} from "./support/datetime-local";
 import en from "../../messages/en.json" with{type:"json"};
 import fr from "../../messages/fr.json" with{type:"json"};
 import ar from "../../messages/ar.json" with{type:"json"};
@@ -31,7 +32,7 @@ async function setup(f:Fixture,marker:string){return withTenant(f.db,f.organizat
   "finance.guest_deposits":{source:"ACTUAL_GUEST_RECEIPT",kinds:[{key:"stay",labels,liability_account_code:"GUEST_PREPAYMENT",application:"ACCOMMODATION_PREPAYMENT"}],receipt_account_codes:[bank.code],refund_account_codes:[refund.code],receipt_bucket:"GUEST_DEPOSIT_RECEIPT",refund_bucket:"GUEST_DEPOSIT_REFUND",payment_methods:[{key:"bank_transfer",labels:{en:"Bank transfer",fr:"Virement bancaire",ar:"تحويل بنكي"}}],refund_limit:"ORIGINAL_UNAPPLIED_UNREFUNDED_LIABILITY",closed_period:"REJECT",correction_date:"CURRENT_OPEN_PERIOD",application:{source:"ORIGINAL_GUEST_PREPAYMENT",recognition:"ORIGINAL_BOOKING_ACCRUAL_EVENT",application_event:"ACTUAL_CHECKOUT",application_date:"CURRENT_OPEN_PERIOD",allocation:"CUMULATIVE_ORIGINAL_NATIVE_TARGET"}}
  }))await rules.createVersion({key,scopeType:"property",scopeId:task.propertyId,effectiveFrom:new Date("2020-01-01"),createdBy:actor.id,value,reason:"Explicit original funded accommodation browser decisions"});
  await rules.lockVersion("finance.accounting_periods","organization",null);const now=await finance.clock();if(!await rules.resolve({key:"finance.accounting_periods",scopes:[{scopeType:"organization",scopeId:null}],asOf:now}))await rules.createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),value:{timezone:"UTC",allow_early_close:false,max_reopen_seconds:60},reason:"Explicit original guest application calendar"});
- return{propertyId:task.propertyId,propertyName:task.property.name,actorId:actor.id,bank,refund,receivedAt:now.toISOString().slice(0,19),checkIn:new Date(now.getTime()-3*86400000).toISOString().slice(0,10),checkOut:now.toISOString().slice(0,10)};
+ return{propertyId:task.propertyId,propertyName:task.property.name,actorId:actor.id,bank,refund,receivedAt:datetimeLocalValue(now),checkIn:new Date(now.getTime()-3*86400000).toISOString().slice(0,10),checkOut:now.toISOString().slice(0,10)};
 });}
 async function next(page:Page,t:typeof en.GuestDeposits){await page.getByTestId("deposit-command-next").click();await expect(page.getByTestId("deposit-command-status")).toHaveText(t.command_ready);}
 async function apply(page:Page){await page.getByTestId("deposit-application-open").click();await page.getByTestId("deposit-application-amount").fill("0.01");await page.getByTestId("deposit-application-review-open").click();await expect(page.getByTestId("deposit-application-review")).toBeVisible();await page.getByTestId("deposit-application-reason").fill("Apply one actual original guest cent using the frozen booking shares and commission");await page.getByTestId("deposit-application-confirm").check();await page.getByTestId("deposit-application-submit").click();}
