@@ -19,7 +19,8 @@ const originalMoney = (f: Fixture) => withTenant(f.db, f.organizationId, tx => t
  UNION ALL SELECT 'audit',id::text,xmin::text,to_jsonb(a) FROM audit_log a WHERE organization_id=${f.organizationId}::uuid AND resource_type='financial_transaction' ORDER BY kind,id`);
 const originalBank = (f: Fixture, id: string) => withTenant(f.db, f.organizationId, tx => tx.$queryRaw<Array<{ id: string; xmin: string; body: unknown }>>`SELECT id::text,xmin::text,to_jsonb(l) AS body FROM bank_statement_line l WHERE organization_id=${f.organizationId}::uuid AND ledger_account_id=${id}::uuid ORDER BY id`);
 async function selectFile(page: Page, name: string, buffer: Buffer) {
-  await page.getByTestId("bank-file").setInputFiles({ name, mimeType: "application/octet-stream", buffer });
+  const choosing = page.waitForEvent("filechooser"); await page.getByTestId("bank-file").click();
+  await (await choosing).setFiles({ name, mimeType: "application/octet-stream", buffer });
   await expect(page.getByTestId("bank-review")).toBeEnabled(); await page.getByTestId("bank-review").click();
   await expect(page.getByTestId("bank-review-result")).toBeVisible();
   await page.getByTestId("bank-reason").fill("Reviewed the actual original bank statement and its exact source movements");
@@ -98,5 +99,12 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Actual CSV and OFX sourc
     await withTenant(f.db, f.organizationId, tx => tx.roleAssignment.updateMany({ where: { organizationId: f.organizationId, userAccountId: setup.actorId, archivedAt: null }, data: { archivedAt: new Date() } }));
     await page.reload(); await expect(page.getByTestId("bank-statement-page").getByRole("alert")).toHaveText(t.privateUnavailable);
     expect(await page.content()).not.toContain(setup.bank.name); expect(errors).toEqual([]);
+  } catch (error) {
+    const layout = await page.evaluate(() => ({ width: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth,
+      viewport: window.visualViewport ? { width: window.visualViewport.width, height: window.visualViewport.height, scale: window.visualViewport.scale } : null,
+      controls: ["bank-file", "bank-review", "bank-submit"].flatMap(id => { const element = document.querySelector(`[data-testid="${id}"]`); if (!element) return [];
+        const rect = element.getBoundingClientRect(), hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return [{ id, rect: rect.toJSON() as unknown, hit: hit ? { tag: hit.tagName, className: hit.className, testId: hit.getAttribute("data-testid") } : null }]; }) })).catch(() => null);
+    await info.attach("bank-layout", { body: Buffer.from(JSON.stringify(layout, null, 2)), contentType: "application/json" }); throw error;
   } finally { await page.context().setOffline(false); await f.db.$disconnect(); }
 });

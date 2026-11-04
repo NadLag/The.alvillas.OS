@@ -1,5 +1,11 @@
 .compensation-page { max-inline-size: 80rem; grid-template-columns: minmax(0, 1fr); }
 .compensation-page > * { min-inline-size: 0; }
+.bank-statement-page { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.bank-statement-page :is(.resource-form, .field, .form-actions, section, ul, ol, li) { min-inline-size: 0; max-inline-size: 100%; }
+.bank-statement-page .resource-form { grid-template-columns: minmax(0, 1fr); }
+.bank-statement-page :is(.primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.bank-statement-page :is(input, select, textarea) { min-inline-size: 0; max-inline-size: 100%; }
+.bank-statement-page :is(ul, ol) { padding-inline-start: var(--space-5); }
 .guest-deposit-page { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .guest-deposit-page :is(fieldset, .resource-form, .field, .form-actions, section, ul, ol, li) { min-inline-size: 0; max-inline-size: 100%; }
 .guest-deposit-page :is(legend, .primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
