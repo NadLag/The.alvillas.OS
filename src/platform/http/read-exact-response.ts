@@ -3,6 +3,10 @@ export async function readExactResponseBytes(response: Response, expectedBytes: 
   return readBytes(response, expectedBytes, true);
 }
 
+export async function readBoundedResponseBytes(response: Response, maximumBytes: number): Promise<Uint8Array> {
+  return readBytes(response, maximumBytes, false);
+}
+
 export async function readBoundedJsonRequest(request: Request, maximumBytes: number): Promise<unknown> {
   const bytes = await readBytes(request, maximumBytes, false);
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;

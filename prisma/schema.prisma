@@ -215,6 +215,8 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+ financialAttachmentAdmissions FinancialAttachmentAdmission[]
+ financialAttachments FinancialAttachment[]
   varianceWorkflowEvents VarianceWorkflowEvent[]
   bankReconciliations BankReconciliationEntry[]
   bankReconciliationAllocations BankReconciliationAllocation[]
@@ -581,6 +583,7 @@ model Person {
 }
 
 model UserAccount {
+ financialAttachmentAdmissions FinancialAttachmentAdmission[] @relation("FinancialAttachmentAdmissionActor")
   varianceWorkflowActions VarianceWorkflowEvent[] @relation("VarianceWorkflowActor")
   varianceWorkflowAssignments VarianceWorkflowEvent[] @relation("VarianceWorkflowAssignee")
   varianceWorkflowResolutions VarianceWorkflowEvent[] @relation("VarianceWorkflowResolver")
@@ -1612,6 +1615,8 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+ attachmentAdmissions FinancialAttachmentAdmission[]
+ attachments FinancialAttachment[]
   serviceAllocationPosting ServiceAllocationPosting?
   receivableCollection ReceivableCollection? @relation("ReceivableCollectionJournal")
   receivableCollectionReversal ReceivableCollectionReversal? @relation("ReceivableCollectionOppositeJournal")
@@ -2010,6 +2015,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+ financialAttachmentAdmissions FinancialAttachmentAdmission[] @relation("FinancialAttachmentAdmissionPolicy")
   serviceAllocationAdmissions ServiceAllocationAdmission[] @relation("ServiceAllocationPolicy")
   serviceTaxAdmissions ServiceAllocationAdmission[] @relation("ServiceAllocationTaxPolicy")
   companyExpenseRevisions CompanyExpenseRevision[]
@@ -4265,4 +4271,63 @@ model ServiceAllocationProviderPart {
   @@unique([organizationId,admissionId,componentKey],map:"service_part_component_key")
   @@unique([organizationId,admissionId,bindingId],map:"service_part_binding_key")
   @@map("service_allocation_provider_part")
+}
+
+model FinancialAttachmentAdmission {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ transactionId String @map("transaction_id") @db.Uuid
+ idempotencyKey String @map("idempotency_key") @db.Uuid
+ supersedesId String? @map("supersedes_id") @db.Uuid
+ kind String @db.VarChar(16)
+ fileName String @map("file_name") @db.VarChar(180)
+ contentType String @map("content_type") @db.VarChar(40)
+ fileSize Int @map("file_size")
+ sha256 String @db.Char(64)
+ reason String @db.VarChar(1000)
+ requestFingerprint String @map("request_fingerprint") @db.Char(64)
+ sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+ policyRuleId String @map("policy_rule_id") @db.Uuid
+ policySnapshot Json @map("policy_snapshot") @db.JsonB
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ transaction FinancialTransaction @relation(fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ creator UserAccount @relation("FinancialAttachmentAdmissionActor",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ policy ConfigRule @relation("FinancialAttachmentAdmissionPolicy",fields:[organizationId,policyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ supersedes FinancialAttachment? @relation("FinancialAttachmentProposedReplacement",fields:[organizationId,supersedesId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ attachment FinancialAttachment? @relation("FinancialAttachmentOriginalAdmission")
+ @@unique([organizationId,id])
+ @@unique([organizationId,createdBy,idempotencyKey])
+ @@index([organizationId,transactionId,createdAt,id])
+ @@map("financial_attachment_admission")
+}
+
+model FinancialAttachment {
+ id String @id @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ transactionId String @map("transaction_id") @db.Uuid
+ rootId String @map("root_id") @db.Uuid
+ supersedesId String? @map("supersedes_id") @db.Uuid
+ version Int
+ storageKey String @map("storage_key") @db.VarChar(300)
+ cipherSize Int @map("cipher_size")
+ cipherSha256 String @map("cipher_sha256") @db.Char(64)
+ keyVersion String @map("key_version") @db.VarChar(180)
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ transaction FinancialTransaction @relation(fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ admission FinancialAttachmentAdmission @relation("FinancialAttachmentOriginalAdmission",fields:[organizationId,id],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ root FinancialAttachment @relation("FinancialAttachmentRoot",fields:[organizationId,rootId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ versions FinancialAttachment[] @relation("FinancialAttachmentRoot")
+ supersedes FinancialAttachment? @relation("FinancialAttachmentVersion",fields:[organizationId,supersedesId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ next FinancialAttachment? @relation("FinancialAttachmentVersion")
+ proposedReplacements FinancialAttachmentAdmission[] @relation("FinancialAttachmentProposedReplacement")
+ @@unique([organizationId,id])
+ @@unique([organizationId,supersedesId])
+ @@unique([organizationId,rootId,version])
+ @@unique([organizationId,storageKey])
+ @@index([organizationId,transactionId,id])
+ @@map("financial_attachment")
 }

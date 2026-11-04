@@ -34,6 +34,8 @@ import { VarianceWorkflowSourceError, VarianceWorkflowConflictError } from "../d
 import { VarianceCenterAccessError, VarianceCenterCursorError } from "../domain/variance-center";
 import { TaxHookAccessError, TaxHookConfigurationError, TaxHookChangedError } from "../domain/tax-hook";
 import { AccountantExportAccessError, AccountantExportConfigurationError, AccountantExportSourceError, AccountantExportChangedError, AccountantExportCapacityError, AccountantExportRateLimitError } from "../domain/accountant-export";
+import { FinancialAttachmentAccessError, FinancialAttachmentConfigurationError, FinancialAttachmentSourceError, FinancialAttachmentConflictError,
+  FinancialAttachmentValidationError, FinancialAttachmentStorageError, FinancialAttachmentRateLimitError } from "../domain/financial-attachment";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
@@ -53,6 +55,13 @@ export async function compensationHttp<T extends Promise<unknown>>(request:NextR
     const value=await work(actor,input,requestId),response=options.respond?options.respond(value):NextResponse.json(value,{headers,status:options.status??200});
     for(const[key,value]of Object.entries(headers))response.headers.set(key,value);return response;
   }catch(error){
+    if(error instanceof FinancialAttachmentAccessError)return failure("forbidden",403);
+    if(error instanceof FinancialAttachmentConfigurationError)return failure("configuration_unavailable",409);
+    if(error instanceof FinancialAttachmentSourceError)return failure("source_unavailable",409);
+    if(error instanceof FinancialAttachmentConflictError)return failure("conflict",409);
+    if(error instanceof FinancialAttachmentValidationError)return failure("validation",400);
+    if(error instanceof FinancialAttachmentStorageError)return failure("storage_unavailable",503);
+    if(error instanceof FinancialAttachmentRateLimitError){const response=failure("rate_limited",429);response.headers.set("Retry-After",String(Math.max(1,Math.ceil((error.resetAt.getTime()-Date.now())/1000))));return response;}
     if(error instanceof AccountantExportAccessError)return failure("forbidden",403);
     if(error instanceof AccountantExportConfigurationError)return failure("configuration_unavailable",409);
     if(error instanceof AccountantExportSourceError)return failure("source_unavailable",409);

@@ -1,3 +1,4 @@
+import { financialAttachmentAuthorityChecks } from "@/platform/authz/financial-attachment-resource";
 import { z } from "zod";
 import {financialRuleKeysIn,financialRuleAccess,recurringCompanyExpensePolicyKey} from "@/platform/config/financial-rule-authority";
 import {
@@ -149,6 +150,14 @@ export function presentAuditHistoryRow(
       { type: auditLogResource, organizationId: ctx.organizationId, data: row },
       { before: { dataClass: "sensitive" }, after: { dataClass: "sensitive" }, reason: { dataClass: "sensitive" } }) as AuditHistoryRow;
   }
+  if (row.resourceType === "financial_attachment") {
+    const source = financialResource?.attachmentSource, checks = source ? financialAttachmentAuthorityChecks(source, action, financialResource?.attachmentRootId) : null;
+    const allowed = Boolean(financialResource?.id === row.resourceId && checks && [...checks, ...(financialResource?.attachmentChecks ?? [])].every(check =>
+      check.resource.organizationId === ctx.organizationId && (check.organizationOnly ? authorizeOrganizationSource(ctx.authContext, check.action, check.resource, new Date()) : authorize(ctx.authContext, check.action, check.resource))));
+    return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,
+      { type: auditLogResource, organizationId: ctx.organizationId, data: row },
+      { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
+  }
   if (["cash_collection", "expense", "financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType)) {
     const expectedType = ["ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType) ? "financial_transaction" : row.resourceType;
     const requiresSourceId = ["financial_transaction", "ledger_account", "transaction_group", "accounting_period"].includes(row.resourceType);
@@ -266,7 +275,7 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims,monthlyRequests,earningRequests,propertyFinance,serviceAllocations] = await Promise.all([
+  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims,monthlyRequests,earningRequests,propertyFinance,serviceAllocations,attachments] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
@@ -279,9 +288,11 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     read("employee_monthly_run_request",ids=>repository.employeeMonthlyRunRequestResources(ids)),
     read("employee_earning_run_request",ids=>repository.employeeEarningRunRequestResources(ids)),
     read("property_finance",ids=>repository.propertyFinanceResources(ids)),
-    read("service_allocation",ids=>repository.serviceAllocationResources(ids))
+    read("service_allocation",ids=>repository.serviceAllocationResources(ids)),
+    read("financial_attachment", ids => repository.financialAttachmentResources(ids))
   ]);
   return new Map([
+    ...[...attachments].map(([id,resource])=>[`financial_attachment:${id}`,resource] as const),
     ...[...serviceAllocations].map(([id,resource])=>[`service_allocation:${id}`,resource]as const),
     ...[...propertyFinance].map(([id,resource])=>[`property_finance:${id}`,resource]as const),
     ...[...cash].map(([id, resource]) => [`cash_collection:${id}`, resource] as const),

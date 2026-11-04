@@ -67,6 +67,7 @@ describe("config rule registry", () => {
       "finance.recurring_expenses",
       "finance.service_allocation",
       "finance.tax",
+      "finance.transaction_attachments",
       "identity.pin_lockout",
       "inventory.minimums",
       "notification.digest.delivery_policy",
@@ -106,6 +107,9 @@ describe("config rule registry", () => {
   });
 
   it("parses known config values and rejects unregistered keys", () => {
+    const attachments={source:"ORIGINAL_SEALED_FINANCIAL_TRANSACTION",content_types:["application/pdf"],max_bytes:102400,intent_lifetime_seconds:600,storage_read_ttl_seconds:60,encryption:"APP_MANAGED_AUTHENTICATED_ENCRYPTION",history:"APPEND_ONLY_WITH_RETAINED_SUPERSEDED_FILES",rate_limit:{requests:10,window_seconds:60}};
+    expect(parseConfigRuleValue("finance.transaction_attachments",attachments)).toEqual(attachments);
+    expect(()=>parseConfigRuleValue("finance.transaction_attachments",{...attachments,encryption:"NONE"})).toThrow();
     const accountant={source:"ORIGINAL_POSTED_FINANCIAL_SOURCES",reports:["TRANSACTIONS","INCOME","EXPENSES","OWNER_STATEMENTS","BANK_RECONCILIATION","SUPPLIER_PAYMENTS","STAFF_PAYMENTS"],formats:["CSV","EXCEL","PDF"],
       classifications:{income:{buckets:["EXPLICIT_INCOME_BUCKET"],account_types:["ALVILLAS_OWN"],sides:["CREDIT"]},expenses:{buckets:["EXPLICIT_EXPENSE_BUCKET"],account_types:["ALVILLAS_OWN"],sides:["DEBIT"]}},
       capacity:{CSV:100,EXCEL:100,PDF:20},rate_limit:{requests:10,window_seconds:60}};

@@ -46,6 +46,7 @@ export const permissionResources = [
   "cash_collection",
   "expense",
   "financial_transaction",
+  "financial_attachment",
   "owner_portal",
   "owner_portal_property",
   "owner_statement",
@@ -92,7 +93,7 @@ const operationalFull = permissionsFor(
 const geographyView = permissionsFor(["region", "city"], ["view"]);
 
 const financeFull = permissionsFor(
-  ["financial_transaction", "wallet", "cash_collection", "expense", "supplier_invoice", "employee_payable", "company_expense", "property_finance", "service_allocation", "bank_statement", "owner_statement", "company_ledger", "report"],
+  ["financial_transaction", "financial_attachment", "wallet", "cash_collection", "expense", "supplier_invoice", "employee_payable", "company_expense", "property_finance", "service_allocation", "bank_statement", "owner_statement", "company_ledger", "report"],
   ["view", "create", "edit", "void", "approve", "reject", "export", "pay", "reconcile"]
 );
 
