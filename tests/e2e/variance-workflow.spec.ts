@@ -1,0 +1,90 @@
+import { randomUUID } from "node:crypto";
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test } from "@playwright/test";
+import { withTenant } from "@/platform/db/tenant";
+import { formatCurrencyAmount } from "@/i18n/format";
+import { varianceCommandReceiptSchema } from "@/modules/finance/domain/variance-workspace";
+import { bankReconciliationCommandReceiptSchema } from "@/modules/finance/domain/bank-reconciliation-command";
+import { openFieldFixture } from "./support/field-fixture";
+import { prepareBankReconciliationFixture } from "./support/bank-reconciliation-fixture";
+import en from "../../messages/en.json" with { type: "json" };
+import fr from "../../messages/fr.json" with { type: "json" };
+import ar from "../../messages/ar.json" with { type: "json" };
+
+test.use({ actionTimeout: 30000, navigationTimeout: 60000 });
+for (const locale of ["en", "fr", "ar"] as const) test(`Actual variance assignment, resolution, aging and private recovery in ${locale}`, async ({ page }, info) => {
+  test.skip(!process.env.DATABASE_URL, "Dedicated PostgreSQL required"); test.setTimeout(240000);
+  if (!["localhost", "127.0.0.1"].includes(new URL(process.env.DATABASE_URL!).hostname)) throw Error("Dedicated local PostgreSQL required");
+  const f = await openFieldFixture(page, info, "en"), marker = randomUUID().slice(0, 8), messages = { en, fr, ar }[locale], t = messages.VarianceCenter, errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  try {
+    const setup = await prepareBankReconciliationFixture(f, marker, page);
+    await page.goto(`/${locale}/app/finance/bank-statements`);
+    await expect(page.getByTestId("bank-command-status")).toHaveText(messages.BankStatements.command_ready);
+    await page.getByTestId("bank-account-open").filter({ hasText: setup.bank.name }).click();
+    const chooser = page.waitForEvent("filechooser"); await page.getByTestId("bank-file").click();
+    await (await chooser).setFiles({ name: "actual-variance.csv", mimeType: "application/octet-stream", buffer: Buffer.from(`Date;ID;Reference;Description;Amount;Currency\n${setup.date};${marker};actual-variance;Actual variance bank evidence;0.03;MAD`) });
+    await page.getByTestId("bank-review").click(); await expect(page.getByTestId("bank-review-result")).toBeVisible();
+    await page.getByTestId("bank-reason").fill("Retain actual original bank evidence for attributed variance review");
+    await page.getByTestId("bank-confirm").check(); await page.getByTestId("bank-submit").click();
+    await expect(page.getByTestId("bank-command-status")).toHaveText(messages.BankStatements.command_succeeded);
+    const originals = await withTenant(f.db, f.organizationId, async tx => ({
+      line: await tx.bankStatementLine.findFirstOrThrow({ where: { ledgerAccountId: setup.bank.id, externalId: marker } }),
+      posting: await tx.posting.findFirstOrThrow({ where: { transactionId: setup.receiptId, ledgerAccountId: setup.bank.id } }) }));
+    const input = { action: "MATCH", accountId: setup.bank.id, currency: "MAD", expected: [{ id: originals.posting.id, amount: "0.07" }], actual: [{ id: originals.line.id, amount: "0.03" }],
+      reason: "Retain original four-cent actual bank difference", varianceAction: "Review actual provider evidence without changing original journals" };
+    const headers = { Origin: new URL(page.url()).origin };
+    const reviewed = await page.request.post("/api/finance/bank-reconciliation/review", { headers, data: input }); expect(reviewed.ok()).toBe(true);
+    const review = await reviewed.json() as { reviewFingerprint: string };
+    const matched = await page.request.post("/api/finance/bank-reconciliation/command", { headers, data: { ...input, reviewFingerprint: review.reviewFingerprint, idempotencyKey: randomUUID() } });
+    expect(matched.ok()).toBe(true); const match = bankReconciliationCommandReceiptSchema.parse(await matched.json());
+    const source = { provider: "BANK", id: match.result.id };
+    const originalMoney = () => withTenant(f.db, f.organizationId, tx => tx.$queryRaw`SELECT id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE id=${setup.receiptId}::uuid UNION ALL SELECT id::text,xmin::text,to_jsonb(p) FROM posting p WHERE transaction_id=${setup.receiptId}::uuid ORDER BY id`);
+    const before = await originalMoney();
+    await page.goto(`/${locale}/app/finance/variances/BANK/${source.id}`);
+    await expect(page.getByTestId("variance-command-state")).toHaveText(t.command_ready);
+    await expect(page.getByTestId("variance-state")).toHaveText(t.status_OPEN);
+    await expect(page.getByTestId("variance-variance")).toHaveText(formatCurrencyAmount(locale, "-0.04", "MAD"));
+    await expect(page.getByTestId("variance-expected")).toHaveText(formatCurrencyAmount(locale, "0.07", "MAD"));
+    expect(await page.getByTestId("variance-detail").locator("input,textarea").count()).toBe(0);
+    await page.getByTestId("variance-assignee").selectOption(setup.actor.id);
+    const assignmentReason = "Actual attributed follow-up " + marker; await page.getByTestId("variance-assignment-reason").fill(assignmentReason);
+    let nonce = "";
+    await page.route("**/api/finance/variance-workflow/command", async route => {
+      const response = await route.fetch(), receipt = varianceCommandReceiptSchema.parse(await response.json());
+      nonce = receipt.idempotencyKey; expect(receipt.operation).toBe("ASSIGN"); await route.abort("failed");
+    }, { times: 1 });
+    await page.getByTestId("variance-assign").click(); await expect(page.getByTestId("variance-command-state")).toHaveText(t.command_uncertain);
+    const storageKey = `alvillas.variance-workflow.v1.${f.organizationId}.${setup.actor.id}.BANK.${source.id}`;
+    expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBe(nonce);
+    expect(await page.evaluate(reason => Object.values(sessionStorage).some((value: unknown) => typeof value === "string" && value.includes(reason)), assignmentReason)).toBe(false);
+    await page.reload(); await expect(page.getByTestId("variance-command-state")).toHaveText(t.command_succeeded);
+    expect(await page.evaluate(key => sessionStorage.getItem(key), storageKey)).toBeNull();
+    await page.getByTestId("variance-new-command").click();
+    await page.getByTestId("variance-reason").fill("Authorized officer reviewed actual provider evidence " + marker);
+    await page.getByTestId("variance-action").fill("Retain original financial facts and the accepted provider explanation " + marker);
+    await page.getByTestId("variance-resolve").click(); await expect(page.getByTestId("variance-command-state")).toHaveText(t.command_succeeded);
+    await expect(page.getByTestId("variance-state")).toHaveText(t.status_RESOLVED);
+    await page.getByTestId("variance-new-command").click();
+    await page.getByTestId("variance-reason").fill("Authorized officer received further original evidence " + marker);
+    await page.getByTestId("variance-action").fill("Reopen follow-up while preserving the earlier accepted explanation " + marker);
+    await page.getByTestId("variance-resolve").click(); await expect(page.getByTestId("variance-command-state")).toHaveText(t.command_succeeded);
+    await expect(page.getByTestId("variance-state")).toHaveText(t.status_OPEN);
+    await page.getByTestId("variance-show-history").click(); await expect(page.getByTestId("variance-history").locator("li")).toHaveCount(3);
+    expect(await originalMoney()).toEqual(before);
+    expect(await withTenant(f.db, f.organizationId, tx => tx.varianceWorkflowEvent.count({ where: { provider: "BANK", sourceId: source.id } }))).toBe(3);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await page.locator("html").getAttribute("dir")).toBe(locale === "ar" ? "rtl" : "ltr");
+    expect((await page.request.post("/api/finance/variance-workflow/read", { headers: { Origin: "https://foreign.example.test" }, data: { source } })).status()).toBe(403);
+    expect((await page.request.post("/api/finance/variance-workflow/read?unexpected=1", { headers, data: { source } })).status()).toBe(400);
+    expect((await page.request.post("/api/finance/variance-workflow/history", { headers, data: { source, before: "not-a-version" } })).status()).toBe(400);
+    expect((await page.request.post("/api/finance/variance-workflow/command", { headers, data: { intent: { source, version: "1.5", sourceFingerprint: "a".repeat(64), operation: "RESOLVE", reason: "Actual malformed request must be rejected", action: "Retain every original native fact" }, idempotencyKey: randomUUID() } })).status()).toBe(400);
+    const unavailable = await page.request.post("/api/finance/variance-workflow/read", { headers, data: { source: { provider: "BANK", id: randomUUID() } } }); expect(unavailable.status()).toBe(403);
+    await page.context().setOffline(true); await expect(page.getByTestId("variance-workflow-page").getByRole("alert")).toHaveText(t.privateUnavailable);
+    expect(await page.content()).not.toContain(assignmentReason);
+    await page.context().setOffline(false); await page.reload(); await expect(page.getByTestId("variance-detail")).toBeVisible();
+    await withTenant(f.db, f.organizationId, tx => tx.roleAssignment.updateMany({ where: { userAccountId: setup.actor.id, archivedAt: null }, data: { archivedAt: new Date() } }));
+    await page.reload(); await expect(page.getByTestId("variance-workflow-page").getByRole("alert")).toHaveText(t.privateUnavailable);
+    expect(await page.content()).not.toContain(assignmentReason); expect(errors).toEqual([]);
+  } finally { await page.context().setOffline(false); await f.db.$disconnect(); }
+});

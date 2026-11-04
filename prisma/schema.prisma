@@ -215,6 +215,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  varianceWorkflowEvents VarianceWorkflowEvent[]
   bankReconciliations BankReconciliationEntry[]
   bankReconciliationAllocations BankReconciliationAllocation[]
   bankReconciliationEvidence BankReconciliationEvidence[]
@@ -580,6 +581,9 @@ model Person {
 }
 
 model UserAccount {
+  varianceWorkflowActions VarianceWorkflowEvent[] @relation("VarianceWorkflowActor")
+  varianceWorkflowAssignments VarianceWorkflowEvent[] @relation("VarianceWorkflowAssignee")
+  varianceWorkflowResolutions VarianceWorkflowEvent[] @relation("VarianceWorkflowResolver")
   bankReconciliations BankReconciliationEntry[]
   bankStatementAdmissions BankStatementAdmission[]
   serviceAllocationPostings ServiceAllocationPosting[]
@@ -1739,6 +1743,7 @@ model TransactionGroupEntry {
 }
 
 model BankReconciliationEntry {
+  varianceWorkflowEvents VarianceWorkflowEvent[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   actorId String @map("actor_id") @db.Uuid
@@ -2144,6 +2149,7 @@ model AirbnbSettlement {
 }
 
 model Variance {
+  workflowEvents VarianceWorkflowEvent[]
   id             String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String       @map("organization_id") @db.Uuid
   sourceType     String       @map("source_type")
@@ -2168,10 +2174,52 @@ model Variance {
   reservation    Reservation? @relation(fields: [reservationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   currencyRef    Currency     @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
 
+  @@unique([organizationId, id], map: "variance_org_id_unique")
   @@index([organizationId, status, createdAt], map: "variance_org_status_created_idx")
   @@index([organizationId, sourceType, sourceId], map: "variance_org_source_idx")
   @@index([organizationId, propertyId, status], map: "variance_org_property_status_idx")
   @@map("variance")
+}
+
+model VarianceWorkflowEvent {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  provider String
+  sourceId String @map("source_id") @db.Uuid
+  varianceId String? @map("variance_id") @db.Uuid
+  bankEntryId String? @map("bank_entry_id") @db.Uuid
+  claimId String? @map("claim_id") @db.Uuid
+  stocktakeId String? @map("stocktake_id") @db.Uuid
+  sourceAuditId String? @map("source_audit_id") @db.Uuid
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  version BigInt
+  operation String
+  status String
+  assignedTo String? @map("assigned_to") @db.Uuid
+  reason String
+  action String?
+  resolvedBy String? @map("resolved_by") @db.Uuid
+  resolvedAt DateTime? @map("resolved_at") @db.Timestamptz(6)
+  actorId String @map("actor_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestHash String @map("request_hash") @db.Char(64)
+  intent Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  variance Variance? @relation(fields: [organizationId, varianceId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  bankEntry BankReconciliationEntry? @relation(fields: [organizationId, bankEntryId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  claim EmployeeCompensationClaim? @relation(fields: [organizationId, claimId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  stocktake InventoryStocktake? @relation(fields: [organizationId, stocktakeId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  sourceAudit AuditLog? @relation(fields: [organizationId, sourceAuditId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  actor UserAccount @relation("VarianceWorkflowActor", fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  assignee UserAccount? @relation("VarianceWorkflowAssignee", fields: [organizationId, assignedTo], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  resolver UserAccount? @relation("VarianceWorkflowResolver", fields: [organizationId, resolvedBy], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id], map: "variance_workflow_event_org_id_unique")
+  @@unique([organizationId, provider, sourceId, version], map: "variance_workflow_event_source_version_unique")
+  @@unique([organizationId, actorId, idempotencyKey], map: "variance_workflow_event_actor_nonce_unique")
+  @@index([organizationId, provider, sourceId, createdAt(sort: Desc), id(sort: Desc)], map: "variance_workflow_event_history_idx")
+  @@map("variance_workflow_event")
 }
 
 model OutboxEvent {
@@ -2318,6 +2366,7 @@ model Notification {
 }
 
 model AuditLog {
+  varianceWorkflowEvents VarianceWorkflowEvent[]
   id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId  String       @map("organization_id") @db.Uuid
   actorId         String?      @map("actor_id") @db.Uuid
@@ -2335,6 +2384,7 @@ model AuditLog {
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
+  @@unique([organizationId, id], map: "audit_log_org_id_unique")
   @@index([organizationId, occurredAt], map: "audit_log_org_occurred_idx")
   @@index([organizationId, resourceType, resourceId], map: "audit_log_org_resource_idx")
   @@map("audit_log")
@@ -2690,6 +2740,7 @@ model InventoryStockCursor {
 }
 
 model InventoryStocktake {
+  varianceWorkflowEvents VarianceWorkflowEvent[]
   id               String             @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId   String             @map("organization_id") @db.Uuid
   propertyId       String?            @map("property_id") @db.Uuid
@@ -3333,6 +3384,7 @@ model EmployeeCompensationSubmission {
 }
 
 model EmployeeCompensationClaim {
+  varianceWorkflowEvents VarianceWorkflowEvent[]
   correction EmployeeCompensationCorrection?
   recognition EmployeeCompensationRecognition?
   recognitionRequests EmployeeCompensationRecognitionRequest[]
