@@ -1,10 +1,10 @@
 import { expect as playwrightExpect, type Page } from "@playwright/test";
 const expect = playwrightExpect.configure({ timeout: 30000 });
-export async function saveAndOpenTemplate(page: Page, key: string, name: string) {
+export async function saveAndOpenTemplate(page: Page, key: string, name: string, reason = "Reviewed reusable property settings") {
   await page.getByTestId("template-key").fill(key);
   await page.getByTestId("template-name-en").fill(name);
   await page.getByTestId("template-name-fr").fill(`Modèle ${name}`);
-  await page.getByTestId("template-reason").fill("Reviewed reusable property settings");
+  await page.getByTestId("template-reason").fill(reason);
   await page.getByTestId("template-save").click();
   await expect(page.getByTestId("template-message")).toHaveText("Saved.");
   await page.getByRole("link", { name: "Open saved template" }).click();

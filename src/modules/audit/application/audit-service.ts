@@ -10,7 +10,7 @@ import {
 import type { AuditActorContext } from "@/modules/audit/application/audit-access";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
-import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
+import { authorizeOrganizationSource, authorizeUnconditionalSource } from "@/platform/authz/organization-authority";
 import {canViewCompletePropertyFinance} from "@/platform/authz/property-finance-resource";
 import {canViewAccountantExport} from "@/platform/authz/accountant-export-resource";
 import {canViewServiceAllocation} from "@/platform/authz/service-allocation-resource";
@@ -72,15 +72,15 @@ export const auditFilterSchema = z.object({
 
 export type AuditFilterInput = z.input<typeof auditFilterSchema>;
 
-function containsServicePricing(value: unknown): boolean {
+function containsFinancialSetting(value: unknown, ruleKey: string): boolean {
   if (!value || typeof value !== "object") return false;
   return Object.entries(value).some(
     ([key, item]) =>
-      key === "services.pricing" ||
-      key.startsWith("/rules/services.pricing/") ||
-      (key === "kind" && item === "SERVICE_CATALOG") ||
-      (key === "key" && item === "services.pricing") ||
-      containsServicePricing(item)
+      key === ruleKey ||
+      key.startsWith(`/rules/${ruleKey}/`) ||
+      (ruleKey === "services.pricing" && key === "kind" && item === "SERVICE_CATALOG") ||
+      (key === "key" && item === ruleKey) ||
+      containsFinancialSetting(item, ruleKey)
   );
 }
 
@@ -212,7 +212,11 @@ export function presentAuditHistoryRow(
         ? row.after.personId
         : row.resourceId;
     const resource = { organizationId: ctx.organizationId, propertyId: row.propertyScopeId };
-    const allowed =
+    const financialTeamSource = teamResource === "staff_compensation" || teamResource === "wallet", teamAt = new Date();
+    const teamSource = { ...resource, type: teamResource, id: subject ?? undefined, personId: subject ?? undefined,
+      walletId: teamResource === "wallet" ? row.resourceId : undefined };
+    const allowed = financialTeamSource ? authorizeUnconditionalSource(ctx.authContext, "view", teamSource, teamAt) &&
+      (action !== "export" || authorizeUnconditionalSource(ctx.authContext, "export", teamSource, teamAt)) :
       (teamResource === "identity" && subject === ctx.personId) ||
       authorize(
         ctx.authContext,
@@ -220,34 +224,37 @@ export function presentAuditHistoryRow(
         {
           ...resource,
           type: teamResource,
-          id: subject ?? undefined,
-          walletId: teamResource === "wallet" ? row.resourceId : undefined
+          id: subject ?? undefined
         }
       );
     return present(
-      { ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["sensitive"] : []) },
+      { ...ctx.authContext, visibleDataClasses: new Set(allowed ? [financialTeamSource ? "financial" : "sensitive"] : []) },
       action,
       { ...resource, type: auditLogResource, data: row },
       {
         ...(teamResource === "identity" && !row.action.startsWith("identity.person.")
           ? {}
-          : { before: { dataClass: "sensitive" as const }, after: { dataClass: "sensitive" as const } }),
-        reason: { dataClass: "sensitive" }
-      }
+          : { before: { dataClass: financialTeamSource ? "financial" as const : "sensitive" as const }, after: { dataClass: financialTeamSource ? "financial" as const : "sensitive" as const } }),
+        reason: { dataClass: financialTeamSource ? "financial" : "sensitive" }
+      }, teamAt
     ) as AuditHistoryRow;
   }
   if (
     !["property_template", "property_template_revision", "config_rule"].includes(row.resourceType) ||
-    (!containsServicePricing(row.before) && !containsServicePricing(row.after))
+    !["services.pricing", "staff.compensation"].some(key => containsFinancialSetting(row.before, key) || containsFinancialSetting(row.after, key))
   )
     return row;
-  const resource = { organizationId: ctx.organizationId, propertyId: row.propertyScopeId };
-  const financial = authorize(ctx.authContext, "view", { ...resource, type: "financial_transaction" });
+  const resource = { organizationId: ctx.organizationId, propertyId: row.propertyScopeId,
+    ...(financialResource?.propertyId === row.propertyScopeId ? { city: financialResource.city, region: financialResource.region } : {}) }, now = new Date();
+  const sources = [["services.pricing", "financial_transaction"], ["staff.compensation", "staff_compensation"]].filter(([key]) =>
+    containsFinancialSetting(row.before, key) || containsFinancialSetting(row.after, key)).map(([, type]) => ({ ...resource, type, dataClass: "financial" as const }));
+  const financial = sources.every(source => authorizeUnconditionalSource(ctx.authContext, "view", source, now) &&
+    (action !== "export" || authorizeUnconditionalSource(ctx.authContext, "export", source, now)));
   return present(
     { ...ctx.authContext, visibleDataClasses: new Set(financial ? ["financial"] : []) },
     action,
     { ...resource, type: auditLogResource, data: row },
-    { before: { dataClass: "financial" }, after: { dataClass: "financial" } }
+    { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }, now
   ) as AuditHistoryRow;
 }
 
@@ -270,12 +277,13 @@ export function parseAuditFilters(input: AuditFilterInput): AuditHistoryFilters 
   return auditFilterSchema.parse(input);
 }
 
-async function financialAuditResources(repository: AuditRepository, rows: AuditHistoryRow[]): Promise<Map<string, FinancialAuditResource>> {
+async function financialAuditResources(repository: AuditRepository, rows: AuditHistoryRow[], organizationId: string): Promise<Map<string, FinancialAuditResource>> {
   const read = (type: string, load: (ids: string[]) => Promise<Map<string, Resource>>) => {
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
     return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
   };
-  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims,monthlyRequests,earningRequests,propertyFinance,serviceAllocations,attachments] = await Promise.all([
+  const settingRows = rows.filter(row => ["config_rule", "property_template", "property_template_revision"].includes(row.resourceType));
+  const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims,monthlyRequests,earningRequests,propertyFinance,serviceAllocations,attachments,settingProperties] = await Promise.all([
     read("cash_collection", ids => repository.cashResources(ids)),
     read("expense", ids => repository.expenseResources(ids)),
     read("financial_transaction", ids => repository.transactionResources(ids)),
@@ -289,9 +297,13 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     read("employee_earning_run_request",ids=>repository.employeeEarningRunRequestResources(ids)),
     read("property_finance",ids=>repository.propertyFinanceResources(ids)),
     read("service_allocation",ids=>repository.serviceAllocationResources(ids)),
-    read("financial_attachment", ids => repository.financialAttachmentResources(ids))
+    read("financial_attachment", ids => repository.financialAttachmentResources(ids)),
+    repository.propertyFinanceResources([...new Set(settingRows.flatMap(row => row.propertyScopeId ? [row.propertyScopeId] : []))])
   ]);
   return new Map([
+    ...settingRows.flatMap(row => row.resourceId ? [[`${row.resourceType}:${row.resourceId}`, {
+      ...settingProperties.get(row.propertyScopeId ?? ""), type: row.resourceType, organizationId, id: row.resourceId, propertyId: row.propertyScopeId
+    }] as const] : []),
     ...[...attachments].map(([id,resource])=>[`financial_attachment:${id}`,resource] as const),
     ...[...serviceAllocations].map(([id,resource])=>[`service_allocation:${id}`,resource]as const),
     ...[...propertyFinance].map(([id,resource])=>[`property_finance:${id}`,resource]as const),
@@ -330,7 +342,7 @@ export async function listAuditHistory(
 
 /** A caller's retained restrictions and the final stored authority must both permit disclosure. */
 async function presentCurrentAuditRows(ctx:AuditActorContext,tx:TenantTransaction,repository:AuditRepository,rows:AuditHistoryRow[],action:"view"|"export"){
-  const resources=await financialAuditResources(repository,rows),authContext=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId),current={...ctx,authContext};
+  const resources=await financialAuditResources(repository,rows,ctx.organizationId),authContext=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId),current={...ctx,authContext};
   if(authContext.organizationId!==ctx.organizationId||authContext.userAccountId!==ctx.actorId)throw new AuditAuthorizationError();assertAllowed(ctx,action);assertAllowed(current,action);
   return rows.map(row=>{const source=row.resourceId?resources.get(`${row.resourceType}:${row.resourceId}`):undefined;return presentAuditHistoryRow(current,presentAuditHistoryRow(ctx,row,action,source),action,source);});
 }

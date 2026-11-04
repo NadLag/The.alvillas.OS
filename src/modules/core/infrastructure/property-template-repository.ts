@@ -47,8 +47,12 @@ export class PropertyTemplateRepository {
   propertyOption(id: string) {
     return this.tx.property.findFirst({
       where: { organizationId: this.organizationId, id, archivedAt: null },
-      select: { id: true, name: true, city: true, region: true }
+      select: { id: true, name: true, city: true, region: true, cityId: true, regionId: true }
     });
+  }
+  presentationProperties(ids: readonly string[]) {
+    return this.tx.property.findMany({ where: { organizationId: this.organizationId, id: { in: [...ids] } },
+      select: { id: true, cityId: true, regionId: true, city: true, region: true } });
   }
   createVersion(data: Omit<Prisma.PropertyTemplateVersionUncheckedCreateInput, "organizationId">) {
     return this.tx.propertyTemplateVersion.create({
@@ -129,7 +133,7 @@ export class PropertyTemplateRepository {
       orderBy: [{ name: "asc" }, { id: "asc" }],
       skip: (page - 1) * 40,
       take: 41,
-      select: { id: true, name: true, city: true, region: true }
+      select: { id: true, name: true, city: true, region: true, cityId: true, regionId: true }
     });
     return rows.filter(
       (p) =>
@@ -137,15 +141,15 @@ export class PropertyTemplateRepository {
           type: "property",
           organizationId: this.organizationId,
           propertyId: p.id,
-          city: p.city,
-          region: p.region
+          city: p.cityId ?? p.city,
+          region: p.regionId ?? p.region
         }) &&
         authorize(auth, "view", {
           type: "config_rule",
           organizationId: this.organizationId,
           propertyId: p.id,
-          city: p.city,
-          region: p.region
+          city: p.cityId ?? p.city,
+          region: p.regionId ?? p.region
         })
     );
   }

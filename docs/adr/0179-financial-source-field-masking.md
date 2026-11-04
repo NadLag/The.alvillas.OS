@@ -1,0 +1,11 @@
+# 0179 — Financial source field masking
+
+The central `present` serializer evaluates each declared financial permission through `authorize` against the actual source scope, original amount, currency, status and history date. A financial class label cannot substitute for that permission. Export requires the independent source export action. Missing exposure or history facts fail closed for conditional grants; Money comparisons remain exact. Company profit and location fields retain their separate company authority even in owner views.
+
+Financial configuration values, reasons and change paths use the same serializer. Financial rule classification includes retained and unknown financial keys, so an unregistered financial definition cannot become operational data. Service templates protect their original financial reasons along with values, version history, applied history and command replays. Complete policy definitions require unconditional authority at the actual source scope. Archived property history remains retained and accessible under the original source geography.
+
+Audit display and CSV apply the same source restrictions to the original payload and free-text reason. Service-price and staff-compensation definitions retain independent financial source actions, including export. A bounded source-property read reuses the existing financial geography projection, including archived properties. Neither audit access nor a partial exposure or time-window grant discloses a complete private policy definition.
+
+Financial reads and writes intersect the caller's captured authority with current stored authority. The existing identity repository loads active account state, current assignments, role permissions and security enrollment together in one PostgreSQL statement using one database clock point. This avoids inconsistent enrollment and grant observations and preserves existing bounded page query budgets while permitting a final authority check before disclosure or commit. There is no cross-request authority cache or alternate permission engine.
+
+These changes do not rewrite financial history, change balances, add business defaults, alter applied migrations or complete staging acceptance.

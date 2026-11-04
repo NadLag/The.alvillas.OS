@@ -384,9 +384,16 @@ describe("PostgreSQL baseline", () => {
   async function templateFixture() {
     const organization = await prisma.organization.create({ data: { name: `Template ${randomUUID()}` } });
     const permissions = new Set(["config_rule:view", "config_rule:create", "config_rule:configure", "property:view", "property:edit", "property:create", "owner:create", "owner:view", "financial_transaction:view", "reservation:view", "reservation:create", "guest:create", "guest:view", "task:view", "task:create", "task:edit"]);
+    await ensureStandardIdentitySetup(organization.id, { db: prisma });
     const identity = await withTenant(prisma, organization.id, async tx => {
       const person = await tx.person.create({ data: { organizationId: organization.id, displayName: "Template administrator" } });
       const account = await tx.userAccount.create({ data: { organizationId: organization.id, personId: person.id } });
+      const nativePermissions = await tx.permission.findMany({ where: { organizationId: organization.id, key: { in: [...permissions] } } });
+      expect(nativePermissions).toHaveLength(permissions.size);
+      const role = await tx.role.create({ data: { organizationId: organization.id, key: "actual_template_administrator", name: "Actual template fixture grants",
+        rolePermissions: { create: nativePermissions.map(permission => ({ organizationId: organization.id, permissionId: permission.id })) } } });
+      await tx.roleAssignment.create({ data: { organizationId: organization.id, userAccountId: account.id, personId: person.id, roleId: role.id,
+        scopeType: "organization", validFrom: new Date("2020-01-01") } });
       return { person, account };
     });
     const baseActor = actorForOrganization(organization.id, permissions);
@@ -516,13 +523,13 @@ describe("PostgreSQL baseline", () => {
     const auditPermissions = new Set(['audit_log:view', 'audit_log:export']);
     await ensureStandardIdentitySetup(f.organization.id,f.deps);
     await withTenant(prisma,f.organization.id,async tx=>{
-      const permissions=await tx.permission.findMany({where:{organizationId:f.organization.id,key:{in:[...auditPermissions,'financial_transaction:view']}}});expect(permissions).toHaveLength(3);
+      const permissions=await tx.permission.findMany({where:{organizationId:f.organization.id,key:{in:[...auditPermissions,'financial_transaction:view','financial_transaction:export']}}});expect(permissions).toHaveLength(4);
       const role=await tx.role.create({data:{organizationId:f.organization.id,key:'template_audit_'+randomUUID(),name:'Persisted template audit reader',rolePermissions:{create:permissions.map(permission=>({organizationId:f.organization.id,permissionId:permission.id}))}}});
       await tx.userAccount.update({where:{id:f.ctx.actorId},data:{status:'ACTIVE'}});
       await tx.roleAssignment.create({data:{organizationId:f.organization.id,personId:f.ctx.personId,userAccountId:f.ctx.actorId,roleId:role.id,scopeType:'organization',validFrom:new Date('2020-01-01')}});
     });
     const reader = { ...operational, authContext: { ...operational.authContext, permissions: auditPermissions } };
-    const financeReader = { ...reader, authContext: { ...reader.authContext, permissions: new Set([...auditPermissions, 'financial_transaction:view']) } };
+    const financeReader = { ...reader, authContext: { ...reader.authContext, permissions: new Set([...auditPermissions, 'financial_transaction:view', 'financial_transaction:export']) } };
     const rawAudits = await withTenant(prisma, f.organization.id, tx => tx.auditLog.findMany({ where: { action: { startsWith: 'property_template.' } }, orderBy: { id: 'asc' } }));
     const history = await listAuditHistory(reader, {}, f.deps);
     const sensitive = history.rows.filter(row => row.resourceType.startsWith('property_template') || row.action === 'config_rule.version.created');
