@@ -4411,7 +4411,10 @@
     "command_succeeded": "Original bank statement retained",
     "newRows": "New source rows: {count, number}",
     "reusedRows": "Previously retained source rows: {count, number}",
-    "duplicateNotice": "These movements already exist in the bank source history."
+    "duplicateNotice": "These movements already exist in the bank source history.",
+    "currency_BANK_CONVERTED": "Original currency reported after bank conversion:",
+    "currency_PRIMARY_CURRENCY_SCOPE": "Primary currency explicitly reported by the bank:",
+    "bankReportedRate": "Bank-reported conversion ratio:"
   },
   "BankReconciliation": {
     "unavailable": "The original bank information could not be read.",

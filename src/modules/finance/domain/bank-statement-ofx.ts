@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { bankStatementAmount } from "./bank-statement-amount";
+import { bankStatementCurrencyEvidenceSchema, type BankStatementCurrencyEvidence } from "./bank-statement";
 
 type Element = { name: string; text: string; children: Element[] };
 export type OfxBankLine = {
@@ -25,6 +26,7 @@ export type OfxBankStatement = {
   ledgerBalance: { amount: string; currency: string };
   balanceTimestamp: string;
   pendingCount: number;
+  currencyEvidence?: Array<BankStatementCurrencyEvidence & { sourceOrder: number }>;
   lines: OfxBankLine[];
 };
 
@@ -107,6 +109,20 @@ function identifier(value: string): string {
   return value;
 }
 
+function currencyEvidence(line: Element, primary: string): BankStatementCurrencyEvidence | null {
+  const scoped = one(line, "CURRENCY", false), original = one(line, "ORIGCURRENCY", false);
+  if (scoped && original) throw new Error("ambiguous_ofx_currency_evidence");
+  const aggregate = scoped ?? original;
+  if (!aggregate) return null;
+  const evidence = bankStatementCurrencyEvidenceSchema.parse({ kind: original ? "BANK_CONVERTED" : "PRIMARY_CURRENCY_SCOPE", currency: text(aggregate, "CURSYM"), rate: text(aggregate, "CURRATE") });
+  // ORIGCURRENCY reports a conversion already performed by the bank. CURRENCY overrides the amount's unit.
+  if (scoped && evidence.currency !== primary) throw new Error("ofx_currency_conversion_requires_explicit_policy");
+  return evidence;
+}
+function assertPrimaryScope(aggregate: Element) {
+  if (one(aggregate, "CURRENCY", false) || one(aggregate, "ORIGCURRENCY", false)) throw new Error("unsupported_ofx_currency_scope");
+}
+
 /** Imports posted bank facts only. Pending rows and source correction instructions never become ledger entries. */
 export function parseBankStatementOfx(source: string, minorUnits: number): OfxBankStatement[] {
   const root = document(source), signon = one(root, "SIGNONMSGSRSV1", false);
@@ -120,14 +136,17 @@ export function parseBankStatementOfx(source: string, minorUnits: number): OfxBa
   return responses.map(response => {
     if (text(one(response, "STATUS")!, "CODE") !== "0") throw new Error("ofx_statement_failed");
     const statement = one(response, "STMTRS")!, account = one(statement, "BANKACCTFROM")!, transactions = one(statement, "BANKTRANLIST")!;
+    assertPrimaryScope(statement); assertPrimaryScope(transactions);
     const currency = text(statement, "CURDEF")!;
     const amount = (value: string) => bankStatementAmount(value, currency, { decimalSeparator: ".", groupingSeparator: "", minorUnits }).toJSON();
     const start = text(transactions, "DTSTART")!, end = text(transactions, "DTEND")!;
     timestamp(start); timestamp(end);
     const original = transactions.children.filter(child => child.name === "STMTTRN");
+    const currencies: NonNullable<OfxBankStatement["currencyEvidence"]> = [];
     if (original.length > 50000) throw new Error("ofx_too_many_transactions");
     const lines = original.map((line, index): OfxBankLine => {
-      if (one(line, "CURRENCY", false) || one(line, "ORIGCURRENCY", false)) throw new Error("ofx_currency_conversion_requires_explicit_policy");
+      const evidence = currencyEvidence(line, currency);
+      if (evidence) currencies.push({ sourceOrder: index + 1, ...evidence });
       const corrected = text(line, "CORRECTFITID", false), action = text(line, "CORRECTACTION", false);
       if (!!corrected !== !!action || (action && action !== "REPLACE" && action !== "DELETE")) throw new Error("invalid_ofx_correction");
       const deleting = action === "DELETE";
@@ -140,9 +159,11 @@ export function parseBankStatementOfx(source: string, minorUnits: number): OfxBa
     });
     if (new Set(lines.map(line => line.externalId)).size !== lines.length) throw new Error("duplicate_ofx_fitid_in_account");
     const balance = one(statement, "LEDGERBAL")!, balanceTimestamp = text(balance, "DTASOF")!;
+    assertPrimaryScope(balance);
     timestamp(balanceTimestamp);
     return { bankId: text(account, "BANKID")!, branchId: text(account, "BRANCHID", false), accountId: text(account, "ACCTID")!, accountType: text(account, "ACCTTYPE")!,
       currency, start, end, ledgerBalance: amount(text(balance, "BALAMT")!), balanceTimestamp,
-      pendingCount: one(statement, "BANKTRANLISTP", false)?.children.filter(child => child.name === "STMTTRNP").length ?? 0, lines };
+      pendingCount: one(statement, "BANKTRANLISTP", false)?.children.filter(child => child.name === "STMTTRNP").length ?? 0,
+      ...(currencies.length ? { currencyEvidence: currencies } : {}), lines };
   });
 }

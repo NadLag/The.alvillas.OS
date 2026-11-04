@@ -81,10 +81,13 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Actual CSV and OFX sourc
     expect(await originalBank(f, setup.bank.id)).toEqual(original);
     await page.getByTestId("bank-command-next").click(); await page.getByTestId("bank-format").selectOption("OFX");
     const date = setup.date.replaceAll("-", ""), correctionId = marker + "-replacement";
-    const ofx = Buffer.from(`<?xml version="1.0" encoding="UTF-8"?><OFX><BANKMSGSRSV1><STMTTRNRS><STATUS><CODE>0</CODE><SEVERITY>INFO</SEVERITY></STATUS><STMTRS><CURDEF>MAD</CURDEF><BANKACCTFROM><BANKID>${setup.bankId}</BANKID><ACCTID>${setup.accountId}</ACCTID><ACCTTYPE>CHECKING</ACCTTYPE></BANKACCTFROM><BANKTRANLIST><DTSTART>${date}</DTSTART><DTEND>${date}235959</DTEND><STMTTRN><TRNTYPE>CREDIT</TRNTYPE><DTPOSTED>${date}120000[0:GMT]</DTPOSTED><TRNAMT>0.08</TRNAMT><FITID>${correctionId}</FITID><CORRECTFITID>${firstId}</CORRECTFITID><CORRECTACTION>REPLACE</CORRECTACTION><NAME>Actual bank correction ${marker}</NAME></STMTTRN></BANKTRANLIST><LEDGERBAL><BALAMT>0.07</BALAMT><DTASOF>${date}235959</DTASOF></LEDGERBAL></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`, "utf8");
-    await selectFile(page, "original-correction.ofx", ofx); await page.getByTestId("bank-submit").click();
+    const ofx = Buffer.from(`<?xml version="1.0" encoding="UTF-8"?><OFX><BANKMSGSRSV1><STMTTRNRS><STATUS><CODE>0</CODE><SEVERITY>INFO</SEVERITY></STATUS><STMTRS><CURDEF>MAD</CURDEF><BANKACCTFROM><BANKID>${setup.bankId}</BANKID><ACCTID>${setup.accountId}</ACCTID><ACCTTYPE>CHECKING</ACCTTYPE></BANKACCTFROM><BANKTRANLIST><DTSTART>${date}</DTSTART><DTEND>${date}235959</DTEND><STMTTRN><TRNTYPE>CREDIT</TRNTYPE><DTPOSTED>${date}120000[0:GMT]</DTPOSTED><TRNAMT>0.08</TRNAMT><FITID>${correctionId}</FITID><CORRECTFITID>${firstId}</CORRECTFITID><CORRECTACTION>REPLACE</CORRECTACTION><ORIGCURRENCY><CURSYM>EUR</CURSYM><CURRATE>10.250000</CURRATE></ORIGCURRENCY><NAME>Actual bank correction ${marker}</NAME></STMTTRN></BANKTRANLIST><LEDGERBAL><BALAMT>0.07</BALAMT><DTASOF>${date}235959</DTASOF></LEDGERBAL></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`, "utf8");
+    await selectFile(page, "original-correction.ofx", ofx);
+    await expect(page.getByTestId("bank-source-currency-evidence")).toContainText("EUR"); await expect(page.getByTestId("bank-source-currency-evidence")).toContainText("10.250000");
+    await page.getByTestId("bank-submit").click();
     await expect(page.getByTestId("bank-command-status")).toHaveText(t.command_succeeded);
     await expect(page.getByTestId("bank-source-amount")).toHaveText(formatCurrencyAmount(locale, "0.08", "MAD"));
+    await expect(page.getByTestId("bank-source-currency-evidence")).toContainText("EUR"); await expect(page.getByTestId("bank-source-currency-evidence")).toContainText("10.250000");
     const after = await originalBank(f, setup.bank.id), originalIds = new Set(original.map(row => row.id));
     expect(after).toHaveLength(3); expect(after.filter(row => originalIds.has(row.id))).toEqual(original);
     const afterMoney = await originalMoney(f), moneyIds = new Set(money.map(row => row.kind + ":" + row.id));

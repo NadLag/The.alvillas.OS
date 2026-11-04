@@ -1,5 +1,17 @@
 import { z } from "zod";
 import { bankStatementPolicySchema } from "@/platform/config/bank-statement-policy";
+export const bankStatementCurrencyEvidenceSchema = z.object({
+  kind: z.enum(["BANK_CONVERTED", "PRIMARY_CURRENCY_SCOPE"]),
+  currency: z.string().regex(/^[A-Z]{3}$/u),
+  rate: z.string().max(120).regex(/^\+?\d+(?:\.\d+)?$/u).refine(value => /[1-9]/u.test(value))
+}).strict();
+export type BankStatementCurrencyEvidence = z.infer<typeof bankStatementCurrencyEvidenceSchema>;
+export const bankStatementCurrencyEvidenceRowsSchema = z.array(bankStatementCurrencyEvidenceSchema.extend({ sourceOrder: z.number().int().positive() }).strict()).max(5000)
+  .refine(rows => new Set(rows.map(row => row.sourceOrder)).size === rows.length);
+export function bankStatementCurrencyEvidenceByOrder(metadata: unknown) {
+  const rows = z.object({ currencyEvidence: bankStatementCurrencyEvidenceRowsSchema.optional() }).parse(metadata).currencyEvidence ?? [];
+  return new Map(rows.map(({ sourceOrder, ...evidence }) => [sourceOrder, evidence] as const));
+}
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/u);
 export const bankStatementReviewInput = z.object({ accountId: z.uuid(), format: z.enum(["CSV", "OFX"]), fileSha256: hash, fileSize: z.number().int().positive() }).strict();
@@ -17,7 +29,7 @@ export const bankStatementFactSchema = z.object({
     context.addIssue({ code: "custom", message: "A posted bank fact must retain its amount, date and distinct correction source" });
 });
 export type BankStatementFact = z.infer<typeof bankStatementFactSchema>;
-export type ParsedBankStatement = { statement: Record<string, unknown>; lines: { sourceOrder: number; fact: BankStatementFact }[] };
+export type ParsedBankStatement = { statement: Record<string, unknown>; lines: { sourceOrder: number; fact: BankStatementFact; currencyEvidence?: BankStatementCurrencyEvidence }[] };
 export class BankStatementAccessError extends Error { constructor() { super("bank_statement_unavailable"); } }
 export class BankStatementMissingError extends BankStatementAccessError {}
 export class BankStatementValidationError extends Error { constructor() { super("bank_statement_invalid_source"); } }

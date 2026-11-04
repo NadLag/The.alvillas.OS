@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseBankStatementOfx } from "@/modules/finance/domain/bank-statement-ofx";
+import { bankStatementCurrencyEvidenceByOrder } from "@/modules/finance/domain/bank-statement";
 
 const transaction = (id = "bank-original-1", extra = "") => `<STMTTRN><TRNTYPE>DEBIT</TRNTYPE><DTPOSTED>20261103235959.123[+1:CET]</DTPOSTED><TRNAMT>-0.01</TRNAMT><FITID>${id}</FITID><NAME>Virement &amp; dépôt</NAME>${extra}</STMTTRN>`;
 const statement = (rows = transaction(), account = "original-account") => `<STMTTRNRS><STATUS><CODE>0</CODE><SEVERITY>INFO</SEVERITY></STATUS><STMTRS><CURDEF>MAD</CURDEF><BANKACCTFROM><BANKID>original-bank</BANKID><ACCTID>${account}</ACCTID><ACCTTYPE>CHECKING</ACCTTYPE></BANKACCTFROM><BANKTRANLIST><DTSTART>20261101</DTSTART><DTEND>20261201</DTEND>${rows}</BANKTRANLIST><LEDGERBAL><BALAMT>9999999999999999.99</BALAMT><DTASOF>20261104000000</DTASOF></LEDGERBAL></STMTRS></STMTTRNRS>`;
@@ -51,5 +52,37 @@ describe("OFX banking source evidence", () => {
   });
   it("accepts a valid leap day and retains a leap second as source evidence", () => {
     expect(parseBankStatementOfx(file().replace("20261103235959.123[+1:CET]", "20240229235960[0:GMT]"), 2)[0].lines[0].postedDate).toBe("2024-02-29");
+  });
+  it("retains bank-reported original currency without converting its already posted primary amount", () => {
+    const result = parseBankStatementOfx(file(statement(transaction("converted", "<ORIGCURRENCY><CURSYM>EUR</CURSYM><CURRATE>10.250000</CURRATE></ORIGCURRENCY>"))), 2)[0];
+    expect(result.lines[0].amount).toEqual({ amount: "-0.01", currency: "MAD" });
+    expect(result.currencyEvidence).toEqual([{ sourceOrder: 1, kind: "BANK_CONVERTED", currency: "EUR", rate: "10.250000" }]);
+  });
+  it("retains an explicit primary-currency scope and keeps unrelated rows free of invented evidence", () => {
+    const result = parseBankStatementOfx(file(statement(transaction("scoped", "<CURRENCY><CURSYM>MAD</CURSYM><CURRATE>1.0000</CURRATE></CURRENCY>") + transaction("ordinary"))), 2)[0];
+    expect(result.lines.map(row => row.amount?.currency)).toEqual(["MAD", "MAD"]);
+    expect(result.currencyEvidence).toEqual([{ sourceOrder: 1, kind: "PRIMARY_CURRENCY_SCOPE", currency: "MAD", rate: "1.0000" }]);
+    expect(Object.hasOwn(parseBankStatementOfx(file(), 2)[0], "currencyEvidence")).toBe(false);
+  });
+  it.each(["<CURSYM>EUR</CURSYM>", "<CURSYM>EUR</CURSYM><CURRATE>0</CURRATE>", "<CURSYM>EUR</CURSYM><CURRATE>-1</CURRATE>", "<CURSYM>EUR</CURSYM><CURRATE>1e3</CURRATE>", "<CURSYM>EURO</CURSYM><CURRATE>1</CURRATE>", "<CURSYM>EUR</CURSYM><CURRATE>1</CURRATE><CURRATE>2</CURRATE>"])("rejects malformed original currency evidence %s", content => {
+    expect(() => parseBankStatementOfx(file(statement(transaction("invalid", `<ORIGCURRENCY>${content}</ORIGCURRENCY>`))), 2)).toThrow();
+  });
+  it("never labels an unconverted foreign amount as the configured primary currency", () => {
+    expect(() => parseBankStatementOfx(file(statement(transaction("foreign", "<CURRENCY><CURSYM>EUR</CURSYM><CURRATE>10.25</CURRATE></CURRENCY>"))), 2)).toThrow("ofx_currency_conversion_requires_explicit_policy");
+    const conflicting = "<CURRENCY><CURSYM>MAD</CURSYM><CURRATE>1</CURRATE></CURRENCY><ORIGCURRENCY><CURSYM>EUR</CURSYM><CURRATE>10.25</CURRATE></ORIGCURRENCY>";
+    expect(() => parseBankStatementOfx(file(statement(transaction("conflicting", conflicting))), 2)).toThrow("ambiguous_ofx_currency_evidence");
+  });
+  it.each(["STMTRS", "BANKTRANLIST", "LEDGERBAL"])("rejects unsupported overriding currency scopes before producing primary Money at %s", aggregate => {
+    expect(() => parseBankStatementOfx(file().replace(`<${aggregate}>`, `<${aggregate}><CURRENCY><CURSYM>EUR</CURSYM><CURRATE>10.25</CURRATE></CURRENCY>`), 2)).toThrow("unsupported_ofx_currency_scope");
+  });
+  it("retains exact small and large bank-reported rates and rejects ambiguous evidence row pointers", () => {
+    for (const rate of ["0.0000000000000000000000001", "99999999999999999.00000001"]) {
+      const parsed = parseBankStatementOfx(file(statement(transaction("converted", `<ORIGCURRENCY><CURSYM>EUR</CURSYM><CURRATE>${rate}</CURRATE></ORIGCURRENCY>`))), 2)[0];
+      expect(bankStatementCurrencyEvidenceByOrder(parsed).get(1)?.rate).toBe(rate);
+      expect(parsed.lines[0].amount).toEqual({ amount: "-0.01", currency: "MAD" });
+    }
+    expect(bankStatementCurrencyEvidenceByOrder({ format: "OFX" }).size).toBe(0);
+    const row = { sourceOrder: 1, kind: "BANK_CONVERTED", currency: "EUR", rate: "10.25" };
+    expect(() => bankStatementCurrencyEvidenceByOrder({ currencyEvidence: [row, row] })).toThrow();
   });
 });
