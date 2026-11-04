@@ -153,18 +153,34 @@ export class PropertyTemplateRepository {
         })
     );
   }
-  catalog(input: {
+  catalogMetadata(input: { kind?: TemplateKind; search: string }) {
+    return this.tx.$queryRaw<Array<Pick<PropertyTemplateVersion, "id" | "propertyId" | "createdAt" | "status"> & {
+      property: { cityId: string | null; regionId: string | null; city: string; region: string | null } | null;
+    }>>(Prisma.sql`SELECT t.id,t.property_id AS "propertyId",t.created_at AS "createdAt",t.status,
+      CASE WHEN p.id IS NULL THEN NULL ELSE jsonb_build_object('cityId',p.city_id,'regionId',p.region_id,'city',p.city,'region',p.region) END AS property
+      FROM (SELECT DISTINCT ON(key) id,key,kind,property_id,name,status,created_at FROM property_template_version
+        WHERE organization_id=${this.organizationId}::uuid ORDER BY key,version DESC) t
+      LEFT JOIN property p ON p.organization_id=${this.organizationId}::uuid AND p.id=t.property_id
+      WHERE (t.property_id IS NULL OR(p.id IS NOT NULL AND p.archived_at IS NULL))
+        AND (${input.kind ?? null}::text IS NULL OR t.kind=${input.kind ?? null})
+        AND(t.name->>'en' ILIKE ${`%${input.search}%`} OR t.name->>'fr' ILIKE ${`%${input.search}%`} OR t.key ILIKE ${`%${input.search}%`}) ORDER BY t.id`);
+  }
+  async catalog(input: {
     propertyIds: string[];
     organization: boolean;
+    allProperties?: boolean;
+    versionIds?: string[];
     kind?: TemplateKind;
     search: string;
     page: number;
-  }) {
+  }): Promise<PropertyTemplateVersion[]> {
     return this.tx.$queryRaw<PropertyTemplateVersion[]>(Prisma.sql`
       SELECT * FROM (SELECT DISTINCT ON (key) id, organization_id AS "organizationId", key, kind,
         property_id AS "propertyId", version, name, description, values, status, created_by AS "createdBy", reason, created_at AS "createdAt"
         FROM property_template_version WHERE organization_id = ${this.organizationId}::uuid
-        AND ((${input.organization} AND property_id IS NULL) OR property_id::text = ANY(${input.propertyIds}::text[]))
+        AND ((${input.organization} AND property_id IS NULL) OR property_id::text = ANY(${input.propertyIds}::text[])
+          OR (${input.allProperties ?? false} AND EXISTS(SELECT 1 FROM property p WHERE p.organization_id=${this.organizationId}::uuid AND p.id=property_id AND p.archived_at IS NULL))
+          OR id::text=ANY(${input.versionIds ?? []}::text[]))
         ORDER BY key, version DESC) AS latest
       WHERE (${input.kind ?? null}::text IS NULL OR kind = ${input.kind ?? null})
         AND (name->>'en' ILIKE ${`%${input.search}%`} OR name->>'fr' ILIKE ${`%${input.search}%`} OR key ILIKE ${`%${input.search}%`})
