@@ -17,6 +17,7 @@ import { getOwnerLedger } from "@/modules/finance/application/owner-ledger-servi
 import { getEmployeeCompensationCostDetail } from "@/modules/finance/application/employee-compensation-cost-detail";
 import { recoverEmployeeCompensationSubmissionRequest } from "@/modules/finance/application/employee-compensation-submission-requests";
 import { randomUUID } from "node:crypto";
+import * as auditWriter from "@/platform/audit/audit-writer";
 import { z } from "zod";
 import { execFileSync } from "node:child_process";
 import { mkdirSync,writeFileSync } from "node:fs";
@@ -126,6 +127,53 @@ describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
     const scoped=new URL(url);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});
   });
   afterAll(async()=>{vi.restoreAllMocks();await db?.$disconnect();await admin?.$disconnect();});
+
+  it("retains staff reconciliation for original partial and complete payments and immutable replay history",async()=>{
+    const f=await settlementFixture(), sources=await sourceRows(f.org,f.run.id), first=await postEmployeeCompensationSettlement(f.actor,f.payment,{db});
+    const retained=()=>withTenant(db,f.org,tx=>tx.$queryRaw<Array<{kind:string;id:string;xmin:string;body:unknown}>>`
+      SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${f.org}::uuid AND id=${first.paymentId}::uuid
+      UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p) FROM posting p WHERE organization_id=${f.org}::uuid AND transaction_id=${first.paymentId}::uuid
+      UNION ALL SELECT 'audit',id::text,xmin::text,to_jsonb(a) FROM audit_log a WHERE organization_id=${f.org}::uuid AND resource_id=${first.paymentId}::uuid ORDER BY kind,id`);
+    const before=await retained(), second=await postEmployeeCompensationSettlement(f.actor,{...f.payment,idempotencyKey:randomUUID(),amount:"300.25",reason:"Complete the original remaining employee liability without changing its first receipt"},{db});
+    expect(await retained()).toEqual(before);expect(await sourceRows(f.org,f.run.id)).toEqual(sources);
+    await withTenant(db,f.org,async tx=>{
+      const audits=await tx.auditLog.findMany({where:{action:"finance.employee_settlement.reconciled",resourceId:{in:[first.paymentId,second.paymentId]}}});expect(audits).toHaveLength(2);
+      expect(audits.find(audit=>audit.resourceId===first.paymentId)?.after).toMatchObject({reconciliation:{provider:"STAFF",sourceType:"EMPLOYEE_CLAIM",sourceId:f.payment.claimId,state:"OPEN_VARIANCE",
+        plan:{unit:"MONEY:MAD",expected:"500.25",actual:"200.00",variance:"-300.25",reason:f.payment.reason,varianceAction:`STAFF_SETTLEMENT:${first.paymentId}`}}});
+      expect(audits.find(audit=>audit.resourceId===second.paymentId)?.after).toMatchObject({reconciliation:{state:"MATCHED",plan:{expected:"500.25",actual:"500.25",variance:"0.00",varianceAction:null}}});
+      expect((await new EmployeePayableRepository(tx,f.org).outstanding({claimId:f.payment.claimId,personId:f.person.id,currency:"MAD"})).toJSON().amount).toBe("0.00");
+    });
+    expect(await postEmployeeCompensationSettlement(f.actor,f.payment,{db})).toEqual({...first,idempotent:true});expect(await retained()).toEqual(before);
+  });
+  it("retains both actual opposite staff postings and original receipt audit when a payment is reversed",async()=>{
+    const f=await settlementFixture(), first=await postEmployeeCompensationSettlement(f.actor,f.payment,{db});
+    const original=await withTenant(db,f.org,tx=>tx.auditLog.findFirstOrThrow({where:{action:"finance.employee_settlement.posted",resourceId:first.paymentId}}));
+    const reason="Restore the original employee liability through its exact native opposite", reversed=await voidEmployeeCompensationSettlement(f.actor,{id:f.source.id,claimId:f.payment.claimId,paymentId:first.paymentId,reason},{db});
+    await withTenant(db,f.org,async tx=>{
+      expect(await tx.auditLog.findUniqueOrThrow({where:{id:original.id}})).toEqual(original);
+      const audit=await tx.auditLog.findFirstOrThrow({where:{action:"finance.employee_settlement.reconciled",resourceId:reversed.reversalTransactionId}});
+      expect(audit.after).toMatchObject({reconciliation:{provider:"STAFF",sourceId:f.payment.claimId,state:"OPEN_VARIANCE",plan:{expected:"500.25",actual:"0.00",variance:"-500.25",reason,
+        varianceAction:`STAFF_SETTLEMENT:${reversed.reversalTransactionId}`,evidence:[]}}});
+      const posted=await tx.posting.findMany({where:{transactionId:{in:[first.paymentId,reversed.reversalTransactionId]},ledgerAccount:{code:"EMPLOYEE_PAYABLE"}}});expect(posted).toHaveLength(2);
+      expect(z.object({reconciliation:z.object({plan:z.object({allocations:z.object({actual:z.array(z.object({sourceKey:z.string(),original:z.string(),allocatedBefore:z.string(),amount:z.string()}))})})})}).parse(audit.after).reconciliation.plan.allocations.actual)
+        .toEqual(expect.arrayContaining(posted.map(posting=>({sourceKey:posting.id,original:posting.side==="DEBIT"?"200.00":"-200.00",allocatedBefore:"0.00",amount:"200.00"}))));
+    });
+  });
+  it("rolls back staff payment, postings and audit when original-source reconciliation disagrees with derived liability",async()=>{
+    const f=await settlementFixture(),before=await facts(f.org),sources=await sourceRows(f.org,f.run.id),original=Reflect.get(EmployeePayableRepository.prototype,"outstanding");let calls=0;
+    const spy=vi.spyOn(EmployeePayableRepository.prototype,"outstanding").mockImplementation(async function(this:EmployeePayableRepository,input){const value=await original.call(this,input);calls++;return calls===2?value.add(Money.of("0.01",input.currency)):value;});
+    try{await expect(postEmployeeCompensationSettlement(f.actor,f.payment,{db})).rejects.toThrow("reconciliation_source_unavailable");expect(calls).toBeGreaterThanOrEqual(2);}finally{spy.mockRestore();}
+    expect(await facts(f.org)).toEqual(before);expect(await sourceRows(f.org,f.run.id)).toEqual(sources);
+    await withTenant(db,f.org,async tx=>{expect(await tx.auditLog.count({where:{action:"finance.employee_settlement.posted"}})).toBe(0);expect(await tx.financialTransaction.count({where:{idempotencyKey:`employee-settlement:${f.payment.idempotencyKey}`}})).toBe(0);});
+  });
+
+  it("rolls back sealed staff journals and original receipts when the linked reconciliation audit fails",async()=>{
+    const f=await settlementFixture(),before=await facts(f.org),auditCount=await withTenant(db,f.org,tx=>tx.auditLog.count()),original=Reflect.get(auditWriter,"writeAuditEvent");let intercepted=false;
+    const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(...args)=>{if(args[1].action==="finance.employee_settlement.reconciled"){intercepted=true;throw new Error("Actual linked staff reconciliation audit unavailable");}return original(...args);});
+    try{await expect(postEmployeeCompensationSettlement(f.actor,f.payment,{db})).rejects.toThrow("Actual linked staff reconciliation audit unavailable");expect(intercepted).toBe(true);}finally{spy.mockRestore();}
+    expect(await facts(f.org)).toEqual(before);expect(await withTenant(db,f.org,tx=>tx.auditLog.count())).toBe(auditCount);
+    await withTenant(db,f.org,async tx=>{expect(await tx.financialTransaction.count({where:{idempotencyKey:`employee-settlement:${f.payment.idempotencyKey}`}})).toBe(0);expect(await tx.auditLog.count({where:{action:"finance.employee_settlement.reconciled"}})).toBe(0);});
+  });
 
   it("payment workspace derives an unchanged earned liability before showing independently authorized funding",async()=>{
     const f=await settlementFixture();await paymentCalendar(f);const before=await facts(f.org),original=await sourceRows(f.org,f.run.id),read=await getEmployeeCompensationPaymentWorkspace(f.actor,{id:f.source.id,claimId:f.command.claimId,amount:"200.00"},{db});

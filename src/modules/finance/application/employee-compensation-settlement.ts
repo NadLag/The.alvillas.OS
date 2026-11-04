@@ -19,6 +19,7 @@ import { inspectEmployeeCompensationRecognition } from "./employee-compensation-
 import { employeeCompensationRunFacts,recheckEmployeeCompensationRun } from "./employee-compensation-run-access";
 import type { recheckFinanceAuthorization,FinanceActorContext } from "./finance-access";
 import { ExpensePolicyUnavailableError } from "./expense-submission-policy";
+import { employeeSettlementReconciliation } from "./employee-compensation-reconciliation";
 
 type Deps={db?:TenantTransactionRunner;requestId?:string;calendar?:{id:string;version:number;local:string;occurrence:"reject"|"earlier"|"later"}};
 type Source=Awaited<ReturnType<typeof inspectEmployeeCompensationRecognition>>;
@@ -83,7 +84,9 @@ export async function postEmployeeCompensationSettlement(ctx:FinanceActorContext
     else postings=employeePaymentPostings({...base,funding});
     const journal=await finance.createFinancialTransaction({reference:`EMPLOYEE-SETTLEMENT:${input.idempotencyKey}`,description:input.reason,occurredAt:postedAt,idempotencyKey:`employee-settlement:${input.idempotencyKey}`,createdBy:ctx.actorId,postings,recheckAuthorization:at=>source.recheckSettlement(at,checks).then(()=>undefined)});
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_settlement.posted",resourceType:"financial_transaction",resourceId:journal.id,after:{input,recognitionId:source.existing!.id,transactionId:journal.id,sourcePeriodId:closed?.id??null,sourcePeriodEventId:closed?.events[0].id??null,postedAt:postedAt.toISOString()},reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:now});
-    await source.recognitions.flushGuards();await source.recheckSettlement(await finance.clock(),checks);return{id:input.id,claimId:input.claimId,paymentId:journal.id,kind:input.kind,idempotent:false};
+    await source.recognitions.flushGuards();const reconciliation=await employeeSettlementReconciliation(ctx,source,input.claimId,journal.id,input.reason);
+    await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_settlement.reconciled",resourceType:"financial_transaction",resourceId:journal.id,after:{submissionId:input.id,claimId:input.claimId,recognitionId:source.existing!.id,sourceAuditAction:"finance.employee_settlement.posted",reconciliation},reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:now});
+    await source.recheckSettlement(await finance.clock(),checks);return{id:input.id,claimId:input.claimId,paymentId:journal.id,kind:input.kind,idempotent:false};
   },{timeout:120000});
 }
 
@@ -96,7 +99,10 @@ export async function voidEmployeeCompensationSettlement(ctx:FinanceActorContext
     if(original.reversedByTransactions.length){const audit=await source.payables.reversalAudit(original.id);if(!matchesFinancialReversalAttempt({actorId:ctx.actorId,reason:input.reason,originalIds:[original.id],reversals:original.reversedByTransactions,audit}))throw new EmployeeCompensationRunConflictError();return{id:input.id,claimId:input.claimId,paymentId:original.id,reversalTransactionId:original.reversedByTransactions[0].id,idempotent:true};}
     const reversed=await source.finance.createFinancialTransaction({reference:original.reference+":VOID",description:input.reason,occurredAt:postedAt,idempotencyKey:original.idempotencyKey+":void",reversesTransactionId:original.id,createdBy:ctx.actorId,
       postings:original.postings.map(posting=>({ledgerAccountId:posting.ledgerAccountId,side:posting.side==="DEBIT"?"CREDIT" as const:"DEBIT" as const,amount:Money.of(posting.amount.toString(),posting.currency),bucket:z.string().parse(posting.bucket),dimensions:z.record(z.string(),z.unknown()).parse(posting.dimensions)})),recheckAuthorization:at=>source.recheckSettlement(at,checks).then(()=>undefined)});
-    await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_settlement.reversed",resourceType:"financial_transaction",resourceId:original.id,after:{submissionId:input.id,claimId:input.claimId,originalTransactionIds:[original.id],reversalTransactionIds:[reversed.id]},reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:now});await source.recognitions.flushGuards();await source.recheckSettlement(await source.finance.clock(),checks);return{id:input.id,claimId:input.claimId,paymentId:original.id,reversalTransactionId:reversed.id,idempotent:false};
+    await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_settlement.reversed",resourceType:"financial_transaction",resourceId:original.id,after:{submissionId:input.id,claimId:input.claimId,originalTransactionIds:[original.id],reversalTransactionIds:[reversed.id]},reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:now});await source.recognitions.flushGuards();
+    const reconciliation=await employeeSettlementReconciliation(ctx,source,input.claimId,reversed.id,input.reason);
+    await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.employee_settlement.reconciled",resourceType:"financial_transaction",resourceId:reversed.id,after:{submissionId:input.id,claimId:input.claimId,recognitionId:source.existing!.id,sourceAuditAction:"finance.employee_settlement.reversed",originalTransactionId:original.id,reconciliation},reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:now});
+    await source.recheckSettlement(await source.finance.clock(),checks);return{id:input.id,claimId:input.claimId,paymentId:original.id,reversalTransactionId:reversed.id,idempotent:false};
   },{timeout:120000});
 }
 
