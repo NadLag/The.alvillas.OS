@@ -28,6 +28,8 @@ import {PropertyFinanceAccessError,PropertyFinanceConfigurationError,PropertyFin
 import {ServiceAllocationAccessError,ServiceAllocationConfigurationError,ServiceAllocationSourceChangedError,ServiceAllocationSourceUnavailableError} from "../domain/service-allocation";
 import {GuestDepositAuthorizationError,GuestDepositConfigurationError,GuestDepositConflictError,GuestDepositSourceError} from "../domain/guest-deposit";
 import {BankStatementAccessError,BankStatementConfigurationError,BankStatementConflictError,BankStatementValidationError,BankStatementStorageError} from "../domain/bank-statement";
+import {BankReconciliationAccessError,BankReconciliationConflictError,BankReconciliationConfigurationError} from "../domain/bank-reconciliation";
+import {ReconciliationSourceError,ReconciliationBudgetError} from "../domain/reconciliation";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
@@ -47,6 +49,10 @@ export async function compensationHttp<T extends Promise<unknown>>(request:NextR
     const value=await work(actor,input,requestId),response=options.respond?options.respond(value):NextResponse.json(value,{headers,status:options.status??200});
     for(const[key,value]of Object.entries(headers))response.headers.set(key,value);return response;
   }catch(error){
+    if(error instanceof BankReconciliationAccessError)return failure("forbidden",403);
+    if(error instanceof BankReconciliationConfigurationError)return failure("configuration_unavailable",409);
+    if(error instanceof BankReconciliationConflictError)return failure("conflict",409);
+    if(error instanceof ReconciliationSourceError||error instanceof ReconciliationBudgetError)return failure("source_unavailable",409);
     if(error instanceof BankStatementAccessError)return failure("forbidden",403);
     if(error instanceof BankStatementConfigurationError)return failure("configuration_unavailable",409);
     if(error instanceof BankStatementConflictError)return failure("conflict",409);

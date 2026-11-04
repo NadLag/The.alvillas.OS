@@ -81,3 +81,5 @@ prisma/migrations/20261103170000_bank_statement_original_sources/migration.sql t
 prisma/migrations/20261103180000_bank_statement_evidence_source_alias/migration.sql text eol=lf
 prisma/migrations/20261103190000_bank_statement_retained_command_intent/migration.sql text eol=lf
 prisma/migrations/20261103200000_bank_statement_catalog_history/migration.sql text eol=lf
+prisma/migrations/20261103210000_bank_reconciliation_allocations/migration.sql text eol=lf
+prisma/migrations/20261103220000_bank_reconciliation_correction_budgets/migration.sql text eol=lf
