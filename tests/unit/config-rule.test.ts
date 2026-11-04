@@ -46,6 +46,7 @@ describe("config rule registry", () => {
       "feature_flag",
       "field.device_hygiene",
       "field.upload_lifecycle",
+      "finance.accountant_exports",
       "finance.accounting_periods",
       "finance.approval_thresholds",
       "finance.bank_statements",
@@ -105,6 +106,11 @@ describe("config rule registry", () => {
   });
 
   it("parses known config values and rejects unregistered keys", () => {
+    const accountant={source:"ORIGINAL_POSTED_FINANCIAL_SOURCES",reports:["TRANSACTIONS","INCOME","EXPENSES","OWNER_STATEMENTS","BANK_RECONCILIATION","SUPPLIER_PAYMENTS","STAFF_PAYMENTS"],formats:["CSV","EXCEL","PDF"],
+      classifications:{income:{buckets:["EXPLICIT_INCOME_BUCKET"],account_types:["ALVILLAS_OWN"],sides:["CREDIT"]},expenses:{buckets:["EXPLICIT_EXPENSE_BUCKET"],account_types:["ALVILLAS_OWN"],sides:["DEBIT"]}},
+      capacity:{CSV:100,EXCEL:100,PDF:20},rate_limit:{requests:10,window_seconds:60}};
+    expect(parseConfigRuleValue("finance.accountant_exports",accountant)).toEqual(accountant);
+    expect(()=>parseConfigRuleValue("finance.accountant_exports",{...accountant,classifications:{}})).toThrow();
     const receivables={source:"POSTED_OWNERSHIP_CLAIMS",account_codes:["EXPLICIT_GUEST_CLAIM"]};
     expect(parseConfigRuleValue("finance.receivables",receivables)).toEqual(receivables);
     const assignments={source:"ORIGINAL_POSTED_DEBIT",party_types:["GUEST","OWNER","SUPPLIER","PERSON"],due_date:"EXPLICIT_OR_UNSCHEDULED"};

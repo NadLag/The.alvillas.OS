@@ -7,6 +7,7 @@ type OwnerLedgerPostingRow = {
   transactionId: string;
   reference: string;
   occurredAt: Date;
+  occurredAtIso: string;
   description: string | null;
   side: "DEBIT" | "CREDIT";
   amount: string;
@@ -41,6 +42,7 @@ export class OwnerStatementRepository {
         p.transaction_id AS "transactionId",
         ft.reference,
         ft.occurred_at AS "occurredAt",
+        to_char(ft.occurred_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "occurredAtIso",
         CASE WHEN employee_link.id IS NOT NULL THEN employee_cost.note ELSE ft.description END AS description,
         p.side,
         p.amount::text AS amount,

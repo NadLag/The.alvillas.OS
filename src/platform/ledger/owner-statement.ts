@@ -20,6 +20,7 @@ export type RawOwnerLedgerPosting = {
   transactionId: string;
   reference: string;
   occurredAt: Date;
+  occurredAtIso?: string;
   description: string | null;
   side: "DEBIT" | "CREDIT";
   amount: string;

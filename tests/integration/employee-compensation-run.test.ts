@@ -1,4 +1,6 @@
 import { getEmployeeCompensationPaymentWorkspace } from "@/modules/finance/application/employee-compensation-payment-workspace";
+import { prepareAccountantExport } from "@/modules/finance/application/accountant-export-service";
+import { accountantExportFixtureAuthority } from "./support/accountant-export";
 import { getEmployeeCompensationCostWorkspace } from "@/modules/finance/application/employee-compensation-cost-workspace";
 import { postEmployeeCompensationSettlement,voidEmployeeCompensationSettlement,recoverEmployeeCompensationSettlement } from "@/modules/finance/application/employee-compensation-settlement";
 import { EmployeePayableRepository } from "@/modules/finance/infrastructure/employee-payable-repository";
@@ -123,6 +125,29 @@ async function settlementFixture(){
 async function paymentCalendar(f:Awaited<ReturnType<typeof settlementFixture>>,timezone="UTC"){return withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),value:{timezone,allow_early_close:false,max_reopen_seconds:60},reason:"Actual payment workspace configured accounting calendar"}));}
 
 describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
+  it("accountant exports distinguish an actual beneficiary wallet offset and its opposite from new cash payment",async()=>{
+    const f=await settlementFixture(),actor=await accountantExportFixtureAuthority(db,f,["STAFF_PAYMENTS"]);
+    await linkTeamWallet({...f.actor,personId:f.person.id},{personId:f.performer.id,accountName:"Actual accountant export beneficiary wallet",reason:"Link actual beneficiary wallet before original native offset"},{db});
+    const wallet=await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id));if(!wallet)throw Error("Original beneficiary wallet required");
+    await postFinancialTransfer(f.actor,{fromAccountId:f.funding.id,toAccountId:wallet.ledgerAccountId,kind:"ADVANCE",amount:"0.07",currency:"MAD",purpose:"Actual accountant export wallet advance",reason:"Fund actual beneficiary wallet before exact seven-cent offset",idempotencyKey:randomUUID()},{db});
+    const paid=await postEmployeeCompensationSettlement(f.actor,{...f.payment,kind:"WALLET_OFFSET",fundingAccountId:wallet.ledgerAccountId,amount:"0.03"},{db});
+    await voidEmployeeCompensationSettlement(f.actor,{id:f.source.id,claimId:f.command.claimId,paymentId:paid.paymentId,reason:"Retain exact original and opposite beneficiary wallet offset history"},{db});
+    const report=await prepareAccountantExport(actor,{kind:"STAFF_PAYMENTS",format:"CSV",locale:"ar",fromOn:"2020-01-01",toOn:"2040-01-01",currency:"MAD",reason:"Keep actual wallet settlement distinct from new cash payment"},document=>document,{db});
+    expect(report.rows).toHaveLength(4);expect(report.rows.filter(row=>row.cells.recordType?.value==="STAFF_WALLET_OFFSET")).toHaveLength(2);expect(report.rows.filter(row=>row.cells.recordType?.value==="STAFF_WALLET_OFFSET_REVERSAL")).toHaveLength(2);
+    expect(report.rows.every(row=>row.cells.amount?.value==="0.03")).toBe(true);expect(new Set(report.rows.map(row=>row.cells.accountType?.value))).toEqual(new Set(["STAFF_WALLET","CLAIM_OWNERSHIP"]));
+    expect(await withTenant(db,f.org,tx=>new TeamRepository(tx,f.org).wallet(f.performer.id))).toMatchObject({balances:[{amount:"0.07",currency:"MAD"}]});
+  });
+  it("accountant exports retain original staff payments and their exact opposite without recognizing earned costs again",async()=>{
+    const f=await settlementFixture(),actor=await accountantExportFixtureAuthority(db,f,["STAFF_PAYMENTS"]),payment=await postEmployeeCompensationSettlement(f.actor,{...f.payment,amount:"0.07"},{db});
+    const input={kind:"STAFF_PAYMENTS",format:"CSV",locale:"fr",fromOn:"2020-01-01",toOn:"2040-01-01",currency:"MAD",reason:"Retain exact actual staff settlement and original earned claim identity"};
+    const first=await prepareAccountantExport(actor,input,document=>document,{db});expect(first.rows).toHaveLength(2);expect(first.rows.every(row=>row.cells.counterparty?.value===f.performer.displayName)).toBe(true);
+    expect(first.rows.every(row=>row.cells.claimId?.value===f.command.claimId&&row.cells.recognitionId?.value===f.recognition.recognitionId&&row.cells.amount?.value==="0.07"&&row.cells.recordType?.value==="STAFF_PAYMENT")).toBe(true);
+    const opposite=await voidEmployeeCompensationSettlement(f.actor,{id:f.source.id,claimId:f.command.claimId,paymentId:payment.paymentId,reason:"Append actual opposite before immutable accountant history export"},{db});
+    const before=await withTenant(db,f.org,tx=>tx.$queryRaw`SELECT id::text,xmin::text FROM financial_transaction WHERE organization_id=${f.org}::uuid ORDER BY id`),report=await prepareAccountantExport(actor,input,document=>document,{db});
+    expect(report.rows).toHaveLength(4);expect(report.rows.filter(row=>row.cells.recordType?.value==="STAFF_PAYMENT_REVERSAL")).toHaveLength(2);
+    expect(report.rows.filter(row=>row.cells.transactionId?.value===opposite.reversalTransactionId).every(row=>row.cells.reversesTransactionId?.value===payment.paymentId&&row.cells.paidAt?.value===f.payment.paidAt)).toBe(true);
+    expect(await withTenant(db,f.org,tx=>tx.$queryRaw`SELECT id::text,xmin::text FROM financial_transaction WHERE organization_id=${f.org}::uuid ORDER BY id`)).toEqual(before);
+  });
   it("variance center derives the actual original recognized unpaid staff source without another salary or balance row",async()=>{
     const f=await settlementFixture(),page=await readVarianceCenter(f.actor,{provider:"STAFF"},{db,authorizeSource:authorizeVarianceSource});
     expect(page).toMatchObject({next:null,items:[{reference:f.run.purpose,detail:{source:{provider:"STAFF",id:f.command.claimId},facts:{kind:"MONEY",currency:"MAD",expected:"500.25",actual:"0.00",variance:"-500.25"}}}]});

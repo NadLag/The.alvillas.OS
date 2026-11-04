@@ -16,6 +16,7 @@ import { resolveFeatureFlag } from "@/platform/config/feature-flags";
 import { authorize } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import {canViewServiceAllocation} from "@/platform/authz/service-allocation-resource";
+import { canViewAccountantExport } from "@/platform/authz/accountant-export-resource";
 
 export const dynamic = "force-dynamic";
 
@@ -95,6 +96,8 @@ export default async function AppPage({
             <Link className="secondary-button" data-testid="receivables-link" href={`/${appLocale}/app/finance/receivables`} prefetch={false}>{t("receivables")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?
             <Link className="secondary-button" data-testid="financial-accounts-link" href={`/${appLocale}/app/finance/accounts`}>{t("financialAccounts")}</Link> : null}
+          {reservationContext && canViewAccountantExport(reservationContext.authContext, "export", new Date()) ?
+            <Link className="secondary-button" data-testid="accountant-exports-link" href={`/${appLocale}/app/finance/accountant-exports`} prefetch={false}>{(await getTranslations("AccountantExports"))("title")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?
             <Link className="secondary-button" data-testid="transaction-groups-link" href={`/${appLocale}/app/finance/groups`}>{t("transactionGroups")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?

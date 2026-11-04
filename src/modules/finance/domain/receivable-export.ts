@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {spreadsheetCsvCell} from "@/platform/exports/spreadsheet-cell";
 import {appLocales,type AppLocale} from "@/i18n/routing";
 import {localizedText} from "@/i18n/content";
 import {receivableAgingInput,receivableAgingCompleteSourceSchema,receivableAgingCompleteSource,ReceivableAgingSourceError} from "./receivable-aging";
@@ -12,9 +13,8 @@ export type ReceivableExportLabels={headers:Record<typeof receivableExportColumn
 
 /** Free text cannot become a spreadsheet formula; verified decimal and integer columns retain their exact bytes. */
 function csvCell(value:string,numeric=false){
- const safe=numeric?value:/^[=+@-]/u.test(value.replace(/^[\s\p{Cc}]*/u,""))?"'"+value:value;
  if(numeric&&!/^-?(?:0|[1-9]\d*)(?:\.\d{2})?$/u.test(value))throw new ReceivableAgingSourceError();
- return '"'+safe.replaceAll('"','""')+'"';
+ return spreadsheetCsvCell(value,numeric);
 }
 const numericColumns=new Set([6,13,15,16,17,18]);
 const csvRow=(values:readonly string[],header=false)=>values.map((value,index)=>csvCell(value,!header&&value!==""&&numericColumns.has(index))).join(",")+"\r\n";

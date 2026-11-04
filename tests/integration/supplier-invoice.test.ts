@@ -47,6 +47,8 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { z } from "zod";
 import { createSupplierInvoice, updateSupplierInvoice, getSupplierInvoice, listSupplierInvoices, setSupplierInvoiceArchived, getSupplierInvoiceChoices, SupplierInvoiceAccessError, SupplierInvoiceConflictError } from "@/modules/finance/application/supplier-invoice-service";
 import { presentAuditHistoryRow } from "@/modules/audit/application/audit-service";
+import { prepareAccountantExport } from "@/modules/finance/application/accountant-export-service";
+import { accountantExportFixtureAuthority } from "./support/accountant-export";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -242,6 +244,19 @@ async function rawSupplierPayment(f: Awaited<ReturnType<typeof invoiceSettlement
 }
 
 describe("immutable supplier invoice authoring on PostgreSQL", () => {
+  it("accountant exports retain original supplier payments after claim reversal and include a reversal whose original is outside the period", async () => {
+    const f=await invoiceSettlementFixture(),actor=await accountantExportFixtureAuthority(db,f,["SUPPLIER_PAYMENTS"]),payment=await postSupplierPayment(f.ctx,{...f.payment,amount:"0.07"},{db});
+    const input={kind:"SUPPLIER_PAYMENTS",format:"CSV",locale:"en",fromOn:"2026-10-01",toOn:"2040-01-01",currency:"MAD",reason:"Export actual immutable supplier payment and original invoice recognition"};
+    const first=await prepareAccountantExport(actor,input,document=>document,{db});expect(first.rows).toHaveLength(2);const party=await withTenant(db,f.org,tx=>tx.supplier.findFirstOrThrow({where:{id:f.supplier.id},select:{displayName:true}}));expect(first.rows.every(row=>row.cells.counterparty?.value===party.displayName)).toBe(true);
+    expect(first.rows.every(row=>row.cells.invoiceId?.value===f.invoice.id&&row.cells.recognitionId?.value===f.recognized.recognitionId&&row.cells.amount?.value==="0.07"&&row.cells.recordType?.value==="SUPPLIER_PAYMENT")).toBe(true);
+    const reversed=await voidSupplierPayment(f.ctx,{id:f.invoice.id,paymentId:payment.paymentId,reason:"Append exact opposite supplier payment for original claim correction"},{db});
+    await voidSupplierInvoiceClaim(f.ctx,{id:f.invoice.id,expectedVersion:f.submitted.version,idempotencyKey:randomUUID(),reason:"Reverse recognized original claim without hiding its actual payment history"},{db});
+    const before=await withTenant(db,f.org,tx=>tx.$queryRaw`SELECT id::text,xmin::text FROM financial_transaction WHERE organization_id=${f.org}::uuid ORDER BY id`),report=await prepareAccountantExport(actor,input,document=>document,{db});
+    expect(report.rows).toHaveLength(4);expect(report.rows.filter(row=>row.cells.recordType?.value==="SUPPLIER_PAYMENT_REVERSAL")).toHaveLength(2);
+    const late=await prepareAccountantExport(actor,{...input,fromOn:"2026-11-01"},document=>document,{db});expect(late.rows).toHaveLength(2);
+    expect(late.rows.every(row=>row.cells.transactionId?.value===reversed.reversalTransactionId&&row.cells.sourceId?.value===payment.paymentId&&row.cells.reversesTransactionId?.value===payment.paymentId&&row.cells.paidAt?.value===f.payment.paidAt)).toBe(true);
+    expect(await withTenant(db,f.org,tx=>tx.$queryRaw`SELECT id::text,xmin::text FROM financial_transaction WHERE organization_id=${f.org}::uuid ORDER BY id`)).toEqual(before);
+  });
   beforeAll(async () => {
     if (!url || !["localhost", "127.0.0.1"].includes(new URL(url).hostname)) throw Error("Dedicated local PostgreSQL required");
     execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"], { env: { ...process.env, DATABASE_URL: url }, stdio: "pipe" });

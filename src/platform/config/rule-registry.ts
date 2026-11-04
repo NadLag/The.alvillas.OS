@@ -1,6 +1,7 @@
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
 import {serviceTaxAssessmentConfigSchema} from "./service-tax-policy";
+import {accountantExportPolicyKey,accountantExportPolicySchema} from "@/modules/finance/domain/accountant-export-policy";
 import {serviceAllocationPolicyKey,serviceAllocationPolicySchema} from "./service-allocation-policy";
 import {guestDepositPolicyKey,guestDepositPolicySchema} from "./guest-deposit-policy";
 import {bankStatementPolicyKey,bankStatementPolicySchema} from "./bank-statement-policy";
@@ -398,6 +399,7 @@ export const configRuleSchemas = {
   [receivableCollectionPolicyKey]:receivableCollectionPolicySchema,
   [receivableAgingPolicyKey]:receivableAgingPolicySchema,
   [receivableExportPolicyKey]:receivableExportPolicySchema,
+  [accountantExportPolicyKey]:accountantExportPolicySchema,
   [receivableReminderPolicyKey]:receivableReminderPolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,

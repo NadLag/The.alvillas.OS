@@ -7,9 +7,12 @@ import {recurringExpensePolicyKey} from "@/modules/finance/domain/recurring-expe
 import {recurringCompanyExpensePolicyKey} from "@/modules/finance/domain/company-expense";
 import {serviceAllocationPolicyKey} from "./service-allocation-policy";
 import {guestDepositPolicyKey} from "./guest-deposit-policy";
+import {accountantExportPolicyKey} from "@/modules/finance/domain/accountant-export-policy";
+import {propertyFinanceFinancialSources} from "@/platform/authz/property-finance-resource";
 export {recurringExpensePolicyKey,recurringCompanyExpensePolicyKey,serviceAllocationPolicyKey};
 
 const sourceGroups:Readonly<Record<string,readonly string[]>>={
+ [accountantExportPolicyKey]:[...propertyFinanceFinancialSources,"bank_statement","company_expense"],
  [recurringExpensePolicyKey]:["expense","financial_transaction"],
  [recurringCompanyExpensePolicyKey]:["company_expense","financial_transaction","staff_compensation"],
  [serviceAllocationPolicyKey]:["cash_collection","financial_transaction","owner_statement","company_ledger","supplier_invoice","employee_payable","staff_compensation"],
