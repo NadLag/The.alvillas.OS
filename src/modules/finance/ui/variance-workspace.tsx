@@ -52,7 +52,7 @@ export function VarianceWorkspace({ locale, scope, actorId, source }: { locale: 
         {command.state === "succeeded" ? <button className="secondary-button" data-testid="variance-new-command" onClick={command.startNew}>{t("newCommand")}</button> : null}</div></section>
     {detail.pending ? <SkeletonBlock rows={5}/> : detail.error ? <p role="alert">{t(detail.error)}</p> : data ? <>
       <section className="resource-form" data-testid="variance-detail"><h2>{t(`provider_${source.provider}`)}</h2><p role="status" data-testid="variance-state">{t(`status_${data.status}`)}</p>
-        <dl className="resource-grid">{(["expected", "actual", "variance"] as const).map(key => <div key={key}><dt>{t(key)}</dt><dd className="money-value" data-testid={`variance-${key}`} dir="auto">{data.facts.kind === "MONEY" && data.facts.currency ?
+        <dl className="detail-grid">{(["expected", "actual", "variance"] as const).map(key => <div key={key}><dt>{t(key)}</dt><dd data-testid={`variance-${key}`} dir="auto">{data.facts.kind === "MONEY" && data.facts.currency ?
           formatCurrencyAmount(locale, data.facts[key], data.facts.currency) : new Intl.NumberFormat(locale).format(BigInt(data.facts[key]))}</dd></div>)}
           <div><dt>{t("age")}</dt><dd>{t("ageDays", { days: new Intl.NumberFormat(locale).format(BigInt(data.ageMilliseconds) / 86_400_000n) })}</dd></div>
           <div><dt>{t("assignedTo")}</dt><dd dir="auto">{name(data.assignedTo)}</dd></div>

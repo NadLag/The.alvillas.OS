@@ -59,6 +59,7 @@ import { ownNotificationContext } from "@/platform/notifications/notification";
 import { getNotificationPage,openNotification } from "@/platform/notifications/notification-service";
 import { commandVarianceWorkflow, readVarianceWorkflow } from "@/modules/finance/application/variance-workflow-service";
 import { authorizeVarianceSource } from "@/platform/reconciliation/variance-source-authority";
+import { readVarianceCenter } from "@/modules/finance/application/variance-center-service";
 
 const url=process.env.TEST_DATABASE_URL;let admin:PrismaClient,db:PrismaClient;
 const fixtures=employeeCompensationFixtures(()=>db,()=>admin);
@@ -122,6 +123,10 @@ async function settlementFixture(){
 async function paymentCalendar(f:Awaited<ReturnType<typeof settlementFixture>>,timezone="UTC"){return withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),value:{timezone,allow_early_close:false,max_reopen_seconds:60},reason:"Actual payment workspace configured accounting calendar"}));}
 
 describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
+  it("variance center derives the actual original recognized unpaid staff source without another salary or balance row",async()=>{
+    const f=await settlementFixture(),page=await readVarianceCenter(f.actor,{provider:"STAFF"},{db,authorizeSource:authorizeVarianceSource});
+    expect(page).toMatchObject({next:null,items:[{reference:f.run.purpose,detail:{source:{provider:"STAFF",id:f.command.claimId},facts:{kind:"MONEY",currency:"MAD",expected:"500.25",actual:"0.00",variance:"-500.25"}}}]});
+  });
   it("variance workflow derives unpaid earnings and reopens a resolution after an actual partial staff payment",async()=>{
     const f=await settlementFixture();
     const officer=await fixtures.reader(f,{permissions:["employee_payable:reconcile","financial_transaction:reconcile"]}),actor={...officer.ctx,personId:f.person.id};

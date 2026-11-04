@@ -4560,6 +4560,21 @@
     "command_recoveryUnavailable": "Demande enregistrée indisponible",
     "command_terminal": "Consultez le résultat de la demande",
     "command_succeeded": "Modification enregistrée",
-    "open": "Examiner l’écart"
+    "open": "Examiner l’écart",
+    "browse": "Parcourir les écarts",
+    "browseGuidance": "Consultez les écarts de l’organisation par source, état et attribution. Les sources les plus anciennes apparaissent en premier.",
+    "source": "Source",
+    "caseStatus": "État",
+    "allStatuses": "Tous les états",
+    "assignment": "Attribution",
+    "assignment_ANY": "Toutes les attributions",
+    "assignment_ME": "Attribué à moi",
+    "assignment_UNASSIGNED": "Non attribué",
+    "refresh": "Actualiser depuis les sources d’origine",
+    "differences": "Écarts d’origine",
+    "emptyPage": "Aucun écart ne correspond sur cette page.",
+    "assignedColleague": "Un autre collègue",
+    "queueForbidden": "Un accès à cette source pour toute l’organisation est nécessaire pour la parcourir. Ouvrez les écarts individuels depuis leurs espaces existants.",
+    "refreshRequired": "Actualisez cette liste depuis les sources d’origine avant de continuer."
   }
 }

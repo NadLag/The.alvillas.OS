@@ -4560,6 +4560,21 @@
     "command_recoveryUnavailable": "Saved request unavailable",
     "command_terminal": "Review the request result",
     "command_succeeded": "Change saved",
-    "open": "Review difference"
+    "open": "Review difference",
+    "browse": "Browse differences",
+    "browseGuidance": "Review organization differences by source, status and assignment. Oldest sources appear first.",
+    "source": "Source",
+    "caseStatus": "Status",
+    "allStatuses": "All statuses",
+    "assignment": "Assignment",
+    "assignment_ANY": "Any assignment",
+    "assignment_ME": "Assigned to me",
+    "assignment_UNASSIGNED": "Unassigned",
+    "refresh": "Refresh from original sources",
+    "differences": "Original differences",
+    "emptyPage": "No differences match on this page.",
+    "assignedColleague": "Another colleague",
+    "queueForbidden": "You need organization-wide access to browse this source. Open individual differences from their existing workspaces.",
+    "refreshRequired": "Refresh this list from the original sources before continuing."
   }
 }

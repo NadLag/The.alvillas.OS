@@ -19,6 +19,7 @@ import { prepareFieldStocktakeBatch, recordFieldStocktakeInTransaction } from "@
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { listAuditHistory } from "@/modules/audit/application/audit-service";
 import { maskedValue } from "@/platform/authz/present";
+import { readVarianceCenter } from "@/modules/finance/application/variance-center-service";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
@@ -145,6 +146,7 @@ describe("native attributed variance workflow", () => {
   });
   it("assigns, resolves and reopens through immutable events while preserving every original financial row and version", async () => {
     const f = await fixture(), before = await snapshot(f), assigned = await commandVarianceWorkflow(f.ctx, { intent: f.intent, idempotencyKey: randomUUID() }, f.deps);
+    expect((await readVarianceCenter(f.ctx, { provider: "OTA", assignment: "ME" }, f.deps)).items).toMatchObject([{ detail: { source: f.source, facts: { expected: "0.07", actual: "0.03", variance: "-0.04" } } }]);
     expect(assigned).toMatchObject({ version: "1", operation: "ASSIGN", idempotent: false });
     let current = await readVarianceWorkflow(f.ctx, { source: f.source }, f.deps);
     await commandVarianceWorkflow(f.ctx, { intent: { source: f.source, version: current.version, sourceFingerprint: current.sourceFingerprint, operation: "RESOLVE",
