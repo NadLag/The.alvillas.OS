@@ -48,6 +48,7 @@ describe("config rule registry", () => {
       "field.upload_lifecycle",
       "finance.accounting_periods",
       "finance.approval_thresholds",
+      "finance.bank_statements",
       "finance.commission",
       "finance.company_expenses",
       "finance.expense_allocation",

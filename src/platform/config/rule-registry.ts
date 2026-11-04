@@ -3,6 +3,7 @@ import { z } from "zod";
 import {serviceTaxAssessmentConfigSchema} from "./service-tax-policy";
 import {serviceAllocationPolicyKey,serviceAllocationPolicySchema} from "./service-allocation-policy";
 import {guestDepositPolicyKey,guestDepositPolicySchema} from "./guest-deposit-policy";
+import {bankStatementPolicyKey,bankStatementPolicySchema} from "./bank-statement-policy";
 import {companyExpensePolicyKey,companyExpensePolicySchema,recurringCompanyExpensePolicyKey,recurringCompanyExpensePolicySchema} from "@/modules/finance/domain/company-expense";
 import {recurringExpensePolicyKey,recurringExpensePolicySchema} from "@/modules/finance/domain/recurring-expense";
 import { automationRuleSchema, ruleConditionSchema } from "@/platform/automation/rule";
@@ -380,6 +381,7 @@ export const configRuleSchemas = {
   [recurringCompanyExpensePolicyKey]:recurringCompanyExpensePolicySchema,
   [serviceAllocationPolicyKey]:serviceAllocationPolicySchema,
   [guestDepositPolicyKey]:guestDepositPolicySchema,
+  [bankStatementPolicyKey]:bankStatementPolicySchema,
   [accountingPeriodPolicyKey]: accountingPeriodPolicySchema,
   [agreementResponsibilitiesConfigKey]: agreementResponsibilitiesConfigSchema,
   [agreementNoticeConfigKey]: agreementNoticeConfigSchema,
