@@ -11,6 +11,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import {canViewCompletePropertyFinance} from "@/platform/authz/property-finance-resource";
+import {canViewAccountantExport} from "@/platform/authz/accountant-export-resource";
 import {canViewServiceAllocation} from "@/platform/authz/service-allocation-resource";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { present } from "@/platform/authz/present";
@@ -88,6 +89,12 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
+  if (row.resourceType === "accountant_export") {
+    const allowed = canViewAccountantExport(ctx.authContext, action, new Date());
+    return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,
+      { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
+      { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
+  }
   if (row.resourceType === "tax_policy_hook") {
     const now = new Date(), allowed = financialRuleAccess(ctx.authContext, action, now, "finance.tax") &&
       authorizeOrganizationSource(ctx.authContext, action, { type: "config_rule", organizationId: ctx.organizationId, dataClass: "financial" }, now);

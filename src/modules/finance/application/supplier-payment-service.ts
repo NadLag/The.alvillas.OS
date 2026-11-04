@@ -16,7 +16,7 @@ import { SupplierPayableRepository } from "../infrastructure/supplier-payable-re
 import { expenseFundingWalletResource, isExpenseFundingAccount } from "../domain/expense";
 import { supplierInvoiceCostResource } from "../domain/supplier-invoice";
 import { supplierPaymentPostings } from "../domain/supplier-payable";
-import { supplierPaymentInput, supplierPaymentVoidInput, supplierSettlementQuery, supplierInvoiceReversalInput } from "../domain/supplier-payment";
+import { supplierPaymentInput, supplierPaymentVoidInput, supplierSettlementQuery, supplierInvoiceReversalInput, supplierPaymentAuditSchema as receipt } from "../domain/supplier-payment";
 import { matchesFinancialReversalAttempt } from "../domain/financial-reversal";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
 import { inspectSupplierInvoiceRecognitionSource } from "./supplier-invoice-recognition";
@@ -28,8 +28,6 @@ type Deps = { db?: TenantTransactionRunner; requestId?: string;
   calendar?: { id: string; version: number; local: string; occurrence: "reject" | "earlier" | "later" } };
 type Source = Awaited<ReturnType<typeof inspectSupplierInvoiceRecognitionSource>>;
 type Check = { action: Action; resource: Resource; organizationOnly?: boolean };
-const receipt = z.object({ input: supplierPaymentInput, recognitionId: z.uuid(), transactionId: z.uuid(),
-  sourcePeriodId: z.uuid().nullable(), sourcePeriodEventId: z.uuid().nullable(), postedAt: z.iso.datetime() }).strict();
 
 function paymentResource(ctx: FinanceActorContext, source: Source, amount: string, at: Date, id?: string): Resource {
   const properties = new Set(source.costs.map(cost => cost.propertyId));
