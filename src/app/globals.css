@@ -1,5 +1,11 @@
 .compensation-page { max-inline-size: 80rem; grid-template-columns: minmax(0, 1fr); }
 .compensation-page > * { min-inline-size: 0; }
+.guest-deposit-page { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.guest-deposit-page :is(fieldset, .resource-form, .field, .form-actions, section, ul, ol, li) { min-inline-size: 0; max-inline-size: 100%; }
+.guest-deposit-page :is(legend, .primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.guest-deposit-page :is(input, select, textarea) { min-inline-size: 0; max-inline-size: 100%; }
+.guest-deposit-page :is(ul, ol) { padding-inline-start: var(--space-5); }
+.guest-deposit-page dd { margin-inline-start: 0; }
 .service-allocation-page { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .service-allocation-page :is(.resource-form, .field, .form-actions, section, details, ul, ol, li) { min-inline-size: 0; max-inline-size: 100%; }
 .service-allocation-page :is(.primary-button, .secondary-button) { max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }

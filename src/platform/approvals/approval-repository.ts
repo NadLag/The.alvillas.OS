@@ -67,7 +67,19 @@ export class ApprovalRepository {
     return this.tx.outboxEvent.upsert({where:{organizationId_idempotencyKey:{organizationId:this.organizationId,idempotencyKey:key}},update:{},create:{organizationId:this.organizationId,type,payload:{approvalId,...(propertyId?{propertyId}:{})},idempotencyKey:key}});
   }
   async resolveNotifications(id: string, resolution: string, resolvedAt: Date) {
-    await this.tx.notification.updateMany({ where: { organizationId: this.organizationId, targetId: id, kind: "approval_requested", resolvedAt: null }, data: { resolution, resolvedAt } });
-    await this.tx.notification.updateMany({ where: { organizationId: this.organizationId, targetId: id, kind: "approval_requested", readAt: null }, data: { readAt: resolvedAt } });
+    let instant: Date | string = resolvedAt;
+    if (resolution === "CANCELLED") {
+      // Retain database microseconds: a JavaScript Date can precede its actual
+      // withdrawal source after precision loss or a backwards wall-clock step.
+      const [source] = await this.tx.$queryRaw<Array<{ at: string }>>(Prisma.sql`
+        SELECT to_char(GREATEST(${resolvedAt}::timestamptz,w.created_at) AT TIME ZONE 'UTC',
+          'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at
+        FROM public.approval_request a JOIN public.employee_compensation_withdrawal w
+          ON w.organization_id=a.organization_id AND w.submission_id=a.employee_submission_id
+        WHERE a.organization_id=${this.organizationId}::uuid AND a.id=${id}::uuid`);
+      instant = source?.at ?? resolvedAt;
+    }
+    await this.tx.notification.updateMany({ where: { organizationId: this.organizationId, targetId: id, kind: "approval_requested", resolvedAt: null }, data: { resolution, resolvedAt: instant } });
+    await this.tx.notification.updateMany({ where: { organizationId: this.organizationId, targetId: id, kind: "approval_requested", readAt: null }, data: { readAt: instant } });
   }
 }

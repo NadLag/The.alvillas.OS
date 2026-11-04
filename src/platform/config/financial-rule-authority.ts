@@ -6,12 +6,14 @@ import {FinanceRepository} from "@/modules/finance/infrastructure/finance-reposi
 import {recurringExpensePolicyKey} from "@/modules/finance/domain/recurring-expense";
 import {recurringCompanyExpensePolicyKey} from "@/modules/finance/domain/company-expense";
 import {serviceAllocationPolicyKey} from "./service-allocation-policy";
+import {guestDepositPolicyKey} from "./guest-deposit-policy";
 export {recurringExpensePolicyKey,recurringCompanyExpensePolicyKey,serviceAllocationPolicyKey};
 
 const sourceGroups:Readonly<Record<string,readonly string[]>>={
  [recurringExpensePolicyKey]:["expense","financial_transaction"],
  [recurringCompanyExpensePolicyKey]:["company_expense","financial_transaction","staff_compensation"],
  [serviceAllocationPolicyKey]:["cash_collection","financial_transaction","owner_statement","company_ledger","supplier_invoice","employee_payable","staff_compensation"],
+ [guestDepositPolicyKey]:["financial_transaction"],
  "finance.tax":["financial_transaction","company_ledger"]
 };
 export const protectedFinancialRuleKey=(key:string|undefined):key is string=>Boolean(key&&Object.hasOwn(sourceGroups,key));
@@ -27,6 +29,7 @@ export async function recheckFinancialRuleAccess(ctx:{organizationId:string;acto
 /** Config history may contain several financial rules; every actual source group must remain authorized. */
 export function financialRuleKeysIn(value:unknown):string[]{
  const found=new Set<string>();function visit(item:unknown){if(!item||typeof item!=="object")return;for(const[key,child]of Object.entries(item)){
+  if(key==='source'&&child==='ACTUAL_GUEST_RECEIPT')found.add(guestDepositPolicyKey);
   for(const protectedKey of Object.keys(sourceGroups))if(key===protectedKey||key.startsWith('/rules/'+protectedKey+'/')||key==='key'&&child===protectedKey)found.add(protectedKey);
   if(key==='source'&&child==='PROPERTY_EXPENSE_DRAFT')found.add(recurringExpensePolicyKey);if(key==='source'&&child==='COMPANY_EXPENSE_PLAN')found.add(recurringCompanyExpensePolicyKey);if(key==='source'&&child==='COMPLETED_SERVICE_COLLECTION')found.add(serviceAllocationPolicyKey);visit(child);
  }}visit(value);return[...found].sort();
