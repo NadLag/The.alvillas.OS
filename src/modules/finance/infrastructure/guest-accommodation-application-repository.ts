@@ -4,6 +4,8 @@ import type {TenantTransaction} from "@/platform/db/tenant";
 /** Native booking evidence and derived application movements; no receivable or balance is manufactured. */
 export class GuestAccommodationApplicationRepository{
  constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
+ retainedFinancialSnapshot(reservationId:string,id:string){return this.tx.reservationFinancialSnapshot.findFirst({where:{organizationId:this.organizationId,reservationId,id}});}
+ reservationCorrectionReceipt(reservationId:string,key:string){return this.tx.auditLog.findFirst({where:{organizationId:this.organizationId,action:"reservation.revenue.reversed",resourceType:"financial_transaction",AND:[{after:{path:["reservationId"],equals:reservationId}},{after:{path:["idempotencyKey"],equals:key}},{after:{path:["source"],equals:"ORIGINAL_GUEST_PREPAYMENT"}}]},orderBy:{id:"asc"},select:{id:true,actorId:true,reason:true,after:true}});}
  async source(reservationId:string){
   const[reservation,financialSnapshot,commissions,checkout,confirmation]=await Promise.all([
    this.tx.reservation.findFirst({where:{organizationId:this.organizationId,id:reservationId,archivedAt:null},select:{id:true,reference:true,propertyId:true,guestId:true,version:true,status:true,source:true,createdAt:true,checkIn:true,checkOut:true,property:{select:{id:true,archivedAt:true,timezone:true,city:true,cityId:true,region:true,regionId:true}}}}),

@@ -20,10 +20,11 @@ type Deps={db?:TenantTransactionRunner;requestId?:string};
 const capture=(ctx:FinanceActorContext)=>({...ctx,authContext:restoreAuthorizationCap(captureAuthorizationCap(ctx.authContext))});
 const serialized=(rows:readonly FinancePostingDraft[])=>rows.filter(row=>!row.amount.amount.isZero()).map(row=>({...row,amount:row.amount.toJSON().amount,currency:row.amount.currency}));
 const json=(value:unknown)=>JSON.parse(JSON.stringify(value))as Prisma.InputJsonObject;
+export {replay as replayGuestAccommodationApplicationInTransaction};
 
 async function replay(ctx:FinanceActorContext,key:string,hash:string,tx:TenantTransaction){
  const repository=new GuestDepositRepository(tx,ctx.organizationId),row=await repository.byCommand(key);if(!row)return null;
- const audit=await repository.audit(row.id,"finance.guest_deposit.applied");
+ const audit=await repository.commandAudit(row.id);
  if(!audit||row.createdBy!==ctx.actorId||audit.actorId!==ctx.actorId)throw new GuestDepositAuthorizationError();
  const saved=guestDepositFundedApplicationSnapshot.safeParse(audit.after);if(!saved.success||saved.data.commandHash!==hash)throw new GuestDepositConflictError();
  const source=await readGuestDepositSourceInTransaction(ctx,saved.data.source.depositId,tx),target={...source.resource,id:row.id,financialRecordId:row.id,amount:saved.data.input.amount,occurredAt:row.occurredAt},checks=[...source.checks,{action:"view"as const,resource:target},...saved.data.originalOwnerOrder.map(ownerId=>({action:"view"as const,resource:{...target,ownerId}}))];

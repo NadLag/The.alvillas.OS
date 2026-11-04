@@ -5,6 +5,7 @@ import {commandFingerprint} from "@/platform/http/command-fingerprint";
 import {calendarDateAt} from "@/i18n/format";
 import {FinanceRepository} from "../infrastructure/finance-repository";
 import {AccountingPeriodRepository} from "../infrastructure/accounting-period-repository";
+import {FinancialTransferRepository} from "../infrastructure/financial-transfer-repository";
 import {GuestAccommodationApplicationRepository} from "../infrastructure/guest-accommodation-application-repository";
 import type {guestDepositFundedApplicationReviewInput} from "../domain/guest-deposit-command";
 import {guestDepositApplicationVectorDelta} from "../domain/guest-deposit-application-vector";
@@ -32,7 +33,8 @@ export async function inspectGuestAccommodationApplication(ctx:FinanceActorConte
  const target={...source.resource,id:undefined,financialRecordId:undefined,amount:amount.toJSON().amount,occurredAt:now},checks:Array<Parameters<typeof recheckFinanceAuthorization>[3][number]>=[...source.checks,{action:"pay",resource:source.resource},{action:"view",resource:target},{action:"create",resource:target},{action:"pay",resource:target}];
  await recheckFinanceAuthorization(ctx,tx,now,checks,new GuestDepositAuthorizationError());
  const policy=await resolveGuestDepositPolicyInTransaction(tx,ctx.organizationId,source.snapshot.source.propertyId,now,source.snapshot.source.reservationId);if(policy.value.application?.source!=="ORIGINAL_GUEST_PREPAYMENT")throw new GuestDepositConfigurationError();
- const facts=await repository.source(source.snapshot.source.reservationId),native=await finance.findReservation(source.snapshot.source.reservationId),baseCurrency=await finance.findOrganizationBaseCurrency();
+ const facts=await repository.source(source.snapshot.source.reservationId),native=await finance.findReservation(source.snapshot.source.reservationId),baseCurrency=await finance.findOrganizationBaseCurrency(),currency=await new FinancialTransferRepository(tx,ctx.organizationId).currency(input.currency);
+ if(!currency||currency.minorUnit>2||amount.amount.decimalPlaces()>currency.minorUnit)throw new GuestDepositConfigurationError();
  if(!facts||!native||facts.reservation.guestId!==source.snapshot.source.guestId||facts.reservation.propertyId!==source.snapshot.source.propertyId||facts.reservation.property.archivedAt||!["CHECKED_OUT","FINANCIAL_RECONCILIATION","CLOSED"].includes(facts.reservation.status)||!facts.confirmation||!facts.checkout||facts.confirmation.createdAt>now||facts.checkout.createdAt>now||facts.confirmation.version>facts.checkout.version||facts.checkout.version>facts.reservation.version||facts.financialSnapshot.version>facts.reservation.version)throw new GuestDepositSourceError();
  const confirmation=confirmationSchema.safeParse(facts.confirmation.after),checkout=checkoutSchema.safeParse(facts.checkout.after);
  if(!confirmation.success||!checkout.success||confirmation.data.id!==native.id||checkout.data.id!==native.id||confirmation.data.propertyId!==native.propertyId||checkout.data.propertyId!==native.propertyId)throw new GuestDepositSourceError();
@@ -51,6 +53,7 @@ export async function inspectGuestAccommodationApplication(ctx:FinanceActorConte
  const principal=before.rows.find(row=>row.ledgerAccountId===source.liability.id);if(!principal)throw new GuestDepositSourceError();const actualBefore:FinancePostingDraft[]=applied.amount.isZero()?actual:[principal,...actual];
  try{if(guestDepositApplicationVectorDelta(actualBefore,before.rows).length)throw new GuestDepositConflictError();}catch{throw new GuestDepositConflictError();}
  const postings=guestDepositApplicationVectorDelta(before.rows,after.rows),funding=postings.filter(row=>row.ledgerAccountId===source.liability.id);if(funding.length!==1||funding[0].side!=="DEBIT"||!funding[0].amount.equals(amount)||postings.some(row=>![source.liability.id,ownerPayable.id,commissionRevenue.id].includes(row.ledgerAccountId)))throw new GuestDepositSourceError();
+ if(postings.some(row=>row.amount.amount.decimalPlaces()>currency.minorUnit))throw new GuestDepositConfigurationError();
  const fingerprint=commandFingerprint({input,source:source.snapshot,sourceMovements:source.movements,policy,facts,position,ownerPayable,commissionRevenue,before:before.rows,after:after.rows,calendar:{id:calendar.id,version:calendar.version,value:calendar.value},month:calendarDateAt(now,calendar.value.timezone).slice(0,7)});
  return{source,finance,repository,periods,now,amount,kind,target,checks,policy,facts,reservation,position,applied,quote,remaining,ownerPayable,commissionRevenue,before,after,postings,fingerprint};
 }

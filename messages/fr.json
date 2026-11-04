@@ -4340,6 +4340,18 @@
     "command_recoveryUnavailable": "La demande initiale n’a pas pu être vérifiée. Réessayez sa vérification.",
     "command_terminal": "Vérifiez le résultat de cette demande avant une autre action.",
     "command_succeeded": "La demande initiale est enregistrée.",
-    "ORIGINAL_REQUEST_RECORDED": "Une demande antérieure est déjà enregistrée. Vérifiez son résultat avant une autre action."
+    "ORIGINAL_REQUEST_RECORDED": "Une demande antérieure est déjà enregistrée. Vérifiez son résultat avant une autre action.",
+    "APPLY": "Imputation au séjour",
+    "REVERSE_APPLICATION": "Correction de l’imputation",
+    "APPLICATION_ADJUSTMENT": "Répartition des droits conservés",
+    "applicationTitle": "Imputer l’acompte au séjour",
+    "applicationGuidance": "Imputez les fonds d’origine du voyageur après son départ. Les droits suivent les quotes-parts et la commission figées. Les fonds restent dans leur compte actuel.",
+    "applicationLimit": "Montant disponible pour cette imputation",
+    "applicationConfirmation": "Cette imputation utilise uniquement les fonds d’origine sélectionnés. Les quotes-parts et la commission figées de la réservation déterminent les droits enregistrés.",
+    "recordApplication": "Enregistrer l’imputation au séjour",
+    "quotedAccommodation": "Devis d’hébergement d’origine",
+    "alreadyApplied": "Montant déjà imputé au séjour",
+    "commissionChange": "Variation de la commission ALVILLAS",
+    "allocationCorrectionGuidance": "Cette correction enregistre aussi l’ajustement des droits nécessaire pour les imputations restantes."
   }
 }
