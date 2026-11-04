@@ -15,16 +15,17 @@ import { actualBankReconciliationFixture, actualBankReplacementSource } from "./
 import * as bankSourceState from "@/modules/finance/domain/bank-statement-source-state";
 import { ReconciliationBudgetError } from "@/modules/finance/domain/reconciliation";
 import { provisionIntegrationRole } from "./support/database-role";
+import { transactionQueryMeasurement } from "./support/transaction-query-measurement";
 
 const url = process.env.TEST_DATABASE_URL;
-let admin: PrismaClient, db: PrismaClient, queryCount = 0, queryTrace: string[] | null = null;
+let admin: PrismaClient, db: PrismaClient, queryMeasurement: ReturnType<typeof transactionQueryMeasurement>;
 beforeAll(async () => {
   const target = url ? new URL(url) : null;
   if (!target || !["127.0.0.1", "localhost"].includes(target.hostname) || !(target.pathname.startsWith("/alvillas_automation_") || process.env.GITHUB_ACTIONS === "true" && target.pathname === "/alvillas_os")) throw Error("Dedicated native bank reconciliation database required");
   execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy"], { env: { ...process.env, DATABASE_URL: url }, stdio: "pipe" });
   admin = new PrismaClient({ datasourceUrl: url }); await provisionIntegrationRole(admin, "alvillas_ops_tests");
   const scoped = new URL(url!); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests";
-  const observed = new PrismaClient({ datasourceUrl: scoped.toString(), log: [{ emit: "event", level: "query" }] }); observed.$on("query", event => { queryCount++; queryTrace?.push(event.query); }); db = observed;
+  const observed = new PrismaClient({ datasourceUrl: scoped.toString(), log: [{ emit: "event", level: "query" }] }); queryMeasurement = transactionQueryMeasurement(observed); observed.$on("query", event => queryMeasurement.observe(event.query)); db = observed;
 });
 afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
 type Fixture = Awaited<ReturnType<typeof actualBankReconciliationFixture>>;
@@ -157,17 +158,14 @@ describe("actual original bank reconciliation", () => {
   it("pages 502 actual bank sources with a constant query count and derives allocated amounts from retained matches", async () => {
     const f = await actualBankReconciliationFixture(db, admin);
     await f.admit("Date;ID;Reference;Description;Amount;Currency\n" + Array.from({ length: 501 }, (_, i) => `2026-11-03;page-${i};actual-reference;Actual original source page;0.01;MAD`).join("\n"));
-    let after: string | undefined, seen = 0; const queries: number[] = [], pageSignatures: string[][] = []; queryTrace = [];
+    let after: string | undefined, seen = 0; const queries: number[] = [], pageSignatures: string[][] = [];
     do {
-      await new Promise<void>(resolve => setImmediate(resolve));
-      const before = queryCount;
-      const page = bankReconciliationSourcesSchema.parse(await readBankReconciliationWorkspace(f.ctx, { operation: "SOURCES", accountId: f.banks.receipt.id, currency: "MAD", after }, f.deps));
-      await new Promise<void>(resolve => setImmediate(resolve));
-      queries.push(queryCount - before); seen += page.items.length; after = page.next ?? undefined;
-      pageSignatures.push(queryTrace.splice(0).map(query => query.trim().replace(/\s+/gu, " ").slice(0, 100)));
+      const measured = await queryMeasurement.measure(() => readBankReconciliationWorkspace(f.ctx, { operation: "SOURCES", accountId: f.banks.receipt.id, currency: "MAD", after }, f.deps));
+      const page = bankReconciliationSourcesSchema.parse(measured.value);
+      queries.push(measured.count); seen += page.items.length; after = page.next ?? undefined;
+      pageSignatures.push(measured.queries.map(query => query.trim().replace(/\s+/gu, " ").slice(0, 100)));
       expect(page.items.every(row => row.state === "ACTIVE" && row.eligible && row.allocated.amount === "0.00")).toBe(true);
     } while (after);
-    queryTrace = null;
     console.log(JSON.stringify({ actualBankSources: seen, pageQueryCounts: queries, protocolStatements: [...new Set(pageSignatures.flat().filter(query => !query.includes('"public"') && !query.startsWith("WITH")))] }));
     const fewest = Math.min(...queries), examples = [pageSignatures[queries.indexOf(fewest)], ...pageSignatures.filter((_, index) => queries[index] !== fewest)];
     expect(seen).toBe(502); expect(queries).toHaveLength(11); expect(new Set(queries).size, JSON.stringify({ counts: queries, examples })).toBe(1);
