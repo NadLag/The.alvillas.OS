@@ -38,7 +38,7 @@ export function employeeSettlementFundingChecks(ctx:FinanceActorContext,account:
 export async function prepareEmployeeCompensationSettlement(ctx:FinanceActorContext,id:string,claimId:string,tx:TenantTransaction,action:"view"|"pay"|"void"){
   const source=await inspectEmployeeCompensationRecognition(ctx,id,claimId,tx),payables=new EmployeePayableRepository(tx,ctx.organizationId);if(!source.existing)throw new EmployeeCompensationRunConflictError();
   const facts=employeeCompensationRunFacts(ctx.organizationId,source.row.run);
-  const sourceActionChecks=(verb:"view"|"pay"|"void"):Check[]=>{const checks:Check[]=verb==="view"?[]:[{action:verb,resource:facts.resource}];
+  const sourceActionChecks=(verb:"view"|"pay"|"void"|"reconcile"|"assign"):Check[]=>{const checks:Check[]=verb==="view"?[]:[{action:verb,resource:facts.resource}];
     if(verb!=="view")for(const cost of source.retained.costs){const actual=source.row.costs.find(line=>line.id===cost.id)!,link=source.existing!.lines.find(line=>line.costId===cost.id)!;
       const{financial}=employeeCompensationFinancialSourceFacts(ctx.organizationId,source.row.run.createdBy,{...actual,taskId:actual.runLine.taskId},cost.sourceOccurredAt);
       checks.push({action:verb,resource:financial},{action:verb,resource:{...financial,id:link.transactionId,financialRecordId:link.transactionId,occurredAt:link.transaction.occurredAt}});}

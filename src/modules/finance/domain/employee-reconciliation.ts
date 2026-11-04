@@ -18,19 +18,19 @@ export type EmployeeReconciliationJournal = {
   id: string; organizationId: string; sealed: boolean; reversesTransactionId: string | null; postings: readonly EmployeeReconciliationPosting[];
 };
 
-/** Compare original earned liability with all actual payment/offset journals, including their exact opposites. */
-export function employeeReconciliation(input: {
+export type EmployeeReconciliationInput = {
   organizationId: string; claimId: string; personId: string; currency: string; minorUnit: number;
-  journals: readonly EmployeeReconciliationJournal[]; outstanding: Money; actionJournalId: string; reason: string;
+  journals: readonly EmployeeReconciliationJournal[]; outstanding: Money;
   recognitionJournalIds: readonly string[];
-}) {
-  for (const id of [input.organizationId, input.claimId, input.personId, input.actionJournalId]) z.uuid().parse(id);
+};
+function originalEmployeeSources(input: EmployeeReconciliationInput) {
+  for (const id of [input.organizationId, input.claimId, input.personId]) z.uuid().parse(id);
   const measure = moneyReconciliationMeasure(input.currency, input.minorUnit), zero = measure.zero(); measure.assert(input.outstanding);
   if (measure.compare(input.outstanding, zero) < 0) throw new ReconciliationSourceError();
   const journals = new Map(input.journals.map(journal => [journal.id, journal]));
   const recognized = new Set(input.recognitionJournalIds), observedRecognition = new Set<string>();
   if (!recognized.size || recognized.size !== input.recognitionJournalIds.length) throw new ReconciliationSourceError();
-  if (journals.size !== input.journals.length || !journals.has(input.actionJournalId)) throw new ReconciliationSourceError();
+  if (journals.size !== input.journals.length) throw new ReconciliationSourceError();
   const expected: ReconciliationAllocation<Money>[] = [], actual: ReconciliationAllocation<Money>[] = [], identities = new Set<string>(), reversed = new Set<string>();
   for (const journal of input.journals) {
     if (journal.organizationId !== input.organizationId || !journal.sealed) throw new ReconciliationSourceError();
@@ -60,6 +60,23 @@ export function employeeReconciliation(input: {
     if (!sources) throw new ReconciliationSourceError();
   }
   if ([...recognized].some(id => !observedRecognition.has(id))) throw new ReconciliationSourceError();
+  return { measure, zero, expected, actual, journals };
+}
+
+/** Read-only balances, including a genuine absence of payments, are derived from the same original native movements. */
+export function employeeReconciliationTotals(input: EmployeeReconciliationInput) {
+  const { measure, zero, expected, actual } = originalEmployeeSources(input);
+  const earned = expected.reduce((sum, source) => measure.add(sum, source.original), zero);
+  const settled = actual.reduce((sum, source) => measure.add(sum, source.original), zero), variance = measure.subtract(settled, earned);
+  if (measure.compare(variance, measure.subtract(zero, input.outstanding)) !== 0) throw new ReconciliationSourceError();
+  return { unit: measure.unit, expected: measure.serialize(earned), actual: measure.serialize(settled), variance: measure.serialize(variance) };
+}
+
+/** Compare original earned liability with all actual payment/offset journals, including their exact opposites. */
+export function employeeReconciliation(input: EmployeeReconciliationInput & { actionJournalId: string; reason: string }) {
+  z.uuid().parse(input.actionJournalId);
+  const { measure, zero, expected, actual, journals } = originalEmployeeSources(input);
+  if (!journals.has(input.actionJournalId)) throw new ReconciliationSourceError();
   const plan = reconciliationEvidencePlan(measure, { expected, actual, evidence: [], reason: input.reason,
     varianceAction: `STAFF_SETTLEMENT:${input.actionJournalId}` });
   if (plan.variance !== measure.serialize(measure.subtract(zero, input.outstanding))) throw new ReconciliationSourceError();

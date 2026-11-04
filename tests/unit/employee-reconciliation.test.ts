@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import fc from "fast-check";
 import { Money } from "@/platform/money/money";
-import { employeeReconciliation, type EmployeeReconciliationJournal } from "@/modules/finance/domain/employee-reconciliation";
+import { employeeReconciliation, employeeReconciliationTotals, type EmployeeReconciliationJournal } from "@/modules/finance/domain/employee-reconciliation";
 import { ReconciliationSourceError } from "@/modules/finance/domain/reconciliation";
 
 const money = (value: string, currency = "MAD") => Money.of(value, currency);
@@ -19,6 +19,16 @@ function fixture(earned = "0.07", paid = "0.03") {
     reason: "Retain the original authorized employee payment" }, recognition, payment, journal };
 }
 describe("original native staff reconciliation", () => {
+  it("derives unpaid earned liability without inventing a payment, allocation or action journal", () => {
+    const f = fixture(), input = { ...f.input, journals: [f.recognition], outstanding: money("0.07") }, before = JSON.stringify(input);
+    expect(employeeReconciliationTotals(input)).toEqual({ unit: "MONEY:MAD", expected: "0.07", actual: "0.00", variance: "-0.07" });
+    expect(() => employeeReconciliation(input)).toThrow(ReconciliationSourceError); expect(JSON.stringify(input)).toBe(before);
+  });
+  it("keeps an actual earning correction distinct from a payment when both original earning sides net to zero", () => {
+    const f = fixture(), opposite = f.journal("EMPLOYEE_COMPENSATION", "0.07", "DEBIT", f.recognition.id);
+    const input = { ...f.input, journals: [f.recognition, opposite], outstanding: money("0.00") };
+    expect(employeeReconciliationTotals(input)).toEqual({ unit: "MONEY:MAD", expected: "0.00", actual: "0.00", variance: "0.00" });
+  });
   it("keeps a partial payment's exact original earned and actual source facts with the remaining liability open", () => {
     const f = fixture(), before = JSON.stringify(f.input), result = employeeReconciliation(f.input);
     expect(result).toMatchObject({ provider: "STAFF", sourceType: "EMPLOYEE_CLAIM", sourceId: f.input.claimId, state: "OPEN_VARIANCE",

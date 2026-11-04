@@ -57,6 +57,8 @@ import { NotificationRepository } from "@/platform/notifications/notification-re
 import { ExpensePolicyUnavailableError } from "@/modules/finance/application/expense-submission-policy";
 import { ownNotificationContext } from "@/platform/notifications/notification";
 import { getNotificationPage,openNotification } from "@/platform/notifications/notification-service";
+import { commandVarianceWorkflow, readVarianceWorkflow } from "@/modules/finance/application/variance-workflow-service";
+import { authorizeVarianceSource } from "@/platform/reconciliation/variance-source-authority";
 
 const url=process.env.TEST_DATABASE_URL;let admin:PrismaClient,db:PrismaClient;
 const fixtures=employeeCompensationFixtures(()=>db,()=>admin);
@@ -120,6 +122,21 @@ async function settlementFixture(){
 async function paymentCalendar(f:Awaited<ReturnType<typeof settlementFixture>>,timezone="UTC"){return withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),value:{timezone,allow_early_close:false,max_reopen_seconds:60},reason:"Actual payment workspace configured accounting calendar"}));}
 
 describe("persisted completed-work compensation runs on real PostgreSQL",()=>{
+  it("variance workflow derives unpaid earnings and reopens a resolution after an actual partial staff payment",async()=>{
+    const f=await settlementFixture();
+    const officer=await fixtures.reader(f,{permissions:["employee_payable:reconcile","financial_transaction:reconcile"]}),actor={...officer.ctx,personId:f.person.id};
+    const source={provider:"STAFF" as const,id:f.command.claimId},deps={db,authorizeSource:authorizeVarianceSource};
+    let current=await readVarianceWorkflow(actor,{source},deps);
+    expect(current).toMatchObject({status:"OPEN",facts:{kind:"MONEY",currency:"MAD",expected:"500.25",actual:"0.00",variance:"-500.25"}});
+    await commandVarianceWorkflow(actor,{intent:{source,version:current.version,sourceFingerprint:current.sourceFingerprint,operation:"RESOLVE",reason:"Review actual unpaid earned beneficiary liability",action:"Retain unpaid earnings and the authorized collection explanation"},idempotencyKey:randomUUID()},deps);
+    expect(await readVarianceWorkflow(actor,{source},deps)).toMatchObject({status:"RESOLVED",version:"1"});
+    await postEmployeeCompensationSettlement(f.actor,f.payment,{db});
+    current=await readVarianceWorkflow(actor,{source},deps);
+    expect(current).toMatchObject({status:"OPEN",version:"1",resolvedBy:null,facts:{expected:"500.25",actual:"200.00",variance:"-300.25"}});
+    const denied={...actor,authContext:{...actor.authContext,permissions:new Set([...actor.authContext.permissions].filter(key=>key!=="staff_compensation:view"))}};
+    await expect(readVarianceWorkflow(denied,{source},deps)).rejects.toThrow();
+    expect(await withTenant(db,f.org,tx=>tx.varianceWorkflowEvent.count())).toBe(1);
+  });
   beforeAll(async()=>{
     if(!url||!["localhost","127.0.0.1"].includes(new URL(url).hostname))throw Error("Dedicated local PostgreSQL required");
     execFileSync(process.execPath,["node_modules/prisma/build/index.js","migrate","deploy"],{env:{...process.env,DATABASE_URL:url},stdio:"pipe"});

@@ -1,6 +1,8 @@
 "use client";
 
 import { useActionState, useMemo, useCallback } from "react";
+import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { z } from "zod";
 import { useServerActionValidation, useZodForm } from "@/design-system/forms";
 import { formatCurrencyAmount } from "@/i18n/format";
@@ -156,6 +158,7 @@ export function AirbnbSettlementPanel({
   const message = messageForState(state, labels);
   const hasAccounts = accounts.length > 0;
   const appLocale = safeLocale(locale);
+  const varianceText = useTranslations("VarianceCenter");
 
   return (
     <section className="settlement-panel" data-testid="airbnb-settlement-panel">
@@ -252,6 +255,7 @@ export function AirbnbSettlementPanel({
                   <strong>{variance.action}</strong>
                 </span>
               </div>
+              <Link className="secondary-button" prefetch={false} href={`/${appLocale}/app/finance/variances/OTA/${variance.id}`}>{varianceText("open")}</Link>
             </article>
           ))
         )}

@@ -126,6 +126,19 @@ async function retained(ctx: FinanceActorContext, row: NonNullable<Awaited<Retur
   return { extra, value: visible(ctx, row.ledgerAccountId, { id: row.id, accountId: row.ledgerAccountId, action: row.action, state,
     ...(row.action === "RELEASE" ? { originalId: row.previousEntryId } : { releasedById: row.release?.id ?? null }), plan: row.snapshot }) };
 }
+/** Shared retained-source authority for variance metadata; no allocation or journal is changed. */
+export async function inspectBankVarianceSource(context: FinanceActorContext, entryId: string, tx: TenantTransaction,
+  access: "view" | "history" | "ASSIGN" | "RESOLVE" | "REOPEN") {
+  const ctx = capture(context), row = await new BankReconciliationRepository(tx, ctx.organizationId).entry(entryId);
+  if (!row || row.action !== "MATCH") throw new BankReconciliationMissingError();
+  const original = await retained(ctx, row, tx), write = access !== "view" && access !== "history";
+  const extra: Check[] = [...original.extra, ...(write ? original.extra.map(check => ({ ...check, action: "reconcile" as const })) : [])];
+  if (access === "ASSIGN") extra.push({ action: "assign", resource: { type: "bank_statement", organizationId: ctx.organizationId,
+    id: row.ledgerAccountId, financialRecordId: row.ledgerAccountId, dataClass: "financial" }, unconditional: true });
+  if (access === "history") extra.push(...original.extra.map(check => ({ ...check, resource: { ...check.resource, type: "audit_log" } })));
+  const recheck = () => authority(ctx, tx, row.ledgerAccountId, write, extra);
+  await recheck(); return { row, recheck };
+}
 export async function matchBankStatement(context: FinanceActorContext, raw: unknown, deps: Deps = {}) {
   const ctx = capture(context), input = bankReconciliationMatchInput.parse(raw), commandHash = commandFingerprint(input);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {

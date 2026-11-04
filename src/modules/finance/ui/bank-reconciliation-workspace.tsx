@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useState } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
 import type { z } from "zod";
 import { SkeletonBlock } from "@/design-system/shells";
@@ -24,6 +25,7 @@ const accept = (receipt: BankReconciliationCommandReceipt, input: Input | null, 
   receipt.operation === input.action && (input.action === "MATCH" ? receipt.result.accountId === input.accountId : receipt.result.originalId === input.id));
 
 function History({ accountId, selected, locale, revision, ready, onSelect, onInvalidate, onCommand }: { accountId: string; selected: string | null; locale: AppLocale; revision: number; ready: boolean; onSelect: (id: string) => void; onInvalidate: () => void; onCommand: (draft: Draft) => void }) {
+  const varianceText = useTranslations("VarianceCenter");
   const t = useTranslations("BankReconciliation"), [before, setBefore] = useState<string | undefined>();
   const history = useCompensationRead(endpoint, bankReconciliationHistorySchema, onInvalidate, JSON.stringify({ operation: "HISTORY", accountId, before }), revision);
   const detail = useCompensationRead(selected ? endpoint : null, bankReconciliationDetailSchema, onInvalidate, JSON.stringify({ operation: "DETAIL", id: selected }), revision);
@@ -33,7 +35,8 @@ function History({ accountId, selected, locale, revision, ready, onSelect, onInv
     <div className="form-actions">{before ? <button className="secondary-button" type="button" onClick={() => setBefore(undefined)}>{t("first")}</button> : null}{history.data?.next ? <button className="secondary-button" type="button" onClick={() => setBefore(history.data!.next!)}>{t("next")}</button> : null}</div></>}
     {selected ? detail.pending ? <SkeletonBlock rows={4}/> : detail.error ? <p role="alert">{t(detail.error)}</p> : detail.data ? <section className="resource-form" data-testid="bank-match-detail">
       <p role="status" data-testid="bank-match-source-state">{t(`state_${detail.data.state}`)}</p><BankReconciliationPlan plan={detail.data.plan} locale={locale}/>
-      {detail.data.originalId ? <button className="secondary-button" type="button" onClick={() => onSelect(detail.data!.originalId!)}>{t("originalAssociation")}</button> : null}
+      {detail.data.originalId ? <button className="secondary-button" type="button" onClick={() => onSelect(detail.data!.originalId!)}>{t("originalAssociation")}</button> :
+        <Link className="secondary-button" prefetch={false} href={`/${locale}/app/finance/variances/BANK/${detail.data.id}`}>{varianceText("open")}</Link>}
       {detail.data.canRelease ? <form key={detail.data.id} className="resource-form" onSubmit={event => {
         event.preventDefault(); if (!ready || new FormData(event.currentTarget).get("confirmed") !== "on") return;
         onCommand({ action: "RELEASE", id: detail.data!.id, reason: companyExpenseFormText(new FormData(event.currentTarget).get("reason")) });
