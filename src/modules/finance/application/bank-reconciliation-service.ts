@@ -58,12 +58,16 @@ async function prepare(ctx: FinanceActorContext, raw: unknown, tx: TenantTransac
   const currency = await new FinancialTransferRepository(tx, ctx.organizationId).currency(input.currency);
   if (!binding || binding.currency !== input.currency || !currency || currency.minorUnit > 2) throw new BankReconciliationConfigurationError();
   const policy = { id: resolved.id, version: resolved.version, matching: rule.matching, bankIdentityHash: bankStatementBankIdentity(binding) };
-  const [postings, lines, families] = await Promise.all([repository.postings(account.id, input.expected.map(row => row.id)), repository.lines(account.id, input.actual.map(row => row.id)), repository.families(input.actual.map(row => row.id))]);
+  const sourceIds = [...input.actual.map(row => row.id), ...(input.evidence ?? [])];
+  const [postings, selectedLines, families] = await Promise.all([repository.postings(account.id, input.expected.map(row => row.id)), repository.lines(account.id, sourceIds), repository.families(sourceIds)]);
+  const lines = selectedLines.filter(row => input.actual.some(selected => selected.id === row.id)), removals = selectedLines.filter(row => input.evidence?.includes(row.id));
   const budgets = await repository.allocated(input.expected.map(row => row.id), families.map(row => row.id)), familyMembers = bankStatementSourceFamilyMembers(families);
+  const activeEvidence = await repository.activeEvidence(families.map(row => row.id));
   const states = bankStatementSourceStates(families);
   if (postings.length !== input.expected.length || lines.length !== input.actual.length || postings.some(row => row.currency !== input.currency || !["DEBIT", "CREDIT"].includes(row.side)) ||
-      lines.some(row => row.currency !== input.currency || row.bankIdentityHash !== policy.bankIdentityHash || states.get(row.id) !== "ACTIVE" || !row.amount)) throw new BankReconciliationConflictError();
-  if (lines.some(row => familyMembers.get(row.id)!.some(id => id !== row.id && Money.of(budgets.get("ACTUAL:" + id) ?? "0.00", row.currency).amount.gt(0)))) throw new ReconciliationBudgetError();
+      lines.some(row => row.currency !== input.currency || row.bankIdentityHash !== policy.bankIdentityHash || states.get(row.id) !== "ACTIVE" || !row.amount) ||
+      removals.length !== (input.evidence?.length ?? 0) || removals.some(row => row.currency !== input.currency || row.bankIdentityHash !== policy.bankIdentityHash || row.correctionAction !== "DELETE" || states.get(row.id) !== "REMOVED")) throw new BankReconciliationConflictError();
+  if (selectedLines.some(row => familyMembers.get(row.id)!.some(id => activeEvidence.has(id) || (id !== row.id || row.correctionAction === "DELETE") && Money.of(budgets.get("ACTUAL:" + id) ?? "0.00", row.currency).amount.gt(0)))) throw new ReconciliationBudgetError();
   const expectedAmounts = new Map(input.expected.map(row => [row.id, row.amount])), actualAmounts = new Map(input.actual.map(row => [row.id, row.amount]));
   const extra: Check[] = [];
   const exposure = new Map<string, Money>();
@@ -79,12 +83,13 @@ async function prepare(ctx: FinanceActorContext, raw: unknown, tx: TenantTransac
       allocatedBefore: Money.of(budgets.get("EXPECTED:" + row.id) ?? "0.00", input.currency), amount: Money.of(expectedAmounts.get(row.id)!, input.currency) })),
     actual: lines.map(row => ({ sourceKey: row.id, original: Money.of(row.amount!.toFixed(2), input.currency),
       allocatedBefore: Money.of(budgets.get("ACTUAL:" + row.id) ?? "0.00", input.currency), amount: Money.of(actualAmounts.get(row.id)!, input.currency) })),
-    evidence: [], tolerance: Money.of(policy.matching.amount_tolerance, input.currency), reason: input.reason, varianceAction: input.varianceAction
+    evidence: removals.map(row => ({ side: "ACTUAL" as const, sourceKey: row.id, fingerprint: row.factHash })), tolerance: Money.of(policy.matching.amount_tolerance, input.currency), reason: input.reason, varianceAction: input.varianceAction
   });
   const witnesses = {
     expected: postings.map(row => ({ id: row.id, transactionId: row.transactionId, reference: row.transaction.reference, side: row.side, amount: row.amount.toFixed(2), currency: row.currency,
       reversalIds: row.transaction.reversedByTransactions.map(reversal => reversal.id) })),
-    actual: lines.map(row => ({ id: row.id, factHash: row.factHash, bankIdentityHash: row.bankIdentityHash }))
+    actual: lines.map(row => ({ id: row.id, factHash: row.factHash, bankIdentityHash: row.bankIdentityHash })),
+    ...(removals.length ? { evidence: removals.map(row => ({ id: row.id, factHash: row.factHash, bankIdentityHash: row.bankIdentityHash })) } : {})
   };
   return { input, repository, account, policy, plan, witnesses, extra, reviewFingerprint: commandFingerprint({ input, policy, plan, witnesses }) };
 }
@@ -108,10 +113,10 @@ async function retained(ctx: FinanceActorContext, row: NonNullable<Awaited<Retur
   const extra: Check[] = [...exposure].map(([id, amount]) => ({ action: "view", resource: { type: "financial_transaction", organizationId: ctx.organizationId, id,
     financialRecordId: id, dataClass: "financial", amount: amount.toJSON().amount, occurredAt: postings.find(posting => posting.transactionId === id)!.transaction.occurredAt } }));
   await authority(ctx, tx, row.ledgerAccountId, false, extra);
-  const families = bankStatementSourceStates(await repository.families(source.allocations.flatMap(allocation => allocation.lineId ? [allocation.lineId] : [])));
+  const families = bankStatementSourceStates(await repository.families([...source.allocations.flatMap(allocation => allocation.lineId ? [allocation.lineId] : []), ...source.evidence.map(witness => witness.lineId)]));
   const changed = source.allocations.some(allocation => allocation.lineId ? families.get(allocation.lineId) !== "ACTIVE" :
     commandFingerprint(z.object({ reversalIds: z.array(z.uuid()) }).parse(allocation.sourceSnapshot).reversalIds) !==
-      commandFingerprint(postings.find(posting => posting.id === allocation.postingId)?.transaction.reversedByTransactions.map(reversal => reversal.id)));
+      commandFingerprint(postings.find(posting => posting.id === allocation.postingId)?.transaction.reversedByTransactions.map(reversal => reversal.id))) || source.evidence.some(witness => families.get(witness.lineId) !== "REMOVED");
   const variance = z.object({ variance: z.string() }).parse(source.snapshot).variance;
   const state = row.action === "RELEASE" || row.release ? "RELEASED" : changed ? "SOURCE_CHANGED" : variance === "0.00" ? "MATCHED" : "OPEN_VARIANCE";
   await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.bank_reconciliation.read", resourceType: "bank_statement", resourceId: row.id,
@@ -131,7 +136,7 @@ export async function matchBankStatement(context: FinanceActorContext, raw: unkn
     await authority(ctx, tx, input.accountId, true);
     // The account lock serializes allocation budgets across every historical bank identity.
     await locks.lock(`bank-reconciliation-account:${input.accountId}`);
-    const lines = await repository.lines(input.accountId, input.actual.map(row => row.id));
+    const lines = await repository.lines(input.accountId, [...input.actual.map(row => row.id), ...(input.evidence ?? [])]);
     for (const identity of [...new Set(lines.map(row => row.bankIdentityHash))].sort()) await locks.lock(`bank-statement-source:${identity}`);
     await new ConfigRuleRepository(tx, ctx.organizationId).lockVersion(bankStatementPolicyKey, "organization", null);
     const { idempotencyKey, reviewFingerprint, ...review } = input; void idempotencyKey;
@@ -144,6 +149,7 @@ export async function matchBankStatement(context: FinanceActorContext, raw: unkn
       originalAmount: allocation.original, allocatedBefore: allocation.allocatedBefore, amount: allocation.amount,
       sourceSnapshot: json(prepared.witnesses[side].find(witness => witness.id === allocation.sourceKey)!)
     }))));
+    if (prepared.witnesses.evidence) await repository.retainEvidence(row.id, prepared.witnesses.evidence.map(witness => ({ lineId: witness.id, sourceSnapshot: json(witness) })));
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.bank_reconciliation.matched", resourceType: "bank_statement", resourceId: row.id,
       after: { id: row.id, accountId: input.accountId, commandHash, plan: prepared.plan }, reason: input.reason, requestId: deps.requestId ?? randomUUID(), occurredAt: await new FinanceRepository(tx, ctx.organizationId).clock() });
     await repository.flush(); await authority(ctx, tx, input.accountId, true, prepared.extra);
@@ -241,14 +247,16 @@ export async function readBankReconciliationWorkspace(context: FinanceActorConte
     if (input.operation === "SOURCES") {
       const batch = await repository.sourcePage(input.accountId, input.currency, input.after), rows = batch.slice(0, 50);
       const facts = await repository.families(rows.map(row => row.id)), budgets = await repository.allocated([], facts.map(row => row.id));
+      const activeEvidence = await repository.activeEvidence(facts.map(row => row.id));
       const states = bankStatementSourceStates(facts), familyMembers = bankStatementSourceFamilyMembers(facts);
       const canReconcile = [ctx.authContext, current].every(auth => authorizeUnconditionalSource(auth, "reconcile", { type: "bank_statement", organizationId: ctx.organizationId,
         id: input.accountId, financialRecordId: input.accountId, dataClass: "financial" }, now));
       return disclose(bankReconciliationSourcesSchema.parse({ canReconcile, items: rows.map(row => {
         const magnitude = Money.of(row.amount?.abs().toFixed(2) ?? "0.00", row.currency), allocated = Money.of(budgets.get("ACTUAL:" + row.id) ?? "0.00", row.currency), remaining = magnitude.subtract(allocated);
         return { id: row.id, fact: bankStatementFactSchema.parse(row.source), state: states.get(row.id), allocated: allocated.toJSON(), remaining: remaining.toJSON(),
-          eligible: !!binding && !account.archivedAt && row.bankIdentityHash === bankStatementBankIdentity(binding) && states.get(row.id) === "ACTIVE" && remaining.amount.gt(0)
-            && !familyMembers.get(row.id)!.some(id => id !== row.id && Money.of(budgets.get("ACTUAL:" + id) ?? "0.00", row.currency).amount.gt(0)) };
+          eligible: !!binding && !account.archivedAt && row.bankIdentityHash === bankStatementBankIdentity(binding)
+            && (states.get(row.id) === "ACTIVE" && remaining.amount.gt(0) || states.get(row.id) === "REMOVED" && row.correctionAction === "DELETE")
+            && !familyMembers.get(row.id)!.some(id => activeEvidence.has(id) || (id !== row.id || row.correctionAction === "DELETE") && Money.of(budgets.get("ACTUAL:" + id) ?? "0.00", row.currency).amount.gt(0)) };
       }), next: batch.length > 50 ? rows.at(-1)!.id : null }));
     }
     const batch = await repository.postingPage(input.accountId, input.currency, input.after), rows = batch.slice(0, 50).filter(row => allows("view", row));

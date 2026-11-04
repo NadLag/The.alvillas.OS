@@ -14,5 +14,5 @@ export function BankReconciliationPlan({ plan, locale }: { plan: z.infer<typeof 
     <dt>{t("classification")}</dt><dd>{t(`classification_${plan.classification}`)}</dd>
     <dt>{t("reason")}</dt><dd dir="auto">{plan.reason}</dd>
     {plan.varianceAction ? <><dt>{t("varianceAction")}</dt><dd dir="auto">{plan.varianceAction}</dd></> : null}
-  </dl></section>;
+  </dl>{plan.evidence.length ? <p data-testid="bank-match-removal-evidence">{t("retainedRemovals", { count: plan.evidence.length })}</p> : null}</section>;
 }

@@ -4488,6 +4488,9 @@
     "state_RELEASED": "Association released",
     "operation_MATCH": "Reconciliation",
     "operation_RELEASE": "Release",
-    "command_succeeded": "Original association recorded"
+    "command_succeeded": "Original association recorded",
+    "removalEvidence": "Bank removal retained as evidence",
+    "removalGuidance": "Compare this bank correction with the original entries and any reversals. Release earlier matches before using the correction.",
+    "retainedRemovals": "Retained bank removal records: {count}."
   }
 }
