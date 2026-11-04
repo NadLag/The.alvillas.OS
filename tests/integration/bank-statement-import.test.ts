@@ -16,9 +16,10 @@ import { BankStatementAccessError, BankStatementConflictError, BankStatementStor
 import * as auditWriter from "@/platform/audit/audit-writer";
 import { actualGuestDepositFixture } from "./support/guest-deposit-fixture";
 import { provisionIntegrationRole } from "./support/database-role";
+import { transactionQueryMeasurement } from "./support/transaction-query-measurement";
 
 const url = process.env.TEST_DATABASE_URL;
-let admin: PrismaClient, db: PrismaClient, queryCount = 0;
+let admin: PrismaClient, db: PrismaClient, queryMeasurement: ReturnType<typeof transactionQueryMeasurement>;
 beforeAll(async () => {
   const target = url ? new URL(url) : null;
   if (!target || !["127.0.0.1", "localhost"].includes(target.hostname) || !(target.pathname.startsWith("/alvillas_automation_") || process.env.GITHUB_ACTIONS === "true" && target.pathname === "/alvillas_os")) throw Error("Dedicated bank statement acceptance database required");
@@ -26,7 +27,7 @@ beforeAll(async () => {
   admin = new PrismaClient({ datasourceUrl: url }); await provisionIntegrationRole(admin, "alvillas_ops_tests");
   const scoped = new URL(url!); scoped.username = "alvillas_ops_tests"; scoped.password = "alvillas_ops_tests";
   const observed = new PrismaClient({ datasourceUrl: scoped.toString(), log: [{ emit: "event", level: "query" }] });
-  observed.$on("query", () => { queryCount++; }); db = observed;
+  queryMeasurement = transactionQueryMeasurement(observed); observed.$on("query", event => queryMeasurement.observe(event.query)); db = observed;
 });
 afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); });
 
@@ -183,9 +184,9 @@ describe("actual immutable bank statement admission", () => {
     const result = await importBankStatement(f.ctx, await command(f, bytes), bytes, f.deps), ids = new Set<string>(), pageQueries: number[] = [];
     let afterOrder: number | undefined;
     do {
-      const start = queryCount;
-      const page = bankStatementDetailSchema.parse(await readBankStatementWorkspace(f.ctx, { operation: "DETAIL", importId: result.importId, ...(afterOrder ? { afterOrder } : {}) }, f.deps));
-      pageQueries.push(queryCount - start);
+      const measured = await queryMeasurement.measure(() => readBankStatementWorkspace(f.ctx, { operation: "DETAIL", importId: result.importId, ...(afterOrder ? { afterOrder } : {}) }, f.deps));
+      const page = bankStatementDetailSchema.parse(measured.value);
+      pageQueries.push(measured.count);
       for (const row of page.lines) { expect(ids.has(row.id)).toBe(false); ids.add(row.id); }
       afterOrder = page.nextOrder ?? undefined;
     } while (afterOrder !== undefined);
