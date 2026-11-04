@@ -2,7 +2,7 @@ import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import type { BankStatementPolicy } from "@/platform/config/bank-statement-policy";
 import { parseBankStatementCsv } from "./bank-statement-csv";
 import { parseBankStatementOfx } from "./bank-statement-ofx";
-import { bankStatementFactSchema, BankStatementConfigurationError, BankStatementConflictError, type ParsedBankStatement } from "./bank-statement";
+import { bankStatementFactSchema, bankStatementCurrencyEvidenceByOrder, BankStatementConfigurationError, BankStatementConflictError, type ParsedBankStatement } from "./bank-statement";
 export * from "./bank-statement";
 
 /** FITIDs belong to a financial institution and actual account, independently of currency or import file. */
@@ -27,7 +27,8 @@ export function parseBankStatementSource(source: string, format: "CSV" | "OFX", 
     const statement = statements[0];
     if (statement.bankId !== account.bank_id || statement.branchId !== account.branch_id || statement.accountId !== account.account_id || statement.accountType !== account.account_type || statement.currency !== account.currency) throw new BankStatementConflictError();
     const { lines, ...metadata } = statement;
-    result = { statement: { format: "OFX", ...metadata }, lines: lines.map(({ sourceOrder, ...fact }) => ({ sourceOrder, fact: bankStatementFactSchema.parse(fact) })) };
+    const evidence = bankStatementCurrencyEvidenceByOrder(metadata);
+    result = { statement: { format: "OFX", ...metadata }, lines: lines.map(({ sourceOrder, ...fact }) => ({ sourceOrder, fact: bankStatementFactSchema.parse(fact), ...(evidence.has(sourceOrder) ? { currencyEvidence: evidence.get(sourceOrder)! } : {}) })) };
   }
   if (result.lines.length > policy.max_rows) throw new BankStatementConflictError();
   return result;

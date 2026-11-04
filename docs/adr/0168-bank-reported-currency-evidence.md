@@ -1,0 +1,9 @@
+# ADR0168 — Bank-reported currency evidence
+
+The [OFX 2.3 specification, section 5.2](https://financialdataexchange.org/wp-content/uploads/2025/12/OFX-Banking-Specification-v2.3.pdf) distinguishes a currency override from an original-currency report following a bank conversion. Treating both aggregates as interchangeable would either reject valid primary-currency evidence or assign an unconverted amount to the wrong currency.
+
+Retain the original currency and exact reported rate as supplemental evidence of that original import. An ORIGCURRENCY report leaves the posted movement in CURDEF. An explicit CURRENCY scope is accepted only when its currency is the configured primary currency. A foreign override requires an explicit conversion policy; unsupported enclosing currency scopes fail before admission. This importer performs no conversion, rounding, balance adjustment or financial posting.
+
+Keep supplemental evidence in the existing immutable import metadata, keyed by the original source order. Preserve the canonical nine-field transaction fact and its identity/hash. Repeated imports may report different supplemental evidence while referring to the same retained movement; each original file, import and rate remain independently readable. Preview and historical detail use the evidence of the selected import. Ordinary files gain no invented metadata fields, preserving their original review and recovery fingerprints.
+
+Rates remain bounded positive decimal strings, including every supplied trailing digit. The private EN/FR/AR views identify them as bank-reported evidence. Existing origin, tenant, bank/journal authority, original-byte verification, append-only storage, audit and correction-family safeguards continue to apply. Every previously applied SQL file remains unchanged.

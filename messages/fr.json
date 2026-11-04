@@ -4411,7 +4411,10 @@
     "command_succeeded": "Relevé bancaire original conservé",
     "newRows": "Nouvelles lignes sources : {count, number}",
     "reusedRows": "Lignes sources déjà conservées : {count, number}",
-    "duplicateNotice": "Ces mouvements figurent déjà dans l’historique bancaire original."
+    "duplicateNotice": "Ces mouvements figurent déjà dans l’historique bancaire original.",
+    "currency_BANK_CONVERTED": "Devise originale déclarée après conversion bancaire :",
+    "currency_PRIMARY_CURRENCY_SCOPE": "Devise principale explicitement déclarée par la banque :",
+    "bankReportedRate": "Ratio de conversion déclaré par la banque :"
   },
   "BankReconciliation": {
     "unavailable": "Les informations bancaires originales n’ont pas pu être lues.",

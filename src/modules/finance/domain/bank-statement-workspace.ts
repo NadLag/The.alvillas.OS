@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { bankStatementFactSchema } from "./bank-statement";
+import { bankStatementFactSchema, bankStatementCurrencyEvidenceSchema } from "./bank-statement";
 
 export const bankStatementWorkspaceInput = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("ACCOUNTS") }).strict(),
@@ -11,7 +11,7 @@ export const bankStatementAccountsSchema = z.object({ items: z.array(bankStateme
 export const bankStatementImportSummarySchema = z.object({ id: z.uuid(), admissionId: z.uuid(), accountId: z.uuid(), format: z.enum(["CSV", "OFX"]), fileSha256: z.string().regex(/^[a-f0-9]{64}$/u), fileSize: z.number().int().positive(), rowCount: z.number().int().nonnegative(), newRows: z.number().int().nonnegative(), reusedRows: z.number().int().nonnegative(), importedAt: z.iso.datetime(), reason: z.string() }).strict();
 export const bankStatementListSchema = z.object({ items: z.array(bankStatementImportSummarySchema), next: z.uuid().nullable() }).strict();
 export const bankStatementDetailSchema = z.object({ source: bankStatementImportSummarySchema, account: bankStatementAccountSchema,
-  lines: z.array(z.object({ id: z.uuid(), sourceOrder: z.number().int().positive(), fact: bankStatementFactSchema }).strict()), nextOrder: z.number().int().positive().nullable() }).strict();
+  lines: z.array(z.object({ id: z.uuid(), sourceOrder: z.number().int().positive(), fact: bankStatementFactSchema, currencyEvidence: bankStatementCurrencyEvidenceSchema.optional() }).strict()), nextOrder: z.number().int().positive().nullable() }).strict();
 export const bankStatementReviewSchema = z.object({ reviewFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), rowCount: z.number().int().nonnegative(), newRows: z.number().int().nonnegative(), reusedRows: z.number().int().nonnegative(),
   account: z.object({ id: z.uuid(), name: z.string(), code: z.string(), lastFour: z.string() }).strict(), statement: z.record(z.string(), z.unknown()),
-  lines: z.array(z.object({ sourceOrder: z.number().int().positive(), fact: bankStatementFactSchema }).strict()) }).strict();
+  lines: z.array(z.object({ sourceOrder: z.number().int().positive(), fact: bankStatementFactSchema, currencyEvidence: bankStatementCurrencyEvidenceSchema.optional() }).strict()) }).strict();

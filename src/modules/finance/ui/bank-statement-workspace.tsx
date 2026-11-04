@@ -28,6 +28,7 @@ function FactRows({ lines, locale }: { lines: Review["lines"]; locale: AppLocale
     {row.fact.amount ? <p data-testid="bank-source-amount">{formatCurrencyAmount(locale, row.fact.amount.amount, row.fact.amount.currency)}</p> : null}
     {row.fact.name ? <p dir="auto">{row.fact.name}</p> : null}{row.fact.reference ? <p dir="auto">{row.fact.reference}</p> : null}
     {row.fact.correction ? <p>{t(`correction_${row.fact.correction.action}`, { reference: row.fact.correction.externalId })}</p> : null}
+    {row.currencyEvidence ? <p data-testid="bank-source-currency-evidence">{t(`currency_${row.currencyEvidence.kind}`)} <bdi>{row.currencyEvidence.currency}</bdi> · {t("bankReportedRate")} <bdi>{row.currencyEvidence.rate}</bdi></p> : null}
   </li>)}</ol>;
 }
 function History({ accountId, revision, locale, selected, onSelect, onInvalidate }: { accountId: string; revision: number; locale: AppLocale; selected: string | null; onSelect: (id: string) => void; onInvalidate: () => void }) {

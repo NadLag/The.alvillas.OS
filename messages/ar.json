@@ -4411,7 +4411,10 @@
     "command_succeeded": "تم الاحتفاظ بالكشف المصرفي الأصلي",
     "newRows": "صفوف المصدر الجديدة: {count, number}",
     "reusedRows": "صفوف المصدر المحتفظ بها سابقاً: {count, number}",
-    "duplicateNotice": "هذه الحركات موجودة مسبقاً في سجل المصدر المصرفي."
+    "duplicateNotice": "هذه الحركات موجودة مسبقاً في سجل المصدر المصرفي.",
+    "currency_BANK_CONVERTED": "العملة الأصلية المبلغ عنها بعد التحويل البنكي:",
+    "currency_PRIMARY_CURRENCY_SCOPE": "العملة الرئيسية المصرح بها من البنك:",
+    "bankReportedRate": "نسبة التحويل المبلغ عنها من البنك:"
   },
   "BankReconciliation": {
     "unavailable": "تعذرت قراءة المعلومات المصرفية الأصلية.",

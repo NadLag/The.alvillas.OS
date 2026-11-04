@@ -74,15 +74,48 @@ async function fixture(withBankIds = true) {
   return { ...f, ctx, policy, bytes, input, storage, transport, state, objects, writeGrant, deps: { db, storage, transport } };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
-async function command(f: Fixture, bytes = f.bytes) {
-  const source = { ...f.input, fileSha256: createHash("sha256").update(bytes).digest("hex"), fileSize: bytes.byteLength };
+async function command(f: Fixture, bytes = f.bytes, format: "CSV" | "OFX" = "CSV") {
+  const source = { ...f.input, format, fileSha256: createHash("sha256").update(bytes).digest("hex"), fileSize: bytes.byteLength };
   const reviewed = await reviewBankStatement(f.ctx, source, bytes, f.deps);
   return { ...source, reviewFingerprint: String(reviewed.reviewFingerprint), idempotencyKey: randomUUID(), reason: "Admit and retain the actual original bank export" };
 }
 const money = (f: Fixture) => withTenant(db, f.org, tx => tx.$queryRaw`SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${f.org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p) FROM posting p WHERE organization_id=${f.org}::uuid UNION ALL SELECT 'audit',id::text,xmin::text,to_jsonb(a) FROM audit_log a WHERE organization_id=${f.org}::uuid AND action NOT LIKE 'finance.bank_statement.%' ORDER BY kind,id`);
 const counts = (f: Fixture) => withTenant(db, f.org, async tx => ({ admissions: await tx.bankStatementAdmission.count(), imports: await tx.bankStatementImport.count(), lines: await tx.bankStatementLine.count(), evidence: await tx.bankStatementEvidence.count() }));
+const convertedSource = (rate = "10.250000") => new TextEncoder().encode(`<OFX><BANKMSGSRSV1><STMTTRNRS><STATUS><CODE>0</CODE></STATUS><STMTRS><CURDEF>MAD</CURDEF><BANKACCTFROM><BANKID>actual-bank</BANKID><ACCTID>actual-account-1234</ACCTID><ACCTTYPE>CHECKING</ACCTTYPE></BANKACCTFROM><BANKTRANLIST><DTSTART>20261103</DTSTART><DTEND>20261103</DTEND><STMTTRN><TRNTYPE>CREDIT</TRNTYPE><DTPOSTED>20261103</DTPOSTED><TRNAMT>0.07</TRNAMT><FITID>converted-original</FITID><NAME>Actual bank-converted receipt</NAME><ORIGCURRENCY><CURSYM>EUR</CURSYM><CURRATE>${rate}</CURRATE></ORIGCURRENCY></STMTTRN></BANKTRANLIST><LEDGERBAL><BALAMT>0.07</BALAMT><DTASOF>20261103</DTASOF></LEDGERBAL></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`);
 
 describe("actual immutable bank statement admission", () => {
+  it("retains independent bank-reported currency evidence for every original import without converting or rewriting Money", async () => {
+    const f = await fixture(), received = await reviewGuestDepositReceipt(f.ctx, f.receiptInput, { db });
+    await postGuestDepositReceipt(f.ctx, { ...f.receiptInput, reviewFingerprint: received.reviewFingerprint, idempotencyKey: randomUUID(), reason: "Receive actual original bank funds before converted-source evidence" }, { db });
+    const before = await money(f), firstBytes = convertedSource(), first = await importBankStatement(f.ctx, await command(f, firstBytes, "OFX"), firstBytes, f.deps);
+    const firstDetail = bankStatementDetailSchema.parse(await readBankStatementWorkspace(f.ctx, { operation: "DETAIL", importId: first.importId }, f.deps));
+    expect(firstDetail.lines).toHaveLength(1);
+    expect(firstDetail.lines[0]).toMatchObject({ fact: { amount: { amount: "0.07", currency: "MAD" } }, currencyEvidence: { kind: "BANK_CONVERTED", currency: "EUR", rate: "10.250000" } });
+    const originalLines = await withTenant(db, f.org, tx => tx.$queryRaw`SELECT id::text,xmin::text,to_jsonb(l) AS body FROM bank_statement_line l ORDER BY id`);
+    const nextBytes = convertedSource("10.260000"), second = await importBankStatement(f.ctx, await command(f, nextBytes, "OFX"), nextBytes, f.deps);
+    expect(second).toMatchObject({ newRows: 0, reusedRows: 1 });
+    const secondDetail = bankStatementDetailSchema.parse(await readBankStatementWorkspace(f.ctx, { operation: "DETAIL", importId: second.importId }, f.deps));
+    expect(secondDetail.lines[0]).toMatchObject({ id: firstDetail.lines[0].id, fact: { amount: { amount: "0.07", currency: "MAD" } }, currencyEvidence: { rate: "10.260000" } });
+    expect(bankStatementDetailSchema.parse(await readBankStatementWorkspace(f.ctx, { operation: "DETAIL", importId: first.importId }, f.deps)).lines).toEqual(firstDetail.lines);
+    expect(await withTenant(db, f.org, tx => tx.$queryRaw`SELECT id::text,xmin::text,to_jsonb(l) AS body FROM bank_statement_line l ORDER BY id`)).toEqual(originalLines);
+    expect(await money(f)).toEqual(before); expect(f.objects.size).toBe(2); expect([...f.objects.values()]).toEqual([firstBytes, nextBytes]);
+  });
+  it("recovers the original bank-converted command after a retained storage failure", async () => {
+    const f = await fixture(), bytes = convertedSource(), input = await command(f, bytes, "OFX");
+    await expect(importBankStatement(f.ctx, input, bytes, { ...f.deps, transport: () => Promise.resolve(new Response(null, { status: 503 })) })).rejects.toBeInstanceOf(BankStatementStorageError);
+    expect(await counts(f)).toEqual({ admissions: 1, imports: 0, lines: 0, evidence: 0 });
+    const recovered = await recoverBankStatement(f.ctx, { idempotencyKey: input.idempotencyKey }, f.deps);
+    expect(recovered).toMatchObject({ state: "ADMITTED", resumeInput: input });
+    const result = await importBankStatement(f.ctx, input, bytes, f.deps);
+    expect(result).toMatchObject({ state: "IMPORTED", rowCount: 1 });
+    expect(bankStatementDetailSchema.parse(await readBankStatementWorkspace(f.ctx, { operation: "DETAIL", importId: result.importId }, f.deps)).lines[0]).toMatchObject({ currencyEvidence: { currency: "EUR", rate: "10.250000" } });
+  });
+  it("rejects an unconverted foreign amount before creating an admission or storing original bytes", async () => {
+    const f = await fixture(), bytes = new TextEncoder().encode(new TextDecoder().decode(convertedSource()).replaceAll("ORIGCURRENCY", "CURRENCY"));
+    const source = { ...f.input, format: "OFX", fileSha256: createHash("sha256").update(bytes).digest("hex"), fileSize: bytes.byteLength };
+    await expect(reviewBankStatement(f.ctx, source, bytes, f.deps)).rejects.toBeInstanceOf(BankStatementValidationError);
+    expect(await counts(f)).toEqual({ admissions: 0, imports: 0, lines: 0, evidence: 0 }); expect(f.objects.size).toBe(0);
+  });
   it("retains original bytes, signed source facts and atomic audit without writing any financial movement", async () => {
     const f = await fixture(), reviewed = await reviewGuestDepositReceipt(f.ctx, f.receiptInput, { db });
     await postGuestDepositReceipt(f.ctx, { ...f.receiptInput, reviewFingerprint: reviewed.reviewFingerprint, idempotencyKey: randomUUID(), reason: "Actual original bank receipt before statement admission" }, { db });

@@ -9,7 +9,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { bankStatementPolicyKey, bankStatementPolicySchema, type BankStatementPolicy } from "@/platform/config/bank-statement-policy";
 import { bankStatementWorkspaceInput, bankStatementAccountSchema, bankStatementAccountsSchema, bankStatementListSchema, bankStatementDetailSchema, bankStatementImportSummarySchema } from "../domain/bank-statement-workspace";
-import { bankStatementBankIdentity, bankStatementFactSchema, BankStatementAccessError, BankStatementConfigurationError } from "../domain/bank-statement-import";
+import { bankStatementBankIdentity, bankStatementFactSchema, bankStatementCurrencyEvidenceByOrder, BankStatementAccessError, BankStatementConfigurationError } from "../domain/bank-statement-import";
 import { BankStatementRepository } from "../infrastructure/bank-statement-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
@@ -78,7 +78,8 @@ export async function readBankStatementWorkspace(context: FinanceActorContext, r
     const binding = retained.accounts.find(binding => bankStatementBankIdentity(binding) === imported.admission.bankIdentityHash);
     if (!account || !binding) throw new BankStatementAccessError();
     const rows = await repository.evidence(imported.id, input.afterOrder);
+    const currencyEvidence = bankStatementCurrencyEvidenceByOrder(imported.statement);
     return disclose(bankStatementDetailSchema.parse({ source: summary(imported), account: accountView(account, binding, false, retained.max_bytes),
-      lines: rows.slice(0, 50).map(row => ({ id: row.line.id, sourceOrder: row.sourceOrder, fact: bankStatementFactSchema.parse(row.line.source) })), nextOrder: rows.length > 50 ? rows[49].sourceOrder : null }), imported.id, "finance.bank_statement.detail_viewed");
+      lines: rows.slice(0, 50).map(row => ({ id: row.line.id, sourceOrder: row.sourceOrder, fact: bankStatementFactSchema.parse(row.line.source), ...(currencyEvidence.has(row.sourceOrder) ? { currencyEvidence: currencyEvidence.get(row.sourceOrder)! } : {}) })), nextOrder: rows.length > 50 ? rows[49].sourceOrder : null }), imported.id, "finance.bank_statement.detail_viewed");
   });
 }
