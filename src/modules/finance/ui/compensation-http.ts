@@ -32,6 +32,7 @@ import {BankReconciliationAccessError,BankReconciliationConflictError,BankReconc
 import {ReconciliationSourceError,ReconciliationBudgetError} from "../domain/reconciliation";
 import { VarianceWorkflowSourceError, VarianceWorkflowConflictError } from "../domain/variance-workflow";
 import { VarianceCenterAccessError, VarianceCenterCursorError } from "../domain/variance-center";
+import { TaxHookAccessError, TaxHookConfigurationError, TaxHookChangedError } from "../domain/tax-hook";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
@@ -51,6 +52,9 @@ export async function compensationHttp<T extends Promise<unknown>>(request:NextR
     const value=await work(actor,input,requestId),response=options.respond?options.respond(value):NextResponse.json(value,{headers,status:options.status??200});
     for(const[key,value]of Object.entries(headers))response.headers.set(key,value);return response;
   }catch(error){
+    if(error instanceof TaxHookAccessError)return failure("forbidden",403);
+    if(error instanceof TaxHookConfigurationError)return failure("configuration_unavailable",409);
+    if(error instanceof TaxHookChangedError)return failure("conflict",409);
     if(error instanceof VarianceCenterAccessError)return failure("forbidden",403);
     if(error instanceof VarianceCenterCursorError)return failure("validation",400);
     if(error instanceof VarianceWorkflowSourceError)return failure("forbidden",403);
