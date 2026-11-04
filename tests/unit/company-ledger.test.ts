@@ -5,7 +5,7 @@ import ar from "../../messages/ar.json";
 import fr from "../../messages/fr.json";
 
 const amount = (cents: bigint) => `${cents < 0n ? "-" : ""}${(cents < 0n ? -cents : cents).toString().padStart(3, "0").slice(0, -2)}.${(cents < 0n ? -cents : cents).toString().padStart(3, "0").slice(-2)}`;
-const row = (opening = "0", credits = "0", debits = "0"): CompanyLedgerAccountTotals => ({ id: "company", code: "ALVILLAS_OWN", name: "Company", opening, credits, debits, count: "1" });
+const row = (opening = "0", credits = "0", debits = "0"): CompanyLedgerAccountTotals => ({ id: "company", code: "ALVILLAS_OWN", name: "Company", currency: "MAD", opening, credits, debits, count: "1" });
 
 describe("ALVILLAS company net position", () => {
   it("retains actual Arabic letters and French diacritics in the localized ledger copy", () => {

@@ -154,11 +154,11 @@ function dimensionString(
 function assertSingleCurrency(postings: readonly RawOwnerLedgerPosting[], fallbackCurrency: string): string {
   const currencies = new Set(postings.map((posting) => posting.currency));
 
-  if (currencies.size > 1) {
+  if (currencies.size > 1 || [...currencies].some(currency => currency !== fallbackCurrency)) {
     throw new Error("Owner statement cannot mix currencies");
   }
 
-  return [...currencies][0] ?? fallbackCurrency;
+  return fallbackCurrency;
 }
 
 function addToMap(map: Map<string, Money>, key: string, amount: Money): void {

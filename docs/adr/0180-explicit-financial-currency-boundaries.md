@@ -1,0 +1,7 @@
+# 0180 — Explicit financial currency boundaries
+
+Financial read models retain their native currency. Owner statements reject postings outside the selected currency, including a single mismatched currency. Company account totals and posting lines carry the currency selected from the original postings, and Money arithmetic rejects a mismatched aggregate. There is no implicit conversion or base-currency relabelling. DEC-01's existing two-decimal, half-up calculations and the retained FX reference table remain unchanged.
+
+Bank reconciliation allocations now store an explicit currency beside each monetary amount. A composite organization, entry and currency foreign key binds that currency to the immutable reconciliation entry. The existing native posting, bank-source, budget, audit and append-only guards still apply. Each new allocation uses the reviewed command's source currency, independently of the organization's base currency.
+
+The migration takes an exclusive allocation-table lock and refuses a populated legacy table before changing schema or data. It contains no financial data update and does not disable immutability guards. An existing populated environment needs a separately reviewed currency enrichment authorized by the owner; this change cannot silently rewrite retained allocations or guess a currency. Fresh databases can apply the complete ordered migration chain normally. The populated legacy rejection and preservation of original financial history require native acceptance alongside the ordinary fresh-schema gates.

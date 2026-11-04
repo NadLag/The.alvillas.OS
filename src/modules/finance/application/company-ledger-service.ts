@@ -39,6 +39,7 @@ export async function getCompanyLedger(ctx: FinanceActorContext, raw: unknown = 
     const totals = companyLedgerTotals(await repository.totals(scope), currency);
     const page = await repository.page({ ...scope, openingBalance: totals.openingBalance, after: input.after });
     if (!page.cursorFound) throw new CompanyLedgerAccessError();
+    if (page.lines.some(line => line.currency !== currency)) throw new CompanyLedgerConfigurationError();
     const data = { ...totals, lines: page.lines.slice(0, 50) };
     const visible = present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...target(ctx.organizationId), data }, catalogFieldPolicy<typeof data>("company_ledger"), now) as typeof data;
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.company_ledger.viewed", resourceType: "company_ledger", resourceId: ctx.organizationId,

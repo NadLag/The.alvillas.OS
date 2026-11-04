@@ -7,6 +7,7 @@ import { withTenant } from "@/platform/db/tenant";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { Money } from "@/platform/money/money";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { nextReferenceNumber } from "@/platform/references/reference-number";
 import { calendarDateAt, formatCurrencyAmount } from "@/i18n/format";
 import { ensureE2EAdmin, e2eEmail, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
@@ -107,6 +108,25 @@ for (const locale of ["en", "fr", "ar"] as const) test(`ALVILLAS company ledger 
     await page.keyboard.press("Tab"); await page.keyboard.press("Tab"); await page.keyboard.press("Tab"); await page.keyboard.press("Tab");
     await page.getByTestId("company-ledger-apply").press("Enter");
     await expect(page.getByTestId("company-ledger-empty")).toBeVisible();
+    const euroAmount = "9007199254740993.07", euroId = await withTenant(db, org, async tx => {
+      const finance = new FinanceRepository(tx, org), revenue = await finance.ensureLedgerAccount({ code: "CURRENCY_EUR_" + randomUUID().replaceAll("-", "").toUpperCase(),
+        name: "Original EUR company revenue", accountType: "ALVILLAS_OWN", normalSide: "CREDIT" }), amount = Money.of(euroAmount, "EUR");
+      const journal = await finance.createFinancialTransaction({ reference: "ORIGINAL-EUR:" + randomUUID(), description: "Original exact EUR company revenue", occurredAt: new Date(f.sourceOn + "T12:00:00Z"),
+        createdBy: f.actor.id, idempotencyKey: randomUUID(), postings: [{ ledgerAccountId: f.bank.id, side: "DEBIT", amount, bucket: "COMPANY_REVENUE", dimensions: {} },
+          { ledgerAccountId: revenue.id, side: "CREDIT", amount, bucket: "COMPANY_REVENUE", dimensions: {} }] }); return journal.id;
+    });
+    const euroOriginal = await withTenant(db, org, tx => tx.financialTransaction.findUniqueOrThrow({ where: { id: euroId }, include: { postings: { orderBy: { id: "asc" } } } }));
+    await page.reload(); await expect(page.getByTestId("company-ledger-currency")).toHaveValue("EUR");
+    await expect(page.getByTestId("company-ledger-periodCredits")).toHaveAttribute("data-amount", euroAmount);
+    await expect(page.getByTestId("company-ledger-periodDebits")).toHaveAttribute("data-amount", "0.00");
+    await expect(page.getByTestId("company-ledger-line")).toHaveCount(1);
+    const euroOpening = Money.of((await page.getByTestId("company-ledger-openingBalance").getAttribute("data-amount"))!, "EUR");
+    await expect(page.getByTestId("company-ledger-closing")).toHaveText(formatCurrencyAmount(locale, euroOpening.add(Money.of(euroAmount, "EUR")).toJSON().amount, "EUR"));
+    await page.getByTestId("company-ledger-currency").selectOption("MAD"); await page.getByTestId("company-ledger-apply").click();
+    await expect(page.getByTestId("company-ledger-periodCredits")).toHaveAttribute("data-amount", "0.00");
+    await expect(page.getByTestId("company-ledger-periodDebits")).toHaveAttribute("data-amount", "500.25");
+    const euroAfter = await withTenant(db, org, tx => tx.financialTransaction.findUniqueOrThrow({ where: { id: euroId }, include: { postings: { orderBy: { id: "asc" } } } }));
+    expect(euroAfter).toEqual(euroOriginal);
     await page.goto(expenseUrl); await page.getByTestId("expense-void-reason").fill("Dedicated company payment recorded in error"); await page.getByTestId("expense-void").click();
     await expect(page.getByTestId("expense-void-form")).toHaveCount(0);
     // A reversal is a current-period movement; the original historical day remains unchanged.
