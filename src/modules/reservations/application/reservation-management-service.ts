@@ -22,7 +22,8 @@ import { authorize, authorizeCollection, type Action } from "@/platform/authz/au
 import { present } from "@/platform/authz/present";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
-import { reverseReservationAccommodationRevenue } from "@/platform/reservations/finance";
+import { reverseReservationAccommodationRevenue,verifyReservationAccommodationReversal } from "@/platform/reservations/finance";
+import {captureAuthorizationCap,restoreAuthorizationCap} from "@/platform/authz/authorization-cap";
 import { logger } from "@/platform/observability/logger";
 import { captureException } from "@/platform/observability/sentry";
 
@@ -170,16 +171,19 @@ async function appendChange(tx: TenantTransaction, ctx: ReservationActorContext,
   await repository.queueChange(after.id, after.version, input.operation);
   if (status === "CANCELLED") await repository.releaseMissingForReservation(after.id, ctx.actorId, input.reason);
   await repository.refreshConflicts(before.propertyId, ctx.actorId);
+  if(input.operation==="REFUND")await verifyReservationAccommodationReversal(ctx,{reservationId:before.id,idempotencyKey:input.idempotencyKey},{db:{$transaction:work=>work(tx)}});
   return after;
 }
 
 export async function changeReservation(ctx: ReservationActorContext, input: unknown, deps: Deps = {}) {
   allowed(ctx, "edit");
-  const parsed = changeReservationSchema.parse(input), metadata = await meta(deps);
+  const parsed = changeReservationSchema.parse(input);
   if (parsed.operation === "REFUND") {
+    ctx={...ctx,authContext:restoreAuthorizationCap(captureAuthorizationCap(ctx.authContext))};
     parsed.idempotencyKey = z.uuid().parse(parsed.idempotencyKey).toLowerCase();
     parsed.reservationId = parsed.reservationId.toLowerCase();
   }
+  const metadata=await meta(deps);
   return withTenant(database(deps), ctx.organizationId, tx => appendChange(tx, ctx, parsed, metadata));
 }
 

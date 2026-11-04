@@ -33,7 +33,7 @@ const intent=(operation:string,input:unknown)=>commandFingerprint({operation,inp
 const policySnapshot=(row:{id:string;version:number;value:unknown})=>({id:row.id,version:row.version,value:guestDepositPolicySchema.parse(row.value)});
 const denied=()=>new GuestDepositAuthorizationError();
 // Shared only with authorized callers that already own the tenant transaction.
-export {original as readGuestDepositSourceInTransaction,policyFor as resolveGuestDepositPolicyInTransaction,visible as presentGuestDepositResult};
+export {original as readGuestDepositSourceInTransaction,policyFor as resolveGuestDepositPolicyInTransaction,visible as presentGuestDepositResult,lockPolicies as lockGuestDepositPolicyInTransaction};
 
 async function policyFor(tx:TenantTransaction,organizationId:string,propertyId:string,at:Date,reservationId:string){
  const source=await new GuestDepositRepository(tx,organizationId).policySource(reservationId);if(!source)throw new GuestDepositSourceError();

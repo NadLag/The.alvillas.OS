@@ -783,6 +783,11 @@ export async function reverseReservationAccommodationRevenue(
     }
 
     const originals = await repository.findPostingTransactionsForReservation(input.reservationId, true);
+    if (originals.some(transaction => transaction.postings.some(posting => jsonObject(posting.dimensions).application_source === "ORIGINAL_GUEST_PREPAYMENT"))) {
+      if (originals.some(transaction => !transaction.reversedByTransactions.length && !transaction.postings.some(posting => jsonObject(posting.dimensions).application_source === "ORIGINAL_GUEST_PREPAYMENT"))) throw new ReservationRevenueConflictError();
+      const { reverseGuestAccommodationForReservation } = await import("./guest-accommodation-reservation-reversal");
+      return reverseGuestAccommodationForReservation(ctx, input, originals, { db: { $transaction: work => work(tx) }, requestId: meta.requestId });
+    }
     if (originals.some(transaction => transaction.postings.some(posting => jsonObject(posting.dimensions).airbnb_settlement_id)) &&
       [ctx.authContext, current.authContext].some(authority => !authorize(authority, "reconcile", { type: "financial_transaction", ...target, dataClass: "financial" }, now))) throw new ReservationRevenueAuthorizationError();
     if (originals.length === 0) {

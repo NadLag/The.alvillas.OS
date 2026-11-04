@@ -22,7 +22,10 @@ export const guestDepositPolicySchema=z.object({
  refund_limit:z.literal("ORIGINAL_UNAPPLIED_UNREFUNDED_LIABILITY"),
  closed_period:z.literal("REJECT"),
  correction_date:z.literal("CURRENT_OPEN_PERIOD"),
- application:z.object({source:z.literal("POSTED_ACCOMMODATION_RECEIVABLE"),recognition:z.literal("ORIGINAL_BOOKING_ACCRUAL_EVENT"),receivable_account_code:accountCodes.element,bucket:z.string().regex(/^[A-Z][A-Z0-9_]{0,119}$/u)}).strict().optional(),
+ application:z.discriminatedUnion("source",[
+  z.object({source:z.literal("POSTED_ACCOMMODATION_RECEIVABLE"),recognition:z.literal("ORIGINAL_BOOKING_ACCRUAL_EVENT"),receivable_account_code:accountCodes.element,bucket:z.string().regex(/^[A-Z][A-Z0-9_]{0,119}$/u)}).strict(),
+  z.object({source:z.literal("ORIGINAL_GUEST_PREPAYMENT"),recognition:z.literal("ORIGINAL_BOOKING_ACCRUAL_EVENT"),application_event:z.literal("ACTUAL_CHECKOUT"),application_date:z.literal("CURRENT_OPEN_PERIOD"),allocation:z.literal("CUMULATIVE_ORIGINAL_NATIVE_TARGET")}).strict()
+ ]).optional(),
  cash_admission:z.object({source:z.literal("ORIGINAL_FIELD_COLLECTION"),limit:z.literal("ORIGINAL_UNALLOCATED_CASH"),task_types:z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/u)).min(1).refine(rows=>new Set(rows).size===rows.length),bucket:z.string().regex(/^[A-Z][A-Z0-9_]{0,119}$/u)}).strict().optional()
 }).strict();
 export type GuestDepositPolicy=z.infer<typeof guestDepositPolicySchema>;

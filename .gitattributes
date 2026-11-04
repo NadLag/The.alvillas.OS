@@ -73,3 +73,7 @@ prisma/migrations/20261103090000_original_cash_source_budget/migration.sql text 
 prisma/migrations/20261103100000_cash_guard_source_precedence/migration.sql text eol=lf
 prisma/migrations/20261103110000_guest_cash_admission/migration.sql text eol=lf
 prisma/migrations/20261103120000_guest_cash_original_period/migration.sql text eol=lf
+prisma/migrations/20261103130000_guest_funded_accommodation_application/migration.sql text eol=lf
+prisma/migrations/20261103140000_guest_application_retained_native_targets/migration.sql text eol=lf
+prisma/migrations/20261103150000_guest_application_native_corrections/migration.sql text eol=lf
+prisma/migrations/20261103160000_guest_application_currency_precision/migration.sql text eol=lf

@@ -13,15 +13,18 @@ export const guestDepositCashAdmissionReviewInput=guestDepositReviewInput.omit({
 export const guestDepositCashAdmissionInput=guestDepositCashAdmissionReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
 export const guestDepositReversalReviewInput=z.object({transactionId:identity}).strict();
 export const guestDepositReversalInput=guestDepositReversalReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
-export const guestDepositApplicationReviewInput=guestDepositRefundReviewInput.pick({depositId:true,amount:true,currency:true}).extend({assignmentId:identity}).strict();
+export const guestDepositFundedApplicationReviewInput=guestDepositRefundReviewInput.pick({depositId:true,amount:true,currency:true}).strict();
+export const guestDepositFundedApplicationInput=guestDepositFundedApplicationReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
+export const guestDepositApplicationReviewInput=guestDepositFundedApplicationReviewInput.extend({assignmentId:identity}).strict();
 export const guestDepositApplicationInput=guestDepositApplicationReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
 export const guestDepositCommandSchema=z.discriminatedUnion("operation",[
+ z.object({operation:z.literal("APPLY"),input:guestDepositFundedApplicationInput.omit({idempotencyKey:true}),idempotencyKey:identity}).strict(),
  z.object({operation:z.literal("ADMIT_CASH"),input:guestDepositCashAdmissionInput.omit({idempotencyKey:true}),idempotencyKey:identity}).strict(),
  z.object({operation:z.literal("RECEIPT"),input:guestDepositReceiptInput.omit({idempotencyKey:true}),idempotencyKey:identity}).strict(),
  z.object({operation:z.literal("REFUND"),input:guestDepositRefundInput.omit({idempotencyKey:true}),idempotencyKey:identity}).strict(),
  z.object({operation:z.literal("REVERSE"),input:guestDepositReversalInput.omit({idempotencyKey:true}),idempotencyKey:identity}).strict()
 ]);
-const operation=z.enum(["RECEIPT","ADMIT_CASH","REFUND","REVERSE"]),base={requestId:identity,idempotencyKey:identity,operation};
+const operation=z.enum(["RECEIPT","ADMIT_CASH","REFUND","APPLY","REVERSE"]),base={requestId:identity,idempotencyKey:identity,operation};
 export const guestDepositCommandSuccessSchema=z.object({...base,state:z.literal("SUCCEEDED"),failureCode:z.null(),id:identity,depositId:identity,idempotent:z.boolean()}).strict();
 export const guestDepositCommandResultSchema=z.union([guestDepositCommandSuccessSchema,z.object({...base,state:z.literal("CONFLICT"),failureCode:z.enum(["SOURCE_CHANGED","ORIGINAL_REQUEST_RECORDED"])}).strict(),z.object({...base,state:z.literal("FAILED"),failureCode:z.enum(["CONFIGURATION_UNAVAILABLE","SOURCE_UNAVAILABLE","PERIOD_CLOSED"])}).strict()]);
 export const guestDepositCommandRecoverySchema=z.object({request:guestDepositCommandSuccessSchema.nullable()}).strict();

@@ -708,7 +708,9 @@ export class FinanceRepository {
 
   /** One atomic journal phase; callers must fence current authority before and after its actual writes. */
   async createFinancialTransactions(inputs: ReadonlyArray<Omit<Parameters<FinanceRepository["createFinancialTransaction"]>[0], "recheckAuthorization">>,
-    recheckAuthorization: (now: Date) => Promise<void>) {
+    recheckAuthorization: (now: Date) => Promise<void>,
+    resolvePostings?: (input: Omit<Parameters<FinanceRepository["createFinancialTransaction"]>[0], "recheckAuthorization">,
+      headers: ReadonlyMap<string, { id: string }>) => readonly FinancePostingDraft[]) {
     if (!inputs.length || new Set(inputs.map(input => input.idempotencyKey)).size !== inputs.length) throw Error("Financial journal batch identities must be distinct and nonempty");
     const periods = new AccountingPeriodRepository(this.tx, this.organizationId);
     for (const at of new Map(inputs.map(input => [input.occurredAt.getTime(), input.occurredAt])).values()) await periods.assertPostingOpen(at);
@@ -716,10 +718,15 @@ export class FinanceRepository {
     const headers = await this.tx.financialTransaction.createManyAndReturn({ data: inputs.map(input => ({ organizationId: this.organizationId,
       reference: input.reference, occurredAt: input.occurredAt, description: input.description, idempotencyKey: input.idempotencyKey,
       reversesTransactionId: input.reversesTransactionId, createdBy: input.createdBy })), select: { id: true, occurredAt: true, idempotencyKey: true } });
-    const identities = new Map(headers.map(header => [header.idempotencyKey, header]));
+    const identities = new Map(headers.map(header => {
+      if (header.idempotencyKey === null) throw Error("Every actual journal must retain its command identity");
+      return [header.idempotencyKey, header] as const;
+    }));
     if (identities.size !== inputs.length) throw Error("Every actual journal identity must be retained");
-    await this.tx.posting.createMany({ data: inputs.flatMap(input => input.postings.map(posting => ({
-      ...postingData(this.organizationId, posting), transactionId: identities.get(input.idempotencyKey)!.id }))) });
+    await this.tx.posting.createMany({ data: inputs.flatMap(input => {
+      const postings = resolvePostings ? resolvePostings(input, identities) : input.postings;
+      return postings.map(posting => ({ ...postingData(this.organizationId, posting), transactionId: identities.get(input.idempotencyKey)!.id }));
+    }) });
     await recheckAuthorization(await this.clock());
     return inputs.map(input => identities.get(input.idempotencyKey)!);
   }
