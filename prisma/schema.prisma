@@ -215,6 +215,8 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  ledgerIntegrityRuns LedgerIntegrityRun[]
+  ledgerIntegritySources LedgerIntegritySource[]
  financialAttachmentAdmissions FinancialAttachmentAdmission[]
  financialAttachments FinancialAttachment[]
   varianceWorkflowEvents VarianceWorkflowEvent[]
@@ -583,6 +585,7 @@ model Person {
 }
 
 model UserAccount {
+  ledgerIntegrityRuns LedgerIntegrityRun[]
  financialAttachmentAdmissions FinancialAttachmentAdmission[] @relation("FinancialAttachmentAdmissionActor")
   varianceWorkflowActions VarianceWorkflowEvent[] @relation("VarianceWorkflowActor")
   varianceWorkflowAssignments VarianceWorkflowEvent[] @relation("VarianceWorkflowAssignee")
@@ -1615,6 +1618,7 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  ledgerIntegritySource LedgerIntegritySource?
  attachmentAdmissions FinancialAttachmentAdmission[]
  attachments FinancialAttachment[]
   serviceAllocationPosting ServiceAllocationPosting?
@@ -1917,6 +1921,36 @@ model BankStatementEvidence {
   @@map("bank_statement_evidence")
 }
 
+model LedgerIntegrityRun {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  on DateTime @db.Date
+  policyRuleId String @map("policy_rule_id") @db.Uuid
+  createdBy String @map("created_by") @db.Uuid
+  checkedAt DateTime @map("checked_at") @db.Timestamptz(6)
+  passed Boolean
+  report Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  policy ConfigRule @relation(fields:[organizationId,policyRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"ledger_integrity_run_org_id_unique")
+  @@unique([organizationId,policyRuleId,on],map:"ledger_integrity_run_occurrence_unique")
+  @@index([organizationId,createdAt,id],map:"ledger_integrity_run_history_idx")
+  @@map("ledger_integrity_run")
+}
+
+model LedgerIntegritySource {
+  organizationId String @map("organization_id") @db.Uuid
+  transactionId String @map("transaction_id") @db.Uuid
+  fingerprint String @db.Char(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  transaction FinancialTransaction @relation(fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@id([organizationId,transactionId])
+  @@map("ledger_integrity_source")
+}
+
 model Posting {
   bankReconciliationAllocations BankReconciliationAllocation[]
   receivableAssignments ReceivableAssignment[] @relation("ReceivableOriginalPosting")
@@ -2019,6 +2053,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  ledgerIntegrityRuns LedgerIntegrityRun[]
  financialAttachmentAdmissions FinancialAttachmentAdmission[] @relation("FinancialAttachmentAdmissionPolicy")
   serviceAllocationAdmissions ServiceAllocationAdmission[] @relation("ServiceAllocationPolicy")
   serviceTaxAdmissions ServiceAllocationAdmission[] @relation("ServiceAllocationTaxPolicy")

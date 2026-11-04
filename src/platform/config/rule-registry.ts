@@ -1,3 +1,4 @@
+import { ledgerIntegrityPolicyKey, ledgerIntegrityPolicySchema } from "@/modules/finance/domain/ledger-integrity";
 import { financialAttachmentPolicyKey, financialAttachmentPolicySchema } from "@/modules/finance/domain/financial-attachment-policy";
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
@@ -354,6 +355,7 @@ export const featureFlagConfigSchema = z
   .passthrough();
 
 export const configRuleSchemas = {
+  [ledgerIntegrityPolicyKey]: ledgerIntegrityPolicySchema,
   [fieldUploadLifecycleKey]: fieldUploadLifecycleSchema,
   [fieldDevicePolicyKey]: fieldDevicePolicySchema,
   [reservationSyncPolicyKey]: reservationSyncPolicySchema,
