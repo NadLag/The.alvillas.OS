@@ -432,4 +432,48 @@ describe("assigned field stocktakes on real PostgreSQL", () => {
       expect(many.tasks.every(task => task.linen && task.inventory)).toBe(true); expect(queries).toBeLessThanOrEqual(single + 2);
     } finally { await measured.$disconnect(); }
   });
+  it.skipIf(!url)("retains exact signed stocktake plans and original adjustment identities without financial movements", async () => {
+    const f = await fixture(), first = await record(f);
+    const snapshot = () => withTenant(db, f.org, tx => tx.$queryRaw<Array<{ kind: string; id: string; xmin: string; body: unknown }>>`
+      SELECT 'observation' AS kind,id::text,xmin::text,to_jsonb(s) AS body FROM inventory_stocktake s WHERE organization_id=${f.org}::uuid AND id=${first.stocktakeId}::uuid
+      UNION ALL SELECT 'movement',id::text,xmin::text,to_jsonb(m) FROM inventory_movement m WHERE organization_id=${f.org}::uuid AND stocktake_id=${first.stocktakeId}::uuid
+      UNION ALL SELECT 'audit',id::text,xmin::text,to_jsonb(a) FROM audit_log a WHERE organization_id=${f.org}::uuid AND resource_id=${first.stocktakeId}::uuid ORDER BY kind,id`);
+    const before = await snapshot();
+    await record(f, { ...f.input, expectedQuantity: "3", expectedRevision: "1", countedQuantity: "1", note: "Physical loss confirmed against original position" });
+    await record(f, { ...f.input, expectedQuantity: "1", expectedRevision: "2", countedQuantity: "4", note: "Physical gain confirmed against original position" });
+    await record(f, { ...f.input, expectedQuantity: "4", expectedRevision: "3", countedQuantity: "4", note: "Physical count matches original position" });
+    expect(await snapshot()).toEqual(before);
+    await withTenant(db, f.org, async tx => {
+      const rows = await tx.inventoryStocktake.findMany({ orderBy: { revision: "asc" }, include: { movement: true } }); expect(rows).toHaveLength(4);
+      const differences = ["3", "-2", "3", "0"];
+      for (const [index, row] of rows.entries()) {
+        const audit = await tx.auditLog.findFirstOrThrow({ where: { action: "inventory.stocktake.record", resourceId: row.id } });
+        expect(audit.after).toMatchObject({ reconciliation: { provider: "INVENTORY", sourceType: "STOCKTAKE", sourceId: row.id,
+          state: index === 3 ? "MATCHED" : "OPEN_VARIANCE", plan: { unit: "QUANTITY:pieces", expected: row.expectedQuantity.toFixed(0),
+            actual: row.countedQuantity.toString(), variance: differences[index], reason: row.note,
+            varianceAction: row.movement ? `INVENTORY_STOCKTAKE_ADJUSTMENT:${row.movement.id}` : null } } });
+      }
+      expect(rows[3].movement).toBeNull(); expect(await tx.financialTransaction.count()).toBe(0); expect(await tx.posting.count()).toBe(0);
+    });
+  });
+  it.skipIf(!url)("retains both genuine zero observations as evidence without synthetic adjustments", async () => {
+    const f = await fixture(), result = await record(f, { ...f.input, countedQuantity: "0" });
+    await withTenant(db, f.org, async tx => {
+      const audit = await tx.auditLog.findFirstOrThrow({ where: { action: "inventory.stocktake.record", resourceId: result.stocktakeId } });
+      expect(audit.after).toMatchObject({ reconciliation: { sourceId: result.stocktakeId, state: "MATCHED", plan: {
+        expected: "0", actual: "0", variance: "0", varianceAction: null, allocations: { expected: [], actual: [] }, evidence: [
+          { side: "ACTUAL", sourceKey: `${result.stocktakeId}:ACTUAL`, fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u) as unknown },
+          { side: "EXPECTED", sourceKey: `${result.stocktakeId}:EXPECTED`, fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u) as unknown }] } } });
+      expect(await tx.inventoryMovement.count()).toBe(0); expect(await tx.financialTransaction.count()).toBe(0);
+    });
+  });
+  it.skipIf(!url)("rolls back catalog, count, adjustment and audit when native reconciliation evidence is inconsistent", async () => {
+    const f = await fixture(), original = Reflect.get(InventoryRepository.prototype, "record");
+    const spy = vi.spyOn(InventoryRepository.prototype, "record").mockImplementation(async function (this: InventoryRepository, ...args) {
+      const recorded = await original.apply(this, args);
+      return { ...recorded, movement: recorded.movement ? { ...recorded.movement, stocktakeId: randomUUID() } : null };
+    });
+    try { await expect(record(f)).rejects.toThrow("reconciliation_source_unavailable"); } finally { spy.mockRestore(); }
+    await empty(f);
+  });
 });
