@@ -34,6 +34,7 @@ export async function reservationPayoutEvidence(propertyId: string, sourceTransa
     const transactions = await tx.financialTransaction.findMany({ where: { organizationId: bootstrapOrganizationId, postings: { some: { dimensions: { path: ["airbnb_settlement_id"], equals: settlements[0]?.id ?? "absent" } } } }, include: { postings: { orderBy: { id: "asc" } } }, orderBy: { id: "asc" } });
     const originals = transactions.filter(row => !row.reversesTransactionId), sums = new Map<string, Decimal>();
     for (const posting of transactions.flatMap(row => row.postings)) sums.set(`${posting.ledgerAccountId}:${posting.currency}`, (sums.get(`${posting.ledgerAccountId}:${posting.currency}`) ?? new Decimal(0)).add(posting.amount.mul(posting.side === "DEBIT" ? 1 : -1)));
-    return { settlements: settlements.length, originals: originals.length, reversals: transactions.length - originals.length, fingerprint: createHash("sha256").update(JSON.stringify(originals)).digest("hex"), zeroBalances: [...sums.values()].every(value => value.eq(0)) };
+    const evidence = await tx.auditLog.findMany({ where: { organizationId: bootstrapOrganizationId, resourceType: "airbnb_settlement", resourceId: { in: settlements.map(row => row.id) }, action: "airbnb.settlement.imported" }, select: { after: true }, orderBy: { id: "asc" } });
+    return { settlements: settlements.length, originals: originals.length, reversals: transactions.length - originals.length, fingerprint: createHash("sha256").update(JSON.stringify(originals)).digest("hex"), zeroBalances: [...sums.values()].every(value => value.eq(0)), reconciliationEvidence: evidence.map(row => row.after) };
   }); } finally { await client.$disconnect(); }
 }

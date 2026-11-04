@@ -13,17 +13,18 @@ export type ReconciliationEvidence = { side: "EXPECTED" | "ACTUAL"; sourceKey: s
 export class ReconciliationSourceError extends Error { constructor() { super("reconciliation_source_unavailable"); } }
 export class ReconciliationBudgetError extends Error { constructor() { super("reconciliation_source_budget_exceeded"); } }
 
-/** Source adapters supply authorized immutable facts and derived prior allocations, never editable balances. */
-export function reconciliationPlan<T>(measure: ReconciliationMeasure<T>, input: {
+export type ReconciliationInput<T> = {
   expected: readonly ReconciliationAllocation<T>[];
   actual: readonly ReconciliationAllocation<T>[];
   evidence: readonly ReconciliationEvidence[];
-  tolerance: T;
   reason: string;
   varianceAction: string | null;
-}) {
-  const zero = measure.zero(); measure.assert(input.tolerance);
-  if (measure.compare(input.tolerance, zero) < 0 || !input.reason.trim()) throw new ReconciliationSourceError();
+};
+
+/** Source adapters supply authorized immutable facts and derived prior allocations, never editable balances. */
+function sourcePlan<T>(measure: ReconciliationMeasure<T>, input: ReconciliationInput<T>) {
+  const zero = measure.zero();
+  if (!input.reason.trim()) throw new ReconciliationSourceError();
   const absolute = (value: T) => measure.compare(value, zero) < 0 ? measure.subtract(zero, value) : value;
   const evidenceKeys = new Set<string>();
   for (const evidence of input.evidence) {
@@ -48,8 +49,22 @@ export function reconciliationPlan<T>(measure: ReconciliationMeasure<T>, input: 
   const expected = project("EXPECTED", input.expected), actual = project("ACTUAL", input.actual), variance = measure.subtract(actual.total, expected.total);
   const exact = measure.compare(variance, zero) === 0;
   if (!exact && !input.varianceAction?.trim()) throw new ReconciliationSourceError();
-  const classification = exact ? "EXACT" as const : measure.compare(absolute(variance), input.tolerance) <= 0 ? "WITHIN_TOLERANCE" as const : "OUTSIDE_TOLERANCE" as const;
-  return { unit: measure.unit, expected: measure.serialize(expected.total), actual: measure.serialize(actual.total), variance: measure.serialize(variance),
-    classification, reason: input.reason.trim(), varianceAction: exact ? null : input.varianceAction!.trim(),
-    allocations: { expected: expected.allocations, actual: actual.allocations }, evidence: [...input.evidence].sort((left, right) => (left.side + ":" + left.sourceKey).localeCompare(right.side + ":" + right.sourceKey)) };
+  return { variance, plan: { unit: measure.unit, expected: measure.serialize(expected.total), actual: measure.serialize(actual.total), variance: measure.serialize(variance),
+    reason: input.reason.trim(), varianceAction: exact ? null : input.varianceAction!.trim(),
+    allocations: { expected: expected.allocations, actual: actual.allocations }, evidence: [...input.evidence].sort((left, right) => (left.side + ":" + left.sourceKey).localeCompare(right.side + ":" + right.sourceKey)) } };
+}
+
+/** Preserve source evidence and signed differences without inventing a provider's tolerance policy. */
+export function reconciliationEvidencePlan<T>(measure: ReconciliationMeasure<T>, input: ReconciliationInput<T>) {
+  return sourcePlan(measure, input).plan;
+}
+
+export function reconciliationPlan<T>(measure: ReconciliationMeasure<T>, input: ReconciliationInput<T> & { tolerance: T }) {
+  const zero = measure.zero(); measure.assert(input.tolerance);
+  if (measure.compare(input.tolerance, zero) < 0) throw new ReconciliationSourceError();
+  const { variance, plan } = sourcePlan(measure, input), absolute = measure.compare(variance, zero) < 0 ? measure.subtract(zero, variance) : variance;
+  const classification = measure.compare(variance, zero) === 0 ? "EXACT" as const : measure.compare(absolute, input.tolerance) <= 0 ? "WITHIN_TOLERANCE" as const : "OUTSIDE_TOLERANCE" as const;
+  // Preserve the existing bank snapshot's shape and property order, including recovery fingerprints.
+  return { unit: plan.unit, expected: plan.expected, actual: plan.actual, variance: plan.variance, classification,
+    reason: plan.reason, varianceAction: plan.varianceAction, allocations: plan.allocations, evidence: plan.evidence };
 }

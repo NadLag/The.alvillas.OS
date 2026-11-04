@@ -175,6 +175,11 @@ export class FinanceRepository {
     return organization.baseCurrency;
   }
 
+  airbnbSettlementVariances(settlementId: string) {
+    return this.tx.variance.findMany({ where: { organizationId: this.organizationId, sourceType: "AIRBNB_SETTLEMENT", sourceId: settlementId },
+      select: { id: true }, orderBy: { id: "asc" }, take: 2 });
+  }
+
   async findReservation(reservationId: string): Promise<{
     id: string;
     reference: string;
