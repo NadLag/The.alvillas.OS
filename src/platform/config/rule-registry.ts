@@ -1,3 +1,4 @@
+import { financialAttachmentPolicyKey, financialAttachmentPolicySchema } from "@/modules/finance/domain/financial-attachment-policy";
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
 import {serviceTaxAssessmentConfigSchema} from "./service-tax-policy";
@@ -399,6 +400,7 @@ export const configRuleSchemas = {
   [receivableCollectionPolicyKey]:receivableCollectionPolicySchema,
   [receivableAgingPolicyKey]:receivableAgingPolicySchema,
   [receivableExportPolicyKey]:receivableExportPolicySchema,
+  [financialAttachmentPolicyKey]:financialAttachmentPolicySchema,
   [accountantExportPolicyKey]:accountantExportPolicySchema,
   [receivableReminderPolicyKey]:receivableReminderPolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,

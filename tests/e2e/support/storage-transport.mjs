@@ -19,6 +19,7 @@ globalThis.fetch = async (input, init) => {
   if (!url.searchParams.get("X-Amz-Credential")?.startsWith("local-e2e-access/") || !/^[a-f0-9]{64}$/u.test(url.searchParams.get("X-Amz-Signature") ?? ""))
     return new globalThis.Response(null, { status: 403 });
   if (request.method === "PUT") {
+    if (request.headers.get("if-none-match") === "*" && objects.has(key)) return new globalThis.Response(null, { status: 412 });
     const bytes = new Uint8Array(await request.arrayBuffer());
     if (bytes.length > 8 * 1024 * 1024) return new globalThis.Response(null, { status: 413 });
     objects.set(key, { bytes, contentType: request.headers.get("content-type") ?? "application/octet-stream" });

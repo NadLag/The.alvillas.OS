@@ -1,3 +1,4 @@
+import {financialAttachmentPolicyKey} from "@/modules/finance/domain/financial-attachment-policy";
 import type {AuthContext} from "@/platform/authz/authorize";
 import {authorizeOrganizationSource} from "@/platform/authz/organization-authority";
 import {recheckAccountAuthorization,type CurrentAuthorityCheck} from "@/platform/authz/current-authority";
@@ -12,6 +13,7 @@ import {propertyFinanceFinancialSources} from "@/platform/authz/property-finance
 export {recurringExpensePolicyKey,recurringCompanyExpensePolicyKey,serviceAllocationPolicyKey};
 
 const sourceGroups:Readonly<Record<string,readonly string[]>>={
+ [financialAttachmentPolicyKey]:["financial_attachment","financial_transaction"],
  [accountantExportPolicyKey]:[...propertyFinanceFinancialSources,"bank_statement","company_expense"],
  [recurringExpensePolicyKey]:["expense","financial_transaction"],
  [recurringCompanyExpensePolicyKey]:["company_expense","financial_transaction","staff_compensation"],

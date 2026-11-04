@@ -2731,3 +2731,7 @@ textarea:disabled {
 .invoice-source-options [role="option"] { padding: var(--space-3); cursor: pointer; min-block-size: var(--target-min); overflow-wrap: anywhere; }
 .invoice-source-options [aria-selected="true"], .invoice-source-options [role="option"]:hover { background: var(--surface-success); }
 .invoice-source-options small { display: block; color: var(--muted); }
+
+.attachment-page :is(h2,h3,p,select,option) { overflow-wrap: anywhere; }
+.attachment-page input[type="file"] { max-inline-size: 100%; min-inline-size: 0; }
+.attachment-page .button-row { display: flex; flex-wrap: wrap; gap: var(--space-3); }
