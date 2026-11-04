@@ -4488,6 +4488,9 @@
     "state_RELEASED": "تم فك الارتباط",
     "operation_MATCH": "مطابقة",
     "operation_RELEASE": "فك ارتباط",
-    "command_succeeded": "تم تسجيل الارتباط الأصلي"
+    "command_succeeded": "تم تسجيل الارتباط الأصلي",
+    "removalEvidence": "إلغاء بنكي محفوظ كدليل",
+    "removalGuidance": "قارن هذا التصحيح البنكي بالقيود الأصلية وأي قيود عكسية. حرر المطابقات السابقة قبل استخدام التصحيح.",
+    "retainedRemovals": "سجلات الإلغاء البنكي المحفوظة: {count}."
   }
 }

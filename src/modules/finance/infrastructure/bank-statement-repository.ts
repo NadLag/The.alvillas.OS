@@ -36,7 +36,7 @@ export class BankStatementRepository {
   facts(identityHashes: string[]) {
     return this.tx.bankStatementLine.findMany({ where: { organizationId: this.organizationId, identityHash: { in: identityHashes } } });
   }
-  admit(data: Omit<Prisma.BankStatementAdmissionUncheckedCreateInput, "organizationId">) {
+  admit(data: Omit<Prisma.BankStatementAdmissionCreateManyInput, "organizationId">) {
     return this.tx.bankStatementAdmission.create({ data: { ...data, organizationId: this.organizationId } });
   }
   async complete(admission: { id: string; ledgerAccountId: string; bankIdentityHash: string; fileSha256: string }, parsed: ParsedBankStatement, currency: string, normalizedHash: string) {
