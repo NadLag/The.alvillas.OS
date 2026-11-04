@@ -86,3 +86,5 @@ prisma/migrations/20261103220000_bank_reconciliation_correction_budgets/migratio
 prisma/migrations/20261103230000_bank_reconciliation_removal_evidence/migration.sql text eol=lf
 prisma/migrations/20261103231000_bank_reconciliation_evidence_source_alias/migration.sql text eol=lf
 prisma/migrations/20261104091000_variance_workflow_events/migration.sql text eol=lf
+
+prisma/migrations/20261104124000_tax_hook_read_models/migration.sql text eol=lf
