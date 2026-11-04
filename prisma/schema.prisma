@@ -215,6 +215,10 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  bankStatementAdmissions BankStatementAdmission[]
+  bankStatementImports BankStatementImport[]
+  bankStatementLines BankStatementLine[]
+  bankStatementEvidence BankStatementEvidence[]
   serviceAllocationPostings ServiceAllocationPosting[]
   serviceFinancialSources ServiceFinancialSource[]
   serviceAllocationAdmissions ServiceAllocationAdmission[]
@@ -573,6 +577,7 @@ model Person {
 }
 
 model UserAccount {
+  bankStatementAdmissions BankStatementAdmission[]
   serviceAllocationPostings ServiceAllocationPosting[]
   serviceFinancialSources ServiceFinancialSource[]
   serviceAllocationAdmissions ServiceAllocationAdmission[]
@@ -1574,6 +1579,8 @@ model SyncOp {
 }
 
 model LedgerAccount {
+  bankStatementAdmissions BankStatementAdmission[]
+  bankStatementLines BankStatementLine[]
   receivedReceivableCollections ReceivableCollection[] @relation("ReceivableCollectionDestination")
   fundedExpenses  Expense[]
   cashCollections CashCollection[]
@@ -1726,6 +1733,100 @@ model TransactionGroupEntry {
   @@map("transaction_group_entry")
 }
 
+model BankStatementAdmission {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  actorId String @map("actor_id") @db.Uuid
+  ledgerAccountId String @map("ledger_account_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  commandHash String @map("command_hash") @db.Char(64)
+  fileSha256 String @map("file_sha256") @db.Char(64)
+  fileSize Int @map("file_size")
+  format String
+  encoding String
+  storageKey String @map("storage_key")
+  policySnapshot Json @map("policy_snapshot")
+  bankIdentityHash String @map("bank_identity_hash") @db.Char(64)
+  reason String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  actor UserAccount @relation(fields: [organizationId, actorId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  ledgerAccount LedgerAccount @relation(fields: [organizationId, ledgerAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  import BankStatementImport?
+
+  @@unique([organizationId, id], map: "bank_statement_admission_org_id_unique")
+  @@unique([organizationId, actorId, idempotencyKey], map: "bank_statement_admission_actor_nonce_unique")
+  @@index([organizationId, ledgerAccountId, id], map: "bank_statement_admission_account_idx")
+  @@index([organizationId, ledgerAccountId, createdAt(sort: Desc), id(sort: Desc)], map: "bank_statement_admission_history_idx")
+  @@map("bank_statement_admission")
+}
+
+model BankStatementImport {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  admissionId String @map("admission_id") @db.Uuid
+  normalizedHash String @map("normalized_hash") @db.Char(64)
+  rowCount Int @map("row_count")
+  statement Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  admission BankStatementAdmission @relation(fields: [organizationId, admissionId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  originalLines BankStatementLine[] @relation("BankStatementOriginalImport")
+  evidence BankStatementEvidence[]
+
+  @@unique([organizationId, id], map: "bank_statement_import_org_id_unique")
+  @@unique([organizationId, admissionId], map: "bank_statement_import_admission_unique")
+  @@index([organizationId, id], map: "bank_statement_import_page_idx")
+  @@map("bank_statement_import")
+}
+
+model BankStatementLine {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  originalImportId String @map("original_import_id") @db.Uuid
+  ledgerAccountId String @map("ledger_account_id") @db.Uuid
+  identityHash String @map("identity_hash") @db.Char(64)
+  bankIdentityHash String @map("bank_identity_hash") @db.Char(64)
+  factHash String @map("fact_hash") @db.Char(64)
+  externalId String? @map("external_id")
+  correctsExternalId String? @map("corrects_external_id")
+  correctionAction String? @map("correction_action")
+  postedOn DateTime? @map("posted_on") @db.Date
+  amount Decimal? @db.Decimal(18, 2)
+  currency String @db.Char(3)
+  source Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  originalImport BankStatementImport @relation("BankStatementOriginalImport", fields: [organizationId, originalImportId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  ledgerAccount LedgerAccount @relation(fields: [organizationId, ledgerAccountId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  evidence BankStatementEvidence[]
+  currencyRef Currency @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, id], map: "bank_statement_line_org_id_unique")
+  @@unique([organizationId, identityHash], map: "bank_statement_line_identity_unique")
+  @@index([organizationId, ledgerAccountId, postedOn, id], map: "bank_statement_line_account_date_idx")
+  @@index([organizationId, bankIdentityHash, correctsExternalId], map: "bank_statement_line_correction_idx")
+  @@index([organizationId, originalImportId], map: "bank_statement_line_original_import_idx")
+  @@map("bank_statement_line")
+}
+
+model BankStatementEvidence {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  importId String @map("import_id") @db.Uuid
+  lineId String @map("line_id") @db.Uuid
+  sourceOrder Int @map("source_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  import BankStatementImport @relation(fields: [organizationId, importId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  line BankStatementLine @relation(fields: [organizationId, lineId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([organizationId, importId, sourceOrder], map: "bank_statement_evidence_order_unique")
+  @@unique([organizationId, importId, lineId], map: "bank_statement_evidence_line_unique")
+  @@index([organizationId, lineId], map: "bank_statement_evidence_line_idx")
+  @@map("bank_statement_evidence")
+}
+
 model Posting {
   receivableAssignments ReceivableAssignment[] @relation("ReceivableOriginalPosting")
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
@@ -1782,6 +1883,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  bankStatementLines BankStatementLine[]
   companyExpenseRevisions CompanyExpenseRevision[]
   receivableCollections ReceivableCollection[]
   receivableAssignments ReceivableAssignment[]

@@ -83,6 +83,8 @@ export default async function AppPage({
             <Link className="secondary-button" data-testid="service-allocations-link" href={`/${appLocale}/app/finance/service-allocations`} prefetch={false}>{(await getTranslations("ServiceAllocations"))("title")}</Link> : null}
           {reservationContext && authorizeOrganizationSource(reservationContext.authContext,"view",{type:"financial_transaction",organizationId:session.user.organizationId,dataClass:"financial"},new Date()) ?
             <Link className="secondary-button" data-testid="guest-deposits-link" href={`/${appLocale}/app/finance/guest-deposits`} prefetch={false}>{(await getTranslations("GuestDeposits"))("title")}</Link> : null}
+          {reservationContext && ["bank_statement","financial_transaction"].every(type=>authorizeOrganizationSource(reservationContext.authContext,"view",{type,organizationId:session.user.organizationId,dataClass:"financial"},new Date())) ?
+            <Link className="secondary-button" data-testid="bank-statements-link" href={`/${appLocale}/app/finance/bank-statements`} prefetch={false}>{(await getTranslations("BankStatements"))("title")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "company_ledger", organizationId: session.user.organizationId, dataClass: "financial" }) ?
             <Link className="secondary-button" data-testid="company-ledger-link" href={`/${appLocale}/app/finance/company-ledger`}>{t("companyLedger")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "employee_payable", organizationId: session.user.organizationId, dataClass: "financial", amount: "0.00", occurredAt: new Date() }) ?
