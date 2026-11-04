@@ -5,7 +5,7 @@ import { z } from "zod";
 import { authContextForAccount, authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { authorize, authorizeCollection, type AuthContext } from "@/platform/authz/authorize";
 import { present, maskedValue, type FieldPolicy } from "@/platform/authz/present";
-import { authorizeUnconditionalSource } from "@/platform/authz/organization-authority";
+import { authorizeUnconditionalSource, authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { writePropertyConfiguration } from "@/platform/config/property-configuration";
@@ -93,6 +93,20 @@ async function meta(deps: Deps) {
     ipAddress: h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null
   };
 }
+function templateMetadataVisible(
+  ctx: TemplateActorContext,
+  row: Pick<PropertyTemplateVersion, "id" | "createdAt" | "status">,
+  propertyId: string | null,
+  current: AuthContext,
+  property: { cityId: string | null; regionId: string | null; city: string; region: string | null } | undefined,
+  at: Date
+) {
+  if (propertyId && !property) return false;
+  const root = { type: "config_rule", organizationId: ctx.organizationId, id: row.id, financialRecordId: row.id, propertyId,
+    city: property?.cityId ?? property?.city, region: property?.regionId ?? property?.region, occurredAt: row.createdAt, status: row.status, dataClass: "financial" as const };
+  return [ctx.authContext, current].every(authority => authorize(authority, "view", root, at) &&
+    (!propertyId || authorize(authority, "view", { ...root, id: propertyId, type: "property" }, at)));
+}
 function visibleVersion(
   ctx: TemplateActorContext,
   row: PropertyTemplateVersion,
@@ -107,8 +121,7 @@ function visibleVersion(
     id: row.id, financialRecordId: row.id, propertyId, city: property?.cityId ?? property?.city,
     region: property?.regionId ?? property?.region, occurredAt: row.createdAt, status: row.status, dataClass: "financial" as const
   };
-  const root = { ...source, type: "config_rule" };
-  if ([ctx.authContext, current].some(authority => !authorize(authority, "view", root, at) || propertyId && !authorize(authority, "view", { ...root, id: propertyId, type: "property" }, at))) throw new TemplateAccessError();
+  if (!templateMetadataVisible(ctx, row, propertyId, current, property, at)) throw new TemplateAccessError();
   const financial = [ctx.authContext, current].every(authority => authorize(authority, "view", source, at));
   const serialized = present(
     {
@@ -241,17 +254,19 @@ export async function templateCatalog(
       propertyId && !properties.some((p) => p.id === propertyId)
         ? await repo.propertyOption(propertyId)
         : null;
-    const organization =
-      propertyId !== null ||
-      authorize(ctx.authContext, "view", { type: "config_rule", organizationId: ctx.organizationId });
+    const selectionAt = new Date(),
+      completeOrganization = ["config_rule", "property"].every(type =>
+        authorizeOrganizationSource(ctx.authContext, "view", { type, organizationId: ctx.organizationId, dataClass: "financial" }, selectionAt)),
+      search = z.string().max(160).parse(input.search ?? ""),
+      versions = !propertyId && !completeOrganization ? (await repo.catalogMetadata({ kind: input.kind, search }))
+        .filter(row => templateMetadataVisible(ctx, row, row.propertyId, ctx.authContext, row.property ?? undefined, selectionAt)).map(row => row.id) : [];
     const rows = await repo.catalog({
-      propertyIds: propertyId ? [propertyId] : properties.map((p) => p.id),
-      organization,
+      propertyIds: propertyId ? [propertyId] : [],
+      organization: propertyId !== null || completeOrganization,
+      allProperties: !propertyId && completeOrganization,
+      versionIds: versions,
       kind: input.kind,
-      search: z
-        .string()
-        .max(160)
-        .parse(input.search ?? ""),
+      search,
       page
     });
     const sourceIds = [...new Set([...properties.map(property => property.id), ...(target ? [target.id] : []), ...rows.slice(0, 24).flatMap(row => row.propertyId ? [row.propertyId] : []), ...(propertyId ? [propertyId] : [])])],
