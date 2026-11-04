@@ -5,7 +5,7 @@ import type { BankSourceFact } from "../domain/bank-statement-source-state";
 export class BankReconciliationRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
   request(actorId: string, idempotencyKey: string) {
-    return this.tx.bankReconciliationEntry.findFirst({ where: { organizationId: this.organizationId, actorId, idempotencyKey }, include: { allocations: true, release: true } });
+    return this.tx.bankReconciliationEntry.findFirst({ where: { organizationId: this.organizationId, actorId, idempotencyKey }, include: { allocations: true, evidence: true, release: true } });
   }
   requestKey(actorId: string, id: string) {
     return this.tx.bankReconciliationEntry.findFirst({ where: { organizationId: this.organizationId, actorId, id }, select: { idempotencyKey: true } });
@@ -14,7 +14,7 @@ export class BankReconciliationRepository {
     return this.tx.bankStatementAdmission.findFirst({ where: { organizationId: this.organizationId, ledgerAccountId: accountId, import: { isNot: null } }, select: { id: true } });
   }
   entry(id: string) {
-    return this.tx.bankReconciliationEntry.findFirst({ where: { organizationId: this.organizationId, id }, include: { allocations: true, release: true } });
+    return this.tx.bankReconciliationEntry.findFirst({ where: { organizationId: this.organizationId, id }, include: { allocations: true, evidence: true, release: true } });
   }
   postings(accountId: string, ids: string[]) {
     // Only the selected bank leg is projected; opposing owner and payroll postings are private.
@@ -42,7 +42,8 @@ export class BankReconciliationRepository {
     if (!ids.length) return new Map<string, string>();
     const rows = await this.tx.$queryRaw<Array<{ id: string; state: string }>>(Prisma.sql`SELECT e.id,CASE
       WHEN e.action='RELEASE' OR EXISTS(SELECT 1 FROM bank_reconciliation_entry released WHERE released.organization_id=e.organization_id AND released.previous_entry_id=e.id) THEN 'RELEASED'
-      WHEN EXISTS(SELECT 1 FROM bank_reconciliation_allocation a WHERE a.organization_id=e.organization_id AND a.entry_id=e.id AND (
+      WHEN EXISTS(SELECT 1 FROM bank_reconciliation_evidence witness WHERE witness.organization_id=e.organization_id AND witness.entry_id=e.id AND NOT app_bank_statement_line_is_removed(e.organization_id,witness.line_id))
+       OR EXISTS(SELECT 1 FROM bank_reconciliation_allocation a WHERE a.organization_id=e.organization_id AND a.entry_id=e.id AND (
         (a.line_id IS NOT NULL AND NOT app_bank_statement_line_is_current(e.organization_id,a.line_id)) OR
         (a.posting_id IS NOT NULL AND a.source_snapshot->'reversalIds' IS DISTINCT FROM
           (SELECT COALESCE(jsonb_agg(r.id::text ORDER BY r.id),'[]'::jsonb) FROM posting p JOIN financial_transaction r ON r.organization_id=p.organization_id AND r.reverses_transaction_id=p.transaction_id
@@ -69,8 +70,15 @@ export class BankReconciliationRepository {
       OR: [{ postingId: { in: postingIds } }, { lineId: { in: lineIds } }], entry: { action: "MATCH", release: null } }, _sum: { amount: true } });
     return new Map(rows.map(row => [(row.postingId ? "EXPECTED:" + row.postingId : "ACTUAL:" + row.lineId), row._sum.amount!.toFixed(2)]));
   }
-  create(data: Omit<Prisma.BankReconciliationEntryUncheckedCreateInput, "organizationId">) {
+  create(data: Omit<Prisma.BankReconciliationEntryCreateManyInput, "organizationId">) {
     return this.tx.bankReconciliationEntry.create({ data: { ...data, organizationId: this.organizationId } });
+  }
+  async activeEvidence(lineIds: string[]) {
+    const rows = await this.tx.bankReconciliationEvidence.findMany({ where: { organizationId: this.organizationId, lineId: { in: lineIds }, entry: { action: "MATCH", release: null } }, select: { lineId: true } });
+    return new Set(rows.map(row => row.lineId));
+  }
+  retainEvidence(entryId: string, rows: Omit<Prisma.BankReconciliationEvidenceCreateManyInput, "organizationId" | "entryId">[]) {
+    return this.tx.bankReconciliationEvidence.createMany({ data: rows.map(row => ({ ...row, entryId, organizationId: this.organizationId })) });
   }
   allocate(entryId: string, rows: Omit<Prisma.BankReconciliationAllocationCreateManyInput, "organizationId" | "entryId">[]) {
     return this.tx.bankReconciliationAllocation.createMany({ data: rows.map(row => ({ ...row, entryId, organizationId: this.organizationId })) });

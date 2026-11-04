@@ -217,6 +217,7 @@ model ReceivableCollectionReversal {
 model Organization {
   bankReconciliations BankReconciliationEntry[]
   bankReconciliationAllocations BankReconciliationAllocation[]
+  bankReconciliationEvidence BankReconciliationEvidence[]
   bankStatementAdmissions BankStatementAdmission[]
   bankStatementImports BankStatementImport[]
   bankStatementLines BankStatementLine[]
@@ -1759,6 +1760,7 @@ model BankReconciliationEntry {
   previous BankReconciliationEntry? @relation("BankReconciliationHistory", fields: [organizationId, previousEntryId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   release BankReconciliationEntry? @relation("BankReconciliationHistory")
   allocations BankReconciliationAllocation[]
+  evidence BankReconciliationEvidence[]
 
   @@unique([organizationId, id], map: "bank_reconciliation_entry_org_id_unique")
   @@unique([organizationId, actorId, idempotencyKey], map: "bank_reconciliation_entry_actor_nonce_unique")
@@ -1788,6 +1790,21 @@ model BankReconciliationAllocation {
   @@index([organizationId, postingId], map: "bank_reconciliation_allocation_posting_idx")
   @@index([organizationId, lineId], map: "bank_reconciliation_allocation_line_idx")
   @@map("bank_reconciliation_allocation")
+}
+
+model BankReconciliationEvidence {
+  organizationId String @map("organization_id") @db.Uuid
+  entryId String @map("entry_id") @db.Uuid
+  lineId String @map("line_id") @db.Uuid
+  sourceSnapshot Json @map("source_snapshot")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  entry BankReconciliationEntry @relation(fields: [organizationId, entryId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  line BankStatementLine @relation(fields: [organizationId, lineId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@id([organizationId, entryId, lineId])
+  @@index([organizationId, lineId], map: "bank_reconciliation_evidence_line_idx")
+  @@map("bank_reconciliation_evidence")
 }
 
 model BankStatementAdmission {
@@ -1839,6 +1856,7 @@ model BankStatementImport {
 
 model BankStatementLine {
   reconciliationAllocations BankReconciliationAllocation[]
+  reconciliationEvidence BankReconciliationEvidence[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   originalImportId String @map("original_import_id") @db.Uuid
