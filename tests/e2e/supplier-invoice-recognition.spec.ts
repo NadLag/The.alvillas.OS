@@ -12,6 +12,7 @@ import { executeSupplierInvoiceRecognitionReference } from "@/modules/finance/ap
 import { localClockLabel } from "@/platform/time/local-instant";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { openFieldFixture } from "./support/field-fixture";
+import { forwardBrowserPostOnce } from "./support/forward-browser-post";
 import en from "../../messages/en.json" with { type: "json" };
 import fr from "../../messages/fr.json" with { type: "json" };
 import ar from "../../messages/ar.json" with { type: "json" };
@@ -88,7 +89,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native approved invoice 
     let loseResponse = true; const target = `**/${locale}/app/finance/supplier-invoices/${id}`;
     await page.route(target, async route => {
       if (loseResponse && route.request().method() === "POST" && route.request().postData()?.includes(reason)) {
-        loseResponse = false; await route.fetch(); await route.abort("failed");
+        loseResponse = false; expect(await forwardBrowserPostOnce(route.request())).toBe(200); await route.abort("failed");
       } else await route.continue();
     });
     const captured = page.waitForRequest(request => request.method() === "POST" && Boolean(request.headers()["next-action"]) && Boolean(request.postData()?.includes(reason)));
