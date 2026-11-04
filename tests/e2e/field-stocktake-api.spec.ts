@@ -63,6 +63,14 @@ for (const locale of ["en", "fr", "ar"]) test(`Field stocktake HTTP ownership, r
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await withTenant(f.db, f.organizationId, async tx => {
       expect(await tx.inventoryStocktake.count({ where: { taskId: f.taskId } })).toBe(2);
+      const observations = await tx.inventoryStocktake.findMany({ where: { taskId: f.taskId }, orderBy: { revision: "asc" }, include: { movement: true } });
+      for (const observation of observations) {
+        const audit = await tx.auditLog.findFirstOrThrow({ where: { action: "inventory.stocktake.record", resourceId: observation.id } });
+        expect(audit.after).toMatchObject({ reconciliation: { provider: "INVENTORY", sourceType: "STOCKTAKE", sourceId: observation.id,
+          state: "OPEN_VARIANCE", plan: { unit: "QUANTITY:pieces", expected: observation.expectedQuantity.toFixed(0), actual: observation.countedQuantity.toString(),
+            variance: observation.movement!.quantityDelta.toFixed(0), reason: observation.note,
+            varianceAction: `INVENTORY_STOCKTAKE_ADJUSTMENT:${observation.movement!.id}` } } });
+      }
       expect(await tx.syncOp.count({ where: { deviceId: batch.device_id } })).toBe(3);
       expect(await tx.outboxEvent.count({ where: { type: "StocktakeVariance", payload: { path: ["taskId"], equals: f.taskId } } })).toBe(2);
       expect(await tx.outboxEvent.count({ where: { type: "InventoryBelowMinimum", payload: { path: ["taskId"], equals: f.taskId } } })).toBe(2);

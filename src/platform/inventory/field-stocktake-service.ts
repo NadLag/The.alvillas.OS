@@ -16,6 +16,7 @@ import { fieldStocktakePayloadSchema, FieldStocktakeUnavailableError, type Field
 import { decideStocktake } from "@/modules/inventory/domain/stocktake";
 import { stocktakeEventDataSchema } from "@/modules/inventory/domain/events";
 import { InventoryRepository } from "@/modules/inventory/infrastructure/inventory-repository";
+import { stocktakeReconciliation } from "./stocktake-reconciliation";
 
 type StocktakeBatch = {
   organizationId: string; actorId: string; transaction: TenantTransaction; now: Date; repository: InventoryRepository;
@@ -91,8 +92,15 @@ export async function recordFieldStocktakeInTransaction(ctx: ReservationActorCon
   const recorded = await batch.repository.record({ propertyId: task.propertyId, taskId: task.id, locationId: location.id, itemId: item.id, actorId: ctx.actorId,
     configRuleId: rule.id, expected: position, countedQuantity: decision.quantity, delta: decision.delta, note: input.note, ...transport,
     configSnapshot: source, receivedAt: batch.now });
+  const reconciliation = stocktakeReconciliation({ observation: { id: recorded.observation.id, organizationId: recorded.observation.organizationId,
+    locationId: recorded.observation.locationId, itemId: recorded.observation.itemId, expectedRevision: recorded.observation.expectedRevision.toString(),
+    revision: recorded.observation.revision.toString(), expectedQuantity: recorded.observation.expectedQuantity.toFixed(0),
+    countedQuantity: recorded.observation.countedQuantity.toString() }, movement: recorded.movement ? { id: recorded.movement.id,
+      organizationId: recorded.movement.organizationId, locationId: recorded.movement.locationId, itemId: recorded.movement.itemId,
+      stocktakeId: recorded.movement.stocktakeId, revision: recorded.movement.revision.toString(), quantityDelta: recorded.movement.quantityDelta.toFixed(0) } : null,
+    unit: item.unit, reason: recorded.observation.note });
   await audit("inventory.stocktake.record", "inventory_stocktake", recorded.observation.id,
-    { ...recorded.position, delta: decision.delta, movementId: recorded.movement?.id ?? null, source,
+    { ...recorded.position, delta: decision.delta, movementId: recorded.movement?.id ?? null, source, reconciliation,
       untrustedClientCreatedAt: transport.clientCreatedAt?.toISOString() ?? null }, position);
   const stocktake = stocktakeEventDataSchema.parse({ id: recorded.observation.id, expected: position.quantity, actual: decision.quantity,
     delta: decision.delta, revision: recorded.position.revision });
