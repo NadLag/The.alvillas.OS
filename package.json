@@ -17,7 +17,7 @@
     "build": "prisma generate && node scripts/build-next.mjs",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "node --max-old-space-size=6144 node_modules/typescript/bin/tsc --noEmit",
+    "typecheck": "node scripts/typecheck.mjs",
     "test": "vitest run",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",

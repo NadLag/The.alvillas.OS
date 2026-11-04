@@ -1,4 +1,5 @@
 import createNextIntlPlugin from "next-intl/plugin";
+import process from "node:process";
 
 const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 
@@ -7,6 +8,7 @@ const nextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   poweredByHeader: false,
   reactStrictMode: true,
+  typescript: { tsconfigPath: process.env.ALVILLAS_BUILD_TSCONFIG ?? "tsconfig.json" },
   experimental: { serverActions: { bodySizeLimit: "4mb" } },
   logging: { serverFunctions: false },
   async headers() {
