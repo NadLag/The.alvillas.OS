@@ -6085,6 +6085,16 @@ describe("PostgreSQL baseline", () => {
         scopes: [{ organizationId: orgA.id }]
       }
     };
+    configCtx.authContext.permissions = new Set([...configCtx.authContext.permissions, "expense:view", "financial_transaction:view", "owner_statement:view"]);
+    configCtx.authContext.scopes = [{ organizationId: orgA.id, scopeType: "organization" }];
+    await ensureStandardIdentitySetup(orgA.id, { db: prisma });
+    await withTenant(prisma, orgA.id, async tx => {
+      const permissions = await tx.permission.findMany({ where: { organizationId: orgA.id, key: { in: [...configCtx.authContext.permissions] } } });
+      expect(permissions).toHaveLength(configCtx.authContext.permissions.size);
+      const role = await tx.role.create({ data: { organizationId: orgA.id, key: "actual_financial_configuration_consumer", name: "Actual financial configuration consumer",
+        rolePermissions: { create: permissions.map(permission => ({ organizationId: orgA.id, permissionId: permission.id })) } } });
+      await tx.roleAssignment.create({ data: { organizationId: orgA.id, personId, userAccountId: actorId, roleId: role.id, scopeType: "organization", validFrom: new Date("2020-01-01") } });
+    });
     const financeCtx = {
       organizationId: orgA.id,
       actorId,
