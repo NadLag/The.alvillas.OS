@@ -59,9 +59,12 @@ test.describe("F-RES-01-16 complete reservation management", () => {
         await expect(page.getByTestId("airbnb-settlement-variance").filter({ hasText: fixture.propertyName }).filter({ hasText: payoutReference })).toHaveAttribute("data-variance", "50.00");
       }
       const payoutBefore = await reservationPayoutEvidence(fixture.propertyId, transactionId); expect(payoutBefore).toMatchObject({ settlements: 1, originals: 2, reversals: 0 });
+      expect(payoutBefore.reconciliationEvidence).toHaveLength(1);
+      expect(payoutBefore.reconciliationEvidence).toMatchObject([{ reconciliation: { provider: "OTA", sourceType: "AIRBNB_SETTLEMENT", state: "OPEN_VARIANCE", plan: { unit: "MONEY:MAD", expected: "5200.00", actual: "5150.00", variance: "-50.00", reason: "Bank fee", varianceAction: "Review payout" } } }]);
       await page.goto(`/${locale}/app/reservations/${payoutReservationId}`); const cancelPayout = page.getByTestId("transition-reservation"); await cancelPayout.locator('select[name="status"]').selectOption("CANCELLED"); await cancelPayout.locator('textarea[name="reason"]').fill("Cancellation of paid OTA acceptance booking"); await cancelPayout.getByRole("button").click(); await expect(page.getByTestId("reservation-version")).toHaveText("2");
       const refundPayout = page.getByTestId("refund-reservation"); await refundPayout.locator("..").locator("summary").click(); await refundPayout.locator('textarea[name="reason"]').fill("Full OTA refund including actual payout receipt"); await refundPayout.getByRole("button").click(); await expect(page.getByTestId("reservation-version")).toHaveText("3");
       const payoutAfter = await reservationPayoutEvidence(fixture.propertyId, transactionId); expect(payoutAfter).toMatchObject({ settlements: 1, originals: 2, reversals: 2, zeroBalances: true }); expect(payoutAfter.fingerprint).toBe(payoutBefore.fingerprint);
+      expect(payoutAfter.reconciliationEvidence).toEqual(payoutBefore.reconciliationEvidence);
       await expect(page.locator("html")).toHaveAttribute("dir", locale === "ar" ? "rtl" : "ltr");
       await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
       const reflow = await page.evaluate(() => ({ fits: document.documentElement.scrollWidth <= innerWidth,

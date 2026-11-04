@@ -29,6 +29,9 @@ import { authContextForAccountInTransaction } from "@/platform/authz/account-con
 import { matchesFinancialReversalAttempt } from "../domain/financial-reversal";
 import { recheckFinanceAuthorization } from "./finance-access";
 import { reverseAirbnbSettlementInputSchema } from "../domain/airbnb-settlement";
+import { otaReconciliationPlan } from "../domain/ota-reconciliation";
+import { commandFingerprint } from "@/platform/http/command-fingerprint";
+import { FinancialTransferRepository } from "../infrastructure/financial-transfer-repository";
 
 const airbnbSettlementSourceType = "AIRBNB_SETTLEMENT";
 
@@ -280,29 +283,28 @@ function idempotentSettlementResult(input: {
   sourceTransactionId: string;
   row: AirbnbSettlementCsvRow;
   transactions: readonly PostingTransaction[];
+  varianceId: string | null;
 }): AirbnbSettlementImportItem {
   const amounts = rowMoney(input.row);
   const expected = input.transactions.find((transaction) =>
     transaction.postings.some((posting) => posting.bucket === "OWNER_REVENUE")
   );
   const receipt = input.transactions.find((transaction) =>
-    transaction.postings.some((posting) => posting.bucket === "OTA_RECEIPT")
+    transaction.postings.some((posting) => jsonObject(posting.dimensions).posting_kind === "airbnb_clearing_received")
   );
-  const variancePosting = input.transactions
-    .flatMap((transaction) => transaction.postings)
-    .find((posting) => posting.bucket === "VARIANCE");
+  if (!expected || !receipt || amounts.varianceAmount.amount.isZero() !== (input.varianceId === null)) throw new AirbnbSettlementConflictError("Original settlement acknowledgement is incomplete");
 
   return {
     settlementId: input.settlementId,
     reservationId: input.reservationId,
     propertyId: input.propertyId,
     sourceTransactionId: input.sourceTransactionId,
-    expectedTransactionId: expected?.id ?? "",
-    receiptTransactionId: receipt?.id ?? "",
+    expectedTransactionId: expected.id,
+    receiptTransactionId: receipt.id,
     expectedPayout: amounts.expectedPayout,
     actualReceipt: amounts.actualReceipt,
     varianceAmount: amounts.varianceAmount,
-    varianceId: variancePosting ? null : null,
+    varianceId: input.varianceId,
     idempotent: true
   };
 }
@@ -347,6 +349,8 @@ export async function importAirbnbSettlementCsv(
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new FinanceRepository(tx, ctx.organizationId);
+    const locks = new FinancialTransferRepository(tx, ctx.organizationId);
+    for (const sourceId of [...new Set(rows.map(row => row.sourceTransactionId))].sort()) await locks.lock("ota-settlement-source:" + sourceId);
     const [baseCurrency, receivedAccount] = await Promise.all([
       repository.findOrganizationBaseCurrency(),
       repository.findLedgerAccountById(input.receivedAccountId)
@@ -400,7 +404,13 @@ export async function importAirbnbSettlementCsv(
       const existing = await repository.findAirbnbSettlementBySourceTransactionId(row.sourceTransactionId);
       if (existing) {
         assertSameImportedSettlement(existing, row);
-        const transactions = await repository.findPostingTransactionsForAirbnbSettlement(existing.id);
+        const [transactions, variances] = await Promise.all([repository.findPostingTransactionsForAirbnbSettlement(existing.id), repository.airbnbSettlementVariances(existing.id)]);
+        if (variances.length > 1) throw new AirbnbSettlementConflictError("Original settlement variance is ambiguous");
+        const target = { organizationId: ctx.organizationId, propertyId: existing.propertyId, reservationId: existing.reservationId, type: "financial_transaction" as const, dataClass: "financial" as const };
+        await recheckFinanceAuthorization(ctx, tx, await repository.clock(), [
+          { action: "view", resource: { ...target, type: "reservation", dataClass: "operational" } },
+          { action: "view", resource: target }, { action: "create", resource: target }, { action: "reconcile", resource: target }
+        ], new AirbnbSettlementAuthorizationError());
         imported.push(
           idempotentSettlementResult({
             settlementId: existing.id,
@@ -408,7 +418,8 @@ export async function importAirbnbSettlementCsv(
             propertyId: existing.propertyId,
             sourceTransactionId: existing.sourceTransactionId,
             row,
-            transactions
+            transactions,
+            varianceId: variances[0]?.id ?? null
           })
         );
         continue;
@@ -471,6 +482,18 @@ export async function importAirbnbSettlementCsv(
         recheckAuthorization: recheckPosting
       });
 
+      const currency = await locks.currency(row.currency);
+      if (!currency) throw new AirbnbSettlementConfigError();
+      const originalPosting = (posting: PostingTransaction["postings"][number]) => ({ id: posting.id, amount: Money.of(posting.amount.toFixed(2), posting.currency) });
+      const reconciliation = otaReconciliationPlan({ currency: row.currency, minorUnit: currency.minorUnit,
+        expectedPayout: amounts.expectedPayout, actualReceipt: amounts.actualReceipt,
+        expected: expectedTransaction.postings.filter(posting => posting.ledgerAccountId === otaClearing.id && posting.side === "DEBIT" && posting.bucket === "OTA_SETTLEMENT").map(originalPosting),
+        actual: receiptTransaction.postings.filter(posting => posting.ledgerAccountId === receivedAccount.id && posting.side === "DEBIT" && posting.bucket === "OTA_RECEIPT").map(originalPosting),
+        zeroReceiptEvidence: amounts.actualReceipt.amount.isZero() ? { side: "ACTUAL", sourceKey: settlement.id,
+          fingerprint: commandFingerprint({ settlementId: settlement.id, actualReceipt: amounts.actualReceipt.toJSON(), receiptTransactionId: receiptTransaction.id,
+            postings: receiptTransaction.postings.map(posting => ({ id: posting.id, side: posting.side, bucket: posting.bucket, ledgerAccountId: posting.ledgerAccountId, amount: posting.amount.toFixed(2), currency: posting.currency })).sort((a, b) => a.id.localeCompare(b.id)) }) } : null,
+        reason: row.reason || "Original imported OTA settlement evidence", varianceAction: row.action || null });
+
       let varianceId: string | null = null;
       if (amounts.varianceAmount.amount.gt(0)) {
         const variance = await repository.createVariance({
@@ -523,12 +546,15 @@ export async function importAirbnbSettlementCsv(
           varianceAmount: amounts.varianceAmount.toJSON(),
           varianceId,
           expectedTransactionId: expectedTransaction.id,
-          receiptTransactionId: receiptTransaction.id
+          receiptTransactionId: receiptTransaction.id,
+          reconciliation: { provider: "OTA", sourceType: airbnbSettlementSourceType, sourceId: settlement.id, ...reconciliation }
         }),
         reason: "S7 Airbnb settlement CSV import",
         requestId: meta.requestId,
         occurredAt: new Date()
       });
+
+      await recheckPosting(await repository.clock());
 
       imported.push(result);
     }
