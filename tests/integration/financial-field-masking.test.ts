@@ -63,6 +63,38 @@ async function serviceTemplate(f: Fixture) {
   return { saved, reason, values, writer };
 }
 describe("financial serializer privacy with actual PostgreSQL source grants", () => {
+  it("rechecks native financial revocation after the catalog query before disclosing original service prices", async () => {
+    const f = await fixture(), source = await serviceTemplate(f), reader = await actor(f, { propertyId: f.property.id }),
+      original = Object.getOwnPropertyDescriptor(PropertyTemplateRepository.prototype, "catalog")!.value as PropertyTemplateRepository["catalog"],
+      spy = vi.spyOn(PropertyTemplateRepository.prototype, "catalog").mockImplementation(async function (this: PropertyTemplateRepository, input) {
+        const rows = await original.call(this, input); await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: reader.assignments[1] }, data: { archivedAt: new Date() } })); return rows;
+      });
+    try {
+      const result = await templateCatalog(reader, { propertyId: f.property.id, kind: "SERVICE_CATALOG", search: source.saved.key }, { db });
+      expect(result.templates).toHaveLength(1); expect(result.templates[0]).toMatchObject({ id: source.saved.id, values: null, reason: maskedValue, restricted: true });
+      expect(JSON.stringify(result.templates)).not.toContain("123.45");
+    } finally { spy.mockRestore(); }
+    expect(await withTenant(db, f.org, tx => tx.propertyTemplateVersion.findUniqueOrThrow({ where: { id: source.saved.id } }))).toMatchObject({ values: source.values, reason: source.reason });
+  });
+  it.each(["organization", "city"] as const)("keeps an authorized redacted catalog beyond 500 earlier picker properties under %s authority", async scope => {
+    const f = await fixture();
+    await withTenant(db, f.org, tx => tx.property.createMany({ data: Array.from({ length: 500 }, (_, index) => ({ organizationId: f.org,
+      name: "000 prior catalog property " + String(index).padStart(3, "0"), addressLine1: "Actual catalog scale acceptance", city: f.city.name, cityId: f.city.id, regionId: f.region.id,
+      propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [] as string[], photoUrls: [] as string[] })) }));
+    const source = await serviceTemplate(f), other = await serviceTemplate({ ...f, property: f.other }), reader = await actor(f);
+    if (scope === "city") {
+      await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: reader.assignments[0] }, data: { scopeType: "city", scopeId: f.city.id } }));
+      reader.authContext = { ...await authContextForAccount(f.org, reader.actorId, { db }), personId: reader.personId };
+    }
+    const retained = () => withTenant(db, f.org, tx => tx.$queryRaw<Array<{ id: string; xmin: string; body: string }>>`
+      SELECT id::text,xmin::text,to_jsonb(v)::text AS body FROM property_template_version v WHERE organization_id=${f.org}::uuid ORDER BY id`), before = await retained(),
+      result = await templateCatalog(reader, { kind: "SERVICE_CATALOG", search: source.saved.key }, { db });
+    expect(result.moreProperties).toBe(true); expect(result.properties.some(property => property.id === f.property.id)).toBe(false);
+    expect(result.templates).toHaveLength(1); expect(result.templates[0]).toMatchObject({ id: source.saved.id, restricted: true, values: null, reason: maskedValue });
+    expect(JSON.stringify(result.templates)).not.toContain("123.45");
+    const otherResult = await templateCatalog(reader, { kind: "SERVICE_CATALOG", search: other.saved.key }, { db });
+    expect(otherResult.templates).toHaveLength(scope === "organization" ? 1 : 0); expect(await retained()).toEqual(before);
+  });
   it("protects original service-price audit reasons, scoped geography and independent CSV export", async () => {
     const f = await fixture(), source = await serviceTemplate(f), operational = await actor(f), filter = { resourceId: source.saved.id };
     const hidden = await listAuditHistory(operational, filter, { db }); expect(hidden.rows).toHaveLength(1);
