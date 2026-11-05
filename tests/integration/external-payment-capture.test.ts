@@ -10,12 +10,12 @@ import { requestExternalPaymentCapture, executeExternalPaymentCaptureReference, 
 import { reviewCapturedPayPalAdmission, getExternalPaymentIntent, recoverExternalPaymentIntent } from "@/modules/finance/application/external-payment-workspace-service";
 import { admitCapturedPayPalPayment } from "@/modules/finance/application/native-paypal-admission";
 import { PaymentMethodAccessError, PaymentMethodConfigurationError } from "@/modules/finance/domain/payment-method";
-import { inspectGuestDepositReceiptInTransaction, postGuestDepositReceipt } from "@/modules/finance/application/guest-deposit-service";
+import { inspectGuestDepositReceiptInTransaction, postGuestDepositReceipt, reviewGuestDepositReversal, reverseGuestDepositMovement } from "@/modules/finance/application/guest-deposit-service";
 import { guestPaymentMethodScopes } from "@/modules/finance/application/guest-deposit-payment-method";
 import { PaymentMethodRepository } from "@/modules/finance/infrastructure/payment-method-repository";
 import { ExternalPaymentRepository } from "@/modules/finance/infrastructure/external-payment-repository";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
-import { GuestDepositAuthorizationError } from "@/modules/finance/domain/guest-deposit";
+import { GuestDepositAuthorizationError, GuestDepositSourceError } from "@/modules/finance/domain/guest-deposit";
 import { ExternalPaymentIntentError } from "@/modules/finance/domain/external-payment-intent";
 import { actualGuestDepositFixture } from "./support/guest-deposit-fixture";
 import { provisionIntegrationRole } from "./support/database-role";
@@ -24,10 +24,13 @@ import { listAuditHistory } from "@/modules/audit/application/audit-service";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { maskedValue } from "@/platform/authz/present";
 import { prepareExternalPaymentFee } from "@/modules/finance/application/external-payment-fee-service";
-import { submitExpense, ExpenseConflictError, updateExpenseDraft } from "@/modules/finance/application/expense-service";
+import { submitExpense, ExpenseConflictError, updateExpenseDraft, createExpenseDraft, getExpense, getExpenseDraftEditor, ExpenseAccessError } from "@/modules/finance/application/expense-service";
 import { ExpenseRepository } from "@/modules/finance/infrastructure/expense-repository";
 import { Money } from "@/platform/money/money";
 import { postExpense } from "@/modules/finance/application/expense-posting-service";
+import { GuestDepositRepository } from "@/modules/finance/infrastructure/guest-deposit-repository";
+import { readGuestDepositWorkspace } from "@/modules/finance/application/guest-deposit-workspace-service";
+import { guestDepositDetailSchema } from "@/modules/finance/domain/guest-deposit-workspace";
 
 const captureTimes=new Map<string,string>();
 function providerReceipt(paymentId:string,amount="0.07"){const capturedAt=captureTimes.get(paymentId)??new Date().toISOString();captureTimes.set(paymentId,capturedAt);return{paymentId,capturedAt,settlement:{schemaVersion:1 as const,basis:"ORIGINAL_PROVIDER_RECEIVABLE_BREAKDOWN" as const,gross:{amount,currency:"MAD"},fee:{amount:"0.00",currency:"MAD"},net:{amount,currency:"MAD"}}};}
@@ -85,6 +88,66 @@ const moneyFacts = (org: string) => withTenant(db, org, tx => tx.$queryRaw<Array
   SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t)::text AS body FROM financial_transaction t WHERE organization_id=${org}::uuid
   UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p)::text FROM posting p WHERE organization_id=${org}::uuid ORDER BY kind,id`);
 describe("durable optional external capture on PostgreSQL", () => {
+  it("does not erase verified provider-held money through a manual guest receipt reversal", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id);
+    await executeExternalPaymentCaptureReference(ref, { db, provider: { lookup: () => Promise.resolve({ state: "CAPTURED" as const, ...providerReceipt("ACTUAL_IRREVERSIBLE_CAPTURE_" + randomUUID()) }), capture: () => Promise.resolve(providerReceipt("NEVER_POST")) } });
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: requested.id }, { db }), admitted = await admitCapturedPayPalPayment(f.ctx, { intentId: requested.id, reviewFingerprint: review.reviewFingerprint,
+      paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Retain authoritative original captured money and guest ownership" }, { db }), before = await moneyFacts(f.org);
+    let reversed: unknown;
+    try { const reversal = await reviewGuestDepositReversal(f.ctx, { transactionId: admitted.id }, { db }); reversed = await reverseGuestDepositMovement(f.ctx, { transactionId: admitted.id, reviewFingerprint: reversal.reviewFingerprint,
+      idempotencyKey: randomUUID(), reason: "Do not remove actual provider-held funds without an actual money movement" }, { db }); } catch (error) { expect(error).toBeInstanceOf(GuestDepositSourceError); }
+    expect(reversed).toBeUndefined(); expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+    const detail = guestDepositDetailSchema.parse(await readGuestDepositWorkspace(f.ctx, { operation: "DETAIL", depositId: f.input.receipt.idempotencyKey }, { db }));
+    expect(detail.movements.find(row => row.id === admitted.id)?.canReverse).toBe(false);
+  });
+  it("preserves verified provider-held money in native PostgreSQL even when the application reversal check is bypassed", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id);
+    await executeExternalPaymentCaptureReference(ref, { db, provider: { lookup: () => Promise.resolve({ state: "CAPTURED" as const, ...providerReceipt("NATIVE_IRREVERSIBLE_CAPTURE_" + randomUUID()) }), capture: () => Promise.resolve(providerReceipt("NEVER_POST")) } });
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: requested.id }, { db }), admitted = await admitCapturedPayPalPayment(f.ctx, { intentId: requested.id, reviewFingerprint: review.reviewFingerprint,
+      paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Retain authoritative captured money against native source-proof bypass" }, { db }), before = await moneyFacts(f.org);
+    vi.spyOn(GuestDepositRepository.prototype, "externalCaptureSource").mockResolvedValue(null);
+    const reversal = await reviewGuestDepositReversal(f.ctx, { transactionId: admitted.id }, { db });
+    await expect(reverseGuestDepositMovement(f.ctx, { transactionId: admitted.id, reviewFingerprint: reversal.reviewFingerprint, idempotencyKey: randomUUID(),
+      reason: "Prove the native source boundary without relying on its application preflight" }, { db })).rejects.toThrow("verified external capture requires a verified money movement");
+    expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+  });
+  it("retains the actual source-bound fee time in ordinary expense audit resources", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), resources = await withTenant(db, f.org, tx => new AuditRepository(tx, f.org).expenseResources([fee.id]));
+    expect(resources.get(fee.id)?.occurredAt).toEqual(new Date(f.evidence.capturedAt));
+  });
+  it("requires actual source-bound fee time authority before creating its ordinary expense", async () => {
+    const f = await capturedFeeFixture(), endsAt = new Date(new Date(f.evidence.capturedAt).getTime() - 1).toISOString();
+    await withTenant(db, f.org, async tx => {
+      const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "expense:create" } }), role = await tx.role.create({ data: { organizationId: f.org, key: "limited-fee-creation", name: "Explicit source-time creation limit" } });
+      expect((await tx.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permissionId: permission.id } })).count).toBe(1);
+      await tx.rolePermission.create({ data: { organizationId: f.org, roleId: role.id, permissionId: permission.id } });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: f.account.id, personId: f.person.id, scopeType: "organization", validFrom: new Date("2020-01-01"), conditions: { timeWindow: { endsAt } } } });
+    });
+    const ctx = { ...f.ctx, authContext: { ...await authContextForAccount(f.org, f.account.id, { db }), personId: f.person.id } };
+    await expect(prepareExternalPaymentFee(ctx, f.feeInput, { db })).rejects.toThrow(PaymentMethodAccessError);
+    expect(await withTenant(db, f.org, tx => tx.expense.count({ where: { organizationId: f.org } }))).toBe(0); expect((await rows(f.org)).captures).toHaveLength(1);
+  });
+  it("keeps held date restrictions for source-bound fee details and draft editors", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), endsAt = new Date(new Date(f.evidence.capturedAt).getTime() - 1).toISOString(),
+      held = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: f.ctx.authContext.assignments!.map(row => ({ ...row, conditions: { timeWindow: { endsAt } } })) } };
+    await expect(getExpense(held, fee.id, { db })).rejects.toThrow(ExpenseAccessError);
+    await expect(getExpenseDraftEditor(held, fee.id, { db })).rejects.toThrow(ExpenseAccessError);
+  });
+  it("withholds source-bound fee details after final independent view revocation", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), write = auditWriter.writeAuditEvent, before = await moneyFacts(f.org);
+    vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const saved = await write(tx, event); if (event.action === "expense.viewed")
+      expect((await withTenant(db, f.org, inner => inner.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permission: { key: "expense:view" } } }))).count).toBe(1); return saved; });
+    await expect(getExpense(f.ctx, fee.id, { db })).rejects.toThrow(ExpenseAccessError); expect(await moneyFacts(f.org)).toEqual(before);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { organizationId: f.org, resourceId: fee.id, action: "expense.viewed" } }))).toBe(0);
+  });
+  it("uses actual source-bound fee time for current date grants while retaining ordinary civil-day expense behavior", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), endsAt = new Date(new Date(f.evidence.capturedAt).getTime() - 1).toISOString(), occurredOn = f.evidence.capturedAt.slice(0, 10),
+      ordinary = await createExpenseDraft(f.ctx, { propertyId: f.property.id, reservationId: f.reservationId, fundingAccountId: f.banks.receipt.id, amount: "0.01", currency: "MAD", category: "ordinary_expense", purpose: "Original civil-day expense", occurredOn, emergency: false, idempotencyKey: randomUUID(), reason: "Preserve the ordinary expense calendar contract alongside exact captured source time" }, { db });
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { conditions: { timeWindow: { endsAt } } } }));
+    expect((await getExpense(f.ctx, ordinary.id, { db })).id).toBe(ordinary.id);
+    await expect(getExpense(f.ctx, fee.id, { db })).rejects.toThrow(ExpenseAccessError);
+    await expect(getExpenseDraftEditor(f.ctx, fee.id, { db })).rejects.toThrow(ExpenseAccessError);
+  });
   it.each(["OWNER_PAID", "INCLUDED_IN_COMMISSION"] as const)("posts exact net merchant funds with configured %s fee allocation through the original approved expense", async treatment => {
     const f = await capturedFeeFixture(treatment), before = await moneyFacts(f.org), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db });
     expect(fee.state).toBe("DRAFT"); expect(await moneyFacts(f.org)).toEqual(before);

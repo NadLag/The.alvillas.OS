@@ -47,6 +47,9 @@ export async function prepareExternalPaymentFee(inputContext: FinanceActorContex
       await authorizeExternalPaymentFee(ctx, tx, request, original);
       return { id: original.expenseId, version: original.expense.version, state: original.expense.state, idempotent: true };
     }
+    const actualTarget = expenseResource(ctx.organizationId, property, { id: request.capture.id, amount: draft.amount, reservationId: draft.reservationId,
+      state: "DRAFT", occurredOn: new Date(draft.occurredOn + "T00:00:00.000Z"), occurredAt: request.capture.capturedAt, createdBy: ctx.actorId });
+    await recheckFinanceAuthorization(ctx, tx, source.now, [{ action: "create", resource: actualTarget }], new PaymentMethodAccessError());
     await recheckExpenseDraftCreation(ctx, tx, draft, request.capture.id);
     const created = await createExpenseDraft(ctx, draft, { db: nativeTransaction(tx), requestId: deps.requestId });
     if (created.idempotent) throw new ExternalPaymentIntentError();
@@ -55,6 +58,7 @@ export async function prepareExternalPaymentFee(inputContext: FinanceActorContex
       action: "finance.external_payment.fee_prepared", after: { intentId: request.id, captureId: request.capture.id, expenseId: created.id, fee: settlement.data.fee, propertyTimezone: property.timezone },
       reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: (await expenses.clock()).now });
     await recheckExpenseDraftCreation(ctx, tx, draft, created.id); await authorizeExternalPaymentSource(ctx, tx, request, true);
+    await recheckFinanceAuthorization(ctx, tx, (await expenses.clock()).now, [{ action: "create", resource: { ...actualTarget, id: created.id, financialRecordId: created.id } }], new PaymentMethodAccessError());
     return { id: created.id, version: created.version, state: "DRAFT" as const, idempotent: false };
   });
 }

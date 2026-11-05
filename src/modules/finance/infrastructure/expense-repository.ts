@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { ExpenseDraftInput } from "../domain/expense";
 
-const include = { property: { select: { id: true, name: true, city: true, cityId: true, region: true, regionId: true, timezone: true, archivedAt: true } },
+const include = { externalPaymentFee: { select: { capture: { select: { capturedAt: true } } } }, property: { select: { id: true, name: true, city: true, cityId: true, region: true, regionId: true, timezone: true, archivedAt: true } },
   correctsExpense: { include: { submission: true, transaction: { select: { occurredAt: true } } } },
   submission: true, transaction: { select: { occurredAt: true } }, approval: { include: { financialStages: { orderBy: { position: "asc" as const }, include: { recipients: true } } } },
   periodAdjustment: { select: { id: true, reason: true, createdAt: true, sourceOccurredAt: true,

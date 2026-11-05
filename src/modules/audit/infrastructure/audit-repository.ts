@@ -4,13 +4,13 @@ import type { CurrentAuthorityCheck } from "@/platform/authz/current-authority";
 import type { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
-import { calendarDateStart } from "@/platform/time/calendar";
 import { employeeCompensationAuthorityLineFields,employeeCompensationRunFacts } from "@/platform/authz/employee-compensation-resource";
 import { employeeMonthlyRequestAuthorityFacts } from "@/platform/authz/employee-monthly-request-resource";
 import { employeeEarningRequestAuthorityFacts,employeeEarningRequestSourceFields } from "@/platform/authz/employee-earning-request-resource";
 import { externalPaymentSourceSchema } from "@/platform/ledger/external-payment-source";
 import { Money } from "@/platform/money/money";
 import { externalPaymentFinancialSources, type ExternalPaymentFinancialSources } from "@/platform/authz/external-payment-resource";
+import { expenseResource } from "@/platform/authz/expense-resource";
 
 export type FinancialAuditResource = NativeFinancialResource & { attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
 
@@ -186,11 +186,8 @@ export class AuditRepository {
   async expenseResources(ids: string[]): Promise<Map<string, Resource>> {
     if (!ids.length) return new Map();
     const rows = await this.tx.expense.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
-      select: { id: true, propertyId: true, reservationId: true, amount: true, state: true, createdBy: true, occurredOn: true,
+      select: { id: true, propertyId: true, reservationId: true, amount: true, state: true, createdBy: true, occurredOn: true, externalPaymentFee: { select: { capture: { select: { capturedAt: true } } } },
         property: { select: { city: true, cityId: true, region: true, regionId: true, timezone: true } } } });
-    return new Map(rows.map(row => [row.id, { type: "expense", organizationId: this.organizationId, id: row.id, financialRecordId: row.id,
-      propertyId: row.propertyId, reservationId: row.reservationId, amount: row.amount.toString(), occurredAt: calendarDateStart(row.occurredOn.toISOString().slice(0,10), row.property.timezone),
-      assignedUserAccountId: row.createdBy, city: row.property.cityId ?? row.property.city, region: row.property.regionId ?? row.property.region,
-      status: row.state, dataClass: "financial" }]));
+    return new Map(rows.map(row => [row.id, expenseResource(this.organizationId, { ...row.property, id: row.propertyId }, { ...row, amount: row.amount.toString() })]));
   }
 }
