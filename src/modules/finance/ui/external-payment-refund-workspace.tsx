@@ -6,7 +6,7 @@ import { SkeletonBlock } from "@/design-system/shells";
 import { formatCurrencyAmount, formatDateTime } from "@/i18n/format";
 import type { AppLocale } from "@/i18n/routing";
 import { Money } from "@/platform/money/money";
-import { externalRefundReconciliationInput, type externalRefundReviewInput } from "../domain/external-payment-refund-command";
+import { externalRefundReconciliationInput, externalRefundCancellationInput, type externalRefundReviewInput } from "../domain/external-payment-refund-command";
 import { guestDepositDetailSchema } from "../domain/guest-deposit-workspace";
 import { externalRefundCommandSchema, externalRefundReceiptSchema, externalRefundRecoverySchema, externalRefundReviewSchema, externalRefundViewSchema,
   externalRefundAdmissionCommandSchema, externalRefundAdmissionReceiptSchema, externalRefundAdmissionRecoverySchema, externalRefundAdmissionReviewSchema, acceptExternalRefund } from "../domain/external-payment-refund-workspace";
@@ -42,7 +42,7 @@ function OriginalDeposit({ detail }: { detail: z.infer<typeof guestDepositDetail
 export function ExternalPaymentRefundWorkspace(props: Props) {
   const { onAdmitted } = props, [refunded, setRefunded] = useState<Refunded | null>(null), storageKey = "alvillas:external-refund:" + props.scope;
   const confirmed = useCallback((receipt: Refunded) => {
-    if (receipt.admission) { onAdmitted(receipt.depositId); return; }
+    if (receipt.admission || receipt.cancellation) { onAdmitted(receipt.depositId); return; }
     storeCompensationNonce(storageKey, receipt.idempotencyKey); setRefunded(receipt);
   }, [onAdmitted, storageKey]);
   return refunded ? <AdmissionPhase {...props} refunded={refunded} storageKey={storageKey} /> : <RequestPhase {...props} storageKey={storageKey} onRefunded={confirmed} />;
@@ -66,6 +66,23 @@ function Reconcile({ request, onInvalidate, refresh }: { request: Pick<z.infer<t
     {error ? <p role="alert">{t("unavailable")}</p> : null}<button className="secondary-button" disabled={pending} type="submit">{t("reconcile")}</button>
     <button className="secondary-button" disabled={pending} type="button" onClick={() => start(async () => { setError(false); try { await refresh(); } catch { setError(true); } })}>{t("refresh")}</button></form>;
 }
+function CancelQueued({ request, locale, onInvalidate, refresh }: { request: Refunded; locale: AppLocale; onInvalidate: () => void; refresh: () => Promise<void> }) {
+  const t = useTranslations("ExternalRefunds"), [confirmed, setConfirmed] = useState(false), [pending, start] = useTransition(), [error, setError] = useState(false), source = useOriginalDeposit(request.depositId, onInvalidate),
+    ready = !source.pending && !source.error && source.data?.summary.depositId === request.depositId && source.data.providerCapture?.id === request.captureId;
+  return <form className="resource-form" data-testid="external-refund-cancel" onSubmit={event => {
+    event.preventDefault(); if (!ready || !confirmed) return; const input = externalRefundCancellationInput.safeParse({ intentId: request.id, reason: text(new FormData(event.currentTarget).get("reason")) });
+    if (!input.success) { setError(true); return; }
+    start(async () => { setError(false); try { const response = await fetch(commandPath, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "CANCEL", input: input.data }) });
+      if (response.status === 401 || response.status === 403) { onInvalidate(); return; } if (!response.ok) throw Error(); const result = externalRefundViewSchema.parse(await response.json());
+      if (result.id !== request.id || result.idempotencyKey !== request.idempotencyKey || result.state !== "RELEASED" || !result.cancellation) throw Error(); await refresh();
+    } catch { setError(true); } });
+  }}><h3>{t("cancelQueued")}</h3><p>{t("cancellationGuidance")}</p>
+    {source.error ? <p role="alert">{t(source.error)}</p> : source.pending ? <SkeletonBlock rows={2} /> : source.data && ready ? <OriginalDeposit detail={source.data} /> : <p role="alert">{t("unavailable")}</p>}
+    <p>{formatCurrencyAmount(locale, request.amount.amount, request.amount.currency)}</p><p dir="auto">{request.input.refund.purpose}</p>
+    <fieldset className="resource-form" disabled={pending || !ready}><legend>{t("cancelQueued")}</legend><label className="field"><span>{t("reason")}</span><textarea name="reason" dir="auto" required minLength={6} maxLength={500} data-testid="external-refund-cancel-reason" /></label>
+      <label className="compensation-cost-check"><input type="checkbox" required checked={confirmed} onChange={event => setConfirmed(event.target.checked)} data-testid="external-refund-cancel-confirm" /><span>{t("confirmCancel")}</span></label></fieldset>
+    {error ? <p role="alert">{t("unavailable")}</p> : null}<button className="secondary-button" type="submit" disabled={pending || !ready || !confirmed} data-testid="external-refund-cancel-submit">{t("cancelQueued")}</button></form>;
+}
 function RequestPhase({ storageKey, onRefunded, ...props }: Props & { storageKey: string; onRefunded: (receipt: Refunded) => void }) {
   const t = useTranslations("ExternalRefunds"), [pending, setPending] = useState<Refunded | null>(null), onPending = useCallback((receipt: Refunded) => setPending(receipt), [setPending]);
   const command = useCompensationCommand({ storageKey, inputSchema: externalRefundCommandSchema, receiptSchema: externalRefundReceiptSchema, recoverySchema: externalRefundRecoverySchema,
@@ -74,6 +91,7 @@ function RequestPhase({ storageKey, onRefunded, ...props }: Props & { storageKey
   return <section className="resource-form" data-testid="external-refund-request"><h2>{t("requestTitle")}</h2><p>{t("requestGuidance")}</p>
     <Recovery state={command.state} recover={() => { void command.recover(); }} retry={() => { void command.send(); }} />
     {pending ? <Reconcile request={pending} onInvalidate={props.onInvalidate} refresh={command.recover} /> : null}
+    {pending?.sourceState === "QUEUED" && command.state === "pending" ? <CancelQueued request={pending} locale={props.locale} onInvalidate={props.onInvalidate} refresh={command.recover} /> : null}
     {pending && ["FAILED", "CANCELLED"].includes(pending.sourceState) ? <p role="alert">{t("providerUnresolved")}</p> : null}
     {props.draft && command.state === "ready" ? <RequestReview {...props} draft={props.draft} send={input => { void command.send(input); }} /> : null}
   </section>;

@@ -8,6 +8,13 @@ const id = randomUUID(), captureId = randomUUID(), depositId = randomUUID(), non
   completed = { ...pending, state: "COMPLETED", refundId: "VERIFIED_REFUND_1", refundedAt: "2026-11-05T09:00:00.000Z", settlement: { schemaVersion: 1, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN", gross: amount, fee: { amount: "0.02", currency: "MAD" }, net: { amount: "0.05", currency: "MAD" }, totalRefunded: amount } };
 
 describe("original provider refund workspace", () => {
+  it("requires a distinct native cancellation witness and never treats provider failure or cancellation as a release", () => {
+    const cancellation = { actorId: randomUUID(), reason: "Original request cancelled before any provider attempt", occurredAt: "2026-11-05T09:00:00.000Z" };
+    expect(externalRefundReceiptSchema.parse({ ...pending, state: "RELEASED", cancellation })).toMatchObject({ sourceState: "RELEASED", state: "SUCCEEDED", admission: null, refundedAt: null, cancellation });
+    expect(externalRefundViewSchema.safeParse({ ...pending, state: "RELEASED" }).success).toBe(false);
+    expect(externalRefundViewSchema.safeParse({ ...completed, state: "RELEASED", cancellation }).success).toBe(false);
+    for (const state of ["PENDING", "FAILED", "CANCELLED"]) expect(externalRefundViewSchema.safeParse({ ...pending, state, cancellation }).success).toBe(false);
+  });
   it.each(["QUEUED", "UNCONFIRMED", "PENDING", "FAILED", "CANCELLED"])("retains %s source claims for recovery without asserting financial success or releasing funds", state => {
     expect(externalRefundRecoverySchema.parse({ request: { ...pending, state } }).request).toMatchObject({ requestId: id, idempotencyKey: nonce, state: "PENDING", sourceState: state, failureCode: null, admission: null });
     expect(externalRefundAdmissionRecoverySchema.parse({ request: { ...pending, state } })).toEqual({ request: null });

@@ -4874,6 +4874,9 @@
     "feeCorrectionRequired": "Les frais restitués et vérifiés nécessitent la correction de la dépense initiale avant la comptabilisation du remboursement.",
     "settlementUnavailable": "Le remboursement est conservé. Les détails vérifiés du règlement sont nécessaires à sa comptabilisation.",
     "confirmAdmission": "Je confirme le remboursement initial du prestataire et son écriture comptable.",
-    "admit": "Comptabiliser le remboursement confirmé"
+    "admit": "Comptabiliser le remboursement confirmé",
+    "cancelQueued": "Annuler le remboursement non envoyé",
+    "cancellationGuidance": "L’annulation ne libère cette réservation que si aucune tentative auprès du prestataire n’a commencé. Un remboursement tenté ou incertain reste réservé pour vérification.",
+    "confirmCancel": "Je confirme l’annulation de cette demande initiale de remboursement non envoyée."
   }
 }

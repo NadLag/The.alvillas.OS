@@ -16,6 +16,7 @@ export class ExternalPaymentRefundRepository {
   byKey(idempotencyKey: string) { return this.tx.externalPaymentRefundIntent.findUnique({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, include }); }
   capture(id: string) { return this.tx.externalPaymentCapture.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } }, include: { intent: true } }); }
   reserved(depositId: string) { return new GuestDepositRepository(this.tx, this.organizationId).reservedExternalRefunds(depositId); }
+  cancellation(intentId: string) { return new GuestDepositRepository(this.tx, this.organizationId).externalRefundCancellation(intentId); }
   create(saved: ReturnType<typeof retainExternalPaymentRefund>, authorizationCap: AuthorizationCap) {
     return this.tx.externalPaymentRefundIntent.create({ data: { organizationId: this.organizationId, captureId: saved.input.captureId,
       depositId: saved.input.refund.depositId, requestedBy: saved.requestedBy, amount: saved.input.refund.amount, currency: saved.input.refund.currency,

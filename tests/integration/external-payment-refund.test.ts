@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { withTenant } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { Money } from "@/platform/money/money";
 import * as audits from "@/platform/audit/audit-writer";
@@ -70,6 +70,68 @@ function gateway(f: Fixture, input: Awaited<ReturnType<typeof draft>>, state: "P
   return { evidence, refund: vi.fn(() => Promise.resolve({ ...evidence, settlement: null })), lookupRefund: vi.fn(() => Promise.resolve({ ...evidence, settlement: null })) };
 }
 describe("original provider refund reservations on PostgreSQL", () => {
+  it("rolls cancellation back when its attributed witness is missing", async () => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), before = await facts(f.org), write = audits.writeAuditEvent;
+    vi.spyOn(audits, "writeAuditEvent").mockImplementation((tx, event) => event.action === "finance.external_payment.refund_cancelled_before_attempt" ? Promise.resolve(undefined) : write(tx, event));
+    await expect(executeExternalPaymentRefundCommand(f.ctx, { operation: "CANCEL", input: { intentId: request.id, reason: "Cancellation must retain its original attributed immutable witness" } }, { db })).rejects.toBeInstanceOf(GuestDepositSourceError);
+    expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).cancellation(request.id))).toBeNull();
+    expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).reserved(input.refund.depositId))).toBe("0.03"); expect(await facts(f.org)).toEqual(before);
+  });
+  it("rechecks current and retained void authority after the actual cancellation write", async () => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), before = await facts(f.org), write = audits.writeAuditEvent; let revoked = false;
+    vi.spyOn(audits, "writeAuditEvent").mockImplementation(async (tx, event) => {
+      const result = await write(tx, event);
+      if (event.action === "finance.external_payment.refund_cancelled_before_attempt") { if (!("permission" in tx) || !("rolePermission" in tx)) throw Error("Actual native tenant transaction required for revocation");
+        const native = tx as unknown as TenantTransaction, permission = await native.permission.findUniqueOrThrow({ where: { organizationId_key: { organizationId: f.org, key: "financial_transaction:void" } } });
+        await native.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permissionId: permission.id } }); revoked = true; }
+      return result;
+    });
+    await expect(executeExternalPaymentRefundCommand(f.ctx, { operation: "CANCEL", input: { intentId: request.id, reason: "Recheck actual cancellation authority after its final audit write" } }, { db })).rejects.toBeInstanceOf(GuestDepositSourceError);
+    expect(revoked).toBe(true); expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).cancellation(request.id))).toBeNull();
+    expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).reserved(input.refund.depositId))).toBe("0.03"); expect(await facts(f.org)).toEqual(before);
+  });
+  it("keeps the first verified economic time in private recovery and admission after later completed provider observations", async () => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input), ref = await reference(f, request.id), amount = { amount: input.refund.amount, currency: "MAD" },
+      settlement = { schemaVersion: 1 as const, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN" as const, gross: amount, fee: { amount: "0.00", currency: "MAD" }, net: amount, totalRefunded: amount };
+    await executeExternalPaymentRefundReference(ref, { db, provider: { refund: () => Promise.resolve({ ...provider.evidence, settlement }), lookupRefund: () => Promise.resolve({ ...provider.evidence, settlement }) } });
+    const before = await facts(f.org), laterAt = new Date(Date.parse(provider.evidence.updatedAt) + 1000).toISOString();
+    await executeExternalPaymentRefundReference(ref, { db, provider: { refund: provider.refund, lookupRefund: () => Promise.resolve({ ...provider.evidence, updatedAt: laterAt, refundedAt: laterAt, settlement }) } });
+    expect(await facts(f.org)).toEqual(before);
+    expect(externalRefundViewSchema.parse(await getExternalPaymentRefund(f.ctx, { intentId: request.id }, { db })).refundedAt).toBe(provider.evidence.refundedAt);
+    const review = await reviewExternalPaymentRefundAdmission(f.ctx, { intentId: request.id }, { db }); expect(review.refundedAt).toBe(provider.evidence.refundedAt);
+    const admitted = await admitExternalPaymentRefund(f.ctx, { intentId: request.id, reviewFingerprint: review.reviewFingerprint }, { db }), recorded = await facts(f.org), lastAt = new Date(Date.parse(laterAt) + 1000).toISOString();
+    await executeExternalPaymentRefundReference(ref, { db, provider: { refund: provider.refund, lookupRefund: () => Promise.resolve({ ...provider.evidence, updatedAt: lastAt, refundedAt: lastAt, settlement }) } });
+    const recovered = externalRefundViewSchema.parse((await recoverExternalPaymentRefund(f.ctx, { key: input.refund.idempotencyKey }, { db })).request);
+    expect(recovered).toMatchObject({ refundedAt: provider.evidence.refundedAt, admission: { transactionId: admitted.id, occurredAt: provider.evidence.refundedAt } }); expect(await facts(f.org)).toEqual(recorded);
+  });
+  it("releases only an unattempted original refund, retains the source, and prevents any later provider POST", async () => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), before = await facts(f.org), reason = "Cancel this original request before any provider payment attempt";
+    const released = externalRefundViewSchema.parse(await executeExternalPaymentRefundCommand(f.ctx, { operation: "CANCEL", input: { intentId: request.id, reason } }, { db }));
+    expect(released).toMatchObject({ id: request.id, state: "RELEASED", admission: null, cancellation: { reason }, idempotent: false });
+    expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).reserved(input.refund.depositId))).toBe("0");
+    const provider = gateway(f, input); expect(await executeExternalPaymentRefundReference(await reference(f, request.id), { db, provider })).toMatchObject({ state: "RELEASED" }); expect(provider.refund).not.toHaveBeenCalled(); expect(provider.lookupRefund).not.toHaveBeenCalled();
+    await expect(withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).attempt(request.id))).rejects.toThrow("cancelled original refund cannot start a provider attempt");
+    expect(externalRefundViewSchema.parse(await executeExternalPaymentRefundCommand(f.ctx, { operation: "CANCEL", input: { intentId: request.id, reason } }, { db }))).toMatchObject({ state: "RELEASED", idempotent: true });
+    expect(await facts(f.org)).toEqual(before);
+    const bank = { ...input.refund, accountId: f.banks.refund.id, method: "bank_transfer", amount: "0.07", idempotencyKey: randomUUID() }, review = await reviewGuestDepositRefund(f.ctx, guestDraft(bank), { db });
+    expect(await postGuestDepositRefund(f.ctx, { ...bank, reviewFingerprint: review.reviewFingerprint }, { db })).toMatchObject({ operation: "REFUND", depositId: input.refund.depositId });
+  });
+  it("never releases an unknown original POST outcome or permits a forged cancellation witness", async () => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input), reason = "An uncertain payment must remain reserved until independently resolved";
+    provider.refund.mockRejectedValueOnce(new Error("retained-original-refund-response-loss")); await expect(executeExternalPaymentRefundReference(await reference(f, request.id), { db, provider })).rejects.toThrow("retained-original-refund-response-loss"); const before = await facts(f.org);
+    await expect(executeExternalPaymentRefundCommand(f.ctx, { operation: "CANCEL", input: { intentId: request.id, reason } }, { db })).rejects.toBeInstanceOf(GuestDepositSourceError);
+    await expect(withTenant(db, f.org, tx => audits.writeAuditEvent(tx, { organizationId: f.org, actorId: f.account.id, action: "finance.external_payment.refund_cancelled_before_attempt", resourceType: "financial_transaction", resourceId: request.id,
+      after: { intentId: request.id, captureId: input.captureId, depositId: input.refund.depositId, idempotencyKey: input.refund.idempotencyKey, amount: { amount: input.refund.amount, currency: input.refund.currency }, disposition: "CANCELLED_BEFORE_PROVIDER_ATTEMPT" }, reason, requestId: randomUUID(), occurredAt: new Date() }))).rejects.toThrow("refund cancellation requires original unattempted durable source");
+    expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).reserved(input.refund.depositId))).toBe("0.03"); expect(await facts(f.org)).toEqual(before); expect(provider.refund).toHaveBeenCalledTimes(1);
+  });
+  it("serializes cancellation against the actual provider attempt so only one can win", async () => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input), before = await facts(f.org), ref = await reference(f, request.id),
+      outcomes = await Promise.allSettled([executeExternalPaymentRefundCommand(f.ctx, { operation: "CANCEL", input: { intentId: request.id, reason: "Race the original queued cancellation against its first provider attempt" } }, { db }), executeExternalPaymentRefundReference(ref, { db, provider })]);
+    if (outcomes[0].status === "fulfilled") { expect(outcomes[0].value).toMatchObject({ state: "RELEASED" }); expect(provider.refund).not.toHaveBeenCalled(); expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).reserved(input.refund.depositId))).toBe("0"); }
+    else { expect(outcomes[0].reason).toBeInstanceOf(GuestDepositSourceError); expect(outcomes[1].status).toBe("fulfilled"); expect(provider.refund).toHaveBeenCalledTimes(1); expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).reserved(input.refund.depositId))).toBe("0.03"); }
+    expect(await facts(f.org)).toEqual(before);
+  });
+
   it("returns the original durable request and actual admission DTOs without offering a fabricated manual opposite", async () => {
     const f = await fixture(), input = await draft(f), requested = externalRefundViewSchema.parse(await executeExternalPaymentRefundCommand(f.ctx, { operation: "REQUEST", input }, { db }));
     expect(requested).toMatchObject({ idempotencyKey: input.refund.idempotencyKey, input, state: "QUEUED", admission: null, idempotent: false });

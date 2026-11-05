@@ -29,10 +29,10 @@ function retained(request: Request) {
 function originalActor(request: Request): FinanceActorContext {
   return externalPaymentContext({ organizationId: request.organizationId, actorId: request.requestedBy, authContext: restoreAuthorizationCap(request.authorizationCap) });
 }
-function view(request: Request, idempotent: boolean) {
+function view(request: Request, idempotent: boolean, cancelled = false) {
   const observation = request.identity?.observations[0];
   return { id: request.id, idempotencyKey: request.idempotencyKey, amount: Money.of(request.amount.toString(), request.currency).toJSON(),
-    state: observation?.state ?? (request.attempt ? "UNCONFIRMED" : "QUEUED"), refundId: request.identity?.refundId ?? null, refundedAt: observation?.refundedAt?.toISOString() ?? null, idempotent };
+    state: cancelled ? "RELEASED" : observation?.state ?? (request.attempt ? "UNCONFIRMED" : "QUEUED"), refundId: request.identity?.refundId ?? null, refundedAt: observation?.refundedAt?.toISOString() ?? null, idempotent };
 }
 async function prepare(ctx: FinanceActorContext, saved: ReturnType<typeof retainExternalPaymentRefund>, tx: TenantTransaction, ownReservation = false) {
   const repository = new ExternalPaymentRefundRepository(tx, ctx.organizationId), capture = await repository.capture(saved.input.captureId),
@@ -73,6 +73,7 @@ async function referenced(tx: TenantTransaction, reference: z.infer<typeof refer
 export async function executeExternalPaymentRefundReference(raw: unknown, deps: Deps = {}) {
   const reference = referenceSchema.parse(raw), db = deps.db ?? prisma, start = await withTenant(db, reference.organizationId, async tx => {
     const { repository, request, payload } = await referenced(tx, reference), saved = retained(request), providerIntent = paymentRefundIntent({ captureId: request.capture.paymentId, requestId: request.idempotencyKey, amount: request.amount.toString(), currency: request.currency });
+    if (await repository.cancellation(request.id)) return { request, providerIntent, post: false, lookup: null, cancelled: true };
     if (payload.refundId) {
       if (!request.attempt || request.identity && request.identity.refundId !== payload.refundId) throw new ExternalPaymentRefundError();
       return { request, providerIntent, post: false, lookup: payload.refundId };
@@ -86,7 +87,7 @@ export async function executeExternalPaymentRefundReference(raw: unknown, deps: 
     await prepare(originalActor(request), saved, tx, true); await repository.flushGuards();
     return { request, providerIntent, post: true, lookup: null };
   });
-  if (!start.post && !start.lookup) return view(start.request, true);
+  if (!start.post && !start.lookup) return view(start.request, true, "cancelled" in start && start.cancelled);
   const provider = deps.provider ?? new PayPalPaymentProvider(), { settlement, ...evidence } = providerRefundResultSchema.parse(start.lookup ? await provider.lookupRefund({ intent: start.providerIntent, refundId: start.lookup }) : await provider.refund(start.providerIntent));
   if (evidence.captureId !== start.providerIntent.captureId || evidence.requestId !== start.providerIntent.requestId || start.lookup && evidence.refundId !== start.lookup || !Money.of(evidence.amount.amount, evidence.amount.currency).equals(Money.of(start.providerIntent.amount, start.providerIntent.currency))) throw new ExternalPaymentRefundError();
   return withTenant(db, reference.organizationId, async tx => {

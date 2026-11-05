@@ -26,10 +26,11 @@ function retained(request: Request, ctx: FinanceActorContext) {
 export { retained as retainedExternalRefund, sourceView as authorizeExternalRefundSourceView };
 async function sourceView(ctx: FinanceActorContext, tx: TenantTransaction, request: Request, journal?: { id: string; occurredAt: Date }) {
   const saved = retained(request, ctx), contexts = [ctx, { ...ctx, authContext: restoreAuthorizationCap(request.authorizationCap) }];
+  const first = request.identity ? await new GuestDepositRepository(tx, ctx.organizationId).firstCompletedExternalRefund(request.identity.id) : null;
   for (const actor of contexts) {
     const source = await readGuestDepositSourceInTransaction(actor, saved.input.refund.depositId, tx);
     if (source.location.id !== saved.input.refund.accountId) throw new ExternalPaymentRefundError();
-    const at = journal?.occurredAt ?? request.identity?.observations[0]?.refundedAt ?? request.requestedAt, target = { ...source.resource, id: journal?.id ?? request.id, financialRecordId: journal?.id ?? request.id, occurredAt: at, amount: saved.input.refund.amount };
+    const at = journal?.occurredAt ?? first?.refundedAt ?? request.identity?.observations[0]?.refundedAt ?? request.requestedAt, target = { ...source.resource, id: journal?.id ?? request.id, financialRecordId: journal?.id ?? request.id, occurredAt: at, amount: saved.input.refund.amount };
     await recheckFinanceAuthorization(actor, tx, await source.finance.clock(), [{ action: "view", resource: target }, ...employeeSettlementFundingChecks(actor, source.location, saved.input.refund.amount, at, "view")], new ExternalPaymentRefundError());
   }
 }

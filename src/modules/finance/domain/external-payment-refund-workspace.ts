@@ -6,7 +6,8 @@ import { externalRefundRequestInput, externalRefundReviewInput } from "./externa
 const id = z.uuid(), hash = z.string().regex(/^[a-f0-9]{64}$/u), instant = z.iso.datetime(),
   money = z.object({ amount: z.string().regex(/^(?:0|[1-9]\d*)\.\d{2}$/u), currency: z.string().regex(/^[A-Z]{3}$/u) }).strict();
 export const externalRefundViewSchema = z.object({ id, idempotencyKey: id, captureId: id, depositId: id, idempotent: z.boolean(), amount: money,
-  state: z.enum(["QUEUED", "UNCONFIRMED", "PENDING", "COMPLETED", "FAILED", "CANCELLED"]), refundId: z.string().regex(/^[A-Za-z0-9_-]{1,127}$/u).nullable(), refundedAt: instant.nullable(),
+  state: z.enum(["QUEUED", "UNCONFIRMED", "PENDING", "COMPLETED", "FAILED", "CANCELLED", "RELEASED"]), refundId: z.string().regex(/^[A-Za-z0-9_-]{1,127}$/u).nullable(), refundedAt: instant.nullable(),
+  cancellation: z.object({ actorId: id, reason: z.string().min(6).max(500), occurredAt: instant }).strict().nullable().default(null),
   input: externalRefundRequestInput, settlement: providerRefundSettlementSchema.nullable(),
   admission: z.object({ state: z.literal("ADMITTED"), transactionId: id, occurredAt: instant }).strict().nullable()
 }).strict().refine(value => value.captureId === value.input.captureId && value.depositId === value.input.refund.depositId && value.idempotencyKey === value.input.refund.idempotencyKey &&
@@ -15,9 +16,10 @@ export const externalRefundViewSchema = z.object({ id, idempotencyKey: id, captu
     Money.of(value.amount.amount, value.amount.currency).equals(Money.of(value.settlement.gross.amount, value.settlement.gross.currency)) &&
     Money.of(value.settlement.gross.amount, value.amount.currency).subtract(Money.of(value.settlement.fee.amount, value.amount.currency)).equals(Money.of(value.settlement.net.amount, value.amount.currency)), "verified_settlement_required")
   .refine(value => value.state === "COMPLETED" ? Boolean(value.refundId && value.refundedAt) : !value.refundedAt && !value.admission, "actual_provider_refund_required")
-  .refine(value => !value.admission || value.admission.occurredAt === value.refundedAt, "actual_refund_date_required");
+  .refine(value => !value.admission || value.admission.occurredAt === value.refundedAt, "actual_refund_date_required")
+  .refine(value => value.state === "RELEASED" ? Boolean(value.cancellation) && !value.refundId && !value.refundedAt && !value.settlement && !value.admission : !value.cancellation, "explicit_unattempted_release_required");
 export const externalRefundReceiptSchema = externalRefundViewSchema.transform(value => ({ ...value, sourceState: value.state, requestId: value.id,
-  state: value.state === "COMPLETED" ? "SUCCEEDED" as const : "PENDING" as const, failureCode: null }));
+  state: value.state === "COMPLETED" || value.state === "RELEASED" ? "SUCCEEDED" as const : "PENDING" as const, failureCode: null }));
 export const externalRefundRecoverySchema = z.object({ request: externalRefundViewSchema.nullable() }).strict().transform(({ request }) => ({ request: request ? externalRefundReceiptSchema.parse(request) : null }));
 export const externalRefundCommandSchema = externalRefundReviewInput.extend({ idempotencyKey: id, refund: externalRefundRequestInput.shape.refund.omit({ idempotencyKey: true }) }).strict();
 export const externalRefundReviewSchema = z.object({ captureId: id, depositId: id, amount: money, account: z.object({ id, name: z.string() }).strict(), reviewFingerprint: hash }).strict();

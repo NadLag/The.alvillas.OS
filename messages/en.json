@@ -4874,6 +4874,9 @@
     "feeCorrectionRequired": "The verified returned fee requires its original expense correction before this refund can be recorded.",
     "settlementUnavailable": "The refund is retained. Verified settlement details are required before it can be recorded.",
     "confirmAdmission": "I confirm the original provider refund and its financial record.",
-    "admit": "Record confirmed refund"
+    "admit": "Record confirmed refund",
+    "cancelQueued": "Cancel unsent refund",
+    "cancellationGuidance": "Cancellation releases this reservation only if the provider attempt has not started. An uncertain or attempted refund remains reserved for reconciliation.",
+    "confirmCancel": "I confirm cancellation of this original unsent refund request."
   }
 }

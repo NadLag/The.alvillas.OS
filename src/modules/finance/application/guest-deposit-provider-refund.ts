@@ -18,6 +18,7 @@ export async function guestDepositProviderRefundSource(ctx: FinanceActorContext,
   if (!key) return null;
   const repository = new GuestDepositRepository(tx, ctx.organizationId), request = await repository.externalRefundByKey(key);
   if (!request) { if (scope.reservationKey) throw new ExternalPaymentRefundError(); return null; }
+  if (await repository.externalRefundCancellation(request.id)) throw new ExternalPaymentRefundError();
   const saved = retainExternalPaymentRefund(request.input, request.organizationId, request.requestedBy), audit = await repository.externalRefundReview(request.id), review = externalPaymentRefundReviewSnapshot.safeParse(audit?.after);
   if (request.requestedBy !== ctx.actorId || saved.fingerprint !== request.requestFingerprint || saved.canonicalRequest !== request.canonicalRequest ||
     !review.success || review.data.intentId !== request.id || review.data.reviewFingerprint !== saved.input.refund.reviewFingerprint || audit?.actorId !== request.requestedBy || audit.reason !== saved.input.refund.reason) throw new ExternalPaymentRefundError();

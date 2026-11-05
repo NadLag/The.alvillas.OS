@@ -38,12 +38,14 @@ async function read(ctx: FinanceActorContext, tx: TenantTransaction, request: Re
   const saved = retainedExternalRefund(request, ctx), journal = await new GuestDepositRepository(tx, ctx.organizationId).byCommand(request.idempotencyKey);
   await authorizeExternalRefundSourceView(ctx, tx, request, journal ?? undefined);
   const observation = request.identity?.observations[0], settlement = providerRefundSettlementSchema.safeParse(observation?.settlement?.settlement);
+  const cancellation = await new GuestDepositRepository(tx, ctx.organizationId).externalRefundCancellation(request.id), first = request.identity ? await new GuestDepositRepository(tx, ctx.organizationId).firstCompletedExternalRefund(request.identity.id) : null;
   await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.external_payment.refund_viewed", resourceType: "financial_transaction", resourceId: request.id,
     after: { intentId: request.id }, reason: "Viewed original refund intent, provider confirmation and independent native admission", requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: await new FinanceRepository(tx, ctx.organizationId).clock() });
   await authorizeExternalRefundSourceView(ctx, tx, request, journal ?? undefined);
   return { id: request.id, idempotencyKey: request.idempotencyKey, captureId: request.captureId, depositId: request.depositId, idempotent: true,
-    amount: Money.of(request.amount.toString(), request.currency).toJSON(), state: observation?.state ?? (request.attempt ? "UNCONFIRMED" : "QUEUED"),
-    refundId: request.identity?.refundId ?? null, refundedAt: observation?.refundedAt?.toISOString() ?? null,
+    amount: Money.of(request.amount.toString(), request.currency).toJSON(), state: cancellation ? "RELEASED" : observation?.state ?? (request.attempt ? "UNCONFIRMED" : "QUEUED"),
+    refundId: request.identity?.refundId ?? null, refundedAt: observation?.state === "COMPLETED" ? (journal?.occurredAt ?? first?.refundedAt)?.toISOString() ?? null : null,
+    cancellation: cancellation ? { actorId: cancellation.actorId, reason: cancellation.reason, occurredAt: cancellation.occurredAt.toISOString() } : null,
     input: saved.input, settlement: settlement.success ? settlement.data : null, admission: journal ? { state: "ADMITTED" as const, transactionId: journal.id, occurredAt: journal.occurredAt.toISOString() } : null };
 }
 export async function getExternalPaymentRefund(inputContext: FinanceActorContext, raw: unknown, deps: Deps = {}) {
