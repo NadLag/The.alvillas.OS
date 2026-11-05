@@ -1286,7 +1286,8 @@
       "expense_emergency": "Emergency expense approval exception",
       "supplier_invoice_emergency": "Emergency invoice cost submitted",
       "employee_cost_emergency": "Emergency employee work cost notice",
-      "receivable_reminder": "A receivable needs your review."
+      "receivable_reminder": "A receivable needs your review.",
+      "ledger_integrity_failed": "Ledger integrity check failed"
     },
     "settings": {
       "eyebrow": "Your account",
@@ -1348,7 +1349,8 @@
       "empty": "No eligible recipients.",
       "email": "Email",
       "push": "Push",
-      "receivablePolicy": "Only explicitly selected people with current organization access to receivables, journals and staff compensation receive these reminders. Each reminder uses the current outstanding claim and the configured company calendar."
+      "receivablePolicy": "Only explicitly selected people with current organization access to receivables, journals and staff compensation receive these reminders. Each reminder uses the current outstanding claim and the configured company calendar.",
+      "integrityPolicy": "Choose the owner or approved financial recipients explicitly. Only recipients with current complete financial and audit access and completed security enrollment can receive integrity failures. The audience applies across the organization; configured email and inbox alerts remain critical. Push still requires consent."
     },
     "resolution": {
       "CANCELLED": "Proposal withdrawn",

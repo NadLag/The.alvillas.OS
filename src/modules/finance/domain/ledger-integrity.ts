@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { Money } from "@/platform/money/money";
+import { explicitNotificationRoutingSchema } from "@/platform/notifications/notification-routing";
 
 export const ledgerIntegrityPolicyKey = "finance.ledger_integrity";
+export const ledgerIntegrityRoutingKey = "notification.routing.ledger_integrity_failed";
+export const ledgerIntegrityRoutingSchema = explicitNotificationRoutingSchema;
 const accountTypes = z.array(z.string().trim().min(1).max(100)).min(1).max(100);
 export const ledgerIntegrityPolicySchema = z.object({
   run_at: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u),

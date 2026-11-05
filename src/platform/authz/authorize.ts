@@ -83,6 +83,8 @@ export type Resource = {
   financialRecordId?: string | null;
   approvalId?: string | null;
   notificationEventId?: string | null;
+  ruleKey?: string;
+  ledgerIntegrityFailed?: boolean;
   walletId?: string | null;
   fieldTeamId?: string | null;
   assignedUserAccountId?: string | null;

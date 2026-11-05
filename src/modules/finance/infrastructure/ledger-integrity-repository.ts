@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { IntegrityAccount, IntegrityMovement, IntegrityTransaction } from "../domain/ledger-integrity";
+import { guestDepositCommandKey } from "./guest-deposit-repository";
 
 // Technical foreign-key identities, including retained historical source rows.
 // Labels, references, categories and configuration values are not dimensions.
@@ -11,23 +12,39 @@ const dimensionSources = [
   { keys: ["guest_id", "guestId"], table: "guest" },
   { keys: ["supplier_id", "supplierId"], table: "supplier" },
   { keys: ["supplier_invoice_id", "supplierInvoiceId"], table: "supplier_invoice" },
-  { keys: ["person_id", "personId"], table: "person" },
+  { keys: ["supplier_invoice_line_id"], table: "supplier_invoice_line" },
+  { keys: ["expense_id"], table: "expense" },
+  { keys: ["person_id", "personId", "employee_person_id", "wallet_person_id", "completed_by_person_id", "validated_by_person_id"], table: "person" },
+  { keys: ["completed_by_user_account_id", "validated_by_user_account_id"], table: "user_account" },
   { keys: ["employee_compensation_claim_id"], table: "employee_compensation_claim" },
+  { keys: ["employee_compensation_cost_id"], table: "employee_compensation_cost" },
+  { keys: ["employee_compensation_run_id"], table: "employee_compensation_run" },
+  { keys: ["employee_compensation_run_line_id"], table: "employee_compensation_run_line" },
+  { keys: ["airbnb_settlement_id"], table: "airbnb_settlement" },
+  { keys: ["commission_snapshot_id"], table: "commission_snapshot" },
+  { keys: ["receivable_assignment_id"], table: "receivable_assignment" },
+  { keys: ["receivable_collection_id"], table: "receivable_collection" },
+  { keys: ["original_posting_id", "receivable_posting_id"], table: "posting" },
+  { keys: ["from_account_id", "to_account_id", "ledger_account_id"], table: "ledger_account" },
   { keys: ["cash_collection_id", "cashCollectionId"], table: "cash_collection" },
-  { keys: ["original_transaction_id", "source_transaction_id"], table: "financial_transaction" }
+  { keys: ["original_transaction_id", "source_transaction_id", "reversal_of_transaction_id", "allocation_parent_transaction_id", "original_collection_transaction_id"], table: "financial_transaction" }
 ] as const;
-const uuidPattern = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$";
+const uuidPattern = "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 
 export class LedgerIntegrityRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
   async lock() {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":ledger-integrity"},0))::text`);
   }
-  async movements(after: string | undefined, limit: number) {
-    const dimensions = dimensionSources.flatMap(source => source.keys.map(name => Prisma.sql`
+  async movements(after: string | undefined, limit: number): Promise<IntegrityMovement[]> {
+    const dimensions = [...dimensionSources.flatMap(source => source.keys.map(name => Prisma.sql`
       (p.dimensions IS NULL OR NOT (p.dimensions ? ${name}) OR p.dimensions->${name}='null'::jsonb OR
         (jsonb_typeof(p.dimensions->${name})='string' AND EXISTS (SELECT 1 FROM ${Prisma.raw(source.table)} dimension
-          WHERE dimension.organization_id=p.organization_id AND dimension.id=CASE WHEN p.dimensions->>${name} ~ ${uuidPattern} THEN (p.dimensions->>${name})::uuid ELSE NULL END)))`));
+          WHERE dimension.organization_id=p.organization_id AND dimension.id=CASE WHEN p.dimensions->>${name} ~ ${uuidPattern} THEN (p.dimensions->>${name})::uuid ELSE NULL END)))`)),
+      ...["deposit_id", "deposit_application_id", "deposit_refund_id"].map(name => Prisma.sql`
+        (p.dimensions IS NULL OR NOT(p.dimensions ? ${name}) OR p.dimensions->${name}='null'::jsonb OR
+          (jsonb_typeof(p.dimensions->${name})='string' AND EXISTS(SELECT 1 FROM financial_transaction command
+            WHERE command.organization_id=p.organization_id AND command.idempotency_key=${guestDepositCommandKey("")} || (p.dimensions->>${name}))))`)];
     return this.tx.$queryRaw<IntegrityMovement[]>(Prisma.sql`SELECT p.id::text,p.transaction_id::text AS "transactionId",p.ledger_account_id::text AS "accountId",
       p.currency::text AS currency,p.amount::text AS amount,p.side,coalesce(a.account_type,'') AS "accountType",
       (t.id IS NOT NULL AND a.id IS NOT NULL AND (p.dimensions IS NULL OR jsonb_typeof(p.dimensions)='object') AND ${Prisma.join(dimensions," AND ")}) AS "validScope"

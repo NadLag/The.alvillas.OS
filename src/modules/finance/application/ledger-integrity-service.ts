@@ -8,12 +8,15 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { financialRuleSourceChecks } from "@/platform/config/financial-rule-authority";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
+import { NotificationRepository } from "@/platform/notifications/notification-repository";
+import { publishNotifications } from "@/platform/notifications/notification-service";
 import { calendarDateAt } from "@/i18n/format";
 import { requireCurrentTimezoneData } from "@/platform/time/timezone-data";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { AccountingPeriodRepository } from "../infrastructure/accounting-period-repository";
 import { LedgerIntegrityRepository } from "../infrastructure/ledger-integrity-repository";
-import { ledgerIntegrityPolicyKey, ledgerIntegrityPolicySchema, LedgerIntegrityRebuild } from "../domain/ledger-integrity";
+import { ledgerIntegrityPolicyKey, ledgerIntegrityPolicySchema, ledgerIntegrityRoutingKey, ledgerIntegrityRoutingSchema, LedgerIntegrityRebuild } from "../domain/ledger-integrity";
+import { ledgerIntegrityNoticeKey } from "../domain/ledger-integrity-notification";
 import type { FinanceActorContext } from "./finance-access";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
@@ -26,11 +29,14 @@ async function settings(organizationId: string, tx: TenantTransaction) {
   const now = await new FinanceRepository(tx, organizationId).clock(), rule = await new ConfigRuleRepository(tx, organizationId).resolve({ key: ledgerIntegrityPolicyKey,
     scopes: [{ scopeType: "organization", scopeId: null }], asOf: now });
   if (!rule) return null;
-  const policy = ledgerIntegrityPolicySchema.safeParse(rule.value), calendar = await new AccountingPeriodRepository(tx, organizationId).policy(now);
-  if (!policy.success || !rule.createdBy || !calendar) throw new LedgerIntegrityConfigurationError();
+  const policy = ledgerIntegrityPolicySchema.safeParse(rule.value), calendar = await new AccountingPeriodRepository(tx, organizationId).policy(now),
+    routingRule = await new ConfigRuleRepository(tx, organizationId).resolve({ key: ledgerIntegrityRoutingKey, scopes: [{ scopeType: "organization", scopeId: null }], asOf: now }),
+    routing = ledgerIntegrityRoutingSchema.safeParse(routingRule?.value);
+  if (!policy.success || !rule.createdBy || !calendar || !routingRule || !routing.success) throw new LedgerIntegrityConfigurationError();
   requireCurrentTimezoneData();
-  return { rule, policy: policy.data, now, timezone: calendar.value.timezone,
-    identity: commandFingerprint({ ruleId: rule.id, value: rule.value, reason: rule.reason, actorId: rule.createdBy, calendarId: calendar.id, calendarValue: calendar.value }) };
+  return { rule, policy: policy.data, routingRule, routing: routing.data, now, timezone: calendar.value.timezone,
+    identity: commandFingerprint({ ruleId: rule.id, value: rule.value, reason: rule.reason, actorId: rule.createdBy, calendarId: calendar.id, calendarValue: calendar.value,
+      routingRuleId: routingRule.id, routing: routing.data }) };
 }
 async function authority(ctx: FinanceActorContext, tx: TenantTransaction) {
   const now = await new FinanceRepository(tx, ctx.organizationId).clock();
@@ -38,8 +44,8 @@ async function authority(ctx: FinanceActorContext, tx: TenantTransaction) {
     ...financialRuleSourceChecks(ctx.organizationId, ledgerIntegrityPolicyKey)], new LedgerIntegrityAccessError());
 }
 
-/** Called by the signed dispatcher only after failure routing is wired. Every
- * occurrence has a configured local time and an immutable native receipt. */
+/** The signed dispatcher polls; business time, authority and failure audience
+ * are configured. Receipts, audit and failure requests commit together. */
 export async function scheduleLedgerIntegrity(organizationId: string, deps: Deps = {}) {
   const db = deps.db ?? prisma, admission = await withTenant(db, organizationId, async tx => {
     const configured = await settings(organizationId, tx); if (!configured) return null;
@@ -52,6 +58,9 @@ export async function scheduleLedgerIntegrity(organizationId: string, deps: Deps
   if (!admission) return { configured: false, runId: null, passed: null };
   if (admission.completed) return { configured: true, runId: admission.completed.id, passed: admission.completed.passed };
   if (!admission.due) return { configured: true, runId: null, passed: null };
+  await withTenant(db, organizationId, async tx => {
+    if (!(await new NotificationRepository(tx, organizationId).ledgerIntegrityRecipients(admission.routing)).length) throw new LedgerIntegrityConfigurationError();
+  });
   const captured = await withTenant(db, organizationId, async tx => {
     const configured = await settings(organizationId, tx); if (!configured || configured.identity !== admission.identity) throw new LedgerIntegritySourceChangedError();
     await authority(admission.ctx, tx);
@@ -76,7 +85,8 @@ export async function scheduleLedgerIntegrity(organizationId: string, deps: Deps
   // snapshot has ended, and rechecks the original journals before publication.
   return withTenant(db, organizationId, async tx => {
     const repository = new LedgerIntegrityRepository(tx, organizationId), rules = new ConfigRuleRepository(tx, organizationId);
-    await rules.lockVersion(ledgerIntegrityPolicyKey, "organization", null); await repository.lock();
+    for (const key of [ledgerIntegrityPolicyKey, ledgerIntegrityRoutingKey].sort()) await rules.lockVersion(key, "organization", null);
+    await repository.lock();
     const configured = await settings(organizationId, tx); if (!configured || configured.identity !== admission.identity) throw new LedgerIntegritySourceChangedError();
     await authority(admission.ctx, tx);
     const completed = await repository.completed(admission.rule.id, admission.on);
@@ -91,7 +101,29 @@ export async function scheduleLedgerIntegrity(organizationId: string, deps: Deps
       resourceType: "config_rule", resourceId: admission.rule.id, after: { key: ledgerIntegrityPolicyKey, runId: row.id, on: admission.on,
         checkedAt: captured.checkedAt.toISOString(), passed: row.passed, movements: captured.report.movements, failureCount: captured.report.failureCount, baselines },
       reason: admission.rule.reason, requestId: deps.requestId ?? randomUUID(), occurredAt: configured.now });
+    if (!row.passed) {
+      const notifications = new NotificationRepository(tx, organizationId), recipients = await notifications.ledgerIntegrityRecipients(configured.routing);
+      if (!recipients.length) throw new LedgerIntegrityConfigurationError();
+      await publishNotifications(tx, organizationId, recipients.map(recipientId => {
+        const eventId = randomUUID();
+        return { eventId, occurredAt: configured.now, key: ledgerIntegrityNoticeKey(row.id, recipientId), input: { kind: "ledger_integrity_failed" as const,
+          recipientId, targetId: eventId, integrityNotice: { runId: row.id, policyId: admission.rule.id, routingRuleId: configured.routingRule.id, routing: configured.routing } } };
+      }));
+      const current = new Set(await notifications.ledgerIntegrityRecipients(configured.routing));
+      if (recipients.some(recipient => !current.has(recipient))) throw new LedgerIntegrityAccessError();
+    }
     await authority(admission.ctx, tx);
     return { configured: true, runId: row.id, passed: row.passed };
   });
+}
+
+export async function tickLedgerIntegrity(organizationId: string, deps: Deps = {}) {
+  try { return { ...await scheduleLedgerIntegrity(organizationId, deps), blocked: null }; }
+  catch (error) {
+    const pending = { configured: true, runId: null, passed: null };
+    if (error instanceof LedgerIntegrityAccessError) return { ...pending, blocked: "authority_unavailable" as const };
+    if (error instanceof LedgerIntegrityConfigurationError) return { ...pending, blocked: "configuration_unavailable" as const };
+    if (error instanceof LedgerIntegritySourceChangedError) return { ...pending, blocked: "source_changed" as const };
+    throw error;
+  }
 }

@@ -12,6 +12,7 @@ import { notificationDestination, notificationInputSchema, notificationPageSchem
 import { z } from "zod";
 import { notificationPreferencesSchema, type NotificationPreferences } from "./notification-preferences";
 import { notificationRoutingKey, notificationRoutingSaveSchema, routedNotificationKindSchema } from "./notification-routing";
+import { recheckFinancialRuleAccess } from "@/platform/config/financial-rule-authority";
 
 export type NotificationActor = { organizationId: string; accountId: string; sessionId?: string; authContext: AuthContext };
 type Deps = { db?: TenantTransactionRunner; requestId?: string; now?: Date };
@@ -76,12 +77,14 @@ export async function deliverNotificationEvent(event: OutboxEvent, deps: Deps = 
 }
 
 export async function getNotificationRouting(actor: NotificationActor, input: unknown, deps: Deps = {}) {
-  const parsed = z.object({ kind: routedNotificationKindSchema, propertyId: z.string().uuid().nullable() }).strict().refine(value=>value.kind!=="receivable_reminder"||value.propertyId===null).parse(input);
+  const parsed = z.object({ kind: routedNotificationKindSchema, propertyId: z.string().uuid().nullable() }).strict().refine(value=>!["receivable_reminder","ledger_integrity_failed"].includes(value.kind)||value.propertyId===null).parse(input);
   if (actor.accountId !== actor.authContext.userAccountId || actor.authContext.organizationId !== actor.organizationId || !authorize(actor.authContext, "configure", {
     type: "config_rule", organizationId: actor.organizationId
   })) throw new NotificationAccessError();
   return withTenant(deps.db ?? prisma, actor.organizationId, async (tx) => {
     const repository = new NotificationRepository(tx, actor.organizationId);
+    await recheckFinancialRuleAccess({ organizationId: actor.organizationId, actorId: actor.accountId, authContext: actor.authContext }, tx, notificationRoutingKey(parsed.kind),
+      [{ action: "configure", resource: { type: "config_rule", organizationId: actor.organizationId }, organizationOnly: true }], new NotificationAccessError());
     await repository.validateRoutingReferences({ roles: [], people: [], assigned: false, channels: [] }, parsed.propertyId);
     const options = await repository.routingOptions();
     return { routing: await repository.routing(parsed.kind, parsed.propertyId),
