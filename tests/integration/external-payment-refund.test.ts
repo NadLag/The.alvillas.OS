@@ -11,8 +11,12 @@ import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repo
 import { PaymentMethodRepository } from "@/modules/finance/infrastructure/payment-method-repository";
 import { ExternalPaymentRefundRepository } from "@/modules/finance/infrastructure/external-payment-refund-repository";
 import { GuestDepositRepository } from "@/modules/finance/infrastructure/guest-deposit-repository";
-import { GuestDepositAuthorizationError } from "@/modules/finance/domain/guest-deposit";
+import { GuestDepositAuthorizationError, GuestDepositSourceError } from "@/modules/finance/domain/guest-deposit";
 import { admitExternalPaymentRefund, reviewExternalPaymentRefundAdmission } from "@/modules/finance/application/external-payment-refund-admission";
+import { executeExternalPaymentRefundCommand } from "@/modules/finance/application/external-payment-refund-api-service";
+import { externalRefundViewSchema } from "@/modules/finance/domain/external-payment-refund-workspace";
+import { readGuestDepositWorkspace } from "@/modules/finance/application/guest-deposit-workspace-service";
+import { reviewGuestDepositReversal } from "@/modules/finance/application/guest-deposit-service";
 import { guestPaymentMethodScopes } from "@/modules/finance/application/guest-deposit-payment-method";
 import { inspectGuestDepositReceiptInTransaction, reviewGuestDepositRefund, postGuestDepositRefund } from "@/modules/finance/application/guest-deposit-service";
 import { requestExternalPaymentCapture, executeExternalPaymentCaptureReference, externalPaymentCaptureRequested } from "@/modules/finance/application/external-payment-service";
@@ -66,6 +70,21 @@ function gateway(f: Fixture, input: Awaited<ReturnType<typeof draft>>, state: "P
   return { evidence, refund: vi.fn(() => Promise.resolve({ ...evidence, settlement: null })), lookupRefund: vi.fn(() => Promise.resolve({ ...evidence, settlement: null })) };
 }
 describe("original provider refund reservations on PostgreSQL", () => {
+  it("returns the original durable request and actual admission DTOs without offering a fabricated manual opposite", async () => {
+    const f = await fixture(), input = await draft(f), requested = externalRefundViewSchema.parse(await executeExternalPaymentRefundCommand(f.ctx, { operation: "REQUEST", input }, { db }));
+    expect(requested).toMatchObject({ idempotencyKey: input.refund.idempotencyKey, input, state: "QUEUED", admission: null, idempotent: false });
+    const provider = gateway(f, input), amount = { amount: input.refund.amount, currency: "MAD" }, settlement = { schemaVersion: 1 as const, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN" as const, gross: amount, fee: { amount: "0.00", currency: "MAD" }, net: amount, totalRefunded: amount };
+    await executeExternalPaymentRefundReference(await reference(f, requested.id), { db, provider: { refund: () => Promise.resolve({ ...provider.evidence, settlement }), lookupRefund: () => Promise.resolve({ ...provider.evidence, settlement }) } });
+    const review = await reviewExternalPaymentRefundAdmission(f.ctx, { intentId: requested.id }, { db }), command = { operation: "ADMIT", input: { intentId: requested.id, reviewFingerprint: review.reviewFingerprint } },
+      admitted = externalRefundViewSchema.parse(await executeExternalPaymentRefundCommand(f.ctx, command, { db }));
+    expect(admitted).toMatchObject({ id: requested.id, idempotencyKey: input.refund.idempotencyKey, state: "COMPLETED", idempotent: false, admission: { state: "ADMITTED", occurredAt: provider.evidence.refundedAt } });
+    const detail = await readGuestDepositWorkspace(f.ctx, { operation: "DETAIL", depositId: input.refund.depositId }, { db });
+    expect(detail).toMatchObject({ providerCapture: { id: f.captureId, accountId: f.merchant.id, method: input.refund.method } });
+    expect("movements" in detail && detail.movements.find(row => row.id === admitted.admission!.transactionId)).toMatchObject({ canReverse: false });
+    const before = await facts(f.org); await expect(reviewGuestDepositReversal(f.ctx, { transactionId: admitted.admission!.transactionId }, { db })).rejects.toBeInstanceOf(GuestDepositSourceError);
+    expect(externalRefundViewSchema.parse(await executeExternalPaymentRefundCommand(f.ctx, command, { db }))).toMatchObject({ idempotent: true, admission: admitted.admission });
+    expect(await facts(f.org)).toEqual(before);
+  });
   it.each(["0.03", "0.07"])("admits an actual %s provider refund through the canonical journal at its original economic time", async amount => {
     const f = await fixture(), input = await draft(f, amount), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input),
       settlement = { schemaVersion: 1 as const, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN" as const, gross: { amount, currency: "MAD" }, fee: { amount: "0.00", currency: "MAD" }, net: { amount, currency: "MAD" }, totalRefunded: { amount, currency: "MAD" } };

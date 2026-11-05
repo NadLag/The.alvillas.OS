@@ -8,6 +8,8 @@ import { guestDepositPolicySchema } from "@/platform/config/guest-deposit-policy
 import { Money } from "@/platform/money/money";
 import { executeExternalPaymentCaptureReference, externalPaymentCaptureRequested } from "@/modules/finance/application/external-payment-service";
 import { externalPaymentCommandInput } from "@/modules/finance/domain/external-payment-command";
+import { externalRefundCommandInput } from "@/modules/finance/domain/external-payment-refund-command";
+import { executeExternalPaymentRefundReference, externalPaymentRefundRequested } from "@/modules/finance/application/external-payment-refund-service";
 import { openGuestPaymentFixture, paymentBrowserMethods } from "./support/guest-payment-fixture";
 import { paypalHttpFixture } from "./support/paypal-http-fixture";
 import { acknowledgementBarrier } from "./support/acknowledgement-barrier";
@@ -80,5 +82,56 @@ for (const locale of ["en", "fr", "ar"] as const) for (const fee of ["0.00", "0.
     expect(proof.receipts).toHaveLength(1); expect(proof.receipts[0].amount.toFixed(2)).toBe("0.07"); expect(proof.receipts[0].accountId).toBe(merchant.id); expect(proof.receipts[0].transaction.occurredAt).toEqual(proof.capture.capturedAt);
     const net = proof.postings.reduce((value, posting) => posting.side === "DEBIT" ? value.add(Money.of(posting.amount.toString(), posting.currency)) : value.subtract(Money.of(posting.amount.toString(), posting.currency)), Money.zero("MAD")); expect(net.toJSON()).toEqual({ amount: fee === "0.00" ? "0.07" : "0.05", currency: "MAD" });
     expect(gateway.facts()).toMatchObject({ posts: 1, lookups: 1 }); expect(errors).toEqual([]);
+  } finally { await gateway.close(); await f.db.$disconnect(); }
+});
+
+for (const locale of ["en", "fr", "ar"] as const) test(`refunds original captured guest funds partially and fully with durable acknowledgement recovery in ${locale}`, async ({ page }, info) => {
+  test.setTimeout(240000);
+  const target = new URL(process.env.DATABASE_URL!); if (!["localhost", "127.0.0.1"].includes(target.hostname) || !(target.pathname.startsWith("/alvillas_automation_") || process.env.GITHUB_ACTIONS === "true" && target.pathname === "/alvillas_os")) throw Error("Owned browser financial acceptance database required");
+  const f = await openGuestPaymentFixture(page, info, locale), orderId = "REFUND_ORDER_" + randomUUID(), gateway = await paypalHttpFixture(orderId), errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.name));
+  try {
+    const merchant = await configure(f);
+    await withTenant(f.db, f.organizationId, async tx => {
+      const finance = new FinanceRepository(tx, f.organizationId), rules = new ConfigRuleRepository(tx, f.organizationId), current = await rules.resolve({ key: "finance.guest_deposits", scopes: [{ scopeType: "organization", scopeId: null }, { scopeType: "property", scopeId: f.setup.propertyId }], asOf: await finance.clock() });
+      if (!current) throw Error("Original merchant refund policy required"); const policy = guestDepositPolicySchema.parse(current.value);
+      await rules.createVersion({ key: "finance.guest_deposits", scopeType: "property", scopeId: f.setup.propertyId, effectiveFrom: new Date("2020-01-01"), createdBy: f.setup.actorId,
+        value: { ...policy, refund_account_codes: [...policy.refund_account_codes, merchant.code] }, reason: "Authorize refunds from the actual original merchant account" });
+    });
+    await page.goto(`/${locale}/app/finance/guest-deposits`); await prepare(page, f, merchant.id, orderId);
+    const captured = acknowledgement(page, "CAPTURE"); await page.getByTestId("external-capture-submit").click(); expect((await captured).ok()).toBe(true);
+    const source = await withTenant(f.db, f.organizationId, async tx => {
+      const intent = await tx.externalPaymentIntent.findFirstOrThrow({ where: { organizationId: f.organizationId, orderId } }), event = await tx.outboxEvent.findFirstOrThrow({ where: { organizationId: f.organizationId, type: externalPaymentCaptureRequested, payload: { path: ["intentId"], equals: intent.id } } }); return { intent, event };
+    });
+    await executeExternalPaymentCaptureReference({ organizationId: f.organizationId, outboxEventId: source.event.id }, { db: f.db, provider: gateway.provider });
+    await expect(page.getByTestId("external-payment-admission")).toBeVisible(); await page.getByTestId("external-admission-reason").fill("Record the verified original guest funds for refund acceptance"); await page.getByTestId("external-admission-confirm").check();
+    const admitted = acknowledgement(page, "ADMIT"); await page.getByTestId("external-admission-submit").click(); expect((await admitted).ok()).toBe(true); await expect(page.getByTestId("deposit-outstanding")).toBeVisible();
+    for (const amount of ["0.03", "0.04"]) {
+      await page.getByTestId("deposit-refund-open").click(); await page.getByTestId("deposit-amount").fill(amount); await page.getByTestId("deposit-account").selectOption(merchant.id);
+      await expect(page.getByTestId("deposit-method")).toHaveValue("original-paypal"); await expect(page.getByTestId("deposit-method")).toBeDisabled(); await expect(page.getByTestId("deposit-currency")).toBeDisabled();
+      await page.getByTestId("deposit-purpose").fill("Actual original guest refund " + amount + " " + f.marker); await page.getByTestId("deposit-prepare").click();
+      await expect(page.getByTestId("external-refund-review")).toBeVisible(); await expect(page.getByTestId("external-refund-original-deposit")).toContainText(f.setup.propertyName); await page.getByTestId("external-refund-reason").fill("Return only the reviewed original guest funds through the provider"); await page.getByTestId("external-refund-confirm").check();
+      const lost = acknowledgementBarrier(); await page.route("**/api/finance/external-payments/refunds/command", async route => {
+        try { expect(externalRefundCommandInput.parse(route.request().postDataJSON()).operation).toBe("REQUEST"); expect(await forwardBrowserPostOnce(route.request())).toBe(200); await route.abort(); lost.resolve(); } catch (error) { lost.reject(error); throw error; }
+      });
+      await page.getByTestId("external-refund-submit").click(); await lost.promise; await page.unroute("**/api/finance/external-payments/refunds/command"); await page.reload();
+      const refund = await withTenant(f.db, f.organizationId, async tx => {
+        const intent = await tx.externalPaymentRefundIntent.findFirstOrThrow({ where: { organizationId: f.organizationId, depositId: source.intent.idempotencyKey, amount } }), event = await tx.outboxEvent.findFirstOrThrow({ where: { organizationId: f.organizationId, type: externalPaymentRefundRequested, payload: { path: ["intentId"], equals: intent.id } } });
+        expect(await tx.financialTransaction.count({ where: { organizationId: f.organizationId, idempotencyKey: "guest-deposit:" + intent.idempotencyKey } })).toBe(0); return { intent, event };
+      });
+      await executeExternalPaymentRefundReference({ organizationId: f.organizationId, outboxEventId: refund.event.id }, { db: f.db, provider: gateway.provider });
+      await expect(page.getByTestId("external-refund-admission")).toBeVisible(); await page.reload(); await expect(page.getByTestId("external-refund-admission")).toBeVisible(); await expect(page.getByTestId("external-refund-original-deposit")).toContainText(f.setup.propertyName);
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]); await page.evaluate(() => { document.documentElement.style.zoom = "2"; });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true); await page.evaluate(() => { document.documentElement.style.zoom = "1"; });
+      await page.getByTestId("external-refund-admission-confirm").check(); const lostAdmission = acknowledgementBarrier();
+      await page.route("**/api/finance/external-payments/refunds/command", async route => {
+        try { expect(externalRefundCommandInput.parse(route.request().postDataJSON()).operation).toBe("ADMIT"); expect(await forwardBrowserPostOnce(route.request())).toBe(200); await route.abort(); lostAdmission.resolve(); } catch (error) { lostAdmission.reject(error); throw error; }
+      });
+      await page.getByTestId("external-refund-admission-submit").click(); await lostAdmission.promise; await page.unroute("**/api/finance/external-payments/refunds/command"); await page.reload(); await expect(page.getByTestId("deposit-outstanding")).toBeVisible();
+      const proof = await withTenant(f.db, f.organizationId, async tx => ({ journal: await tx.financialTransaction.findFirstOrThrow({ where: { organizationId: f.organizationId, idempotencyKey: "guest-deposit:" + refund.intent.idempotencyKey }, include: { postings: true } }),
+        provider: await tx.externalPaymentRefundEvidence.findFirstOrThrow({ where: { organizationId: f.organizationId, identity: { intentId: refund.intent.id } } }) }));
+      expect(proof.journal.occurredAt).toEqual(proof.provider.refundedAt); expect(proof.journal.postings.map(row => row.amount.toFixed(2))).toEqual([amount, amount]); await expect(page.getByTestId("deposit-reverse-open")).toHaveCount(0);
+    }
+    expect(gateway.facts()).toMatchObject({ posts: 1, refundPosts: 2, refunded: { amount: "0.07", currency: "MAD" } }); expect(errors).toEqual([]); await expect(page.getByTestId("deposit-refund-open")).toHaveCount(0);
   } finally { await gateway.close(); await f.db.$disconnect(); }
 });

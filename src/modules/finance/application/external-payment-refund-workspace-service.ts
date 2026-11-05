@@ -41,7 +41,7 @@ async function read(ctx: FinanceActorContext, tx: TenantTransaction, request: Re
   await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.external_payment.refund_viewed", resourceType: "financial_transaction", resourceId: request.id,
     after: { intentId: request.id }, reason: "Viewed original refund intent, provider confirmation and independent native admission", requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: await new FinanceRepository(tx, ctx.organizationId).clock() });
   await authorizeExternalRefundSourceView(ctx, tx, request, journal ?? undefined);
-  return { id: request.id, idempotencyKey: request.idempotencyKey, captureId: request.captureId, depositId: request.depositId,
+  return { id: request.id, idempotencyKey: request.idempotencyKey, captureId: request.captureId, depositId: request.depositId, idempotent: true,
     amount: Money.of(request.amount.toString(), request.currency).toJSON(), state: observation?.state ?? (request.attempt ? "UNCONFIRMED" : "QUEUED"),
     refundId: request.identity?.refundId ?? null, refundedAt: observation?.refundedAt?.toISOString() ?? null,
     input: saved.input, settlement: settlement.success ? settlement.data : null, admission: journal ? { state: "ADMITTED" as const, transactionId: journal.id, occurredAt: journal.occurredAt.toISOString() } : null };

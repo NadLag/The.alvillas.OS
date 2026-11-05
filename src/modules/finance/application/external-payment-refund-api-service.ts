@@ -13,7 +13,7 @@ export async function readExternalPaymentRefundWorkspace(ctx: FinanceActorContex
 }
 export async function executeExternalPaymentRefundCommand(ctx: FinanceActorContext, raw: unknown, deps: Deps = {}) {
   const command = externalRefundCommandInput.parse(raw);
-  if (command.operation === "REQUEST") return requestExternalPaymentRefund(ctx, command.input, deps);
+  if (command.operation === "REQUEST") { const result = await requestExternalPaymentRefund(ctx, command.input, deps); return { ...await getExternalPaymentRefund(ctx, { intentId: result.id }, deps), idempotent: result.idempotent }; }
   if (command.operation === "RECONCILE") return reconcileExternalPaymentRefund(ctx, command.input, deps);
-  return admitExternalPaymentRefund(ctx, command.input, deps);
+  const result = await admitExternalPaymentRefund(ctx, command.input, deps); return { ...await getExternalPaymentRefund(ctx, { intentId: command.input.intentId }, deps), idempotent: result.idempotent };
 }
