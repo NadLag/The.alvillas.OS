@@ -406,6 +406,13 @@ describe("team management on real PostgreSQL", () => {
     expect(masked.profile.email).toBe("••••••");
     expect(masked.profile.phone).toBe("••••••");
     const configReader = actor(f.org, f.ctx.actorId, f.ctx.personId, new Set(["config_rule:view"]));
+    await withTenant(db, f.org, async tx => {
+      const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "config_rule:view" } }),
+        role = await tx.role.create({ data: { organizationId: f.org, key: "actual_configuration_reader", name: "Actual configuration reader",
+          rolePermissions: { create: { organizationId: f.org, permissionId: permission.id } } } });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, personId: f.ctx.personId, userAccountId: f.ctx.actorId, roleId: role.id,
+        scopeType: "organization", validFrom: new Date("2020-01-01") } });
+    });
     expect(
       JSON.stringify(await getConfigAdminModel(configReader, {}, { db, requestId: randomUUID() }))
     ).not.toContain("500.25");

@@ -6,14 +6,23 @@ import { withTenant } from "@/platform/db/tenant";
 import { provisionIntegrationRole } from "./support/database-role";
 import { ConfigAuthorizationError, ConfigValidationError, getConfigAdminModel, configAdminPageSize } from "@/modules/config/application/config-service";
 import type { ConfigActorContext } from "@/modules/config/application/config-access";
+import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient;
 async function fixture(count = 1) {
   const org = randomUUID(); await admin.organization.create({ data: { id: org, name: "Configuration pagination acceptance", baseCurrency: "MAD" } });
+  await ensureStandardIdentitySetup(org, { db });
   return withTenant(db, org, async tx => {
     const person = await tx.person.create({ data: { organizationId: org, displayName: "Scoped configuration reader" } });
     const account = await tx.userAccount.create({ data: { organizationId: org, personId: person.id } });
+    const permissions = new Set(["config_rule:view", "config_rule:create", "config_rule:configure"]);
+    const stored = await tx.permission.findMany({ where: { organizationId: org, key: { in: [...permissions] } } });
+    expect(stored).toHaveLength(permissions.size);
+    const role = await tx.role.create({ data: { organizationId: org, key: "config_pagination_reader", name: "Actual configuration fixture grants",
+      rolePermissions: { create: stored.map(permission => ({ organizationId: org, permissionId: permission.id })) } } });
+    await tx.roleAssignment.create({ data: { organizationId: org, userAccountId: account.id, personId: person.id, roleId: role.id,
+      scopeType: "organization", validFrom: new Date("2020-01-01") } });
     const properties = Array.from({ length: count }, (_, index) => ({ id: randomUUID(), organizationId: org, name: `Property ${String(index).padStart(4, "0")}`,
       addressLine1: "Test", city: "Marrakech", propertyType: "VILLA", bedrooms: 1, bathrooms: 1, maxGuests: 2, amenities: [], photoUrls: [] }));
     await tx.property.createMany({ data: properties });
@@ -22,7 +31,7 @@ async function fixture(count = 1) {
       createdBy: account.id, reason: "Explicit isolated pagination fixture" }));
     await tx.configRule.createMany({ data: rules });
     const ctx: ConfigActorContext = { organizationId: org, actorId: account.id, personId: person.id, authContext: { organizationId: org,
-      userAccountId: account.id, personId: person.id, permissions: new Set(["config_rule:view", "config_rule:create", "config_rule:configure"]), scopes: [{ organizationId: org }] } };
+      userAccountId: account.id, personId: person.id, permissions, scopes: [{ organizationId: org }] } };
     return { org, person, account, properties, rules, ctx };
   });
 }
@@ -82,6 +91,14 @@ describe("authorized configuration pages on real PostgreSQL", () => {
       { scope: { organizationId: f.org, scopeType: "property" as const, scopeId: randomUUID() }, permissions: new Set(["staff_compensation:view", "financial_transaction:view"]) }
     ] } };
     expect(JSON.stringify(await model(f, {}, wrong))).not.toContain("800.00");
+    await withTenant(db, f.org, async tx => {
+      const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: ["staff_compensation:view", "financial_transaction:view"] } } });
+      expect(permissions).toHaveLength(2);
+      const role = await tx.role.create({ data: { organizationId: f.org, key: "config_pagination_financial_reader", name: "Actual scoped financial fixture grants",
+        rolePermissions: { create: permissions.map(permission => ({ organizationId: f.org, permissionId: permission.id })) } } });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, userAccountId: f.account.id, personId: f.person.id, roleId: role.id,
+        scopeType: "property", scopeId: f.properties[0].id, validFrom: new Date("2020-01-01") } });
+    });
     const allowed = { ...wrong, authContext: { ...wrong.authContext, assignments: [wrong.authContext.assignments[0],
       { scope: { organizationId: f.org, scopeType: "property" as const, scopeId: f.properties[0].id }, permissions: new Set(["staff_compensation:view", "financial_transaction:view"]) }] } };
     expect(JSON.stringify(await model(f, {}, allowed))).toContain("800.00");

@@ -2,9 +2,10 @@ import { headers } from "next/headers";
 import type { Session } from "next-auth";
 import type { PropertyTemplateVersion } from "@prisma/client";
 import { z } from "zod";
-import { authContextForAccount } from "@/platform/authz/account-context";
-import { authorize, authorizeCollection } from "@/platform/authz/authorize";
-import { present } from "@/platform/authz/present";
+import { authContextForAccount, authContextForAccountInTransaction } from "@/platform/authz/account-context";
+import { authorize, authorizeCollection, type AuthContext } from "@/platform/authz/authorize";
+import { present, maskedValue, type FieldPolicy } from "@/platform/authz/present";
+import { authorizeUnconditionalSource, authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { writePropertyConfiguration } from "@/platform/config/property-configuration";
@@ -92,16 +93,36 @@ async function meta(deps: Deps) {
     ipAddress: h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null
   };
 }
+function templateMetadataVisible(
+  ctx: TemplateActorContext,
+  row: Pick<PropertyTemplateVersion, "id" | "createdAt" | "status">,
+  propertyId: string | null,
+  current: AuthContext,
+  property: { cityId: string | null; regionId: string | null; city: string; region: string | null } | undefined,
+  at: Date
+) {
+  if (propertyId && !property) return false;
+  const root = { type: "config_rule", organizationId: ctx.organizationId, id: row.id, financialRecordId: row.id, propertyId,
+    city: property?.cityId ?? property?.city, region: property?.regionId ?? property?.region, occurredAt: row.createdAt, status: row.status, dataClass: "financial" as const };
+  return [ctx.authContext, current].every(authority => authorize(authority, "view", root, at) &&
+    (!propertyId || authorize(authority, "view", { ...root, id: propertyId, type: "property" }, at)));
+}
 function visibleVersion(
   ctx: TemplateActorContext,
   row: PropertyTemplateVersion,
-  propertyId: string | null
+  propertyId: string | null,
+  current: AuthContext,
+  property: { cityId: string | null; regionId: string | null; city: string; region: string | null } | undefined,
+  at: Date
 ) {
-  const financial = authorize(ctx.authContext, "view", {
+  const source = {
     type: "financial_transaction",
     organizationId: ctx.organizationId,
-    propertyId
-  });
+    id: row.id, financialRecordId: row.id, propertyId, city: property?.cityId ?? property?.city,
+    region: property?.regionId ?? property?.region, occurredAt: row.createdAt, status: row.status, dataClass: "financial" as const
+  };
+  if (!templateMetadataVisible(ctx, row, propertyId, current, property, at)) throw new TemplateAccessError();
+  const financial = [ctx.authContext, current].every(authority => authorize(authority, "view", source, at));
   const serialized = present(
     {
       ...ctx.authContext,
@@ -112,16 +133,37 @@ function visibleVersion(
       type: "config_rule",
       id: row.id,
       organizationId: ctx.organizationId,
-      propertyId,
+      propertyId, city: source.city, region: source.region,
       data: { ...row, values: row.values }
     },
-    row.kind === "SERVICE_CATALOG" ? { values: { dataClass: "financial", mask: "omit" } } : {}
+    row.kind === "SERVICE_CATALOG" ? { values: { dataClass: "financial", mask: "omit" }, reason: { dataClass: "financial" } } : {}, at
   );
   return {
     ...row,
     values: serialized.values ?? null,
+    reason: serialized.reason ?? maskedValue,
     restricted: row.kind === "SERVICE_CATALOG" && !financial
   };
+}
+async function templateDisclosure(ctx: TemplateActorContext, repo: PropertyTemplateRepository, propertyId: string | null, financial: boolean) {
+  const property = propertyId ? (await repo.presentationProperties([propertyId]))[0] : undefined;
+  if (propertyId && !property) throw new TemplateNotFoundError();
+  const current = financial ? await authContextForAccountInTransaction(repo.tx, ctx.organizationId, ctx.actorId) : ctx.authContext, at = new Date();
+  return { current, property, at, source: { organizationId: ctx.organizationId, propertyId, id: propertyId ?? undefined,
+    city: property?.cityId ?? property?.city, region: property?.regionId ?? property?.region } };
+}
+async function financialTemplateWriteAuthority(ctx: TemplateActorContext, repo: PropertyTemplateRepository, propertyId: string | null, action: "create" | "configure") {
+  const disclosure = await templateDisclosure(ctx, repo, propertyId, true), source = { ...disclosure.source, dataClass: "financial" as const };
+  if ([ctx.authContext, disclosure.current].some(authority =>
+    !authorize(authority, action, { ...source, type: "config_rule" }, disclosure.at) ||
+    !authorize(authority, "view", { ...source, type: "config_rule" }, disclosure.at) || propertyId &&
+    !authorize(authority, "edit", { ...source, type: "property" }, disclosure.at) ||
+    !authorizeUnconditionalSource(authority, "view", { ...source, type: "financial_transaction" }, disclosure.at))) throw new TemplateAccessError();
+  return disclosure;
+}
+function presentFinancialTemplate<T extends Record<string, unknown>>(ctx: TemplateActorContext, disclosure: Awaited<ReturnType<typeof templateDisclosure>>, data: T, fields: readonly (keyof T & string)[]): T {
+  return present({ ...ctx.authContext, visibleDataClasses: new Set(["financial"] as const) }, "view",
+    { ...disclosure.source, type: "config_rule", data }, Object.fromEntries(fields.map(field => [field, { dataClass: "financial" as const }])) as FieldPolicy<T>, disclosure.at) as T;
 }
 export async function savePropertyTemplate(ctx: TemplateActorContext, raw: unknown, deps: Deps = {}) {
   const input = templateSaveSchema.parse(raw);
@@ -137,6 +179,7 @@ export async function savePropertyTemplate(ctx: TemplateActorContext, raw: unkno
     )
       throw new TemplateConflictError();
     if (input.propertyId) await repo.projection(input.propertyId, []);
+    if (input.kind === "SERVICE_CATALOG") await financialTemplateWriteAuthority(ctx, repo, input.propertyId, input.expectedVersion ? "configure" : "create");
     const after = await repo.createVersion({
       key: input.key,
       kind: input.kind,
@@ -162,7 +205,9 @@ export async function savePropertyTemplate(ctx: TemplateActorContext, raw: unkno
       reason: input.reason,
       occurredAt: new Date()
     });
-    return after;
+    if (input.kind !== "SERVICE_CATALOG") return after;
+    const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, input.expectedVersion ? "configure" : "create");
+    return presentFinancialTemplate(ctx, disclosure, after, ["values", "reason"]);
   });
 }
 export async function templateCatalog(
@@ -209,23 +254,32 @@ export async function templateCatalog(
       propertyId && !properties.some((p) => p.id === propertyId)
         ? await repo.propertyOption(propertyId)
         : null;
-    const organization =
-      propertyId !== null ||
-      authorize(ctx.authContext, "view", { type: "config_rule", organizationId: ctx.organizationId });
+    const selectionAt = new Date(),
+      completeOrganization = ["config_rule", "property"].every(type =>
+        authorizeOrganizationSource(ctx.authContext, "view", { type, organizationId: ctx.organizationId, dataClass: "financial" }, selectionAt)),
+      search = z.string().max(160).parse(input.search ?? ""),
+      versions = !propertyId && !completeOrganization ? (await repo.catalogMetadata({ kind: input.kind, search }))
+        .filter(row => templateMetadataVisible(ctx, row, row.propertyId, ctx.authContext, row.property ?? undefined, selectionAt)).map(row => row.id) : [];
     const rows = await repo.catalog({
-      propertyIds: propertyId ? [propertyId] : properties.map((p) => p.id),
-      organization,
+      propertyIds: propertyId ? [propertyId] : [],
+      organization: propertyId !== null || completeOrganization,
+      allProperties: !propertyId && completeOrganization,
+      versionIds: versions,
       kind: input.kind,
-      search: z
-        .string()
-        .max(160)
-        .parse(input.search ?? ""),
+      search,
       page
     });
+    const sourceIds = [...new Set([...properties.map(property => property.id), ...(target ? [target.id] : []), ...rows.slice(0, 24).flatMap(row => row.propertyId ? [row.propertyId] : []), ...(propertyId ? [propertyId] : [])])],
+      sourceProperties = new Map((await repo.presentationProperties(sourceIds)).map(property => [property.id, property])),
+      current = rows.slice(0, 24).some(row => row.kind === "SERVICE_CATALOG") ? await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId) : ctx.authContext, at = new Date();
+    const propertyVisible = (id: string) => { const source = sourceProperties.get(id); return Boolean(source && authorize(current, "view", {
+      type: "property", organizationId: ctx.organizationId, id, propertyId: id, city: source.cityId ?? source.city, region: source.regionId ?? source.region }, at)); };
+    if (!authorizeCollection(current, "view", "config_rule") || !authorizeCollection(current, "view", "property") || propertyId && !propertyVisible(propertyId)) throw new TemplateAccessError();
     return {
-      properties: target ? [target, ...properties.slice(0, 40)] : properties.slice(0, 40),
+      properties: (target ? [target, ...properties.slice(0, 40)] : properties.slice(0, 40)).filter(property => propertyVisible(property.id)),
       moreProperties: properties.length > 40,
-      templates: rows.slice(0, 24).map((row) => visibleVersion(ctx, row, row.propertyId ?? propertyId)),
+      templates: rows.slice(0, 24).map((row) => { const sourceId = row.propertyId ?? propertyId;
+        return visibleVersion(ctx, row, sourceId, current, sourceId ? sourceProperties.get(sourceId) : undefined, at); }),
       more: rows.length > 24,
       page
     };
@@ -245,12 +299,14 @@ export async function templateVersionHistory(
       row = await repo.version(id);
     if (!row) throw new TemplateNotFoundError();
     if (row.propertyId && propertyId && row.propertyId !== propertyId) throw new TemplateAccessError();
-    allowed(ctx, "view", row.propertyId ?? propertyId, row.kind);
     const rows = await repo.versions(row.key, page),
       latest = await repo.latest(row.key);
+    const sourceId = row.propertyId ?? propertyId, disclosure = await templateDisclosure(ctx, repo, sourceId, row.kind === "SERVICE_CATALOG"),
+      selected = visibleVersion(ctx, row, sourceId, disclosure.current, disclosure.property, disclosure.at);
+    if (selected.restricted) throw new TemplateAccessError();
     return {
-      selected: row,
-      versions: rows.slice(0, 20),
+      selected,
+      versions: rows.slice(0, 20).map(version => visibleVersion(ctx, version, sourceId, disclosure.current, disclosure.property, disclosure.at)),
       latestVersion: latest!.version,
       more: rows.length > 20
     };
@@ -266,7 +322,6 @@ export async function propertyTemplateState(
   z.uuid().parse(propertyId);
   z.enum(templateKinds).parse(kind);
   z.number().int().min(1).max(10000).parse(page);
-  allowed(ctx, "view", propertyId, kind);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async (tx) => {
     const repo = new PropertyTemplateRepository(tx, ctx.organizationId),
       binding = await repo.binding(propertyId, kind);
@@ -278,14 +333,19 @@ export async function propertyTemplateState(
       current: readSetting(current, path) ?? null,
       overridden: !equalSetting(readSetting(current, path), inherited)
     }));
-    const history = await repo.history(propertyId, kind, page);
-    return {
+    const history = await repo.history(propertyId, kind, page), latest = binding ? await repo.latest(binding.templateVersion.key) : null;
+    const disclosure = await templateDisclosure(ctx, repo, propertyId, kind === "SERVICE_CATALOG"), source = { ...disclosure.source, dataClass: "financial" as const };
+    if ([ctx.authContext, disclosure.current].some(authority => !authorize(authority, "view", { ...source, type: "config_rule" }, disclosure.at) ||
+      !authorize(authority, "view", { ...source, type: "property" }, disclosure.at) || kind === "SERVICE_CATALOG" &&
+      !authorizeUnconditionalSource(authority, "view", { ...source, type: "financial_transaction" }, disclosure.at))) throw new TemplateAccessError();
+    const result = {
       binding,
       fields,
-      latest: binding ? await repo.latest(binding.templateVersion.key) : null,
+      latest,
       history: history.slice(0, 20),
       more: history.length > 20
     };
+    return kind === "SERVICE_CATALOG" ? presentFinancialTemplate(ctx, disclosure, result, ["binding", "fields", "latest", "history"]) : result;
   });
 }
 export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unknown, deps: Deps = {}) {
@@ -300,7 +360,9 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
       allowed(ctx, "configure", input.propertyId, replay.kind);
       if (replay.createdBy !== ctx.actorId || !equalSetting(replay.command, input))
         throw new TemplateConflictError();
-      return replay;
+      if (replay.kind !== "SERVICE_CATALOG") return replay;
+      const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure");
+      return presentFinancialTemplate(ctx, disclosure, replay, ["snapshot", "overrides", "command", "reason"]);
     }
     const selected = input.action === "APPLY" ? await repo.version(input.templateVersionId) : null;
     if (input.action === "APPLY" && !selected) throw new TemplateNotFoundError();
@@ -329,6 +391,7 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
       ])
     ].sort();
     for (const key of ruleKeys) await config.lockVersion(key, "property", input.propertyId);
+    if (kind === "SERVICE_CATALOG") await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure");
     const before = await repo.projection(input.propertyId, ruleKeys);
     const after = structuredClone(before) as TemplateValues & Record<string, unknown>;
     const base = flattenSettings(template.values),
@@ -425,6 +488,8 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
       reason: input.reason,
       occurredAt: new Date()
     });
-    return revision;
+    if (kind !== "SERVICE_CATALOG") return revision;
+    const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure");
+    return presentFinancialTemplate(ctx, disclosure, revision, ["snapshot", "overrides", "command", "reason"]);
   });
 }

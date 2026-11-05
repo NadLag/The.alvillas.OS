@@ -300,15 +300,43 @@ export class IdentityRepository {
   }
 
   async authorizationStates(ids:readonly string[]) {
-    const clock = await this.authorizationObservation(ids);
-    const [accounts, assignments] = await Promise.all([
-      this.tx.userAccount.findMany({where:{organizationId:this.organizationId,id:{in:[...ids]},status:"ACTIVE"},select:securityAccountSelect(clock.now,clock.ids)}),
-      this.tx.roleAssignment.findMany({ where: { organizationId: this.organizationId, userAccountId: {in:[...ids]}, id: { in: clock.ids }, archivedAt: null, role: { archivedAt: null } },
-        include: { role: { include: { rolePermissions: { include: { permission: true } } } } } })
-    ]);
-    const grouped=new Map<string,typeof assignments>();
-    for(const assignment of assignments){if(!assignment.userAccountId)continue;const rows=grouped.get(assignment.userAccountId)??[];rows.push(assignment);grouped.set(assignment.userAccountId,rows);}
-    return {states:new Map(accounts.map(account=>[account.id,{account,assignments:grouped.get(account.id)??[]}])),now:clock.now};
+    type Assignment = { scopeType: string; scopeId: string | null; conditions: Prisma.JsonValue; validFrom: string; validTo: string | null;
+      role: { id: string; key: string; rolePermissions: Array<{ permission: { key: string } }> } };
+    type Credential = { type: string; expiresAt: string | null; revokedAt: null };
+    // One database snapshot supplies both enrollment and grants. Separate relation reads
+    // duplicate the same roles and can observe a revocation between their statements.
+    const rows = await this.tx.$queryRaw<Array<{ now: Date; id: string | null; sessionVersion: number; mfaRequired: boolean;
+      preferredLocale: string; credentials: Credential[]; assignments: Assignment[] }>>(Prisma.sql`
+      WITH checked AS MATERIALIZED (SELECT clock_timestamp() AS at),
+      accounts AS MATERIALIZED (
+        SELECT u.id,u.session_version,u.mfa_required,p.preferred_locale
+        FROM user_account u JOIN person p ON p.id=u.person_id AND p.organization_id=u.organization_id
+        WHERE u.organization_id=${this.organizationId}::uuid AND u.status='ACTIVE'
+          AND ${ids.length ? Prisma.sql`u.id IN (${Prisma.join(ids.map(id => Prisma.sql`${id}::uuid`))})` : Prisma.sql`FALSE`}
+      ), grants AS MATERIALIZED (
+        SELECT a.*,r.key AS role_key FROM role_assignment a
+        JOIN role r ON r.id=a.role_id AND r.organization_id=a.organization_id
+        JOIN accounts u ON u.id=a.user_account_id CROSS JOIN checked
+        WHERE a.organization_id=${this.organizationId}::uuid AND a.archived_at IS NULL AND r.archived_at IS NULL
+          AND a.valid_from<=checked.at AND (a.valid_to IS NULL OR a.valid_to>checked.at)
+      )
+      SELECT date_trunc('milliseconds',checked.at) AS now,u.id,u.session_version AS "sessionVersion",u.mfa_required AS "mfaRequired",u.preferred_locale AS "preferredLocale",
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('type',c.type,'expiresAt',c.expires_at,'revokedAt',NULL) ORDER BY c.id)
+          FROM auth_credential c WHERE c.organization_id=${this.organizationId}::uuid AND c.user_account_id=u.id AND c.revoked_at IS NULL),'[]'::jsonb) AS credentials,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('scopeType',a.scope_type,'scopeId',a.scope_id,'conditions',a.conditions,
+          'validFrom',a.valid_from,'validTo',a.valid_to,'role',jsonb_build_object('id',a.role_id,'key',a.role_key,'rolePermissions',
+            COALESCE((SELECT jsonb_agg(jsonb_build_object('permission',jsonb_build_object('key',p.key)) ORDER BY p.key)
+              FROM role_permission rp JOIN permission p ON p.id=rp.permission_id AND p.organization_id=rp.organization_id
+              WHERE rp.organization_id=${this.organizationId}::uuid AND rp.role_id=a.role_id),'[]'::jsonb))) ORDER BY a.id)
+          FROM grants a WHERE a.user_account_id=u.id),'[]'::jsonb) AS assignments
+      FROM checked LEFT JOIN accounts u ON TRUE ORDER BY u.id`);
+    const states = new Map(rows.filter(row => row.id !== null).map(row => {
+      const assignments = row.assignments.map(assignment => ({ ...assignment, validFrom: new Date(assignment.validFrom), validTo: assignment.validTo ? new Date(assignment.validTo) : null }));
+      return [row.id!, { account: { id: row.id!, sessionVersion: row.sessionVersion, mfaRequired: row.mfaRequired,
+        person: { preferredLocale: row.preferredLocale }, roleAssignments: assignments.map(assignment => ({ role: { key: assignment.role.key } })),
+        authCredentials: row.credentials.map(credential => ({ ...credential, expiresAt: credential.expiresAt ? new Date(credential.expiresAt) : null })) }, assignments }] as const;
+    }));
+    return { states, now: rows[0].now };
   }
 
   findSessionSecurityAccount(id: string, now = new Date(), assignmentIds?: string[]) {

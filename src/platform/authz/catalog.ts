@@ -365,8 +365,9 @@ export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
   ...(["openingBalance", "periodCredits", "periodDebits", "periodResult", "closingBalance", "accounts", "lines"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "company_ledger", field, dataClass: "financial", requiredPermission: permissionKey("company_ledger", "view"), mask: "placeholder" })),
   ...(["currency","openingBalance","periodDebits","periodCredits","closingBalance","rowCount","accounts","assignment","collection","source"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"receivable",field,dataClass:"financial",requiredPermission:permissionKey("receivable","view"),mask:"placeholder"})),
   ...(["openingBalance","periodCredits","periodDebits","bucketTotals"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"owner_statement",field,dataClass:"financial",requiredPermission:permissionKey("owner_statement","view"),mask:"placeholder"})),
-  { resource: "staff_compensation", field: "amount", dataClass: "financial", requiredPermission: permissionKey("staff_compensation", "view"), mask: "placeholder" },
+  ...(["amount","currency","mode","reason","effectiveFrom"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"staff_compensation",field,dataClass:"financial",requiredPermission:permissionKey("staff_compensation","view"),mask:"placeholder"})),
   { resource: "wallet", field: "balances", dataClass: "financial", requiredPermission: permissionKey("wallet", "view"), mask: "placeholder" },
+  { resource: "wallet", field: "movements", dataClass: "financial", requiredPermission: permissionKey("wallet", "view"), mask: "placeholder" },
   {
     resource: "reservation",
     field: "totalAmount",
@@ -420,14 +421,14 @@ export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
     resource: "financial_transaction",
     field: "ownerProfitability",
     dataClass: "financial",
-    requiredPermission: permissionKey("financial_transaction", "view"),
+    requiredPermission: permissionKey("owner_statement", "view"),
     mask: "placeholder"
   },
   {
     resource: "financial_transaction",
     field: "alvillasProfit",
     dataClass: "financial",
-    requiredPermission: permissionKey("financial_transaction", "view"),
+    requiredPermission: permissionKey("company_ledger", "view"),
     mask: "placeholder"
   },
   {
@@ -448,7 +449,7 @@ export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
     resource: "owner_statement",
     field: "internalLocationCode",
     dataClass: "sensitive",
-    requiredPermission: permissionKey("financial_transaction", "view"),
+    requiredPermission: permissionKey("company_ledger", "view"),
     mask: "omit"
   },
   {

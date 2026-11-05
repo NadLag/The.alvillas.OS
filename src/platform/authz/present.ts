@@ -1,11 +1,12 @@
 import {
   authorize,
+  assignmentCandidates,
   type Action,
   type AuthContext,
   type DataClass,
   type Resource
 } from "@/platform/authz/authorize";
-import { fieldPolicyCatalog } from "@/platform/authz/catalog";
+import { fieldPolicyCatalog, permissionActions, permissionResources } from "@/platform/authz/catalog";
 
 export const maskedValue = "\u2022\u2022\u2022\u2022\u2022\u2022";
 
@@ -36,8 +37,25 @@ function canSeeField<TResource extends Record<string, unknown>>(
   ctx: PresentationContext,
   resource: PresentableResource<TResource>,
   field: keyof TResource & string,
-  rule: FieldPolicyRule<TResource>
+  rule: FieldPolicyRule<TResource>,
+  action: Action,
+  effectiveAt: Date
 ): boolean {
+  const requiredAllowed = () => {
+    if (!rule.requiredPermission) return false;
+    const [type, verb, extra] = rule.requiredPermission.split(":");
+    if (extra !== undefined || !permissionResources.some(resource => resource === type) || !permissionActions.some(action => action === verb)) return false;
+    const source = { ...resource, type, dataClass: rule.dataClass };
+    const dated = source.occurredAt instanceof Date ? Number.isFinite(source.occurredAt.getTime())
+      : typeof source.occurredAt === "string" && Number.isFinite(Date.parse(source.occurredAt));
+    const candidates = rule.dataClass === "financial" && !dated ? assignmentCandidates(ctx).filter(assignment =>
+      !assignment.conditions?.timeWindow?.startsAt && !assignment.conditions?.timeWindow?.endsAt) : null;
+    const authority = candidates ? { ...ctx, assignments: candidates, scopes: candidates.map(assignment => assignment.scope),
+      permissions: new Set(candidates.flatMap(assignment => [...assignment.permissions])) } : ctx;
+    return authorize(authority, verb as Action, source, effectiveAt) && (action !== "export" || verb === "export" || authorize(authority, "export", source, effectiveAt));
+  };
+  // A class label cannot replace the financial source's assignment, amount or export grant.
+  if (rule.dataClass === "financial" && rule.requiredPermission) return requiredAllowed();
   if (ctx.visibleDataClasses.has(rule.dataClass)) {
     return true;
   }
@@ -46,7 +64,7 @@ function canSeeField<TResource extends Record<string, unknown>>(
     return true;
   }
 
-  if (rule.requiredPermission && ctx.permissions.has(rule.requiredPermission)) {
+  if (requiredAllowed()) {
     return true;
   }
 
@@ -64,7 +82,8 @@ export function present<TResource extends Record<string, unknown>>(
   policy: FieldPolicy<TResource>,
   effectiveAt?: Date
 ): Partial<TResource> {
-  if (!authorize(ctx, action, resource, effectiveAt)) {
+  const at = effectiveAt ?? new Date();
+  if (!authorize(ctx, action, resource, at)) {
     throw new Error("Not authorized to present resource");
   }
 
@@ -75,7 +94,7 @@ export function present<TResource extends Record<string, unknown>>(
   >) {
     const rule = policy[field];
 
-    if (!rule || canSeeField(ctx, resource, field, rule)) {
+    if (!rule || canSeeField(ctx, resource, field, rule, action, at)) {
       output[field] = value;
       continue;
     }

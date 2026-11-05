@@ -67,7 +67,8 @@ describe("service template audit privacy", () => {
           ...context,
           authContext: {
             ...context.authContext,
-            permissions: new Set([...context.authContext.permissions, permission])
+            permissions: new Set([...context.authContext.permissions, permission,
+              ...(action === "export" && ["staff_compensation:view", "wallet:view"].includes(permission) ? [permission.replace(":view", ":export")] : [])])
           }
         };
         expect(presentAuditHistoryRow(permitted, source, action)).toEqual(source);
@@ -101,7 +102,7 @@ describe("service template audit privacy", () => {
         expect(result).toMatchObject({
           id: source.id,
           resourceId: source.resourceId,
-          reason: source.reason,
+          reason: maskedValue,
           before: maskedValue,
           after: maskedValue
         });
@@ -110,7 +111,7 @@ describe("service template audit privacy", () => {
           ...context,
           authContext: {
             ...context.authContext,
-            permissions: new Set([...context.authContext.permissions, "financial_transaction:view"])
+            permissions: new Set([...context.authContext.permissions, "financial_transaction:view", ...(action === "export" ? ["financial_transaction:export"] : [])])
           }
         };
         expect(presentAuditHistoryRow(financial, source, action)).toEqual(source);
@@ -124,7 +125,7 @@ describe("service template audit privacy", () => {
                 scope: { organizationId, scopeType: "organization" as const }
               },
               {
-                permissions: new Set(["financial_transaction:view"]),
+                permissions: new Set(["financial_transaction:view", ...(action === "export" ? ["financial_transaction:export"] : [])]),
                 scope: { organizationId, scopeType: "property" as const, scopeId: propertyId }
               }
             ]
