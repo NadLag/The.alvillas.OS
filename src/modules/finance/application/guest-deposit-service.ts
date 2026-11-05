@@ -36,6 +36,11 @@ const normalized=<T extends{amount:string;currency:string}>(input:T):T=>({...inp
 const intent=(operation:string,input:unknown)=>commandFingerprint({operation,input});
 const policySnapshot=(row:{id:string;version:number;value:unknown})=>({id:row.id,version:row.version,value:guestDepositPolicySchema.parse(row.value)});
 const denied=()=>new GuestDepositAuthorizationError();
+
+/** Shared native receipt inspection for source-qualified provider intent review. */
+export async function inspectGuestDepositReceiptInTransaction(context:FinanceActorContext,raw:unknown,tx:TenantTransaction){
+ return prepareReceipt(captured(context),normalized(guestDepositReviewInput.parse(raw)),tx);
+}
 // Shared only with authorized callers that already own the tenant transaction.
 export {original as readGuestDepositSourceInTransaction,policyFor as resolveGuestDepositPolicyInTransaction,visible as presentGuestDepositResult,lockPolicies as lockGuestDepositPolicyInTransaction};
 
