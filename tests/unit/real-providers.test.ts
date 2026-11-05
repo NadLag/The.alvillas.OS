@@ -102,7 +102,9 @@ describe("real provider adapters", () => {
     const transport = vi
       .fn<HttpTransport>()
       .mockResolvedValueOnce(response({ ok: true, status: 200, body: { access_token: "token_1" } }))
-      .mockResolvedValueOnce(response({ ok: true, status: 201, body: { id: "capture_1" } }));
+      .mockResolvedValueOnce(response({ ok: true, status: 201, body: { id: "ORDER-1", status: "COMPLETED", purchase_units: [{ payments: { captures: [
+        { id: "capture_1", status: "COMPLETED", amount: { value: "100.00", currency_code: "MAD" } }
+      ] } }] } }));
     const provider = new PayPalPaymentProvider(
       {
         PAYPAL_CLIENT_ID: "client",

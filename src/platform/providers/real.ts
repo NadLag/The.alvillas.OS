@@ -13,6 +13,7 @@ import type {
 } from "@/platform/providers";
 import type { AppLocale } from "@/i18n/routing";
 import type { AppEnv } from "@/platform/env/env";
+import { paymentCaptureIntent, verifiedPayPalCapture, PaymentCaptureEvidenceError } from "./payment-capture";
 
 export type HttpTransport = (
   url: string,
@@ -197,6 +198,7 @@ export class PayPalPaymentProvider implements PaymentProvider {
     currency: string;
     source: string;
   }): Promise<{ paymentId: string }> {
+    const intent = paymentCaptureIntent(input);
     const tokenResponse = await this.transport(`${this.apiBaseUrl}/v1/oauth2/token`, {
       method: "POST",
       headers: {
@@ -204,33 +206,31 @@ export class PayPalPaymentProvider implements PaymentProvider {
         "Content-Type": "application/x-www-form-urlencoded"
       },
       body: "grant_type=client_credentials"
-    });
+    }).catch(() => { throw new PaymentCaptureEvidenceError(); });
 
     if (!tokenResponse.ok) {
-      throw new Error(`PayPal OAuth failed with ${tokenResponse.status}: ${await tokenResponse.text()}`);
+      throw new PaymentCaptureEvidenceError(tokenResponse.status);
     }
 
-    const tokenBody = (await tokenResponse.json()) as { access_token?: string };
-    const accessToken = tokenBody.access_token;
+    const tokenBody: unknown = await tokenResponse.json().catch(() => { throw new PaymentCaptureEvidenceError(); });
+    const accessToken = tokenBody && typeof tokenBody === "object" && "access_token" in tokenBody ? tokenBody.access_token : null;
 
-    if (!accessToken) {
-      throw new Error("PayPal OAuth response did not include an access token");
+    if (typeof accessToken !== "string" || !accessToken || /\s/u.test(accessToken)) {
+      throw new PaymentCaptureEvidenceError();
     }
 
-    const capture = await jsonRequest<{ id?: string }>(
-      this.transport,
-      `${this.apiBaseUrl}/v2/checkout/orders/${encodeURIComponent(input.source)}/capture`,
-      {
+    const capture = await this.transport(`${this.apiBaseUrl}/v2/checkout/orders/${encodeURIComponent(intent.source)}/capture`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
-          "PayPal-Request-Id": `${input.source}:${input.currency}:${input.amount}`
+          "Content-Type": "application/json",
+          Prefer: "return=representation",
+          "PayPal-Request-Id": createHash("sha256").update(JSON.stringify(intent)).digest("hex").slice(0, 38)
         },
-        body: {}
-      }
-    );
-
-    return { paymentId: capture.id ?? input.source };
+        body: "{}"
+      }).catch(() => { throw new PaymentCaptureEvidenceError(); });
+    if (!capture.ok) throw new PaymentCaptureEvidenceError(capture.status);
+    return verifiedPayPalCapture(await capture.json().catch(() => { throw new PaymentCaptureEvidenceError(); }), intent);
   }
 }
 

@@ -1,4 +1,5 @@
 import { ledgerIntegrityPolicyKey, ledgerIntegrityPolicySchema, ledgerIntegrityRoutingKey, ledgerIntegrityRoutingSchema } from "@/modules/finance/domain/ledger-integrity";
+import { paymentMethodPolicyKey, paymentMethodPolicySchema } from "@/modules/finance/domain/payment-method";
 import { financialAttachmentPolicyKey, financialAttachmentPolicySchema } from "@/modules/finance/domain/financial-attachment-policy";
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
@@ -386,6 +387,7 @@ export const configRuleSchemas = {
   [recurringCompanyExpensePolicyKey]:recurringCompanyExpensePolicySchema,
   [serviceAllocationPolicyKey]:serviceAllocationPolicySchema,
   [guestDepositPolicyKey]:guestDepositPolicySchema,
+  [paymentMethodPolicyKey]:paymentMethodPolicySchema,
   [bankStatementPolicyKey]:bankStatementPolicySchema,
   [accountingPeriodPolicyKey]: accountingPeriodPolicySchema,
   [agreementResponsibilitiesConfigKey]: agreementResponsibilitiesConfigSchema,

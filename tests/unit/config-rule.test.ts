@@ -57,6 +57,7 @@ describe("config rule registry", () => {
       "finance.guest_deposits",
       "finance.ledger_integrity",
       "finance.ota_fee",
+      "finance.payment_methods",
       "finance.payout_schedule",
       "finance.receivable_aging",
       "finance.receivable_assignments",
