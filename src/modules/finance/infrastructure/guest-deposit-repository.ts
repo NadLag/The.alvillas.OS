@@ -12,6 +12,12 @@ export class GuestDepositRepository{
  constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
  lockCommand(key:string){return new FinancialTransferRepository(this.tx,this.organizationId).lock("guest-deposit-command:"+key);}
  lockSource(id:string){return new FinancialTransferRepository(this.tx,this.organizationId).lock("guest-deposit-source:"+id);}
+ async flushOriginalCashProof(){
+  // The original finalizer seals only this transaction's new journal. Additional
+  // provenance guards remain deferred while the original cash proof is checked.
+  await this.tx.$executeRawUnsafe("SET CONSTRAINTS financial_transaction_finish_write IMMEDIATE");
+  await this.tx.$executeRawUnsafe("SET CONSTRAINTS guest_cash_admission_guard IMMEDIATE");
+ }
  source(reservationId:string){return this.tx.reservation.findFirst({where:{organizationId:this.organizationId,id:reservationId,archivedAt:null},select:{
   id:true,organizationId:true,propertyId:true,guestId:true,version:true,reference:true,status:true,createdAt:true,
   linkedguestId:{select:{id:true,organizationId:true,archivedAt:true}},
