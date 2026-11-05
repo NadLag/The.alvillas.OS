@@ -1237,7 +1237,12 @@
       "OWNER_EXPENSE": "Owner expense",
       "PAYOUT": "Payout",
       "ADJUSTMENT": "Adjustment"
-    }
+    },
+    "periodFrom": "من",
+    "periodTo": "إلى",
+    "currency": "العملة",
+    "applyPeriod": "عرض الفترة",
+    "invalidPeriod": "اختر تواريخ صحيحة بحيث لا يسبق تاريخ النهاية تاريخ البداية، وعملة صحيحة. يظهر الشهر الحالي حسب الإعدادات."
   },
   "emailTemplates": {
     "invitation": {
@@ -4743,5 +4748,28 @@
     "storage_unavailable": "تخزين المستندات غير متاح. أبقِ الصفحة مفتوحة واستأنف الرفع عند توفره.",
     "unavailable": "تعذر تحميل المستندات أو حفظها. حاول مجدداً.",
     "reload": "تحديث المستندات"
+  },
+  "OwnerStatementDocuments": {
+    "subject": "كشف المالك للعقار {propertyName}",
+    "title": "كشف حساب المالك",
+    "period": "من {from} إلى {to}",
+    "owner": "المالك",
+    "property": "العقار",
+    "openingBalance": "الرصيد الافتتاحي",
+    "periodCredits": "المبالغ الدائنة",
+    "periodDebits": "المبالغ المدينة",
+    "closingBalance": "الرصيد الختامي",
+    "lines": "حركات كشف الحساب",
+    "noLines": "لا توجد حركات مالية خلال هذه الفترة.",
+    "buckets": {
+      "OWNER_REVENUE": "إيرادات المالك",
+      "OWNER_SERVICES": "خدمات المالك",
+      "REIMBURSEMENT": "المبالغ المستردة",
+      "COMMISSION": "العمولة",
+      "OTA_FEE": "رسوم منصات الحجز",
+      "OWNER_EXPENSE": "مصاريف المالك",
+      "PAYOUT": "الدفعات",
+      "ADJUSTMENT": "التسويات"
+    }
   }
 }

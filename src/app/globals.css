@@ -70,9 +70,9 @@
 .receivable-page input:not([type="checkbox"]),
 .receivable-page select,
 .receivable-page textarea { min-inline-size: 0; max-inline-size: 100%; }
-.compensation-filters { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-4); margin-block: var(--space-5) var(--space-7); }
+.compensation-filters, .statement-filters { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-4); margin-block: var(--space-5) var(--space-7); }
 .compensation-filters .field:first-child { flex: 1 1 20rem; }
-.compensation-filters input, .compensation-filters select { min-block-size: var(--target-min); inline-size: 100%; }
+.compensation-filters input, .compensation-filters select, .statement-filters input, .statement-filters select { min-block-size: var(--target-min); inline-size: 100%; }
 .compensation-table-scroll { overflow: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); margin-block: var(--space-5); }
 .compensation-table { inline-size: 100%; min-inline-size: 42rem; table-layout: fixed; border-collapse: collapse; text-align: start; background: var(--surface-panel); }
 .compensation-table th, .compensation-table td { min-block-size: 56px; padding: var(--space-4); border-block-end: 1px solid var(--border-subtle); text-align: start; vertical-align: top; }
@@ -129,7 +129,7 @@
 .compensation-create-review p { flex: 1 1 100%; margin: 0; }
 @media (max-width: 600px) {
   .compensation-summary, .compensation-evidence { grid-template-columns: minmax(0, 1fr); }
-  .compensation-filters { align-items: stretch; flex-direction: column; }
+  .compensation-filters, .statement-filters { align-items: stretch; flex-direction: column; }
   .compensation-filters .field:first-child { flex-basis: auto; }
   .compensation-source { padding: var(--space-4); }
   .compensation-source-heading { flex-direction: column; }

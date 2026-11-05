@@ -9,6 +9,7 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { consumeRateLimit } from "@/platform/rate-limit/postgres-rate-limiter";
 import { Money } from "@/platform/money/money";
+import { LedgerCalendarConfigurationError } from "@/platform/ledger/ledger-calendar-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { AccountantPostingExportRepository } from "../infrastructure/accountant-posting-export-repository";
 import { accountantExportPolicyKey, accountantExportPolicySchema } from "../domain/accountant-export-policy";
@@ -31,8 +32,12 @@ async function context(ctx: FinanceActorContext, tx: TenantTransaction, currency
   const rule = await new ConfigRuleRepository(tx, ctx.organizationId).resolve({ key: accountantExportPolicyKey, scopes: [{ scopeType: "organization", scopeId: null }], asOf: now });
   if (!rule) throw new AccountantExportConfigurationError(); const parsed = accountantExportPolicySchema.safeParse(rule.value);
   if (!parsed.success) throw new AccountantExportConfigurationError();
-  const settings = await repository.settings(); if (!settings.timezone) throw new AccountantExportConfigurationError();
-  return { now, rule, policy: parsed.data, settings, repository, identity: commandFingerprint({ rule, timezone: settings.timezone, currency: settings.currencies.find(row => row.code === currency) ?? null }) };
+  const settings = await repository.configuration().catch(error => {
+    if (error instanceof LedgerCalendarConfigurationError || error instanceof ZodError) throw new AccountantExportConfigurationError();
+    throw error;
+  });
+  return { now, rule, policy: parsed.data, settings, repository, identity: commandFingerprint({ rule, calendarPolicyId: settings.policyId,
+    timezone: settings.timezone, currency: settings.currencies.find(row => row.code === currency) ?? null }) };
 }
 
 /** A format renderer runs inside the final source fence; no attachment can escape an uncommitted audit or a changed source. */
@@ -58,7 +63,7 @@ export async function prepareAccountantExport<T>(contextInput: FinanceActorConte
       if (actual.length !== classification.account_codes.length || actual.some(row => !classification.account_types.includes(row.accountType as "ALVILLAS_OWN" | "CLAIM_OWNERSHIP"))) throw new AccountantExportConfigurationError();
     }
     const maxRows = current.policy.capacity[input.format], scope = { currency: input.currency, propertyId: input.propertyId,
-      ...await current.repository.range(input.fromOn, input.toOn, current.settings.timezone!), maxRows, classification };
+      ...await current.repository.range(input.fromOn, input.toOn, current.settings.timezone), maxRows, classification };
     const readNative = async (): Promise<AccountantExportNativeSnapshot> => {
       if (input.kind === "OWNER_STATEMENTS") return captureAccountantOwnerSource(tx, ctx.organizationId, input, scope);
       if (input.kind === "BANK_RECONCILIATION") return captureAccountantBankSource(tx, ctx.organizationId, input, scope, maxRows);
@@ -77,7 +82,7 @@ export async function prepareAccountantExport<T>(contextInput: FinanceActorConte
     const file = await render(document, maxRows);
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.accountant_export.generated", resourceType: "accountant_export", resourceId: current.rule.id,
       propertyScopeId: input.propertyId, after: { kind: input.kind, format: input.format, locale: input.locale, fromOn: input.fromOn, toOn: input.toOn, currency: input.currency,
-        timezone: document.timezone, policyId: current.rule.id, policyVersion: current.rule.version, sourceFingerprint, rowCount: rows.length }, reason: input.reason,
+        timezone: document.timezone, calendarPolicyId: current.settings.policyId, policyId: current.rule.id, policyVersion: current.rule.version, sourceFingerprint, rowCount: rows.length }, reason: input.reason,
       requestId: deps.requestId ?? randomUUID(), occurredAt: current.now });
     if ((await context(ctx, tx, input.currency)).identity !== current.identity || (await capture()).fingerprint !== sourceFingerprint) throw new AccountantExportChangedError();
     await authority(ctx, tx); return file;
@@ -95,7 +100,7 @@ export async function readAccountantExportEditor(contextInput: FinanceActorConte
       ? (await accountantBankExportAccounts(tx, ctx.organizationId, currency)).accounts.filter(row => (!input.after || row.id > input.after) && (row.code + " " + row.name).toLocaleLowerCase().includes(input.query.toLocaleLowerCase())).slice(0, 31).map(row => ({ id: row.id, label: row.code + " · " + row.name }))
       : await current.repository.choices(input.choice, input.query, input.after);
     const result = accountantEditorSchema.parse({ reports: current.policy.reports, formats: current.policy.formats, currency, currencies: current.settings.currencies.map(row => row.code),
-      timezone: current.settings.timezone, ...await current.repository.defaults(current.now, current.settings.timezone!), choices: choices.slice(0, 30), next: choices.length > 30 ? choices[29].id : null,
+      timezone: current.settings.timezone, ...await current.repository.defaults(current.now, current.settings.timezone), choices: choices.slice(0, 30), next: choices.length > 30 ? choices[29].id : null,
       arabicPdfAvailable: Boolean(process.env.PDF_RENDERER_ENDPOINT && process.env.PDF_RENDERER_TOKEN) });
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.accountant_export.editor_read", resourceType: "accountant_export", resourceId: current.rule.id,
       after: { choice: input.choice ?? null, count: result.choices.length, currency, policyId: current.rule.id }, requestId: deps.requestId ?? randomUUID(), occurredAt: current.now });

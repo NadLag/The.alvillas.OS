@@ -1237,7 +1237,12 @@
       "OWNER_EXPENSE": "Owner expense",
       "PAYOUT": "Payout",
       "ADJUSTMENT": "Adjustment"
-    }
+    },
+    "periodFrom": "From",
+    "periodTo": "To",
+    "currency": "Currency",
+    "applyPeriod": "Apply period",
+    "invalidPeriod": "Choose valid dates with an end date on or after the start and a currency. The configured current month is shown."
   },
   "emailTemplates": {
     "invitation": {
@@ -4743,5 +4748,28 @@
     "storage_unavailable": "Document storage is unavailable. Keep this page open and resume the upload when it is available.",
     "unavailable": "Documents could not be loaded or saved. Try again.",
     "reload": "Refresh documents"
+  },
+  "OwnerStatementDocuments": {
+    "subject": "Owner statement for {propertyName}",
+    "title": "Owner statement",
+    "period": "{from} to {to}",
+    "owner": "Owner",
+    "property": "Property",
+    "openingBalance": "Opening balance",
+    "periodCredits": "Credits",
+    "periodDebits": "Debits",
+    "closingBalance": "Closing balance",
+    "lines": "Statement lines",
+    "noLines": "No ledger postings were found for this period.",
+    "buckets": {
+      "OWNER_REVENUE": "Owner revenue",
+      "OWNER_SERVICES": "Owner services",
+      "REIMBURSEMENT": "Reimbursement",
+      "COMMISSION": "Commission",
+      "OTA_FEE": "OTA fee",
+      "OWNER_EXPENSE": "Owner expense",
+      "PAYOUT": "Payout",
+      "ADJUSTMENT": "Adjustment"
+    }
   }
 }

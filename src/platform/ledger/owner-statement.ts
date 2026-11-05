@@ -75,17 +75,21 @@ export type OwnerStatement<TPropertyId extends string | null = string> = {
   lines: OwnerStatementLine[];
 };
 
-export const statementPeriodInputSchema = z
-  .object({
-    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
-    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u)
-  })
+const statementPeriodFields = z.object({
+    from: z.iso.date(),
+    to: z.iso.date(),
+    currency: z.string().regex(/^[A-Z]{3}$/u).optional()
+  }).strict();
+export const statementPeriodInputSchema = statementPeriodFields
   .refine((value) => value.from <= value.to, {
     message: "Statement period end must be on or after the start date",
     path: ["to"]
   });
 
 export type StatementPeriodInput = z.infer<typeof statementPeriodInputSchema>;
+export const statementPeriodSelectionSchema = statementPeriodFields.partial().refine(value => !value.from || !value.to || value.from <= value.to,
+  { message: "Statement period end must be on or after the start date", path: ["to"] });
+export type StatementPeriodSelection = z.infer<typeof statementPeriodSelectionSchema>;
 
 export function dateOnlyToUtc(date: string): Date {
   return new Date(`${date}T00:00:00.000Z`);

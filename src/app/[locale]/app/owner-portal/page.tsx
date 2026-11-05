@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { EmptyState, OwnerShell, ShellHeader } from "@/design-system/shells";
 import { routing, type AppLocale } from "@/i18n/routing";
-import { defaultStatementPeriod } from "@/modules/owner-portal/domain/owner-statement";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
 import { listOwnerPortalProperties } from "@/modules/owner-portal/application/owner-portal-service";
 import { auth } from "@/platform/auth/session";
@@ -39,8 +38,6 @@ export default async function OwnerPortalPage({
     getTranslations("OwnerPortal"),
     listOwnerPortalProperties(ctx)
   ]);
-  const period = defaultStatementPeriod();
-  const periodQuery = `from=${period.from}&to=${period.to}`;
 
   return (
     <OwnerShell className="resource-page" testId="owner-portal-page">
@@ -70,7 +67,7 @@ export default async function OwnerPortalPage({
               <Link
                 className="resource-row"
                 data-testid="owner-property-row"
-                href={`/${appLocale}/app/owner-portal/properties/${property.propertyId}?${periodQuery}`}
+                href={`/${appLocale}/app/owner-portal/properties/${property.propertyId}`}
                 key={property.propertyId}
               >
                 <span>

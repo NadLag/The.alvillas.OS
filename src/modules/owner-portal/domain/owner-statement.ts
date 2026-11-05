@@ -1,2 +1,2 @@
-export {ownerStatementBuckets,statementPeriodInputSchema,dateOnlyToUtc,addUtcDays,defaultStatementPeriod,statementPeriodDates,buildOwnerStatement} from "@/platform/ledger/owner-statement";
-export type {OwnerStatementBucket,RawOwnerLedgerPosting,OwnerStatementLine,OwnerHeldBreakdown,OwnerStatement,StatementPeriodInput} from "@/platform/ledger/owner-statement";
+export {ownerStatementBuckets,statementPeriodInputSchema,statementPeriodSelectionSchema,dateOnlyToUtc,addUtcDays,defaultStatementPeriod,statementPeriodDates,buildOwnerStatement} from "@/platform/ledger/owner-statement";
+export type {OwnerStatementBucket,RawOwnerLedgerPosting,OwnerStatementLine,OwnerHeldBreakdown,OwnerStatement,StatementPeriodInput,StatementPeriodSelection} from "@/platform/ledger/owner-statement";

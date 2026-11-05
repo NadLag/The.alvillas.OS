@@ -3,14 +3,15 @@ import { headers } from "next/headers";
 import type { Prisma } from "@prisma/client";
 import {
   buildOwnerStatement,
-  statementPeriodDates,
   statementPeriodInputSchema,
-  type StatementPeriodInput
+  statementPeriodSelectionSchema,
+  type StatementPeriodSelection
 } from "@/modules/owner-portal/domain/owner-statement";
 import type { OwnerPortalActorContext } from "@/modules/owner-portal/application/owner-portal-access";
 import {
   presentOwnerStatement,
-  type OwnerStatementView
+  type OwnerStatementView,
+  type OwnerStatementSnapshot
 } from "@/modules/owner-portal/application/owner-statement-presenter";
 import { OwnerPortalRepository } from "@/modules/owner-portal/infrastructure/owner-portal-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
@@ -104,11 +105,16 @@ function statementHash(statement: OwnerStatementView): string {
   return createHash("sha256")
     .update(
       JSON.stringify({
+        schemaVersion: 2,
         organizationId: statement.organizationId,
         ownerId: statement.ownerId,
         propertyId: statement.propertyId,
         periodStart: statement.periodStart.toISOString(),
         periodEnd: statement.periodEnd.toISOString(),
+        timezone: statement.timezone,
+        fromOn: statement.fromOn,
+        toOn: statement.toOn,
+        currency: statement.currency,
         openingBalance: statement.openingBalance.toJSON(),
         periodCreditTotal: statement.periodCreditTotal.toJSON(),
         periodDebitTotal: statement.periodDebitTotal.toJSON(),
@@ -154,12 +160,11 @@ export async function listOwnerPortalProperties(
 export async function getOwnerStatement(
   ctx: OwnerPortalActorContext,
   propertyId: string,
-  periodInput: StatementPeriodInput,
+  periodInput: StatementPeriodSelection = {},
   deps: OwnerPortalServiceDeps = {}
-): Promise<OwnerStatementView> {
+): Promise<OwnerStatementSnapshot> {
   assertAllowed(ctx, "owner_statement", propertyId);
-  const parsedPeriod = statementPeriodInputSchema.parse(periodInput);
-  const { periodStart, periodEnd } = statementPeriodDates(parsedPeriod);
+  const selection = statementPeriodSelectionSchema.parse(periodInput);
   const meta = await auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
@@ -170,17 +175,17 @@ export async function getOwnerStatement(
       throw new OwnerPortalNotFoundError();
     }
 
-    const [organization, postings] = await Promise.all([
-      tx.organization.findUniqueOrThrow({
-        where: { id: ctx.organizationId },
-        select: { baseCurrency: true }
-      }),
-      repository.listOwnerLedgerPostings({
+    const configured = await repository.configuration(), defaults = await repository.defaults(configured.now, configured.timezone),
+      parsedPeriod = statementPeriodInputSchema.parse({ from: selection.from ?? defaults.fromOn, to: selection.to ?? defaults.toOn, currency: selection.currency }),
+      currency = parsedPeriod.currency ?? configured.baseCurrency;
+    if (!configured.currencies.some(row => row.code === currency)) throw new OwnerPortalNotFoundError();
+    const { startsAt: periodStart, endsAt: periodEnd } = await repository.range(parsedPeriod.from, parsedPeriod.to, configured.timezone);
+    const postings = await repository.listOwnerLedgerPostings({
         ownerId: access.ownerId,
         propertyId,
-        periodEnd
-      })
-    ]);
+        periodEnd,
+        currency
+      });
     const statement = buildOwnerStatement({
       organizationId: ctx.organizationId,
       ownerId: access.ownerId,
@@ -189,10 +194,11 @@ export async function getOwnerStatement(
       propertyName: access.propertyName,
       periodStart,
       periodEnd,
-      currency: organization.baseCurrency,
+      currency,
       postings
     });
-    const presented = presentOwnerStatement(ownerPresentationContext(ctx), statement);
+    const presented = { ...presentOwnerStatement(ownerPresentationContext(ctx), statement), timezone: configured.timezone,
+      fromOn: parsedPeriod.from, toOn: parsedPeriod.to, currencies: configured.currencies };
     const hash = statementHash(presented);
 
     await writeAuditEvent(tx, {
@@ -205,21 +211,27 @@ export async function getOwnerStatement(
       propertyScopeId: propertyId,
       after: toAuditJson({
         statementHash: hash,
+        statementHashVersion: 2,
         ownerId: access.ownerId,
         propertyId,
         periodStart: periodStart.toISOString(),
         periodEnd: periodEnd.toISOString(),
+        timezone: configured.timezone,
+        calendarPolicyId: configured.policyId,
+        fromOn: parsedPeriod.from,
+        toOn: parsedPeriod.to,
+        currency,
         openingBalance: presented.openingBalance.toJSON(),
         periodCreditTotal: presented.periodCreditTotal.toJSON(),
         periodDebitTotal: presented.periodDebitTotal.toJSON(),
         closingBalance: presented.closingBalance.toJSON(),
         lineCount: presented.lines.length
       }),
-      reason: "S5 owner portal statement",
+      reason: "Viewed the authorized original owner statement",
       requestId: meta.requestId,
-      occurredAt: new Date()
+      occurredAt: configured.now
     });
 
     return presented;
-  });
+  }, { isolationLevel: "RepeatableRead" });
 }

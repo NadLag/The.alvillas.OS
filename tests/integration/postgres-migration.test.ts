@@ -6740,6 +6740,9 @@ describe("PostgreSQL baseline", () => {
     });
     expect(properties.map((property) => property.propertyId)).toEqual([fixture.property.id]);
 
+    await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, tx => new ConfigRuleRepository(tx, orgA.id).createVersion({
+      key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date(0), createdBy: ownerUser.userAccountId,
+      value: { timezone: "UTC", allow_early_close: false, max_reopen_seconds: 60 }, reason: "Explicit original owner statement fixture calendar" }));
     const statement = await getOwnerStatement(
       ownerCtx!,
       fixture.property.id,
@@ -7210,6 +7213,9 @@ describe("PostgreSQL baseline", () => {
       }
     );
     expect(ownerCtx).not.toBeNull();
+    await withTenant(prisma as unknown as TenantTransactionRunner, orgA.id, tx => new ConfigRuleRepository(tx, orgA.id).createVersion({
+      key: "finance.accounting_periods", scopeType: "organization", effectiveFrom: new Date(0), createdBy: ownerUser.userAccountId,
+      value: { timezone: "UTC", allow_early_close: false, max_reopen_seconds: 60 }, reason: "Explicit original reservation statement fixture calendar" }));
     const postedStatement = await getOwnerStatement(
       ownerCtx!,
       fixture.property.id,
