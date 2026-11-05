@@ -14,6 +14,7 @@ export type TenantTransactionRunner = {
     options?: TenantTransactionOptions
   ): Promise<T>;
 };
+export const tenantTransactionDefaults = Object.freeze({ maxWait: 10000, timeout: 30000 });
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -39,8 +40,8 @@ export async function withTenant<T>(
 
     return work(tx);
   }, {
-    maxWait: options?.maxWait ?? 10000,
-    timeout: options?.timeout ?? 30000,
+    maxWait: options?.maxWait ?? tenantTransactionDefaults.maxWait,
+    timeout: options?.timeout ?? tenantTransactionDefaults.timeout,
     isolationLevel: options?.isolationLevel
   });
 }

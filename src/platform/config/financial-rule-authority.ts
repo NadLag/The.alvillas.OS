@@ -1,4 +1,5 @@
 import {ledgerIntegrityPolicyKey,ledgerIntegrityRoutingKey} from "@/modules/finance/domain/ledger-integrity";
+import {paymentMethodPolicyKey} from "@/modules/finance/domain/payment-method";
 import {financialAttachmentPolicyKey} from "@/modules/finance/domain/financial-attachment-policy";
 import type {AuthContext} from "@/platform/authz/authorize";
 import {authorizeOrganizationSource} from "@/platform/authz/organization-authority";
@@ -31,6 +32,7 @@ const sourceGroups:Readonly<Record<string,readonly string[]>>={
  [recurringCompanyExpensePolicyKey]:["company_expense","financial_transaction","staff_compensation"],
  [serviceAllocationPolicyKey]:["cash_collection","financial_transaction","owner_statement","company_ledger","supplier_invoice","employee_payable","staff_compensation"],
  [guestDepositPolicyKey]:["financial_transaction"],
+ [paymentMethodPolicyKey]:["financial_transaction","cash_collection","bank_statement"],
  "finance.tax":["financial_transaction","company_ledger"]
 };
 function financialSources(key: string): readonly string[] | undefined {

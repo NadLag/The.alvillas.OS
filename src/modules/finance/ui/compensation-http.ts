@@ -12,6 +12,7 @@ import { ExpensePolicyUnavailableError } from "../application/expense-submission
 import { EmployeeCompensationRecognitionSourceError } from "../domain/employee-compensation-recognition";
 import { AccountingPeriodClosedError } from "../domain/accounting-period";
 import { PaymentAccountChoiceAccessError } from "../domain/payment-account-choices";
+import { PaymentMethodAccessError, PaymentMethodConfigurationError, PaymentMethodChangedError, PaymentMethodSourceError } from "../domain/payment-method";
 import { ExpenseAccessError } from "../application/expense-service";
 import { EmployeeWorkTimeAccessError,EmployeeWorkTimeConflictError,EmployeeWorkTimePolicyError,EmployeeWorkTimeSourceError } from "../domain/employee-work-time";
 import {ReceivableAccessError,ReceivablePolicyError} from "../domain/receivable";
@@ -55,6 +56,10 @@ export async function compensationHttp<T extends Promise<unknown>>(request:NextR
     const value=await work(actor,input,requestId),response=options.respond?options.respond(value):NextResponse.json(value,{headers,status:options.status??200});
     for(const[key,value]of Object.entries(headers))response.headers.set(key,value);return response;
   }catch(error){
+    if(error instanceof PaymentMethodAccessError)return failure("forbidden",403);
+    if(error instanceof PaymentMethodConfigurationError)return failure("configuration_unavailable",409);
+    if(error instanceof PaymentMethodChangedError)return failure("conflict",409);
+    if(error instanceof PaymentMethodSourceError)return failure("source_unavailable",409);
     if(error instanceof FinancialAttachmentAccessError)return failure("forbidden",403);
     if(error instanceof FinancialAttachmentConfigurationError)return failure("configuration_unavailable",409);
     if(error instanceof FinancialAttachmentSourceError)return failure("source_unavailable",409);

@@ -5,12 +5,12 @@ const moneyInput={amount:positiveMoney,currency:z.string().regex(/^[A-Z]{3}$/u)}
 const receiptFacts={reservationId:identity,kind:z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/u),accountId:identity,...moneyInput,
  method:z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/u),receivedAt:z.iso.datetime({precision:3}),externalReference:z.string().trim().max(160).nullable(),purpose:z.string().trim().min(3).max(1000)};
 export const guestDepositReviewInput=z.object(receiptFacts).strict();
-export const guestDepositReceiptInput=guestDepositReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
+export const guestDepositReceiptInput=guestDepositReviewInput.extend({reviewFingerprint:hash,paymentMethodFingerprint:hash.optional(),idempotencyKey:identity,reason}).strict();
 export const guestDepositRefundReviewInput=z.object({depositId:identity,accountId:identity,...moneyInput,method:receiptFacts.method,externalReference:receiptFacts.externalReference,purpose:receiptFacts.purpose}).strict();
 export const guestDepositRefundInput=guestDepositRefundReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
 export const guestDepositRecoveryInput=z.object({key:identity}).strict();
-export const guestDepositCashAdmissionReviewInput=guestDepositReviewInput.omit({accountId:true,method:true,receivedAt:true,externalReference:true}).extend({collectionId:identity}).strict();
-export const guestDepositCashAdmissionInput=guestDepositCashAdmissionReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
+export const guestDepositCashAdmissionReviewInput=guestDepositReviewInput.omit({accountId:true,method:true,receivedAt:true,externalReference:true}).extend({collectionId:identity,paymentMethodKey:receiptFacts.method.optional()}).strict();
+export const guestDepositCashAdmissionInput=guestDepositCashAdmissionReviewInput.extend({reviewFingerprint:hash,paymentMethodFingerprint:hash.optional(),idempotencyKey:identity,reason}).strict();
 export const guestDepositReversalReviewInput=z.object({transactionId:identity}).strict();
 export const guestDepositReversalInput=guestDepositReversalReviewInput.extend({reviewFingerprint:hash,idempotencyKey:identity,reason}).strict();
 export const guestDepositFundedApplicationReviewInput=guestDepositRefundReviewInput.pick({depositId:true,amount:true,currency:true}).strict();
