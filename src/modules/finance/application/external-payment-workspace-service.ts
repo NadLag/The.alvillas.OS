@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
@@ -16,10 +15,11 @@ import { authorizeExternalPaymentSource, type ExternalPaymentRequest } from "./e
 import { assertExternalPaymentLocation } from "./external-payment-location";
 import { guestPaymentMethodScopes } from "./guest-deposit-payment-method";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
+import { externalPaymentReviewInput, externalPaymentIdentityInput as identity, externalPaymentRecoveryInput } from "../domain/external-payment-command";
+import type { z } from "zod";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
-const identity = z.object({ id: z.uuid() }).strict();
-export const externalPaymentReviewInput = z.object({ provider: z.literal("paypal"), orderId: z.string().regex(/^[A-Za-z0-9_-]{1,127}$/u), receipt: guestDepositReviewInput }).strict();
+export { externalPaymentReviewInput } from "../domain/external-payment-command";
 async function review(ctx: FinanceActorContext, raw: z.infer<typeof externalPaymentReviewInput>, tx: Parameters<typeof inspectGuestDepositReceiptInTransaction>[2], retained?: ExternalPaymentRequest) {
   if (raw.receipt.externalReference !== raw.orderId) throw new ExternalPaymentIntentError();
   const prepared = await inspectGuestDepositReceiptInTransaction(ctx, raw.receipt, tx), now = await prepared.finance.clock(),
@@ -46,10 +46,26 @@ export async function getExternalPaymentIntent(inputContext: FinanceActorContext
   const ctx = externalPaymentContext(inputContext), input = identity.parse(raw);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const request = await new ExternalPaymentRepository(tx, ctx.organizationId).find(input.id); if (!request) throw new PaymentMethodAccessError();
-    await authorizeExternalPaymentSource(ctx, tx, request);
+    return readOriginalIntent(ctx, tx, request, deps);
+  });
+}
+async function readOriginalIntent(ctx: FinanceActorContext, tx: Parameters<typeof authorizeExternalPaymentSource>[1], request: ExternalPaymentRequest, deps: Deps) {
+    const before = await authorizeExternalPaymentSource(ctx, tx, request), receipt = await new ExternalPaymentRepository(tx, ctx.organizationId).admittedReceipt(request.idempotencyKey);
+    if (receipt && !request.capture) throw new ExternalPaymentIntentError();
+    const checks = receipt ? [receipt, ...receipt.reversedByTransactions].map(journal => ({ action: "view" as const, resource: { ...before.resource, id: journal.id, financialRecordId: journal.id, occurredAt: journal.occurredAt } })) : [];
+    await recheckFinanceAuthorization(ctx, tx, before.now, checks, new PaymentMethodAccessError());
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.external_payment.viewed", resourceType: "financial_transaction", resourceId: request.id,
       after: { operation: "VIEW_ORIGINAL_EXTERNAL_PAYMENT" }, reason: "Viewed the original retained payment intent and confirmation state", requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: await new FinanceRepository(tx, ctx.organizationId).clock() });
-    await authorizeExternalPaymentSource(ctx, tx, request); return externalPaymentIntentView(request, true);
+    const after = await authorizeExternalPaymentSource(ctx, tx, request);
+    await recheckFinanceAuthorization(ctx, tx, after.now, checks, new PaymentMethodAccessError());
+    return { ...externalPaymentIntentView(request, true), admission: receipt ? { state: "ADMITTED" as const, transactionId: receipt.id, depositId: request.idempotencyKey, reversed: receipt.reversedByTransactions.length > 0 } : null };
+}
+/** An unknown nonce reveals no tenant or provider existence; known requests pass the same private read and audit boundary. */
+export async function recoverExternalPaymentIntent(inputContext: FinanceActorContext, raw: unknown, deps: Deps = {}) {
+  const ctx = externalPaymentContext(inputContext), input = externalPaymentRecoveryInput.parse(raw);
+  return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
+    const request = await new ExternalPaymentRepository(tx, ctx.organizationId).byKey(input.key);
+    return { request: request ? await readOriginalIntent(ctx, tx, request, deps) : null };
   });
 }
 export async function reviewCapturedPayPalAdmission(inputContext: FinanceActorContext, raw: unknown, deps: Deps = {}) {

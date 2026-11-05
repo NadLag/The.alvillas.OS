@@ -1,17 +1,12 @@
 import { z } from "zod";
 import { paymentCaptureIntent } from "@/platform/providers/payment-capture";
-import { guestDepositReceiptInput } from "./guest-deposit-command";
+import { externalPaymentIntentInput } from "./external-payment-command";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { PaymentMethodSourceError } from "./payment-method";
 
+export { externalPaymentSourceSchema } from "./external-payment-source";
 const identity = z.uuid().transform(value => value.toLowerCase());
-export const externalPaymentSourceSchema = z.object({ schemaVersion: z.literal(1), organizationId: identity, userAccountId: identity, personId: identity,
-  reservationId: identity, propertyId: identity, guestId: identity, bookingSource: z.string().min(1), financialSnapshotId: identity, financialSnapshotVersion: z.number().int().positive(),
-  city: z.string(), region: z.string().nullable(), accountId: identity, amount: z.object({ amount: z.string().regex(/^(?:0|[1-9]\d*)\.\d{2}$/u), currency: z.string().regex(/^[A-Z]{3}$/u) }).strict(), receivedAt: z.iso.datetime() }).strict();
-export const externalPaymentIntentInput = z.object({
-  provider: z.literal("paypal"), orderId: z.string().regex(/^[A-Za-z0-9_-]{1,127}$/u),
-  receipt: guestDepositReceiptInput.extend({ paymentMethodFingerprint: z.string().regex(/^[a-f0-9]{64}$/u) }),
-}).strict();
+export { externalPaymentIntentInput } from "./external-payment-command";
 export class ExternalPaymentIntentError extends PaymentMethodSourceError { constructor() { super(); this.message = "external_payment_intent_unavailable"; } }
 
 /** Retains the reviewed native command; capture success does not grant financial admission. */

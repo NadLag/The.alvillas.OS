@@ -15,6 +15,7 @@ export class ExternalPaymentRepository {
   lock(key: string) { return new FinancialTransferRepository(this.tx, this.organizationId).lock("external-payment:" + key); }
   find(id: string) { return this.tx.externalPaymentIntent.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } }, include: { capture: true, attempt: true } }); }
   byKey(idempotencyKey: string) { return this.tx.externalPaymentIntent.findUnique({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, include: { capture: true, attempt: true } }); }
+  admittedReceipt(idempotencyKey: string) { return new GuestDepositRepository(this.tx, this.organizationId).receipt(idempotencyKey); }
   async sourceSnapshot(saved: Intent, personId: string | undefined) {
     const repository = new GuestPaymentProvenanceRepository(this.tx, this.organizationId);
     const [actor, booking, snapshot, source] = await Promise.all([repository.actor(saved.requestedBy), repository.booking(saved.input.receipt.reservationId),

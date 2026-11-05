@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { Money } from "@/platform/money/money";
@@ -15,9 +14,9 @@ import type { FinanceActorContext } from "./finance-access";
 import { configuredPaymentMethod } from "../domain/payment-method";
 import { assertExternalPaymentLocation } from "./external-payment-location";
 import { providerCaptureSettlementSchema } from "@/platform/providers/payment-capture";
+import { capturedPayPalAdmissionInput } from "../domain/external-payment-command";
 
-export const capturedPayPalAdmissionInput = z.object({ intentId: z.uuid(), reviewFingerprint: guestDepositReceiptInput.shape.reviewFingerprint,
-  paymentMethodFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), reason: guestDepositReceiptInput.shape.reason }).strict();
+export { capturedPayPalAdmissionInput } from "../domain/external-payment-command";
 /** The captured source is already durable. Every monetary effect still belongs to the original native receipt producer. */
 export async function admitCapturedPayPalPayment(inputContext: FinanceActorContext, raw: unknown, deps: { db?: TenantTransactionRunner; requestId?: string } = {}) {
   const ctx = externalPaymentContext(inputContext), input = capturedPayPalAdmissionInput.parse(raw);
