@@ -12,6 +12,9 @@ import { reviewExternalPaymentRefundAdmission } from "@/modules/finance/applicat
 import { reviewSupervisedExternalPaymentRefundAdmission, admitSupervisedExternalPaymentRefund, recoverSupervisedExternalPaymentRefund } from "@/modules/finance/application/external-payment-refund-supervised-admission";
 import { prepareSupervisedExternalPaymentRefundFee, readSupervisedExternalPaymentRefundFee } from "@/modules/finance/application/external-payment-refund-supervised-fee";
 import { submitExpense } from "@/modules/finance/application/expense-service";
+import { readExternalRefundSupervisionWorkspace, executeExternalRefundSupervisionCommand, recoverExternalRefundSupervisionReceipt } from "@/modules/finance/application/external-payment-refund-supervision-api-service";
+import { externalRefundSupervisionListSchema, externalRefundSupervisionReviewSchema, externalRefundSupervisedAdmissionReviewSchema, externalRefundSupervisedReceiptSchema } from "@/modules/finance/domain/external-payment-refund-supervision-workspace";
+import { encryptSecret } from "@/platform/auth/secret-encryption";
 import { postGuestDepositRefund, inspectGuestDepositRefundInTransaction } from "@/modules/finance/application/guest-deposit-service";
 import { issueExternalRefundSupervisionAuthority } from "@/modules/finance/application/external-refund-supervision-authority";
 import { nativeTransaction } from "@/modules/finance/application/native-payment-providers";
@@ -133,11 +136,52 @@ describe("independent supervised admission of original returned provider costs",
     await expect(prepareSupervisedExternalPaymentRefundFee(supervisor.ctx, { intentId: f.request.id, reviewId: review.reviewId, reviewFingerprint: review.reviewFingerprint, reason }, { db })).rejects.toThrow(/committed original refund fee/u); expect(await facts(f.org)).toEqual(before);
     expect(await withTenant(db, f.org, tx => tx.externalPaymentRefundFee.count({ where: { organizationId: f.org } }))).toBe(0);
   });
+  it("rolls all three new cost and guest journals back after final independent expense-payment revocation", async () => {
+    const f = await fixture(), supervisor = await costAdmitter(f), source = await reviewExternalPaymentRefundSupervision(supervisor.ctx, { intentId: f.request.id, reason }, { db }),
+      plan = await prepareSupervisedExternalPaymentRefundFee(supervisor.ctx, { intentId: f.request.id, reviewId: source.reviewId, reviewFingerprint: source.reviewFingerprint, reason }, { db }),
+      draft = await withTenant(db, f.org, tx => tx.expense.findUniqueOrThrow({ where: { organizationId_id: { organizationId: f.org, id: plan.expenseId! } } }));
+    await submitExpense(supervisor.ctx, { id: draft.id, expectedVersion: draft.version, reason: "Apply the retained ordinary cost approval before revocation acceptance" }, { db });
+    const review = await reviewSupervisedExternalPaymentRefundAdmission(supervisor.ctx, { intentId: f.request.id, reason }, { db }), before = await facts(f.org), write = audits.writeAuditEvent; let revoked = false;
+    vi.spyOn(audits, "writeAuditEvent").mockImplementation(async (tx, event) => { const result = await write(tx, event); if (event.action === "finance.external_payment.refund_supervised_admitted") {
+      const native = tx as unknown as TenantTransaction; expect((await native.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: supervisor.role.id, permission: { key: "expense:pay" } } })).count).toBe(1); revoked = true;
+    } return result; });
+    await expect(admitSupervisedExternalPaymentRefund(supervisor.ctx, admission(review), { db })).rejects.toBeInstanceOf(ExternalPaymentRefundError); expect(revoked).toBe(true); expect(await facts(f.org)).toEqual(before);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { organizationId: f.org, action: { in: ["finance.external_payment.refund_supervised_authorized", "finance.external_payment.refund_supervised_admitted"] } } }))).toBe(0);
+    expect((await withTenant(db, f.org, tx => tx.expense.findUniqueOrThrow({ where: { organizationId_id: { organizationId: f.org, id: f.fee.id } } })))).toMatchObject({ state: "POSTED" });
+  });
 });
 
 const paidWithoutFee = () => actualProviderRefundFeeFixture(db, admin, "OWNER_PAID", "0.00"),
   admitter = (f: Fixture, permissions = admissionPermissions, fundingPay = true) => reviewer(f, permissions, undefined, true, fundingPay),
   admission = (review: { intentId: string; reviewId: string; reviewFingerprint: string; reason: string }) => ({ intentId: review.intentId, reviewId: review.reviewId, reviewFingerprint: review.reviewFingerprint, reason: review.reason, idempotencyKey: randomUUID() });
+describe("source-bound private independent-refund workspace", () => {
+  it("lists only independently eligible source refunds and recovers the exact private command receipt after original access ends", async () => {
+    const f = await paidWithoutFee(), supervisor = await admitter(f), before = await facts(f.org);
+    expect(externalRefundSupervisionListSchema.parse(await readExternalRefundSupervisionWorkspace(f.ctx, { operation: "LIST", input: { depositId: f.input.receipt.idempotencyKey } }, { db })).items).toEqual([]);
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+    const list = externalRefundSupervisionListSchema.parse(await readExternalRefundSupervisionWorkspace(supervisor.ctx, { operation: "LIST", input: { depositId: f.input.receipt.idempotencyKey } }, { db }));
+    expect(list.items).toEqual([{ intentId: f.request.id, refundId: f.evidence.refundId, originalRequestedBy: f.account.id, amount: { amount: "0.03", currency: "MAD" }, returnedFee: { amount: "0.00", currency: "MAD" }, refundedAt: f.evidence.refundedAt }]);
+    const view = externalRefundSupervisionReviewSchema.parse(await readExternalRefundSupervisionWorkspace(supervisor.ctx, { operation: "REVIEW", input: { intentId: f.request.id, reason } }, { db })); expect(view.originalRequestedBy).toBe(f.account.id); expect(await facts(f.org)).toEqual(before);
+    const review = externalRefundSupervisedAdmissionReviewSchema.parse(await readExternalRefundSupervisionWorkspace(supervisor.ctx, { operation: "REVIEW_ADMISSION", input: { intentId: f.request.id, reason } }, { db })), command = admission(review),
+      result = externalRefundSupervisedReceiptSchema.parse(await executeExternalRefundSupervisionCommand(supervisor.ctx, { operation: "ADMIT", input: command }, { db }));
+    expect(result).toMatchObject({ requestId: command.idempotencyKey, idempotencyKey: command.idempotencyKey, state: "SUCCEEDED", intentId: f.request.id });
+    const after = await facts(f.org); expect(await recoverExternalRefundSupervisionReceipt(supervisor.ctx, { key: command.idempotencyKey }, { db })).toMatchObject({ request: { id: result.id, requestId: command.idempotencyKey, idempotent: true } });
+    expect(externalRefundSupervisionListSchema.parse(await readExternalRefundSupervisionWorkspace(supervisor.ctx, { operation: "LIST", input: { depositId: f.input.receipt.idempotencyKey } }, { db })).items).toEqual([]); expect(await facts(f.org)).toEqual(after);
+  });
+  it("does not expose a private source through another reviewer or deposit cursor", async () => {
+    const f = await paidWithoutFee(), supervisor = await admitter(f), before = await facts(f.org), after = encryptSecret(JSON.stringify({ purpose: "external-refund-supervision.v1", organizationId: f.org, actorId: f.account.id, depositId: f.input.receipt.idempotencyKey, after: f.request.id }));
+    await expect(readExternalRefundSupervisionWorkspace(supervisor.ctx, { operation: "LIST", input: { depositId: f.input.receipt.idempotencyKey, after } }, { db })).rejects.toBeInstanceOf(ExternalPaymentRefundError);
+    const foreign = await fixture(); await expect(readExternalRefundSupervisionWorkspace(supervisor.ctx, { operation: "LIST", input: { depositId: foreign.input.receipt.idempotencyKey } }, { db })).rejects.toThrow(); expect(await facts(f.org)).toEqual(before);
+  });
+  it("withholds all private source details and rolls its view audit back after final current-view revocation", async () => {
+    const f = await paidWithoutFee(), supervisor = await admitter(f), before = await facts(f.org), write = audits.writeAuditEvent; let revoked = false;
+    vi.spyOn(audits, "writeAuditEvent").mockImplementation(async (tx, event) => { const result = await write(tx, event); if (event.action === "finance.external_payment.refund_supervision_sources_viewed") {
+      const native = tx as unknown as TenantTransaction; expect((await native.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: supervisor.role.id, permission: { key: "financial_transaction:view" } } })).count).toBe(1); revoked = true;
+    } return result; });
+    await expect(readExternalRefundSupervisionWorkspace(supervisor.ctx, { operation: "LIST", input: { depositId: f.input.receipt.idempotencyKey } }, { db })).rejects.toBeInstanceOf(GuestDepositAuthorizationError); expect(revoked).toBe(true); expect(await facts(f.org)).toEqual(before);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { organizationId: f.org, action: "finance.external_payment.refund_supervision_sources_viewed" } }))).toBe(0);
+  });
+});
 describe("independently attributed native financial admission of already-paid provider refunds", () => {
   it("records the original fact once under independent authority, preserves prior rows, and recovers a lost response by its new nonce", async () => {
     const f = await paidWithoutFee(), supervisor = await admitter(f), before = await facts(f.org); await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));

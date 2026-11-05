@@ -112,7 +112,7 @@ function RequestReview({ draft, locale, onInvalidate, send }: { draft: ExternalR
     <label className="compensation-cost-check"><input type="checkbox" required checked={confirmed} onChange={event => setConfirmed(event.target.checked)} data-testid="external-refund-confirm" /><span>{t("confirmRequest")}</span></label>
     {validation ? <p role="alert">{t("validation")}</p> : null}<button className="primary-button" disabled={!confirmed} type="submit" data-testid="external-refund-submit">{t("request")}</button></form>;
 }
-function FeeCorrection({ plan, locale, onInvalidate, refresh }: { plan: z.infer<typeof externalRefundFeePlanSchema>; locale: AppLocale; onInvalidate: () => void; refresh: () => Promise<void> }) {
+export function ExternalRefundFeeCorrection({ plan, locale, onInvalidate, refresh, preparation }: { plan: z.infer<typeof externalRefundFeePlanSchema>; locale: AppLocale; onInvalidate: () => void; refresh: () => Promise<void>; preparation?: { path: string; input: unknown } }) {
   const t = useTranslations("ExternalRefunds"), [pending, start] = useTransition(), [error, setError] = useState(false);
   return <section className="resource-form" data-testid="external-refund-fee-correction"><h3>{t("feeCorrectionTitle")}</h3><p>{t("feeCorrectionGuidance")}</p>
     <p>{t("remainingCost", { amount: formatCurrencyAmount(locale, plan.remainingCost.amount, plan.remainingCost.currency) })}</p>
@@ -121,7 +121,7 @@ function FeeCorrection({ plan, locale, onInvalidate, refresh }: { plan: z.infer<
     {plan.state === "READY" ? <p role="status">{t("feeReady")}</p> : null}
     {plan.state === "UNPREPARED" ? <button className="secondary-button" disabled={pending} type="button" data-testid="external-refund-prepare-fee" onClick={() => start(async () => {
       setError(false); try {
-        const response = await fetch(commandPath, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "PREPARE_FEE", input: { intentId: plan.intentId } }) });
+        const response = await fetch(preparation?.path ?? commandPath, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "PREPARE_FEE", input: preparation?.input ?? { intentId: plan.intentId } }) });
         if (response.status === 401 || response.status === 403) { onInvalidate(); return; } if (!response.ok) throw Error();
         externalRefundFeePreparationSchema.parse(await response.json()); await refresh();
       } catch { setError(true); }
@@ -149,7 +149,7 @@ function AdmissionPhase({ refunded, storageKey, locale, onInvalidate, onAdmitted
     <dl className="compensation-evidence"><div><dt>{t("gross")}</dt><dd>{formatCurrencyAmount(locale, request.amount.amount, request.amount.currency)}</dd></div><div><dt>{t("refundedAt")}</dt><dd>{formatDateTime(locale, new Date(request.refundedAt!), { timeZone: "UTC" })}</dd></div>
       {request.settlement ? <><div><dt>{t("returnedFee")}</dt><dd>{formatCurrencyAmount(locale, request.settlement.fee.amount, request.settlement.fee.currency)}</dd></div><div><dt>{t("net")}</dt><dd>{formatCurrencyAmount(locale, request.settlement.net.amount, request.settlement.net.currency)}</dd></div></> : null}</dl>
     {!settlementReady ? <p role="status">{t(request.settlement ? "feeCorrectionRequired" : "settlementUnavailable")}</p> : null}
-    {returnedFee ? fee.error ? <p role="alert">{t(fee.error)}</p> : fee.pending || !fee.data ? <SkeletonBlock rows={2} /> : <FeeCorrection plan={fee.data} locale={locale} onInvalidate={onInvalidate} refresh={async () => { await fee.refresh(); await read.refresh(); }} /> : null}
+    {returnedFee ? fee.error ? <p role="alert">{t(fee.error)}</p> : fee.pending || !fee.data ? <SkeletonBlock rows={2} /> : <ExternalRefundFeeCorrection plan={fee.data} locale={locale} onInvalidate={onInvalidate} refresh={async () => { await fee.refresh(); await read.refresh(); }} /> : null}
     {read.error ? <p role="alert">{t(read.error)}</p> : read.pending && settlementReady ? <SkeletonBlock rows={2} /> : null}
     <Reconcile request={request} onInvalidate={onInvalidate} refresh={refresh} />
     <form className="resource-form" onSubmit={event => { event.preventDefault(); if (ready && confirmed && read.data) void command.send({ intentId: refunded.id, reviewFingerprint: read.data.reviewFingerprint }); }}>

@@ -15,6 +15,10 @@ export class ExternalPaymentRefundRepository {
   find(id: string) { return this.tx.externalPaymentRefundIntent.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } }, include }); }
   byKey(idempotencyKey: string) { return this.tx.externalPaymentRefundIntent.findUnique({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, include }); }
   capture(id: string) { return this.tx.externalPaymentCapture.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } }, include: { intent: true } }); }
+  supervisionCandidates(depositId: string, actorId: string, after?: string) {
+    return this.tx.externalPaymentRefundIntent.findMany({ where: { organizationId: this.organizationId, depositId, requestedBy: { not: actorId }, identity: { isNot: null },
+      ...after ? { id: { gt: after } } : {} }, orderBy: { id: "asc" }, take: 51, include });
+  }
   reserved(depositId: string) { return new GuestDepositRepository(this.tx, this.organizationId).reservedExternalRefunds(depositId); }
   cancellation(intentId: string) { return new GuestDepositRepository(this.tx, this.organizationId).externalRefundCancellation(intentId); }
   supervisionReview(reviewId: string, actorId: string) {

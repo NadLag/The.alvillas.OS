@@ -4887,5 +4887,15 @@
     "feeReady": "Le remboursement de frais vérifié est prêt à être enregistré avec ce remboursement.",
     "prepareFee": "Préparer le remboursement de frais",
     "refreshFee": "Actualiser l’approbation de la dépense"
+  },
+  "ExternalRefundSupervision": {
+    "title": "Comptabiliser un remboursement déjà payé",
+    "guidance": "Utilisez vos propres autorisations financières pour comptabiliser le paiement vérifié et conserver sa demande et son historique.",
+    "empty": "Cette page ne contient aucun remboursement éligible.",
+    "originalPreserved": "Le demandeur initial, les fonds du client, la confirmation du paiement et la répartition des frais restent conservés dans l’historique financier.",
+    "reason": "Votre motif de comptabilisation de ce remboursement",
+    "review": "Examiner le remboursement vérifié",
+    "admissionTitle": "Comptabiliser le remboursement vérifié",
+    "confirm": "J’ai vérifié les fonds initiaux du client, la confirmation du prestataire, l’approbation requise des frais et mon motif de comptabilisation."
   }
 }

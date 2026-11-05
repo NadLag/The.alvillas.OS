@@ -14,9 +14,84 @@ import { openGuestPaymentFixture, paymentBrowserMethods } from "./support/guest-
 import { paypalHttpFixture } from "./support/paypal-http-fixture";
 import { acknowledgementBarrier } from "./support/acknowledgement-barrier";
 import { forwardBrowserPostOnce } from "./support/forward-browser-post";
+import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
+import { externalRefundSupervisionCommandInput } from "@/modules/finance/domain/external-payment-refund-supervision-workspace";
 
 test.use({ timezoneId: "America/Denver", actionTimeout: 30000, navigationTimeout: 60000 });
 type Fixture = Awaited<ReturnType<typeof openGuestPaymentFixture>>;
+for (const locale of ["en", "fr", "ar"] as const) for (const credit of ["0.00", "0.01"] as const) test(`independently records paid provider refund credit ${credit} after requester access ends with recovery in ${locale}`, async ({ page, browser }, info) => {
+  test.setTimeout(240000);
+  const f = await openGuestPaymentFixture(page, info, locale, { "finance.expense_treatment": { default_treatment: "OWNER_PAID" }, "finance.approval_thresholds": { thresholds: [] } }), orderId = "SUPERVISED_REFUND_" + randomUUID(),
+    originalFee = credit === "0.00" ? "0.00" : "0.02", gateway = await paypalHttpFixture(orderId, originalFee, [credit]), errors: string[] = [],
+    independent = await browser.newContext({ baseURL: new URL(page.url()).origin, timezoneId: "America/Denver", viewport: page.viewportSize(), isMobile: Boolean(info.project.use.isMobile), hasTouch: Boolean(info.project.use.hasTouch), userAgent: info.project.use.userAgent, deviceScaleFactor: info.project.use.deviceScaleFactor });
+  page.on("pageerror", error => errors.push(error.name));
+  try {
+    const merchant = await configure(f, true), url = `/${locale}/app/finance/guest-deposits`; await page.goto(url); await prepare(page, f, merchant.id, orderId);
+    const captured = acknowledgement(page, "CAPTURE"); await page.getByTestId("external-capture-submit").click(); expect((await captured).ok()).toBe(true);
+    const source = await withTenant(f.db, f.organizationId, async tx => {
+      const intent = await tx.externalPaymentIntent.findFirstOrThrow({ where: { organizationId: f.organizationId, orderId } }), event = await tx.outboxEvent.findFirstOrThrow({ where: { organizationId: f.organizationId, type: externalPaymentCaptureRequested, payload: { path: ["intentId"], equals: intent.id } } }); return { intent, event };
+    });
+    await executeExternalPaymentCaptureReference({ organizationId: f.organizationId, outboxEventId: source.event.id }, { db: f.db, provider: gateway.provider }); await expect(page.getByTestId("external-payment-admission")).toBeVisible();
+    if (originalFee !== "0.00") {
+      await page.getByTestId("external-fee-category").fill("provider_fee"); await page.getByTestId("external-fee-purpose").fill("Original independently reviewed provider deduction " + f.marker); await page.getByTestId("external-fee-reason").fill("Retain the actual original approved provider cost and its original ownership");
+      const prepared = acknowledgement(page, "PREPARE_FEE"); await page.getByTestId("external-fee-submit").click(); expect((await prepared).ok()).toBe(true); await page.getByTestId("external-fee-link").click();
+      await page.getByTestId("expense-submit-reason").fill("Approve the original deduction under the ordinary frozen expense rules"); await page.getByTestId("expense-submit").click(); await expect(page.getByTestId("expense-post-form")).toBeVisible();
+      await page.goto(url); await expect(page.getByTestId("external-payment-admission")).toBeVisible();
+    }
+    await page.getByTestId("external-admission-reason").fill("Record the actual original guest receipt before its independent refund review"); await page.getByTestId("external-admission-confirm").check();
+    const admitted = acknowledgement(page, "ADMIT"); await page.getByTestId("external-admission-submit").click(); expect((await admitted).ok()).toBe(true); await expect(page.getByTestId("deposit-outstanding")).toBeVisible();
+    await page.getByTestId("deposit-refund-open").click(); await page.getByTestId("deposit-amount").fill("0.03"); await page.getByTestId("deposit-account").selectOption(merchant.id); await page.getByTestId("deposit-purpose").fill("Already-paid original guest refund " + f.marker); await page.getByTestId("deposit-prepare").click();
+    await page.getByTestId("external-refund-reason").fill("Pay only the original reviewed guest funds before independent financial admission"); await page.getByTestId("external-refund-confirm").check();
+    const requested = page.waitForResponse(response => new URL(response.url()).pathname === "/api/finance/external-payments/refunds/command" && (response.request().postDataJSON() as { operation?: string }).operation === "REQUEST");
+    await page.getByTestId("external-refund-submit").click(); expect((await requested).ok()).toBe(true);
+    const refund = await withTenant(f.db, f.organizationId, async tx => {
+      const intent = await tx.externalPaymentRefundIntent.findFirstOrThrow({ where: { organizationId: f.organizationId, depositId: source.intent.idempotencyKey } }), event = await tx.outboxEvent.findFirstOrThrow({ where: { organizationId: f.organizationId, type: externalPaymentRefundRequested, payload: { path: ["intentId"], equals: intent.id } } }); return { intent, event };
+    });
+    await executeExternalPaymentRefundReference({ organizationId: f.organizationId, outboxEventId: refund.event.id }, { db: f.db, provider: gateway.provider });
+    const history = () => withTenant(f.db, f.organizationId, tx => tx.$queryRaw<Array<{ kind: string; id: string; xmin: string; body: string }>>`WITH source_journals AS (SELECT t.id FROM financial_transaction t WHERE t.organization_id=${f.organizationId}::uuid AND EXISTS(SELECT 1 FROM posting p WHERE p.organization_id=t.organization_id AND p.transaction_id=t.id AND p.ledger_account_id=${merchant.id}::uuid)) SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t)::text AS body FROM financial_transaction t WHERE organization_id=${f.organizationId}::uuid AND id IN(SELECT id FROM source_journals) UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p)::text FROM posting p WHERE organization_id=${f.organizationId}::uuid AND transaction_id IN(SELECT id FROM source_journals) ORDER BY kind,id`), original = await history(),
+      email = e2eEmail("refund-reviewer-" + f.marker, info.project.name), password = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
+    await ensureE2EAdmin(email, password);
+    const reviewer = await withTenant(f.db, f.organizationId, tx => tx.userAccount.findFirstOrThrow({ where: { organizationId: f.organizationId, email } })); expect(reviewer.id).not.toBe(f.setup.actorId);
+    expect((await withTenant(f.db, f.organizationId, tx => tx.roleAssignment.updateMany({ where: { organizationId: f.organizationId, userAccountId: f.setup.actorId, archivedAt: null }, data: { archivedAt: new Date() } }))).count).toBeGreaterThan(0);
+    expect((await page.request.post("/api/finance/external-payments/refunds/read", { headers: { origin: new URL(page.url()).origin }, data: { operation: "GET", input: { intentId: refund.intent.id } } })).status()).toBe(403);
+    const reviewPage = await independent.newPage(); reviewPage.on("pageerror", error => errors.push(error.name)); await reviewPage.goto("/en/login"); await waitForE2EAdminLoginWindow(reviewPage, email);
+    await reviewPage.getByTestId("login-email").fill(email); await reviewPage.getByTestId("login-password").fill(password); await reviewPage.getByTestId("login-submit").click(); await completeE2EAdminMfa(reviewPage, email); await expect(reviewPage).toHaveURL(/\/en\/app/u);
+    const reason = "Independently record the verified already-paid refund while preserving its original requester and costs", open = async () => {
+      await reviewPage.goto(url); await reviewPage.getByTestId("deposit-open").filter({ hasText: f.setup.propertyName }).click(); await expect(reviewPage.getByTestId("deposit-outstanding")).toBeVisible();
+      await reviewPage.getByTestId("supervised-refund-open").click(); await reviewPage.getByTestId("supervised-refund-reason").fill(reason); await reviewPage.getByTestId("supervised-refund-review").click(); await expect(reviewPage.getByTestId("supervised-refund-admission")).toBeVisible();
+    };
+    await open();
+    if (credit !== "0.00") {
+      const lost = acknowledgementBarrier(); await reviewPage.route("**/api/finance/external-payments/refunds/supervision/command", async route => {
+        try { expect(externalRefundSupervisionCommandInput.parse(route.request().postDataJSON()).operation).toBe("PREPARE_FEE"); expect(await forwardBrowserPostOnce(route.request())).toBe(200); await route.abort(); lost.resolve(); } catch (error) { lost.reject(error); throw error; }
+      });
+      await reviewPage.getByTestId("external-refund-prepare-fee").click(); await lost.promise; await reviewPage.unroute("**/api/finance/external-payments/refunds/supervision/command"); await open();
+      const binding = await withTenant(f.db, f.organizationId, tx => tx.externalPaymentRefundFee.findUniqueOrThrow({ where: { organizationId_refundIntentId: { organizationId: f.organizationId, refundIntentId: refund.intent.id } } })); expect(binding.createdBy).toBe(reviewer.id); expect(binding.correctionExpenseId).not.toBeNull();
+      await expect(reviewPage.getByTestId("supervised-refund-admit")).toBeDisabled(); const opened = reviewPage.waitForEvent("popup"); await reviewPage.getByTestId("external-refund-fee-expense").click(); const expense = await opened;
+      try { await expect(expense.getByTestId("expense-refund-guidance")).toBeVisible(); await expect(expense.getByTestId("expense-edit")).toHaveCount(0); await expect(expense.getByTestId("expense-post-form")).toHaveCount(0);
+        await expense.getByTestId("expense-submit-reason").fill("Approve the frozen original remaining cost before independent native admission"); await expense.getByTestId("expense-submit").click(); await expect(expense.getByTestId("expense-submit")).toHaveCount(0); await expect(expense.getByTestId("expense-post-form")).toHaveCount(0);
+      } finally { await expense.close(); }
+      await reviewPage.getByTestId("external-refund-refresh-fee").click(); expect(await withTenant(f.db, f.organizationId, tx => tx.externalPaymentRefundFee.count({ where: { organizationId: f.organizationId, refundIntentId: refund.intent.id } }))).toBe(1);
+    }
+    await expect(reviewPage.getByTestId("supervised-refund-confirm")).toBeEnabled(); expect((await new AxeBuilder({ page: reviewPage }).analyze()).violations).toEqual([]);
+    await reviewPage.evaluate(() => { document.documentElement.style.zoom = "2"; }); expect(await reviewPage.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true); await reviewPage.evaluate(() => { document.documentElement.style.zoom = "1"; });
+    await reviewPage.getByTestId("supervised-refund-confirm").check(); const lost = acknowledgementBarrier(); await reviewPage.route("**/api/finance/external-payments/refunds/supervision/command", async route => {
+      try { expect(externalRefundSupervisionCommandInput.parse(route.request().postDataJSON()).operation).toBe("ADMIT"); expect(await forwardBrowserPostOnce(route.request())).toBe(200); await route.abort(); lost.resolve(); } catch (error) { lost.reject(error); throw error; }
+    });
+    await reviewPage.getByTestId("supervised-refund-admit").click(); await lost.promise; await reviewPage.unroute("**/api/finance/external-payments/refunds/supervision/command");
+    const cached = await reviewPage.evaluate(() => Object.entries(sessionStorage).filter(([key]) => key.startsWith("alvillas:external-refund-supervision:"))); expect(cached).toHaveLength(1); expect(cached[0][1]).toMatch(/^[a-f0-9-]{36}$/u); expect(cached[0][0]).not.toContain(source.intent.idempotencyKey);
+    await reviewPage.reload(); await reviewPage.getByTestId("deposit-open").filter({ hasText: f.setup.propertyName }).click(); await expect(reviewPage.getByTestId("deposit-outstanding")).toBeVisible(); await expect(reviewPage.getByTestId("supervised-refund-open")).toHaveCount(0);
+    const proof = await withTenant(f.db, f.organizationId, async tx => ({ journal: await tx.financialTransaction.findFirstOrThrow({ where: { organizationId: f.organizationId, idempotencyKey: "guest-deposit:" + refund.intent.idempotencyKey }, include: { postings: true } }),
+      evidence: await tx.externalPaymentRefundEvidence.findFirstOrThrow({ where: { organizationId: f.organizationId, identity: { intentId: refund.intent.id }, state: "COMPLETED" } }),
+      witnesses: await tx.auditLog.findMany({ where: { organizationId: f.organizationId, resourceId: refund.intent.id, action: "finance.external_payment.refund_supervised_admitted" } }),
+      postings: await tx.posting.findMany({ where: { organizationId: f.organizationId, ledgerAccountId: merchant.id } }), request: await tx.externalPaymentRefundIntent.findUniqueOrThrow({ where: { organizationId_id: { organizationId: f.organizationId, id: refund.intent.id } } }) }));
+    expect(proof.journal).toMatchObject({ createdBy: reviewer.id, sealed: true }); expect(proof.journal.occurredAt).toEqual(proof.evidence.refundedAt); expect(proof.journal.postings.map(row => row.amount.toFixed(2))).toEqual(["0.03", "0.03"]); expect(proof.request.requestedBy).toBe(f.setup.actorId);
+    expect(proof.witnesses).toHaveLength(1); expect(proof.witnesses[0]).toMatchObject({ actorId: reviewer.id, reason, after: { originalRequestedBy: f.setup.actorId, admittedBy: reviewer.id, transactionId: proof.journal.id } });
+    const ids = new Set(original.map(row => row.kind + row.id)); expect((await history()).filter(row => ids.has(row.kind + row.id))).toEqual(original);
+    expect(proof.postings.reduce((sum, row) => row.side === "DEBIT" ? sum.add(Money.of(row.amount.toString(), row.currency)) : sum.subtract(Money.of(row.amount.toString(), row.currency)), Money.zero("MAD")).toJSON()).toEqual(Money.of("0.07", "MAD").subtract(Money.of(originalFee, "MAD")).subtract(Money.of("0.03", "MAD").subtract(Money.of(credit, "MAD"))).toJSON());
+    expect(gateway.facts()).toMatchObject({ posts: 1, refundPosts: 1, refunded: { amount: "0.03", currency: "MAD" }, creditedFee: { amount: credit, currency: "MAD" } }); expect(errors).toEqual([]);
+  } finally { await independent.close(); await gateway.close(); await f.db.$disconnect(); }
+});
 async function configure(f: Fixture, refunds = false) {
   return withTenant(f.db, f.organizationId, async tx => {
     const finance = new FinanceRepository(tx, f.organizationId), merchant = await finance.ensureLedgerAccount({ code: "PAYPAL_BROWSER_" + f.marker.toUpperCase(), name: "Original PayPal merchant " + f.marker, accountType: "ASSET_LOCATION", normalSide: "DEBIT" }), rules = new ConfigRuleRepository(tx, f.organizationId),
