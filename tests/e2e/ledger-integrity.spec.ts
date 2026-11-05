@@ -10,6 +10,8 @@ import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repo
 import { scheduleLedgerIntegrity } from "@/modules/finance/application/ledger-integrity-service";
 import { ledgerIntegrityPolicyKey, ledgerIntegrityRoutingKey } from "@/modules/finance/domain/ledger-integrity";
 import { Money } from "@/platform/money/money";
+import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
+import { canReadLedgerIntegrityFailure } from "@/modules/finance/domain/ledger-integrity-notification";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import en from "../../messages/en.json" with { type: "json" };
 import fr from "../../messages/fr.json" with { type: "json" };
@@ -26,8 +28,15 @@ for (const locale of ["en", "fr", "ar"] as const) test(`nightly integrity failur
   page.on("pageerror", error => errors.push(error.message));
   try {
     const f = await withTenant(db, org, async tx => {
-      const account = await tx.userAccount.findFirstOrThrow({ where: { organizationId: org, email } }),
-        role = await tx.role.create({ data: { organizationId: org, key: "integrity_qa_" + randomUUID(), name: "Explicit integrity financial authority" } }),
+      const account = await tx.userAccount.findFirstOrThrow({ where: { organizationId: org, email } });
+      await tx.roleAssignment.updateMany({ where: { organizationId: org, userAccountId: account.id, archivedAt: null }, data: { archivedAt: new Date() } });
+      const operationalKeys = ["config_rule:view", "config_rule:configure", "audit_log:view"],
+        operationalPermissions = await tx.permission.findMany({ where: { organizationId: org, key: { in: operationalKeys } } }),
+        operational = await tx.role.create({ data: { organizationId: org, key: "integrity_operations_" + randomUUID(), name: "Independent operational access" } });
+      expect(operationalPermissions).toHaveLength(operationalKeys.length);
+      await tx.rolePermission.createMany({ data: operationalPermissions.map(permission => ({ organizationId: org, roleId: operational.id, permissionId: permission.id })) });
+      await tx.roleAssignment.create({ data: { organizationId: org, personId: account.personId, userAccountId: account.id, roleId: operational.id, scopeType: "organization", validFrom: new Date("2000-01-01") } });
+      const role = await tx.role.create({ data: { organizationId: org, key: "integrity_qa_" + randomUUID(), name: "Explicit integrity financial authority" } }),
         keys = [...new Set(["config_rule:configure", "config_rule:view", "audit_log:view", ...financialRuleSourceChecks(org, ledgerIntegrityPolicyKey).map(check => check.resource.type + ":" + check.action)])],
         permissions = await tx.permission.findMany({ where: { organizationId: org, key: { in: keys } } });
       expect(permissions).toHaveLength(keys.length);
@@ -59,8 +68,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`nightly integrity failur
       const policy = await rules.createVersion({ key: ledgerIntegrityPolicyKey, scopeType: "organization", effectiveFrom: new Date("2000-01-01"), createdBy: f.account.id,
         value: { run_at: "00:00", page_size: 500, max_findings: 10, account_types: { locations: ["UNCLASSIFIED_LOCATION_QA"], claims: ["CLAIM_OWNERSHIP"], company: ["ALVILLAS_OWN"] } },
         reason: "Detect an intentionally unclassified actual bank without changing source money" }),
-        bank = await finance.ensureLedgerAccount({ code: "INTEGRITY_BANK_" + randomUUID(), name: "Original integrity custody", accountType: "ASSET_LOCATION", normalSide: "DEBIT" }),
-        income = await finance.ensureLedgerAccount({ code: "INTEGRITY_INCOME_" + randomUUID(), name: "Original integrity company source", accountType: "ALVILLAS_OWN", normalSide: "CREDIT" }), amount = Money.of("0.07", "MAD"),
+        bank = await finance.ensureLedgerAccount({ code: "INTEGRITY_BANK_" + randomUUID().replaceAll("-", "").toUpperCase(), name: "Original integrity custody", accountType: "ASSET_LOCATION", normalSide: "DEBIT" }),
+        income = await finance.ensureLedgerAccount({ code: "INTEGRITY_INCOME_" + randomUUID().replaceAll("-", "").toUpperCase(), name: "Original integrity company source", accountType: "ALVILLAS_OWN", normalSide: "CREDIT" }), amount = Money.of("0.07", "MAD"),
         journal = await finance.createFinancialTransaction({ reference: "INTEGRITY-QA:" + randomUUID(), description: "Original native browser integrity source", occurredAt: new Date(), createdBy: f.account.id, idempotencyKey: randomUUID(),
           postings: [{ ledgerAccountId: bank.id, side: "DEBIT", amount, bucket: "COMPANY_REVENUE", dimensions: {} }, { ledgerAccountId: income.id, side: "CREDIT", amount, bucket: "COMPANY_REVENUE", dimensions: {} }] });
       return { policy, journal };
@@ -83,7 +92,10 @@ for (const locale of ["en", "fr", "ar"] as const) test(`nightly integrity failur
     await page.getByTestId("audit-filter-resource-id").fill(source.policy.id); await page.getByTestId("audit-filter-submit").click();
     await expect(page.getByTestId("audit-row").filter({ hasText: "finance.ledger_integrity.failed" })).toHaveCount(1);
     await withTenant(db, org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+    expect(await withTenant(db, org, async tx => canReadLedgerIntegrityFailure(await authContextForAccountInTransaction(tx, org, f.account.id), {
+      type: "config_rule", organizationId: org, id: source.policy.id, dataClass: "financial", ruleKey: ledgerIntegrityPolicyKey, ledgerIntegrityFailed: true }))).toBe(false);
     await page.goto(`/${locale}/app`); await page.getByTestId("notification-bell").click();
+    await expect(page.getByTestId("notification-panel")).toHaveAttribute("aria-busy", "false");
     await expect(notice.getByRole("button", { name: labels.Notifications.open, exact: true })).toHaveCount(0);
     await expect(notice).toContainText(labels.Notifications.unavailable);
     expect(await facts()).toEqual(original); expect(errors).toEqual([]);
