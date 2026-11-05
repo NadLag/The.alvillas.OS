@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { guestDepositReceiptInput, guestDepositReviewInput } from "./guest-deposit-command";
+import { expenseDraftSchema } from "./expense-input";
 
 const identity = z.uuid().transform(value => value.toLowerCase());
 export const externalPaymentIdentityInput = z.object({ id: identity }).strict();
@@ -9,7 +10,9 @@ export const externalPaymentIntentInput = z.object({ provider: z.literal("paypal
 export const externalPaymentReviewInput = z.object({ provider: externalPaymentIntentInput.shape.provider, orderId: externalPaymentIntentInput.shape.orderId,
   receipt: guestDepositReviewInput }).strict();
 export const capturedPayPalAdmissionInput = z.object({ intentId: identity, reviewFingerprint: guestDepositReceiptInput.shape.reviewFingerprint,
-  paymentMethodFingerprint: externalPaymentIntentInput.shape.receipt.shape.paymentMethodFingerprint, reason: guestDepositReceiptInput.shape.reason }).strict();
+  paymentMethodFingerprint: externalPaymentIntentInput.shape.receipt.shape.paymentMethodFingerprint, reason: guestDepositReceiptInput.shape.reason,
+  fee: z.object({ expenseId: identity, expectedVersion: z.number().int().positive(), reason: guestDepositReceiptInput.shape.reason }).strict().optional() }).strict();
+export const externalPaymentFeeDraftInput = z.object({ intentId: identity, category: expenseDraftSchema.shape.category, purpose: expenseDraftSchema.shape.purpose, reason: expenseDraftSchema.shape.reason }).strict();
 export const externalPaymentReadInput = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("REVIEW_CAPTURE"), input: externalPaymentReviewInput }).strict(),
   z.object({ operation: z.literal("GET"), input: externalPaymentIdentityInput }).strict(),
@@ -19,4 +22,5 @@ export const externalPaymentCommandInput = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("CAPTURE"), input: externalPaymentIntentInput }).strict(),
   z.object({ operation: z.literal("RECONCILE"), input: externalPaymentIdentityInput }).strict(),
   z.object({ operation: z.literal("ADMIT"), input: capturedPayPalAdmissionInput }).strict(),
+  z.object({ operation: z.literal("PREPARE_FEE"), input: externalPaymentFeeDraftInput }).strict(),
 ]);

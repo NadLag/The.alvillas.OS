@@ -23,6 +23,10 @@ export class ExpenseRepository {
   }
   find(id: string) { return this.tx.expense.findFirst({ where: { organizationId: this.organizationId, id }, include }); }
   byKey(idempotencyKey: string) { return this.tx.expense.findUnique({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, include }); }
+  async externalCaptureInstant(expenseId: string) {
+    const fee = await this.tx.externalPaymentFee.findUnique({ where: { organizationId_expenseId: { organizationId: this.organizationId, expenseId } }, select: { capture: { select: { capturedAt: true } } } });
+    return fee?.capture.capturedAt ?? null;
+  }
   property(id: string) {
     return this.tx.property.findFirst({ where: { organizationId: this.organizationId, id, archivedAt: null },
       select: { id: true, name: true, city: true, cityId: true, region: true, regionId: true, timezone: true } });

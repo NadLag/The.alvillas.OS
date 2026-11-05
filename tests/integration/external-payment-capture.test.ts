@@ -23,6 +23,11 @@ import { AuditRepository } from "@/modules/audit/infrastructure/audit-repository
 import { listAuditHistory } from "@/modules/audit/application/audit-service";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { maskedValue } from "@/platform/authz/present";
+import { prepareExternalPaymentFee } from "@/modules/finance/application/external-payment-fee-service";
+import { submitExpense, ExpenseConflictError, updateExpenseDraft } from "@/modules/finance/application/expense-service";
+import { ExpenseRepository } from "@/modules/finance/infrastructure/expense-repository";
+import { Money } from "@/platform/money/money";
+import { postExpense } from "@/modules/finance/application/expense-posting-service";
 
 const captureTimes=new Map<string,string>();
 function providerReceipt(paymentId:string,amount="0.07"){const capturedAt=captureTimes.get(paymentId)??new Date().toISOString();captureTimes.set(paymentId,capturedAt);return{paymentId,capturedAt,settlement:{schemaVersion:1 as const,basis:"ORIGINAL_PROVIDER_RECEIVABLE_BREAKDOWN" as const,gross:{amount,currency:"MAD"},fee:{amount:"0.00",currency:"MAD"},net:{amount,currency:"MAD"}}};}
@@ -42,8 +47,9 @@ beforeAll(async () => {
 }, 120000);
 afterEach(() => vi.restoreAllMocks()); afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); await control?.$disconnect(); });
 const labels = { en: "Original optional PayPal", fr: "PayPal facultatif initial", ar: "باي بال الاختياري الأصلي" };
-async function fixture(amount = "0.07", orderId = "ORDER_" + randomUUID().replaceAll("-", "")) {
-  const f = await actualGuestDepositFixture(db, admin, "MAD", 2, amount);
+async function fixture(amount = "0.07", orderId = "ORDER_" + randomUUID().replaceAll("-", ""), originalTreatment?: "OWNER_PAID" | "INCLUDED_IN_COMMISSION") {
+  const originalRules = originalTreatment ? { "finance.expense_treatment": { default_treatment: originalTreatment }, "finance.approval_thresholds": { thresholds: [] } } : {};
+  const f = await actualGuestDepositFixture(db, admin, "MAD", 2, amount, [10000], originalRules);
   const merchant = await withTenant(db, f.org, tx => new FinanceRepository(tx, f.org).ensureLedgerAccount({ code: "PAYPAL_MERCHANT_BALANCE", name: "Actual configured PayPal merchant location", accountType: "ASSET_LOCATION", normalSide: "DEBIT" }));
   const input = await withTenant(db, f.org, async tx => {
     const rules = new ConfigRuleRepository(tx, f.org);
@@ -58,6 +64,18 @@ async function fixture(amount = "0.07", orderId = "ORDER_" + randomUUID().replac
   return { ...f, banks: { ...f.banks, receipt: merchant }, input };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
+async function capturedFeeFixture(treatment: "OWNER_PAID" | "INCLUDED_IN_COMMISSION" = "OWNER_PAID") {
+  const f = await fixture("0.07", undefined, treatment);
+  await withTenant(db, f.org, async tx => {
+    const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: ["expense:create", "expense:view", "expense:edit", "expense:pay"] } } }); expect(permissions).toHaveLength(4);
+    await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: f.role.id, permissionId: permission.id })) });
+
+  });
+  const ctx = { ...f.ctx, authContext: { ...await authContextForAccount(f.org, f.account.id, { db }), personId: f.person.id } }, requested = await requestExternalPaymentCapture(ctx, f.input, { db }), ref = await reference(f, requested.id),
+    evidence = providerReceipt("ACTUAL_APPROVED_FEE_" + randomUUID()); evidence.settlement.fee.amount = "0.02"; evidence.settlement.net.amount = "0.05";
+  await executeExternalPaymentCaptureReference(ref, { db, provider: { lookup: () => Promise.resolve({ state: "CAPTURED" as const, ...evidence }), capture: () => Promise.resolve(providerReceipt("NEVER_POST")) } });
+  return { ...f, ctx, requested, evidence, feeInput: { intentId: requested.id, category: "provider_fee", purpose: "Actual original merchant payment deduction", reason: "Prepare the actual verified deduction under configured expense rules" } };
+}
 async function reference(f: Fixture, intentId: string) {
   const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { organizationId: f.org, type: externalPaymentCaptureRequested, payload: { path: ["intentId"], equals: intentId } } }));
   return { organizationId: f.org, outboxEventId: event.id };
@@ -67,6 +85,71 @@ const moneyFacts = (org: string) => withTenant(db, org, tx => tx.$queryRaw<Array
   SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t)::text AS body FROM financial_transaction t WHERE organization_id=${org}::uuid
   UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p)::text FROM posting p WHERE organization_id=${org}::uuid ORDER BY kind,id`);
 describe("durable optional external capture on PostgreSQL", () => {
+  it.each(["OWNER_PAID", "INCLUDED_IN_COMMISSION"] as const)("posts exact net merchant funds with configured %s fee allocation through the original approved expense", async treatment => {
+    const f = await capturedFeeFixture(treatment), before = await moneyFacts(f.org), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db });
+    expect(fee.state).toBe("DRAFT"); expect(await moneyFacts(f.org)).toEqual(before);
+    expect(await prepareExternalPaymentFee(f.ctx, f.feeInput, { db })).toEqual({ ...fee, idempotent: true });
+    const approved = await submitExpense(f.ctx, { id: fee.id, expectedVersion: fee.version, reason: "Apply the explicit configured approval rules to the original provider fee" }, { db }); expect(approved.state).toBe("APPROVED");
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: f.requested.id }, { db }), input = { intentId: f.requested.id, reviewFingerprint: review.reviewFingerprint,
+      paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Admit only the actual captured gross, approved deduction and merchant net", fee: { expenseId: fee.id, expectedVersion: approved.version, reason: "Post the actual original approved merchant fee with the captured receipt" } };
+    const admitted = await admitCapturedPayPalPayment(f.ctx, input, { db });
+    const proof = await withTenant(db, f.org, async tx => ({ expense: await tx.expense.findFirstOrThrow({ where: { organizationId: f.org, id: fee.id }, include: { transaction: { include: { postings: true } }, submission: true } }),
+      merchant: await tx.posting.findMany({ where: { organizationId: f.org, ledgerAccountId: f.banks.receipt.id } }), receipt: await tx.guestPaymentReceipt.findFirstOrThrow({ where: { organizationId: f.org, transactionId: admitted.id } }) }));
+    expect(proof.expense.state).toBe("POSTED"); expect(proof.expense.transaction?.occurredAt.toISOString()).toBe(f.evidence.capturedAt);
+    expect(proof.expense.transaction?.postings.find(row => row.side === "DEBIT")).toMatchObject({ bucket: treatment === "OWNER_PAID" ? "OWNER_EXPENSE" : "ALVILLAS_EXPENSE" });
+    expect(proof.receipt.amount.toFixed(2)).toBe("0.07");
+    const net = proof.merchant.reduce((total, row) => row.side === "DEBIT" ? total.add(Money.of(row.amount.toString(), row.currency)) : total.subtract(Money.of(row.amount.toString(), row.currency)), Money.zero("MAD")); expect(net.toJSON()).toEqual({ amount: "0.05", currency: "MAD" });
+    const saved = await moneyFacts(f.org); expect(await admitCapturedPayPalPayment(f.ctx, input, { db })).toEqual({ ...admitted, idempotent: true }); expect(await moneyFacts(f.org)).toEqual(saved);
+    await expect(admitCapturedPayPalPayment(f.ctx, { ...input, fee: { ...input.fee, reason: "A substituted later fee-admission intent must not replace the original" } }, { db })).rejects.toThrow();
+    expect(await moneyFacts(f.org)).toEqual(saved);
+  });
+  it("admits an original capture after its configured fee was already posted through the ordinary expense workflow", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), approved = await submitExpense(f.ctx, { id: fee.id, expectedVersion: fee.version, reason: "Apply the original configured fee approvals" }, { db }),
+      posted = await postExpense(f.ctx, { id: fee.id, expectedVersion: approved.version, reason: "Post the actual fee through its ordinary expense workspace" }, { db }), review = await reviewCapturedPayPalAdmission(f.ctx, { id: f.requested.id }, { db });
+    expect(review.fee).toEqual({ id: fee.id, version: posted.version, state: "POSTED" });
+    const input = { intentId: f.requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Admit the original guest capture without paying an already posted fee twice",
+      fee: { expenseId: fee.id, expectedVersion: posted.version, reason: "Retain the actual earlier ordinary expense posting as original fee evidence" } }, admitted = await admitCapturedPayPalPayment(f.ctx, input, { db }), saved = await moneyFacts(f.org);
+    expect(await admitCapturedPayPalPayment(f.ctx, input, { db })).toEqual({ ...admitted, idempotent: true }); expect(await moneyFacts(f.org)).toEqual(saved);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count({ where: { organizationId: f.org, reference: "EXPENSE:" + fee.id } }))).toBe(1);
+  });
+  it("rolls the fee and receipt back together after late independent expense-pay revocation", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), approved = await submitExpense(f.ctx, { id: fee.id, expectedVersion: fee.version, reason: "Apply the original configured fee approvals" }, { db }),
+      review = await reviewCapturedPayPalAdmission(f.ctx, { id: f.requested.id }, { db }), before = await moneyFacts(f.org), write = auditWriter.writeAuditEvent;
+    vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const saved = await write(tx, event); if (event.action === "finance.payment_method.accepted")
+      expect((await withTenant(db, f.org, inner => inner.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permission: { key: "expense:pay" } } }))).count).toBe(1); return saved; });
+    await expect(admitCapturedPayPalPayment(f.ctx, { intentId: f.requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint,
+      reason: "Require final independent expense authority for the atomic fee and guest receipt", fee: { expenseId: fee.id, expectedVersion: approved.version, reason: "Retain exact approved deduction and original source authority" } }, { db })).rejects.toThrow(PaymentMethodAccessError);
+    expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+    expect((await withTenant(db, f.org, tx => new ExpenseRepository(tx, f.org).find(fee.id)))?.state).toBe("APPROVED");
+  });
+  it("binds fee history to the actual expense and withholds it without independent expense access", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), source = await withTenant(db, f.org, async tx => (await new AuditRepository(tx, f.org).transactionResources([f.requested.id])).get(f.requested.id));
+    expect(source?.externalPayment?.fee).toMatchObject({ type: "expense", id: fee.id, financialRecordId: fee.id, amount: "0.02", status: "DRAFT", occurredAt: new Date(f.evidence.capturedAt) });
+    await withTenant(db, f.org, async tx => { const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "audit_log:view" } }), role = await tx.role.create({ data: { organizationId: f.org, key: "independent-fee-audit", name: "Independent provider fee history" } });
+      await tx.rolePermission.create({ data: { organizationId: f.org, roleId: role.id, permissionId: permission.id } }); await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: f.account.id, personId: f.person.id, scopeType: "organization", validFrom: new Date("2020-01-01") } }); });
+    const actor = { ...f.ctx, personId: f.person.id, authContext: await authContextForAccount(f.org, f.account.id, { db }) }, filters = { action: "finance.external_payment.fee_prepared", resourceType: "financial_transaction", resourceId: f.requested.id };
+    expect((await listAuditHistory(actor, filters, { db })).rows[0].after).toMatchObject({ expenseId: fee.id, fee: { amount: "0.02", currency: "MAD" } });
+    await withTenant(db, f.org, tx => tx.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permission: { key: "expense:view" } } }));
+    expect((await listAuditHistory(actor, filters, { db })).rows[0].after).toBe(maskedValue);
+  });
+  it("withholds financial admission until the actual source-bound fee has completed configured expense approval", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), before = await moneyFacts(f.org), review = await reviewCapturedPayPalAdmission(f.ctx, { id: f.requested.id }, { db });
+    await expect(admitCapturedPayPalPayment(f.ctx, { intentId: f.requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint,
+      reason: "Do not bypass the required original expense allocation and approval flow", fee: { expenseId: fee.id, expectedVersion: fee.version, reason: "Do not bypass configured approval before posting the actual fee" } }, { db })).rejects.toThrow(ExpenseConflictError);
+    expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+  });
+  it("rejects source substitution, mutation, deletion and changed amounts for an actual provider fee", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db });
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentFee.updateMany({ where: { organizationId: f.org }, data: { propertyTimezone: "Europe/Paris" } }))).rejects.toThrow();
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentFee.deleteMany({ where: { organizationId: f.org } }))).rejects.toThrow();
+    const row = await withTenant(db, f.org, tx => new ExpenseRepository(tx, f.org).find(fee.id)); expect(row).not.toBeNull();
+    await expect(updateExpenseDraft(f.ctx, { id: fee.id, expectedVersion: fee.version, draft: { propertyId: f.property.id, reservationId: f.reservationId, fundingAccountId: f.banks.receipt.id,
+      category: f.feeInput.category, purpose: f.feeInput.purpose, amount: "0.01", currency: "MAD", occurredOn: row!.occurredOn.toISOString().slice(0, 10), emergency: false,
+      idempotencyKey: row!.idempotencyKey, reason: "Require the retained provider deduction despite an otherwise valid expense edit" } }, { db })).rejects.toThrow("actual original captured fee expense source required");
+    const bound = await withTenant(db, f.org, tx => tx.externalPaymentFee.findFirstOrThrow({ where: { organizationId: f.org, expenseId: fee.id } })), foreign = await fixture();
+    expect(await withTenant(db, foreign.org, tx => tx.externalPaymentFee.findMany({ where: { captureId: bound.captureId } }))).toEqual([]);
+    await expect(prepareExternalPaymentFee(f.ctx, { ...f.feeInput, category: "changed_source" }, { db })).rejects.toThrow(ExternalPaymentIntentError);
+  });
   it("recovers the same durable intent after an acknowledgement is lost without queuing another provider attempt", async () => {
     const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), before = await rows(f.org);
     const recovered = await recoverExternalPaymentIntent(f.ctx, { key: f.input.receipt.idempotencyKey }, { db });

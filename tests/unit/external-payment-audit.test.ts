@@ -34,6 +34,14 @@ describe("original external payment audit authority", () => {
     hidden(presentAuditHistoryRow(context(["financial_transaction:export"]), entry, "export", source));
     expect(presentAuditHistoryRow(context(["financial_transaction:view", "financial_transaction:export"]), entry, "export", source).after).toEqual(entry.after);
   });
+  it("requires the actual independent expense permission for fee history without concealing ordinary capture facts", () => {
+    const fee = { ...capture, id: randomUUID(), type: "expense", amount: "0.02" }, actual = { ...source, externalPayment: { ...source.externalPayment!, fee } }, row = { ...entry, action: "finance.external_payment.fee_prepared" };
+    hidden(presentAuditHistoryRow(context(), row, "view", actual)); hidden(presentAuditHistoryRow(context(["financial_transaction:view", "expense:view"]), row, "view", source));
+    expect(presentAuditHistoryRow(context(["financial_transaction:view", "expense:view"]), row, "view", actual).after).toEqual(row.after);
+    hidden(presentAuditHistoryRow(context(["financial_transaction:view", "financial_transaction:export", "expense:view"]), row, "export", actual));
+    expect(presentAuditHistoryRow(context(["financial_transaction:view", "financial_transaction:export", "expense:view", "expense:export"]), row, "export", actual).after).toEqual(row.after);
+    expect(presentAuditHistoryRow(context(), entry, "view", actual).after).toEqual(entry.after);
+  });
   it("does not disclose prior-month capture facts through a reconciliation-month date grant", () => {
     const ctx = context(); ctx.authContext.assignments = [{ scope: { organizationId, scopeType: "organization" }, permissions: new Set(["audit_log:view"]) },
       { scope: { organizationId, scopeType: "organization" }, permissions: new Set(["financial_transaction:view"]), conditions: { timeWindow: { startsAt: "2026-11-01T00:00:00Z" } } }];

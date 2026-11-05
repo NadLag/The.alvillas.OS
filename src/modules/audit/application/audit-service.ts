@@ -94,7 +94,7 @@ export function presentAuditHistoryRow(
 ): AuditHistoryRow {
   if (row.action.startsWith("finance.external_payment.")) {
     const allowed = Boolean(row.resourceType === "financial_transaction" && financialResource?.id === row.resourceId &&
-      canReadExternalPayment(ctx.authContext, financialResource, action, new Date()));
+      canReadExternalPayment(ctx.authContext, financialResource, action, new Date(), row.action.startsWith("finance.external_payment.fee_")));
     return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,
       { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
       { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;

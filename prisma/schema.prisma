@@ -215,6 +215,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  externalPaymentFees ExternalPaymentFee[]
   externalPaymentAttempts ExternalPaymentAttempt[]
   externalPaymentIntents ExternalPaymentIntent[]
   externalPaymentCaptures ExternalPaymentCapture[]
@@ -594,6 +595,7 @@ model Person {
 }
 
 model UserAccount {
+  externalPaymentFees ExternalPaymentFee[]
   externalPaymentIntents ExternalPaymentIntent[]
   collectedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentCollector")
   recordedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentRecorder")
@@ -2958,6 +2960,7 @@ model AccountingPeriodAdjustment {
 }
 
 model Expense {
+  externalPaymentFee ExternalPaymentFee?
   recurringOccurrence RecurringExpenseOccurrence?
   correctsExpenseId      String?                     @map("corrects_expense_id") @db.Uuid
   correctsExpenseVersion Int?                        @map("corrects_expense_version")
@@ -4507,6 +4510,7 @@ model ExternalPaymentIntent {
 }
 
 model ExternalPaymentCapture {
+  fee ExternalPaymentFee?
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   intentId String @map("intent_id") @db.Uuid
@@ -4525,6 +4529,24 @@ model ExternalPaymentCapture {
   @@unique([organizationId,intentId],map:"external_payment_capture_intent_unique")
   @@unique([provider,paymentId],map:"external_payment_capture_provider_unique")
   @@map("external_payment_capture")
+}
+
+model ExternalPaymentFee {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  captureId String @map("capture_id") @db.Uuid
+  expenseId String @map("expense_id") @db.Uuid
+  createdBy String @map("created_by") @db.Uuid
+  propertyTimezone String @map("property_timezone")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  capture ExternalPaymentCapture @relation(fields:[organizationId,captureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  expense Expense @relation(fields:[organizationId,expenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  actor UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"external_payment_fee_org_id_unique")
+  @@unique([organizationId,captureId],map:"external_payment_fee_capture_unique")
+  @@unique([organizationId,expenseId],map:"external_payment_fee_expense_unique")
+  @@map("external_payment_fee")
 }
 
 model ExternalPaymentAttempt {

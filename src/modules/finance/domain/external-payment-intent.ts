@@ -4,7 +4,7 @@ import { externalPaymentIntentInput } from "./external-payment-command";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { PaymentMethodSourceError } from "./payment-method";
 
-export { externalPaymentSourceSchema } from "./external-payment-source";
+export { externalPaymentSourceSchema } from "@/platform/ledger/external-payment-source";
 const identity = z.uuid().transform(value => value.toLowerCase());
 export { externalPaymentIntentInput } from "./external-payment-command";
 export class ExternalPaymentIntentError extends PaymentMethodSourceError { constructor() { super(); this.message = "external_payment_intent_unavailable"; } }

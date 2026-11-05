@@ -4,6 +4,7 @@ import { getExternalPaymentIntent, resumeExternalPaymentCapture, reviewCapturedP
 import { admitCapturedPayPalPayment } from "./native-paypal-admission";
 import type { FinanceActorContext } from "./finance-access";
 import type { TenantTransactionRunner } from "@/platform/db/tenant";
+import { prepareExternalPaymentFee } from "./external-payment-fee-service";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 export async function readExternalPaymentWorkspace(actor: FinanceActorContext, raw: unknown, deps: Deps = {}) {
@@ -16,5 +17,6 @@ export async function executeExternalPaymentCommand(actor: FinanceActorContext, 
   const command = externalPaymentCommandInput.parse(raw);
   if (command.operation === "CAPTURE") return requestExternalPaymentCapture(actor, command.input, deps);
   if (command.operation === "RECONCILE") return resumeExternalPaymentCapture(actor, command.input, deps);
+  if (command.operation === "PREPARE_FEE") return prepareExternalPaymentFee(actor, command.input, deps);
   return admitCapturedPayPalPayment(actor, command.input, deps);
 }

@@ -17,6 +17,9 @@ import { guestPaymentMethodScopes } from "./guest-deposit-payment-method";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
 import { externalPaymentReviewInput, externalPaymentIdentityInput as identity, externalPaymentRecoveryInput } from "../domain/external-payment-command";
 import type { z } from "zod";
+import { ExternalPaymentFeeRepository } from "../infrastructure/external-payment-fee-repository";
+import { authorizeExternalPaymentFee } from "./external-payment-fee-service";
+import { providerCaptureSettlementSchema } from "@/platform/providers/payment-capture";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 export { externalPaymentReviewInput } from "../domain/external-payment-command";
@@ -79,7 +82,10 @@ export async function reviewCapturedPayPalAdmission(inputContext: FinanceActorCo
       after: { intentId: request.id, captureId: request.capture.id }, reason: "Reviewed confirmed original provider money before native financial admission", requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: await new FinanceRepository(tx, ctx.organizationId).clock() });
     await authorizeExternalPaymentSource(ctx, tx, request, true); const after = await review(ctx, current, tx, request);
     if (commandFingerprint(before) !== commandFingerprint(after)) throw new PaymentMethodChangedError();
-    return { ...before.value, intentId: request.id, captureId: request.capture.id, purpose: receipt.purpose, orderId: request.orderId };
+    const fee = await new ExternalPaymentFeeRepository(tx, ctx.organizationId).byCapture(request.capture.id), settlement = providerCaptureSettlementSchema.safeParse(request.capture.settlement);
+    if (fee) await authorizeExternalPaymentFee(ctx, tx, request, fee);
+    return { ...before.value, intentId: request.id, captureId: request.capture.id, purpose: receipt.purpose, orderId: request.orderId,
+      settlement: settlement.success ? settlement.data : null, fee: fee ? { id: fee.expenseId, version: fee.expense.version, state: fee.expense.state } : null };
   });
 }
 export async function resumeExternalPaymentCapture(inputContext: FinanceActorContext, raw: unknown, deps: Deps = {}) {

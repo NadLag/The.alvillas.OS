@@ -8,7 +8,7 @@ import { calendarDateStart } from "@/platform/time/calendar";
 import { employeeCompensationAuthorityLineFields,employeeCompensationRunFacts } from "@/platform/authz/employee-compensation-resource";
 import { employeeMonthlyRequestAuthorityFacts } from "@/platform/authz/employee-monthly-request-resource";
 import { employeeEarningRequestAuthorityFacts,employeeEarningRequestSourceFields } from "@/platform/authz/employee-earning-request-resource";
-import { externalPaymentSourceSchema } from "@/modules/finance/domain/external-payment-source";
+import { externalPaymentSourceSchema } from "@/platform/ledger/external-payment-source";
 import { Money } from "@/platform/money/money";
 import { externalPaymentFinancialSources, type ExternalPaymentFinancialSources } from "@/platform/authz/external-payment-resource";
 
@@ -168,7 +168,7 @@ export class AuditRepository {
     if (!ids.length) return result;
     const requests = await this.tx.externalPaymentIntent.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
       select: { id: true, requestedBy: true, reservationId: true, accountId: true, amount: true, currency: true, sourceSnapshot: true,
-        capture: { select: { capturedAt: true, amount: true, currency: true } } } });
+        capture: { select: { capturedAt: true, amount: true, currency: true, fee: { select: { expense: { select: { id: true, state: true, amount: true, currency: true, createdBy: true } } } } } } } });
     for (const request of requests) {
       const parsed = externalPaymentSourceSchema.safeParse(request.sourceSnapshot); if (!parsed.success || result.has(request.id)) continue;
       const source = parsed.data, amount = Money.of(request.amount.toString(), request.currency).toJSON().amount;
@@ -176,6 +176,9 @@ export class AuditRepository {
           source.accountId !== request.accountId || source.amount.amount !== amount || source.amount.currency !== request.currency ||
           request.capture && (!request.capture.capturedAt || !request.capture.amount.eq(request.amount) || request.capture.currency !== request.currency)) continue;
       const sources = externalPaymentFinancialSources(request.id, source, request.capture?.capturedAt);
+      const expense = request.capture?.fee?.expense;
+      if (expense && sources.capture) sources.fee = { ...sources.capture, type: "expense", id: expense.id, financialRecordId: expense.id,
+        status: expense.state, assignedUserAccountId: expense.createdBy, amount: Money.of(expense.amount.toString(), expense.currency).toJSON().amount };
       result.set(request.id, { ...sources.original, externalPayment: sources });
     }
     return result;
