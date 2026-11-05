@@ -5,6 +5,7 @@ export {guestDepositReversalReviewInput,guestDepositReversalInput} from "./guest
 const id=z.uuid().transform(value=>value.toLowerCase()),hash=z.string().regex(/^[a-f0-9]{64}$/u);
 export const guestDepositSourceSnapshot=z.object({organizationId:id,depositId:id,reservationId:id,propertyId:id,guestId:id,kind:z.string(),city:z.string().nullable(),region:z.string().nullable()}).strict();
 const policy=z.object({id,version:z.number().int().positive(),value:guestDepositPolicySchema}).strict();
+export {policy as guestDepositPolicySnapshot};
 const base={schemaVersion:z.literal(1),commandHash:hash,source:guestDepositSourceSnapshot,policy,liabilityAccountId:id};
 export const guestDepositReceiptSnapshot=z.object({...base,operation:z.literal("RECEIPT"),input:guestDepositReceiptInput}).strict();
 export const guestDepositCashAdmissionSnapshot=z.object({...base,operation:z.literal("ADMIT_CASH"),input:guestDepositCashAdmissionInput,unallocatedAccountId:id,cashSource:z.object({id,transactionId:id,custodyAccountId:id,taskId:id,taskType:z.string(),recordedAt:z.iso.datetime(),amount:z.string(),currency:z.string(),collectorUserAccountId:id,collectorPersonId:id,provenance:z.unknown()}).strict()}).strict();

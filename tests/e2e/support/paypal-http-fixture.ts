@@ -1,13 +1,15 @@
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { Money } from "@/platform/money/money";
 import { PayPalPaymentProvider } from "@/platform/providers/real";
 
 /** A real local HTTP boundary for the production provider adapter; no live provider/account settings. */
 export async function paypalHttpFixture(orderId: string, fee = "0.00") {
   const captureId = "ORIGINAL_CAPTURE_" + randomUUID(), amount = Money.of("0.07", "MAD"), net = amount.subtract(Money.of(fee, "MAD"));
-  let capturedAt: string | null = null, posts = 0, lookups = 0;
+  let capturedAt: string | null = null, posts = 0, lookups = 0, refundPosts = 0, refundLookups = 0, refunded = Money.zero("MAD");
+  const refunds = new Map<string, object>();
   const server = createServer((request, response) => {
     response.setHeader("Content-Type", "application/json");
     if (request.method === "POST" && request.url === "/v1/oauth2/token") { response.end(JSON.stringify({ access_token: "local-capture-fixture" })); return; }
@@ -20,9 +22,28 @@ export async function paypalHttpFixture(orderId: string, fee = "0.00") {
       if (!request.headers["paypal-request-id"]) { response.statusCode = 400; response.end("{}"); return; }
       posts++; capturedAt ??= new Date().toISOString(); response.end(JSON.stringify(completed())); return;
     }
+    if (request.method === "POST" && request.url === "/v2/payments/captures/" + captureId + "/refund") {
+      let raw = ""; request.setEncoding("utf8"); request.on("data", chunk => { raw += chunk; }); request.on("end", () => {
+        try {
+          const input = z.object({ custom_id: z.uuid(), amount: z.object({ value: z.string().regex(/^(?:0|[1-9]\d*)\.\d{2}$/u), currency_code: z.literal("MAD") }).strict() }).strict().parse(JSON.parse(raw)), requestId = request.headers["paypal-request-id"];
+          if (!capturedAt || typeof requestId !== "string" || input.custom_id !== requestId || input.amount?.currency_code !== "MAD") throw Error();
+          const gross = Money.of(input.amount.value, "MAD"); if (!gross.amount.gt(0) || refunded.add(gross).amount.gt(amount.amount)) throw Error();
+          const refundId = "ORIGINAL_REFUND_" + randomUUID(), at = new Date().toISOString(), address = server.address(); if (!address || typeof address === "string") throw Error();
+          refunded = refunded.add(gross); refundPosts++;
+          const result = { id: refundId, custom_id: requestId, status: "COMPLETED", amount: { value: gross.toJSON().amount, currency_code: "MAD" }, create_time: at, update_time: at,
+            links: [{ rel: "up", method: "GET", href: "http://127.0.0.1:" + address.port + "/v2/payments/captures/" + captureId }],
+            seller_payable_breakdown: { gross_amount: { value: gross.toJSON().amount, currency_code: "MAD" }, paypal_fee: { value: "0.00", currency_code: "MAD" }, net_amount: { value: gross.toJSON().amount, currency_code: "MAD" }, total_refunded_amount: { value: refunded.toJSON().amount, currency_code: "MAD" } } };
+          refunds.set(refundId, result); response.end(JSON.stringify(result));
+        } catch { response.statusCode = 400; response.end("{}"); }
+      }); return;
+    }
+    if (request.method === "GET" && request.url?.startsWith("/v2/payments/refunds/")) {
+      const refund = refunds.get(request.url.slice("/v2/payments/refunds/".length)); if (!refund) { response.statusCode = 404; response.end("{}"); return; }
+      refundLookups++; response.end(JSON.stringify(refund)); return;
+    }
     response.statusCode = 404; response.end("{}");
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening"); const address = server.address(); if (!address || typeof address === "string") throw Error("Owned local payment fixture required");
   return { provider: new PayPalPaymentProvider({ PAYPAL_CLIENT_ID: "local-capture-fixture", PAYPAL_SECRET: "local-capture-fixture", PAYPAL_BASE_URL: "http://127.0.0.1:" + address.port }),
-    facts: () => ({ captureId, capturedAt, posts, lookups }), close: () => new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); }) };
+    facts: () => ({ captureId, capturedAt, posts, lookups, refundPosts, refundLookups, refunded: refunded.toJSON() }), close: () => new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); }) };
 }
