@@ -23,6 +23,8 @@ import {recheckFinanceAuthorization,type FinanceActorContext} from "./finance-ac
 import {employeeSettlementFundingChecks} from "./employee-compensation-settlement";
 import {resolveSourceScope} from "./receivable-collection-service";
 
+import {reviewGuestPaymentMethod} from "./guest-deposit-payment-method";
+
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 type ReceiptDraft=z.infer<typeof guestDepositReviewInput>;
 type RefundDraft=z.infer<typeof guestDepositRefundReviewInput>;
@@ -75,9 +77,9 @@ async function replay(ctx:FinanceActorContext,key:string,hash:string,operation:"
 }
 
 export async function reviewGuestDepositReceipt(context:FinanceActorContext,raw:unknown,deps:Deps={}){const ctx=captured(context),input=normalized(guestDepositReviewInput.parse(raw));return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
- const prepared=await prepareReceipt(ctx,input,tx),result=visible(ctx,prepared.resource,{reservationId:input.reservationId,kind:prepared.policy.value.kinds.find(row=>row.key===input.kind)!,amount:prepared.amount.toJSON(),location:{id:prepared.location.id,name:prepared.location.name,code:prepared.location.code},receivedAt:input.receivedAt,reviewFingerprint:prepared.fingerprint},prepared.now);
+ const prepared=await prepareReceipt(ctx,input,tx),method=await reviewGuestPaymentMethod(tx,ctx.organizationId,input.reservationId,await prepared.finance.clock(),prepared.amount,input.method,["manual","bank_transfer"]),result=visible(ctx,prepared.resource,{reservationId:input.reservationId,kind:prepared.policy.value.kinds.find(row=>row.key===input.kind)!,amount:prepared.amount.toJSON(),location:{id:prepared.location.id,name:prepared.location.name,code:prepared.location.code},receivedAt:input.receivedAt,reviewFingerprint:prepared.fingerprint,...method?{paymentMethodFingerprint:method.fingerprint}:{}},prepared.now);
  await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.guest_deposit.receipt_reviewed",resourceType:"financial_transaction",resourceId:input.reservationId,after:{reservationId:input.reservationId,reviewFingerprint:prepared.fingerprint},reason:"Reviewed actual original guest deposit and liability",requestId:deps.requestId??crypto.randomUUID(),occurredAt:await prepared.finance.clock()});
- if((await prepareReceipt(ctx,input,tx)).fingerprint!==prepared.fingerprint)throw new GuestDepositConflictError();return result;
+ if((await prepareReceipt(ctx,input,tx)).fingerprint!==prepared.fingerprint||(await reviewGuestPaymentMethod(tx,ctx.organizationId,input.reservationId,await prepared.finance.clock(),prepared.amount,input.method,["manual","bank_transfer"]))?.fingerprint!==method?.fingerprint)throw new GuestDepositConflictError();return result;
 });}
 
 export async function postGuestDepositReceipt(context:FinanceActorContext,raw:unknown,deps:Deps={}){const ctx=captured(context),input=normalized(guestDepositReceiptInput.parse(raw)),hash=intent("RECEIPT",input);return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{

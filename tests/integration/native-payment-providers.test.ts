@@ -14,6 +14,7 @@ import { actualGuestDepositFixture } from "./support/guest-deposit-fixture";
 import { actualGuestDepositCashFixture } from "./support/guest-deposit-cash-fixture";
 import { actualOtaSettlementFixture } from "./support/ota-settlement-fixture";
 import { provisionIntegrationRole } from "./support/database-role";
+import { executeGuestDepositCommand, requestGuestDepositCommand } from "@/modules/finance/application/guest-deposit-command-service";
 
 const url = process.env.TEST_DATABASE_URL; let admin: PrismaClient, db: PrismaClient;
 beforeAll(async () => {
@@ -36,7 +37,7 @@ async function receipt(adapter: "manual" | "bank_transfer") {
   if (adapter === "manual") await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.guest_deposits", scopeType: "organization", effectiveFrom: new Date("2020-01-01"), createdBy: f.account.id,
     value: { ...f.policy, payment_methods: [...f.policy.payment_methods, { key: "manual", labels }] }, reason: "Explicitly permit the actual original manual receipt method" }));
   const draft = { ...f.receiptInput, method: adapter }, review = await reviewGuestDepositReceipt(f.ctx, draft, { db }),
-    command = { ...draft, reviewFingerprint: review.reviewFingerprint, idempotencyKey: randomUUID(), reason: "Record the actual original guest funds once through their configured method" },
+    command = { ...draft, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, idempotencyKey: randomUUID(), reason: "Record the actual original guest funds once through their configured method" },
     provider = adapter === "manual" ? new ManualPaymentProvider(f.ctx, command, { db }) : new BankTransferPaymentProvider(f.ctx, command, { db });
   return { ...f, command, provider, intent: { source: command.idempotencyKey, amount: command.amount, currency: command.currency } };
 }
@@ -46,6 +47,61 @@ const facts = (org: string) => withTenant(db, org, tx => tx.$queryRaw<Array<{ ki
 const accepted = (org: string) => withTenant(db, org, tx => tx.auditLog.count({ where: { action: "finance.payment_method.accepted" } }));
 
 describe("native payment source adapters through the original ledger", () => {
+  it("uses the configured adapter through original command admission and recovers it after disablement", async () => {
+    const f = await receipt("bank_transfer"), { idempotencyKey, ...input } = f.command;
+    const command = { operation: "RECEIPT", input, idempotencyKey }, first = await executeGuestDepositCommand(f.ctx, command, { db });
+    expect(first).toMatchObject({ state: "SUCCEEDED", operation: "RECEIPT", idempotent: false, depositId: idempotencyKey });
+    expect(await accepted(f.org)).toBe(1); const original = await facts(f.org);
+    await definition(f, "bank_transfer", "bank_transfer", false);
+    expect(await executeGuestDepositCommand(f.ctx, command, { db })).toEqual({ ...first, idempotent: true });
+    expect(await accepted(f.org)).toBe(1); expect(await facts(f.org)).toEqual(original);
+  });
+  it("rejects a command that omits its reviewed configured-method version", async () => {
+    const f = await receipt("manual"), { idempotencyKey, paymentMethodFingerprint, ...input } = f.command, original = await facts(f.org);
+    expect(paymentMethodFingerprint).toMatch(/^[a-f0-9]{64}$/u);
+    expect(await requestGuestDepositCommand(f.ctx, { operation: "RECEIPT", input, idempotencyKey }, { db })).toMatchObject({ state: "CONFLICT", failureCode: "SOURCE_CHANGED" });
+    expect(await accepted(f.org)).toBe(0); expect(await facts(f.org)).toEqual(original);
+  });
+  it("rejects a newer enabled method version after review without rewriting original money", async () => {
+    const f = await receipt("bank_transfer"), { idempotencyKey, ...input } = f.command, original = await facts(f.org);
+    await definition(f, "bank_transfer");
+    expect(await requestGuestDepositCommand(f.ctx, { operation: "RECEIPT", input, idempotencyKey }, { db })).toMatchObject({ state: "CONFLICT", failureCode: "SOURCE_CHANGED" });
+    expect(await accepted(f.org)).toBe(0); expect(await facts(f.org)).toEqual(original);
+  });
+  it("does not admit an unconfigured review after the first method definition becomes active", async () => {
+    const f = await actualGuestDepositFixture(db, admin), review = await reviewGuestDepositReceipt(f.ctx, f.receiptInput, { db }),
+      idempotencyKey = randomUUID(), input = { ...f.receiptInput, reviewFingerprint: review.reviewFingerprint, reason: "Preserve the original unconfigured review before a method definition becomes active" }, original = await facts(f.org);
+    expect(review.paymentMethodFingerprint).toBeUndefined(); await definition(f, "bank_transfer");
+    expect(await requestGuestDepositCommand(f.ctx, { operation: "RECEIPT", input, idempotencyKey }, { db })).toMatchObject({ state: "CONFLICT", failureCode: "SOURCE_CHANGED" });
+    expect(await accepted(f.org)).toBe(0); expect(await facts(f.org)).toEqual(original);
+  });
+  it("keeps original method definitions append-only in native PostgreSQL", async () => {
+    const f = await receipt("manual"), original = await facts(f.org);
+    await expect(withTenant(db, f.org, tx => tx.configRule.updateMany({ where: { organizationId: f.org, key: paymentMethodPolicyKey, archivedAt: null }, data: { archivedAt: new Date() } }))).rejects.toThrow("config_rule is append-only");
+    expect(await accepted(f.org)).toBe(0); expect(await facts(f.org)).toEqual(original);
+  });
+  it("rolls back an unconfigured admission when a first method definition arrives during posting", async () => {
+    const f = await actualGuestDepositFixture(db, admin), review = await reviewGuestDepositReceipt(f.ctx, f.receiptInput, { db }), original = await facts(f.org), write = auditWriter.writeAuditEvent;
+    vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const saved = await write(tx, event); if (event.action === "finance.guest_deposit.received") await definition(f, "bank_transfer"); return saved; });
+    const result = await requestGuestDepositCommand(f.ctx, { operation: "RECEIPT", idempotencyKey: randomUUID(), input: { ...f.receiptInput, reviewFingerprint: review.reviewFingerprint, reason: "Preserve the originally reviewed unconfigured method during concurrent configuration" } }, { db });
+    expect(result).toMatchObject({ state: "CONFLICT", failureCode: "SOURCE_CHANGED" });
+    expect(await accepted(f.org)).toBe(0); expect(await facts(f.org)).toEqual(original);
+  });
+  it("requires an explicit selection when several cash methods are configured and preserves custody", async () => {
+    const f = await actualGuestDepositCashFixture(db, admin);
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: paymentMethodPolicyKey, scopeType: "organization", effectiveFrom: new Date("2000-01-01"), createdBy: f.account.id,
+      value: { methods: ["reception-cash", "manager-cash"].map(key => ({ key, labels, adapter: "cash", enabled: true, currencies: ["MAD"] })) }, reason: "Explicit independently selected actual cash reception methods" }));
+    const draft = { collectionId: f.cash.id, reservationId: f.reservationId, kind: "stay", amount: "0.07", currency: "MAD", purpose: "Select actual original manager cash ownership" }, original = await facts(f.org);
+    await expect(reviewGuestDepositCashAdmission(f.ctx, draft, { db })).rejects.toThrow(PaymentMethodConfigurationError);
+    const selected = { ...draft, paymentMethodKey: "manager-cash" }, review = await reviewGuestDepositCashAdmission(f.ctx, selected, { db }), input = { ...selected, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Admit only the explicitly reviewed configured cash reception method" };
+    expect(review.paymentMethod?.key).toBe("manager-cash");
+    expect(() => new CashPaymentProvider(f.ctx, "reception-cash", { ...input, idempotencyKey: randomUUID() }, { db })).toThrow(PaymentMethodSourceError);
+    const command = { operation: "ADMIT_CASH", input, idempotencyKey: randomUUID() }, first = await executeGuestDepositCommand(f.ctx, command, { db });
+    expect(first).toMatchObject({ state: "SUCCEEDED", idempotent: false });
+    expect(await executeGuestDepositCommand(f.ctx, command, { db })).toEqual({ ...first, idempotent: true });
+    expect(await accepted(f.org)).toBe(1); const ids = new Set(original.map(row => row.kind + row.id));
+    expect((await facts(f.org)).filter(row => ids.has(row.kind + row.id))).toEqual(original);
+  });
   it.each(["manual", "bank_transfer"] as const)("admits %s funds once under concurrent calls and preserves all original financial bodies", async adapter => {
     const f = await receipt(adapter), original = await facts(f.org), replies = await Promise.all([f.provider.record(f.intent), f.provider.record(f.intent)]);
     expect(replies[0]).toEqual(replies[1]); expect(await accepted(f.org)).toBe(1);
@@ -90,7 +146,7 @@ describe("native payment source adapters through the original ledger", () => {
   it("admits original field cash ownership without counting its physical custody a second time", async () => {
     const f = await actualGuestDepositCashFixture(db, admin); await definition(f, "cash");
     const draft = { collectionId: f.cash.id, reservationId: f.reservationId, kind: "stay", amount: "0.07", currency: "MAD", purpose: "Admit the actual original guest cash source" }, review = await reviewGuestDepositCashAdmission(f.ctx, draft, { db }),
-      command = { ...draft, reviewFingerprint: review.reviewFingerprint, idempotencyKey: randomUUID(), reason: "Transfer original cash claims without another physical money receipt" },
+      command = { ...draft, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, idempotencyKey: randomUUID(), reason: "Transfer original cash claims without another physical money receipt" },
       provider = new CashPaymentProvider(f.ctx, "cash", command, { db }), intent = { source: command.idempotencyKey, amount: command.amount, currency: command.currency }, original = await facts(f.org), first = await provider.record(intent);
     expect(await provider.record(intent)).toEqual(first); expect(await accepted(f.org)).toBe(1);
     const postings = await withTenant(db, f.org, tx => tx.posting.findMany({ where: { transactionId: first.paymentId }, include: { ledgerAccount: true } }));

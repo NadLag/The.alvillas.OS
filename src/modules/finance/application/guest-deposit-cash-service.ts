@@ -23,6 +23,8 @@ import {recheckFinanceAuthorization,type FinanceActorContext} from "./finance-ac
 import {employeeSettlementFundingChecks} from "./employee-compensation-settlement";
 import {readGuestDepositSourceInTransaction,resolveGuestDepositPolicyInTransaction,recoverGuestDepositCommand,presentGuestDepositResult} from "./guest-deposit-service";
 
+import {reviewGuestPaymentMethod} from "./guest-deposit-payment-method";
+
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 type Draft=z.infer<typeof guestDepositCashAdmissionReviewInput>;
 const json=(value:unknown)=>JSON.parse(JSON.stringify(value))as Prisma.InputJsonObject;
@@ -49,7 +51,7 @@ async function prepare(ctx:FinanceActorContext,input:Draft,tx:TenantTransaction)
 
 export async function reviewGuestDepositCashAdmission(context:FinanceActorContext,raw:unknown,deps:Deps={}){
  const ctx=captured(context),parsed=guestDepositCashAdmissionReviewInput.parse(raw),input={...parsed,amount:Money.of(parsed.amount,parsed.currency).toJSON().amount};
- return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{const p=await prepare(ctx,input,tx);await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.guest_deposit.cash_admission_reviewed",resourceType:"cash_collection",resourceId:p.cash.id,after:{collectionId:p.cash.id,reviewFingerprint:p.fingerprint},reason:"Reviewed ownership admission from the original actual cash collection",requestId:deps.requestId??crypto.randomUUID(),occurredAt:await p.finance.clock()});if((await prepare(ctx,input,tx)).fingerprint!==p.fingerprint)throw new GuestDepositConflictError();return presentGuestDepositResult(ctx,p.resource,{collectionId:p.cash.id,reservationId:p.booking.id,kind:p.kind,amount:p.amount.toJSON(),available:p.available.toJSON(),receivedAt:p.cash.recordedAt.toISOString(),custody:{id:p.custody.ledgerAccount.id,name:p.custody.ledgerAccount.name,code:p.custody.ledgerAccount.code},reviewFingerprint:p.fingerprint},await p.finance.clock());});
+ return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{const p=await prepare(ctx,input,tx),method=await reviewGuestPaymentMethod(tx,ctx.organizationId,input.reservationId,await p.finance.clock(),p.amount,input.paymentMethodKey,["cash"]);await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.guest_deposit.cash_admission_reviewed",resourceType:"cash_collection",resourceId:p.cash.id,after:{collectionId:p.cash.id,reviewFingerprint:p.fingerprint},reason:"Reviewed ownership admission from the original actual cash collection",requestId:deps.requestId??crypto.randomUUID(),occurredAt:await p.finance.clock()});if((await prepare(ctx,input,tx)).fingerprint!==p.fingerprint||(await reviewGuestPaymentMethod(tx,ctx.organizationId,input.reservationId,await p.finance.clock(),p.amount,input.paymentMethodKey,["cash"]))?.fingerprint!==method?.fingerprint)throw new GuestDepositConflictError();return presentGuestDepositResult(ctx,p.resource,{collectionId:p.cash.id,reservationId:p.booking.id,kind:p.kind,amount:p.amount.toJSON(),available:p.available.toJSON(),receivedAt:p.cash.recordedAt.toISOString(),custody:{id:p.custody.ledgerAccount.id,name:p.custody.ledgerAccount.name,code:p.custody.ledgerAccount.code},reviewFingerprint:p.fingerprint,...method?{paymentMethodFingerprint:method.fingerprint,paymentMethod:{key:method.method.key,labels:method.method.labels}}:{}},await p.finance.clock());});
 }
 
 export async function admitGuestDepositCash(context:FinanceActorContext,raw:unknown,deps:Deps={}){

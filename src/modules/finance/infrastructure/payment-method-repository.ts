@@ -12,8 +12,13 @@ export class PaymentMethodRepository {
       AND: [{ after: { path: ["sourceNamespace"], equals: namespace } }, { after: { path: ["source"], equals: source } }] }, orderBy: { createdAt: "asc" } });
   }
   async catalog(input: { at: Date; currency?: string; scopes: ConfigScopeCandidate[] }) {
+    const catalog = await this.optionalCatalog(input);
+    if (!catalog) throw new PaymentMethodConfigurationError();
+    return catalog;
+  }
+  async optionalCatalog(input: { at: Date; currency?: string; scopes: ConfigScopeCandidate[] }) {
     const rule = await new ConfigRuleRepository(this.tx, this.organizationId).resolve({ key: paymentMethodPolicyKey, scopes: input.scopes, asOf: input.at });
-    if (!rule) throw new PaymentMethodConfigurationError(); const parsed = paymentMethodPolicySchema.safeParse(rule.value);
+    if (!rule) return null; const parsed = paymentMethodPolicySchema.safeParse(rule.value);
     if (!parsed.success) throw new PaymentMethodConfigurationError();
     const references = await new FinancialTransferRepository(this.tx, this.organizationId).currencyChoices(), currency = input.currency ?? references.baseCurrency;
     const available = new Set(references.currencies.map(row => row.code));
