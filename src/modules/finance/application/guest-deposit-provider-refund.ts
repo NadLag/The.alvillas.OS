@@ -10,8 +10,9 @@ import { retainExternalPaymentRefund, ExternalPaymentRefundError } from "../doma
 import { externalPaymentRefundReviewSnapshot } from "../domain/external-payment-refund-review";
 import { GuestDepositRepository } from "../infrastructure/guest-deposit-repository";
 import type { FinanceActorContext } from "./finance-access";
+import { externalRefundSupervisionAuthorityDetails, type ExternalRefundSupervisionAuthority } from "./external-refund-supervision-authority";
 
-export type GuestRefundSourceScope = { reservationKey?: string; commandKey?: string };
+export type GuestRefundSourceScope = { reservationKey?: string; commandKey?: string; supervision?: ExternalRefundSupervisionAuthority };
 /** A retained request restricts admission; its verified provider fact supplies the economic time. */
 export async function guestDepositProviderRefundSource(ctx: FinanceActorContext, input: z.infer<typeof guestDepositRefundReviewInput>, tx: TenantTransaction, scope: GuestRefundSourceScope) {
   const key = scope.commandKey ?? scope.reservationKey;
@@ -20,13 +21,14 @@ export async function guestDepositProviderRefundSource(ctx: FinanceActorContext,
   if (!request) { if (scope.reservationKey) throw new ExternalPaymentRefundError(); return null; }
   if (await repository.externalRefundCancellation(request.id)) throw new ExternalPaymentRefundError();
   const saved = retainExternalPaymentRefund(request.input, request.organizationId, request.requestedBy), audit = await repository.externalRefundReview(request.id), review = externalPaymentRefundReviewSnapshot.safeParse(audit?.after);
-  if (request.requestedBy !== ctx.actorId || saved.fingerprint !== request.requestFingerprint || saved.canonicalRequest !== request.canonicalRequest ||
+  const supervision = scope.supervision && scope.commandKey ? externalRefundSupervisionAuthorityDetails(scope.supervision, ctx, tx, request.id) : null;
+  if ((!supervision && request.requestedBy !== ctx.actorId) || saved.fingerprint !== request.requestFingerprint || saved.canonicalRequest !== request.canonicalRequest ||
     !review.success || review.data.intentId !== request.id || review.data.reviewFingerprint !== saved.input.refund.reviewFingerprint || audit?.actorId !== request.requestedBy || audit.reason !== saved.input.refund.reason) throw new ExternalPaymentRefundError();
-  const originalInput = guestDepositRefundReviewInput.strip().parse(saved.input.refund), heldContext: FinanceActorContext = { organizationId: ctx.organizationId, actorId: ctx.actorId, authContext: restoreAuthorizationCap(request.authorizationCap) };
+  const originalInput = guestDepositRefundReviewInput.strip().parse(saved.input.refund), heldContext: FinanceActorContext = supervision?.heldContext ?? { organizationId: ctx.organizationId, actorId: ctx.actorId, authContext: restoreAuthorizationCap(request.authorizationCap) };
   if (heldContext.authContext.organizationId !== ctx.organizationId || heldContext.authContext.userAccountId !== ctx.actorId) throw new ExternalPaymentRefundError();
   if (!scope.commandKey) {
     if (commandFingerprint(originalInput) !== commandFingerprint(input)) throw new ExternalPaymentRefundError();
-    return { request, heldContext, policy: review.data.policy, refundedAt: null };
+    return { request, heldContext, policy: review.data.policy, refundedAt: null, afterWritten: undefined };
   }
   const observation = request.identity?.observations[0], evidence = providerRefundEvidenceSchema.safeParse(observation?.evidence), settlement = providerRefundSettlementSchema.safeParse(observation?.settlement?.settlement);
   if (!request.identity || !observation || !evidence.success || !settlement.success || evidence.data.state !== "COMPLETED" || !evidence.data.refundedAt ||
@@ -38,5 +40,5 @@ export async function guestDepositProviderRefundSource(ctx: FinanceActorContext,
     commandFingerprint({ ...originalInput, externalReference: request.identity.refundId }) !== commandFingerprint(input)) throw new ExternalPaymentRefundError();
   const first = await repository.firstCompletedExternalRefund(request.identity.id);
   if (!first?.refundedAt) throw new ExternalPaymentRefundError();
-  return { request, heldContext, policy: review.data.policy, refundedAt: first.refundedAt };
+  return { request, heldContext, policy: review.data.policy, refundedAt: first.refundedAt, afterWritten: supervision?.afterWritten };
 }

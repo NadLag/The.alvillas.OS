@@ -17,6 +17,22 @@ export class ExternalPaymentRefundRepository {
   capture(id: string) { return this.tx.externalPaymentCapture.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } }, include: { intent: true } }); }
   reserved(depositId: string) { return new GuestDepositRepository(this.tx, this.organizationId).reservedExternalRefunds(depositId); }
   cancellation(intentId: string) { return new GuestDepositRepository(this.tx, this.organizationId).externalRefundCancellation(intentId); }
+  supervisionReview(reviewId: string, actorId: string) {
+    return this.tx.auditLog.findFirst({ where: { organizationId: this.organizationId, actorId, resourceType: "financial_transaction", action: "finance.external_payment.refund_supervision_reviewed",
+      after: { path: ["reviewId"], equals: reviewId } } });
+  }
+  supervisedAdmissionReview(reviewId: string, actorId: string) {
+    return this.tx.auditLog.findFirst({ where: { organizationId: this.organizationId, actorId, resourceType: "financial_transaction", action: "finance.external_payment.refund_supervised_admission_reviewed",
+      after: { path: ["reviewId"], equals: reviewId } } });
+  }
+  supervisedAdmissionByKey(key: string, actorId: string) {
+    return this.tx.auditLog.findFirst({ where: { organizationId: this.organizationId, actorId, resourceType: "financial_transaction", action: "finance.external_payment.refund_supervised_admitted",
+      after: { path: ["commandKey"], equals: key } } });
+  }
+  async committedAudit(id: string) {
+    const rows = await this.tx.$queryRaw<Array<{ committed: boolean }>>`SELECT xmin::text<>pg_current_xact_id()::xid::text AS committed FROM audit_log WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid`;
+    return rows.length === 1 && rows[0].committed;
+  }
   create(saved: ReturnType<typeof retainExternalPaymentRefund>, authorizationCap: AuthorizationCap) {
     return this.tx.externalPaymentRefundIntent.create({ data: { organizationId: this.organizationId, captureId: saved.input.captureId,
       depositId: saved.input.refund.depositId, requestedBy: saved.requestedBy, amount: saved.input.refund.amount, currency: saved.input.refund.currency,

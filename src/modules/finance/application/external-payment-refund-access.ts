@@ -1,6 +1,6 @@
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { restoreAuthorizationCap } from "@/platform/authz/authorization-cap";
-import { retainExternalPaymentRefund, ExternalPaymentRefundError } from "../domain/external-payment-refund-intent";
+import { assertExternalPaymentRefund, ExternalPaymentRefundError } from "../domain/external-payment-refund-intent";
 import type { ExternalPaymentRefundRepository } from "../infrastructure/external-payment-refund-repository";
 import { GuestDepositRepository } from "../infrastructure/guest-deposit-repository";
 import { readGuestDepositSourceInTransaction } from "./guest-deposit-service";
@@ -9,8 +9,8 @@ import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance
 
 type Request = NonNullable<Awaited<ReturnType<ExternalPaymentRefundRepository["find"]>>>;
 export function retainedExternalRefund(request: Request, ctx: FinanceActorContext) {
-  const saved = retainExternalPaymentRefund(request.input, request.organizationId, request.requestedBy);
-  if (ctx.actorId !== request.requestedBy || ctx.organizationId !== request.organizationId || saved.fingerprint !== request.requestFingerprint || saved.canonicalRequest !== request.canonicalRequest) throw new ExternalPaymentRefundError();
+  const saved = assertExternalPaymentRefund(request);
+  if (ctx.actorId !== request.requestedBy || ctx.organizationId !== request.organizationId) throw new ExternalPaymentRefundError();
   return saved;
 }
 export async function authorizeExternalRefundSourceView(ctx: FinanceActorContext, tx: TenantTransaction, request: Request, journal?: { id: string; occurredAt: Date }) {
