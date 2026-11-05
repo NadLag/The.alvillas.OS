@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useCallback, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import type { z } from "zod";
@@ -9,7 +10,8 @@ import { Money } from "@/platform/money/money";
 import { externalRefundReconciliationInput, externalRefundCancellationInput, type externalRefundReviewInput } from "../domain/external-payment-refund-command";
 import { guestDepositDetailSchema } from "../domain/guest-deposit-workspace";
 import { externalRefundCommandSchema, externalRefundReceiptSchema, externalRefundRecoverySchema, externalRefundReviewSchema, externalRefundViewSchema,
-  externalRefundAdmissionCommandSchema, externalRefundAdmissionReceiptSchema, externalRefundAdmissionRecoverySchema, externalRefundAdmissionReviewSchema, acceptExternalRefund } from "../domain/external-payment-refund-workspace";
+  externalRefundAdmissionCommandSchema, externalRefundAdmissionReceiptSchema, externalRefundAdmissionRecoverySchema, externalRefundAdmissionReviewSchema,
+  externalRefundFeePlanSchema, externalRefundFeePreparationSchema, acceptExternalRefund } from "../domain/external-payment-refund-workspace";
 import { useCompensationCommand, storeCompensationNonce } from "./use-compensation-command";
 import { useCompensationRead } from "./use-compensation-read";
 import { companyExpenseFormText as text } from "./company-expense-form-text";
@@ -110,26 +112,47 @@ function RequestReview({ draft, locale, onInvalidate, send }: { draft: ExternalR
     <label className="compensation-cost-check"><input type="checkbox" required checked={confirmed} onChange={event => setConfirmed(event.target.checked)} data-testid="external-refund-confirm" /><span>{t("confirmRequest")}</span></label>
     {validation ? <p role="alert">{t("validation")}</p> : null}<button className="primary-button" disabled={!confirmed} type="submit" data-testid="external-refund-submit">{t("request")}</button></form>;
 }
+function FeeCorrection({ plan, locale, onInvalidate, refresh }: { plan: z.infer<typeof externalRefundFeePlanSchema>; locale: AppLocale; onInvalidate: () => void; refresh: () => Promise<void> }) {
+  const t = useTranslations("ExternalRefunds"), [pending, start] = useTransition(), [error, setError] = useState(false);
+  return <section className="resource-form" data-testid="external-refund-fee-correction"><h3>{t("feeCorrectionTitle")}</h3><p>{t("feeCorrectionGuidance")}</p>
+    <p>{t("remainingCost", { amount: formatCurrencyAmount(locale, plan.remainingCost.amount, plan.remainingCost.currency) })}</p>
+    {plan.expenseId ? <><p role="status">{t(plan.state === "APPROVED" ? "feeReady" : "feeApprovalRequired")}</p>
+      <Link className="secondary-button" href={`/${locale}/app/expenses/${plan.expenseId}`} target="_blank" rel="noopener noreferrer" data-testid="external-refund-fee-expense">{t("openFeeExpense")}</Link></> : null}
+    {plan.state === "READY" ? <p role="status">{t("feeReady")}</p> : null}
+    {plan.state === "UNPREPARED" ? <button className="secondary-button" disabled={pending} type="button" data-testid="external-refund-prepare-fee" onClick={() => start(async () => {
+      setError(false); try {
+        const response = await fetch(commandPath, { method: "POST", credentials: "same-origin", cache: "no-store", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ operation: "PREPARE_FEE", input: { intentId: plan.intentId } }) });
+        if (response.status === 401 || response.status === 403) { onInvalidate(); return; } if (!response.ok) throw Error();
+        externalRefundFeePreparationSchema.parse(await response.json()); await refresh();
+      } catch { setError(true); }
+    })}>{t("prepareFee")}</button> : null}
+    {error ? <p role="alert">{t("unavailable")}</p> : null}
+    <button className="secondary-button" disabled={pending} type="button" data-testid="external-refund-refresh-fee" onClick={() => start(async () => { setError(false); try { await refresh(); } catch { setError(true); } })}>{t("refreshFee")}</button></section>;
+}
 function AdmissionPhase({ refunded, storageKey, locale, onInvalidate, onAdmitted }: Props & { refunded: Refunded; storageKey: string }) {
-  const t = useTranslations("ExternalRefunds"), [confirmed, setConfirmed] = useState(false), [request, setRequest] = useState<z.infer<typeof externalRefundViewSchema>>(() => originalView(refunded)),
+  const t = useTranslations("ExternalRefunds"), [acceptedFingerprint, setAcceptedFingerprint] = useState<string | null>(null), [request, setRequest] = useState<z.infer<typeof externalRefundViewSchema>>(() => originalView(refunded)),
     success = useCallback((receipt: z.infer<typeof externalRefundAdmissionReceiptSchema>) => onAdmitted(receipt.depositId), [onAdmitted]);
   const command = useCompensationCommand({ storageKey, inputSchema: externalRefundAdmissionCommandSchema, receiptSchema: externalRefundAdmissionReceiptSchema, recoverySchema: externalRefundAdmissionRecoverySchema,
     requestPath: commandPath, recoveryPath, recoveryInput, requestBody: admissionBody, accept: acceptAdmission, onSuccess: success, onInvalidate });
-  const settlementReady = Boolean(request.settlement && Money.of(request.settlement.fee.amount, request.settlement.fee.currency).amount.isZero()),
+  const returnedFee = Boolean(request.settlement && Money.of(request.settlement.fee.amount, request.settlement.fee.currency).amount.gt(0)),
+    fee = useCompensationRead(returnedFee ? readPath : null, externalRefundFeePlanSchema, onInvalidate, JSON.stringify({ operation: "GET_FEE", input: { intentId: refunded.id } })),
+    settlementReady = Boolean(request.settlement && (!returnedFee || fee.data?.state === "APPROVED" || fee.data?.state === "READY")),
     read = useCompensationRead(settlementReady ? readPath : null, externalRefundAdmissionReviewSchema, onInvalidate, JSON.stringify({ operation: "REVIEW_ADMISSION", input: { intentId: refunded.id } })), source = useOriginalDeposit(refunded.depositId, onInvalidate);
   const refresh = async () => { await command.recover(); const response = await fetch(statusPath(refunded.id), { credentials: "same-origin", cache: "no-store" });
-    if (response.status === 401 || response.status === 403) { onInvalidate(); return; } if (!response.ok) throw Error(); setRequest(externalRefundViewSchema.parse(await response.json())); await read.refresh(); };
+    if (response.status === 401 || response.status === 403) { onInvalidate(); return; } if (!response.ok) throw Error(); setRequest(externalRefundViewSchema.parse(await response.json())); await fee.refresh(); await read.refresh(); };
   const originalSource = source.data?.summary.depositId === request.depositId && source.data.providerCapture?.id === request.captureId;
-  const ready = command.state === "ready" && settlementReady && Boolean(read.data) && !read.pending && !read.error && originalSource && !source.pending && !source.error;
+  const ready = command.state === "ready" && settlementReady && Boolean(read.data) && !read.pending && !read.error && originalSource && !source.pending && !source.error && (!returnedFee || !fee.pending && !fee.error),
+    confirmed = Boolean(read.data && acceptedFingerprint === read.data.reviewFingerprint);
   return <section className="resource-form" data-testid="external-refund-admission"><h2>{t("admissionTitle")}</h2><p>{t("admissionGuidance")}</p>
     <Recovery state={command.state} recover={() => { void command.recover(); }} retry={() => { void command.send(); }} />
     {source.error ? <p role="alert">{t(source.error)}</p> : source.pending ? <SkeletonBlock rows={2} /> : source.data && originalSource ? <OriginalDeposit detail={source.data} /> : <p role="alert">{t("unavailable")}</p>}
     <dl className="compensation-evidence"><div><dt>{t("gross")}</dt><dd>{formatCurrencyAmount(locale, request.amount.amount, request.amount.currency)}</dd></div><div><dt>{t("refundedAt")}</dt><dd>{formatDateTime(locale, new Date(request.refundedAt!), { timeZone: "UTC" })}</dd></div>
       {request.settlement ? <><div><dt>{t("returnedFee")}</dt><dd>{formatCurrencyAmount(locale, request.settlement.fee.amount, request.settlement.fee.currency)}</dd></div><div><dt>{t("net")}</dt><dd>{formatCurrencyAmount(locale, request.settlement.net.amount, request.settlement.net.currency)}</dd></div></> : null}</dl>
     {!settlementReady ? <p role="status">{t(request.settlement ? "feeCorrectionRequired" : "settlementUnavailable")}</p> : null}
+    {returnedFee ? fee.error ? <p role="alert">{t(fee.error)}</p> : fee.pending || !fee.data ? <SkeletonBlock rows={2} /> : <FeeCorrection plan={fee.data} locale={locale} onInvalidate={onInvalidate} refresh={async () => { await fee.refresh(); await read.refresh(); }} /> : null}
     {read.error ? <p role="alert">{t(read.error)}</p> : read.pending && settlementReady ? <SkeletonBlock rows={2} /> : null}
     <Reconcile request={request} onInvalidate={onInvalidate} refresh={refresh} />
     <form className="resource-form" onSubmit={event => { event.preventDefault(); if (ready && confirmed && read.data) void command.send({ intentId: refunded.id, reviewFingerprint: read.data.reviewFingerprint }); }}>
-      <label className="compensation-cost-check"><input type="checkbox" required disabled={!ready} checked={confirmed} onChange={event => setConfirmed(event.target.checked)} data-testid="external-refund-admission-confirm" /><span>{t("confirmAdmission")}</span></label>
+      <label className="compensation-cost-check"><input type="checkbox" required disabled={!ready} checked={confirmed} onChange={event => setAcceptedFingerprint(event.target.checked && read.data ? read.data.reviewFingerprint : null)} data-testid="external-refund-admission-confirm" /><span>{t("confirmAdmission")}</span></label>
       <button className="primary-button" disabled={!ready || !confirmed} type="submit" data-testid="external-refund-admission-submit">{t("admit")}</button></form></section>;
 }

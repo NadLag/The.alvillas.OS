@@ -8,7 +8,7 @@ import { GuestDepositRepository } from "../infrastructure/guest-deposit-reposito
 import { ExternalPaymentRefundError } from "../domain/external-payment-refund-intent";
 import { externalRefundCancellationInput } from "../domain/external-payment-refund-command";
 import { externalPaymentContext } from "./external-payment-service";
-import { retainedExternalRefund, authorizeExternalRefundSourceView } from "./external-payment-refund-admission";
+import { retainedExternalRefund, authorizeExternalRefundSourceView } from "./external-payment-refund-access";
 import { readGuestDepositSourceInTransaction } from "./guest-deposit-service";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
 import { employeeSettlementFundingChecks } from "./employee-compensation-settlement";

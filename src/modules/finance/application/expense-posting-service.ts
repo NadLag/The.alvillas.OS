@@ -28,12 +28,13 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     const expenses=new ExpenseRepository(tx,ctx.organizationId),hint=await expenses.find(input.id);
     if(!hint)throw new ExpenseAccessError();
+    const refundSource=await expenses.lockExternalRefundSource(input.id,"POST");
     for(const id of [...new Set([input.id,...(hint.correctsExpenseId?[hint.correctsExpenseId]:[])])].sort())await expenses.lock(id);
     let clock=await expenses.clock();
     const row=await expenses.find(input.id);if(!row||row.property.archivedAt)throw new ExpenseAccessError();
     const periods=new AccountingPeriodRepository(tx,ctx.organizationId);
     const timezone=z.object({timezone:z.string().min(1)}).safeParse(row.submission?.snapshot);
-    const externalOccurredAt=await expenses.externalCaptureInstant(row.id);
+    const externalOccurredAt=refundSource?.occurredAt??await expenses.externalCaptureInstant(row.id);
     const sourceOccurredAt=externalOccurredAt??await periods.sourceInstant(row.occurredOn,timezone.success?timezone.data.timezone:row.property.timezone);
     if(externalOccurredAt&&input.currentPeriod)throw new ExpenseConflictError();
     const target=expenseResource(ctx.organizationId,row.property,{...row,amount:row.amount.toString(),occurredAt:sourceOccurredAt});
@@ -52,7 +53,7 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
       if(!original?.transactionId||!original.submission||original.property.archivedAt)throw new ExpenseAccessError();
       const oldTimezone=z.object({timezone:z.string().min(1)}).safeParse(original.submission.snapshot);
       if(!oldTimezone.success)throw new ExpenseConfigurationError("Original expense policy is unavailable");
-      const oldAt=await periods.sourceInstant(original.occurredOn,oldTimezone.data.timezone);
+      const oldAt=await expenses.externalCaptureInstant(original.id)??(await expenses.externalRefundSource(original.id,"POST"))?.occurredAt??await periods.sourceInstant(original.occurredOn,oldTimezone.data.timezone);
       const oldExpense=expenseResource(ctx.organizationId,original.property,{...original,amount:original.amount.toString(),occurredAt:oldAt});
       const oldJournal={...oldExpense,type:"financial_transaction" as const,id:original.transactionId,financialRecordId:original.transactionId,occurredAt:original.transaction!.occurredAt};
       correctionChecks.push({action:"view",resource:oldExpense},{action:"void",resource:oldExpense},{action:"view",resource:oldJournal},
@@ -65,12 +66,12 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
       ...(input.currentPeriod?[{action:"override" as const,resource:{...target,type:"financial_transaction" as const}}]:[]),...correctionChecks
     ];
     await recheckFinanceAuthorization(ctx,tx,clock.now,checks,new ExpenseAccessError());
-    if(row.correctsExpenseId&&!input.currentPeriod)throw new ExpenseConflictError();
+    if(row.correctsExpenseId&&!input.currentPeriod&&!refundSource)throw new ExpenseConflictError();
     if(row.transactionId){
       const audit=await expenses.lifecycleAudit(row.id,"expense.posted"),before=z.object({version:z.number()}).safeParse(audit?.before);
       const after=z.object({postingDateMode:z.enum(["SOURCE_DATE","CURRENT_OPEN_PERIOD"]).default("SOURCE_DATE")}).safeParse(audit?.after);
       if(!audit||audit.actorId!==ctx.actorId||audit.reason!==input.reason||!before.success||before.data.version!==input.expectedVersion||!after.success||
-        after.data.postingDateMode!==(input.currentPeriod?"CURRENT_OPEN_PERIOD":"SOURCE_DATE")||Boolean(row.periodAdjustment||row.correctsExpenseId)!==input.currentPeriod)throw new ExpenseConflictError();
+        after.data.postingDateMode!==(input.currentPeriod?"CURRENT_OPEN_PERIOD":"SOURCE_DATE")||Boolean(row.periodAdjustment||row.correctsExpenseId&&!refundSource)!==input.currentPeriod)throw new ExpenseConflictError();
       return{id:row.id,version:row.version,transactionId:row.transactionId,idempotent:true,...(row.periodAdjustment?{accountingPeriodAdjustmentId:row.periodAdjustment.id}:{})};
     }
     if(!isExpenseFundingAccount(funding))throw new ExpenseConfigurationError("Expense funding account is unavailable");
@@ -135,10 +136,10 @@ export async function voidExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
   const input=inputSchema.parse(raw);
   if(ctx.organizationId!==ctx.authContext.organizationId||ctx.actorId!==ctx.authContext.userAccountId)throw new ExpenseAccessError();
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
-    const expenses=new ExpenseRepository(tx,ctx.organizationId);await expenses.lock(input.id);
+    const expenses=new ExpenseRepository(tx,ctx.organizationId),refundSource=await expenses.lockExternalRefundSource(input.id,"VOID");await expenses.lock(input.id);
     const row=await expenses.find(input.id);if(!row||row.property.archivedAt)throw new ExpenseAccessError();
     const timezone=z.object({timezone:z.string().min(1)}).safeParse(row.submission?.snapshot);
-    const occurredAt=await new AccountingPeriodRepository(tx,ctx.organizationId).sourceInstant(row.occurredOn,timezone.success?timezone.data.timezone:row.property.timezone);
+    const occurredAt=await expenses.externalCaptureInstant(row.id)??(await expenses.externalRefundSource(row.id,"POST"))?.occurredAt??await new AccountingPeriodRepository(tx,ctx.organizationId).sourceInstant(row.occurredOn,timezone.success?timezone.data.timezone:row.property.timezone);
     const target=expenseResource(ctx.organizationId,row.property,{...row,amount:row.amount.toString(),occurredAt});
     const financialTarget={...target,type:"financial_transaction" as const,id:row.transactionId??row.id,financialRecordId:row.transactionId??row.id,occurredAt:row.transaction?.occurredAt??occurredAt};
     const sourceFunding=await new FinanceRepository(tx,ctx.organizationId).findLedgerAccountById(row.fundingAccountId);
@@ -157,7 +158,7 @@ export async function voidExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
       return{id:row.id,version:row.version,transactionId:original.id,reversalTransactionId:reversal.id,idempotent:true};
     }
     if(row.state!=="POSTED"||row.version!==input.expectedVersion||original.reversedByTransactions.length)throw new ExpenseConflictError();
-    const reverse=await finance.createFinancialTransaction({reference:`EXPENSE:${row.id}:VOID`,description:input.reason,occurredAt:clock.now,
+    const reverse=await finance.createFinancialTransaction({reference:`EXPENSE:${row.id}:VOID`,description:input.reason,occurredAt:refundSource?.occurredAt??clock.now,
       idempotencyKey:`expense:${row.id}:voided`,reversesTransactionId:original.id,createdBy:ctx.actorId,postings:original.postings.map(posting=>({
         ledgerAccountId:posting.ledgerAccountId,side:posting.side==="DEBIT"?"CREDIT" as const:"DEBIT" as const,
         amount:Money.of(posting.amount.toString(),posting.currency),bucket:z.string().parse(posting.bucket),dimensions:z.record(z.string(),z.unknown()).parse(posting.dimensions)

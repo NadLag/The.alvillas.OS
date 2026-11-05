@@ -24,6 +24,13 @@ export const externalRefundRecoverySchema = z.object({ request: externalRefundVi
 export const externalRefundCommandSchema = externalRefundReviewInput.extend({ idempotencyKey: id, refund: externalRefundRequestInput.shape.refund.omit({ idempotencyKey: true }) }).strict();
 export const externalRefundReviewSchema = z.object({ captureId: id, depositId: id, amount: money, account: z.object({ id, name: z.string() }).strict(), reviewFingerprint: hash }).strict();
 export const externalRefundAdmissionReviewSchema = z.object({ intentId: id, depositId: id, refundId: z.string(), amount: money, refundedAt: instant, reviewFingerprint: hash }).strict();
+export const externalRefundFeePlanSchema = z.object({ intentId: id, bindingId: id.nullable(), expenseId: id.nullable(),
+  state: z.enum(["UNPREPARED", "DRAFT", "PENDING_APPROVAL", "APPROVED", "REJECTED", "POSTED", "VOIDED", "READY"]), returnedFee: money, remainingCost: money }).strict()
+  .refine(value => value.returnedFee.currency === value.remainingCost.currency && Money.of(value.returnedFee.amount, value.returnedFee.currency).amount.gt(0), "original_verified_fee_required")
+  .refine(value => value.state === "UNPREPARED" ? !value.bindingId && !value.expenseId : Boolean(value.bindingId), "original_fee_plan_required")
+  .refine(value => ["UNPREPARED", "READY"].includes(value.state) || Boolean(value.expenseId) && Money.of(value.remainingCost.amount, value.remainingCost.currency).amount.gt(0), "original_remaining_expense_required")
+  .refine(value => value.state === "READY" ? !value.expenseId && Money.of(value.remainingCost.amount, value.remainingCost.currency).amount.isZero() : true, "zero_remaining_cost_required");
+export const externalRefundFeePreparationSchema = z.object({ id, expenseId: id.nullable(), state: z.string(), idempotent: z.boolean() }).strict();
 export const externalRefundAdmissionCommandSchema = z.object({ intentId: id, reviewFingerprint: hash, idempotencyKey: id }).strict();
 export const externalRefundAdmissionReceiptSchema = externalRefundViewSchema.refine(value => Boolean(value.admission), "native_admission_required")
   .transform(value => ({ ...value, requestId: value.id, state: "SUCCEEDED" as const, failureCode: null }));

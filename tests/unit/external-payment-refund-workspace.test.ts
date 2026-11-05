@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { externalRefundViewSchema, externalRefundReceiptSchema, externalRefundRecoverySchema, externalRefundAdmissionRecoverySchema, externalRefundAdmissionReceiptSchema, externalRefundCommandSchema, acceptExternalRefund } from "@/modules/finance/domain/external-payment-refund-workspace";
+import { externalRefundViewSchema, externalRefundReceiptSchema, externalRefundRecoverySchema, externalRefundAdmissionRecoverySchema, externalRefundAdmissionReceiptSchema, externalRefundCommandSchema, externalRefundFeePlanSchema, acceptExternalRefund } from "@/modules/finance/domain/external-payment-refund-workspace";
+import { externalRefundCommandInput, externalRefundReadInput } from "@/modules/finance/domain/external-payment-refund-command";
 
 const id = randomUUID(), captureId = randomUUID(), depositId = randomUUID(), nonce = randomUUID(), amount = { amount: "0.07", currency: "MAD" },
   refund = { depositId, accountId: randomUUID(), ...amount, method: "verified_paypal", externalReference: null, purpose: "Return original guest funds", reason: "Approved original refund request", reviewFingerprint: "a".repeat(64), idempotencyKey: nonce },
@@ -8,6 +9,25 @@ const id = randomUUID(), captureId = randomUUID(), depositId = randomUUID(), non
   completed = { ...pending, state: "COMPLETED", refundId: "VERIFIED_REFUND_1", refundedAt: "2026-11-05T09:00:00.000Z", settlement: { schemaVersion: 1, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN", gross: amount, fee: { amount: "0.02", currency: "MAD" }, net: { amount: "0.05", currency: "MAD" }, totalRefunded: amount } };
 
 describe("original provider refund workspace", () => {
+  it("distinguishes an unprepared credit, an approved remaining expense and a fully credited original cost", () => {
+    const plan = { intentId: id, bindingId: null, expenseId: null, state: "UNPREPARED", returnedFee: { amount: "0.01", currency: "MAD" }, remainingCost: { amount: "0.01", currency: "MAD" } };
+    expect(externalRefundFeePlanSchema.parse(plan).state).toBe("UNPREPARED");
+    expect(externalRefundFeePlanSchema.parse({ ...plan, bindingId: randomUUID(), expenseId: randomUUID(), state: "APPROVED" }).state).toBe("APPROVED");
+    expect(externalRefundFeePlanSchema.parse({ ...plan, bindingId: randomUUID(), state: "READY", remainingCost: { amount: "0.00", currency: "MAD" } }).state).toBe("READY");
+  });
+  it.each([
+    { returnedFee: { amount: "0.00", currency: "MAD" } }, { returnedFee: { amount: "0.001", currency: "MAD" } },
+    { remainingCost: { amount: "0.01", currency: "EUR" } }, { state: "APPROVED", expenseId: null },
+    { state: "READY", remainingCost: { amount: "0.01", currency: "MAD" } },
+    { state: "READY", expenseId: randomUUID(), remainingCost: { amount: "0.00", currency: "MAD" } }
+  ])("rejects incomplete or contradictory original cost credit evidence %#", patch => {
+    const plan = { intentId: id, bindingId: randomUUID(), expenseId: randomUUID(), state: "APPROVED", returnedFee: { amount: "0.01", currency: "MAD" }, remainingCost: { amount: "0.01", currency: "MAD" } };
+    expect(externalRefundFeePlanSchema.safeParse({ ...plan, ...patch }).success).toBe(false);
+  });
+  it.each(["amount", "returnedFee", "expenseId"])("rejects caller-supplied %s at the metadata-only original fee command boundary", field => {
+    expect(externalRefundCommandInput.safeParse({ operation: "PREPARE_FEE", input: { intentId: id, [field]: field === "expenseId" ? randomUUID() : "0.01" } }).success).toBe(false);
+    expect(externalRefundReadInput.safeParse({ operation: "GET_FEE", input: { intentId: id, [field]: "0.01" } }).success).toBe(false);
+  });
   it("requires a distinct native cancellation witness and never treats provider failure or cancellation as a release", () => {
     const cancellation = { actorId: randomUUID(), reason: "Original request cancelled before any provider attempt", occurredAt: "2026-11-05T09:00:00.000Z" };
     expect(externalRefundReceiptSchema.parse({ ...pending, state: "RELEASED", cancellation })).toMatchObject({ sourceState: "RELEASED", state: "SUCCEEDED", admission: null, refundedAt: null, cancellation });

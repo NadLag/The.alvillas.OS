@@ -2548,7 +2548,8 @@
     "correctionSource": "Cette facture corrige une facture déjà comptabilisée.",
     "viewOriginalExpense": "Voir la facture d’origine",
     "correctionDraftGuidance": "Révisez le montant et indiquez un motif. La devise, le compte de financement, la catégorie, la date de facture et les versions des accords sont conservés. La facture révisée nécessite sa propre approbation.",
-    "correctionPostingGuidance": "Après approbation, enregistrez explicitement la correction dans la période ouverte en cours. Le paiement d’origine est extourné exactement et le remplacement approuvé est comptabilisé dans une seule transaction ; la facture d’origine et son historique sont conservés."
+    "correctionPostingGuidance": "Après approbation, enregistrez explicitement la correction dans la période ouverte en cours. Le paiement d’origine est extourné exactement et le remplacement approuvé est comptabilisé dans une seule transaction ; la facture d’origine et son historique sont conservés.",
+    "refundAdmissionGuidance": "Cette dépense est liée à un remboursement vérifié du prestataire. Terminez son approbation ici, puis revenez au remboursement d’origine pour les enregistrer ensemble."
   },
   "FinancialAccounts": {
     "eyebrow": "Finances",
@@ -4877,6 +4878,14 @@
     "admit": "Comptabiliser le remboursement confirmé",
     "cancelQueued": "Annuler le remboursement non envoyé",
     "cancellationGuidance": "L’annulation ne libère cette réservation que si aucune tentative auprès du prestataire n’a commencé. Un remboursement tenté ou incertain reste réservé pour vérification.",
-    "confirmCancel": "Je confirme l’annulation de cette demande initiale de remboursement non envoyée."
+    "confirmCancel": "Je confirme l’annulation de cette demande initiale de remboursement non envoyée.",
+    "feeCorrectionTitle": "Frais remboursés par le prestataire",
+    "feeCorrectionGuidance": "Vérifiez ce remboursement de frais avec sa dépense d’origine. Le coût restant respecte l’accord et les règles d’approbation d’origine.",
+    "remainingCost": "Coût d’origine restant : {amount}",
+    "openFeeExpense": "Vérifier et approuver la dépense restante",
+    "feeApprovalRequired": "Terminez l’approbation de la dépense d’origine avant d’enregistrer ce remboursement.",
+    "feeReady": "Le remboursement de frais vérifié est prêt à être enregistré avec ce remboursement.",
+    "prepareFee": "Préparer le remboursement de frais",
+    "refreshFee": "Actualiser l’approbation de la dépense"
   }
 }
