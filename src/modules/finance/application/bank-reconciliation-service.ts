@@ -159,7 +159,7 @@ export async function matchBankStatement(context: FinanceActorContext, raw: unkn
       commandHash, input: json(input), policySnapshot: json(prepared.policy), snapshot: json(prepared.plan), reason: input.reason });
     await repository.allocate(row.id, (["expected", "actual"] as const).flatMap(side => prepared.plan.allocations[side].map(allocation => ({
       postingId: side === "expected" ? allocation.sourceKey : null, lineId: side === "actual" ? allocation.sourceKey : null,
-      originalAmount: allocation.original, allocatedBefore: allocation.allocatedBefore, amount: allocation.amount,
+      originalAmount: allocation.original, allocatedBefore: allocation.allocatedBefore, amount: allocation.amount, currency: input.currency,
       sourceSnapshot: json(prepared.witnesses[side].find(witness => witness.id === allocation.sourceKey)!)
     }))));
     if (prepared.witnesses.evidence) await repository.retainEvidence(row.id, prepared.witnesses.evidence.map(witness => ({ lineId: witness.id, sourceSnapshot: json(witness) })));

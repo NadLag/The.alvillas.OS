@@ -16,6 +16,7 @@ export function canViewCompleteCompanyLedger(ctx: AuthContext, resource: Resourc
 
 export type CompanyLedgerAccountTotals = {
   id: string;
+  currency: string;
   code: string;
   name: string;
   opening: string;
@@ -28,12 +29,12 @@ export type CompanyLedgerAccountTotals = {
 export function companyLedgerTotals(rows: readonly CompanyLedgerAccountTotals[], currency: string) {
   let opening = Money.zero(currency), credits = Money.zero(currency), debits = Money.zero(currency), count = 0n;
   const accounts = rows.map(row => {
-    const before = Money.of(row.opening, currency), cr = Money.of(row.credits, currency), dr = Money.of(row.debits, currency);
+    const before = Money.of(row.opening, row.currency), cr = Money.of(row.credits, row.currency), dr = Money.of(row.debits, row.currency);
     opening = opening.add(before);
     credits = credits.add(cr);
     debits = debits.add(dr);
     count += BigInt(row.count);
-    return { id: row.id, code: row.code, name: row.name, openingBalance: before.toJSON().amount,
+    return { id: row.id, code: row.code, name: row.name, currency: row.currency, openingBalance: before.toJSON().amount,
       periodCredits: cr.toJSON().amount, periodDebits: dr.toJSON().amount, closingBalance: before.add(cr).subtract(dr).toJSON().amount };
   });
   return { openingBalance: opening.toJSON().amount, periodCredits: credits.toJSON().amount, periodDebits: debits.toJSON().amount,

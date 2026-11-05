@@ -1773,6 +1773,7 @@ model BankReconciliationEntry {
   evidence BankReconciliationEvidence[]
 
   @@unique([organizationId, id], map: "bank_reconciliation_entry_org_id_unique")
+  @@unique([organizationId, id, currency], map: "bank_reconciliation_entry_org_id_currency_unique")
   @@unique([organizationId, actorId, idempotencyKey], map: "bank_reconciliation_entry_actor_nonce_unique")
   @@unique([organizationId, previousEntryId], map: "bank_reconciliation_entry_release_unique")
   @@index([organizationId, ledgerAccountId, createdAt(sort: Desc), id(sort: Desc)], map: "bank_reconciliation_entry_history_idx")
@@ -1788,10 +1789,12 @@ model BankReconciliationAllocation {
   originalAmount Decimal @map("original_amount") @db.Decimal(18, 2)
   allocatedBefore Decimal @map("allocated_before") @db.Decimal(18, 2)
   amount Decimal @db.Decimal(18, 2)
+  currency String @db.Char(3)
   sourceSnapshot Json @map("source_snapshot")
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  entry BankReconciliationEntry @relation(fields: [organizationId, entryId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
+  entry BankReconciliationEntry @relation(fields: [organizationId, entryId, currency], references: [organizationId, id, currency], onDelete: Restrict, onUpdate: NoAction, map: "bank_reconciliation_allocation_entry_currency_fk")
+  currencyRef Currency @relation(fields: [currency], references: [code], onDelete: Restrict, onUpdate: NoAction, map: "bank_reconciliation_allocation_currency_fk")
   posting Posting? @relation(fields: [organizationId, postingId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
   line BankStatementLine? @relation(fields: [organizationId, lineId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction)
 
@@ -1971,6 +1974,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  bankReconciliationAllocations BankReconciliationAllocation[]
   bankReconciliations BankReconciliationEntry[]
   bankStatementLines BankStatementLine[]
   companyExpenseRevisions CompanyExpenseRevision[]

@@ -52,7 +52,7 @@ export class AccountantBankExportRepository {
       SELECT 'MATCH' AS kind,e.id::text AS identity,jsonb_build_object('id',e.id,'entryId',e.id,'accountId',e.ledger_account_id,'currency',e.currency,'snapshot',e.snapshot,
         'policySnapshot',e.policy_snapshot,'reason',e.reason,'releaseId',e.release_id,'createdAt',to_char(e.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) AS data
       FROM selected e
-      UNION ALL SELECT 'ALLOCATION',a.id::text,jsonb_build_object('id',a.id,'entryId',a.entry_id,'accountId',e.ledger_account_id,'currency',e.currency,'postingId',a.posting_id,'lineId',a.line_id,
+      UNION ALL SELECT 'ALLOCATION',a.id::text,jsonb_build_object('id',a.id,'entryId',a.entry_id,'accountId',e.ledger_account_id,'currency',a.currency,'postingId',a.posting_id,'lineId',a.line_id,
         'amount',a.amount::text,'original',a.original_amount::text,'allocatedBefore',a.allocated_before::text,'sourceSnapshot',a.source_snapshot)
       FROM selected e JOIN bank_reconciliation_allocation a ON a.organization_id=e.organization_id AND a.entry_id=e.id
       UNION ALL SELECT 'EVIDENCE',v.entry_id::text||':'||v.line_id::text,jsonb_build_object('id',v.line_id,'entryId',v.entry_id,'accountId',e.ledger_account_id,'currency',e.currency,'lineId',v.line_id,'sourceSnapshot',v.source_snapshot)
