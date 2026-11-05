@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { paymentRefundIntent } from "@/platform/providers/payment-refund";
-import { guestDepositRefundInput } from "./guest-deposit-command";
+import { externalRefundRequestInput } from "./external-payment-refund-command";
 import { GuestDepositSourceError } from "./guest-deposit";
 
 const identity = z.uuid().transform(value => value.toLowerCase());
-export const externalPaymentRefundInput = z.object({ captureId: identity, refund: guestDepositRefundInput.extend({ externalReference: z.null() }) }).strict();
+export const externalPaymentRefundInput = externalRefundRequestInput;
 export class ExternalPaymentRefundError extends GuestDepositSourceError { constructor() { super(); this.message = "external_payment_refund_unavailable"; } }
 
 export function retainExternalPaymentRefund(raw: unknown, organizationId: string, actorId: string) {

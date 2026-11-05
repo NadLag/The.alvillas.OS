@@ -2,17 +2,23 @@ import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { externalPaymentReadInput, externalPaymentCommandInput, externalPaymentRecoveryInput } from "@/modules/finance/domain/external-payment-command";
+import { externalRefundReadInput, externalRefundCommandInput, externalRefundRecoveryInput } from "@/modules/finance/domain/external-payment-refund-command";
 import { PaymentMethodAccessError, PaymentMethodChangedError, PaymentMethodConfigurationError, PaymentMethodSourceError } from "@/modules/finance/domain/payment-method";
-const boundary = vi.hoisted(() => ({ auth: vi.fn(), actor: vi.fn(), read: vi.fn(), command: vi.fn(), recover: vi.fn(), status: vi.fn(), capture: vi.fn() }));
+const boundary = vi.hoisted(() => ({ auth: vi.fn(), actor: vi.fn(), read: vi.fn(), command: vi.fn(), recover: vi.fn(), refundRead: vi.fn(), refundCommand: vi.fn(), refundRecover: vi.fn(), status: vi.fn(), capture: vi.fn() }));
 vi.mock("@/platform/auth/session", () => ({ auth: boundary.auth }));
 vi.mock("@/modules/finance/application/finance-access", () => ({ financeActorContextFromSession: boundary.actor }));
 vi.mock("@/modules/finance/application/external-payment-api-service", () => ({ readExternalPaymentWorkspace: boundary.read, executeExternalPaymentCommand: boundary.command }));
 vi.mock("@/modules/finance/application/external-payment-workspace-service", () => ({ recoverExternalPaymentIntent: boundary.recover, getExternalPaymentIntent: boundary.status }));
+vi.mock("@/modules/finance/application/external-payment-refund-api-service", () => ({ readExternalPaymentRefundWorkspace: boundary.refundRead, executeExternalPaymentRefundCommand: boundary.refundCommand }));
+vi.mock("@/modules/finance/application/external-payment-refund-workspace-service", () => ({ recoverExternalPaymentRefund: boundary.refundRecover }));
 vi.mock("@/platform/observability/sentry", () => ({ captureException: boundary.capture }));
 import { POST as read } from "@/app/api/finance/external-payments/read/route";
 import { POST as command } from "@/app/api/finance/external-payments/command/route";
 import { POST as recover } from "@/app/api/finance/external-payments/recover/route";
 import { GET as status } from "@/app/api/finance/external-payments/status/[id]/route";
+import { POST as refundRead } from "@/app/api/finance/external-payments/refunds/read/route";
+import { POST as refundCommand } from "@/app/api/finance/external-payments/refunds/command/route";
+import { POST as refundRecover } from "@/app/api/finance/external-payments/refunds/recover/route";
 const origin = "http://localhost:3194", actor = { organizationId: randomUUID(), actorId: randomUUID() }, id = randomUUID();
 function request(path: string, body: unknown, from = origin, type = "application/json", query = "") { return new NextRequest(origin + "/api/finance/external-payments/" + path + query,
   { method: "POST", headers: { origin: from, host: "localhost:3194", "content-type": type }, body: JSON.stringify(body) }); }
@@ -21,6 +27,9 @@ describe.each([
   { name: "read", post: read, schema: externalPaymentReadInput, service: boundary.read, input: { operation: "GET", input: { id } } },
   { name: "command", post: command, schema: externalPaymentCommandInput, service: boundary.command, input: { operation: "RECONCILE", input: { id } } },
   { name: "recover", post: recover, schema: externalPaymentRecoveryInput, service: boundary.recover, input: { key: id } },
+  { name: "refunds/read", post: refundRead, schema: externalRefundReadInput, service: boundary.refundRead, input: { operation: "GET", input: { intentId: id } } },
+  { name: "refunds/command", post: refundCommand, schema: externalRefundCommandInput, service: boundary.refundCommand, input: { operation: "RECONCILE", input: { intentId: id, refundId: "ORIGINAL_REFUND_1" } } },
+  { name: "refunds/recover", post: refundRecover, schema: externalRefundRecoveryInput, service: boundary.refundRecover, input: { key: id } },
 ])("private optional provider $name boundary", ({ name, post, schema, service, input }) => {
   beforeEach(() => { vi.clearAllMocks(); boundary.auth.mockResolvedValue({ user: { id: actor.actorId } }); boundary.actor.mockResolvedValue(actor);
     service.mockImplementation((_actor, raw) => { schema.parse(raw); return Promise.resolve({ privateResult: true }); }); });

@@ -8,20 +8,22 @@ import { ExternalPaymentRefundError } from "../domain/external-payment-refund-in
 import type { retainExternalPaymentRefund } from "../domain/external-payment-refund-intent";
 import { GuestDepositRepository } from "./guest-deposit-repository";
 
-const include = { capture: { include: { intent: true } }, attempt: true, identity: { include: { observations: { orderBy: [{ providerUpdatedAt: "desc" }, { id: "desc" }], take: 1 } } } } satisfies Prisma.ExternalPaymentRefundIntentInclude;
+const include = { capture: { include: { intent: true } }, attempt: true, identity: { include: { observations: { include: { settlement: true }, orderBy: [{ providerUpdatedAt: "desc" }, { id: "desc" }], take: 1 } } } } satisfies Prisma.ExternalPaymentRefundIntentInclude;
 const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
 export class ExternalPaymentRefundRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
   find(id: string) { return this.tx.externalPaymentRefundIntent.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } }, include }); }
   byKey(idempotencyKey: string) { return this.tx.externalPaymentRefundIntent.findUnique({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, include }); }
   capture(id: string) { return this.tx.externalPaymentCapture.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } }, include: { intent: true } }); }
-  async reserved(depositId: string) { return (await this.tx.$queryRaw<Array<{ amount: string }>>`SELECT app_external_refund_reserved(${this.organizationId}::uuid,${depositId}::uuid)::text AS amount`)[0].amount; }
+  reserved(depositId: string) { return new GuestDepositRepository(this.tx, this.organizationId).reservedExternalRefunds(depositId); }
   create(saved: ReturnType<typeof retainExternalPaymentRefund>, authorizationCap: AuthorizationCap) {
     return this.tx.externalPaymentRefundIntent.create({ data: { organizationId: this.organizationId, captureId: saved.input.captureId,
       depositId: saved.input.refund.depositId, requestedBy: saved.requestedBy, amount: saved.input.refund.amount, currency: saved.input.refund.currency,
       idempotencyKey: saved.idempotencyKey, requestFingerprint: saved.fingerprint, canonicalRequest: saved.canonicalRequest, input: json(saved.input), authorizationCap }, include });
   }
   attempt(intentId: string) { return this.tx.externalPaymentRefundAttempt.create({ data: { organizationId: this.organizationId, intentId } }); }
+  failure(intentId: string, outboxEventId: string) { return this.tx.auditLog.findFirst({ where: { organizationId: this.organizationId, resourceType: "financial_transaction", resourceId: intentId,
+    action: "finance.external_payment.refund_unconfirmed", after: { path: ["outboxEventId"], equals: outboxEventId } }, select: { id: true } }); }
   async observe(request: NonNullable<Awaited<ReturnType<ExternalPaymentRefundRepository["find"]>>>, evidence: z.infer<typeof providerRefundEvidenceSchema>) {
     const identity = request.identity ?? await this.tx.externalPaymentRefundIdentity.create({ data: { organizationId: this.organizationId, intentId: request.id, provider: "paypal", refundId: evidence.refundId } });
     if (identity.refundId !== evidence.refundId) throw Error("external_payment_refund_unavailable");
