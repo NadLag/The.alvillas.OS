@@ -215,6 +215,9 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  guestPaymentReceipts GuestPaymentReceipt[]
+  guestPaymentReceiptOwners GuestPaymentReceiptOwner[]
+
   ledgerIntegrityRuns LedgerIntegrityRun[]
   ledgerIntegritySources LedgerIntegritySource[]
  financialAttachmentAdmissions FinancialAttachmentAdmission[]
@@ -548,6 +551,9 @@ model TeamWallet {
 }
 
 model Person {
+  collectedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentCollectorPerson")
+  recordedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentRecorderPerson")
+
   receivableAssignments ReceivableAssignment[] @relation("ReceivablePerson")
   performedWorkTimeEvidence EmployeeWorkTimeEvidence[] @relation("WorkTimePerformer")
   submittedWorkTimeEvidence EmployeeWorkTimeEvidence[] @relation("WorkTimeSubmitterPerson")
@@ -585,6 +591,9 @@ model Person {
 }
 
 model UserAccount {
+  collectedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentCollector")
+  recordedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentRecorder")
+
   ledgerIntegrityRuns LedgerIntegrityRun[]
  financialAttachmentAdmissions FinancialAttachmentAdmission[] @relation("FinancialAttachmentAdmissionActor")
   varianceWorkflowActions VarianceWorkflowEvent[] @relation("VarianceWorkflowActor")
@@ -902,6 +911,8 @@ model RoleAssignment {
 }
 
 model Owner {
+  guestPaymentReceiptOwners GuestPaymentReceiptOwner[]
+
   receivableAssignments ReceivableAssignment[] @relation("ReceivableOwner")
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   expenseApprovalStages ApprovalStage[]
@@ -1004,6 +1015,8 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  guestPaymentReceipts GuestPaymentReceipt[]
+
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   workTimeEvidence EmployeeWorkTimeEvidence[]
   employeeCompensationCosts EmployeeCompensationCost[]
@@ -1259,6 +1272,8 @@ model BookingChannel {
 }
 
 model Reservation {
+  guestPaymentReceipts GuestPaymentReceipt[]
+
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   employeeCompensationCosts                            EmployeeCompensationCost[]
   invoiceApprovalStages                                ApprovalStage[]                @relation("InvoiceApprovalReservation")
@@ -1593,6 +1608,9 @@ model SyncOp {
 }
 
 model LedgerAccount {
+  receivedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentLocation")
+  guestPaymentClaims GuestPaymentReceipt[] @relation("GuestPaymentClaim")
+
   bankReconciliations BankReconciliationEntry[]
   bankStatementAdmissions BankStatementAdmission[]
   bankStatementLines BankStatementLine[]
@@ -1618,6 +1636,8 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  guestPaymentReceipt GuestPaymentReceipt?
+
   ledgerIntegritySource LedgerIntegritySource?
  attachmentAdmissions FinancialAttachmentAdmission[]
  attachments FinancialAttachment[]
@@ -2008,6 +2028,8 @@ model ReferenceSequence {
 }
 
 model Currency {
+  guestPaymentReceipts GuestPaymentReceipt[]
+
   bankReconciliationAllocations BankReconciliationAllocation[]
   bankReconciliations BankReconciliationEntry[]
   bankStatementLines BankStatementLine[]
@@ -2411,6 +2433,8 @@ model Notification {
 }
 
 model AuditLog {
+  guestPaymentOriginalReceipts GuestPaymentReceipt[]
+
   varianceWorkflowEvents VarianceWorkflowEvent[]
   id              String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId  String       @map("organization_id") @db.Uuid
@@ -2519,6 +2543,8 @@ model NotificationEmailSuppression {
 }
 
 model GuestRecord {
+  guestPaymentReceipts GuestPaymentReceipt[]
+
   receivableAssignments ReceivableAssignment[] @relation("ReceivableGuest")
   id                                 String        @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId                     String        @map("organization_id") @db.Uuid
@@ -2642,6 +2668,8 @@ model ReservationRevision {
 }
 
 model ReservationFinancialSnapshot {
+  guestPaymentReceipts GuestPaymentReceipt[]
+
   id                  String       @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId      String       @map("organization_id") @db.Uuid
   reservationId       String       @map("reservation_id") @db.Uuid
@@ -2655,6 +2683,7 @@ model ReservationFinancialSnapshot {
   tenantOrganization  Organization @relation("ReservationReservationFinancialSnapshotOrganization", fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_financial_snapshot_organization_fk")
   linkedreservationId Reservation  @relation("ReservationFinancialSnapshotreservationIdLink", fields: [organizationId, reservationId], references: [organizationId, id], onDelete: Restrict, onUpdate: NoAction, map: "reservation_financial_snapshot_reservation_id_tenant_fk")
 
+  @@unique([organizationId, id], map: "reservation_financial_snapshot_org_id_unique")
   @@unique([organizationId, reservationId, version], map: "reservation_financial_snapshot_org_version_unique")
   @@map("reservation_financial_snapshot")
 }
@@ -2844,6 +2873,8 @@ model InventoryMovement {
 }
 
 model CashCollection {
+  guestPaymentReceipts GuestPaymentReceipt[]
+
   serviceFinancialSources ServiceFinancialSource[]
   id                     String               @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId         String               @map("organization_id") @db.Uuid
@@ -4369,4 +4400,65 @@ model FinancialAttachment {
  @@unique([organizationId,storageKey])
  @@index([organizationId,transactionId,id])
  @@map("financial_attachment")
+}
+
+model GuestPaymentReceipt {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  transactionId String @map("transaction_id") @db.Uuid
+  originalAuditId String @map("original_audit_id") @db.Uuid
+  depositId String @map("deposit_id") @db.Uuid
+  operation String
+  reservationId String @map("reservation_id") @db.Uuid
+  propertyId String @map("property_id") @db.Uuid
+  guestId String @map("guest_id") @db.Uuid
+  financialSnapshotId String @map("financial_snapshot_id") @db.Uuid
+  accountId String @map("account_id") @db.Uuid
+  liabilityAccountId String @map("liability_account_id") @db.Uuid
+  collectorUserAccountId String @map("collector_user_account_id") @db.Uuid
+  collectorPersonId String @map("collector_person_id") @db.Uuid
+  createdBy String @map("created_by") @db.Uuid
+  recordedPersonId String @map("recorded_person_id") @db.Uuid
+  originalCollectionId String? @map("original_collection_id") @db.Uuid
+  amount Decimal @db.Decimal(18, 2)
+  currency String @db.Char(3)
+  receivedAt DateTime @map("received_at") @db.Timestamptz(6)
+  provenance Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_organization_fk")
+  transaction FinancialTransaction @relation(fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_transaction_fk")
+  originalAudit AuditLog @relation(fields:[organizationId,originalAuditId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_original_audit_fk")
+  reservation Reservation @relation(fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_reservation_fk")
+  property Property @relation(fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_property_fk")
+  guest GuestRecord @relation(fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_guest_fk")
+  financialSnapshot ReservationFinancialSnapshot @relation(fields:[organizationId,financialSnapshotId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_snapshot_fk")
+  account LedgerAccount @relation("GuestPaymentLocation",fields:[organizationId,accountId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_account_fk")
+  liabilityAccount LedgerAccount @relation("GuestPaymentClaim",fields:[organizationId,liabilityAccountId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_liability_fk")
+  collectorAccount UserAccount @relation("GuestPaymentCollector",fields:[organizationId,collectorUserAccountId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_collector_account_fk")
+  collectorPerson Person @relation("GuestPaymentCollectorPerson",fields:[organizationId,collectorPersonId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_collector_person_fk")
+  recorder UserAccount @relation("GuestPaymentRecorder",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_recorder_fk")
+  recordedPerson Person @relation("GuestPaymentRecorderPerson",fields:[organizationId,recordedPersonId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_recorded_person_fk")
+  originalCollection CashCollection? @relation(fields:[organizationId,originalCollectionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_collection_fk")
+  currencyRef Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_receipt_currency_fk")
+  owners GuestPaymentReceiptOwner[]
+  @@unique([organizationId,id],map:"guest_payment_receipt_org_id_unique")
+  @@unique([organizationId,transactionId],map:"guest_payment_receipt_transaction_unique")
+  @@unique([organizationId,depositId],map:"guest_payment_receipt_deposit_unique")
+  @@index([organizationId,propertyId,receivedAt,id],map:"guest_payment_receipt_property_idx")
+  @@index([organizationId,reservationId,receivedAt,id],map:"guest_payment_receipt_reservation_idx")
+  @@map("guest_payment_receipt")
+}
+
+model GuestPaymentReceiptOwner {
+  organizationId String @map("organization_id") @db.Uuid
+  receiptId String @map("receipt_id") @db.Uuid
+  ownerId String @map("owner_id") @db.Uuid
+  ordinal Int
+  shareBps Int @map("share_bps")
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_owner_organization_fk")
+  receipt GuestPaymentReceipt @relation(fields:[organizationId,receiptId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_owner_receipt_fk")
+  owner Owner @relation(fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_payment_owner_owner_fk")
+  @@id([organizationId,receiptId,ownerId],map:"guest_payment_receipt_owner_pkey")
+  @@unique([organizationId,receiptId,ordinal],map:"guest_payment_receipt_owner_order_unique")
+  @@map("guest_payment_receipt_owner")
 }

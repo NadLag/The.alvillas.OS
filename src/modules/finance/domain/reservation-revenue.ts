@@ -80,10 +80,7 @@ export function parseCommissionRuleValue(input: unknown): CommissionRuleValue {
   return commissionRuleValueSchema.parse(input);
 }
 
-export function allocateGrossRevenueByOwnerShare(
-  total: Money,
-  owners: readonly PropertyOwnerShare[]
-): OwnerGrossAllocation[] {
+export function assertPropertyOwnerShares(owners: readonly PropertyOwnerShare[]): void {
   if (owners.length === 0) {
     throw new Error("A reservation must have at least one active property owner");
   }
@@ -94,6 +91,13 @@ export function allocateGrossRevenueByOwnerShare(
   }
   if (owners.some(owner => !Number.isSafeInteger(owner.shareBps) || owner.shareBps < 0 || owner.shareBps > 10000))
     throw new Error("Active property owner shares must be nonnegative basis points");
+}
+
+export function allocateGrossRevenueByOwnerShare(
+  total: Money,
+  owners: readonly PropertyOwnerShare[]
+): OwnerGrossAllocation[] {
+  assertPropertyOwnerShares(owners);
 
   let allocated = Money.zero(total.currency);
 

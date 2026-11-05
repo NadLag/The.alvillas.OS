@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { withTenant } from "@/platform/db/tenant";
 import { guestDepositCommandSchema, type GuestDepositCommand } from "@/modules/finance/domain/guest-deposit-command";
+import { guestPaymentProvenanceSchema } from "@/modules/finance/domain/guest-payment-provenance";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { openGuestPaymentFixture } from "./support/guest-payment-fixture";
 import { forwardBrowserPostOnce } from "./support/forward-browser-post";
@@ -42,6 +43,21 @@ async function submit(page: Page, testId: string) {
   expect(acknowledged.ok()).toBe(true);
   return guestDepositCommandSchema.parse(acknowledged.request().postDataJSON());
 }
+async function originalProvenance(page: Page, f: Fixture, depositId: string, source: string) {
+  const row = await withTenant(f.db, f.organizationId, tx => tx.guestPaymentReceipt.findUniqueOrThrow({ where: { organizationId_depositId: { organizationId: f.organizationId, depositId } },
+    include: { organization: true, collectorPerson: true, account: true, transaction: true, owners: { orderBy: { ordinal: "asc" } } } }));
+  const saved = guestPaymentProvenanceSchema.parse(row.provenance), panel = page.getByTestId("deposit-provenance");
+  await expect(panel).toBeVisible();
+  await expect(panel.getByTestId("provenance-collector")).toHaveText(row.organization.name + " · " + row.collectorPerson.displayName);
+  await expect(panel.getByTestId("provenance-account")).toHaveText(row.account.name);
+  await expect(panel.getByTestId("provenance-owners")).toContainText("Original cash booking owner " + f.marker);
+  await expect(panel.getByTestId("provenance-source")).toHaveText(source);
+  await expect(panel).toContainText(f.setup.propertyName); await expect(panel).toContainText(f.guestName);
+  expect(saved).toMatchObject({ organizationId: f.organizationId, depositId, transactionId: row.transactionId, accountId: row.accountId,
+    amount: { amount: "0.07", currency: "MAD" }, booking: { reservationId: f.source.reservationId, propertyId: f.setup.propertyId, source: "DIRECT" } });
+  expect(row.transaction.sealed).toBe(true); expect(row.owners.map(owner => owner.ownerId)).toEqual(saved.relatedOwners.map(owner => owner.ownerId));
+  return row;
+}
 for (const locale of ["en", "fr", "ar"] as const) test(`Configured bank, manual and selected cash methods retain original admission in ${locale}`, async ({ page }, info) => {
   test.skip(!process.env.DATABASE_URL, "Dedicated native PostgreSQL required");
   test.setTimeout(240000);
@@ -75,12 +91,15 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured bank, manual 
     await f.define(true); await page.reload();
     await expect(page.getByTestId("deposit-command-status")).toHaveText(t.command_succeeded);
     await expect(page.getByTestId("deposit-outstanding")).toHaveText(formatCurrencyAmount(locale, "0.07", "MAD"));
+    if (!first) throw Error("Original submitted bank command required");
+    await originalProvenance(page, f, first.idempotencyKey, { en, fr, ar }[locale].Reservations.sources.DIRECT);
     await page.getByTestId("deposit-command-next").click();
     await prepareReceipt(page, f, "desk-confirmed");
     await expect(page.getByTestId("deposit-method").locator('option[value="wire-confirmed"]')).toHaveCount(0);
     const manual = await submit(page, "deposit-submit");
     expect(manual.operation === "RECEIPT" ? manual.input.method : null).toBe("desk-confirmed");
     await expect(page.getByTestId("deposit-command-status")).toHaveText(t.command_succeeded);
+    await originalProvenance(page, f, manual.idempotencyKey, { en, fr, ar }[locale].Reservations.sources.DIRECT);
     await page.getByTestId("deposit-command-next").click();
     await page.getByTestId("deposit-create-open").click();
     await page.getByTestId("deposit-sources").getByRole("listitem").filter({ hasText: f.setup.propertyName }).getByTestId("deposit-cash-open").click();
@@ -97,6 +116,8 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured bank, manual 
     const admission = await submit(page, "deposit-cash-submit");
     expect(admission.operation === "ADMIT_CASH" ? admission.input.paymentMethodKey : null).toBe("cash-manager");
     await expect(page.getByTestId("deposit-command-status")).toHaveText(t.command_succeeded);
+    const originalCash = await originalProvenance(page, f, admission.idempotencyKey, { en, fr, ar }[locale].Reservations.sources.DIRECT);
+    expect(originalCash).toMatchObject({ originalCollectionId: collection.id, accountId: collection.custodyAccountId, collectorUserAccountId: collection.collectorUserAccountId, collectorPersonId: collection.collectorPersonId });
     if (!first) throw Error("Original submitted bank command required");
     const sources = [first.idempotencyKey, manual.idempotencyKey, admission.idempotencyKey];
     await withTenant(f.db, f.organizationId, async tx => {

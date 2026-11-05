@@ -4259,6 +4259,18 @@
     "cancelReview": "Return to admitted allocation"
   },
   "GuestDeposits": {
+    "provenanceTitle": "Original payment details",
+    "provenanceHistorical": "Additional payment details are unavailable for this historical receipt.",
+    "provenanceNameRestricted": "Name restricted",
+    "provenanceOwnerContext": "Owners relate to the booking when the money was received. Guest funds remain a guest liability until an authorized allocation or refund.",
+    "provenanceCollectedBy": "Collected by",
+    "provenanceRecordedBy": "Recorded by",
+    "provenanceAccount": "Original custody account",
+    "provenanceOwners": "Owners at receipt",
+    "provenanceProperty": "Property",
+    "provenanceReservation": "Reservation",
+    "provenanceGuest": "Guest",
+    "provenanceSource": "Booking source",
     "ADMIT_CASH": "Cash deposit admission",
     "REVERSE_CASH_ADMISSION": "Cash admission correction",
     "cashAdmissionTitle": "Use an existing cash collection",

@@ -25,6 +25,18 @@ import {readGuestDepositSourceInTransaction,resolveGuestDepositPolicyInTransacti
 
 import {reviewGuestPaymentMethod} from "./guest-deposit-payment-method";
 
+import {retainGuestPaymentProvenance} from "./guest-payment-provenance-service";
+import {GuestPaymentProvenanceSourceError} from "../domain/guest-payment-provenance";
+
+async function retainCashPaymentProvenance(ctx:FinanceActorContext,tx:TenantTransaction,transactionId:string,repository:GuestDepositRepository,requestId?:string){
+ try{await retainGuestPaymentProvenance(ctx,tx,transactionId,requestId);}catch(error){
+  // Preserve the original PostgreSQL proof boundary when its audit is missing or malformed.
+  // The mandatory provenance guard still rejects any receipt without its new witnesses.
+  if(error instanceof GuestPaymentProvenanceSourceError)await repository.flushOriginalCashProof();
+  throw error;
+ }
+}
+
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 type Draft=z.infer<typeof guestDepositCashAdmissionReviewInput>;
 const json=(value:unknown)=>JSON.parse(JSON.stringify(value))as Prisma.InputJsonObject;
@@ -63,7 +75,7 @@ export async function admitGuestDepositCash(context:FinanceActorContext,raw:unkn
   const scopeSource=await repository.policySource(input.reservationId);if(!scopeSource)throw new GuestDepositSourceError();const scopes=await new ReservationConfigScopeRepository(tx,ctx.organizationId).scopes({propertyId:hint.booking.propertyId,asOf:hint.now,source:scopeSource.source});for(const scope of scopes.sort((a,b)=>(a.scopeType+":"+(a.scopeId??"")).localeCompare(b.scopeType+":"+(b.scopeId??""))))await new ConfigRuleRepository(tx,ctx.organizationId).lockVersion(guestDepositPolicyKey,scope.scopeType,scope.scopeId);
   await transfer.lock("cash-source:"+input.collectionId);await repository.lockSource(input.idempotencyKey);
   const p=await prepare(ctx,draft,tx);if(p.fingerprint!==input.reviewFingerprint)throw new GuestDepositConflictError();const source={...p.source,depositId:input.idempotencyKey},row=await p.finance.createFinancialTransaction({reference:"GUEST_DEPOSIT:"+input.idempotencyKey,description:input.purpose,occurredAt:p.now,idempotencyKey:guestDepositCommandKey(input.idempotencyKey),createdBy:ctx.actorId,postings:guestDepositCashAdmissionPostings({source,collectionId:p.cash.id,collectionTransactionId:p.cash.transactionId,taskId:p.cash.taskId,taskType:p.taskType,unallocated:p.unallocated.ledgerAccount,liability:p.liability,amount:p.amount,available:p.available,policy:p.policy.value}),recheckAuthorization:at=>recheckFinanceAuthorization(ctx,tx,at,p.checks,denied())}),snapshot=guestDepositCashAdmissionSnapshot.parse({schemaVersion:1,operation:"ADMIT_CASH",commandHash:hash,input,source,policy:p.policy,liabilityAccountId:p.liability.id,unallocatedAccountId:p.unallocated.ledgerAccountId,cashSource:{id:p.cash.id,transactionId:p.cash.transactionId,custodyAccountId:p.cash.custodyAccountId,taskId:p.cash.taskId,taskType:p.taskType,recordedAt:p.cash.recordedAt.toISOString(),amount:p.cash.amount.toFixed(2),currency:p.cash.currency,collectorUserAccountId:p.cash.collectorUserAccountId,collectorPersonId:p.cash.collectorPersonId,provenance:p.cash.provenance}});
-  await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.guest_deposit.received",resourceType:"financial_transaction",resourceId:row.id,after:json(snapshot),reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await p.finance.clock()});await repository.flushGuards();
+  await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.guest_deposit.received",resourceType:"financial_transaction",resourceId:row.id,after:json(snapshot),reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await p.finance.clock()});await retainCashPaymentProvenance(ctx,tx,row.id,repository,deps.requestId);await repository.flushGuards();
   await recheckFinanceAuthorization(ctx,tx,await p.finance.clock(),p.checks,denied());const current=await repository.cashRemaining(p.cash.id,p.unallocated.ledgerAccountId,p.cash.currency);if(!Money.of(current.amount,p.cash.currency).equals(p.available.subtract(p.amount))||commandFingerprint(await resolveGuestDepositPolicyInTransaction(tx,ctx.organizationId,p.booking.propertyId,await p.finance.clock(),p.booking.id))!==commandFingerprint(p.policy))throw new GuestDepositConflictError();await p.periods.assertPostingOpen(p.now);await readGuestDepositSourceInTransaction(ctx,input.idempotencyKey,tx);return{id:row.id,depositId:input.idempotencyKey,operation:"ADMIT_CASH"as const,idempotent:false};
  });
 }

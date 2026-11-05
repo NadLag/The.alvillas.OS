@@ -1,5 +1,6 @@
 import { financialAttachmentAuthorityChecks } from "@/platform/authz/financial-attachment-resource";
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 import {financialRuleKeysIn,financialRuleAccess,recurringCompanyExpensePolicyKey} from "@/platform/config/financial-rule-authority";
 import {
   AuditRepository,
@@ -117,6 +118,19 @@ export function presentAuditHistoryRow(
   if(row.resourceType==="company_expense"){
     const allowed=financialRuleAccess(ctx.authContext,action,new Date(),recurringCompanyExpensePolicyKey);
     return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,data:row},{before:{dataClass:"financial"},after:{dataClass:"financial"},reason:{dataClass:"financial"}})as AuditHistoryRow;
+  }
+  if (row.action === "finance.guest_payment.provenance_retained") {
+    const original = financialResource?.guestPayment, now = new Date();
+    const allowed = Boolean(row.resourceType === "financial_transaction" && financialResource?.type === "financial_transaction" && financialResource.id === row.resourceId && original &&
+      original.actorId === row.actorId && original.reason === row.reason && row.before == null &&
+      isDeepStrictEqual(row.after, { receiptId: original.receiptId, provenance: original.provenance }) &&
+      authorize(ctx.authContext, action, financialResource, now) && original.fundingSources.length && original.fundingSources.every(source => source.organizationId === ctx.organizationId &&
+        authorize(ctx.authContext, "view", source, now) && authorize(ctx.authContext, action, source, now)) &&
+      (!original.originalCollectionId || original.cashSource?.id === original.originalCollectionId && original.cashSource.organizationId === ctx.organizationId &&
+        authorize(ctx.authContext, "view", original.cashSource, now) && authorize(ctx.authContext, action, original.cashSource, now)));
+    return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,
+      { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
+      { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
   }
   const financialRules=[...new Set([row.before,row.after].flatMap(financialRuleKeysIn))];
   if(["config_rule","property_template","property_template_revision"].includes(row.resourceType)&&financialRules.length){
@@ -278,9 +292,9 @@ export function parseAuditFilters(input: AuditFilterInput): AuditHistoryFilters 
 }
 
 async function financialAuditResources(repository: AuditRepository, rows: AuditHistoryRow[], organizationId: string): Promise<Map<string, FinancialAuditResource>> {
-  const read = (type: string, load: (ids: string[]) => Promise<Map<string, Resource>>) => {
+  const read = <T extends Resource>(type: string, load: (ids: string[]) => Promise<Map<string, T>>) => {
     const ids = [...new Set(rows.filter(row => row.resourceType === type).flatMap(row => row.resourceId ? [row.resourceId] : []))];
-    return ids.length ? load(ids) : Promise.resolve(new Map<string, Resource>());
+    return ids.length ? load(ids) : Promise.resolve(new Map<string, T>());
   };
   const settingRows = rows.filter(row => ["config_rule", "property_template", "property_template_revision"].includes(row.resourceType));
   const [cash, expenses, transactions, accounts, groups, periods, employeeRuns,employeeSubmissions,employeeClaims,monthlyRequests,earningRequests,propertyFinance,serviceAllocations,attachments,settingProperties] = await Promise.all([
@@ -300,6 +314,12 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     read("financial_attachment", ids => repository.financialAttachmentResources(ids)),
     repository.propertyFinanceResources([...new Set(settingRows.flatMap(row => row.propertyScopeId ? [row.propertyScopeId] : []))])
   ]);
+  const originalCashIds = [...new Set([...transactions.values()].flatMap(resource => resource.guestPayment?.originalCollectionId ? [resource.guestPayment.originalCollectionId] : []))];
+  const originalCash = originalCashIds.length ? await repository.cashResources(originalCashIds) : new Map<string, Resource>();
+  for (const [id, resource] of transactions) if (resource.guestPayment?.originalCollectionId) {
+    const actual = originalCash.get(resource.guestPayment.originalCollectionId);
+    transactions.set(id, { ...resource, guestPayment: { ...resource.guestPayment, cashSource: actual ? { ...actual, occurredAt: resource.guestPayment.receivedAt } : undefined } });
+  }
   return new Map([
     ...settingRows.flatMap(row => row.resourceId ? [[`${row.resourceType}:${row.resourceId}`, {
       ...settingProperties.get(row.propertyScopeId ?? ""), type: row.resourceType, organizationId, id: row.resourceId, propertyId: row.propertyScopeId
