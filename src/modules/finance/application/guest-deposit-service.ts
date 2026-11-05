@@ -25,6 +25,8 @@ import {resolveSourceScope} from "./receivable-collection-service";
 
 import {reviewGuestPaymentMethod} from "./guest-deposit-payment-method";
 
+import {retainGuestPaymentProvenance} from "./guest-payment-provenance-service";
+
 type Deps={db?:TenantTransactionRunner;requestId?:string};
 type ReceiptDraft=z.infer<typeof guestDepositReviewInput>;
 type RefundDraft=z.infer<typeof guestDepositRefundReviewInput>;
@@ -86,7 +88,7 @@ export async function postGuestDepositReceipt(context:FinanceActorContext,raw:un
  const repository=new GuestDepositRepository(tx,ctx.organizationId);await repository.lockCommand(input.idempotencyKey);const existing=await replay(ctx,input.idempotencyKey,hash,"RECEIPT",tx);if(existing)return existing;
  const draft=guestDepositReviewInput.strip().parse(input),hint=await prepareReceipt(ctx,draft,tx);await hint.finance.lockReservationFinancialCorrection(input.reservationId);await lockWalletHolders(tx,ctx.organizationId,hint.location.teamWallet?[hint.location.teamWallet.personId]:[]);await new FinancialTransferRepository(tx,ctx.organizationId).lockAccounts([hint.location.id,hint.liability.id]);await hint.periods.lockPostingCalendar();await lockPolicies(tx,ctx.organizationId,hint.source.propertyId,hint.receivedAt,hint.source.id);await repository.lockSource(input.idempotencyKey);
  const prepared=await prepareReceipt(ctx,draft,tx);if(prepared.fingerprint!==input.reviewFingerprint)throw new GuestDepositConflictError();const source={...prepared.retained,depositId:input.idempotencyKey},recheck=async()=>{if((await prepareReceipt(ctx,draft,tx)).fingerprint!==prepared.fingerprint)throw new GuestDepositConflictError();},row=await prepared.finance.createFinancialTransaction({reference:"GUEST_DEPOSIT:"+input.idempotencyKey,description:input.purpose,occurredAt:prepared.receivedAt,idempotencyKey:guestDepositCommandKey(input.idempotencyKey),createdBy:ctx.actorId,postings:guestDepositReceiptPostings({source,location:prepared.location,liability:prepared.liability,amount:prepared.amount,method:input.method,policy:prepared.policy.value}),recheckAuthorization:recheck}),snapshot=guestDepositReceiptSnapshot.parse({schemaVersion:1,operation:"RECEIPT",commandHash:hash,input,source,policy:prepared.policy,liabilityAccountId:prepared.liability.id});
- await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.guest_deposit.received",resourceType:"financial_transaction",resourceId:row.id,after:json(snapshot),reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await prepared.finance.clock()});await repository.flushGuards();await recheck();return visible(ctx,prepared.resource,{id:row.id,depositId:source.depositId,operation:"RECEIPT"as const,idempotent:false},await prepared.finance.clock());
+ await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"finance.guest_deposit.received",resourceType:"financial_transaction",resourceId:row.id,after:json(snapshot),reason:input.reason,requestId:deps.requestId??crypto.randomUUID(),occurredAt:await prepared.finance.clock()});await retainGuestPaymentProvenance(ctx,tx,row.id,deps.requestId);await repository.flushGuards();await recheck();return visible(ctx,prepared.resource,{id:row.id,depositId:source.depositId,operation:"RECEIPT"as const,idempotent:false},await prepared.finance.clock());
 });}
 
 async function prepareRefund(ctx:FinanceActorContext,input:RefundDraft,tx:TenantTransaction){
