@@ -4,7 +4,7 @@ import arMessages from "../../messages/ar.json" with { type: "json" };
 import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 import {
   e2eEmail,
   ensureE2EAdmin,
@@ -15,9 +15,23 @@ import { withTenant } from "@/platform/db/tenant";
 import { bootstrapOrganizationId } from "@/platform/identity/bootstrap";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { preferOperationPerformer } from "./support/operation-policy";
+import { acknowledgementBarrier } from "./support/acknowledgement-barrier";
 
 const password = process.env.ADMIN_PASSWORD ?? "correct horse battery staple";
 test.use({ actionTimeout: 30000, navigationTimeout: 30000 });
+function isSubmittedAction(request: Request, pathname: string, value: string) {
+  return request.method() === "POST" &&
+    new URL(request.url()).pathname === pathname &&
+    Boolean(request.postData()?.includes(value));
+}
+async function submitAcknowledged(page: Page, form: Locator, value: string, saved: string) {
+  const pathname = new URL(page.url()).pathname;
+  const acknowledgement = page.waitForResponse(response =>
+    isSubmittedAction(response.request(), pathname, value));
+  await form.locator('button[type="submit"]').click();
+  expect((await acknowledgement).ok()).toBe(true);
+  await expect(form.getByRole("status")).toHaveText(saved);
+}
 for (const locale of ["en", "fr", "ar"] as const)
   test(`Operations lifecycle, checklist, proxy history and accessibility in ${locale}`, async ({
     page,
@@ -203,10 +217,55 @@ for (const locale of ["en", "fr", "ar"] as const)
       if (locale === "ar")
         await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
       const evidence = page.getByTestId("operation-evidence-form");
+      const catalog = { en: enMessages, fr: frMessages, ar: arMessages }[locale]
+        .Operations;
       await evidence
         .locator('[name="reason"]')
         .fill("Inspection evidence recorded during the task");
-      await evidence.locator('button[type="submit"]').click();
+      if (locale === "en") {
+        const pathname = new URL(page.url()).pathname;
+        const completed = acknowledgementBarrier();
+        const release = acknowledgementBarrier();
+        const match = (url: URL) => url.pathname === pathname;
+        await page.route(match, async route => {
+          if (!isSubmittedAction(route.request(), pathname, "Inspection evidence recorded during the task")) {
+            await route.continue();
+            return;
+          }
+          try {
+            const response = await route.fetch();
+            expect(response.ok()).toBe(true);
+            completed.resolve();
+            await release.promise;
+            await route.fulfill({ response });
+          } catch (error) {
+            completed.reject(error);
+            throw error;
+          }
+        });
+        let acknowledged = false;
+        const submission = submitAcknowledged(page, evidence,
+          "Inspection evidence recorded during the task", catalog.manage.saved)
+          .then(() => { acknowledged = true; });
+        try {
+          await completed.promise;
+          expect(await withTenant(db, org, tx => tx.operationTaskEvidence.count({
+            where: { organizationId: org, taskId, note: "Inspection evidence recorded during the task" },
+          }))).toBe(1);
+          await expect(evidence.locator('button[type="submit"]')).toBeDisabled();
+          await expect(evidence.locator('button[type="submit"]')).toHaveText(catalog.manage.saving);
+          await expect(page.getByTestId("task-evidence-panel")
+            .getByText("Inspection evidence recorded during the task", { exact: true })).toHaveCount(0);
+          expect(acknowledged).toBe(false);
+        } finally {
+          release.resolve();
+        }
+        await submission;
+        await page.unroute(match);
+      } else {
+        await submitAcknowledged(page, evidence,
+          "Inspection evidence recorded during the task", catalog.manage.saved);
+      }
       await expect(
         page
           .getByTestId("task-evidence-panel")
@@ -219,7 +278,7 @@ for (const locale of ["en", "fr", "ar"] as const)
       await issue
         .locator('[name="reason"]')
         .fill("Pool filter needs a maintenance inspection");
-      await issue.locator('button[type="submit"]').click();
+      await submitAcknowledged(page, issue, `Pool issue ${suffix}`, catalog.manage.saved);
       await expect(
         page
           .getByTestId("task-evidence-panel")
@@ -311,8 +370,6 @@ for (const locale of ["en", "fr", "ar"] as const)
       await generate.locator('button[type="submit"]').click();
       expect((await generationResponse).status()).toBe(200);
       await expect(page.getByTestId("operation-task-row")).toHaveCount(1);
-      const catalog = { en: enMessages, fr: frMessages, ar: arMessages }[locale]
-        .Operations;
       await expect(
         page.getByRole("heading", {
           level: 1,
@@ -357,7 +414,7 @@ for (const locale of ["en", "fr", "ar"] as const)
       await fieldEvidence
         .locator('[name="reason"]')
         .fill(`Field checklist evidence ${suffix}`);
-      await fieldEvidence.locator('button[type="submit"]').click();
+      await submitAcknowledged(page, fieldEvidence, `Field checklist evidence ${suffix}`, catalog.manage.saved);
       await expect(
         page
           .getByTestId("task-evidence-panel")
