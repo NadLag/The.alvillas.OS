@@ -10,6 +10,7 @@ import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repo
 import { Money } from "@/platform/money/money";
 import { openFieldFixture } from "./support/field-fixture";
 import { forwardBrowserPostOnce } from "./support/forward-browser-post";
+import { acknowledgementBarrier } from "./support/acknowledgement-barrier";
 
 for (const locale of ["en", "fr", "ar"] as const) test(`Original financial receipts and corrected invoices retain private history in ${locale}`, async ({ page, browser }, info) => {
   test.skip(!process.env.DATABASE_URL, "Dedicated native PostgreSQL required"); test.setTimeout(240000);
@@ -48,11 +49,15 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Original financial recei
     expect((await native.json() as { transaction: { amount: string; currency: string } }).transaction).toMatchObject({ amount: "9007199254740993.07", currency: "MAD" });
     await page.getByTestId("attachment-file").setInputFiles({ name: command.fileName, mimeType: "image/png", buffer: png }); await page.getByTestId("attachment-reason").fill(command.reason);
     let forwardCount = 0;
+    const lostAcknowledgement = acknowledgementBarrier();
     await page.route("**/api/finance/attachments/upload?**", async route => {
       if (forwardCount++) { await route.continue(); return; }
-      expect(await forwardBrowserPostOnce(route.request())).toBe(200); await route.abort();
+      try {
+        expect(await forwardBrowserPostOnce(route.request())).toBe(200); await route.abort();
+        lostAcknowledgement.resolve();
+      } catch (error) { lostAcknowledgement.reject(error); throw error; }
     });
-    await page.getByTestId("attachment-submit").click(); await expect(page.getByTestId("attachment-result")).toBeVisible(); await expect(page.getByTestId("attachment-submit")).toBeEnabled();
+    await page.getByTestId("attachment-submit").click(); await lostAcknowledgement.promise; await expect(page.getByTestId("attachment-result")).toBeVisible(); await expect(page.getByTestId("attachment-submit")).toBeEnabled();
     expect(await withTenant(f.db, f.organizationId, tx => tx.financialAttachment.count({ where: { transactionId: source.journal.id } }))).toBe(1);
     await page.getByTestId("attachment-submit").click(); await expect(page.getByTestId("attachment-history-item")).toHaveCount(1); expect(forwardCount).toBe(2);
     await page.unroute("**/api/finance/attachments/upload?**");
