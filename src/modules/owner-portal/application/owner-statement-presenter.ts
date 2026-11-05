@@ -14,6 +14,13 @@ import {
 export type OwnerStatementLineView = OwnerStatementLine;
 export type OwnerHeldBreakdownView = OwnerHeldBreakdown;
 
+export type OwnerStatementSnapshot = OwnerStatementView & {
+  timezone: string;
+  fromOn: string;
+  toOn: string;
+  currencies: { code: string }[];
+};
+
 export type OwnerStatementView = {
   organizationId: string;
   ownerId: string;
@@ -23,6 +30,10 @@ export type OwnerStatementView = {
   periodStart: Date;
   periodEnd: Date;
   currency: string;
+  timezone?: string;
+  fromOn?: string;
+  toOn?: string;
+  currencies?: { code: string }[];
   openingBalance: Money;
   periodCreditTotal: Money;
   periodDebitTotal: Money;

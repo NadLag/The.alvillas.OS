@@ -62,6 +62,8 @@ export async function ensureOwnerPortalScenario(input: {
 
   try {
     return await prisma.$transaction(async (tx) => {
+      await tx.organizationProfile.upsert({ where: { organizationId: bootstrapOrganizationId }, update: {},
+        create: { organizationId: bootstrapOrganizationId, brandName: "Actual original owner statement fixture", timezone: "UTC" } });
       const periods = new AccountingPeriodRepository(tx, bootstrapOrganizationId);
       while (!await periods.postingOpen(openingDate)) {
         const closed = await periods.postingPeriod(openingDate);

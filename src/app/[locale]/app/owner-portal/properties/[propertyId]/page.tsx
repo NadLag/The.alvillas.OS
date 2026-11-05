@@ -6,11 +6,9 @@ import { formatCurrency, formatDate } from "@/i18n/format";
 import { LocaleSwitch } from "@/i18n/locale-switch";
 import { routing, type AppLocale } from "@/i18n/routing";
 import {
-  addUtcDays,
-  defaultStatementPeriod,
-  statementPeriodInputSchema,
-  type OwnerStatementBucket,
-  type StatementPeriodInput
+  dateOnlyToUtc,
+  statementPeriodSelectionSchema,
+  type OwnerStatementBucket
 } from "@/modules/owner-portal/domain/owner-statement";
 import { ownerPortalActorContextFromSession } from "@/modules/owner-portal/application/owner-portal-access";
 import {
@@ -32,14 +30,13 @@ function firstSearchValue(value: SearchValue): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function periodFromSearch(searchParams: Record<string, SearchValue>): StatementPeriodInput {
-  const fallback = defaultStatementPeriod();
-  const parsed = statementPeriodInputSchema.safeParse({
-    from: firstSearchValue(searchParams.from) ?? fallback.from,
-    to: firstSearchValue(searchParams.to) ?? fallback.to
+function periodFromSearch(searchParams: Record<string, SearchValue>) {
+  return statementPeriodSelectionSchema.safeParse({
+    from: firstSearchValue(searchParams.from),
+    to: firstSearchValue(searchParams.to),
+    currency: firstSearchValue(searchParams.currency)
   });
 
-  return parsed.success ? parsed.data : fallback;
 }
 
 export default async function OwnerStatementPage({
@@ -65,7 +62,7 @@ export default async function OwnerStatementPage({
     notFound();
   }
 
-  const period = periodFromSearch(rawSearchParams);
+  const parsedPeriod = periodFromSearch(rawSearchParams), period = parsedPeriod.success ? parsedPeriod.data : {};
   const t = await getTranslations("OwnerPortal");
   let statement: Awaited<ReturnType<typeof getOwnerStatement>>;
 
@@ -82,7 +79,6 @@ export default async function OwnerStatementPage({
     throw error;
   }
 
-  const periodEndInclusive = addUtcDays(statement.periodEnd, -1);
   const nonZeroBuckets = Object.entries(statement.bucketTotals).filter(
     ([, amount]) => !amount.amount.eq(0)
   ) as Array<[OwnerStatementBucket, (typeof statement.bucketTotals)[OwnerStatementBucket]]>;
@@ -99,17 +95,27 @@ export default async function OwnerStatementPage({
             compact
             currentLocale={appLocale}
             label={t("language")}
-            path={`/app/owner-portal/properties/${propertyId}?from=${period.from}&to=${period.to}`}
+            path={`/app/owner-portal/properties/${propertyId}?from=${statement.fromOn}&to=${statement.toOn}&currency=${statement.currency}`}
           />
           </>
         }
         eyebrow={t("statementEyebrow")}
         subtitle={t("statementPeriod", {
-          from: formatDate(appLocale, statement.periodStart),
-          to: formatDate(appLocale, periodEndInclusive)
+          from: formatDate(appLocale, dateOnlyToUtc(statement.fromOn), { timeZone: "UTC" }),
+          to: formatDate(appLocale, dateOnlyToUtc(statement.toOn), { timeZone: "UTC" })
         })}
         title={statement.propertyName}
       />
+
+      {!parsedPeriod.success && <p className="form-error" role="alert">{t("invalidPeriod")}</p>}
+      <form className="statement-filters" method="get" data-testid="owner-statement-filters">
+        <label className="field"><span>{t("periodFrom")}</span><input type="date" name="from" defaultValue={statement.fromOn} required data-testid="owner-statement-from" /></label>
+        <label className="field"><span>{t("periodTo")}</span><input type="date" name="to" defaultValue={statement.toOn} required data-testid="owner-statement-to" /></label>
+        <label className="field"><span>{t("currency")}</span><select name="currency" defaultValue={statement.currency} data-testid="owner-statement-currency">
+          {statement.currencies.map(row => <option key={row.code} value={row.code}>{row.code}</option>)}
+        </select></label>
+        <button type="submit" className="primary-button" data-testid="owner-statement-apply">{t("applyPeriod")}</button>
+      </form>
 
       <section className="statement-summary" aria-label={t("balanceSummary")}>
         <div>
@@ -175,7 +181,7 @@ export default async function OwnerStatementPage({
                   data-testid="owner-statement-line"
                   key={line.postingId}
                 >
-                  <span role="cell">{formatDate(appLocale, line.occurredAt)}</span>
+                  <span role="cell">{formatDate(appLocale, line.occurredAt, { timeZone: statement.timezone })}</span>
                   <span role="cell">{t(`buckets.${line.bucket}`)}</span>
                   <span role="cell">
                     <strong>{line.reference}</strong>

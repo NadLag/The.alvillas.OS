@@ -1,6 +1,6 @@
 import { OwnerStatementRepository } from "@/platform/ledger/owner-statement-repository";
 import type { RawOwnerLedgerPosting } from "@/modules/owner-portal/domain/owner-statement";
-import type { TenantTransaction } from "@/platform/db/tenant";
+import { LedgerCalendarRepository } from "@/platform/ledger/ledger-calendar-repository";
 
 type OwnerPropertyRow = {
   ownerId: string;
@@ -42,12 +42,7 @@ function ownerPropertyRows(
   );
 }
 
-export class OwnerPortalRepository {
-  constructor(
-    private readonly tx: TenantTransaction,
-    private readonly organizationId: string
-  ) {}
-
+export class OwnerPortalRepository extends LedgerCalendarRepository {
   async listAccessForUser(userAccountId: string): Promise<{
     ownerIds: string[];
     propertyIds: string[];

@@ -1237,7 +1237,12 @@
       "OWNER_EXPENSE": "Depense proprietaire",
       "PAYOUT": "Paiement",
       "ADJUSTMENT": "Ajustement"
-    }
+    },
+    "periodFrom": "Du",
+    "periodTo": "Au",
+    "currency": "Devise",
+    "applyPeriod": "Appliquer la période",
+    "invalidPeriod": "Choisissez des dates valides, avec une date de fin au plus tôt égale au début, et une devise. Le mois courant configuré est affiché."
   },
   "emailTemplates": {
     "invitation": {
@@ -4743,5 +4748,28 @@
     "storage_unavailable": "Le stockage des documents est indisponible. Gardez cette page ouverte et reprenez l’envoi lorsqu’il sera disponible.",
     "unavailable": "Impossible de charger ou d’enregistrer les documents. Réessayez.",
     "reload": "Actualiser les documents"
+  },
+  "OwnerStatementDocuments": {
+    "subject": "Relevé propriétaire - {propertyName}",
+    "title": "Relevé propriétaire",
+    "period": "{from} a {to}",
+    "owner": "Propriétaire",
+    "property": "Propriété",
+    "openingBalance": "Solde initial",
+    "periodCredits": "Credits",
+    "periodDebits": "Debits",
+    "closingBalance": "Solde final",
+    "lines": "Lignes du relevé",
+    "noLines": "Aucune écriture pour cette période.",
+    "buckets": {
+      "OWNER_REVENUE": "Revenu propriétaire",
+      "OWNER_SERVICES": "Services proprietaire",
+      "REIMBURSEMENT": "Remboursement",
+      "COMMISSION": "Commission",
+      "OTA_FEE": "Frais OTA",
+      "OWNER_EXPENSE": "Dépense propriétaire",
+      "PAYOUT": "Paiement",
+      "ADJUSTMENT": "Ajustement"
+    }
   }
 }
