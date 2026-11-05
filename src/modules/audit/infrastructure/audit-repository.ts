@@ -4,12 +4,15 @@ import type { CurrentAuthorityCheck } from "@/platform/authz/current-authority";
 import type { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { Resource } from "@/platform/authz/authorize";
-import { calendarDateStart } from "@/platform/time/calendar";
 import { employeeCompensationAuthorityLineFields,employeeCompensationRunFacts } from "@/platform/authz/employee-compensation-resource";
 import { employeeMonthlyRequestAuthorityFacts } from "@/platform/authz/employee-monthly-request-resource";
 import { employeeEarningRequestAuthorityFacts,employeeEarningRequestSourceFields } from "@/platform/authz/employee-earning-request-resource";
+import { externalPaymentSourceSchema } from "@/platform/ledger/external-payment-source";
+import { Money } from "@/platform/money/money";
+import { externalPaymentFinancialSources, type ExternalPaymentFinancialSources } from "@/platform/authz/external-payment-resource";
+import { expenseResource } from "@/platform/authz/expense-resource";
 
-export type FinancialAuditResource = NativeFinancialResource & { attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[] };
+export type FinancialAuditResource = NativeFinancialResource & { attachmentSource?: NativeFinancialResource; attachmentRootId?: string; attachmentChecks?: readonly CurrentAuthorityCheck[]; externalPayment?: ExternalPaymentFinancialSources };
 
 export type AuditHistoryFilters = {
   action?: string;
@@ -160,17 +163,31 @@ export class AuditRepository {
       attachmentRootId: row.attachment?.rootId ?? row.supersedes?.rootId ?? row.id, attachmentChecks: native.extraChecks }); }
     return result;
   }
-  transactionResources(ids: string[]): Promise<Map<string, FinancialAuditResource>> {
-    return new FinancialTransactionResourceRepository(this.tx, this.organizationId).transactionResources(ids);
+  async transactionResources(ids: string[]): Promise<Map<string, FinancialAuditResource>> {
+    const result: Map<string, FinancialAuditResource> = await new FinancialTransactionResourceRepository(this.tx, this.organizationId).transactionResources(ids);
+    if (!ids.length) return result;
+    const requests = await this.tx.externalPaymentIntent.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
+      select: { id: true, requestedBy: true, reservationId: true, accountId: true, amount: true, currency: true, sourceSnapshot: true,
+        capture: { select: { capturedAt: true, amount: true, currency: true, fee: { select: { expense: { select: { id: true, state: true, amount: true, currency: true, createdBy: true } } } } } } } });
+    for (const request of requests) {
+      const parsed = externalPaymentSourceSchema.safeParse(request.sourceSnapshot); if (!parsed.success || result.has(request.id)) continue;
+      const source = parsed.data, amount = Money.of(request.amount.toString(), request.currency).toJSON().amount;
+      if (source.organizationId !== this.organizationId || source.userAccountId !== request.requestedBy || source.reservationId !== request.reservationId ||
+          source.accountId !== request.accountId || source.amount.amount !== amount || source.amount.currency !== request.currency ||
+          request.capture && (!request.capture.capturedAt || !request.capture.amount.eq(request.amount) || request.capture.currency !== request.currency)) continue;
+      const sources = externalPaymentFinancialSources(request.id, source, request.capture?.capturedAt);
+      const expense = request.capture?.fee?.expense;
+      if (expense && sources.capture) sources.fee = { ...sources.capture, type: "expense", id: expense.id, financialRecordId: expense.id,
+        status: expense.state, assignedUserAccountId: expense.createdBy, amount: Money.of(expense.amount.toString(), expense.currency).toJSON().amount };
+      result.set(request.id, { ...sources.original, externalPayment: sources });
+    }
+    return result;
   }
   async expenseResources(ids: string[]): Promise<Map<string, Resource>> {
     if (!ids.length) return new Map();
     const rows = await this.tx.expense.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
-      select: { id: true, propertyId: true, reservationId: true, amount: true, state: true, createdBy: true, occurredOn: true,
+      select: { id: true, propertyId: true, reservationId: true, amount: true, state: true, createdBy: true, occurredOn: true, externalPaymentFee: { select: { capture: { select: { capturedAt: true } } } },
         property: { select: { city: true, cityId: true, region: true, regionId: true, timezone: true } } } });
-    return new Map(rows.map(row => [row.id, { type: "expense", organizationId: this.organizationId, id: row.id, financialRecordId: row.id,
-      propertyId: row.propertyId, reservationId: row.reservationId, amount: row.amount.toString(), occurredAt: calendarDateStart(row.occurredOn.toISOString().slice(0,10), row.property.timezone),
-      assignedUserAccountId: row.createdBy, city: row.property.cityId ?? row.property.city, region: row.property.regionId ?? row.property.region,
-      status: row.state, dataClass: "financial" }]));
+    return new Map(rows.map(row => [row.id, expenseResource(this.organizationId, { ...row.property, id: row.propertyId }, { ...row, amount: row.amount.toString() })]));
   }
 }

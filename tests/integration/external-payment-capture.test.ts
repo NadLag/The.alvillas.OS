@@ -1,0 +1,461 @@
+import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
+import { PrismaClient } from "@prisma/client";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import * as auditWriter from "@/platform/audit/audit-writer";
+import { requestExternalPaymentCapture, executeExternalPaymentCaptureReference, externalPaymentCaptureRequested } from "@/modules/finance/application/external-payment-service";
+import { reviewCapturedPayPalAdmission, getExternalPaymentIntent, recoverExternalPaymentIntent } from "@/modules/finance/application/external-payment-workspace-service";
+import { admitCapturedPayPalPayment } from "@/modules/finance/application/native-paypal-admission";
+import { PaymentMethodAccessError, PaymentMethodConfigurationError } from "@/modules/finance/domain/payment-method";
+import { inspectGuestDepositReceiptInTransaction, postGuestDepositReceipt, reviewGuestDepositReversal, reverseGuestDepositMovement } from "@/modules/finance/application/guest-deposit-service";
+import { guestPaymentMethodScopes } from "@/modules/finance/application/guest-deposit-payment-method";
+import { PaymentMethodRepository } from "@/modules/finance/infrastructure/payment-method-repository";
+import { ExternalPaymentRepository } from "@/modules/finance/infrastructure/external-payment-repository";
+import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
+import { GuestDepositAuthorizationError, GuestDepositSourceError } from "@/modules/finance/domain/guest-deposit";
+import { ExternalPaymentIntentError } from "@/modules/finance/domain/external-payment-intent";
+import { actualGuestDepositFixture } from "./support/guest-deposit-fixture";
+import { provisionIntegrationRole } from "./support/database-role";
+import { AuditRepository } from "@/modules/audit/infrastructure/audit-repository";
+import { listAuditHistory } from "@/modules/audit/application/audit-service";
+import { authContextForAccount } from "@/platform/authz/account-context";
+import { maskedValue } from "@/platform/authz/present";
+import { prepareExternalPaymentFee } from "@/modules/finance/application/external-payment-fee-service";
+import { submitExpense, ExpenseConflictError, updateExpenseDraft, createExpenseDraft, getExpense, getExpenseDraftEditor, ExpenseAccessError } from "@/modules/finance/application/expense-service";
+import { ExpenseRepository } from "@/modules/finance/infrastructure/expense-repository";
+import { Money } from "@/platform/money/money";
+import { postExpense } from "@/modules/finance/application/expense-posting-service";
+import { GuestDepositRepository } from "@/modules/finance/infrastructure/guest-deposit-repository";
+import { readGuestDepositWorkspace } from "@/modules/finance/application/guest-deposit-workspace-service";
+import { guestDepositDetailSchema } from "@/modules/finance/domain/guest-deposit-workspace";
+
+const captureTimes=new Map<string,string>();
+function providerReceipt(paymentId:string,amount="0.07"){const capturedAt=captureTimes.get(paymentId)??new Date().toISOString();captureTimes.set(paymentId,capturedAt);return{paymentId,capturedAt,settlement:{schemaVersion:1 as const,basis:"ORIGINAL_PROVIDER_RECEIVABLE_BREAKDOWN" as const,gross:{amount,currency:"MAD"},fee:{amount:"0.00",currency:"MAD"},net:{amount,currency:"MAD"}}};}
+let admin: PrismaClient, db: PrismaClient, control: PrismaClient;
+beforeAll(async () => {
+  const url = process.env.TEST_DATABASE_URL, target = url ? new URL(url) : null;
+  if (!target || !["localhost", "127.0.0.1"].includes(target.hostname) || !(target.pathname.startsWith("/alvillas_automation_") || process.env.GITHUB_ACTIONS === "true" && target.pathname === "/alvillas_os")) throw Error("Owned external-capture acceptance database required");
+  control = new PrismaClient({ datasourceUrl: url });
+  const database = "alvillas_automation_external171_" + randomUUID().replaceAll("-", "").slice(0, 20);
+  if (!/^[a-z0-9_]{1,63}$/u.test(database)) throw Error("Owned shadow identifier required");
+  await control.$executeRawUnsafe('CREATE DATABASE "' + database + '"'); const shadow = new URL(url!); shadow.pathname = "/" + database;
+  execFileSync(process.execPath, ["node_modules/prisma/build/index.js", "migrate", "deploy", "--schema", resolve("prisma/schema.prisma")], { env: { ...process.env, DATABASE_URL: shadow.toString() }, stdio: "pipe" });
+  admin = new PrismaClient({ datasourceUrl: shadow.toString() }); await provisionIntegrationRole(admin, "alvillas_ops_tests");
+  const restricted = new URL(shadow); restricted.username = restricted.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: restricted.toString() });
+  expect(await db.$queryRaw`SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user`).toEqual([{ rolsuper: false, rolbypassrls: false }]);
+  for (const code of ["MAD", "EUR"]) await admin.currency.upsert({ where: { code }, update: {}, create: { code, name: code, minorUnit: 2 } });
+}, 120000);
+afterEach(() => vi.restoreAllMocks()); afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); await control?.$disconnect(); });
+const labels = { en: "Original optional PayPal", fr: "PayPal facultatif initial", ar: "باي بال الاختياري الأصلي" };
+async function fixture(amount = "0.07", orderId = "ORDER_" + randomUUID().replaceAll("-", ""), originalTreatment?: "OWNER_PAID" | "INCLUDED_IN_COMMISSION") {
+  const originalRules = originalTreatment ? { "finance.expense_treatment": { default_treatment: originalTreatment }, "finance.approval_thresholds": { thresholds: [] } } : {};
+  const f = await actualGuestDepositFixture(db, admin, "MAD", 2, amount, [10000], originalRules);
+  const merchant = await withTenant(db, f.org, tx => new FinanceRepository(tx, f.org).ensureLedgerAccount({ code: "PAYPAL_MERCHANT_BALANCE", name: "Actual configured PayPal merchant location", accountType: "ASSET_LOCATION", normalSide: "DEBIT" }));
+  const input = await withTenant(db, f.org, async tx => {
+    const rules = new ConfigRuleRepository(tx, f.org);
+    await rules.createVersion({ key: "finance.guest_deposits", scopeType: "organization", effectiveFrom: new Date("2020-01-01"), createdBy: f.account.id,
+      value: { ...f.policy, receipt_account_codes: [...f.policy.receipt_account_codes, merchant.code], payment_methods: [...f.policy.payment_methods, { key: "confirmed-paypal", labels }] }, reason: "Explicit original external receipt configuration" });
+    await rules.createVersion({ key: "finance.payment_methods", scopeType: "organization", effectiveFrom: new Date("2020-01-01"), createdBy: f.account.id,
+      value: { methods: [{ key: "confirmed-paypal", labels, adapter: "paypal", enabled: true, currencies: ["MAD"], provider_account_code: merchant.code }] }, reason: "Explicit optional original PayPal protocol" });
+    const receipt = { ...f.receiptInput, accountId: merchant.id, method: "confirmed-paypal", externalReference: orderId }, prepared = await inspectGuestDepositReceiptInTransaction(f.ctx, receipt, tx),
+      now = await new FinanceRepository(tx, f.org).clock(), catalog = await new PaymentMethodRepository(tx, f.org).catalog({ at: now, currency: "MAD", scopes: await guestPaymentMethodScopes(tx, f.org, f.reservationId, now) });
+    return { provider: "paypal" as const, orderId, receipt: { ...receipt, idempotencyKey: randomUUID(), reason: "Capture only this original reviewed payment without duplicate guest funds", reviewFingerprint: prepared.fingerprint, paymentMethodFingerprint: catalog.identity } };
+  });
+  return { ...f, banks: { ...f.banks, receipt: merchant }, input };
+}
+type Fixture = Awaited<ReturnType<typeof fixture>>;
+async function capturedFeeFixture(treatment: "OWNER_PAID" | "INCLUDED_IN_COMMISSION" = "OWNER_PAID") {
+  const f = await fixture("0.07", undefined, treatment);
+  await withTenant(db, f.org, async tx => {
+    const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: ["expense:create", "expense:view", "expense:edit", "expense:pay"] } } }); expect(permissions).toHaveLength(4);
+    await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: f.role.id, permissionId: permission.id })) });
+
+  });
+  const ctx = { ...f.ctx, authContext: { ...await authContextForAccount(f.org, f.account.id, { db }), personId: f.person.id } }, requested = await requestExternalPaymentCapture(ctx, f.input, { db }), ref = await reference(f, requested.id),
+    evidence = providerReceipt("ACTUAL_APPROVED_FEE_" + randomUUID()); evidence.settlement.fee.amount = "0.02"; evidence.settlement.net.amount = "0.05";
+  await executeExternalPaymentCaptureReference(ref, { db, provider: { lookup: () => Promise.resolve({ state: "CAPTURED" as const, ...evidence }), capture: () => Promise.resolve(providerReceipt("NEVER_POST")) } });
+  return { ...f, ctx, requested, evidence, feeInput: { intentId: requested.id, category: "provider_fee", purpose: "Actual original merchant payment deduction", reason: "Prepare the actual verified deduction under configured expense rules" } };
+}
+async function reference(f: Fixture, intentId: string) {
+  const event = await withTenant(db, f.org, tx => tx.outboxEvent.findFirstOrThrow({ where: { organizationId: f.org, type: externalPaymentCaptureRequested, payload: { path: ["intentId"], equals: intentId } } }));
+  return { organizationId: f.org, outboxEventId: event.id };
+}
+const rows = (org: string) => withTenant(db, org, async tx => ({ intents: await tx.externalPaymentIntent.findMany({ where: { organizationId: org }, include: { capture: true } }), captures: await tx.externalPaymentCapture.findMany({ where: { organizationId: org } }) }));
+const moneyFacts = (org: string) => withTenant(db, org, tx => tx.$queryRaw<Array<{ kind: string; id: string; xmin: string; body: string }>>`
+  SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t)::text AS body FROM financial_transaction t WHERE organization_id=${org}::uuid
+  UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p)::text FROM posting p WHERE organization_id=${org}::uuid ORDER BY kind,id`);
+describe("durable optional external capture on PostgreSQL", () => {
+  it("does not erase verified provider-held money through a manual guest receipt reversal", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id);
+    await executeExternalPaymentCaptureReference(ref, { db, provider: { lookup: () => Promise.resolve({ state: "CAPTURED" as const, ...providerReceipt("ACTUAL_IRREVERSIBLE_CAPTURE_" + randomUUID()) }), capture: () => Promise.resolve(providerReceipt("NEVER_POST")) } });
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: requested.id }, { db }), admitted = await admitCapturedPayPalPayment(f.ctx, { intentId: requested.id, reviewFingerprint: review.reviewFingerprint,
+      paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Retain authoritative original captured money and guest ownership" }, { db }), before = await moneyFacts(f.org);
+    let reversed: unknown;
+    try { const reversal = await reviewGuestDepositReversal(f.ctx, { transactionId: admitted.id }, { db }); reversed = await reverseGuestDepositMovement(f.ctx, { transactionId: admitted.id, reviewFingerprint: reversal.reviewFingerprint,
+      idempotencyKey: randomUUID(), reason: "Do not remove actual provider-held funds without an actual money movement" }, { db }); } catch (error) { expect(error).toBeInstanceOf(GuestDepositSourceError); }
+    expect(reversed).toBeUndefined(); expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+    const detail = guestDepositDetailSchema.parse(await readGuestDepositWorkspace(f.ctx, { operation: "DETAIL", depositId: f.input.receipt.idempotencyKey }, { db }));
+    expect(detail.movements.find(row => row.id === admitted.id)?.canReverse).toBe(false);
+  });
+  it("preserves verified provider-held money in native PostgreSQL even when the application reversal check is bypassed", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id);
+    await executeExternalPaymentCaptureReference(ref, { db, provider: { lookup: () => Promise.resolve({ state: "CAPTURED" as const, ...providerReceipt("NATIVE_IRREVERSIBLE_CAPTURE_" + randomUUID()) }), capture: () => Promise.resolve(providerReceipt("NEVER_POST")) } });
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: requested.id }, { db }), admitted = await admitCapturedPayPalPayment(f.ctx, { intentId: requested.id, reviewFingerprint: review.reviewFingerprint,
+      paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Retain authoritative captured money against native source-proof bypass" }, { db }), before = await moneyFacts(f.org);
+    vi.spyOn(GuestDepositRepository.prototype, "externalCaptureSource").mockResolvedValue(null);
+    const reversal = await reviewGuestDepositReversal(f.ctx, { transactionId: admitted.id }, { db });
+    await expect(reverseGuestDepositMovement(f.ctx, { transactionId: admitted.id, reviewFingerprint: reversal.reviewFingerprint, idempotencyKey: randomUUID(),
+      reason: "Prove the native source boundary without relying on its application preflight" }, { db })).rejects.toThrow("verified external capture requires a verified money movement");
+    expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+  });
+  it("retains the actual source-bound fee time in ordinary expense audit resources", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), resources = await withTenant(db, f.org, tx => new AuditRepository(tx, f.org).expenseResources([fee.id]));
+    expect(resources.get(fee.id)?.occurredAt).toEqual(new Date(f.evidence.capturedAt));
+  });
+  it("requires actual source-bound fee time authority before creating its ordinary expense", async () => {
+    const f = await capturedFeeFixture(), endsAt = new Date(new Date(f.evidence.capturedAt).getTime() - 1).toISOString();
+    await withTenant(db, f.org, async tx => {
+      const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "expense:create" } }), role = await tx.role.create({ data: { organizationId: f.org, key: "limited-fee-creation", name: "Explicit source-time creation limit" } });
+      expect((await tx.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permissionId: permission.id } })).count).toBe(1);
+      await tx.rolePermission.create({ data: { organizationId: f.org, roleId: role.id, permissionId: permission.id } });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: f.account.id, personId: f.person.id, scopeType: "organization", validFrom: new Date("2020-01-01"), conditions: { timeWindow: { endsAt } } } });
+    });
+    const ctx = { ...f.ctx, authContext: { ...await authContextForAccount(f.org, f.account.id, { db }), personId: f.person.id } };
+    await expect(prepareExternalPaymentFee(ctx, f.feeInput, { db })).rejects.toThrow(PaymentMethodAccessError);
+    expect(await withTenant(db, f.org, tx => tx.expense.count({ where: { organizationId: f.org } }))).toBe(0); expect((await rows(f.org)).captures).toHaveLength(1);
+  });
+  it("keeps held date restrictions for source-bound fee details and draft editors", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), endsAt = new Date(new Date(f.evidence.capturedAt).getTime() - 1).toISOString(),
+      held = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: f.ctx.authContext.assignments!.map(row => ({ ...row, conditions: { timeWindow: { endsAt } } })) } };
+    await expect(getExpense(held, fee.id, { db })).rejects.toThrow(ExpenseAccessError);
+    await expect(getExpenseDraftEditor(held, fee.id, { db })).rejects.toThrow(ExpenseAccessError);
+  });
+  it("withholds source-bound fee details after final independent view revocation", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), write = auditWriter.writeAuditEvent, before = await moneyFacts(f.org);
+    vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const saved = await write(tx, event); if (event.action === "expense.viewed")
+      expect((await withTenant(db, f.org, inner => inner.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permission: { key: "expense:view" } } }))).count).toBe(1); return saved; });
+    await expect(getExpense(f.ctx, fee.id, { db })).rejects.toThrow(ExpenseAccessError); expect(await moneyFacts(f.org)).toEqual(before);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { organizationId: f.org, resourceId: fee.id, action: "expense.viewed" } }))).toBe(0);
+  });
+  it("uses actual source-bound fee time for current date grants while retaining ordinary civil-day expense behavior", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), endsAt = new Date(new Date(f.evidence.capturedAt).getTime() - 1).toISOString(), occurredOn = f.evidence.capturedAt.slice(0, 10),
+      ordinary = await createExpenseDraft(f.ctx, { propertyId: f.property.id, reservationId: f.reservationId, fundingAccountId: f.banks.receipt.id, amount: "0.01", currency: "MAD", category: "ordinary_expense", purpose: "Original civil-day expense", occurredOn, emergency: false, idempotencyKey: randomUUID(), reason: "Preserve the ordinary expense calendar contract alongside exact captured source time" }, { db });
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { conditions: { timeWindow: { endsAt } } } }));
+    expect((await getExpense(f.ctx, ordinary.id, { db })).id).toBe(ordinary.id);
+    await expect(getExpense(f.ctx, fee.id, { db })).rejects.toThrow(ExpenseAccessError);
+    await expect(getExpenseDraftEditor(f.ctx, fee.id, { db })).rejects.toThrow(ExpenseAccessError);
+  });
+  it.each(["OWNER_PAID", "INCLUDED_IN_COMMISSION"] as const)("posts exact net merchant funds with configured %s fee allocation through the original approved expense", async treatment => {
+    const f = await capturedFeeFixture(treatment), before = await moneyFacts(f.org), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db });
+    expect(fee.state).toBe("DRAFT"); expect(await moneyFacts(f.org)).toEqual(before);
+    expect(await prepareExternalPaymentFee(f.ctx, f.feeInput, { db })).toEqual({ ...fee, idempotent: true });
+    const approved = await submitExpense(f.ctx, { id: fee.id, expectedVersion: fee.version, reason: "Apply the explicit configured approval rules to the original provider fee" }, { db }); expect(approved.state).toBe("APPROVED");
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: f.requested.id }, { db }), input = { intentId: f.requested.id, reviewFingerprint: review.reviewFingerprint,
+      paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Admit only the actual captured gross, approved deduction and merchant net", fee: { expenseId: fee.id, expectedVersion: approved.version, reason: "Post the actual original approved merchant fee with the captured receipt" } };
+    const admitted = await admitCapturedPayPalPayment(f.ctx, input, { db });
+    const proof = await withTenant(db, f.org, async tx => ({ expense: await tx.expense.findFirstOrThrow({ where: { organizationId: f.org, id: fee.id }, include: { transaction: { include: { postings: true } }, submission: true } }),
+      merchant: await tx.posting.findMany({ where: { organizationId: f.org, ledgerAccountId: f.banks.receipt.id } }), receipt: await tx.guestPaymentReceipt.findFirstOrThrow({ where: { organizationId: f.org, transactionId: admitted.id } }) }));
+    expect(proof.expense.state).toBe("POSTED"); expect(proof.expense.transaction?.occurredAt.toISOString()).toBe(f.evidence.capturedAt);
+    expect(proof.expense.transaction?.postings.find(row => row.side === "DEBIT")).toMatchObject({ bucket: treatment === "OWNER_PAID" ? "OWNER_EXPENSE" : "ALVILLAS_EXPENSE" });
+    expect(proof.receipt.amount.toFixed(2)).toBe("0.07");
+    const net = proof.merchant.reduce((total, row) => row.side === "DEBIT" ? total.add(Money.of(row.amount.toString(), row.currency)) : total.subtract(Money.of(row.amount.toString(), row.currency)), Money.zero("MAD")); expect(net.toJSON()).toEqual({ amount: "0.05", currency: "MAD" });
+    const saved = await moneyFacts(f.org); expect(await admitCapturedPayPalPayment(f.ctx, input, { db })).toEqual({ ...admitted, idempotent: true }); expect(await moneyFacts(f.org)).toEqual(saved);
+    await expect(admitCapturedPayPalPayment(f.ctx, { ...input, fee: { ...input.fee, reason: "A substituted later fee-admission intent must not replace the original" } }, { db })).rejects.toThrow();
+    expect(await moneyFacts(f.org)).toEqual(saved);
+  });
+  it("admits an original capture after its configured fee was already posted through the ordinary expense workflow", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), approved = await submitExpense(f.ctx, { id: fee.id, expectedVersion: fee.version, reason: "Apply the original configured fee approvals" }, { db }),
+      posted = await postExpense(f.ctx, { id: fee.id, expectedVersion: approved.version, reason: "Post the actual fee through its ordinary expense workspace" }, { db }), review = await reviewCapturedPayPalAdmission(f.ctx, { id: f.requested.id }, { db });
+    expect(review.fee).toEqual({ id: fee.id, version: posted.version, state: "POSTED" });
+    const input = { intentId: f.requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Admit the original guest capture without paying an already posted fee twice",
+      fee: { expenseId: fee.id, expectedVersion: posted.version, reason: "Retain the actual earlier ordinary expense posting as original fee evidence" } }, admitted = await admitCapturedPayPalPayment(f.ctx, input, { db }), saved = await moneyFacts(f.org);
+    expect(await admitCapturedPayPalPayment(f.ctx, input, { db })).toEqual({ ...admitted, idempotent: true }); expect(await moneyFacts(f.org)).toEqual(saved);
+    expect(await withTenant(db, f.org, tx => tx.financialTransaction.count({ where: { organizationId: f.org, reference: "EXPENSE:" + fee.id } }))).toBe(1);
+  });
+  it("rolls the fee and receipt back together after late independent expense-pay revocation", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), approved = await submitExpense(f.ctx, { id: fee.id, expectedVersion: fee.version, reason: "Apply the original configured fee approvals" }, { db }),
+      review = await reviewCapturedPayPalAdmission(f.ctx, { id: f.requested.id }, { db }), before = await moneyFacts(f.org), write = auditWriter.writeAuditEvent;
+    vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const saved = await write(tx, event); if (event.action === "finance.payment_method.accepted")
+      expect((await withTenant(db, f.org, inner => inner.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permission: { key: "expense:pay" } } }))).count).toBe(1); return saved; });
+    await expect(admitCapturedPayPalPayment(f.ctx, { intentId: f.requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint,
+      reason: "Require final independent expense authority for the atomic fee and guest receipt", fee: { expenseId: fee.id, expectedVersion: approved.version, reason: "Retain exact approved deduction and original source authority" } }, { db })).rejects.toThrow(PaymentMethodAccessError);
+    expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+    expect((await withTenant(db, f.org, tx => new ExpenseRepository(tx, f.org).find(fee.id)))?.state).toBe("APPROVED");
+  });
+  it("binds fee history to the actual expense and withholds it without independent expense access", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), source = await withTenant(db, f.org, async tx => (await new AuditRepository(tx, f.org).transactionResources([f.requested.id])).get(f.requested.id));
+    expect(source?.externalPayment?.fee).toMatchObject({ type: "expense", id: fee.id, financialRecordId: fee.id, amount: "0.02", status: "DRAFT", occurredAt: new Date(f.evidence.capturedAt) });
+    await withTenant(db, f.org, async tx => { const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "audit_log:view" } }), role = await tx.role.create({ data: { organizationId: f.org, key: "independent-fee-audit", name: "Independent provider fee history" } });
+      await tx.rolePermission.create({ data: { organizationId: f.org, roleId: role.id, permissionId: permission.id } }); await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: f.account.id, personId: f.person.id, scopeType: "organization", validFrom: new Date("2020-01-01") } }); });
+    const actor = { ...f.ctx, personId: f.person.id, authContext: await authContextForAccount(f.org, f.account.id, { db }) }, filters = { action: "finance.external_payment.fee_prepared", resourceType: "financial_transaction", resourceId: f.requested.id };
+    expect((await listAuditHistory(actor, filters, { db })).rows[0].after).toMatchObject({ expenseId: fee.id, fee: { amount: "0.02", currency: "MAD" } });
+    await withTenant(db, f.org, tx => tx.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permission: { key: "expense:view" } } }));
+    expect((await listAuditHistory(actor, filters, { db })).rows[0].after).toBe(maskedValue);
+  });
+  it("withholds financial admission until the actual source-bound fee has completed configured expense approval", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db }), before = await moneyFacts(f.org), review = await reviewCapturedPayPalAdmission(f.ctx, { id: f.requested.id }, { db });
+    await expect(admitCapturedPayPalPayment(f.ctx, { intentId: f.requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint,
+      reason: "Do not bypass the required original expense allocation and approval flow", fee: { expenseId: fee.id, expectedVersion: fee.version, reason: "Do not bypass configured approval before posting the actual fee" } }, { db })).rejects.toThrow(ExpenseConflictError);
+    expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+  });
+  it("rejects source substitution, mutation, deletion and changed amounts for an actual provider fee", async () => {
+    const f = await capturedFeeFixture(), fee = await prepareExternalPaymentFee(f.ctx, f.feeInput, { db });
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentFee.updateMany({ where: { organizationId: f.org }, data: { propertyTimezone: "Europe/Paris" } }))).rejects.toThrow();
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentFee.deleteMany({ where: { organizationId: f.org } }))).rejects.toThrow();
+    const row = await withTenant(db, f.org, tx => new ExpenseRepository(tx, f.org).find(fee.id)); expect(row).not.toBeNull();
+    await expect(updateExpenseDraft(f.ctx, { id: fee.id, expectedVersion: fee.version, draft: { propertyId: f.property.id, reservationId: f.reservationId, fundingAccountId: f.banks.receipt.id,
+      category: f.feeInput.category, purpose: f.feeInput.purpose, amount: "0.01", currency: "MAD", occurredOn: row!.occurredOn.toISOString().slice(0, 10), emergency: false,
+      idempotencyKey: row!.idempotencyKey, reason: "Require the retained provider deduction despite an otherwise valid expense edit" } }, { db })).rejects.toThrow("actual original captured fee expense source required");
+    const bound = await withTenant(db, f.org, tx => tx.externalPaymentFee.findFirstOrThrow({ where: { organizationId: f.org, expenseId: fee.id } })), foreign = await fixture();
+    expect(await withTenant(db, foreign.org, tx => tx.externalPaymentFee.findMany({ where: { captureId: bound.captureId } }))).toEqual([]);
+    await expect(prepareExternalPaymentFee(f.ctx, { ...f.feeInput, category: "changed_source" }, { db })).rejects.toThrow(ExternalPaymentIntentError);
+  });
+  it("recovers the same durable intent after an acknowledgement is lost without queuing another provider attempt", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), before = await rows(f.org);
+    const recovered = await recoverExternalPaymentIntent(f.ctx, { key: f.input.receipt.idempotencyKey }, { db });
+    expect(recovered.request).toMatchObject({ id: requested.id, state: "PENDING", admission: null, idempotent: true });
+    expect(await rows(f.org)).toEqual(before); expect(await recoverExternalPaymentIntent(f.ctx, { key: randomUUID() }, { db })).toEqual({ request: null });
+    const foreign = await fixture(); expect(await recoverExternalPaymentIntent(foreign.ctx, { key: f.input.receipt.idempotencyKey }, { db })).toEqual({ request: null });
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+    await expect(recoverExternalPaymentIntent(f.ctx, { key: f.input.receipt.idempotencyKey }, { db })).rejects.toThrow(PaymentMethodAccessError);
+  });
+  it("refuses a current request-date-only grant from disclosing an actual prior-month capture", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id), now = new Date(f.receiptInput.receivedAt),
+      monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString(), capturedAt = new Date(new Date(monthStart).getTime() - 1000).toISOString(), paymentId = "PRIVATE_PRIOR_MONTH_" + randomUUID();
+    captureTimes.set(paymentId, capturedAt);
+    await executeExternalPaymentCaptureReference(ref, { db, provider: { lookup: () => Promise.resolve({ state: "CAPTURED" as const, ...providerReceipt(paymentId) }), capture: () => Promise.resolve(providerReceipt("NEVER_POST")) } });
+    const held = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: f.ctx.authContext.assignments!.map(row => ({ ...row, conditions: { timeWindow: { startsAt: monthStart } } })) } };
+    await expect(getExternalPaymentIntent(held, { id: requested.id }, { db })).rejects.toThrow(PaymentMethodAccessError);
+    await expect(recoverExternalPaymentIntent(held, { key: f.input.receipt.idempotencyKey }, { db })).rejects.toThrow(PaymentMethodAccessError);
+    expect((await getExternalPaymentIntent(f.ctx, { id: requested.id }, { db })).capturedAt).toBe(capturedAt);
+  });
+  it("hydrates audit authority from actual immutable original and captured sources rather than the current property", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id), paymentId = "AUDIT_ORIGINAL_DATE_" + randomUUID(), capturedAt = "2026-10-31T23:59:59.000Z";
+    captureTimes.set(paymentId, capturedAt);
+    await executeExternalPaymentCaptureReference(ref, { db, provider: { lookup: () => Promise.resolve({ state: "CAPTURED" as const, ...providerReceipt(paymentId) }), capture: () => Promise.resolve(providerReceipt("NEVER_POST")) } });
+    const source = await withTenant(db, f.org, async tx => (await new AuditRepository(tx, f.org).transactionResources([requested.id])).get(requested.id));
+    expect(source?.externalPayment?.original).toMatchObject({ id: requested.id, propertyId: f.property.id, reservationId: f.reservationId, amount: "0.07", occurredAt: f.input.receipt.receivedAt });
+    expect(source?.externalPayment?.capture?.occurredAt).toEqual(new Date(capturedAt));
+    expect(source?.externalPayment?.funding).toHaveLength(2); expect(source?.externalPayment?.funding.every(row => row.id === f.banks.receipt.id)).toBe(true);
+    const foreign = await fixture(); expect(await withTenant(db, foreign.org, tx => new AuditRepository(tx, foreign.org).transactionResources([requested.id]))).toEqual(new Map());
+  });
+  it("rechecks retained and current authority when presenting original capture audit history", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db });
+    await withTenant(db, f.org, async tx => { const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "audit_log:view" } }),
+      role = await tx.role.create({ data: { organizationId: f.org, key: "capture-auditor-" + randomUUID(), name: "Independent capture audit access" } });
+      await tx.rolePermission.create({ data: { organizationId: f.org, roleId: role.id, permissionId: permission.id } });
+      await tx.roleAssignment.create({ data: { organizationId: f.org, roleId: role.id, userAccountId: f.account.id, personId: f.person.id, scopeType: "organization", validFrom: new Date("2020-01-01") } }); });
+    const authContext = await authContextForAccount(f.org, f.account.id, { db }), actor = { ...f.ctx, personId: f.person.id, authContext }, filters = { resourceType: "financial_transaction", resourceId: requested.id };
+    expect((await listAuditHistory(actor, filters, { db })).rows[0].reason).toBe(f.input.receipt.reason);
+    const held = { ...actor, authContext: { ...authContext, assignments: authContext.assignments!.map(row => row.permissions.has("financial_transaction:view") ? { ...row, conditions: { maxAmount: "0.06" } } : row) } };
+    expect((await listAuditHistory(held, filters, { db })).rows.every(row => row.reason === maskedValue && row.after === maskedValue)).toBe(true);
+    await withTenant(db, f.org, tx => tx.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permission: { key: "financial_transaction:view" } } }));
+    expect((await listAuditHistory(actor, filters, { db })).rows.every(row => row.reason === maskedValue && row.after === maskedValue)).toBe(true);
+  });
+  it.each(["0.07", "9007199254740993.07"])("retains one exact %s intent, outbox, capture and audit with provider I/O outside every transaction", async amount => {
+    const f = await fixture(amount), before = await moneyFacts(f.org); let active = 0;
+    const runner: TenantTransactionRunner = { $transaction: (work, options) => db.$transaction(async tx => { active++; try { return await work(tx); } finally { active--; } }, options) };
+    const provider = { lookup: vi.fn(() => { expect(active).toBe(0); return Promise.resolve({ state: "APPROVED" as const }); }), capture: vi.fn((input: { source: string; amount: string; currency: string }) => { expect(active).toBe(0); expect(input).toEqual({ source: f.input.orderId, amount, currency: "MAD" }); return Promise.resolve(providerReceipt("CAPTURE_" + randomUUID(), input.amount)); }) };
+    const request = await requestExternalPaymentCapture(f.ctx, f.input, { db: runner }), ref = await reference(f, request.id);
+    expect(request.state).toBe("PENDING"); const captured = await executeExternalPaymentCaptureReference(ref, { db: runner, provider });
+    expect(captured).toMatchObject({ state: "CAPTURED", amount: { amount, currency: "MAD" }, idempotent: false });
+    expect(await executeExternalPaymentCaptureReference(ref, { db: runner, provider })).toEqual({ ...captured, idempotent: true });
+    expect(provider.capture).toHaveBeenCalledTimes(1); expect(provider.lookup).toHaveBeenCalledTimes(1);
+    const saved = await rows(f.org); expect(saved.intents).toHaveLength(1); expect(saved.captures).toHaveLength(1); expect(saved.captures[0].amount.toFixed(2)).toBe(amount);
+    expect(await moneyFacts(f.org)).toEqual(before);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { organizationId: f.org, action: "finance.external_payment.captured" } }))).toBe(1);
+  });
+  it("deduplicates concurrent original intent requests without another capture task", async () => {
+    const f = await fixture(), outcomes = await Promise.all(Array.from({ length: 4 }, () => requestExternalPaymentCapture(f.ctx, f.input, { db })));
+    expect(new Set(outcomes.map(outcome => outcome.id)).size).toBe(1); expect(outcomes.filter(outcome => !outcome.idempotent)).toHaveLength(1);
+    expect(await withTenant(db, f.org, tx => tx.outboxEvent.count({ where: { organizationId: f.org, type: externalPaymentCaptureRequested } }))).toBe(1);
+  });
+  it("recovers a lost capture acknowledgement through GET before another POST", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id); let captured = false;
+    const provider = { lookup: vi.fn(() => Promise.resolve(captured ? ({ state: "CAPTURED" as const, ...providerReceipt("ACTUAL_LOST_ACK_CAPTURE") }) : { state: "APPROVED" as const })), capture: vi.fn(() => { captured = true; providerReceipt("ACTUAL_LOST_ACK_CAPTURE"); return Promise.reject(Error("Simulated lost provider acknowledgement")); }) };
+    await expect(executeExternalPaymentCaptureReference(ref, { db, provider })).rejects.toThrow("Simulated lost provider acknowledgement");
+    expect((await rows(f.org)).captures).toEqual([]);
+    expect(await executeExternalPaymentCaptureReference(ref, { db, provider })).toMatchObject({ state: "CAPTURED" });
+    expect(provider.capture).toHaveBeenCalledTimes(1); expect((await rows(f.org)).captures).toHaveLength(1);
+  });
+  it("reconciles an uncertain actual capture with GET after the original finance grant was revoked", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), before = await moneyFacts(f.org); let captured = false;
+    const provider = { lookup: vi.fn(() => Promise.resolve(captured ? ({ state: "CAPTURED" as const, ...providerReceipt("RECONCILED_AFTER_REVOKE_" + request.id) }) : { state: "APPROVED" as const })),
+      capture: vi.fn(async () => { captured = true; providerReceipt("RECONCILED_AFTER_REVOKE_" + request.id); await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } })); throw Error("Capture succeeded but its acknowledgement was lost"); }) };
+    await expect(executeExternalPaymentCaptureReference(ref, { db, provider })).rejects.toThrow("Capture succeeded but its acknowledgement was lost");
+    expect(await executeExternalPaymentCaptureReference(ref, { db, provider })).toMatchObject({ state: "CAPTURED" });
+    expect(provider.capture).toHaveBeenCalledTimes(1); expect(await moneyFacts(f.org)).toEqual(before);
+  });
+  it("permits only read-only reconciliation after an uncertain attempt and refuses a new POST under revoked grants", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), provider = {
+      lookup: vi.fn<() => Promise<{ state: "APPROVED" }>>().mockRejectedValueOnce(Error("Read acknowledgement unavailable")).mockResolvedValue({ state: "APPROVED" }),
+      capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_POST_AFTER_REVOKE"))) };
+    await expect(executeExternalPaymentCaptureReference(ref, { db, provider })).rejects.toThrow("Read acknowledgement unavailable");
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+    await expect(executeExternalPaymentCaptureReference(ref, { db, provider })).rejects.toThrow(GuestDepositAuthorizationError);
+    expect(provider.lookup).toHaveBeenCalledTimes(2); expect(provider.capture).not.toHaveBeenCalled(); expect((await rows(f.org)).captures).toEqual([]);
+  });
+  it("rolls the durable attempt back before provider I/O when its audit fails", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), write = auditWriter.writeAuditEvent,
+      provider = { lookup: vi.fn(() => Promise.resolve({ state: "APPROVED" as const })), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_POST_WITHOUT_ATTEMPT_AUDIT"))) };
+    vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation((tx, event) => { if (event.action === "finance.external_payment.capture_started") throw Error("Attempt audit unavailable"); return write(tx, event); });
+    await expect(executeExternalPaymentCaptureReference(ref, { db, provider })).rejects.toThrow("Attempt audit unavailable");
+    expect(provider.lookup).not.toHaveBeenCalled(); expect(provider.capture).not.toHaveBeenCalled();
+    expect(await withTenant(db, f.org, tx => tx.externalPaymentAttempt.count({ where: { organizationId: f.org, intentId: request.id } }))).toBe(0);
+  });
+  it("requires current authority before any provider request", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), provider = { lookup: vi.fn(() => Promise.resolve({ state: "APPROVED" as const })), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_CAPTURE"))) };
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+    await expect(executeExternalPaymentCaptureReference(ref, { db, provider })).rejects.toThrow(GuestDepositAuthorizationError);
+    expect(provider.lookup).not.toHaveBeenCalled(); expect(provider.capture).not.toHaveBeenCalled(); expect((await rows(f.org)).captures).toEqual([]);
+  });
+  it("retains an actual capture after an in-flight grant revocation without admitting or rewriting money", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), before = await moneyFacts(f.org);
+    const provider = { lookup: vi.fn(() => Promise.resolve({ state: "APPROVED" as const })), capture: vi.fn(async () => { await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } })); return providerReceipt("ACTUAL_CAPTURE_BEFORE_REVOCATION_" + randomUUID()); }) };
+    expect(await executeExternalPaymentCaptureReference(ref, { db, provider })).toMatchObject({ state: "CAPTURED" });
+    expect((await rows(f.org)).captures).toHaveLength(1); expect(await moneyFacts(f.org)).toEqual(before);
+  });
+  it("refuses a second tenant's claim on the same provider order without disclosing its owner", async () => {
+    const f = await fixture(), other = await fixture("0.07", f.input.orderId);
+    await requestExternalPaymentCapture(f.ctx, f.input, { db });
+    await expect(requestExternalPaymentCapture(other.ctx, other.input, { db })).rejects.toThrow(ExternalPaymentIntentError);
+    expect((await rows(other.org)).intents).toEqual([]);
+  });
+  it("rejects foreign event references before any provider I/O", async () => {
+    const f = await fixture(), other = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), provider = { lookup: vi.fn(() => Promise.resolve({ state: "APPROVED" as const })), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_CAPTURE"))) };
+    await expect(executeExternalPaymentCaptureReference({ ...ref, organizationId: other.org }, { db, provider })).rejects.toThrow(ExternalPaymentIntentError);
+    expect(provider.lookup).not.toHaveBeenCalled();
+    expect(await withTenant(db, other.org, tx => tx.externalPaymentIntent.findMany({ where: { organizationId: f.org } }))).toEqual([]);
+  });
+  it("requires confirmed native capture evidence before the original receipt producer can admit its reserved nonce", async () => {
+    const f = await fixture(), before = await moneyFacts(f.org); await requestExternalPaymentCapture(f.ctx, f.input, { db });
+    await expect(postGuestDepositReceipt(f.ctx, f.input.receipt, { db })).rejects.toThrow("verified original external capture required before financial admission");
+    expect(await moneyFacts(f.org)).toEqual(before);
+  });
+  it("rolls the intent back when its audit fails", async () => {
+    const f = await fixture(), write = auditWriter.writeAuditEvent;
+    vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation((tx, event) => { if (event.action === "finance.external_payment.requested") throw Error("Intent audit unavailable"); return write(tx, event); });
+    await expect(requestExternalPaymentCapture(f.ctx, f.input, { db })).rejects.toThrow("Intent audit unavailable");
+    expect((await rows(f.org)).intents).toEqual([]);
+  });
+  it("reconciles the original capture after a local evidence-audit rollback", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), write = auditWriter.writeAuditEvent;
+    const provider = { lookup: vi.fn(() => Promise.resolve(({ state: "CAPTURED" as const, ...providerReceipt("ACTUAL_CAPTURE_AUDIT_RECOVERY_" + randomUUID()) }))), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_POST"))) };
+    provider.lookup.mockResolvedValue(({ state: "CAPTURED" as const, ...providerReceipt("ACTUAL_CAPTURE_AUDIT_RECOVERY_" + randomUUID()) }));
+    const spy = vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation((tx, event) => { if (event.action === "finance.external_payment.captured") throw Error("Capture audit unavailable"); return write(tx, event); });
+    await expect(executeExternalPaymentCaptureReference(ref, { db, provider })).rejects.toThrow("Capture audit unavailable"); expect((await rows(f.org)).captures).toEqual([]);
+    spy.mockRestore(); expect(await executeExternalPaymentCaptureReference(ref, { db, provider })).toMatchObject({ state: "CAPTURED" }); expect(provider.capture).not.toHaveBeenCalled();
+  });
+  it("preserves every intent and capture witness against update and deletion", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), provider = { lookup: vi.fn(() => Promise.resolve(({ state: "CAPTURED" as const, ...providerReceipt("ACTUAL_APPEND_ONLY_CAPTURE_" + randomUUID()) }))), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_POST"))) };
+    await executeExternalPaymentCaptureReference(ref, { db, provider }); const before = await rows(f.org), capture = before.captures[0];
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentIntent.update({ where: { id: request.id }, data: { amount: "0.08" } }))).rejects.toThrow();
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentIntent.delete({ where: { id: request.id } }))).rejects.toThrow();
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentCapture.update({ where: { id: capture.id }, data: providerReceipt("SUBSTITUTED_CAPTURE") }))).rejects.toThrow();
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentCapture.delete({ where: { id: capture.id } }))).rejects.toThrow(); expect(await rows(f.org)).toEqual(before);
+    const attempt = await withTenant(db, f.org, tx => tx.externalPaymentAttempt.findFirstOrThrow({ where: { organizationId: f.org, intentId: request.id } }));
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentAttempt.update({ where: { id: attempt.id }, data: { startedAt: new Date() } }))).rejects.toThrow();
+    await expect(withTenant(db, f.org, tx => tx.externalPaymentAttempt.delete({ where: { id: attempt.id } }))).rejects.toThrow();
+  });
+  it("refuses a native capture of a different exact amount", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db });
+    const ref = await reference(f, request.id), provider = { lookup: vi.fn<() => Promise<{ state: "APPROVED" }>>().mockRejectedValue(Error("Provider read acknowledgement unavailable")), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_POST"))) };
+    await expect(executeExternalPaymentCaptureReference(ref, { db, provider })).rejects.toThrow("Provider read acknowledgement unavailable");
+    await expect(withTenant(db, f.org, tx => new ExternalPaymentRepository(tx, f.org).capture(request.id, { schemaVersion: 1, provider: "paypal", orderId: f.input.orderId, paymentId: "FORGED_CAPTURE", amount: { amount: "0.08", currency: "MAD" } }, new Date().toISOString(), null))).rejects.toThrow("original exact provider capture required");
+    expect((await rows(f.org)).captures).toEqual([]);
+  });
+  it("admits the exact confirmed capture through one original journal and provenance, then recovers after method disablement", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id),
+      provider = { lookup: vi.fn(() => Promise.resolve(({ state: "CAPTURED" as const, ...providerReceipt("ACTUAL_NATIVE_ADMISSION_" + randomUUID()) }))), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_POST"))) };
+    await executeExternalPaymentCaptureReference(ref, { db, provider }); const review = await reviewCapturedPayPalAdmission(f.ctx, { id: requested.id }, { db }),
+      input = { intentId: requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Admit the confirmed original external funds under their reviewed native receipt" }, before = await moneyFacts(f.org),
+      admitted = await admitCapturedPayPalPayment(f.ctx, input, { db });
+    expect(admitted).toMatchObject({ depositId: f.input.receipt.idempotencyKey, operation: "RECEIPT", idempotent: false });
+    const source = await withTenant(db, f.org, async tx => ({ intent: await tx.externalPaymentIntent.findFirstOrThrow({ where: { id: requested.id, organizationId: f.org } }),
+      receipt: await tx.guestPaymentReceipt.findFirstOrThrow({ where: { organizationId: f.org, transactionId: admitted.id } }), postings: await tx.posting.findMany({ where: { organizationId: f.org, transactionId: admitted.id } }) }));
+    expect(source.postings).toHaveLength(2); expect(source.postings.map(posting => posting.amount.toFixed(2))).toEqual(["0.07", "0.07"]);
+    expect(source.receipt).toMatchObject({ accountId: f.banks.receipt.id, collectorUserAccountId: f.account.id, collectorPersonId: f.person.id });
+    expect(source.receipt.financialSnapshotId).toBe((source.intent.sourceSnapshot as { financialSnapshotId: string }).financialSnapshotId);
+    const old = new Set(before.map(row => row.kind + row.id)), saved = await moneyFacts(f.org); expect(saved.filter(row => old.has(row.kind + row.id))).toEqual(before);
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.payment_methods", scopeType: "organization", effectiveFrom: new Date("2020-01-01"), createdBy: f.account.id,
+      value: { methods: [{ key: "confirmed-paypal", labels, adapter: "paypal", enabled: false, currencies: ["MAD"] }] }, reason: "Disable new optional external payments while preserving the original accepted source" }));
+    expect(await admitCapturedPayPalPayment(f.ctx, input, { db })).toEqual({ ...admitted, idempotent: true }); expect(await moneyFacts(f.org)).toEqual(saved); expect(provider.capture).not.toHaveBeenCalled();
+    expect((await getExternalPaymentIntent(f.ctx, { id: requested.id }, { db })).amount).toEqual({ amount: "0.07", currency: "MAD" });
+    expect((await recoverExternalPaymentIntent(f.ctx, { key: f.input.receipt.idempotencyKey }, { db })).request?.admission).toEqual({ state: "ADMITTED", transactionId: admitted.id, depositId: f.input.receipt.idempotencyKey, reversed: false });
+  });
+  it("rolls financial admission back after final independent pay revocation while preserving the actual external capture", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id),
+      provider = { lookup: vi.fn(() => Promise.resolve(({ state: "CAPTURED" as const, ...providerReceipt("ACTUAL_HELD_NATIVE_CAPTURE_" + randomUUID()) }))), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_POST"))) };
+    await executeExternalPaymentCaptureReference(ref, { db, provider }); const review = await reviewCapturedPayPalAdmission(f.ctx, { id: requested.id }, { db }), before = await moneyFacts(f.org), write = auditWriter.writeAuditEvent;
+    vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const saved = await write(tx, event); if (event.action === "finance.payment_method.accepted") {
+      const revoked = await withTenant(db, f.org, inner => inner.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id, permission: { key: "financial_transaction:pay" } } })); expect(revoked.count).toBe(1);
+    } return saved; });
+    await expect(admitCapturedPayPalPayment(f.ctx, { intentId: requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Require final actual independent financial pay authority" }, { db })).rejects.toThrow(PaymentMethodAccessError);
+    expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+  });
+  it("withholds retained capture history when current source authority is revoked", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db });
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+    await expect(getExternalPaymentIntent(f.ctx, { id: requested.id }, { db })).rejects.toThrow(PaymentMethodAccessError);
+  });
+  it("refuses an optional provider with no explicit merchant-account mapping before queuing any capture", async () => {
+    const f = await fixture();
+    await withTenant(db, f.org, async tx => {
+      await new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.payment_methods", scopeType: "organization", effectiveFrom: new Date("2020-01-01"), createdBy: f.account.id,
+        value: { methods: [{ key: "confirmed-paypal", labels, adapter: "paypal", enabled: true, currencies: ["MAD"] }] }, reason: "Unconfigured provider location must not be inferred from the selected bank" });
+      f.input.receipt.paymentMethodFingerprint = (await new PaymentMethodRepository(tx, f.org).catalog({ at: await new FinanceRepository(tx, f.org).clock(), currency: "MAD", scopes: [{ scopeType: "organization", scopeId: null }] })).identity;
+    });
+    await expect(requestExternalPaymentCapture(f.ctx, f.input, { db })).rejects.toThrow(PaymentMethodConfigurationError); expect((await rows(f.org)).intents).toEqual([]);
+  });
+  it("refuses a caller-selected different bank despite otherwise valid receipt and source permissions", async () => {
+    const f = await fixture(), before = await moneyFacts(f.org); f.input.receipt.accountId = f.receiptInput.accountId;
+    f.input.receipt.reviewFingerprint = await withTenant(db, f.org, async tx => (await inspectGuestDepositReceiptInTransaction(f.ctx, { ...f.receiptInput, method: "confirmed-paypal", externalReference: f.input.orderId }, tx)).fingerprint);
+    await expect(requestExternalPaymentCapture(f.ctx, f.input, { db })).rejects.toThrow(PaymentMethodConfigurationError);
+    expect((await rows(f.org)).intents).toEqual([]); expect(await moneyFacts(f.org)).toEqual(before);
+  });
+  it("admits already-captured money under its retained original method after new captures are disabled and remapped", async () => {
+    const f = await fixture(), requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id), provider = {
+      lookup: vi.fn(() => Promise.resolve({ state: "CAPTURED" as const, ...providerReceipt("ORIGINAL_DISABLED_METHOD_CAPTURE_" + randomUUID()) })), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_CAPTURE_AGAIN"))) };
+    await executeExternalPaymentCaptureReference(ref, { db, provider });
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.payment_methods", scopeType: "organization", effectiveFrom: new Date("2020-01-01"), createdBy: f.account.id,
+      value: { methods: [{ key: "confirmed-paypal", labels, adapter: "paypal", enabled: false, currencies: ["MAD"], provider_account_code: f.banks.refund.code }] }, reason: "Disable future captures without moving original provider-held money into another bank" }));
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: requested.id }, { db }); expect(review.method.provider_account_code).toBe(f.banks.receipt.code);
+    const admitted = await admitCapturedPayPalPayment(f.ctx, { intentId: requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Record the actual original capture in its retained merchant location" }, { db });
+    const proof = await withTenant(db, f.org, async tx => ({ source: await tx.externalPaymentIntent.findFirstOrThrow({ where: { id: requested.id, organizationId: f.org } }),
+      acceptance: await tx.auditLog.findFirstOrThrow({ where: { organizationId: f.org, resourceId: admitted.id, action: "finance.payment_method.accepted" } }),
+      receipt: await tx.guestPaymentReceipt.findFirstOrThrow({ where: { organizationId: f.org, transactionId: admitted.id } }) }));
+    expect(proof.receipt.accountId).toBe(f.banks.receipt.id); expect(proof.acceptance.after).toMatchObject({ policyId: proof.source.policyId, policyVersion: proof.source.policyVersion }); expect(provider.capture).not.toHaveBeenCalled();
+    const forged = { ...(proof.acceptance.after as Record<string, unknown>), policyId: randomUUID() };
+    await expect(withTenant(db, f.org, tx => auditWriter.writeAuditEvent(tx, { organizationId: f.org, actorId: f.account.id, resourceType: "financial_transaction", resourceId: admitted.id,
+      action: "finance.payment_method.accepted", after: forged, reason: "Prove native refusal of a forged captured method attribution", requestId: randomUUID(), occurredAt: new Date() }))).rejects.toThrow("actual original captured method audit required");
+  });
+  it("posts the provider's original capture date across a month boundary instead of the later reconciliation clock", async () => {
+    const f = await fixture(), now = new Date(f.receiptInput.receivedAt), capturedAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59)).toISOString(), paymentId = "ACTUAL_PRIOR_MONTH_CAPTURE_" + randomUUID();
+    captureTimes.set(paymentId, capturedAt); const requested = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, requested.id), provider = {
+      lookup: vi.fn(() => Promise.resolve({ state: "CAPTURED" as const, ...providerReceipt(paymentId) })), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_CAPTURE_AGAIN"))) };
+    const captured = await executeExternalPaymentCaptureReference(ref, { db, provider }); expect(captured.capturedAt).toBe(capturedAt); expect(captured.observedAt?.slice(0, 7)).not.toBe(capturedAt.slice(0, 7));
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: requested.id }, { db }); expect(review.receivedAt).toBe(capturedAt);
+    const admitted = await admitCapturedPayPalPayment(f.ctx, { intentId: requested.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Retain the actual original economic date without synthetic reconciliation-time dating" }, { db });
+    const original = await withTenant(db, f.org, tx => tx.financialTransaction.findFirstOrThrow({ where: { organizationId: f.org, id: admitted.id } })); expect(original.occurredAt.toISOString()).toBe(capturedAt); expect(provider.capture).not.toHaveBeenCalled();
+  });
+  it("retains nonzero deductions and actual net while withholding an incomplete gross-only financial admission", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), before = await moneyFacts(f.org), evidence = providerReceipt("ACTUAL_NET_CAPTURE_" + randomUUID());
+    evidence.settlement.fee.amount = "0.02"; evidence.settlement.net.amount = "0.05";
+    const provider = { lookup: vi.fn(() => Promise.resolve({ state: "CAPTURED" as const, ...evidence })), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_CAPTURE_AGAIN"))) };
+    const retained = await executeExternalPaymentCaptureReference(ref, { db, provider }); expect(retained.settlement).toMatchObject({ gross: { amount: "0.07" }, fee: { amount: "0.02" }, net: { amount: "0.05" } });
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: request.id }, { db });
+    await expect(admitCapturedPayPalPayment(f.ctx, { intentId: request.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Do not claim gross funds are physically held before the actual deduction is posted" }, { db })).rejects.toThrow(ExternalPaymentIntentError);
+    expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1); expect(provider.capture).not.toHaveBeenCalled();
+  });
+  it("does not fabricate net or a zero fee when the original provider settlement is unavailable", async () => {
+    const f = await fixture(), request = await requestExternalPaymentCapture(f.ctx, f.input, { db }), ref = await reference(f, request.id), before = await moneyFacts(f.org),
+      provider = { lookup: vi.fn(() => Promise.resolve({ state: "CAPTURED" as const, ...providerReceipt("ACTUAL_UNKNOWN_NET_" + randomUUID()), settlement: null })), capture: vi.fn(() => Promise.resolve(providerReceipt("NEVER_CAPTURE_AGAIN"))) };
+    const retained = await executeExternalPaymentCaptureReference(ref, { db, provider }); expect(retained.state).toBe("CAPTURED"); expect(retained.settlement).toBeNull();
+    const review = await reviewCapturedPayPalAdmission(f.ctx, { id: request.id }, { db });
+    await expect(admitCapturedPayPalPayment(f.ctx, { intentId: request.id, reviewFingerprint: review.reviewFingerprint, paymentMethodFingerprint: review.paymentMethodFingerprint, reason: "Keep the actual capture without inventing its unavailable merchant settlement" }, { db })).rejects.toThrow(ExternalPaymentIntentError);
+    expect(await moneyFacts(f.org)).toEqual(before); expect((await rows(f.org)).captures).toHaveLength(1);
+  });
+});

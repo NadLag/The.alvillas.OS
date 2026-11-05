@@ -1,4 +1,5 @@
 import { financialAttachmentAuthorityChecks } from "@/platform/authz/financial-attachment-resource";
+import { canReadExternalPayment } from "@/platform/authz/external-payment-resource";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import {financialRuleKeysIn,financialRuleAccess,recurringCompanyExpensePolicyKey} from "@/platform/config/financial-rule-authority";
@@ -91,6 +92,13 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
+  if (row.action.startsWith("finance.external_payment.")) {
+    const allowed = Boolean(row.resourceType === "financial_transaction" && financialResource?.id === row.resourceId &&
+      canReadExternalPayment(ctx.authContext, financialResource, action, new Date(), row.action.startsWith("finance.external_payment.fee_")));
+    return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,
+      { type: auditLogResource, organizationId: ctx.organizationId, propertyId: row.propertyScopeId, data: row },
+      { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
+  }
   if (row.resourceType === "accountant_export") {
     const allowed = canViewAccountantExport(ctx.authContext, action, new Date());
     return present({ ...ctx.authContext, visibleDataClasses: new Set(allowed ? ["financial"] : []) }, action,

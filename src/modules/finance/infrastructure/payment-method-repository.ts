@@ -16,6 +16,14 @@ export class PaymentMethodRepository {
     if (!catalog) throw new PaymentMethodConfigurationError();
     return catalog;
   }
+  async retainedCatalog(input: { ruleId: string; version: number; identity: string; currency: string }) {
+    const rule = await new ConfigRuleRepository(this.tx, this.organizationId).findById(input.ruleId);
+    if (!rule || rule.key !== paymentMethodPolicyKey || rule.version !== input.version || !/^[a-f0-9]{64}$/u.test(input.identity)) throw new PaymentMethodConfigurationError();
+    const policy = paymentMethodPolicySchema.parse(rule.value), references = await new FinancialTransferRepository(this.tx, this.organizationId).currencyChoices();
+    if (!references.currencies.some(row => row.code === input.currency)) throw new PaymentMethodConfigurationError();
+    return { rule: { ...rule, parsedValue: policy }, policy, currency: input.currency, currencies: references.currencies, identity: input.identity,
+      methods: policy.methods.filter(method => method.enabled && method.currencies.includes(input.currency)) };
+  }
   async optionalCatalog(input: { at: Date; currency?: string; scopes: ConfigScopeCandidate[] }) {
     const rule = await new ConfigRuleRepository(this.tx, this.organizationId).resolve({ key: paymentMethodPolicyKey, scopes: input.scopes, asOf: input.at });
     if (!rule) return null; const parsed = paymentMethodPolicySchema.safeParse(rule.value);

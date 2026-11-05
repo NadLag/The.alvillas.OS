@@ -3,21 +3,22 @@ import { useCallback,useEffect,useRef,useState } from "react";
 import { z } from "zod";
 type Receipt={requestId:string;state:"PENDING"|"SUCCEEDED"|"DENIED"|"CONFLICT"|"FAILED";failureCode:string|null};
 type State="checking"|"ready"|"sending"|"pending"|"uncertain"|"offline"|"forbidden"|"recoveryUnavailable"|"terminal"|"succeeded";
-type Options<I extends {idempotencyKey:string},R extends Receipt>={storageKey:string;inputSchema:z.ZodType<I>;receiptSchema:z.ZodType<R>;requestPath:string;recoveryPath:string;statusPath?:(id:string)=>string;recoverySchema?:z.ZodType<{request:R|null}>;recoveryInput:(key:string)=>unknown;requestBody?:(input:I)=>{headers?:HeadersInit;body:BodyInit};resumeInput?:(receipt:R)=>I|null;accept:(receipt:R,input:I|null,nonce:string|null)=>boolean;onSuccess:(receipt:R)=>void;onInvalidate:()=>void};
+type Options<I extends {idempotencyKey:string},R extends Receipt>={storageKey:string;inputSchema:z.ZodType<I>;receiptSchema:z.ZodType<R>;requestPath:string;recoveryPath:string;statusPath?:(id:string)=>string;recoverySchema?:z.ZodType<{request:R|null}>;recoveryInput:(key:string)=>unknown;requestBody?:(input:I)=>{headers?:HeadersInit;body:BodyInit};resumeInput?:(receipt:R)=>I|null;accept:(receipt:R,input:I|null,nonce:string|null)=>boolean;onSuccess:(receipt:R)=>void;onPending?:(receipt:R)=>void;onInvalidate:()=>void};
 const readNonce=(key:string)=>{try{const value=z.uuid().safeParse(sessionStorage.getItem(key));return value.success?value.data:null;}catch{return null;}};
 const storeNonce=(key:string,value:string)=>{try{sessionStorage.setItem(key,value);}catch{/* Exact retries remain available in memory. */}};
 const removeNonce=(key:string,value:string)=>{try{if(sessionStorage.getItem(key)===value)sessionStorage.removeItem(key);}catch{/* Storage is optional. */}};
+export { storeNonce as storeCompensationNonce };
 /** Only a scoped random nonce survives reloads. Financial intent and authority stay in memory. */
-export function useCompensationCommand<I extends {idempotencyKey:string},R extends Receipt>({storageKey,inputSchema,receiptSchema,requestPath,recoveryPath,statusPath,recoverySchema,recoveryInput,requestBody,resumeInput,accept,onSuccess,onInvalidate}:Options<I,R>){
+export function useCompensationCommand<I extends {idempotencyKey:string},R extends Receipt>({storageKey,inputSchema,receiptSchema,requestPath,recoveryPath,statusPath,recoverySchema,recoveryInput,requestBody,resumeInput,accept,onSuccess,onPending,onInvalidate}:Options<I,R>){
   const [state,setState]=useState<State>("checking"),[error,setError]=useState<string|null>(null),[requestId,setRequestId]=useState<string|null>(null);
   const nonce=useRef<string|null>(null),intent=useRef<I|null>(null),busy=useRef(false),generation=useRef(0),alive=useRef(false);
   const invalidateGeneration=useCallback(()=>{generation.current++;},[]);
   const receive=useCallback((receipt:R)=>{if(!accept(receipt,intent.current,nonce.current)||receipt.state==="PENDING"&&receipt.failureCode!==null||receipt.state!=="PENDING"&&receipt.state!=="SUCCEEDED"&&!receipt.failureCode)throw Error("Invalid source acknowledgement");
     if(receipt.state==="SUCCEEDED"){if(nonce.current)removeNonce(storageKey,nonce.current);intent.current=null;setRequestId(null);setState("succeeded");setError(null);onSuccess(receipt);return;}
     if(receipt.state==="PENDING"&&!statusPath)throw Error("Pending acknowledgement requires a status endpoint");
-    if(receipt.state==="PENDING"){if(resumeInput){const retained=inputSchema.parse(resumeInput(receipt));if(retained.idempotencyKey!==nonce.current)throw Error("Different original request nonce");intent.current=retained;}setRequestId(receipt.requestId);setState("pending");setError(null);return;}
+    if(receipt.state==="PENDING"){if(resumeInput){const retained=inputSchema.parse(resumeInput(receipt));if(retained.idempotencyKey!==nonce.current)throw Error("Different original request nonce");intent.current=retained;}setRequestId(receipt.requestId);setState("pending");setError(null);onPending?.(receipt);return;}
     intent.current=null;setRequestId(null);setState("terminal");setError(receipt.failureCode);
-  },[accept,onSuccess,storageKey,statusPath,resumeInput,inputSchema]);
+  },[accept,onSuccess,onPending,storageKey,statusPath,resumeInput,inputSchema]);
   const deny=useCallback(()=>{generation.current++;intent.current=null;setRequestId(null);setState("forbidden");setError("forbidden");onInvalidate();},[onInvalidate]);
   const recover=useCallback(async()=>{
     if(!navigator.onLine){setState("offline");return;}if(!nonce.current){setState("ready");return;}

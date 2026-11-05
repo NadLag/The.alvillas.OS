@@ -27,6 +27,7 @@ export class GuestDepositRepository{
  byCommand(key:string){return this.tx.financialTransaction.findFirst({where:{organizationId:this.organizationId,idempotencyKey:guestDepositCommandKey(key)},include});}
  async receipt(depositId:string){const row=await this.byCommand(depositId);return row?.reference==="GUEST_DEPOSIT:"+depositId&&!row.reversesTransactionId?row:null;}
  journal(id:string){return this.tx.financialTransaction.findFirst({where:{organizationId:this.organizationId,id},include});}
+ async externalCaptureSource(depositId:string){const row=await this.tx.externalPaymentIntent.findUnique({where:{organizationId_idempotencyKey:{organizationId:this.organizationId,idempotencyKey:depositId}},select:{capture:{select:{id:true}}}});return row?.capture??null;}
  cashSource(id:string){return this.tx.cashCollection.findFirst({where:{organizationId:this.organizationId,id},include:{transaction:{include},property:{select:{city:true,cityId:true,region:true,regionId:true}}}});}
  cashSources(reservationId:string,before?:string){return this.tx.cashCollection.findMany({where:{organizationId:this.organizationId,reservationId,...before?{id:{lt:before}}:{}},orderBy:{id:"desc"},take:51,include:{transaction:{include}}});}
  cashBookingRevision(reservationId:string,recordedAt:Date){return this.tx.reservationRevision.findFirst({where:{organizationId:this.organizationId,reservationId,createdAt:{lte:recordedAt}},orderBy:{version:"desc"},select:{id:true,after:true}});}

@@ -1,13 +1,14 @@
 import { z } from "zod";
-import { authorize, type Resource } from "@/platform/authz/authorize";
+import { authorize, type Resource, type AuthContext } from "@/platform/authz/authorize";
 import { present } from "@/platform/authz/present";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { prisma } from "@/platform/db/client";
+import { captureAuthorizationCap, restoreAuthorizationCap } from "@/platform/authz/authorization-cap";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { Money } from "@/platform/money/money";
 import { calendarDateAt } from "@/i18n/format";
-import { expenseDraftSchema, expenseResource, viewableExpenseResource, isExpenseFundingAccount, expenseFundingWalletResource, type ExpenseDraftInput } from "../domain/expense";
+import { expenseDraftSchema, expenseResource, viewableExpenseResource, expenseOccurredAt, isExpenseFundingAccount, expenseFundingWalletResource, type ExpenseDraftInput } from "../domain/expense";
 import { ExpenseRepository, type ExpenseRecord } from "../infrastructure/expense-repository";
 import { FinanceRepository } from "../infrastructure/finance-repository";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
@@ -234,35 +235,43 @@ export async function submitExpense(ctx: FinanceActorContext, raw: unknown, deps
   });
 }
 
-async function editorChoices(ctx:FinanceActorContext,tx:TenantTransaction,target:Resource,now:Date,selectedReservationId?:string|null,selectedFundingAccountId?:string|null){
+async function editorChoices(ctx:FinanceActorContext,tx:TenantTransaction,target:Resource,now:Date,selectedReservationId?:string|null,selectedFundingAccountId?:string|null,authorities:readonly AuthContext[]=[]){
   if(!target.propertyId)throw new ExpenseAccessError();
+  const can=(action:"view"|"configure",resource:Resource,at=now)=>[ctx.authContext,...authorities].every(authority=>authorize(authority,action,resource,at));
   const repository=new ExpenseRepository(tx,ctx.organizationId),sources=await repository.editorSources();
   const accounts=(await new FinanceRepository(tx,ctx.organizationId).listRevenuePostingAccounts()).filter(account=>!account.code.startsWith("CASH_CUSTODY_")&&
-    authorize(ctx.authContext,"view",{...target,type:"financial_transaction",id:account.id,financialRecordId:account.id},now));
+    can("view",{...target,type:"financial_transaction",id:account.id,financialRecordId:account.id},now));
   if(selectedFundingAccountId&&!accounts.some(account=>account.id===selectedFundingAccountId)){
     const selected=await new FinanceRepository(tx,ctx.organizationId).findLedgerAccountById(selectedFundingAccountId);
     const wallet=selected&&expenseFundingWalletResource(ctx.organizationId,selected,String(target.amount??"0"));
-    if(selected&&isExpenseFundingAccount(selected)&&(!wallet||authorize(ctx.authContext,"view",wallet,now))&&authorize(ctx.authContext,"view",{...target,type:"financial_transaction",id:selected.id,financialRecordId:selected.id},now))
+    if(selected&&isExpenseFundingAccount(selected)&&(!wallet||can("view",wallet,now))&&can("view",{...target,type:"financial_transaction",id:selected.id,financialRecordId:selected.id},now))
       accounts.push({id:selected.id,name:selected.name,code:selected.code});
   }
   const choices=await repository.reservationChoices(target.propertyId);
   if(selectedReservationId&&!choices.some(row=>row.id===selectedReservationId)){
     const selected=await repository.reservation(selectedReservationId);if(selected?.propertyId===target.propertyId)choices.push(selected);
   }
-  const reservations=choices.filter(reservation=>authorize(ctx.authContext,"view",{...target,type:"reservation",id:reservation.id,reservationId:reservation.id,
+  const reservations=choices.filter(reservation=>can("view",{...target,type:"reservation",id:reservation.id,reservationId:reservation.id,
     dataClass:"operational",status:reservation.status,assignedUserAccountId:reservation.createdBy},now)).map(({id,reference})=>({id,reference}));
   const chart={type:"financial_transaction",organizationId:ctx.organizationId,dataClass:"financial" as const};
-  return{...sources,accounts,reservations,canConfigureAccounts:authorize(ctx.authContext,"view",chart,now)&&authorize(ctx.authContext,"configure",chart,now)};
+  return{...sources,accounts,reservations,canConfigureAccounts:can("view",chart,now)&&can("configure",chart,now)};
 }
 export async function getExpenseDraftEditor(ctx:FinanceActorContext,id:string,deps:Deps={}){
   assertActor(ctx);z.uuid().parse(id);
+  const heldCtx={...ctx,authContext:restoreAuthorizationCap(captureAuthorizationCap(ctx.authContext))};
   return withTenant(deps.db??prisma,ctx.organizationId,async tx=>{
     const repository=new ExpenseRepository(tx,ctx.organizationId),clock=await repository.clock();ctx=await current(ctx,tx);
     const row=await repository.find(id);if(!row||row.property.archivedAt)throw new ExpenseAccessError();
     const target=resource(ctx,sourceProperty(row),{...row,amount:row.amount.toString()});
     if(!authorize(ctx.authContext,"view",target,clock.now)||!authorize(ctx.authContext,"edit",target,clock.now))throw new ExpenseAccessError();
     if(row.state!=="DRAFT")throw new ExpenseConflictError();
-    const choices=await editorChoices(ctx,tx,target,clock.now,row.reservationId,row.fundingAccountId);
+    await recheckFinanceAuthorization(heldCtx,tx,clock.now,[{action:"view",resource:target},{action:"edit",resource:target}],new ExpenseAccessError());
+    const choices=await editorChoices(ctx,tx,target,clock.now,row.reservationId,row.fundingAccountId,[heldCtx.authContext]);
+    if(row.externalPaymentFee){
+      await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"expense.editor_viewed",resourceType:"expense",resourceId:row.id,propertyScopeId:row.propertyId,after:{expenseId:row.id},reason:"Viewed the original provider deduction expense editor",requestId:deps.requestId??crypto.randomUUID(),occurredAt:(await repository.clock()).now});
+      const finalClock=await repository.clock(),fresh=await current(heldCtx,tx);await recheckFinanceAuthorization(heldCtx,tx,finalClock.now,[{action:"view",resource:target},{action:"edit",resource:target}],new ExpenseAccessError());
+      if(JSON.stringify(choices)!==JSON.stringify(await editorChoices(fresh,tx,target,finalClock.now,row.reservationId,row.fundingAccountId,[heldCtx.authContext])))throw new ExpenseAccessError();
+    }
     return{editor:{property:{id:row.property.id,name:row.property.name,timezone:row.property.timezone},...choices,today:calendarDateAt(clock.now,row.property.timezone)},
       draft:{...facts(row),idempotencyKey:row.idempotencyKey}};
   });
@@ -283,14 +292,16 @@ export async function getExpenseEditor(ctx: FinanceActorContext, propertyId: str
 }
 export async function getExpense(ctx: FinanceActorContext, id: string, deps: Deps = {}) {
   assertActor(ctx); z.uuid().parse(id);
+  const heldCtx={...ctx,authContext:restoreAuthorizationCap(captureAuthorizationCap(ctx.authContext))};
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new ExpenseRepository(tx, ctx.organizationId), clock = await repository.clock(); ctx = await current(ctx, tx);
     const row = await repository.find(id); if (!row || row.property.archivedAt) throw new ExpenseAccessError();
     const stored = z.object({ policies:z.array(z.object({ownerId:z.uuid()})),timezone:z.string().optional(),postHocOwnerNotificationRequired:z.boolean().optional() }).safeParse(row.submission?.snapshot ?? row.correctsExpense?.submission?.snapshot);
     const periods=new AccountingPeriodRepository(tx,ctx.organizationId),property={...row.property,timezone:stored.success&&stored.data.timezone?stored.data.timezone:row.property.timezone};
-    const occurredAt=await periods.sourceInstant(row.occurredOn,property.timezone),sourceFacts={...row,amount:row.amount.toString(),occurredAt};
+    const occurredAt=expenseOccurredAt(property,{...row,amount:row.amount.toString(),occurredAt:await periods.sourceInstant(row.occurredOn,property.timezone)}),sourceFacts={...row,amount:row.amount.toString(),occurredAt};
     const target = viewableExpenseResource(ctx.authContext,property,sourceFacts,stored.success?stored.data.policies.map(policy=>policy.ownerId):[],clock.now);
     if (!target) throw new ExpenseAccessError();
+    await recheckFinanceAuthorization(heldCtx,tx,clock.now,[{action:"view",resource:target}],new ExpenseAccessError());
     const postingSource=expenseResource(ctx.organizationId,property,sourceFacts),financialSource={...postingSource,type:"financial_transaction" as const};
     const funding=await new FinanceRepository(tx,ctx.organizationId).findLedgerAccountById(row.fundingAccountId);
     const wallet=funding&&expenseFundingWalletResource(ctx.organizationId,funding,row.amount.toString(),occurredAt);
@@ -319,7 +330,7 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
     const canPostInCurrentPeriod=payable&&correctionCanPost&&(Boolean(row.correctsExpenseId)||sourcePeriodClosed)&&authorize(ctx.authContext,"override",financialSource,clock.now)&&
       authorize(ctx.authContext,"create",{...financialSource,occurredAt:clock.now},clock.now);
     const originalJournal={...financialSource,id:row.transactionId??row.id,financialRecordId:row.transactionId??row.id,occurredAt:row.transaction?.occurredAt??occurredAt};
-    const canCorrect=walletVisible&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&
+    const canCorrect=!row.externalPaymentFee&&walletVisible&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&
       authorize(ctx.authContext,"view",originalJournal,clock.now)&&authorize(ctx.authContext,"override",originalJournal,clock.now)&&
       authorize(ctx.authContext,"create",{...postingSource,id:undefined,financialRecordId:undefined,status:"DRAFT",assignedUserAccountId:ctx.actorId},clock.now)&&
       authorize(ctx.authContext,"view",{...financialSource,id:row.fundingAccountId,financialRecordId:row.fundingAccountId},clock.now);
@@ -331,8 +342,12 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
       postingAdjustment:visibleAdjustment?{id:visibleAdjustment.id,sourcePeriodId:visibleAdjustment.period.id,
         sourceMonth:visibleAdjustment.period.month.toISOString().slice(0,7),sourceOccurredAt:visibleAdjustment.sourceOccurredAt.toISOString(),
         postedAt:row.transaction!.occurredAt.toISOString(),reason:visibleAdjustment.reason}:null,
-      canVoid:walletVisible&&(!wallet||authorize(ctx.authContext,"void",wallet,clock.now))&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"void",postingSource,clock.now)&&
+      canVoid:!row.externalPaymentFee&&walletVisible&&(!wallet||authorize(ctx.authContext,"void",wallet,clock.now))&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"void",postingSource,clock.now)&&
         authorize(ctx.authContext,"void",{...financialSource,id:row.transactionId!,financialRecordId:row.transactionId!,occurredAt:row.transaction?.occurredAt??occurredAt},clock.now) };
+    if(row.externalPaymentFee){
+      await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"expense.viewed",resourceType:"expense",resourceId:row.id,propertyScopeId:row.propertyId,after:{expenseId:row.id,occurredAt:occurredAt.toISOString()},reason:"Viewed the original source-bound provider deduction expense",requestId:deps.requestId??crypto.randomUUID(),occurredAt:(await repository.clock()).now});
+      await recheckFinanceAuthorization(heldCtx,tx,(await repository.clock()).now,[{action:"view",resource:target}],new ExpenseAccessError());
+    }
     return present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...target, data }, {}, clock.now) as typeof data;
   });
 }

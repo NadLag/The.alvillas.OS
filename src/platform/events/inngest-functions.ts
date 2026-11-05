@@ -24,6 +24,7 @@ import {tickReceivableReminders} from "@/modules/finance/application/receivable-
 import {tickRecurringExpenses} from "@/modules/finance/application/recurring-expense-service";
 import {tickRecurringCompanyExpenses} from "@/modules/finance/application/recurring-company-expense-service";
 import {tickLedgerIntegrity} from "@/modules/finance/application/ledger-integrity-service";
+import {externalPaymentCaptureRequested,executeExternalPaymentCaptureReference,failExternalPaymentCaptureReference} from "@/modules/finance/application/external-payment-service";
 
 export { outboxDispatchEvent };
 export const outboxDispatchInput = z.object({ organizationId: z.string().uuid(), outboxEventId: z.string().uuid() }).strict();
@@ -104,8 +105,10 @@ export const cleanupUploadParts = inngest.createFunction({ id: "cleanup-field-up
   return { organizations: organizations.length, cleaned };
 });
 export const recognizeSupplierInvoices = inngest.createFunction({ id: "supplier-invoice-recognition", name: "ALVILLAS OS financial commands",
-  triggers: [{ event: supplierInvoiceRecognitionRequested }, { event: supplierInvoiceReversalRequested },{event:employeeCompensationSubmissionRequested},{event:employeeCompensationRecognitionRequested},{event:employeeMonthlyRunRequested},{event:employeeEarningRunRequested}], concurrency: { limit: 1 }, retries: 3
-}, async ({ event, step }) => event.name===employeeEarningRunRequested?
+  triggers: [{ event: supplierInvoiceRecognitionRequested }, { event: supplierInvoiceReversalRequested },{event:employeeCompensationSubmissionRequested},{event:employeeCompensationRecognitionRequested},{event:employeeMonthlyRunRequested},{event:employeeEarningRunRequested},{event:externalPaymentCaptureRequested}], concurrency: { limit: 1 }, retries: 3
+}, async ({ event, step }) => event.name===externalPaymentCaptureRequested?
+  step.run("capture-original-external-order",()=>executeExternalPaymentCaptureReference(event.data)):
+  event.name===employeeEarningRunRequested?
   step.run("create-reviewed-actual-earning-run",()=>executeEmployeeEarningRunReference(event.data,{eventType:event.name})):
   event.name===employeeMonthlyRunRequested?
   step.run("create-reviewed-monthly-contractual-run",()=>executeEmployeeMonthlyRunReference(event.data,{eventType:event.name})):
@@ -116,7 +119,7 @@ export const recognizeSupplierInvoices = inngest.createFunction({ id: "supplier-
   step.run(event.name === supplierInvoiceReversalRequested ? "reverse-actual-recognized-invoice" : "recognize-actual-approved-invoice",
   () => executeSupplierInvoiceRecognitionReference(event.data, { eventType: event.name })));
 const failedInvoiceExecution = z.object({ function_id: z.literal("alvillas-os-supplier-invoice-recognition"),
-  event: z.object({ name: z.enum([supplierInvoiceRecognitionRequested, supplierInvoiceReversalRequested,employeeCompensationSubmissionRequested,employeeCompensationRecognitionRequested,employeeMonthlyRunRequested,employeeEarningRunRequested]), data: outboxDispatchInput }) });
+  event: z.object({ name: z.enum([supplierInvoiceRecognitionRequested, supplierInvoiceReversalRequested,employeeCompensationSubmissionRequested,employeeCompensationRecognitionRequested,employeeMonthlyRunRequested,employeeEarningRunRequested,externalPaymentCaptureRequested]), data: outboxDispatchInput }) });
 // The SDK's automatic onFailure registration omits concurrency. An explicit consumer
 // keeps both workers within the existing plan's checked admission limits.
 export const failSupplierInvoiceRecognitions = inngest.createFunction({ id: "supplier-invoice-recognition-failure", name: "ALVILLAS OS supplier recognition failure receipt",
@@ -124,6 +127,7 @@ export const failSupplierInvoiceRecognitions = inngest.createFunction({ id: "sup
 }, async ({ event, step }) => {
   const failure = failedInvoiceExecution.safeParse(event.data);
   if (!failure.success) throw new NonRetriableError("supplier_invoice_failure_reference_denied");
+  if(failure.data.event.name===externalPaymentCaptureRequested)return step.run("retain-unconfirmed-original-provider-outcome",()=>failExternalPaymentCaptureReference(failure.data.event.data));
   if(failure.data.event.name===employeeEarningRunRequested)return step.run("record-terminal-earning-run-failure",()=>failEmployeeEarningRunReference(failure.data.event.data,{eventType:employeeEarningRunRequested}));
   if(failure.data.event.name===employeeMonthlyRunRequested)return step.run("record-terminal-monthly-run-failure",()=>failEmployeeMonthlyRunReference(failure.data.event.data,{eventType:employeeMonthlyRunRequested}));
   if(failure.data.event.name===employeeCompensationRecognitionRequested)return step.run("record-terminal-employee-recognition-failure",()=>failEmployeeCompensationFinancialReference(failure.data.event.data,{eventType:employeeCompensationRecognitionRequested}));

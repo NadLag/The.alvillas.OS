@@ -23,7 +23,8 @@ import { guestPaymentMethodScopes, lockGuestPaymentMethods } from "./guest-depos
 type Intent = Parameters<PaymentProvider["record"]>[0];
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 type Outcome = { id: string; idempotent: boolean };
-type NativeSource = { adapter: "manual" | "bank_transfer" | "cash" | "airbnb_settlement"; methodKey: string; namespace: string; source: string; amount: Money; command: unknown; paymentMethodFingerprint?: string; reservationId?: string;
+export type NativeSource = { adapter: "manual" | "bank_transfer" | "cash" | "airbnb_settlement" | "paypal"; methodKey: string; namespace: string; source: string; amount: Money; command: unknown; paymentMethodFingerprint?: string; reservationId?: string;
+  retainedCatalog?: (tx: TenantTransaction) => ReturnType<PaymentMethodRepository["catalog"]>;
   preflight: (runner: TenantTransactionRunner) => Promise<unknown>; post: (runner: TenantTransactionRunner) => Promise<Outcome> };
 const acceptedSchema = z.object({ schemaVersion: z.literal(1), key: z.literal(paymentMethodPolicyKey), sourceNamespace: z.string(), source: z.string(), adapter: paymentMethodSchema.shape.adapter,
   methodKey: paymentMethodSchema.shape.key, commandHash: z.string().regex(/^[a-f0-9]{64}$/u), amount: z.object({ amount: z.string(), currency: z.string() }),
@@ -37,7 +38,7 @@ function assertIntent(input: Intent, source: NativeSource) {
   const amount = Money.of(guestDepositReviewInput.shape.amount.parse(input.amount), guestDepositReviewInput.shape.currency.parse(input.currency));
   if (z.string().parse(input.source) !== source.source || !amount.equals(source.amount)) throw new PaymentMethodSourceError();
 }
-function nativeTransaction(tx: TenantTransaction): TenantTransactionRunner {
+export function nativeTransaction(tx: TenantTransaction): TenantTransactionRunner {
   return { $transaction: async (work, options) => {
     if (options?.isolationLevel || options?.timeout !== undefined && options.timeout !== tenantTransactionDefaults.timeout) throw new PaymentMethodConfigurationError();
     return work(tx);
@@ -52,7 +53,7 @@ async function unconfiguredGuestPayment<T>(tx: TenantTransaction, ctx: FinanceAc
 }
 
 /** Native adapters borrow one tenant transaction and delegate every monetary effect to the original producer. */
-async function admitNative(ctx: FinanceActorContext, source: NativeSource, deps: Deps) {
+export async function admitNative(ctx: FinanceActorContext, source: NativeSource, deps: Deps) {
   const hash = commandFingerprint({ actorId: ctx.actorId, adapter: source.adapter, methodKey: source.methodKey, sourceNamespace: source.namespace, source: source.source, amount: source.amount.toJSON(), command: source.command });
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const runner = nativeTransaction(tx), repository = new PaymentMethodRepository(tx, ctx.organizationId), finance = new FinanceRepository(tx, ctx.organizationId);
@@ -66,7 +67,8 @@ async function admitNative(ctx: FinanceActorContext, source: NativeSource, deps:
       return { paymentId: replay.id, idempotent: true };
     }
     await source.preflight(runner);
-    const scopes = source.reservationId ? await guestPaymentMethodScopes(tx, ctx.organizationId, source.reservationId, await finance.clock()) : [{ scopeType: "organization" as const, scopeId: null }], catalog = await repository.catalog({ at: await finance.clock(), currency: source.amount.currency, scopes }),
+    if (source.retainedCatalog && source.adapter !== "paypal") throw new PaymentMethodSourceError();
+    const scopes = source.reservationId ? await guestPaymentMethodScopes(tx, ctx.organizationId, source.reservationId, await finance.clock()) : [{ scopeType: "organization" as const, scopeId: null }], catalog = source.retainedCatalog ? await source.retainedCatalog(tx) : await repository.catalog({ at: await finance.clock(), currency: source.amount.currency, scopes }),
       method = configuredPaymentMethod(catalog.policy, source.methodKey, source.amount), reference = catalog.currencies.find(row => row.code === source.amount.currency);
     if (method.adapter !== source.adapter || !reference || source.amount.amount.decimalPlaces() > reference.minorUnit) throw new PaymentMethodSourceError();
     if (source.adapter !== "airbnb_settlement" && source.paymentMethodFingerprint !== catalog.identity) throw new PaymentMethodChangedError();
@@ -75,6 +77,10 @@ async function admitNative(ctx: FinanceActorContext, source: NativeSource, deps:
     // The producer already holds its funding-account locks. Keep the established account-before-policy lock order.
     await lockGuestPaymentMethods(tx, ctx.organizationId, scopes);
     const configurationUnchanged = async () => {
+      if (source.retainedCatalog) {
+        if (commandFingerprint(await source.retainedCatalog(tx)) !== commandFingerprint(catalog)) throw new PaymentMethodChangedError();
+        return;
+      }
       const current = source.reservationId ? await guestPaymentMethodScopes(tx, ctx.organizationId, source.reservationId, await finance.clock()) : scopes;
       if (commandFingerprint(current) !== commandFingerprint(scopes) ||
         (await repository.catalog({ at: await finance.clock(), currency: source.amount.currency, scopes: current })).identity !== catalog.identity) throw new PaymentMethodChangedError();

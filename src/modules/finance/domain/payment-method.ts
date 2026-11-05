@@ -1,10 +1,12 @@
 import { z } from "zod";
 import type { Money } from "@/platform/money/money";
+import { receivablePolicySchema } from "./receivable";
 
 export const paymentMethodPolicyKey = "finance.payment_methods";
 const key = z.string().regex(/^[a-z][a-z0-9_.-]{0,119}$/u), label = z.string().trim().min(1).max(120), currency = z.string().regex(/^[A-Z]{3}$/u);
 /** Method identities and labels are configured lookup data; adapter identities select technical provider protocols. */
 export const paymentMethodSchema = z.object({ key, labels: z.object({ en: label, fr: label, ar: label }).strict(), enabled: z.boolean(),
+  provider_account_code: receivablePolicySchema.shape.account_codes.element.optional(),
   adapter: z.enum(["cash", "bank_transfer", "airbnb_settlement", "manual", "paypal"]),
   currencies: z.array(currency).min(1).refine(rows => new Set(rows).size === rows.length, "duplicate_payment_method_currency") }).strict();
 export const paymentMethodPolicySchema = z.object({ methods: z.array(paymentMethodSchema).min(1)

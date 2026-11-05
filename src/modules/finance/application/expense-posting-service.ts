@@ -33,7 +33,9 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const row=await expenses.find(input.id);if(!row||row.property.archivedAt)throw new ExpenseAccessError();
     const periods=new AccountingPeriodRepository(tx,ctx.organizationId);
     const timezone=z.object({timezone:z.string().min(1)}).safeParse(row.submission?.snapshot);
-    const sourceOccurredAt=await periods.sourceInstant(row.occurredOn,timezone.success?timezone.data.timezone:row.property.timezone);
+    const externalOccurredAt=await expenses.externalCaptureInstant(row.id);
+    const sourceOccurredAt=externalOccurredAt??await periods.sourceInstant(row.occurredOn,timezone.success?timezone.data.timezone:row.property.timezone);
+    if(externalOccurredAt&&input.currentPeriod)throw new ExpenseConflictError();
     const target=expenseResource(ctx.organizationId,row.property,{...row,amount:row.amount.toString(),occurredAt:sourceOccurredAt});
     const finance=new FinanceRepository(tx,ctx.organizationId);let funding=await finance.findLedgerAccountById(row.fundingAccountId);
     if(!funding)throw new ExpenseConfigurationError("Expense funding account is unavailable");

@@ -215,6 +215,10 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  externalPaymentFees ExternalPaymentFee[]
+  externalPaymentAttempts ExternalPaymentAttempt[]
+  externalPaymentIntents ExternalPaymentIntent[]
+  externalPaymentCaptures ExternalPaymentCapture[]
   guestPaymentReceipts GuestPaymentReceipt[]
   guestPaymentReceiptOwners GuestPaymentReceiptOwner[]
 
@@ -591,6 +595,8 @@ model Person {
 }
 
 model UserAccount {
+  externalPaymentFees ExternalPaymentFee[]
+  externalPaymentIntents ExternalPaymentIntent[]
   collectedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentCollector")
   recordedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentRecorder")
 
@@ -1272,6 +1278,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  externalPaymentIntents ExternalPaymentIntent[]
   guestPaymentReceipts GuestPaymentReceipt[]
 
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
@@ -1608,6 +1615,7 @@ model SyncOp {
 }
 
 model LedgerAccount {
+  externalPaymentIntents ExternalPaymentIntent[]
   receivedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentLocation")
   guestPaymentClaims GuestPaymentReceipt[] @relation("GuestPaymentClaim")
 
@@ -2028,6 +2036,8 @@ model ReferenceSequence {
 }
 
 model Currency {
+  externalPaymentIntents ExternalPaymentIntent[]
+  externalPaymentCaptures ExternalPaymentCapture[]
   guestPaymentReceipts GuestPaymentReceipt[]
 
   bankReconciliationAllocations BankReconciliationAllocation[]
@@ -2075,6 +2085,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  externalPaymentIntents ExternalPaymentIntent[]
   ledgerIntegrityRuns LedgerIntegrityRun[]
  financialAttachmentAdmissions FinancialAttachmentAdmission[] @relation("FinancialAttachmentAdmissionPolicy")
   serviceAllocationAdmissions ServiceAllocationAdmission[] @relation("ServiceAllocationPolicy")
@@ -2949,6 +2960,7 @@ model AccountingPeriodAdjustment {
 }
 
 model Expense {
+  externalPaymentFee ExternalPaymentFee?
   recurringOccurrence RecurringExpenseOccurrence?
   correctsExpenseId      String?                     @map("corrects_expense_id") @db.Uuid
   correctsExpenseVersion Int?                        @map("corrects_expense_version")
@@ -4461,4 +4473,90 @@ model GuestPaymentReceiptOwner {
   @@id([organizationId,receiptId,ownerId],map:"guest_payment_receipt_owner_pkey")
   @@unique([organizationId,receiptId,ordinal],map:"guest_payment_receipt_owner_order_unique")
   @@map("guest_payment_receipt_owner")
+}
+
+model ExternalPaymentIntent {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  requestedBy String @map("requested_by") @db.Uuid
+  reservationId String @map("reservation_id") @db.Uuid
+  accountId String @map("account_id") @db.Uuid
+  provider String
+  orderId String @map("order_id")
+  sourceIdentity String @unique(map:"external_payment_intent_source_unique") @map("source_identity") @db.Char(64)
+  canonicalRequest String @map("canonical_request")
+  sourceSnapshot Json? @map("source_snapshot")
+  policyId String @map("policy_id") @db.Uuid
+  policyVersion Int @map("policy_version")
+  amount Decimal @db.Decimal(18,2)
+  currency String @db.Char(3)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  input Json
+  authorizationCap Json @map("authorization_cap")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  actor UserAccount @relation(fields:[organizationId,requestedBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  reservation Reservation @relation(fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  account LedgerAccount @relation(fields:[organizationId,accountId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  policy ConfigRule @relation(fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  currencyRef Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+  capture ExternalPaymentCapture?
+  attempt ExternalPaymentAttempt?
+  @@unique([organizationId,id],map:"external_payment_intent_org_id_unique")
+  @@unique([organizationId,idempotencyKey],map:"external_payment_intent_key_unique")
+  @@index([organizationId,requestedBy,requestedAt,id],map:"external_payment_intent_actor_idx")
+  @@map("external_payment_intent")
+}
+
+model ExternalPaymentCapture {
+  fee ExternalPaymentFee?
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  intentId String @map("intent_id") @db.Uuid
+  provider String
+  paymentId String @map("payment_id")
+  amount Decimal @db.Decimal(18,2)
+  currency String @db.Char(3)
+  evidence Json
+  capturedAt DateTime? @map("captured_at") @db.Timestamptz(6)
+  settlement Json?
+  observedAt DateTime @default(now()) @map("observed_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  intent ExternalPaymentIntent @relation(fields:[organizationId,intentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  currencyRef Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"external_payment_capture_org_id_unique")
+  @@unique([organizationId,intentId],map:"external_payment_capture_intent_unique")
+  @@unique([provider,paymentId],map:"external_payment_capture_provider_unique")
+  @@map("external_payment_capture")
+}
+
+model ExternalPaymentFee {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  captureId String @map("capture_id") @db.Uuid
+  expenseId String @map("expense_id") @db.Uuid
+  createdBy String @map("created_by") @db.Uuid
+  propertyTimezone String @map("property_timezone")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  capture ExternalPaymentCapture @relation(fields:[organizationId,captureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  expense Expense @relation(fields:[organizationId,expenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  actor UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"external_payment_fee_org_id_unique")
+  @@unique([organizationId,captureId],map:"external_payment_fee_capture_unique")
+  @@unique([organizationId,expenseId],map:"external_payment_fee_expense_unique")
+  @@map("external_payment_fee")
+}
+
+model ExternalPaymentAttempt {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  intentId String @map("intent_id") @db.Uuid
+  startedAt DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  intent ExternalPaymentIntent @relation(fields:[organizationId,intentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"external_payment_attempt_org_id_unique")
+  @@unique([organizationId,intentId],map:"external_payment_attempt_intent_unique")
+  @@map("external_payment_attempt")
 }

@@ -13,7 +13,7 @@ import type {
 } from "@/platform/providers";
 import type { AppLocale } from "@/i18n/routing";
 import type { AppEnv } from "@/platform/env/env";
-import { paymentCaptureIntent, verifiedPayPalCapture, PaymentCaptureEvidenceError } from "./payment-capture";
+import { paymentCaptureIntent, verifiedPayPalCapture, verifiedPayPalCaptureEvidence, payPalOrderState, PaymentCaptureEvidenceError } from "./payment-capture";
 
 export type HttpTransport = (
   url: string,
@@ -193,12 +193,7 @@ export class PayPalPaymentProvider implements PaymentProvider {
     this.apiBaseUrl = baseUrl(env.PAYPAL_BASE_URL || "https://api-m.paypal.com");
   }
 
-  async record(input: {
-    amount: string;
-    currency: string;
-    source: string;
-  }): Promise<{ paymentId: string }> {
-    const intent = paymentCaptureIntent(input);
+  private async accessToken() {
     const tokenResponse = await this.transport(`${this.apiBaseUrl}/v1/oauth2/token`, {
       method: "POST",
       headers: {
@@ -218,6 +213,20 @@ export class PayPalPaymentProvider implements PaymentProvider {
     if (typeof accessToken !== "string" || !accessToken || /\s/u.test(accessToken)) {
       throw new PaymentCaptureEvidenceError();
     }
+    return accessToken;
+  }
+
+  async lookup(input: { amount: string; currency: string; source: string }) {
+    const intent = paymentCaptureIntent(input), accessToken = await this.accessToken();
+    const response = await this.transport(`${this.apiBaseUrl}/v2/checkout/orders/${encodeURIComponent(intent.source)}`, {
+      method: "GET", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
+    }).catch(() => { throw new PaymentCaptureEvidenceError(); });
+    if (!response.ok) throw new PaymentCaptureEvidenceError(response.status);
+    return payPalOrderState(await response.json().catch(() => { throw new PaymentCaptureEvidenceError(); }), intent);
+  }
+
+  private async captureResponse(input: { amount: string; currency: string; source: string }) {
+    const intent = paymentCaptureIntent(input), accessToken = await this.accessToken();
 
     const capture = await this.transport(`${this.apiBaseUrl}/v2/checkout/orders/${encodeURIComponent(intent.source)}/capture`, {
         method: "POST",
@@ -230,7 +239,13 @@ export class PayPalPaymentProvider implements PaymentProvider {
         body: "{}"
       }).catch(() => { throw new PaymentCaptureEvidenceError(); });
     if (!capture.ok) throw new PaymentCaptureEvidenceError(capture.status);
-    return verifiedPayPalCapture(await capture.json().catch(() => { throw new PaymentCaptureEvidenceError(); }), intent);
+    return { body: await capture.json().catch(() => { throw new PaymentCaptureEvidenceError(); }), intent };
+  }
+  async record(input: { amount: string; currency: string; source: string }): Promise<{ paymentId: string }> {
+    const response = await this.captureResponse(input); return verifiedPayPalCapture(response.body, response.intent);
+  }
+  async capture(input: { amount: string; currency: string; source: string }) {
+    const response = await this.captureResponse(input); return verifiedPayPalCaptureEvidence(response.body, response.intent);
   }
 }
 
