@@ -17,7 +17,7 @@ import { provisionIntegrationRole } from "./support/database-role";
 const url = process.env.TEST_DATABASE_URL; let admin: PrismaClient, db: PrismaClient;
 beforeAll(async () => {
   const target = url ? new URL(url) : null;
-  if (!target || !["127.0.0.1", "localhost"].includes(target.hostname) || !(target.pathname.startsWith("/alvillas_automation_currency165_") || process.env.GITHUB_ACTIONS === "true" && target.pathname === "/alvillas_os")) throw Error("Dedicated native currency acceptance database required");
+  if (!target || !["127.0.0.1", "localhost"].includes(target.hostname) || !(["/alvillas_automation_currency165_", "/alvillas_automation_integrity167_", "/alvillas_automation_statement168_"].some(prefix => target.pathname.startsWith(prefix)) || process.env.GITHUB_ACTIONS === "true" && target.pathname === "/alvillas_os")) throw Error("Dedicated native currency acceptance database required");
   admin = new PrismaClient({ datasourceUrl: url }); await provisionIntegrationRole(admin, "alvillas_ops_tests");
   const restricted = new URL(url!); restricted.username = restricted.password = "alvillas_ops_tests"; db = new PrismaClient({ datasourceUrl: restricted.toString() });
   expect(await db.$queryRaw`SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user`).toEqual([{ rolsuper: false, rolbypassrls: false }]);
