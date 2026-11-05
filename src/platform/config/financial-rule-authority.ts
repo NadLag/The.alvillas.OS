@@ -1,3 +1,4 @@
+import {ledgerIntegrityPolicyKey,ledgerIntegrityRoutingKey} from "@/modules/finance/domain/ledger-integrity";
 import {financialAttachmentPolicyKey} from "@/modules/finance/domain/financial-attachment-policy";
 import type {AuthContext} from "@/platform/authz/authorize";
 import {authorizeOrganizationSource} from "@/platform/authz/organization-authority";
@@ -13,6 +14,8 @@ import {propertyFinanceFinancialSources} from "@/platform/authz/property-finance
 export {recurringExpensePolicyKey,recurringCompanyExpensePolicyKey,serviceAllocationPolicyKey};
 
 const sourceGroups:Readonly<Record<string,readonly string[]>>={
+ [ledgerIntegrityPolicyKey]:[...propertyFinanceFinancialSources,"bank_statement","company_expense","receivable","financial_attachment"],
+ [ledgerIntegrityRoutingKey]:[...propertyFinanceFinancialSources,"bank_statement","company_expense","receivable","financial_attachment"],
  "finance.commission":["financial_transaction","company_ledger"],
  "finance.ota_fee":["financial_transaction","company_ledger"],
  "finance.bank_statements":["bank_statement","financial_transaction"],

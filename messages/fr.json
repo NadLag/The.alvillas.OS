@@ -1286,7 +1286,8 @@
       "expense_emergency": "Exception de validation pour une dépense urgente",
       "supplier_invoice_emergency": "Coût de facture urgente soumis",
       "employee_cost_emergency": "Avis de coûts urgents du personnel",
-      "receivable_reminder": "Une créance nécessite votre attention."
+      "receivable_reminder": "Une créance nécessite votre attention.",
+      "ledger_integrity_failed": "Échec du contrôle d’intégrité du grand livre"
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -1348,7 +1349,8 @@
       "empty": "Aucun destinataire éligible.",
       "email": "E-mail",
       "push": "Notifications push",
-      "receivablePolicy": "Seules les personnes sélectionnées ayant un accès actuel aux créances, aux écritures et à la rémunération du personnel pour toute l’organisation reçoivent ces rappels. Chaque rappel suit le solde actuel et le calendrier configuré de l’entreprise."
+      "receivablePolicy": "Seules les personnes sélectionnées ayant un accès actuel aux créances, aux écritures et à la rémunération du personnel pour toute l’organisation reçoivent ces rappels. Chaque rappel suit le solde actuel et le calendrier configuré de l’entreprise.",
+      "integrityPolicy": "Choisissez explicitement le dirigeant ou les destinataires financiers autorisés. Seules les personnes disposant de tous les accès financiers et d’audit actuels et ayant terminé leur inscription de sécurité peuvent recevoir les alertes d’intégrité. Ces alertes concernent toute l’organisation. Les canaux e-mail et boîte de réception configurés restent prioritaires. Les notifications push exigent toujours un consentement."
     },
     "resolution": {
       "CANCELLED": "Proposition retirée",

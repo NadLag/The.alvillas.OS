@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const routedNotificationKinds = ["language_updated", "task_assigned", "reservation_created", "task_completed", "task_overdue", "security_session_revoked", "approval_requested", "approval_decided", "staff_document_expiring", "receivable_reminder"] as const;
+export const routedNotificationKinds = ["language_updated", "task_assigned", "reservation_created", "task_completed", "task_overdue", "security_session_revoked", "approval_requested", "approval_decided", "staff_document_expiring", "receivable_reminder", "ledger_integrity_failed"] as const;
 export const routedNotificationKindSchema = z.enum(routedNotificationKinds);
 export type RoutedNotificationKind = z.infer<typeof routedNotificationKindSchema>;
 export const notificationRoutingSchema = z.object({
@@ -10,6 +10,8 @@ export const notificationRoutingSchema = z.object({
   channels: z.array(z.enum(["in_app", "email", "push"])).max(3)
 }).strict();
 export type NotificationRouting = z.infer<typeof notificationRoutingSchema>;
+export const explicitNotificationRoutingSchema = notificationRoutingSchema.refine(value => !value.assigned && value.channels.length > 0 && value.people.length + value.roles.length > 0,
+  "Explicit recipients and delivery channels are required");
 export function notificationRoutingKey(kind: RoutedNotificationKind) { return `notification.routing.${kind}`; }
 
 // Initial values are persisted as ordinary config_rule versions before use.
@@ -22,4 +24,4 @@ export const notificationRoutingSaveSchema = z.object({
   propertyId: z.string().uuid().nullable(),
   routing: notificationRoutingSchema,
   reason: z.string().trim().min(6).max(500)
-}).strict().superRefine((value,ctx)=>{if(value.kind==="receivable_reminder"){if(value.propertyId!==null)ctx.addIssue({code:"custom",path:["propertyId"],message:"Receivable reminder routing requires organization scope"});if(value.routing.assigned)ctx.addIssue({code:"custom",path:["routing","assigned"],message:"Receivable reminder recipients must be explicitly configured"});}});
+}).strict().superRefine((value,ctx)=>{if(value.kind==="receivable_reminder"){if(value.propertyId!==null)ctx.addIssue({code:"custom",path:["propertyId"],message:"Receivable reminder routing requires organization scope"});if(value.routing.assigned)ctx.addIssue({code:"custom",path:["routing","assigned"],message:"Receivable reminder recipients must be explicitly configured"});}if(value.kind==="ledger_integrity_failed"){if(value.propertyId!==null)ctx.addIssue({code:"custom",path:["propertyId"],message:"Integrity failure routing requires organization scope"});if(!explicitNotificationRoutingSchema.safeParse(value.routing).success)ctx.addIssue({code:"custom",path:["routing"],message:"Explicit integrity failure recipients and delivery channels are required"});}});

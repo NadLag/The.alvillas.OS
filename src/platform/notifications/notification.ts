@@ -3,10 +3,12 @@ import { authorize, type AuthContext, type Resource } from "@/platform/authz/aut
 import { authorizeApprovalResource } from "@/platform/approvals/approval";
 import {receivableReminderNoticeSchema} from "@/modules/finance/domain/receivable-reminder-notice";
 import {canReadReceivableReminder} from "@/modules/finance/domain/receivable-reminder-notification";
+import {canReadLedgerIntegrityFailure,ledgerIntegrityNoticeSchema} from "@/modules/finance/domain/ledger-integrity-notification";
 
 export const notificationEventType = "notification.requested";
 export class NotificationAudienceUnavailableError extends Error{}
 export const notificationInputSchema = z.discriminatedUnion("kind", [
+  z.object({kind:z.literal("ledger_integrity_failed"),recipientId:z.uuid(),targetId:z.uuid(),integrityNotice:ledgerIntegrityNoticeSchema.optional()}).strict(),
   z.object({kind:z.literal("receivable_reminder"),recipientId:z.uuid(),targetId:z.uuid(),receivableNotice:receivableReminderNoticeSchema.optional()}).strict(),
   z.object({kind:z.literal("employee_cost_emergency"),recipientId:z.uuid(),targetId:z.uuid(),employeeNotice:z.object({submissionId:z.uuid(),costId:z.uuid(),ownerId:z.uuid()}).strict().optional()}).strict(),
   z.object({ kind: z.literal("supplier_invoice_emergency"), recipientId: z.uuid(), targetId: z.uuid(),
@@ -52,7 +54,7 @@ export function ownNotificationContext(ctx: AuthContext, accountId: string): Aut
 export function notificationDestination(
   ctx: AuthContext, input: NotificationInput, target: Resource | null, locale: "en" | "fr" | "ar"
 ): string | null {
-  const referenceId = input.kind === "supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder" ? target?.notificationEventId : input.kind === "staff_document_expiring" ? target?.documentId :
+  const referenceId = input.kind === "supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed" ? target?.notificationEventId : input.kind === "staff_document_expiring" ? target?.documentId :
     input.kind === "approval_requested" || input.kind === "approval_decided" ? target?.approvalId ?? target?.id : target?.id;
   if (input.recipientId !== ctx.userAccountId || !target || referenceId !== input.targetId) return null;
   if (input.kind === "language_updated" || input.kind === "security_session_revoked") {
@@ -64,6 +66,7 @@ export function notificationDestination(
     return authorize(selfContext, "configure", target) ? `/${locale}/app${input.kind === "security_session_revoked" ? "/security" : ""}` : null;
   }
   if(input.kind==="receivable_reminder")return canReadReceivableReminder(ctx,target,new Date())?`/${locale}/app/finance/receivables`:null;
+  if(input.kind==="ledger_integrity_failed")return canReadLedgerIntegrityFailure(ctx,target,new Date())?`/${locale}/app/audit`:null;
   if (!(input.kind==="approval_requested"||input.kind==="approval_decided"?authorizeApprovalResource:authorize)(ctx, "view", target)) return null;
   if (input.kind === "expense_emergency") return target.type === "expense" ? `/${locale}/app/expenses/${target.id}` : null;
   if (input.kind === "supplier_invoice_emergency") return target.type === "supplier_invoice" ? `/${locale}/app/finance/supplier-invoice-notices/${input.targetId}` : null;

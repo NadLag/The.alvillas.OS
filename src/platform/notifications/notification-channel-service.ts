@@ -21,7 +21,10 @@ export async function resolveNotificationChannel(repository: NotificationReposit
   const locale = safeLocale(candidate?.person.preferredLocale ?? "en");
   const destination = ctx && target ? notificationDestination(ctx, input, target, locale) : null;
   const currentApproval = input.kind !== "approval_requested" || await repository.approvalDeliveryAllowed(input.targetId, input.recipientId, payload.sourceEventId);
+  const currentIntegrity = input.kind !== "ledger_integrity_failed" || payload.sourceEventId === input.targetId &&
+    await repository.ledgerIntegrityChannelAllowed(input.targetId, input.recipientId, payload.channel);
   const allowed = Boolean(candidate && ctx && target && destination && (target.type === "identity" || !securityEnrollment(candidate).setupRequired)
+    && currentIntegrity
     && (target.type === "identity" || authorize(ctx, "view", target))
     && (input.kind !== "approval_requested" || (currentApproval && (authorize(ctx, "approve", target) || authorize(ctx, "reject", target))))
     && shouldDeliverNotification(input.kind, payload.channel, preferences));
