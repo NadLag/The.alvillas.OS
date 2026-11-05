@@ -217,6 +217,10 @@ model ReceivableCollectionReversal {
 model Organization {
   externalPaymentFees ExternalPaymentFee[]
   externalPaymentAttempts ExternalPaymentAttempt[]
+  externalPaymentRefundIntents ExternalPaymentRefundIntent[]
+  externalPaymentRefundAttempts ExternalPaymentRefundAttempt[]
+  externalPaymentRefundIdentities ExternalPaymentRefundIdentity[]
+  externalPaymentRefundEvidence ExternalPaymentRefundEvidence[]
   externalPaymentIntents ExternalPaymentIntent[]
   externalPaymentCaptures ExternalPaymentCapture[]
   guestPaymentReceipts GuestPaymentReceipt[]
@@ -597,6 +601,7 @@ model Person {
 model UserAccount {
   externalPaymentFees ExternalPaymentFee[]
   externalPaymentIntents ExternalPaymentIntent[]
+  externalPaymentRefundIntents ExternalPaymentRefundIntent[]
   collectedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentCollector")
   recordedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentRecorder")
 
@@ -2036,6 +2041,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  externalPaymentRefundIntents ExternalPaymentRefundIntent[]
   externalPaymentIntents ExternalPaymentIntent[]
   externalPaymentCaptures ExternalPaymentCapture[]
   guestPaymentReceipts GuestPaymentReceipt[]
@@ -4476,6 +4482,7 @@ model GuestPaymentReceiptOwner {
 }
 
 model ExternalPaymentIntent {
+  refundIntents ExternalPaymentRefundIntent[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   requestedBy String @map("requested_by") @db.Uuid
@@ -4510,6 +4517,7 @@ model ExternalPaymentIntent {
 }
 
 model ExternalPaymentCapture {
+  refundIntents ExternalPaymentRefundIntent[]
   fee ExternalPaymentFee?
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -4559,4 +4567,76 @@ model ExternalPaymentAttempt {
   @@unique([organizationId,id],map:"external_payment_attempt_org_id_unique")
   @@unique([organizationId,intentId],map:"external_payment_attempt_intent_unique")
   @@map("external_payment_attempt")
+}
+
+model ExternalPaymentRefundIntent {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  captureId String @map("capture_id") @db.Uuid
+  depositId String @map("deposit_id") @db.Uuid
+  requestedBy String @map("requested_by") @db.Uuid
+  amount Decimal @db.Decimal(18,2)
+  currency String @db.Char(3)
+  idempotencyKey String @map("idempotency_key") @db.Uuid
+  requestFingerprint String @map("request_fingerprint") @db.Char(64)
+  canonicalRequest String @map("canonical_request")
+  input Json
+  authorizationCap Json @map("authorization_cap")
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  capture ExternalPaymentCapture @relation(fields:[organizationId,captureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  deposit ExternalPaymentIntent @relation(fields:[organizationId,depositId],references:[organizationId,idempotencyKey],onDelete:Restrict,onUpdate:NoAction)
+  actor UserAccount @relation(fields:[organizationId,requestedBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  currencyRef Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+  attempt ExternalPaymentRefundAttempt?
+  identity ExternalPaymentRefundIdentity?
+  @@unique([organizationId,id],map:"external_payment_refund_intent_org_id_unique")
+  @@unique([organizationId,idempotencyKey],map:"external_payment_refund_intent_key_unique")
+  @@index([organizationId,depositId,id],map:"external_payment_refund_intent_deposit_idx")
+  @@map("external_payment_refund_intent")
+}
+
+model ExternalPaymentRefundAttempt {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  intentId String @map("intent_id") @db.Uuid
+  startedAt DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  intent ExternalPaymentRefundIntent @relation(fields:[organizationId,intentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"external_payment_refund_attempt_org_id_unique")
+  @@unique([organizationId,intentId],map:"external_payment_refund_attempt_intent_unique")
+  @@map("external_payment_refund_attempt")
+}
+
+model ExternalPaymentRefundIdentity {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  intentId String @map("intent_id") @db.Uuid
+  provider String
+  refundId String @map("refund_id")
+  retainedAt DateTime @default(now()) @map("retained_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  intent ExternalPaymentRefundIntent @relation(fields:[organizationId,intentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  observations ExternalPaymentRefundEvidence[]
+  @@unique([organizationId,id],map:"external_payment_refund_identity_org_id_unique")
+  @@unique([organizationId,intentId],map:"external_payment_refund_identity_intent_unique")
+  @@unique([provider,refundId],map:"external_payment_refund_identity_provider_unique")
+  @@map("external_payment_refund_identity")
+}
+
+model ExternalPaymentRefundEvidence {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  identityId String @map("identity_id") @db.Uuid
+  state String
+  providerCreatedAt DateTime @map("provider_created_at") @db.Timestamptz(6)
+  providerUpdatedAt DateTime @map("provider_updated_at") @db.Timestamptz(6)
+  refundedAt DateTime? @map("refunded_at") @db.Timestamptz(6)
+  evidence Json
+  observedAt DateTime @default(now()) @map("observed_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  identity ExternalPaymentRefundIdentity @relation(fields:[organizationId,identityId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"external_payment_refund_evidence_org_id_unique")
+  @@unique([organizationId,identityId,providerUpdatedAt,state],map:"external_payment_refund_evidence_version_unique")
+  @@map("external_payment_refund_evidence")
 }

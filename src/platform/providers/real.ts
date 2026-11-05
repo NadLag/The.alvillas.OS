@@ -14,6 +14,7 @@ import type {
 import type { AppLocale } from "@/i18n/routing";
 import type { AppEnv } from "@/platform/env/env";
 import { paymentCaptureIntent, verifiedPayPalCapture, verifiedPayPalCaptureEvidence, payPalOrderState, PaymentCaptureEvidenceError } from "./payment-capture";
+import { paymentRefundIntent, paymentRefundLookup, verifiedPayPalRefund, PaymentRefundEvidenceError } from "./payment-refund";
 
 export type HttpTransport = (
   url: string,
@@ -246,6 +247,31 @@ export class PayPalPaymentProvider implements PaymentProvider {
   }
   async capture(input: { amount: string; currency: string; source: string }) {
     const response = await this.captureResponse(input); return verifiedPayPalCaptureEvidence(response.body, response.intent);
+  }
+
+  /** The durable caller must commit its refund reservation and attempt before this single POST. */
+  async refund(input: { captureId: string; requestId: string; amount: string; currency: string }) {
+    const intent = paymentRefundIntent(input);
+    let accessToken: string;
+    try { accessToken = await this.accessToken(); } catch { throw new PaymentRefundEvidenceError(); }
+    const response = await this.transport(`${this.apiBaseUrl}/v2/payments/captures/${encodeURIComponent(intent.captureId)}/refund`, {
+      method: "POST", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", Prefer: "return=representation", "PayPal-Request-Id": intent.requestId },
+      body: JSON.stringify({ amount: { value: intent.amount, currency_code: intent.currency }, custom_id: intent.requestId })
+    }).catch(() => { throw new PaymentRefundEvidenceError(); });
+    if (!response.ok) throw new PaymentRefundEvidenceError(response.status);
+    return verifiedPayPalRefund(await response.json().catch(() => { throw new PaymentRefundEvidenceError(); }), intent, this.apiBaseUrl);
+  }
+
+  /** A retained refund identity is reconciled by GET; an unknown POST outcome never triggers an SDK retry. */
+  async lookupRefund(input: { intent: { captureId: string; requestId: string; amount: string; currency: string }; refundId: string }) {
+    const { intent, refundId } = paymentRefundLookup(input);
+    let accessToken: string;
+    try { accessToken = await this.accessToken(); } catch { throw new PaymentRefundEvidenceError(); }
+    const response = await this.transport(`${this.apiBaseUrl}/v2/payments/refunds/${encodeURIComponent(refundId)}`, {
+      method: "GET", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
+    }).catch(() => { throw new PaymentRefundEvidenceError(); });
+    if (!response.ok) throw new PaymentRefundEvidenceError(response.status);
+    return verifiedPayPalRefund(await response.json().catch(() => { throw new PaymentRefundEvidenceError(); }), intent, this.apiBaseUrl, refundId);
   }
 }
 

@@ -41,6 +41,9 @@ const denied=()=>new GuestDepositAuthorizationError();
 export async function inspectGuestDepositReceiptInTransaction(context:FinanceActorContext,raw:unknown,tx:TenantTransaction){
  return prepareReceipt(captured(context),normalized(guestDepositReviewInput.parse(raw)),tx);
 }
+export async function inspectGuestDepositRefundInTransaction(context:FinanceActorContext,raw:unknown,tx:TenantTransaction){
+ return prepareRefund(captured(context),normalized(guestDepositRefundReviewInput.parse(raw)),tx);
+}
 // Shared only with authorized callers that already own the tenant transaction.
 export {original as readGuestDepositSourceInTransaction,policyFor as resolveGuestDepositPolicyInTransaction,visible as presentGuestDepositResult,lockPolicies as lockGuestDepositPolicyInTransaction};
 
