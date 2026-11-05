@@ -4259,6 +4259,18 @@
     "cancelReview": "Revenir à la répartition validée"
   },
   "GuestDeposits": {
+    "provenanceTitle": "Détails du paiement initial",
+    "provenanceHistorical": "Les détails supplémentaires ne sont pas disponibles pour ce reçu historique.",
+    "provenanceNameRestricted": "Nom à accès restreint",
+    "provenanceOwnerContext": "Les propriétaires sont ceux de la réservation lors de la réception des fonds. Les fonds restent une dette envers le client jusqu’à une affectation ou un remboursement autorisé.",
+    "provenanceCollectedBy": "Encaissé par",
+    "provenanceRecordedBy": "Enregistré par",
+    "provenanceAccount": "Compte de détention initial",
+    "provenanceOwners": "Propriétaires à la réception",
+    "provenanceProperty": "Propriété",
+    "provenanceReservation": "Réservation",
+    "provenanceGuest": "Client",
+    "provenanceSource": "Source de la réservation",
     "ADMIT_CASH": "Affectation d’un acompte en espèces",
     "REVERSE_CASH_ADMISSION": "Correction d’affectation des espèces",
     "cashAdmissionTitle": "Utiliser un encaissement en espèces existant",

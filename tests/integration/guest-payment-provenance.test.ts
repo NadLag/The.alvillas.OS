@@ -5,18 +5,21 @@ import { resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { withTenant } from "@/platform/db/tenant";
+import { authContextForAccount } from "@/platform/authz/account-context";
 import { reviewGuestDepositReceipt, postGuestDepositReceipt } from "@/modules/finance/application/guest-deposit-service";
 import { reviewGuestDepositCashAdmission, admitGuestDepositCash } from "@/modules/finance/application/guest-deposit-cash-service";
 import * as provenanceService from "@/modules/finance/application/guest-payment-provenance-service";
 import * as auditWriter from "@/platform/audit/audit-writer";
 import { GuestDepositAuthorizationError } from "@/modules/finance/domain/guest-deposit";
+import { readGuestDepositWorkspace } from "@/modules/finance/application/guest-deposit-workspace-service";
+import { guestDepositDetailSchema } from "@/modules/finance/domain/guest-deposit-workspace";
 import { actualGuestDepositFixture } from "./support/guest-deposit-fixture";
 import { actualGuestDepositCashFixture } from "./support/guest-deposit-cash-fixture";
 import { provisionIntegrationRole } from "./support/database-role";
 
 const url = process.env.TEST_DATABASE_URL;
 let admin: PrismaClient, db: PrismaClient, control: PrismaClient;
-let legacy: Awaited<ReturnType<typeof actualGuestDepositFixture>>, legacyId: string, beforeUpgrade: Awaited<ReturnType<typeof facts>>;
+let legacy: Awaited<ReturnType<typeof actualGuestDepositFixture>>, legacyId: string, legacyDepositId: string, beforeUpgrade: Awaited<ReturnType<typeof facts>>;
 function facts(org: string) { return withTenant(db, org, tx => tx.$queryRaw<Array<{ kind: string; id: string; xmin: string; body: string }>>`
   SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t)::text AS body FROM financial_transaction t WHERE organization_id=${org}::uuid
   UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p)::text FROM posting p WHERE organization_id=${org}::uuid
@@ -43,7 +46,8 @@ beforeAll(async () => {
   const former = vi.spyOn(provenanceService, "retainGuestPaymentProvenance").mockResolvedValue(undefined);
   try {
     legacy = await actualGuestDepositFixture(db, admin); const review = await reviewGuestDepositReceipt(legacy.ctx, legacy.receiptInput, { db });
-    legacyId = (await postGuestDepositReceipt(legacy.ctx, { ...legacy.receiptInput, reviewFingerprint: review.reviewFingerprint, idempotencyKey: randomUUID(), reason: "Original receipt committed before provenance migration" }, { db })).id;
+    legacyDepositId = randomUUID();
+    legacyId = (await postGuestDepositReceipt(legacy.ctx, { ...legacy.receiptInput, reviewFingerprint: review.reviewFingerprint, idempotencyKey: legacyDepositId, reason: "Original receipt committed before provenance migration" }, { db })).id;
     beforeUpgrade = await facts(legacy.org);
   } finally { former.mockRestore(); }
   migrate(resolve("prisma/schema.prisma")); await provisionIntegrationRole(admin, "alvillas_ops_tests");
@@ -55,6 +59,19 @@ const retained = (org: string) => withTenant(db, org, tx => tx.guestPaymentRecei
 async function command(f: Awaited<ReturnType<typeof actualGuestDepositFixture>>) {
   const review = await reviewGuestDepositReceipt(f.ctx, f.receiptInput, { db });
   return { ...f.receiptInput, reviewFingerprint: review.reviewFingerprint, idempotencyKey: randomUUID(), reason: "Retain exact original guest payment provenance atomically" };
+}
+async function personalAuthority(f: Awaited<ReturnType<typeof actualGuestDepositFixture>>) {
+  const grant = await withTenant(db, f.org, async tx => {
+    const role = await tx.role.create({ data: { organizationId: f.org, key: "receipt_personal_context_" + randomUUID(), name: "Independent receipt personal-name authority" } });
+    const permissions = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: ["owner:view", "team_member:view", "guest:view"] } } });
+    expect(permissions).toHaveLength(3);
+    await tx.rolePermission.createMany({ data: permissions.map(permission => ({ organizationId: f.org, roleId: role.id, permissionId: permission.id })) });
+    return tx.roleAssignment.create({ data: { organizationId: f.org, userAccountId: f.account.id, personId: f.person.id, roleId: role.id, scopeType: "organization", validFrom: new Date("2020-01-01") } });
+  });
+  return { grant, ctx: { ...f.ctx, authContext: { ...await authContextForAccount(f.org, f.account.id, { db }), personId: f.person.id } } };
+}
+async function detail(ctx: Parameters<typeof readGuestDepositWorkspace>[0], depositId: string) {
+  return guestDepositDetailSchema.parse(await readGuestDepositWorkspace(ctx, { operation: "DETAIL", depositId }, { db }));
 }
 describe("durable original guest receipt provenance", () => {
   it("upgrades populated financial history without rewriting bodies, tuple versions or historical provenance", async () => {
@@ -90,6 +107,7 @@ describe("durable original guest receipt provenance", () => {
   it("isolates retained receipt and owner rows across tenants and refuses foreign parent links", async () => {
     const f = await actualGuestDepositFixture(db, admin), other = await actualGuestDepositFixture(db, admin), input = await command(f);
     await postGuestDepositReceipt(f.ctx, input, { db }); const rows = await retained(f.org), original = await facts(f.org);
+    expect(await admin.$queryRaw`SELECT policyname FROM pg_policies WHERE schemaname='public' AND tablename='guest_payment_receipt_owner' ORDER BY policyname`).toEqual([{ policyname: "guest_payment_receipt_owner_tenant_isolation" }]);
     await withTenant(db, other.org, async tx => {
       expect(await tx.guestPaymentReceipt.findMany({ where: { organizationId: f.org } })).toEqual([]);
       expect(await tx.guestPaymentReceiptOwner.findMany({ where: { organizationId: f.org } })).toEqual([]);
@@ -118,5 +136,52 @@ describe("durable original guest receipt provenance", () => {
     vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const saved = await write(tx, event); if (event.action === "finance.guest_payment.provenance_retained") await withTenant(db, f.org, inner => inner.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } })); return saved; });
     await expect(postGuestDepositReceipt(f.ctx, input, { db })).rejects.toThrow(GuestDepositAuthorizationError);
     expect(await retained(f.org)).toEqual([]); expect(await facts(f.org)).toEqual(original);
+  });
+  it("shows retained financial context while withholding independently protected personal names and identifiers", async () => {
+    const f = await actualGuestDepositFixture(db, admin), input = await command(f);
+    await postGuestDepositReceipt(f.ctx, input, { db });
+    const read = await detail(f.ctx, input.idempotencyKey);
+    expect(read.provenance).toEqual({ organizationName: "Actual service collection source", collectorName: null, recordedByName: null, accountName: f.banks.receipt.name, owners: [{ name: null }], bookingSource: "DIRECT", receivedAt: input.receivedAt });
+    expect(read.summary.guestName).toBeNull();
+    const privateNames = JSON.stringify(read.provenance);
+    expect(privateNames).not.toContain(f.person.id); expect(privateNames).not.toContain(f.account.id);
+    expect(privateNames).not.toContain(f.person.displayName); expect(privateNames).not.toContain("Actual confirmed booking owner");
+  });
+  it("uses frozen owner names and both held and current independent personal grants", async () => {
+    const f = await actualGuestDepositFixture(db, admin), input = await command(f);
+    await postGuestDepositReceipt(f.ctx, input, { db }); const authority = await personalAuthority(f), rows = await retained(f.org);
+    await withTenant(db, f.org, tx => tx.owner.update({ where: { id: rows[0].owners[0].ownerId }, data: { displayName: "Renamed owner after original receipt" } }));
+    expect((await detail(f.ctx, input.idempotencyKey)).provenance?.owners).toEqual([{ name: null }]);
+    const read = await detail(authority.ctx, input.idempotencyKey);
+    expect(read.provenance?.owners).toEqual([{ name: "Actual confirmed booking owner" }]);
+    expect(read.provenance?.collectorName).toBe(f.person.displayName); expect(read.provenance?.recordedByName).toBe(f.person.displayName);
+    expect(read.summary.guestName).toBe("Actual original deposit guest");
+    expect(JSON.stringify(read.provenance)).not.toContain("Renamed owner after original receipt");
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: authority.grant.id }, data: { archivedAt: new Date() } }));
+    expect((await detail(authority.ctx, input.idempotencyKey)).provenance?.collectorName).toBeNull();
+  });
+  it("withholds the complete disclosure when personal authority is revoked after its read audit", async () => {
+    const f = await actualGuestDepositFixture(db, admin), input = await command(f);
+    await postGuestDepositReceipt(f.ctx, input, { db }); const authority = await personalAuthority(f), original = await facts(f.org), write = auditWriter.writeAuditEvent;
+    vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const saved = await write(tx, event); if (event.action === "finance.guest_deposit.detail_viewed") await withTenant(db, f.org, inner => inner.roleAssignment.update({ where: { id: authority.grant.id }, data: { archivedAt: new Date() } })); return saved; });
+    await expect(detail(authority.ctx, input.idempotencyKey)).rejects.toThrow(GuestDepositAuthorizationError);
+    expect(await facts(f.org)).toEqual(original);
+  });
+  it("retains original cash funding authority for a smaller admitted claim", async () => {
+    const f = await actualGuestDepositCashFixture(db, admin), draft = { collectionId: f.cash.id, reservationId: f.reservationId, kind: "stay", amount: "0.04", currency: "MAD", purpose: "Source-authorized partial original collection context" }, review = await reviewGuestDepositCashAdmission(f.ctx, draft, { db }), key = randomUUID();
+    await admitGuestDepositCash(f.ctx, { ...draft, reviewFingerprint: review.reviewFingerprint, idempotencyKey: key, reason: "Keep the complete original cash source private" }, { db });
+    const cash = await withTenant(db, f.org, tx => tx.cashCollection.findFirstOrThrow({ where: { organizationId: f.org, id: f.cash.id }, include: { custodyAccount: true } }));
+    expect((await detail(f.ctx, key)).provenance).toMatchObject({ accountName: cash.custodyAccount.name, receivedAt: cash.recordedAt.toISOString() });
+    const capped = { ...f.ctx, authContext: { ...f.ctx.authContext, assignments: f.ctx.authContext.assignments?.map(assignment => ({ ...assignment, conditions: { ...assignment.conditions, maxAmount: "0.04" } })) } };
+    await expect(detail(capped, key)).rejects.toThrow(GuestDepositAuthorizationError);
+  });
+  it("reads historical receipts with explicit unavailable context and no retroactive attribution", async () => {
+    const read = await detail(legacy.ctx, legacyDepositId);
+    expect(read.summary.transactionId).toBe(legacyId); expect(read.provenance).toBeNull(); expect(await retained(legacy.org)).toEqual([]);
+  });
+  it("refuses receipt context from another tenant", async () => {
+    const f = await actualGuestDepositFixture(db, admin), other = await actualGuestDepositFixture(db, admin), input = await command(f);
+    await postGuestDepositReceipt(f.ctx, input, { db });
+    await expect(detail(other.ctx, input.idempotencyKey)).rejects.toThrow();
   });
 });

@@ -6,6 +6,18 @@ import { assertPropertyOwnerShares } from "./reservation-revenue";
 import { GuestDepositSourceError } from "./guest-deposit";
 
 const identity = z.uuid().transform(value => value.toLowerCase());
+const person = z.object({ userAccountId: identity, personId: identity }).strict();
+export const guestPaymentProvenanceSchema = z.object({
+  schemaVersion: z.literal(1), organizationId: identity, transactionId: identity, originalAuditId: identity,
+  depositId: identity, operation: z.enum(["RECEIPT", "ADMIT_CASH"]),
+  amount: z.object({ amount: z.string().regex(/^(?:0|[1-9]\d*)\.\d{2}$/u), currency: z.string().regex(/^[A-Z]{3}$/u) }).strict(),
+  recordedBy: person, collectedBy: person, accountId: identity,
+  claim: z.object({ guestId: identity, liabilityAccountId: identity }).strict(),
+  booking: z.object({ reservationId: identity, propertyId: identity, guestId: identity, source: z.string().min(1).max(120), financialSnapshotId: identity, financialSnapshotVersion: z.number().int().positive() }).strict(),
+  relatedOwners: z.array(z.object({ ownerId: identity, shareBps: z.number().int().min(0).max(10000) }).strict()).min(1),
+  purpose: z.string(), receivedAt: z.iso.datetime(), externalReference: z.string().nullable(),
+  originalCollectionId: identity.nullable(), originalCollectionTransactionId: identity.nullable(),
+}).strict();
 const financialSnapshot = z.object({ id: identity, organizationId: identity, reservationId: identity, version: z.number().int().positive(),
   rules: z.object({ owners: z.array(serviceAllocationOwnerSchema.strip()).min(1) }).strip() }).strip();
 const sourceSchema = z.object({ organizationId: identity,
@@ -32,7 +44,7 @@ export function captureGuestPaymentProvenance(raw: unknown) {
     if (!original.success || original.data.reservationFinancialSnapshot.id !== retained.id || original.data.reservationFinancialSnapshot.version !== retained.version || receipt.input.collectionId !== receipt.cashSource.id)
       throw new GuestPaymentProvenanceSourceError();
   }
-  return {
+  return guestPaymentProvenanceSchema.parse({
     schemaVersion: 1 as const, organizationId, transactionId: transaction.id, originalAuditId: audit.id,
     depositId: source.depositId, operation: receipt.operation,
     amount: Money.of(receipt.input.amount, receipt.input.currency).toJSON(),
@@ -47,6 +59,6 @@ export function captureGuestPaymentProvenance(raw: unknown) {
     externalReference: receipt.operation === "RECEIPT" ? receipt.input.externalReference : null,
     originalCollectionId: receipt.operation === "ADMIT_CASH" ? receipt.cashSource.id : null,
     originalCollectionTransactionId: receipt.operation === "ADMIT_CASH" ? receipt.cashSource.transactionId : null,
-  };
+  });
 }
 export type GuestPaymentProvenance = ReturnType<typeof captureGuestPaymentProvenance>;

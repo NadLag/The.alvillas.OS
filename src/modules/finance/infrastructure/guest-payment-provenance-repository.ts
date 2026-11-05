@@ -8,6 +8,12 @@ export class GuestPaymentProvenanceRepository {
   find(transactionId: string) {
     return this.tx.guestPaymentReceipt.findUnique({ where: { organizationId_transactionId: { organizationId: this.organizationId, transactionId } }, include: { owners: { orderBy: { ordinal: "asc" } } } });
   }
+  presentation(transactionId: string) {
+    return this.tx.guestPaymentReceipt.findUnique({ where: { organizationId_transactionId: { organizationId: this.organizationId, transactionId } },
+      include: { organization: { select: { name: true } }, account: { select: { name: true } },
+        collectorPerson: { select: { displayName: true } }, recordedPerson: { select: { displayName: true } },
+        financialSnapshot: { select: { version: true, rules: true } }, owners: { orderBy: { ordinal: "asc" } } } });
+  }
   async source(transactionId: string) {
     const [transaction, audit] = await Promise.all([
       this.tx.financialTransaction.findFirst({ where: { organizationId: this.organizationId, id: transactionId }, select: { id: true, organizationId: true, createdBy: true, occurredAt: true, sealed: true, reversesTransactionId: true } }),

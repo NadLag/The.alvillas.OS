@@ -4259,6 +4259,18 @@
     "cancelReview": "العودة إلى التوزيع المعتمد"
   },
   "GuestDeposits": {
+    "provenanceTitle": "تفاصيل الدفعة الأصلية",
+    "provenanceHistorical": "التفاصيل الإضافية غير متاحة لهذا الإيصال التاريخي.",
+    "provenanceNameRestricted": "الاسم مقيّد الصلاحية",
+    "provenanceOwnerContext": "المالكون مرتبطون بالحجز وقت استلام الأموال. تبقى أموال الضيف التزامًا تجاهه حتى تخصيصها أو ردّها بتفويض.",
+    "provenanceCollectedBy": "تم التحصيل بواسطة",
+    "provenanceRecordedBy": "تم التسجيل بواسطة",
+    "provenanceAccount": "حساب الحيازة الأصلي",
+    "provenanceOwners": "المالكون عند الاستلام",
+    "provenanceProperty": "العقار",
+    "provenanceReservation": "الحجز",
+    "provenanceGuest": "الضيف",
+    "provenanceSource": "مصدر الحجز",
     "ADMIT_CASH": "تخصيص دفعة نقدية للضيف",
     "REVERSE_CASH_ADMISSION": "تصحيح تخصيص الدفعة النقدية",
     "cashAdmissionTitle": "استخدام تحصيل نقدي موجود",
