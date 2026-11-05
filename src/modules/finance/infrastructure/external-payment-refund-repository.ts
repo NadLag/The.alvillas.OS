@@ -3,6 +3,8 @@ import type { TenantTransaction } from "@/platform/db/tenant";
 import type { AuthorizationCap } from "@/platform/authz/authorization-cap";
 import type { z } from "zod";
 import type { providerRefundEvidenceSchema } from "@/platform/providers/payment-refund";
+import { providerRefundSettlementSchema } from "@/platform/providers/payment-refund-settlement";
+import { ExternalPaymentRefundError } from "../domain/external-payment-refund-intent";
 import type { retainExternalPaymentRefund } from "../domain/external-payment-refund-intent";
 import { GuestDepositRepository } from "./guest-deposit-repository";
 
@@ -29,6 +31,15 @@ export class ExternalPaymentRefundRepository {
     const observation = await this.tx.externalPaymentRefundEvidence.create({ data: { organizationId: this.organizationId, identityId: identity.id, state: evidence.state,
       providerCreatedAt: new Date(evidence.createdAt), providerUpdatedAt: new Date(evidence.updatedAt), refundedAt: evidence.refundedAt ? new Date(evidence.refundedAt) : null, evidence: json(evidence) } });
     return { identity, observation, idempotent: false };
+  }
+  async retainSettlement(evidenceId: string, settlement: z.infer<typeof providerRefundSettlementSchema>) {
+    const existing = await this.tx.externalPaymentRefundSettlement.findUnique({ where: { organizationId_evidenceId: { organizationId: this.organizationId, evidenceId } } });
+    if (existing) {
+      const previous = providerRefundSettlementSchema.safeParse(existing.settlement);
+      if (!previous.success || JSON.stringify(previous.data) !== JSON.stringify(settlement)) throw new ExternalPaymentRefundError();
+      return { row: existing, idempotent: true };
+    }
+    return { row: await this.tx.externalPaymentRefundSettlement.create({ data: { organizationId: this.organizationId, evidenceId, settlement: json(settlement) } }), idempotent: false };
   }
   flushGuards() { return new GuestDepositRepository(this.tx, this.organizationId).flushGuards(); }
 }

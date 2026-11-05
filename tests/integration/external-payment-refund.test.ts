@@ -59,7 +59,7 @@ async function reference(f: Fixture, intentId: string) { const event = await wit
 const facts = (org: string) => withTenant(db, org, tx => tx.$queryRaw<Array<{ kind: string; id: string; xmin: string; body: string }>>`SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t)::text AS body FROM financial_transaction t WHERE organization_id=${org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p)::text FROM posting p WHERE organization_id=${org}::uuid ORDER BY kind,id`);
 function gateway(f: Fixture, input: Awaited<ReturnType<typeof draft>>, state: "PENDING" | "COMPLETED" = "COMPLETED") {
   const at = new Date().toISOString(), evidence = { refundId: "REFUND_" + randomUUID(), captureId: f.capture.paymentId, requestId: input.refund.idempotencyKey, amount: { amount: input.refund.amount, currency: "MAD" }, state, createdAt: at, updatedAt: at, refundedAt: state === "COMPLETED" ? at : null };
-  return { evidence, refund: vi.fn(() => Promise.resolve(evidence)), lookupRefund: vi.fn(() => Promise.resolve(evidence)) };
+  return { evidence, refund: vi.fn(() => Promise.resolve({ ...evidence, settlement: null })), lookupRefund: vi.fn(() => Promise.resolve({ ...evidence, settlement: null })) };
 }
 describe("original provider refund reservations on PostgreSQL", () => {
   it("reserves the exact original funds and queues a recoverable source without changing financial history", async () => {
@@ -76,7 +76,7 @@ describe("original provider refund reservations on PostgreSQL", () => {
   });
   it("retains a completed independent provider refund after grants end without admitting another journal", async () => {
     const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), ref = await reference(f, request.id), before = await facts(f.org), provider = gateway(f, input);
-    provider.refund.mockImplementationOnce(async () => { await admin.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id } }); return provider.evidence; });
+    provider.refund.mockImplementationOnce(async () => { await admin.rolePermission.deleteMany({ where: { organizationId: f.org, roleId: f.role.id } }); return { ...provider.evidence, settlement: null }; });
     expect(await executeExternalPaymentRefundReference(ref, { db, provider })).toMatchObject({ state: "COMPLETED", refundId: provider.evidence.refundId }); expect(provider.refund).toHaveBeenCalledTimes(1); expect(await facts(f.org)).toEqual(before);
     expect(await executeExternalPaymentRefundReference(ref, { db, provider })).toMatchObject({ state: "COMPLETED", idempotent: true }); expect(provider.refund).toHaveBeenCalledTimes(1); expect(provider.lookupRefund).toHaveBeenCalledTimes(1);
   });
@@ -90,6 +90,40 @@ describe("original provider refund reservations on PostgreSQL", () => {
     const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input, "PENDING"), before = await facts(f.org);
     expect(await executeExternalPaymentRefundReference(await reference(f, request.id), { db, provider })).toMatchObject({ state: "PENDING", refundedAt: null }); expect(await facts(f.org)).toEqual(before);
     expect(Money.of(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).reserved(input.refund.depositId)), "MAD").toJSON().amount).toBe("0.03");
+  });
+  it("retains exact provider gross, fee and merchant net separately from refund admission", async () => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input), before = await facts(f.org),
+      settlement = { schemaVersion: 1 as const, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN" as const, gross: { amount: "0.03", currency: "MAD" }, fee: { amount: "0.02", currency: "MAD" }, net: { amount: "0.01", currency: "MAD" }, totalRefunded: { amount: "0.03", currency: "MAD" } };
+    const result = await executeExternalPaymentRefundReference(await reference(f, request.id), { db, provider: { refund: () => Promise.resolve({ ...provider.evidence, settlement }), lookupRefund: () => Promise.resolve({ ...provider.evidence, settlement }) } });
+    expect(result).toMatchObject({ state: "COMPLETED" });
+    const rows = await withTenant(db, f.org, tx => tx.externalPaymentRefundSettlement.findMany({ where: { organizationId: f.org }, include: { evidence: true } }));
+    expect(rows).toHaveLength(1); expect(rows[0].settlement).toEqual(settlement); expect(rows[0].evidence.evidence).toEqual(provider.evidence); expect(await facts(f.org)).toEqual(before);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { organizationId: f.org, action: "finance.external_payment.refund_settlement_retained", resourceId: request.id } }))).toBe(1);
+  });
+  it("adds missing settlement after read-only reconciliation without rewriting the original observation", async () => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), ref = await reference(f, request.id), provider = gateway(f, input);
+    await executeExternalPaymentRefundReference(ref, { db, provider });
+    const original = await withTenant(db, f.org, tx => tx.$queryRaw<Array<{ id: string; xmin: string; body: string }>>`SELECT id::text,xmin::text,to_jsonb(e)::text AS body FROM external_payment_refund_evidence e WHERE organization_id=${f.org}::uuid`),
+      settlement = { schemaVersion: 1 as const, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN" as const, gross: { amount: "0.03", currency: "MAD" }, fee: { amount: "0.00", currency: "MAD" }, net: { amount: "0.03", currency: "MAD" }, totalRefunded: null };
+    await executeExternalPaymentRefundReference(ref, { db, provider: { refund: provider.refund, lookupRefund: () => Promise.resolve({ ...provider.evidence, settlement }) } });
+    expect(await withTenant(db, f.org, tx => tx.$queryRaw<Array<{ id: string; xmin: string; body: string }>>`SELECT id::text,xmin::text,to_jsonb(e)::text AS body FROM external_payment_refund_evidence e WHERE organization_id=${f.org}::uuid`)).toEqual(original);
+    expect(await withTenant(db, f.org, tx => tx.externalPaymentRefundSettlement.count({ where: { organizationId: f.org } }))).toBe(1); expect(provider.refund).toHaveBeenCalledTimes(1);
+  });
+  it("rolls back unaudited settlement without releasing its original uncertain money reservation", async () => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input), before = await facts(f.org),
+      settlement = { schemaVersion: 1 as const, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN" as const, gross: { amount: "0.03", currency: "MAD" }, fee: { amount: "0.00", currency: "MAD" }, net: { amount: "0.03", currency: "MAD" }, totalRefunded: null }, write = audits.writeAuditEvent;
+    vi.spyOn(audits, "writeAuditEvent").mockImplementation(async (tx, event) => { if (event.action === "finance.external_payment.refund_settlement_retained") return undefined; return write(tx, event); });
+    await expect(executeExternalPaymentRefundReference(await reference(f, request.id), { db, provider: { refund: () => Promise.resolve({ ...provider.evidence, settlement }), lookupRefund: () => Promise.resolve({ ...provider.evidence, settlement }) } })).rejects.toThrow("exact original provider refund settlement and attributed audit");
+    expect(await withTenant(db, f.org, tx => tx.externalPaymentRefundSettlement.count({ where: { organizationId: f.org } }))).toBe(0);
+    expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).reserved(input.refund.depositId))).toBe("0.03"); expect(await facts(f.org)).toEqual(before);
+  });
+  it("keeps populated refund settlement private to its source tenant", async () => {
+    const f = await fixture(), other = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input),
+      settlement = { schemaVersion: 1 as const, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN" as const, gross: { amount: "0.03", currency: "MAD" }, fee: { amount: "0.00", currency: "MAD" }, net: { amount: "0.03", currency: "MAD" }, totalRefunded: null };
+    await executeExternalPaymentRefundReference(await reference(f, request.id), { db, provider: { refund: () => Promise.resolve({ ...provider.evidence, settlement }), lookupRefund: () => Promise.resolve({ ...provider.evidence, settlement }) } });
+    expect(await admin.externalPaymentRefundSettlement.count({ where: { organizationId: f.org } })).toBe(1);
+    expect(await withTenant(db, other.org, tx => tx.externalPaymentRefundSettlement.findMany({ where: { organizationId: f.org } }))).toEqual([]);
+    expect(await admin.$queryRaw<Array<{ enabled: boolean; forced: boolean }>>`SELECT relrowsecurity AS enabled,relforcerowsecurity AS forced FROM pg_class WHERE oid='external_payment_refund_settlement'::regclass`).toEqual([{ enabled: true, forced: true }]);
   });
   it("rolls back the reservation when its original attributed audit is absent", async () => {
     const f = await fixture(), input = await draft(f), write = audits.writeAuditEvent; vi.spyOn(audits, "writeAuditEvent").mockImplementation(async (tx, event) => { if (event.action === "finance.external_payment.refund_requested") return undefined; return write(tx, event); });

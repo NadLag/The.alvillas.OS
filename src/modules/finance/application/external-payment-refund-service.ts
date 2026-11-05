@@ -5,7 +5,7 @@ import { captureAuthorizationCap, restoreAuthorizationCap } from "@/platform/aut
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { OutboxRepository } from "@/platform/events/outbox-repository";
 import { PayPalPaymentProvider } from "@/platform/providers/real";
-import { paymentRefundIntent, providerRefundEvidenceSchema } from "@/platform/providers/payment-refund";
+import { paymentRefundIntent, providerRefundResultSchema } from "@/platform/providers/payment-refund";
 import { Money } from "@/platform/money/money";
 import { retainExternalPaymentRefund, ExternalPaymentRefundError } from "../domain/external-payment-refund-intent";
 import { guestDepositRefundReviewInput } from "../domain/guest-deposit-command";
@@ -81,13 +81,18 @@ export async function executeExternalPaymentRefundReference(raw: unknown, deps: 
     return { request, providerIntent, post: true, lookup: null };
   });
   if (!start.post && !start.lookup) return view(start.request, true);
-  const provider = deps.provider ?? new PayPalPaymentProvider(), evidence = providerRefundEvidenceSchema.parse(start.lookup ? await provider.lookupRefund({ intent: start.providerIntent, refundId: start.lookup }) : await provider.refund(start.providerIntent));
+  const provider = deps.provider ?? new PayPalPaymentProvider(), { settlement, ...evidence } = providerRefundResultSchema.parse(start.lookup ? await provider.lookupRefund({ intent: start.providerIntent, refundId: start.lookup }) : await provider.refund(start.providerIntent));
   if (evidence.captureId !== start.providerIntent.captureId || evidence.requestId !== start.providerIntent.requestId || !Money.of(evidence.amount.amount, evidence.amount.currency).equals(Money.of(start.providerIntent.amount, start.providerIntent.currency))) throw new ExternalPaymentRefundError();
   return withTenant(db, reference.organizationId, async tx => {
     const { repository, request } = await referenced(tx, reference); if (request.id !== start.request.id || retained(request).fingerprint !== retained(start.request).fingerprint) throw new ExternalPaymentRefundError();
     const retainedEvidence = await repository.observe(request, evidence);
     if (!retainedEvidence.idempotent) await writeAuditEvent(tx, { organizationId: reference.organizationId, actorId: null, action: "finance.external_payment.refund_observed", resourceType: "financial_transaction", resourceId: request.id,
       after: { intentId: request.id, identityId: retainedEvidence.identity.id, evidenceId: retainedEvidence.observation.id, evidence }, reason: "Retained independently verified original provider refund without financial admission", requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: await new FinanceRepository(tx, reference.organizationId).clock() });
+    if (settlement) {
+      const retainedSettlement = await repository.retainSettlement(retainedEvidence.observation.id, settlement);
+      if (!retainedSettlement.idempotent) await writeAuditEvent(tx, { organizationId: reference.organizationId, actorId: null, action: "finance.external_payment.refund_settlement_retained", resourceType: "financial_transaction", resourceId: request.id,
+        after: { intentId: request.id, evidenceId: retainedEvidence.observation.id, settlementId: retainedSettlement.row.id, settlement }, reason: "Retained exact original refund gross, deductions and merchant net without guessing fees", requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: await new FinanceRepository(tx, reference.organizationId).clock() });
+    }
     await repository.flushGuards(); return view((await repository.find(request.id))!, retainedEvidence.idempotent);
   });
 }

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { Money } from "@/platform/money/money";
 import { paymentCaptureIntent } from "./payment-capture";
+import { payPalRefundSettlement, providerRefundSettlementSchema } from "./payment-refund-settlement";
 
 export class PaymentRefundEvidenceError extends Error {
   constructor(readonly status?: number) { super("payment_refund_unverified" + (status ? ":" + status : "")); }
@@ -13,6 +14,7 @@ export const providerRefundEvidenceSchema = z.object({ refundId: identity, captu
   amount: z.object({ amount: z.string().regex(/^(?:0|[1-9]\d{0,15})\.\d{2}$/u), currency: z.string().regex(/^[A-Z]{3}$/u) }).strict(),
   state: z.enum(["PENDING", "COMPLETED", "FAILED", "CANCELLED"]), createdAt: z.iso.datetime({ precision: 3 }), updatedAt: z.iso.datetime({ precision: 3 }), refundedAt: z.iso.datetime({ precision: 3 }).nullable()
 }).strict().refine(value => value.updatedAt >= value.createdAt && (value.state === "COMPLETED" ? value.refundedAt === value.updatedAt : value.refundedAt === null));
+export const providerRefundResultSchema = providerRefundEvidenceSchema.safeExtend({ settlement: providerRefundSettlementSchema.nullable() });
 const refundSchema = z.object({ id: identity, custom_id: z.string(), status: z.enum(["PENDING", "COMPLETED", "FAILED", "CANCELLED"]),
   amount: providerMoney, create_time: z.iso.datetime({ offset: true }), update_time: z.iso.datetime({ offset: true }),
   links: z.array(z.object({ rel: z.string(), href: z.string(), method: z.string().optional() })) });
@@ -49,4 +51,10 @@ export function paymentRefundLookup(raw: unknown) {
   const parsed = z.object({ intent: z.unknown(), refundId: identity }).strict().safeParse(raw);
   if (!parsed.success) throw new PaymentRefundEvidenceError();
   return { intent: paymentRefundIntent(parsed.data.intent), refundId: parsed.data.refundId };
+}
+
+export function verifiedPayPalRefundResult(raw: unknown, input: ReturnType<typeof paymentRefundIntent>, apiBaseUrl: string, refundId?: string) {
+  const evidence = verifiedPayPalRefund(raw, input, apiBaseUrl, refundId), envelope = z.object({ seller_payable_breakdown: z.unknown().optional() }).safeParse(raw);
+  if (!envelope.success) throw new PaymentRefundEvidenceError();
+  return { ...evidence, settlement: payPalRefundSettlement(envelope.data.seller_payable_breakdown, input) };
 }

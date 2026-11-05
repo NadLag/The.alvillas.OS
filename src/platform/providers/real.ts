@@ -14,7 +14,7 @@ import type {
 import type { AppLocale } from "@/i18n/routing";
 import type { AppEnv } from "@/platform/env/env";
 import { paymentCaptureIntent, verifiedPayPalCapture, verifiedPayPalCaptureEvidence, payPalOrderState, PaymentCaptureEvidenceError } from "./payment-capture";
-import { paymentRefundIntent, paymentRefundLookup, verifiedPayPalRefund, PaymentRefundEvidenceError } from "./payment-refund";
+import { paymentRefundIntent, paymentRefundLookup, verifiedPayPalRefundResult, PaymentRefundEvidenceError } from "./payment-refund";
 
 export type HttpTransport = (
   url: string,
@@ -259,7 +259,7 @@ export class PayPalPaymentProvider implements PaymentProvider {
       body: JSON.stringify({ amount: { value: intent.amount, currency_code: intent.currency }, custom_id: intent.requestId })
     }).catch(() => { throw new PaymentRefundEvidenceError(); });
     if (!response.ok) throw new PaymentRefundEvidenceError(response.status);
-    return verifiedPayPalRefund(await response.json().catch(() => { throw new PaymentRefundEvidenceError(); }), intent, this.apiBaseUrl);
+    return verifiedPayPalRefundResult(await response.json().catch(() => { throw new PaymentRefundEvidenceError(); }), intent, this.apiBaseUrl);
   }
 
   /** A retained refund identity is reconciled by GET; an unknown POST outcome never triggers an SDK retry. */
@@ -271,7 +271,7 @@ export class PayPalPaymentProvider implements PaymentProvider {
       method: "GET", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }
     }).catch(() => { throw new PaymentRefundEvidenceError(); });
     if (!response.ok) throw new PaymentRefundEvidenceError(response.status);
-    return verifiedPayPalRefund(await response.json().catch(() => { throw new PaymentRefundEvidenceError(); }), intent, this.apiBaseUrl, refundId);
+    return verifiedPayPalRefundResult(await response.json().catch(() => { throw new PaymentRefundEvidenceError(); }), intent, this.apiBaseUrl, refundId);
   }
 }
 

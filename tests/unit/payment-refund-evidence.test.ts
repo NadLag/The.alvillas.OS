@@ -22,7 +22,7 @@ describe("original provider refund evidence", () => {
   it("posts the exact explicit refund to its original capture with the retained request identity", async () => {
     const { adapter, transport } = provider();
     await expect(adapter.refund(input)).resolves.toEqual({ refundId: "REFUND-ORIGINAL-1", captureId: input.captureId, requestId: input.requestId,
-      amount: { amount: input.amount, currency: "EUR" }, state: "COMPLETED", createdAt: "2026-11-05T16:55:00.000Z", updatedAt: "2026-11-05T16:56:00.000Z", refundedAt: "2026-11-05T16:56:00.000Z" });
+      amount: { amount: input.amount, currency: "EUR" }, state: "COMPLETED", createdAt: "2026-11-05T16:55:00.000Z", updatedAt: "2026-11-05T16:56:00.000Z", refundedAt: "2026-11-05T16:56:00.000Z", settlement: null });
     expect(transport).toHaveBeenCalledTimes(2);
     expect(transport.mock.calls[1]?.[0]).toBe(api + "/v2/payments/captures/" + input.captureId + "/refund");
     expect(transport.mock.calls[1]?.[1].method).toBe("POST");
