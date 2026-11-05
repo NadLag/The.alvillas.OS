@@ -6,6 +6,7 @@ declare const authority: unique symbol;
 /** Process-local authority cannot be supplied by a serialized command or reused in another transaction. */
 export type ExternalRefundSupervisionAuthority = { readonly [authority]: true };
 type Details = { tx: TenantTransaction; organizationId: string; actorId: string; intentId: string; heldContext: FinanceActorContext;
+  review?: { id: string; fingerprint: string; reason: string };
   afterWritten?: (journal: { id: string; occurredAt: Date }) => Promise<void> };
 const issued = new WeakMap<ExternalRefundSupervisionAuthority, Details>();
 export function issueExternalRefundSupervisionAuthority(details: Details): ExternalRefundSupervisionAuthority {

@@ -8,6 +8,7 @@ export const externalRefundSupervisionReviewInput = externalRefundIdentityInput.
 export const externalRefundSupervisionAdmissionInput = externalRefundSupervisionReviewInput.extend({ reviewId: z.uuid().transform(value => value.toLowerCase()),
   reviewFingerprint: guestDepositRefundInput.shape.reviewFingerprint, idempotencyKey: z.uuid().transform(value => value.toLowerCase()) }).strict();
 export const externalRefundSupervisionRecoveryInput = z.object({ key: z.uuid().transform(value => value.toLowerCase()) }).strict();
+export const externalRefundSupervisionFeeInput = externalRefundSupervisionReviewInput.extend({ reviewId: z.uuid(), reviewFingerprint: guestDepositRefundInput.shape.reviewFingerprint }).strict();
 export const externalRefundSupervisedAdmissionReview = z.object({ schemaVersion: z.literal(1), reviewId: z.uuid(), intentId: z.uuid(),
   reviewFingerprint: guestDepositRefundInput.shape.reviewFingerprint, sourceFingerprint: guestDepositRefundInput.shape.reviewFingerprint,
   guestRefundFingerprint: guestDepositRefundInput.shape.reviewFingerprint, reason: guestDepositRefundInput.shape.reason,

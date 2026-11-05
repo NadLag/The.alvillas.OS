@@ -18,6 +18,7 @@ import { inspectGuestDepositRefundInTransaction, postGuestDepositRefund, recover
 import { employeeSettlementFundingChecks } from "./employee-compensation-settlement";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
 import { nativeTransaction } from "./native-payment-providers";
+import { inspectExternalRefundFeeAdmission, postExternalRefundFeeAdmission } from "./external-payment-refund-fee-service";
 
 type Deps = { db?: TenantTransactionRunner; requestId?: string };
 type Request = NonNullable<Awaited<ReturnType<ExternalPaymentRefundRepository["find"]>>>;
@@ -25,28 +26,28 @@ const json = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.Inp
 const held = (ctx: FinanceActorContext, raw: unknown): FinanceActorContext => ({ organizationId: ctx.organizationId, actorId: ctx.actorId, authContext: restoreAuthorizationCap(raw) });
 async function prepare(ctx: FinanceActorContext, tx: TenantTransaction, request: Request, restriction = ctx) {
   const source = await inspectExternalRefundForSupervision(ctx, tx, request);
-  // Returned costs require their own independently authorized ordinary correction and approval handoff.
-  if (ctx.actorId === request.requestedBy || source.verified.settlement.fee.amount !== "0.00") throw new ExternalPaymentRefundError();
+  if (ctx.actorId === request.requestedBy) throw new ExternalPaymentRefundError();
   await inspectExternalRefundForSupervision(restriction, tx, request);
   const authority = issueExternalRefundSupervisionAuthority({ tx, organizationId: ctx.organizationId, actorId: ctx.actorId, intentId: request.id, heldContext: restriction }),
     draft = guestDepositRefundReviewInput.strip().parse({ ...source.verified.saved.input.refund, externalReference: request.identity!.refundId }),
-    native = await inspectGuestDepositRefundInTransaction(ctx, draft, tx, { commandKey: request.idempotencyKey, supervision: authority });
-  return { source, draft, native };
+    native = await inspectGuestDepositRefundInTransaction(ctx, draft, tx, { commandKey: request.idempotencyKey, supervision: authority }),
+    fee = await inspectExternalRefundFeeAdmission(ctx, tx, request, authority), fingerprint = fee ? commandFingerprint({ guestRefund: native.fingerprint, fee: fee.fingerprint }) : native.fingerprint;
+  return { source, draft, native, fee, authority, fingerprint };
 }
 export async function reviewSupervisedExternalPaymentRefundAdmission(inputContext: FinanceActorContext, raw: unknown, deps: Deps = {}) {
   const ctx = externalPaymentContext(inputContext), input = externalRefundSupervisionReviewInput.parse(raw);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async tx => {
     const repository = new ExternalPaymentRefundRepository(tx, ctx.organizationId), request = await repository.find(input.intentId); if (!request) throw new ExternalPaymentRefundError();
-    const p = await prepare(ctx, tx, request), reviewId = crypto.randomUUID(), reviewFingerprint = commandFingerprint({ source: p.source.fingerprint, guestRefund: p.native.fingerprint, reason: input.reason }),
+    const p = await prepare(ctx, tx, request), reviewId = crypto.randomUUID(), reviewFingerprint = commandFingerprint({ source: p.source.fingerprint, guestRefund: p.fingerprint, reason: input.reason }),
       after = externalRefundSupervisedAdmissionReview.parse({ schemaVersion: 1, reviewId, intentId: request.id, reviewFingerprint, sourceFingerprint: p.source.fingerprint,
-        guestRefundFingerprint: p.native.fingerprint, reason: input.reason, originalRequestedBy: request.requestedBy, originalRequestKey: request.idempotencyKey,
+        guestRefundFingerprint: p.fingerprint, reason: input.reason, originalRequestedBy: request.requestedBy, originalRequestKey: request.idempotencyKey,
         originalRequestFingerprint: request.requestFingerprint, settlementId: p.source.verified.observation.settlement!.id, firstEvidenceId: p.source.basis.firstEvidenceId,
         refundedAt: p.source.refundedAt.toISOString(), authorizationCap: captureAuthorizationCap(ctx.authContext) });
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.external_payment.refund_supervised_admission_reviewed", resourceType: "financial_transaction", resourceId: request.id,
       propertyScopeId: p.source.target.propertyId, after: json(after), reason: input.reason, requestId: deps.requestId ?? crypto.randomUUID(), occurredAt: await p.native.finance.clock() });
     const audit = await repository.supervisedAdmissionReview(reviewId, ctx.actorId);
     if (!audit || audit.resourceId !== request.id || audit.reason !== input.reason || !isDeepStrictEqual(audit.after, json(after))) throw new ExternalPaymentRefundError();
-    const fresh = await prepare(ctx, tx, request); if (fresh.source.fingerprint !== p.source.fingerprint || fresh.native.fingerprint !== p.native.fingerprint) throw new ExternalPaymentRefundError();
+    const fresh = await prepare(ctx, tx, request); if (fresh.source.fingerprint !== p.source.fingerprint || fresh.fingerprint !== p.fingerprint) throw new ExternalPaymentRefundError();
     return presentGuestDepositResult(ctx, p.source.target, { intentId: request.id, reviewId, reviewFingerprint, originalRequestedBy: request.requestedBy, prospectiveAdmitter: ctx.actorId,
       amount: p.source.verified.settlement.gross, refundedAt: after.refundedAt, reason: input.reason }, await p.native.finance.clock());
   });
@@ -83,15 +84,16 @@ export async function admitSupervisedExternalPaymentRefund(inputContext: Finance
       review.data.reviewFingerprint !== input.reviewFingerprint || !await repository.committedAudit(audit.id)) throw new ExternalPaymentRefundError();
     await native.lockCommand(request.idempotencyKey); await native.lockSource(request.depositId);
     const restriction = held(ctx, review.data.authorizationCap), p = await prepare(ctx, tx, request, restriction);
-    if (p.source.fingerprint !== review.data.sourceFingerprint || p.native.fingerprint !== review.data.guestRefundFingerprint ||
-      commandFingerprint({ source: p.source.fingerprint, guestRefund: p.native.fingerprint, reason: input.reason }) !== input.reviewFingerprint) throw new ExternalPaymentRefundError();
+    if (p.source.fingerprint !== review.data.sourceFingerprint || p.fingerprint !== review.data.guestRefundFingerprint ||
+      commandFingerprint({ source: p.source.fingerprint, guestRefund: p.fingerprint, reason: input.reason }) !== input.reviewFingerprint) throw new ExternalPaymentRefundError();
     const after = { reviewId: input.reviewId, reviewFingerprint: input.reviewFingerprint, intentId: request.id, commandKey: input.idempotencyKey,
       originalRequestedBy: request.requestedBy, admittedBy: ctx.actorId, originalRequestKey: request.idempotencyKey }, requestId = deps.requestId ?? crypto.randomUUID(),
       finalAuthorization = async () => { for (const actor of [ctx, restriction]) await recheckFinanceAuthorization(actor, tx, await p.native.finance.clock(),
-        [{ action: "view", resource: p.source.target }, { action: "override", resource: p.source.target }, { action: "reconcile", resource: p.source.target }], new ExternalPaymentRefundError()); await p.native.recheck(await p.native.finance.clock()); };
+        [{ action: "view", resource: p.source.target }, { action: "override", resource: p.source.target }, { action: "reconcile", resource: p.source.target }], new ExternalPaymentRefundError()); await p.native.recheck(await p.native.finance.clock()); await p.fee?.recheck(); };
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.external_payment.refund_supervised_authorized", resourceType: "financial_transaction", resourceId: request.id,
       propertyScopeId: p.source.target.propertyId, after, reason: input.reason, requestId, occurredAt: await p.native.finance.clock() });
     await finalAuthorization();
+    if (p.fee) await postExternalRefundFeeAdmission(ctx, tx, request, p.fee, requestId, p.authority);
     const authority = issueExternalRefundSupervisionAuthority({ tx, organizationId: ctx.organizationId, actorId: ctx.actorId, intentId: request.id, heldContext: restriction,
       afterWritten: async journal => { await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.external_payment.refund_supervised_admitted", resourceType: "financial_transaction", resourceId: request.id,
         propertyScopeId: p.source.target.propertyId, after: { ...after, transactionId: journal.id }, reason: input.reason, requestId, occurredAt: await p.native.finance.clock() }); await finalAuthorization(); } });

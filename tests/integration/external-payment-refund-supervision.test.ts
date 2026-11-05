@@ -10,6 +10,8 @@ import { ExternalPaymentRefundRepository } from "@/modules/finance/infrastructur
 import { reviewExternalPaymentRefundSupervision } from "@/modules/finance/application/external-payment-refund-supervision";
 import { reviewExternalPaymentRefundAdmission } from "@/modules/finance/application/external-payment-refund-admission";
 import { reviewSupervisedExternalPaymentRefundAdmission, admitSupervisedExternalPaymentRefund, recoverSupervisedExternalPaymentRefund } from "@/modules/finance/application/external-payment-refund-supervised-admission";
+import { prepareSupervisedExternalPaymentRefundFee, readSupervisedExternalPaymentRefundFee } from "@/modules/finance/application/external-payment-refund-supervised-fee";
+import { submitExpense } from "@/modules/finance/application/expense-service";
 import { postGuestDepositRefund, inspectGuestDepositRefundInTransaction } from "@/modules/finance/application/guest-deposit-service";
 import { issueExternalRefundSupervisionAuthority } from "@/modules/finance/application/external-refund-supervision-authority";
 import { nativeTransaction } from "@/modules/finance/application/native-payment-providers";
@@ -34,7 +36,7 @@ afterEach(() => vi.restoreAllMocks()); afterAll(async () => { await db?.$disconn
 const reason = "Independently review the already-paid original refund after its initiating actor lost access", fixture = () => actualProviderRefundFeeFixture(db, admin),
   facts = (org: string) => withTenant(db, org, tx => tx.$queryRaw<Array<{ kind: string; id: string; xmin: string; body: string }>>`SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t)::text AS body FROM financial_transaction t WHERE organization_id=${org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p)::text FROM posting p WHERE organization_id=${org}::uuid ORDER BY kind,id`);
 type Fixture = Awaited<ReturnType<typeof fixture>>;
-async function reviewer(f: Fixture, permissions = ["financial_transaction:view", "financial_transaction:override", "financial_transaction:reconcile"], propertyId = f.property.id, fundingView = true, fundingPay = false) {
+async function reviewer(f: Fixture, permissions = ["financial_transaction:view", "financial_transaction:override", "financial_transaction:reconcile"], propertyId = f.property.id, fundingView = true, fundingPay = false, fundingVoid = false) {
   const selected = await withTenant(db, f.org, async tx => {
     const person = await tx.person.create({ data: { organizationId: f.org, displayName: "Independent financial supervisor" } }), account = await tx.userAccount.create({ data: { organizationId: f.org, personId: person.id } }),
       role = await tx.role.create({ data: { organizationId: f.org, key: "financial_supervisor_" + randomUUID(), name: "Financial supervisor" } }), rows = await tx.permission.findMany({ where: { organizationId: f.org, key: { in: permissions } } });
@@ -44,6 +46,7 @@ async function reviewer(f: Fixture, permissions = ["financial_transaction:view",
       const funding = await tx.role.create({ data: { organizationId: f.org, key: "merchant_viewer_" + randomUUID(), name: "Original merchant financial viewer" } }), permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "financial_transaction:view" } });
       await tx.rolePermission.create({ data: { organizationId: f.org, roleId: funding.id, permissionId: permission.id } });
       if (fundingPay) { const pay = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "financial_transaction:pay" } }); await tx.rolePermission.create({ data: { organizationId: f.org, roleId: funding.id, permissionId: pay.id } }); }
+      if (fundingVoid) { const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.org, key: "financial_transaction:void" } }); await tx.rolePermission.create({ data: { organizationId: f.org, roleId: funding.id, permissionId: permission.id } }); }
       await tx.roleAssignment.create({ data: { organizationId: f.org, userAccountId: account.id, personId: person.id, roleId: funding.id, scopeType: "financial_record", scopeId: f.merchant.id, validFrom: new Date("2020-01-01") } });
     }
     return { person, account, role };
@@ -90,8 +93,49 @@ describe("independent current financial review of retained provider refunds", ()
   });
 });
 
-const admissionPermissions = ["financial_transaction:view", "financial_transaction:override", "financial_transaction:reconcile", "financial_transaction:pay", "financial_transaction:create"],
-  paidWithoutFee = () => actualProviderRefundFeeFixture(db, admin, "OWNER_PAID", "0.00"),
+const admissionPermissions = ["financial_transaction:view", "financial_transaction:override", "financial_transaction:reconcile", "financial_transaction:pay", "financial_transaction:create"];
+const feePermissions = [...admissionPermissions, "financial_transaction:void", "expense:view", "expense:create", "expense:edit", "expense:pay", "expense:void"],
+  costAdmitter = (f: Fixture, permissions = feePermissions) => reviewer(f, permissions, undefined, true, true, true);
+describe("independent supervised admission of original returned provider costs", () => {
+  it.each(["OWNER_PAID", "INCLUDED_IN_COMMISSION"] as const)("keeps original %s cost ownership and ordinary approval while independently admitting exact money", async treatment => {
+    const f = await actualProviderRefundFeeFixture(db, admin, treatment), supervisor = await costAdmitter(f), before = await facts(f.org);
+    await withTenant(db, f.org, tx => tx.roleAssignment.update({ where: { id: f.grant.id }, data: { archivedAt: new Date() } }));
+    const review = await reviewExternalPaymentRefundSupervision(supervisor.ctx, { intentId: f.request.id, reason }, { db }), input = { intentId: f.request.id, reviewId: review.reviewId, reviewFingerprint: review.reviewFingerprint, reason },
+      view = await readSupervisedExternalPaymentRefundFee(supervisor.ctx, input, { db }); expect(view).toMatchObject({ returnedFee: { amount: "0.01", currency: "MAD" }, remainingCost: { amount: "0.01", currency: "MAD" }, state: "UNPREPARED" });
+    const plan = await prepareSupervisedExternalPaymentRefundFee(supervisor.ctx, input, { db }); expect(plan.expenseId).not.toBeNull(); expect(await facts(f.org)).toEqual(before);
+    await expect(reviewSupervisedExternalPaymentRefundAdmission(supervisor.ctx, { intentId: f.request.id, reason }, { db })).rejects.toThrow();
+    const draft = await withTenant(db, f.org, tx => tx.expense.findUniqueOrThrow({ where: { organizationId_id: { organizationId: f.org, id: plan.expenseId! } } }));
+    expect(draft).toMatchObject({ createdBy: supervisor.account.id, state: "DRAFT", correctsExpenseId: f.fee.id });
+    await submitExpense(supervisor.ctx, { id: draft.id, expectedVersion: draft.version, reason: "Apply the frozen original ordinary approval before independent admission" }, { db });
+    const approval = await reviewSupervisedExternalPaymentRefundAdmission(supervisor.ctx, { intentId: f.request.id, reason }, { db }), command = admission(approval), result = await admitSupervisedExternalPaymentRefund(supervisor.ctx, command, { db }), after = await facts(f.org);
+    expect(after.filter(row => before.some(original => original.kind === row.kind && original.id === row.id))).toEqual(before);
+    const added = after.filter(row => row.kind === "journal" && !before.some(original => original.kind === row.kind && original.id === row.id)); expect(added).toHaveLength(3);
+    for (const row of added) { const value = JSON.parse(row.body) as { created_by: string; occurred_at: string; sealed: boolean }; expect(value).toMatchObject({ created_by: supervisor.account.id, sealed: true }); expect(new Date(value.occurred_at).toISOString()).toBe(f.evidence.refundedAt); }
+    expect(await recoverSupervisedExternalPaymentRefund(supervisor.ctx, { key: command.idempotencyKey }, { db })).toMatchObject({ request: { id: result.id, idempotent: true } }); expect(await facts(f.org)).toEqual(after);
+    const binding = await withTenant(db, f.org, tx => tx.externalPaymentRefundFee.findUniqueOrThrow({ where: { organizationId_refundIntentId: { organizationId: f.org, refundIntentId: f.request.id } } })); expect(binding.createdBy).toBe(supervisor.account.id);
+    const audits = await withTenant(db, f.org, tx => tx.auditLog.findMany({ where: { organizationId: f.org, action: "finance.external_payment.refund_fee_supervised_prepared" } })); expect(audits).toHaveLength(1); expect(audits[0]).toMatchObject({ actorId: supervisor.account.id, reason, after: { originalRequestedBy: f.account.id, preparedBy: supervisor.account.id, bindingId: binding.id } });
+  });
+  it("admits a fully credited cost through its exact opposite without a zero-value expense", async () => {
+    const f = await actualProviderRefundFeeFixture(db, admin, "OWNER_PAID", "0.02"), supervisor = await costAdmitter(f), before = await facts(f.org), review = await reviewExternalPaymentRefundSupervision(supervisor.ctx, { intentId: f.request.id, reason }, { db }),
+      plan = await prepareSupervisedExternalPaymentRefundFee(supervisor.ctx, { intentId: f.request.id, reviewId: review.reviewId, reviewFingerprint: review.reviewFingerprint, reason }, { db }); expect(plan.expenseId).toBeNull();
+    const approved = await reviewSupervisedExternalPaymentRefundAdmission(supervisor.ctx, { intentId: f.request.id, reason }, { db }); await admitSupervisedExternalPaymentRefund(supervisor.ctx, admission(approved), { db });
+    const after = await facts(f.org); expect(after.filter(row => row.kind === "journal" && !before.some(original => original.kind === row.kind && original.id === row.id))).toHaveLength(2);
+    expect(await withTenant(db, f.org, tx => tx.expense.count({ where: { organizationId: f.org, amount: 0 } }))).toBe(0);
+  });
+  it("requires an independent ordinary expense grant before preparing the original cost", async () => {
+    const f = await fixture(), supervisor = await costAdmitter(f, feePermissions.filter(key => key !== "expense:void")), before = await facts(f.org), review = await reviewExternalPaymentRefundSupervision(supervisor.ctx, { intentId: f.request.id, reason }, { db });
+    await expect(prepareSupervisedExternalPaymentRefundFee(supervisor.ctx, { intentId: f.request.id, reviewId: review.reviewId, reviewFingerprint: review.reviewFingerprint, reason }, { db })).rejects.toThrow(); expect(await facts(f.org)).toEqual(before);
+    expect(await withTenant(db, f.org, tx => tx.externalPaymentRefundFee.count({ where: { organizationId: f.org } }))).toBe(0);
+  });
+  it("requires its actual supervisory preparation witness in the same native transaction", async () => {
+    const f = await fixture(), supervisor = await costAdmitter(f), before = await facts(f.org), review = await reviewExternalPaymentRefundSupervision(supervisor.ctx, { intentId: f.request.id, reason }, { db }), write = audits.writeAuditEvent;
+    vi.spyOn(audits, "writeAuditEvent").mockImplementation((tx, event) => event.action === "finance.external_payment.refund_fee_supervised_prepared" ? Promise.resolve(undefined) : write(tx, event));
+    await expect(prepareSupervisedExternalPaymentRefundFee(supervisor.ctx, { intentId: f.request.id, reviewId: review.reviewId, reviewFingerprint: review.reviewFingerprint, reason }, { db })).rejects.toThrow(/committed original refund fee/u); expect(await facts(f.org)).toEqual(before);
+    expect(await withTenant(db, f.org, tx => tx.externalPaymentRefundFee.count({ where: { organizationId: f.org } }))).toBe(0);
+  });
+});
+
+const paidWithoutFee = () => actualProviderRefundFeeFixture(db, admin, "OWNER_PAID", "0.00"),
   admitter = (f: Fixture, permissions = admissionPermissions, fundingPay = true) => reviewer(f, permissions, undefined, true, fundingPay),
   admission = (review: { intentId: string; reviewId: string; reviewFingerprint: string; reason: string }) => ({ intentId: review.intentId, reviewId: review.reviewId, reviewFingerprint: review.reviewFingerprint, reason: review.reason, idempotencyKey: randomUUID() });
 describe("independently attributed native financial admission of already-paid provider refunds", () => {

@@ -6,6 +6,7 @@ import { GuestDepositRepository } from "../infrastructure/guest-deposit-reposito
 import { readGuestDepositSourceInTransaction } from "./guest-deposit-service";
 import { employeeSettlementFundingChecks } from "./employee-compensation-settlement";
 import { recheckFinanceAuthorization, type FinanceActorContext } from "./finance-access";
+import { externalRefundSupervisionAuthorityDetails, type ExternalRefundSupervisionAuthority } from "./external-refund-supervision-authority";
 
 type Request = NonNullable<Awaited<ReturnType<ExternalPaymentRefundRepository["find"]>>>;
 export function retainedExternalRefund(request: Request, ctx: FinanceActorContext) {
@@ -13,8 +14,13 @@ export function retainedExternalRefund(request: Request, ctx: FinanceActorContex
   if (ctx.actorId !== request.requestedBy || ctx.organizationId !== request.organizationId) throw new ExternalPaymentRefundError();
   return saved;
 }
-export async function authorizeExternalRefundSourceView(ctx: FinanceActorContext, tx: TenantTransaction, request: Request, journal?: { id: string; occurredAt: Date }) {
-  const saved = retainedExternalRefund(request, ctx), contexts = [ctx, { ...ctx, authContext: restoreAuthorizationCap(request.authorizationCap) }];
+export function externalRefundAuthorityContexts(ctx: FinanceActorContext, tx: TenantTransaction, request: Request, supervision?: ExternalRefundSupervisionAuthority) {
+  const independent = supervision ? externalRefundSupervisionAuthorityDetails(supervision, ctx, tx, request.id) : null,
+    saved = independent ? assertExternalPaymentRefund(request) : retainedExternalRefund(request, ctx);
+  return { saved, contexts: [ctx, independent?.heldContext ?? { ...ctx, authContext: restoreAuthorizationCap(request.authorizationCap) }] };
+}
+export async function authorizeExternalRefundSourceView(ctx: FinanceActorContext, tx: TenantTransaction, request: Request, journal?: { id: string; occurredAt: Date }, supervision?: ExternalRefundSupervisionAuthority) {
+  const { saved, contexts } = externalRefundAuthorityContexts(ctx, tx, request, supervision);
   const first = request.identity ? await new GuestDepositRepository(tx, ctx.organizationId).firstCompletedExternalRefund(request.identity.id) : null;
   for (const actor of contexts) {
     const source = await readGuestDepositSourceInTransaction(actor, saved.input.refund.depositId, tx);
