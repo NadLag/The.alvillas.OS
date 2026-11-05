@@ -27,6 +27,12 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
     const group = name.startsWith("tests/unit/") ? "unit" : name.startsWith("tests/integration/") ? "postgres" : name.startsWith("tests/") ? "browser-and-tools" : "application";
     groups.get(group).push(file);
   }
+  // Independent native test modules share the same ambient context. Bound each
+  // compiler process as the catalog grows; no original input is dropped.
+  const native = groups.get("postgres").sort(), middle = Math.ceil(native.length / 2);
+  groups.delete("postgres");
+  groups.set("postgres-1", native.slice(0, middle));
+  groups.set("postgres-2", native.slice(middle));
   const directory = join(root, ".tmp", "typecheck-" + randomUUID()); mkdirSync(directory, { recursive: true });
   const portable = file => relative(directory, file).replaceAll("\\", "/");
   const projects = [...groups].map(([name, files]) => {
@@ -41,16 +47,18 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
 }
 export async function runTypecheckProjects(plan, projects = plan.projects) {
   const megabyte = 1024 * 1024, reserve = 1024 * megabyte, free = () => process.availableMemory?.() ?? freemem();
-  const heap = project => project.name === "postgres" ? 6144 : project.name === "application" ? 3072 : 2048;
+  const isNative = project => project.name.startsWith("postgres-");
+  const heap = project => isNative(project) ? 6144 : project.name === "application" ? 3072 : 2048;
   const run = project => new Promise(resolve => {
     const child = spawn(process.execPath, ["--max-old-space-size=" + heap(project), worker, plan.root, project.name, project.path], { cwd: plan.root, stdio: "inherit", env: process.env, windowsHide: true });
     child.once("error", error => { process.stderr.write(String(error) + "\n"); resolve(1); });
     child.once("exit", status => resolve(status ?? 1));
   });
   let failure = 0;
-  // The native acceptance catalog keeps its full original heap and runs alone.
-  for (const project of projects.filter(project => project.name === "postgres")) failure ||= await run(project);
-  const queue = projects.filter(project => project.name !== "postgres"), active = new Map(), budget = Math.max(0, free() - reserve);
+  // Both native partitions keep the original heap and run serially, even after
+  // a failure, so every partition produces diagnostic evidence.
+  for (const project of projects.filter(isNative)) { const status = await run(project); failure ||= status; }
+  const queue = projects.filter(project => !isNative(project)), active = new Map(), budget = Math.max(0, free() - reserve);
   const parallel = plan.parallelSafe && availableParallelism() >= 2;
   while (queue.length || active.size) {
     while (queue.length && active.size < (parallel ? 2 : 1)) {
