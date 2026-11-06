@@ -1,21 +1,17 @@
 import { createHash } from "node:crypto";
-import { z } from "zod";
-import { documentUploadReviewInput, documentUploadInput } from "../domain/document-command";
-import { documentTemplateDefinitionSchema, encodeDocumentTemplate } from "../domain/document-template";
-import { documentTemplateMediaType } from "../domain/document-template-format";
+import { documentUploadReviewInput } from "../domain/document-command";
+import { encodeDocumentTemplate } from "../domain/document-template";
+import { documentTemplateDraftSchema,documentTemplateAdmissionSchema } from "../domain/document-template-command";
+import { documentTemplateMediaType,documentTemplateFileName } from "../domain/document-template-format";
 import { reviewDocumentUpload, admitDocumentUpload, type DocumentActorContext } from "./document-archive";
 
-const fields=documentUploadReviewInput.shape;
-export const documentTemplateDraftSchema=z.object({documentId:fields.documentId,source:fields.source,typeKey:fields.typeKey,title:fields.title,
-  supersedesId:fields.supersedesId,effectiveFrom:fields.effectiveFrom,definition:documentTemplateDefinitionSchema}).strict();
-export const documentTemplateAdmissionSchema=documentTemplateDraftSchema.extend({idempotencyKey:documentUploadInput.shape.idempotencyKey,
-  reviewFingerprint:documentUploadInput.shape.reviewFingerprint,reason:documentUploadInput.shape.reason});
+export {documentTemplateDraftSchema,documentTemplateAdmissionSchema} from "../domain/document-template-command";
 type Dependencies=Parameters<typeof admitDocumentUpload>[2];
 
 export function prepareDocumentTemplate(raw:unknown){
   const input=documentTemplateDraftSchema.parse(raw),definition=input.definition,bytes=encodeDocumentTemplate(definition);
   const metadata=documentUploadReviewInput.parse({documentId:input.documentId,source:input.source,typeKey:input.typeKey,title:input.title,kind:"TEMPLATE",
-    locale:definition.locale,templateKey:definition.templateKey,fileName:definition.templateKey+"."+definition.locale+".template.json",contentType:documentTemplateMediaType,
+    locale:definition.locale,templateKey:definition.templateKey,fileName:documentTemplateFileName(definition.templateKey,definition.locale),contentType:documentTemplateMediaType,
     fileSize:bytes.length,sha256:createHash("sha256").update(bytes).digest("hex"),supersedesId:input.supersedesId,effectiveFrom:input.effectiveFrom});
   return{metadata,bytes};
 }
