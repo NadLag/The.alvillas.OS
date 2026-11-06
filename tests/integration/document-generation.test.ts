@@ -42,6 +42,7 @@ import { reviewSignatureDistribution, admitSignatureDistribution, recoverSignatu
 import { executeSignatureDistributionReference } from "@/modules/documents/application/document-signature-distribution-worker";
 import { readNativeSignatureProviderEvidence } from "@/modules/documents/application/document-signature-provider-evidence";
 import { reconcileSignatureDistribution } from "@/modules/documents/application/document-signature-reconciliation";
+import { listNativeSignatures, readNativeSignatureHistory } from "@/modules/documents/application/document-signature-history";
 
 let admin: PrismaClient, db: PrismaClient, server: Server, base: string, puts = 0;
 const signatureServers: Array<Awaited<ReturnType<typeof ownedSignatureProvider>>> = [];
@@ -152,6 +153,49 @@ async function admitDistribution(f: Awaited<ReturnType<typeof distributionFixtur
   const receipt = await admitSignatureDistribution(f.ctx, f.distributionCommand, f.deps), event = await withTenant(db, f.organizationId, tx => tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: { organizationId: f.organizationId, idempotencyKey: signatureDistributionOutboxKey(f.ctx.actorId, receipt.idempotencyKey) } } }));
   return { receipt, reference: { organizationId: f.organizationId, outboxEventId: event.id } };
 }
+describe("retained native signature discovery and history", () => {
+  it("reads exact original contacts after contact changes, archival and disabled provider configuration without rewriting history", async () => {
+    const f = await signatureFixture(), receipt = await admitNativeSignature(f.ctx, f.signatureCommand, { db, env }), original = await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(receipt.id)), before = await money(f.organizationId);
+    await withTenant(db, f.organizationId, tx => tx.owner.update({ where: { id: f.parties.owner.id }, data: { displayName: "Changed contact after original request", email: null, archivedAt: new Date() } }));
+    const history = await readNativeSignatureHistory(f.ctx, { signatureId: receipt.id }, { db, env }); expect(history.signature).toMatchObject({ id: receipt.id, instanceId: f.intent.id, documentVersionId: f.complete.versionId, state: "DRAFT" }); expect(history.recipients[0]).toMatchObject({ displayName: f.parties.owner.displayName, email: f.parties.owner.email }); expect(history.events.map(event => event.state)).toEqual(["DRAFT"]);
+    expect((await listNativeSignatures(f.ctx, { documentVersionId: f.complete.versionId }, { db, env })).items.map(item => item.id)).toEqual([receipt.id]);
+    await expect(reviewNativeSignature(f.ctx, f.signatureDraft, { db, env })).rejects.toThrow("document_unavailable");
+    expect(await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(receipt.id))).toEqual(original); expect(await money(f.organizationId)).toEqual(before);
+  });
+  it("retains original sent history after provider policy changes and after a later business amendment", async () => {
+    const f = await distributionFixture(), admitted = await admitDistribution(f); await executeSignatureDistributionReference(admitted.reference, f.deps); const before = await money(f.organizationId), original = await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(f.signature.id)), calls = f.http.calls.length, ids = await amendedTemplates(f), command = await amendmentCommand(f, f.complete, ids), amendment = await admitDocumentGeneration(f.ctx, command, f.deps); await publishDocumentGeneration(f.ctx, { instanceId: amendment.id }, f.deps);
+    await withTenant(db, f.organizationId, tx => new ConfigRuleRepository(tx, f.organizationId).createVersion({ key: "documents.signatures", scopeType: "organization", effectiveFrom: new Date(), reason: "Disable future provider effects while preserving original historical evidence", value: { source: "NATIVE_DOCUMENT_SIGNATURES", provider: "DOCUMENSO", enabled: false, account: null, legal: null, signing: null } }));
+    const history = await readNativeSignatureHistory(f.ctx, { signatureId: f.signature.id }, f.deps); expect(history.signature.state).toBe("SENT"); expect(history.signature.instanceId).toBe(f.intent.id); expect(history.signature.documentVersionId).toBe(f.complete.versionId); expect(history.events.map(event => event.state)).toEqual(["SENT", "DRAFT"]); expect(history.events.every(event => event.signedVersionId === null)).toBe(true); expect(history.preparation).toEqual({ id: f.prepared.receipt.id, state: "PREPARED" });
+    expect(f.http.calls).toHaveLength(calls); expect(await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(f.signature.id))).toEqual(original); expect(await money(f.organizationId)).toEqual(before);
+  });
+  it.each(["signature:view", "owner:export", "document_instance:export", "document_template:export", "property_finance:view"])("denies retained private history after current %s revocation", async key => {
+    const f = await signatureFixture(), receipt = await admitNativeSignature(f.ctx, f.signatureCommand, { db, env }); await revokeSignaturePermission(f, key); await expect(readNativeSignatureHistory(f.ctx, { signatureId: receipt.id }, { db, env })).rejects.toThrow("document_unavailable");
+    expect((await withTenant(db, f.organizationId, tx => tx.auditLog.count({ where: { action: "documents.signature.history_read" } })))).toBe(0);
+  });
+  it("denies held-capability escalation and real foreign tenant histories", async () => {
+    const f = await signatureFixture(), receipt = await admitNativeSignature(f.ctx, f.signatureCommand, { db, env }), foreign = await signatureFixture(), held = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => key !== "owner:export")) } };
+    await expect(readNativeSignatureHistory(held, { signatureId: receipt.id }, { db, env })).rejects.toThrow("document_unavailable"); await expect(readNativeSignatureHistory(foreign.ctx, { signatureId: receipt.id }, { db, env })).rejects.toThrow("document_unavailable");
+    await expect(listNativeSignatures(foreign.ctx, { documentVersionId: f.complete.versionId }, { db, env })).rejects.toThrow("document_unavailable");
+  });
+  it("authorizes a different history reader independently after the original requester is deactivated", async () => {
+    const f = await signatureFixture(), receipt = await admitNativeSignature(f.ctx, f.signatureCommand, { db, env }), other = await withTenant(db, f.organizationId, async tx => {
+      const person = await tx.person.create({ data: { organizationId: f.organizationId, displayName: "Independent current history operator" } }), account = await tx.userAccount.create({ data: { organizationId: f.organizationId, personId: person.id } }); await tx.roleAssignment.create({ data: { organizationId: f.organizationId, userAccountId: account.id, personId: person.id, roleId: f.assignment.roleId, scopeType: "organization", validFrom: new Date("2020-01-01") } }); await tx.userAccount.update({ where: { id: f.ctx.actorId }, data: { status: "DEACTIVATED", deactivatedAt: new Date(), sessionVersion: { increment: 1 } } }); return { person, account };
+    }), ctx = { organizationId: f.organizationId, actorId: other.account.id, authContext: { ...await authContextForAccount(f.organizationId, other.account.id, { db }), personId: other.person.id } };
+    expect((await readNativeSignatureHistory(ctx, { signatureId: receipt.id }, { db, env })).recipients[0].email).toBe(f.parties.owner.email); await expect(readNativeSignatureHistory(f.ctx, { signatureId: receipt.id }, { db, env })).rejects.toThrow("document_unavailable");
+  });
+  it.each(["documents.signature.history_read", "documents.signature.history_listed"])("discards private results and audit after late revocation at %s", async action => {
+    const f = await signatureFixture(), receipt = await admitNativeSignature(f.ctx, f.signatureCommand, { db, env }), write = auditWriter.writeAuditEvent; let revoked = false;
+    const spy = vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const result = await write(tx, event); if (!revoked && event.action === action) { revoked = true; await revokeSignaturePermission(f, "owner:export"); } return result; });
+    try { if (action.endsWith("history_read")) await expect(readNativeSignatureHistory(f.ctx, { signatureId: receipt.id }, { db, env })).rejects.toThrow("document_unavailable"); else await expect(listNativeSignatures(f.ctx, { documentVersionId: f.complete.versionId }, { db, env })).rejects.toThrow("document_unavailable"); } finally { spy.mockRestore(); }
+    expect(revoked).toBe(true); expect(await withTenant(db, f.organizationId, tx => tx.auditLog.count({ where: { action } }))).toBe(0);
+  });
+  it("discovers every immutable original through actor/version-bound pages without exposing command nonces", async () => {
+    const f = await signatureFixture(), ids = []; for (let index = 0; index < 31; index++) ids.push((await admitNativeSignature(f.ctx, { ...f.signatureCommand, idempotencyKey: randomUUID() }, { db, env })).id);
+    const first = await listNativeSignatures(f.ctx, { documentVersionId: f.complete.versionId }, { db, env }); expect(first.items).toHaveLength(30); expect(first.next).toBeTruthy(); const second = await listNativeSignatures(f.ctx, { documentVersionId: f.complete.versionId, cursor: first.next }, { db, env }); expect(second.items).toHaveLength(1); expect(second.next).toBeNull(); expect([...first.items, ...second.items].map(item => item.id).sort()).toEqual(ids.sort()); expect(JSON.stringify(first)).not.toContain("idempotencyKey");
+    await expect(readNativeSignatureHistory(f.ctx, { signatureId: ids[0], cursor: first.next }, { db, env })).rejects.toThrow(); const foreign = await signatureFixture(); await expect(listNativeSignatures(foreign.ctx, { documentVersionId: f.complete.versionId, cursor: first.next }, { db, env })).rejects.toThrow();
+  });
+});
+
 describe("explicit durable native signature distribution", () => {
   it("sends an older prepared original after a later amendment without changing business-effective ordering or financial history", async () => {
     const f = await distributionFixture(), { receipt, reference } = await admitDistribution(f), originalMoney = await money(f.organizationId), ids = await amendedTemplates(f), command = await amendmentCommand(f, f.complete, ids), amendment = await admitDocumentGeneration(f.ctx, command, f.deps), completed = await publishDocumentGeneration(f.ctx, { instanceId: amendment.id }, f.deps);

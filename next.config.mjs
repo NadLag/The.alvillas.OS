@@ -11,7 +11,8 @@ const nextConfig = {
   serverExternalPackages: ["pdfjs-dist"],
   outputFileTracingIncludes: {
     "/api/inngest": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
-    "/api/documents/signatures/preparation/*": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"]
+    "/api/documents/signatures/preparation/*": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
+    "/api/documents/signatures/distribution/*": ["./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"]
   },
   typescript: { tsconfigPath: process.env.ALVILLAS_BUILD_TSCONFIG ?? "tsconfig.json" },
   experimental: { serverActions: { bodySizeLimit: "4mb" } },

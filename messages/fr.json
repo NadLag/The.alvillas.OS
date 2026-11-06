@@ -5136,5 +5136,22 @@
     "reviewed": "Original et destinataires vérifiés",
     "confirm": "Confirmez l’envoi de cet original conservé à ces destinataires par e-mail.",
     "send": "Mettre les demandes de signature en attente"
+  },
+  "SignatureHistory": {
+    "title": "Demandes de signature conservées",
+    "guidance": "Retrouvez les demandes de cette version originale précise. Les coordonnées et événements restent ceux conservés à l’origine ; vos droits actuels contrôlent l’accès.",
+    "find": "Rechercher les demandes conservées",
+    "read": "Lire l’historique conservé",
+    "empty": "Aucune demande autorisée sur cette page.",
+    "more": "Autres demandes",
+    "original": "Original conservé",
+    "moreEvents": "Événements antérieurs",
+    "open": "Ouvrir la demande originale",
+    "DRAFT": "Brouillon",
+    "SENT": "Envoyée",
+    "VIEWED": "Consultée",
+    "SIGNED": "Signée",
+    "DECLINED": "Refusée",
+    "EXPIRED": "Expirée"
   }
 }
