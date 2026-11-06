@@ -6,7 +6,7 @@ import type { AppLocale } from "@/i18n/routing";
 import { SkeletonBlock } from "@/design-system/shells";
 import { documentSourceKinds } from "../domain/document-policy";
 import { documentUploadReviewInput,documentUploadInput,type documentSourceReferenceSchema } from "../domain/document-command";
-import { documentSourceChoicesSchema,documentSourceWorkspaceSchema,documentHistorySchema,documentUploadAdmissionSchema,documentUploadRecoverySchema,documentPartReceiptSchema,
+import { documentSourceChoicesSchema,documentSourceWorkspaceSchema,documentEffectiveHistorySchema,documentUploadAdmissionSchema,documentUploadRecoverySchema,documentPartReceiptSchema,
   type documentItemSchema,type documentVersionItemSchema } from "../domain/document-read-model";
 import { DocumentFileEditor,type DocumentFileDraft } from "./document-file-editor";
 import { DocumentHistoryPanel } from "./document-history-panel";
@@ -17,10 +17,11 @@ import { documentTemplateAdmissionSchema,documentTemplateDraftSchema } from "../
 import { encodeDocumentTemplate,decodeDocumentTemplate,type DocumentTemplateDefinition } from "../domain/document-template";
 import { documentTemplateMediaType,documentTemplateFileName } from "../domain/document-template-format";
 import {DocumentGenerationPanel} from "./document-generation-panel";
+import {documentEffectiveHistoryFormat} from "../domain/document-effective-version";
 
 type Source=z.infer<typeof documentSourceReferenceSchema>;
 type Workspace=z.infer<typeof documentSourceWorkspaceSchema>;
-type History=z.infer<typeof documentHistorySchema>;
+type History=z.infer<typeof documentEffectiveHistorySchema>;
 type Document=z.infer<typeof documentItemSchema>;
 type Version=z.infer<typeof documentVersionItemSchema>;
 type Admission=z.infer<typeof documentUploadAdmissionSchema>;
@@ -65,7 +66,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
   },[active,controller,failed,scope]);
   const loadHistory=useCallback(async(documentId:string,before?:number,publish=true)=>{
     const own=generation.current,sequence=++sequences.current.history,abort=controller();setHistory(null);
-    try{const response=await documentRequest(scope,"history",{documentId,...before?{before}:{}},abort.signal),data=documentHistorySchema.parse(await response.json());
+    try{const response=await documentRequest(scope,"history",{documentId,format:documentEffectiveHistoryFormat,...before?{before}:{}},abort.signal),data=documentEffectiveHistorySchema.parse(await response.json());
       if(active(own)&&sequence===sequences.current.history){if(publish){view.current.documentId=documentId;setHistory(data);}return data;}}
     catch(error){if(active(own)&&sequence===sequences.current.history&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);}
   },[active,controller,failed,scope]);
@@ -114,7 +115,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
       const bytes=new Uint8Array(await file.arrayBuffer()),parts=bytes.length>documentSingleBodyBytes?{schemaVersion:1,chunkBytes:documentUploadChunkBytes,
         hashes:await Promise.all(Array.from({length:Math.ceil(bytes.length/documentUploadChunkBytes)},(_,index)=>digest(bytes.subarray(index*documentUploadChunkBytes,(index+1)*documentUploadChunkBytes))))}:undefined;
       const metadata=documentUploadReviewInput.parse({documentId:amendment?.document.id??null,source,typeKey:draft.typeKey,kind:draft.kind,locale:draft.locale,title:draft.title,
-        fileName:file.name,contentType:file.type,fileSize:file.size,sha256:await digest(bytes),supersedesId:amendment?.version.id??null,effectiveFrom:null,templateKey:draft.templateKey,...parts?{parts}:{}});
+        fileName:file.name,contentType:file.type,fileSize:file.size,sha256:await digest(bytes),supersedesId:amendment?.version.id??null,effectiveFrom:draft.effectiveFrom,templateKey:draft.templateKey,...parts?{parts}:{}});
       const review=reviewSchema.parse(await(await documentRequest(scope,"review",metadata,abort.signal)).json());if(!active(own))return;
       nonce.current??=crypto.randomUUID();writeDocumentNonce(storageKey,nonce.current);setHasPending(true);setUnrecorded(false);
       const input=documentUploadInput.parse({...metadata,idempotencyKey:nonce.current,reviewFingerprint:review.reviewFingerprint,reason:draft.reason});intent.current=input;originalFile.current=file;templateIntent.current=null;setCanRetry(true);
@@ -127,7 +128,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
   const sendTemplate=async(value:AuthoredTemplateDraft)=>{
     if(busyRef.current||!source||!editor)return;const own=generation.current,token=++operation.current,abort=controller();busyRef.current=true;setBusy(true);setState("sending");setHistory(null);
     try{
-      const draft=documentTemplateDraftSchema.parse({documentId:amendment?.document.id??null,source,typeKey:value.typeKey,title:value.title,supersedesId:amendment?.version.id??null,effectiveFrom:null,definition:value.definition}),
+      const draft=documentTemplateDraftSchema.parse({documentId:amendment?.document.id??null,source,typeKey:value.typeKey,title:value.title,supersedesId:amendment?.version.id??null,effectiveFrom:value.effectiveFrom,definition:value.definition}),
         bytes=encodeDocumentTemplate(draft.definition),review=templateReviewSchema.parse(await(await documentRequest(scope,"templates/review",draft,abort.signal)).json()),metadata=review.metadata;
       if(!active(own))return;
       if(metadata.kind!=="TEMPLATE"||metadata.contentType!==documentTemplateMediaType||metadata.documentId!==draft.documentId||metadata.source.kind!==source.kind||metadata.source.id!==source.id||metadata.typeKey!==draft.typeKey||metadata.title!==draft.title||metadata.supersedesId!==draft.supersedesId||metadata.templateKey!==draft.definition.templateKey||metadata.locale!==draft.definition.locale||metadata.fileName!==documentTemplateFileName(draft.definition.templateKey,draft.definition.locale)||metadata.fileSize!==bytes.length||metadata.sha256!==await digest(bytes))throw new DocumentBrowserError("unavailable");
@@ -202,7 +203,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
       {kind==="TEMPLATE"&&authoredTypes.length>0&&canEdit?<label className="field"><span>{tt("mode")}</span><select value={authoring?"AUTHORED":"ORIGINAL"} disabled={busy||!workspace} onChange={event=>setTemplateMode(z.enum(["AUTHORED","ORIGINAL"]).parse(event.target.value))} data-testid="template-mode"><option value="AUTHORED">{tt("authored")}</option>{fileTypes.length?<option value="ORIGINAL">{tt("uploaded")}</option>:null}</select></label>:null}
       {canEdit?authoring?<DocumentTemplateEditor key={formKey+":authored"} locale={locale} types={authoredTypes} identity={amendment?.document.templateKey?{templateKey:amendment.document.templateKey,locale:amendment.document.locale,typeKey:amendment.document.typeKey,title:amendment.version.title}:null} definition={templateDefinition} disabled={busy||!workspace} onSubmit={value=>{void sendTemplate(value);}}/>:fileTypes.length?<DocumentFileEditor key={formKey+":original"} locale={locale} types={fileTypes} kind={kind} amendment={amendment} disabled={busy||!workspace} onSubmit={(draft,file)=>{void send(draft,file);}}/>:<p>{editor?.types.length?tt("templatesOnly"):t("readOnly")}</p>:null}
     </section>:null}
-    <DocumentGenerationPanel key={scope+":"+source?.id+":"+epoch} scope={scope} source={source} disabled={locked} onComplete={async documentId=>{const data=await loadHistory(documentId);if(data){view.current.source=data.document.source;view.current.kind="FILE";setSource(data.document.source);setKind("FILE");await loadWorkspace(data.document.source,"FILE");}}}/>
-    {history?<DocumentHistoryPanel locale={locale} data={history} disabled={locked} canAmend={Boolean(workspace?.types.some(type=>type.key===history.document.typeKey))} onMore={()=>{if(history.next)void loadHistory(history.document.id,history.next);}} onCurrent={()=>{void loadHistory(history.document.id);}} onDownload={version=>{void download(version);}} onAmend={version=>{void amend(version);}}/>:null}
+    <DocumentGenerationPanel locale={locale} key={scope+":"+source?.id+":"+epoch} scope={scope} source={source} disabled={locked} onComplete={async documentId=>{const data=await loadHistory(documentId);if(data){view.current.source=data.document.source;view.current.kind="FILE";setSource(data.document.source);setKind("FILE");await loadWorkspace(data.document.source,"FILE");}}}/>
+    {history?<DocumentHistoryPanel locale={locale} data={history} disabled={locked} canAmend={Boolean(workspace?.types.some(type=>type.key===history.document.typeKey))} onMore={()=>{if(history.next)void loadHistory(history.document.id,history.next);}} onCurrent={()=>{void loadHistory(history.document.id);}} onEffective={()=>{if(history.effectiveVersion)void loadHistory(history.document.id,history.effectiveVersion.number+1);}} onDownload={version=>{void download(version);}} onAmend={version=>{void amend(version);}}/>:null}
   </div>;
 }
