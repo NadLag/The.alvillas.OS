@@ -215,6 +215,15 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  documents Document[]
+  documentAdmissions DocumentAdmission[]
+  documentVersions DocumentVersion[]
+  documentTemplates DocumentTemplate[]
+  documentInstances DocumentInstance[]
+  documentSignatures Signature[]
+  documentSignatureRecipients SignatureRecipient[]
+  documentSignatureEvents SignatureEvent[]
+  documentActions DocumentAction[]
   externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentFees ExternalPaymentFee[]
   externalPaymentAttempts ExternalPaymentAttempt[]
@@ -561,6 +570,8 @@ model TeamWallet {
 }
 
 model Person {
+  documents Document[] @relation("DocumentPerson")
+  documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientPerson")
   collectedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentCollectorPerson")
   recordedGuestPayments GuestPaymentReceipt[] @relation("GuestPaymentRecorderPerson")
 
@@ -601,6 +612,13 @@ model Person {
 }
 
 model UserAccount {
+  createdDocuments Document[] @relation("DocumentCreator")
+  documentAdmissions DocumentAdmission[] @relation("DocumentAdmissionCreator")
+  documentVersions DocumentVersion[] @relation("DocumentVersionCreator")
+  documentTemplates DocumentTemplate[] @relation("DocumentTemplateCreator")
+  documentInstances DocumentInstance[] @relation("DocumentInstanceCreator")
+  documentSignatures Signature[] @relation("DocumentSignatureRequester")
+  documentActions DocumentAction[] @relation("DocumentActionActor")
   externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentFees ExternalPaymentFee[]
   externalPaymentIntents ExternalPaymentIntent[]
@@ -925,6 +943,8 @@ model RoleAssignment {
 }
 
 model Owner {
+  documents Document[] @relation("DocumentOwner")
+  documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientOwner")
   guestPaymentReceiptOwners GuestPaymentReceiptOwner[]
 
   receivableAssignments ReceivableAssignment[] @relation("ReceivableOwner")
@@ -1029,6 +1049,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  documents Document[] @relation("DocumentProperty")
   guestPaymentReceipts GuestPaymentReceipt[]
 
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
@@ -1286,6 +1307,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  documents Document[] @relation("DocumentReservation")
   externalPaymentIntents ExternalPaymentIntent[]
   guestPaymentReceipts GuestPaymentReceipt[]
 
@@ -1652,6 +1674,7 @@ model LedgerAccount {
 }
 
 model FinancialTransaction {
+  documents Document[] @relation("DocumentTransaction")
   guestPaymentReceipt GuestPaymentReceipt?
 
   ledgerIntegritySource LedgerIntegritySource?
@@ -2564,6 +2587,7 @@ model NotificationEmailSuppression {
 }
 
 model GuestRecord {
+  documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientGuest")
   guestPaymentReceipts GuestPaymentReceipt[]
 
   receivableAssignments ReceivableAssignment[] @relation("ReceivableGuest")
@@ -3101,6 +3125,7 @@ model ApprovalStageRecipient {
 }
 
 model Supplier {
+  documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientSupplier")
   receivableAssignments ReceivableAssignment[] @relation("ReceivableSupplier")
   invoices           SupplierInvoice[]
   id                 String            @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -4691,4 +4716,240 @@ model ExternalPaymentRefundSettlement {
   @@unique([organizationId,id],map:"external_payment_refund_settlement_org_id_unique")
   @@unique([organizationId,evidenceId],map:"external_payment_refund_settlement_evidence_unique")
   @@map("external_payment_refund_settlement")
+}
+
+
+model Document {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  sourceKind String @map("source_kind")
+  sourceId String @map("source_id") @db.Uuid
+  propertyId String? @map("property_id") @db.Uuid
+  ownerId String? @map("owner_id") @db.Uuid
+  reservationId String? @map("reservation_id") @db.Uuid
+  personId String? @map("person_id") @db.Uuid
+  transactionId String? @map("transaction_id") @db.Uuid
+  typeKey String @map("type_key")
+  kind String
+  locale String
+  title String
+  privacy String[]
+  sourceSnapshot Json @map("source_snapshot")
+  policySnapshot Json @map("policy_snapshot")
+  revision BigInt @default(1)
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash") @db.Char(64)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("DocumentCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  property Property? @relation("DocumentProperty",fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  owner Owner? @relation("DocumentOwner",fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  reservation Reservation? @relation("DocumentReservation",fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  person Person? @relation("DocumentPerson",fields:[organizationId,personId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  transaction FinancialTransaction? @relation("DocumentTransaction",fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  admissions DocumentAdmission[]
+  versions DocumentVersion[]
+  template DocumentTemplate?
+  instance DocumentInstance?
+  actions DocumentAction[]
+  @@unique([organizationId,id],map:"document_org_id_unique")
+  @@unique([organizationId,createdBy,commandKey],map:"document_command_unique")
+  @@index([organizationId,sourceKind,sourceId,id],map:"document_source_page_idx")
+  @@map("document")
+}
+
+model DocumentAdmission {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  documentId String @map("document_id") @db.Uuid
+  supersedesId String? @map("supersedes_id") @db.Uuid
+  expectedRevision BigInt @map("expected_revision")
+  authorizationCap Json @map("authorization_cap")
+  policySnapshot Json @map("policy_snapshot")
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  input Json
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash") @db.Char(64)
+  fileName String @map("file_name")
+  contentType String @map("content_type")
+  fileSize Int @map("file_size")
+  sha256 String @db.Char(64)
+  storageKey String @map("storage_key")
+  reason String
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  document Document @relation(fields:[organizationId,documentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("DocumentAdmissionCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  supersedes DocumentVersion? @relation("DocumentAdmissionPredecessor",fields:[organizationId,supersedesId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  version DocumentVersion? @relation("DocumentVersionAdmission")
+  @@unique([organizationId,id],map:"document_admission_org_id_unique")
+  @@unique([organizationId,createdBy,commandKey],map:"document_admission_command_unique")
+  @@unique([organizationId,storageKey],map:"document_admission_storage_unique")
+  @@map("document_admission")
+}
+
+model DocumentVersion {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  documentId String @map("document_id") @db.Uuid
+  admissionId String @map("admission_id") @db.Uuid
+  number Int
+  title String
+  supersedesId String? @map("supersedes_id") @db.Uuid
+  effectiveFrom DateTime? @map("effective_from") @db.Timestamptz(6)
+  cipherSize Int @map("cipher_size")
+  cipherSha256 String @map("cipher_sha256") @db.Char(64)
+  keyVersion String @map("key_version")
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  document Document @relation(fields:[organizationId,documentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  admission DocumentAdmission @relation("DocumentVersionAdmission",fields:[organizationId,admissionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("DocumentVersionCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  supersedes DocumentVersion? @relation("DocumentVersionLineage",fields:[organizationId,supersedesId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  next DocumentVersion[] @relation("DocumentVersionLineage")
+  successorAdmissions DocumentAdmission[] @relation("DocumentAdmissionPredecessor")
+  instances DocumentInstance[]
+  signatures Signature[]
+  signedOutcomes SignatureEvent[]
+  @@unique([organizationId,id],map:"document_version_org_id_unique")
+  @@unique([organizationId,documentId,number],map:"document_version_number_unique")
+  @@unique([organizationId,admissionId],map:"document_version_admission_unique")
+  @@unique([organizationId,supersedesId],map:"document_version_successor_unique")
+  @@map("document_version")
+}
+
+model DocumentTemplate {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  documentId String @map("document_id") @db.Uuid
+  key String
+  locale String
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  document Document @relation(fields:[organizationId,documentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("DocumentTemplateCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"document_template_org_id_unique")
+  @@unique([organizationId,documentId],map:"document_template_document_unique")
+  @@unique([organizationId,key,locale],map:"document_template_locale_unique")
+  @@map("document_template")
+}
+
+model DocumentInstance {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  documentId String @map("document_id") @db.Uuid
+  templateVersionId String @map("template_version_id") @db.Uuid
+  sourceSnapshot Json @map("source_snapshot")
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash") @db.Char(64)
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  document Document @relation(fields:[organizationId,documentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  templateVersion DocumentVersion @relation(fields:[organizationId,templateVersionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  creator UserAccount @relation("DocumentInstanceCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  signatures Signature[]
+  @@unique([organizationId,id],map:"document_instance_org_id_unique")
+  @@unique([organizationId,documentId],map:"document_instance_document_unique")
+  @@unique([organizationId,createdBy,commandKey],map:"document_instance_command_unique")
+  @@map("document_instance")
+}
+
+model Signature {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  instanceId String @map("instance_id") @db.Uuid
+  documentVersionId String @map("document_version_id") @db.Uuid
+  policySnapshot Json @map("policy_snapshot")
+  authorizationCap Json @map("authorization_cap")
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash") @db.Char(64)
+  reason String
+  requestedBy String @map("requested_by") @db.Uuid
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  instance DocumentInstance @relation(fields:[organizationId,instanceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  documentVersion DocumentVersion @relation(fields:[organizationId,documentVersionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  requester UserAccount @relation("DocumentSignatureRequester",fields:[organizationId,requestedBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  recipients SignatureRecipient[]
+  events SignatureEvent[]
+  @@unique([organizationId,id],map:"signature_org_id_unique")
+  @@unique([organizationId,requestedBy,commandKey],map:"signature_command_unique")
+  @@index([organizationId,documentVersionId],map:"signature_document_version_idx")
+  @@map("signature")
+}
+
+model SignatureRecipient {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  signatureId String @map("signature_id") @db.Uuid
+  personId String? @map("person_id") @db.Uuid
+  ownerId String? @map("owner_id") @db.Uuid
+  guestId String? @map("guest_id") @db.Uuid
+  supplierId String? @map("supplier_id") @db.Uuid
+  identityHash String @map("identity_hash") @db.Char(64)
+  emailCipher Bytes @map("email_cipher")
+  sourceSnapshot Json @map("source_snapshot")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  signature Signature @relation(fields:[organizationId,signatureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  person Person? @relation("SignatureRecipientPerson",fields:[organizationId,personId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  owner Owner? @relation("SignatureRecipientOwner",fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  guest GuestRecord? @relation("SignatureRecipientGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  supplier Supplier? @relation("SignatureRecipientSupplier",fields:[organizationId,supplierId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"signature_recipient_org_id_unique")
+  @@unique([organizationId,signatureId,identityHash],map:"signature_recipient_identity_unique")
+  @@map("signature_recipient")
+}
+
+model SignatureEvent {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  signatureId String @map("signature_id") @db.Uuid
+  state String
+  providerIdentityHash String? @map("provider_identity_hash") @db.Char(64)
+  providerRequestId String? @map("provider_request_id")
+  providerEventId String? @map("provider_event_id")
+  evidenceHash String @map("evidence_hash") @db.Char(64)
+  evidenceCipher Bytes? @map("evidence_cipher")
+  signedVersionId String? @map("signed_version_id") @db.Uuid
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+  observedAt DateTime @default(now()) @map("observed_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  signature Signature @relation(fields:[organizationId,signatureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  signedVersion DocumentVersion? @relation(fields:[organizationId,signedVersionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"signature_event_org_id_unique")
+  @@unique([providerIdentityHash,providerEventId],map:"signature_event_provider_identity_unique")
+  @@unique([organizationId,signatureId,evidenceHash],map:"signature_event_evidence_unique")
+  @@index([organizationId,signatureId,occurredAt,id],map:"signature_event_history_idx")
+  @@map("signature_event")
+}
+
+model DocumentAction {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  documentId String @map("document_id") @db.Uuid
+  action String
+  reason String
+  before Json
+  after Json
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash") @db.Char(64)
+  actorId String @map("actor_id") @db.Uuid
+  occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  document Document @relation(fields:[organizationId,documentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  actor UserAccount @relation("DocumentActionActor",fields:[organizationId,actorId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"document_action_org_id_unique")
+  @@unique([organizationId,actorId,commandKey,action],map:"document_action_command_unique")
+  @@index([organizationId,documentId,occurredAt,id],map:"document_action_history_idx")
+  @@map("document_action")
 }
