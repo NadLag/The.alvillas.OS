@@ -14,6 +14,21 @@ export class ExternalPaymentRefundRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
   find(id: string) { return this.tx.externalPaymentRefundIntent.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } }, include }); }
   byKey(idempotencyKey: string) { return this.tx.externalPaymentRefundIntent.findUnique({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } }, include }); }
+  admissionEvidence(intentId: string) { return this.tx.auditLog.findFirst({ where: { organizationId: this.organizationId, resourceType: "financial_transaction", resourceId: intentId,
+    action: "finance.external_payment.refund_admission_evidence" }, select: { actorId: true, after: true } }); }
+  admissionSettlement(id: string) { return this.tx.externalPaymentRefundSettlement.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } },
+    include: { evidence: { include: { identity: true } } } }); }
+  async unambiguousCompletedSettlement(intentId: string) {
+    const rows = await this.tx.$queryRaw<Array<{ settlement: Prisma.JsonValue | null }>>`SELECT CASE WHEN count(*)=1 THEN min(payload::text)::jsonb ELSE NULL END AS settlement
+      FROM (SELECT DISTINCT s.settlement AS payload FROM external_payment_refund_settlement s
+        JOIN external_payment_refund_evidence e ON e.organization_id=s.organization_id AND e.id=s.evidence_id
+        JOIN external_payment_refund_identity i ON i.organization_id=e.organization_id AND i.id=e.identity_id
+        JOIN external_payment_refund_intent r ON r.organization_id=i.organization_id AND r.id=i.intent_id
+        LEFT JOIN external_payment_refund_fee f ON f.organization_id=r.organization_id AND f.refund_intent_id=r.id
+        WHERE s.organization_id=${this.organizationId}::uuid AND r.id=${intentId}::uuid AND e.state='COMPLETED'
+          AND (s.settlement->'fee'->>'amount')::numeric=coalesce(f.returned_fee,0)) candidates`;
+    return rows[0]?.settlement ?? null;
+  }
   capture(id: string) { return this.tx.externalPaymentCapture.findUnique({ where: { organizationId_id: { organizationId: this.organizationId, id } }, include: { intent: true } }); }
   supervisionCandidates(depositId: string, actorId: string, after?: string) {
     return this.tx.externalPaymentRefundIntent.findMany({ where: { organizationId: this.organizationId, depositId, requestedBy: { not: actorId }, identity: { isNot: null },

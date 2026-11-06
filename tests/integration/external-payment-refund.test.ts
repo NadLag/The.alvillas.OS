@@ -70,6 +70,37 @@ function gateway(f: Fixture, input: Awaited<ReturnType<typeof draft>>, state: "P
   return { evidence, refund: vi.fn(() => Promise.resolve({ ...evidence, settlement: null })), lookupRefund: vi.fn(() => Promise.resolve({ ...evidence, settlement: null })) };
 }
 describe("original provider refund reservations on PostgreSQL", () => {
+  it.each([null, "evidenceId", "settlementId", "transactionId", "admittedBy"])("rolls native refund admission back when retained admission evidence is missing or redirected: %s", async field => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input), amount = { amount: input.refund.amount, currency: "MAD" },
+      settlement = { schemaVersion: 1 as const, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN" as const, gross: amount, fee: { amount: "0.00", currency: "MAD" }, net: amount, totalRefunded: amount };
+    await executeExternalPaymentRefundReference(await reference(f, request.id), { db, provider: { refund: () => Promise.resolve({ ...provider.evidence, settlement }), lookupRefund: provider.lookupRefund } });
+    const review = await reviewExternalPaymentRefundAdmission(f.ctx, { intentId: request.id }, { db }), before = await facts(f.org), write = audits.writeAuditEvent;
+    vi.spyOn(audits, "writeAuditEvent").mockImplementation((tx, event) => {
+      if (event.action !== "finance.external_payment.refund_admission_evidence") return write(tx, event);
+      if (field === null) return Promise.resolve(undefined);
+      if (!event.after || typeof event.after !== "object" || Array.isArray(event.after)) throw Error("Actual admission evidence required");
+      return write(tx, { ...event, after: { ...event.after, [field]: randomUUID() } });
+    });
+    await expect(admitExternalPaymentRefund(f.ctx, { intentId: request.id, reviewFingerprint: review.reviewFingerprint }, { db })).rejects.toThrow();
+    expect(await facts(f.org)).toEqual(before);
+    expect(await withTenant(db, f.org, tx => new GuestDepositRepository(tx, f.org).byCommand(input.refund.idempotencyKey))).toBeNull();
+    expect(await withTenant(db, f.org, tx => new ExternalPaymentRefundRepository(tx, f.org).admissionEvidence(request.id))).toBeNull();
+  });
+  it.each(["PENDING", "FAILED", "CANCELLED", "COMPLETED"] as const)("retains admitted refund history after a later %s observation without settlement", async state => {
+    const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), provider = gateway(f, input), ref = await reference(f, request.id), amount = { amount: input.refund.amount, currency: "MAD" },
+      settlement = { schemaVersion: 1 as const, basis: "ORIGINAL_PROVIDER_PAYABLE_BREAKDOWN" as const, gross: amount, fee: { amount: "0.00", currency: "MAD" }, net: amount, totalRefunded: amount },
+      monetaryPost = vi.fn(() => Promise.resolve({ ...provider.evidence, settlement }));
+    await executeExternalPaymentRefundReference(ref, { db, provider: { refund: monetaryPost, lookupRefund: provider.lookupRefund } });
+    const review = await reviewExternalPaymentRefundAdmission(f.ctx, { intentId: request.id }, { db }), admitted = await admitExternalPaymentRefund(f.ctx, { intentId: request.id, reviewFingerprint: review.reviewFingerprint }, { db }), recorded = await facts(f.org),
+      laterAt = new Date(Date.parse(provider.evidence.updatedAt) + 1000).toISOString(), lookup = vi.fn(() => Promise.resolve({ ...provider.evidence, state, updatedAt: laterAt, refundedAt: state === "COMPLETED" ? laterAt : null, settlement: null }));
+    await executeExternalPaymentRefundReference(ref, { db, provider: { refund: monetaryPost, lookupRefund: lookup } });
+    expect(monetaryPost).toHaveBeenCalledTimes(1); expect(lookup).toHaveBeenCalledTimes(1); expect(await facts(f.org)).toEqual(recorded);
+    const recovered = externalRefundViewSchema.parse((await recoverExternalPaymentRefund(f.ctx, { key: input.refund.idempotencyKey }, { db })).request);
+    expect(recovered).toMatchObject({ state: "COMPLETED", refundedAt: provider.evidence.refundedAt, settlement, admission: { transactionId: admitted.id, occurredAt: provider.evidence.refundedAt }, providerObservation: { state, updatedAt: laterAt } });
+    expect(externalRefundViewSchema.parse(await getExternalPaymentRefund(f.ctx, { intentId: request.id }, { db }))).toEqual(recovered);
+    expect(await withTenant(db, f.org, tx => tx.externalPaymentRefundEvidence.count({ where: { organizationId: f.org, identity: { intentId: request.id } } }))).toBe(2);
+    expect(await facts(f.org)).toEqual(recorded);
+  });
   it("rolls cancellation back when its attributed witness is missing", async () => {
     const f = await fixture(), input = await draft(f), request = await requestExternalPaymentRefund(f.ctx, input, { db }), before = await facts(f.org), write = audits.writeAuditEvent;
     vi.spyOn(audits, "writeAuditEvent").mockImplementation((tx, event) => event.action === "finance.external_payment.refund_cancelled_before_attempt" ? Promise.resolve(undefined) : write(tx, event));

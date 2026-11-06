@@ -46,5 +46,12 @@ export async function paypalHttpFixture(orderId: string, fee = "0.00", returnedF
   });
   server.listen(0, "127.0.0.1"); await once(server, "listening"); const address = server.address(); if (!address || typeof address === "string") throw Error("Owned local payment fixture required");
   return { provider: new PayPalPaymentProvider({ PAYPAL_CLIENT_ID: "local-capture-fixture", PAYPAL_SECRET: "local-capture-fixture", PAYPAL_BASE_URL: "http://127.0.0.1:" + address.port }),
-    facts: () => ({ captureId, capturedAt, posts, lookups, refundPosts, refundLookups, refunded: refunded.toJSON(), creditedFee: creditedFee.toJSON() }), close: () => new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); }) };
+    facts: () => ({ captureId, capturedAt, posts, lookups, refundPosts, refundLookups, refunded: refunded.toJSON(), creditedFee: creditedFee.toJSON() }),
+    observeRefund: async (refundId: string, state: "PENDING" | "FAILED" | "CANCELLED" | "COMPLETED") => {
+      const original = z.object({ update_time: z.iso.datetime(), seller_payable_breakdown: z.unknown().optional() }).passthrough().parse(refunds.get(refundId)), at = (await clock()).toISOString();
+      if (at <= original.update_time) throw Error("Later provider fixture observation requires a later owned clock instant");
+      const { seller_payable_breakdown: ignored, ...retained } = original; void ignored;
+      refunds.set(refundId, { ...retained, status: state, update_time: at });
+    },
+    close: () => new Promise<void>((resolve, reject) => { server.close(error => error ? reject(error) : resolve()); server.closeAllConnections(); }) };
 }
