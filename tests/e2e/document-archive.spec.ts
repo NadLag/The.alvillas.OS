@@ -39,8 +39,13 @@ async function fillFile(page: Page, file: { name: string; mimeType: string; buff
   await page.getByTestId("document-reason").fill(reason);
 }
 async function downloadFile(page: Page, name: string, bytes: Buffer) {
-  const version = page.getByTestId("document-version").filter({ hasText: name }), pending = page.waitForEvent("download");
-  await expect(version).toHaveCount(1); await version.getByTestId("document-download").click();
+  const version = page.getByTestId("document-version").filter({ hasText: name }), button = version.getByTestId("document-download");
+  await expect(version).toHaveCount(1); await expect(button).toBeEnabled(); await button.scrollIntoViewIfNeeded();
+  await expect.poll(() => button.evaluate(element => {
+    const box = element.getBoundingClientRect(), x = box.x + box.width / 2, y = box.y + box.height / 2;
+    return box.width >= 48 && box.height >= 48 && x >= 0 && x < window.innerWidth && y >= 0 && y < window.innerHeight && element.contains(document.elementFromPoint(x, y));
+  })).toBe(true);
+  const pending = page.waitForEvent("download"); await button.click();
   const file = await pending, path = await file.path(); if (!path) throw Error("Actual downloaded original bytes required");
   expect(file.suggestedFilename()).toBe(name); expect(await readFile(path)).toEqual(bytes);
   await expect(page.getByTestId("document-download").first()).toBeEnabled();
