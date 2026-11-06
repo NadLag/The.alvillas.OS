@@ -90,7 +90,7 @@ describe("immutable generated amendments", () => {
       original = await publishDocumentGeneration(f.ctx, { instanceId: first.id }, { db, env, objects: store() });
     const signature = await withTenant(db, f.organizationId, async tx => {
       const repository = new DocumentRepository(tx, f.organizationId), instance = await repository.instance(first.id); if (!instance) throw Error("Actual original required");
-      const snapshot = documentGenerationSnapshotSchema.parse(instance.sourceSnapshot), current = await documentArchiveContext(f.ctx, tx, f.draft.source, "view", instance.document),
+      const snapshot = documentGenerationSnapshotSchema.parse(instance.sourceSnapshot), current = await documentArchiveContext(f.ctx, tx, { kind: "PROPERTY", id: f.property.id }, "view", instance.document),
         commandKey = randomUUID(), commandHash = commandFingerprint({ instanceId: first.id, versionId: original.versionId, commandKey }),
         row = await tx.signature.create({ data: { organizationId: f.organizationId, instanceId: first.id, documentVersionId: original.versionId!,
           policySnapshot: documentJson(snapshot.policySnapshot), authorizationCap: documentJson(snapshot.authorizationCap), sourceFingerprint: current.native.fingerprint,
