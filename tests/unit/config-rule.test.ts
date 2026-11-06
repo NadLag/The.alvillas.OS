@@ -43,6 +43,7 @@ describe("config rule registry", () => {
       "agreement.notice",
       "agreement.responsibilities",
       "agreement.special_conditions",
+      "documents.archive",
       "feature_flag",
       "field.device_hygiene",
       "field.upload_lifecycle",

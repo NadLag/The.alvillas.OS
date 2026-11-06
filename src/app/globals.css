@@ -2735,3 +2735,13 @@ textarea:disabled {
 .attachment-page :is(h2,h3,p,select,option) { overflow-wrap: anywhere; }
 .attachment-page input[type="file"] { max-inline-size: 100%; min-inline-size: 0; }
 .attachment-page .button-row { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+
+.document-archive-page, .document-archive-page :is(.resource-form, .field, .form-actions, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
+.document-archive-page .resource-form { grid-template-columns: minmax(0, 1fr); }
+.document-archive-page .resource-list { list-style: none; margin: 0; padding: 0; }
+.document-archive-page .resource-list > li { overflow-wrap: anywhere; }
+.document-archive-page .resource-list > li > button { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; inline-size: 100%; text-align: start; white-space: normal; overflow-wrap: anywhere; }
+.document-archive-page .resource-list > li > button > span { min-inline-size: 0; max-inline-size: 100%; }
+.document-archive-page .field :is(input, select, textarea) { inline-size: 100%; min-inline-size: 0; }
+.document-archive-page :is(button, input, select, textarea) { min-block-size: var(--target-field-large); max-inline-size: 100%; }
+.document-archive-page .form-actions > button { white-space: normal; overflow-wrap: anywhere; }

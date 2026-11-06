@@ -1,0 +1,11 @@
+# 0192 — Private versioned document archive
+
+The locked specification requires separate Document, DocumentVersion, DocumentTemplate, DocumentInstance and Signature identities. A template version, a generated agreement, its amendment and a signed return must remain distinguishable without changing an earlier file.
+
+Store private bytes through the existing StorageProvider and versioned application AEAD helpers. Bind ciphertext to the tenant, document, durable admission, MIME type, size and plaintext hash. Conditional object creation and exact retained-object verification recover lost acknowledgements without replacing the first ciphertext. Authorized server downloads keep storage URLs and encryption envelopes out of client responses.
+
+Commit upload admission before object transport. Bind its nonce to the actual actor, original request, held authorization, explicit configuration and native source. Recheck held and current grants after transport and the final audit. Serialize original version lineage in PostgreSQL; retain losing admissions and original rows. Financial documents reuse the native journal disclosure checks, including salary, wallet, supplier and company sources, with exact amount limits. Operational grants cannot substitute for financial source grants.
+
+Every business table has a tenant key, compound source references and forced RLS. Versions, admissions, templates, instances, recipients, signature events and private actions are append-only. Root identity is immutable; later protection may only increase. Native guards require each mutation's private reason/history and a separate canonical audit witness in the same transaction. Generic audit payloads contain opaque references rather than private titles, filenames, reasons, bytes or financial detail.
+
+Document types, locales, classification and upload budgets come from `documents.archive`; no legal text, monetary rule or retention schedule is invented. The existing PDF and SignatureProvider interfaces remain authoritative. Actual template rendering, instance generation, Documenso dispatch/webhook acceptance and signed returns continue under their approved feature IDs; this archive foundation does not report them as signed or DONE. Legal assurance and retention decisions remain owner-reserved.
