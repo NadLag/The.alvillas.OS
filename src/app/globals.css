@@ -2745,3 +2745,5 @@ textarea:disabled {
 .document-archive-page .field :is(input, select, textarea) { inline-size: 100%; min-inline-size: 0; }
 .document-archive-page :is(button, input, select, textarea) { min-block-size: var(--target-field-large); max-inline-size: 100%; }
 .document-archive-page .form-actions > button { white-space: normal; overflow-wrap: anywhere; }
+.document-template-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); min-inline-size: 0; max-inline-size: 100%; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-5); }
+.document-template-section legend { padding-inline: var(--space-3); overflow-wrap: anywhere; }

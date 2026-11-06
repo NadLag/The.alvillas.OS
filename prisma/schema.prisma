@@ -4777,6 +4777,7 @@ model DocumentAdmission {
   fileSize Int @map("file_size")
   sha256 String @db.Char(64)
   storageKey String @map("storage_key")
+  payloadCipher Bytes? @map("payload_cipher")
   reason String
   createdBy String @map("created_by") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
