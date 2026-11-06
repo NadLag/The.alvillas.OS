@@ -16,6 +16,7 @@ import { DocumentTemplateEditor,type AuthoredTemplateDraft } from "./document-te
 import { documentTemplateAdmissionSchema,documentTemplateDraftSchema } from "../domain/document-template-command";
 import { encodeDocumentTemplate,decodeDocumentTemplate,type DocumentTemplateDefinition } from "../domain/document-template";
 import { documentTemplateMediaType,documentTemplateFileName } from "../domain/document-template-format";
+import {DocumentGenerationPanel} from "./document-generation-panel";
 
 type Source=z.infer<typeof documentSourceReferenceSchema>;
 type Workspace=z.infer<typeof documentSourceWorkspaceSchema>;
@@ -201,6 +202,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
       {kind==="TEMPLATE"&&authoredTypes.length>0&&canEdit?<label className="field"><span>{tt("mode")}</span><select value={authoring?"AUTHORED":"ORIGINAL"} disabled={busy||!workspace} onChange={event=>setTemplateMode(z.enum(["AUTHORED","ORIGINAL"]).parse(event.target.value))} data-testid="template-mode"><option value="AUTHORED">{tt("authored")}</option>{fileTypes.length?<option value="ORIGINAL">{tt("uploaded")}</option>:null}</select></label>:null}
       {canEdit?authoring?<DocumentTemplateEditor key={formKey+":authored"} locale={locale} types={authoredTypes} identity={amendment?.document.templateKey?{templateKey:amendment.document.templateKey,locale:amendment.document.locale,typeKey:amendment.document.typeKey,title:amendment.version.title}:null} definition={templateDefinition} disabled={busy||!workspace} onSubmit={value=>{void sendTemplate(value);}}/>:fileTypes.length?<DocumentFileEditor key={formKey+":original"} locale={locale} types={fileTypes} kind={kind} amendment={amendment} disabled={busy||!workspace} onSubmit={(draft,file)=>{void send(draft,file);}}/>:<p>{editor?.types.length?tt("templatesOnly"):t("readOnly")}</p>:null}
     </section>:null}
+    <DocumentGenerationPanel key={scope+":"+source?.id+":"+epoch} scope={scope} source={source} disabled={locked} onComplete={async documentId=>{const data=await loadHistory(documentId);if(data){view.current.source=data.document.source;view.current.kind="FILE";setSource(data.document.source);setKind("FILE");await loadWorkspace(data.document.source,"FILE");}}}/>
     {history?<DocumentHistoryPanel locale={locale} data={history} disabled={locked} canAmend={Boolean(workspace?.types.some(type=>type.key===history.document.typeKey))} onMore={()=>{if(history.next)void loadHistory(history.document.id,history.next);}} onCurrent={()=>{void loadHistory(history.document.id);}} onDownload={version=>{void download(version);}} onAmend={version=>{void amend(version);}}/>:null}
   </div>;
 }

@@ -1,0 +1,49 @@
+import {randomUUID} from "node:crypto";
+import {readFile} from "node:fs/promises";
+import {getDocument} from "pdfjs-dist/legacy/build/pdf.mjs";
+import AxeBuilder from "@axe-core/playwright";
+import {expect,test} from "@playwright/test";
+import {withTenant} from "@/platform/db/tenant";
+import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
+import {FinanceRepository} from "@/modules/finance/infrastructure/finance-repository";
+import {Money} from "@/platform/money/money";
+import {documentTemplateMediaType} from "@/modules/documents/domain/document-template-format";
+import {openFieldFixture} from "./support/field-fixture";
+import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
+import {forwardBrowserPostOnce} from "./support/forward-browser-post";
+
+for(const locale of ["en","fr","ar"] as const)test(`Native document generation retains its chosen PDF and recovers original acknowledgements in ${locale}`,async({page},info)=>{
+  test.skip(!process.env.DATABASE_URL,"Dedicated native PostgreSQL required");test.setTimeout(240000);
+  const f=await openFieldFixture(page,info,locale),errors:string[]=[];page.on("pageerror",error=>errors.push(error.name));
+  try{
+    const suffix=randomUUID().replaceAll("-","").slice(0,12),marker="PRIVATE-GENERATED-CLAUSE-"+suffix,reason="PRIVATE-GENERATION-REASON-"+suffix;
+    const saved=await withTenant(f.db,f.organizationId,async tx=>{
+      const task=await tx.operationTask.findUniqueOrThrow({where:{id:f.taskId}}),property=await tx.property.findUniqueOrThrow({where:{id:task.propertyId}}),actorId=task.assignedToUserAccountId!;
+      await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"documents.archive",scopeType:"property",scopeId:property.id,effectiveFrom:new Date("2020-01-01"),createdBy:actorId,reason:"Explicit authored generation browser acceptance policy",value:{source:"NATIVE_DOCUMENT_ARCHIVE",encryption:"APP_MANAGED_AEAD",history:"APPEND_ONLY",downloads:"AUTHORIZED_SERVER_PROXY",storage_url_seconds:30,upload_admission:{window_seconds:3600,max_requests:100},upload_transport:{window_seconds:3600,max_requests:100},types:[{key:"generated_agreement",labels:{en:"Generated agreement",fr:"Convention générée",ar:"اتفاقية منشأة"},sources:["PROPERTY"],privacy:["financial"],content_types:[documentTemplateMediaType,"application/pdf"],max_bytes:1048576}]}});
+      const finance=new FinanceRepository(tx,f.organizationId),bank=await finance.ensureLedgerAccount({code:"GEN_BROWSER_BANK",name:"Original generation browser custody",accountType:"ASSET_LOCATION",normalSide:"DEBIT"}),claim=await finance.ensureLedgerAccount({code:"GEN_BROWSER_OWNER",name:"Original generation browser ownership",accountType:"CLAIM_OWNERSHIP",normalSide:"CREDIT"}),amount=Money.of("9007199254740993.07","MAD");
+      await finance.createFinancialTransaction({reference:"GEN_BROWSER:"+suffix,description:"Original financial preservation evidence",idempotencyKey:randomUUID(),createdBy:actorId,occurredAt:await finance.clock(),postings:[{ledgerAccountId:bank.id,side:"DEBIT",amount,bucket:"OWNER_REVENUE",dimensions:{property_id:property.id}},{ledgerAccountId:claim.id,side:"CREDIT",amount,bucket:"OWNER_REVENUE",dimensions:{property_id:property.id}}]});return{property,actorId};
+    }),money=()=>withTenant(f.db,f.organizationId,tx=>tx.$queryRaw`SELECT t.id::text,t.xmin::text,md5(to_jsonb(t)::text) AS body FROM financial_transaction t WHERE organization_id=${f.organizationId}::uuid UNION ALL SELECT p.id::text,p.xmin::text,md5(to_jsonb(p)::text) FROM posting p WHERE organization_id=${f.organizationId}::uuid ORDER BY id`),originalMoney=await money(),headers={Origin:new URL(page.url()).origin,"x-alvillas-document-scope":f.organizationId+"."+saved.actorId},variants=[];
+    for(const language of ["en","fr"] as const){
+      const draft={documentId:null,source:{kind:"PROPERTY",id:saved.property.id},typeKey:"generated_agreement",title:(language==="en"?"English original ":"Original français ")+suffix+" retained original language version".repeat(5),supersedesId:null,effectiveFrom:null,definition:{schemaVersion:1,templateKey:"generated_"+suffix,locale:language,title:(language==="en"?"Agreement ":"Convention ")+"{{property}}",variables:[{key:"property",kind:"TEXT"}],blocks:[{kind:"PARAGRAPH",text:marker+" {{property}}"}]}};
+      const review=await page.request.post("/api/documents/templates/review",{headers,data:draft});expect(review.status()).toBe(200);const body=await review.json() as {reviewFingerprint:string},admit=await page.request.post("/api/documents/templates/admit",{headers,data:{...draft,idempotencyKey:randomUUID(),reviewFingerprint:body.reviewFingerprint,reason:"Preserve actual authored generation language original"}});expect(admit.status()).toBe(200);
+      const admission=await admit.json() as {id:string;documentId:string},complete=await page.request.post("/api/documents/complete",{headers,data:{admissionId:admission.id}});expect(complete.status()).toBe(200);variants.push({language,documentId:admission.documentId});
+    }
+    await page.goto(`/${locale}/app/documents`);await page.getByTestId("document-source-query").fill(saved.property.name);await page.getByTestId("document-source").filter({hasText:saved.property.name}).click();
+    const panel=page.getByTestId("document-generation");await panel.getByRole("combobox").first().selectOption("PROPERTY");await page.getByTestId("generation-library-query").fill(saved.property.name);await page.getByTestId("generation-find-sources").click();await page.getByTestId("generation-library-source").filter({hasText:saved.property.name}).click();
+    for(const variant of variants){await page.getByTestId(`generation-${variant.language}-template`).selectOption(variant.documentId);const version=page.getByTestId(`generation-${variant.language}-version`);await expect(version.locator("option")).toHaveCount(2);await version.selectOption({index:1});}
+    await page.getByTestId("generation-language").selectOption(locale==="en"?"en":"fr");await page.getByTestId("generation-title").fill("Actual generated archive "+suffix);await page.getByTestId("generation-reason").fill(reason);await page.getByTestId("generation-review").click();await expect(page.getByTestId("generation-reviewed")).toBeVisible();
+    let admissions=0,completions=0;const admitted=acknowledgementBarrier();await page.route("**/api/documents/generation/admit",async route=>{admissions++;try{expect(await forwardBrowserPostOnce(route.request())).toBe(200);await route.abort();admitted.resolve();}catch(error){admitted.reject(error);throw error;}});
+    await page.getByTestId("generation-generate").click();await admitted.promise;await expect(page.getByTestId("generation-recover")).toBeEnabled();expect(admissions).toBe(1);
+    const instance=await withTenant(f.db,f.organizationId,tx=>tx.documentInstance.findFirstOrThrow({where:{createdBy:saved.actorId,document:{sourceId:saved.property.id}}})),key="alvillas:document-generation:"+f.organizationId+"."+saved.actorId;
+    expect(JSON.stringify(instance.sourceSnapshot)).not.toContain(marker);const storage=await page.evaluate(()=>({session:{...sessionStorage},local:{...localStorage}}));expect(storage.session[key]).toBe(instance.commandKey);expect(JSON.stringify(storage)).not.toContain(marker);expect(JSON.stringify(storage)).not.toContain(reason);
+    await page.unroute("**/api/documents/generation/admit");await page.reload();await page.getByTestId("generation-recover").click();await expect(page.getByTestId("generation-complete")).toBeEnabled();
+    const completed=acknowledgementBarrier();await page.route("**/api/documents/generation/complete",async route=>{completions++;try{expect(await forwardBrowserPostOnce(route.request())).toBe(200);await route.abort();completed.resolve();}catch(error){completed.reject(error);throw error;}});
+    await page.getByTestId("generation-complete").click();await completed.promise;await expect(page.getByTestId("generation-recover")).toBeEnabled();expect(completions).toBe(1);await page.unroute("**/api/documents/generation/complete");
+    await page.getByTestId("generation-recover").click();await expect(page.getByTestId("document-version")).toHaveCount(1);await expect(page.getByTestId("generation-recover")).toHaveCount(0);expect(await page.evaluate(key=>sessionStorage.getItem(key),key)).toBeNull();
+    const download=page.waitForEvent("download");await page.getByTestId("document-download").click();const file=await download,path=info.outputPath("generated-original.pdf");await file.saveAs(path);const bytes=await readFile(path),task=getDocument({data:new Uint8Array(bytes),useSystemFonts:false,useWorkerFetch:false,useWasm:false,disableFontFace:true}),pdf=await task.promise;
+    try{const page=await pdf.getPage(1),content=await page.getTextContent(),text=content.items.map(item=>"str" in item?item.str:"").join("\n");expect(text).toContain(marker);expect(text).toContain(saved.property.name);}finally{await task.destroy();}
+    expect(await money()).toEqual(originalMoney);expect(await withTenant(f.db,f.organizationId,tx=>tx.documentVersion.count({where:{documentId:instance.documentId}}))).toBe(1);expect(completions).toBe(1);expect(admissions).toBe(1);
+    expect((await new AxeBuilder({page}).include("main").analyze()).violations).toEqual([]);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);expect(errors).toEqual([]);await page.screenshot({path:info.outputPath("generated-original.png"),fullPage:true});
+    await page.context().setOffline(true);await page.evaluate(()=>window.dispatchEvent(new Event("offline")));await expect(page.getByTestId("generation-form")).toHaveCount(0);await expect(page.getByTestId("document-version")).toHaveCount(0);expect(await money()).toEqual(originalMoney);
+  }finally{await f.db.$disconnect();}
+});

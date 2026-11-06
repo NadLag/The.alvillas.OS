@@ -5003,5 +5003,24 @@
     "value_INTEGER": "Nombre entier",
     "value_MONEY": "Montant",
     "templatesOnly": "Ce dossier est configuré pour des modèles rédigés. Choisissez Modèle pour continuer."
+  },
+  "DocumentGeneration": {
+    "title": "Générer un PDF",
+    "guidance": "Choisissez les versions linguistiques originales, puis vérifiez le document avant de générer son PDF archivé.",
+    "pending": "Une demande précédente peut être enregistrée. Récupérez son résultat avant de générer un autre document.",
+    "complete": "Terminer le PDF enregistré",
+    "changed": "La source ou sa protection a changé. La demande originale est conservée ; vérifiez un nouveau document avec la source actuelle.",
+    "libraryKind": "Modèles appartenant à",
+    "find": "Rechercher les sources de modèles",
+    "noTemplates": "Aucun modèle rédigé n’est disponible pour cette source.",
+    "language": "Langue du PDF",
+    "variant": "Version originale en {language}",
+    "template": "Modèle",
+    "version": "Version immuable",
+    "choose": "Choisir un original",
+    "review": "Vérifier la génération",
+    "generate": "Générer et archiver le PDF",
+    "reviewed": "Le modèle original en {language} et la source actuelle ont été vérifiés. Confirmez pour générer ce PDF.",
+    "selectSource": "Sélectionnez la source du document ci-dessus pour générer un PDF."
   }
 }

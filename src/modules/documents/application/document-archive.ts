@@ -24,6 +24,8 @@ import { decodeDocumentTemplate } from "../domain/document-template";
 import { documentGenerationProtocol, documentGenerationSnapshotSchema } from "../domain/document-generation";
 import { DocumentTemplateSourceRepository } from "../infrastructure/document-template-source-repository";
 import { validateDocumentTemplateBytes, sealDocumentTemplatePayload, openDocumentTemplatePayload } from "../infrastructure/document-template-payload";
+import { storedDocumentUploadInput, generatedDocumentUploadInput } from "../domain/document-generated-upload";
+import { openGeneratedDocumentPayload } from "../infrastructure/document-generated-payload";
 
 export type DocumentActorContext = { organizationId: string; actorId: string; authContext: AuthContext };
 type Dependencies = { db: TenantTransactionRunner; objects?: DocumentObjectStore; requestId?: string; preparedTemplate?:Uint8Array; env?:NodeJS.ProcessEnv };
@@ -133,11 +135,11 @@ async function historyAction(ctx: DocumentActorContext, tx: TenantTransaction, c
 function identity(ctx: DocumentActorContext, row: Pick<Admission, "id" | "documentId" | "contentType" | "fileSize" | "sha256">) {
   return { organizationId: ctx.organizationId, documentId: row.documentId, admissionId: row.id, contentType: row.contentType as z.infer<typeof documentUploadInput>["contentType"], fileSize: row.fileSize, sha256: row.sha256 };
 }
-async function admittedContext(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission) {
+async function admittedContext(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission, justAppendedVersionId?: string) {
   if (row.createdBy !== ctx.actorId) throw new DocumentAccessError();
   const root = await new DocumentRepository(tx, ctx.organizationId).document(row.documentId); if (!root) throw new DocumentAccessError();
   const latest = row.version ? null : await new DocumentRepository(tx,ctx.organizationId).latest(root.id);
-  const superseded = !row.version && ((latest?.id ?? null) !== row.supersedesId || root.revision !== row.expectedRevision);
+  const superseded = !row.version && (((latest?.id ?? null) !== row.supersedesId && latest?.id !== justAppendedVersionId) || root.revision !== row.expectedRevision);
   const original = { ...ctx, authContext: restoreAuthorizationCap(row.authorizationCap) }, action = row.version || superseded ? "view" : "create";
   const current = await context(ctx, tx, sourceOf(root), action, root), held = await context(original, tx, sourceOf(root), action, root);
   if (!row.version && !superseded && (row.sourceFingerprint !== current.native.fingerprint || commandFingerprint(savedPolicy.parse(row.policySnapshot)) !== commandFingerprint(current.policy))) throw new DocumentConflictError();
@@ -146,7 +148,7 @@ async function admittedContext(ctx: DocumentActorContext, tx: TenantTransaction,
 async function admissionResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission) {
   const current = await admittedContext(ctx, tx, row);
   return documentUploadAdmissionSchema.parse({ recorded: true, id: row.id, documentId: row.documentId, idempotencyKey: row.commandKey, state: row.version ? "COMPLETE" : current.superseded ? "SUPERSEDED" : "ADMITTED", complete: Boolean(row.version), version: row.version ? publicVersion(ctx, current, current.root, row.version) : null,
-    expected: { fileName: row.fileName, contentType: row.contentType, fileSize: row.fileSize, sha256: row.sha256,parts:documentUploadInput.parse(row.input).parts??null } });
+    expected: { fileName: row.fileName, contentType: row.contentType, fileSize: row.fileSize, sha256: row.sha256,parts:storedDocumentUploadInput.parse(row.input).parts??null } });
 }
 
 export async function reviewDocumentUpload(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
@@ -228,8 +230,8 @@ export async function uploadDocumentBytes(actor: DocumentActorContext, raw: unkn
     const current = await admittedContext(ctx, tx, row);
     if (current.superseded) throw new DocumentConflictError();
     if (bytes.length !== row.fileSize || createHash("sha256").update(bytes).digest("hex") !== row.sha256) throw new DocumentConflictError();
-    const parts=documentUploadInput.parse(row.input).parts;
-    if(row.contentType===documentTemplateMediaType){const original=documentUploadInput.parse(row.input);if(!original.templateKey||!row.payloadCipher)throw new DocumentConflictError();validateDocumentTemplateBytes({...identity(ctx,row),templateKey:original.templateKey,locale:original.locale},bytes);}
+    const parts=storedDocumentUploadInput.parse(row.input).parts;
+    if(row.contentType===documentTemplateMediaType){const original=storedDocumentUploadInput.parse(row.input);if(!original.templateKey||!row.payloadCipher)throw new DocumentConflictError();validateDocumentTemplateBytes({...identity(ctx,row),templateKey:original.templateKey,locale:original.locale},bytes);}
     if(parts&&parts.hashes.some((hash,index)=>createHash("sha256").update(bytes.subarray(index*documentUploadChunkBytes,(index+1)*documentUploadChunkBytes)).digest("hex")!==hash))throw new DocumentConflictError();
     return { row, ttl: current.policy.value.storage_url_seconds, result: row.version ? await admissionResult(ctx, tx, row) : null };
   });
@@ -243,11 +245,11 @@ export async function uploadDocumentBytes(actor: DocumentActorContext, raw: unkn
     if (current.superseded) throw new DocumentConflictError();
     if (!row.version) {
       const previous = await repository.latest(row.documentId); if ((previous?.id ?? null) !== row.supersedesId) throw new DocumentConflictError();
-      const originalInput = documentUploadInput.parse(row.input), version = await repository.appendVersion({ documentId: row.documentId, admissionId: row.id, number: (previous?.number ?? 0) + 1,
+      const originalInput = storedDocumentUploadInput.parse(row.input), version = await repository.appendVersion({ documentId: row.documentId, admissionId: row.id, number: (previous?.number ?? 0) + 1,
         title: originalInput.title, supersedesId: row.supersedesId, effectiveFrom: originalInput.effectiveFrom ? new Date(originalInput.effectiveFrom) : null,
         cipherSize: stored.cipherSize, cipherSha256: stored.cipherSha256, keyVersion: stored.keyVersion, createdBy: ctx.actorId, createdAt: current.now });
       await historyAction(ctx, tx, current, row.documentId, "VERSION_ADDED", row.commandKey, row.commandHash, row.reason, {}, { versionId: version.id, admissionId: row.id }, deps);
-      const final = await admittedContext(ctx, tx, row); if (current.fingerprint !== final.fingerprint) throw new DocumentConflictError();
+      const final = await admittedContext(ctx, tx, row, version.id); if (current.fingerprint !== final.fingerprint) throw new DocumentConflictError();
     }
     const complete = await repository.admission(row.id); if (!complete?.version) throw new DocumentConflictError(); return admissionResult(ctx, tx, complete);
   });
@@ -258,7 +260,7 @@ export async function uploadDocumentPart(actor:DocumentActorContext,raw:unknown,
   const ctx=actorContext(actor),input=partReference.parse(raw);
   const captured=await withTenant(deps.db,ctx.organizationId,async tx=>{
     const repository=new DocumentRepository(tx,ctx.organizationId),row=await repository.admission(input.admissionId);if(!row)throw new DocumentAccessError();
-    const current=await admittedContext(ctx,tx,row),parts=documentUploadInput.parse(row.input).parts;if(!parts||current.superseded)throw new DocumentConflictError();
+    const current=await admittedContext(ctx,tx,row),parts=storedDocumentUploadInput.parse(row.input).parts;if(!parts||current.superseded)throw new DocumentConflictError();
     const contract=documentPartContract(identity(ctx,row),input.index,parts);
     if(bytes.length!==contract.size||createHash("sha256").update(bytes).digest("hex")!==contract.sha256)throw new DocumentConflictError();
     const budget=current.policy.value.upload_transport;if(!budget)throw new DocumentConfigurationError();
@@ -280,17 +282,20 @@ export async function uploadDocumentPart(actor:DocumentActorContext,raw:unknown,
 export async function completeDocumentParts(actor:DocumentActorContext,raw:unknown,deps:Dependencies){
   const ctx=actorContext(actor),input=uploadReference.parse(raw),captured=await withTenant(deps.db,ctx.organizationId,async tx=>{
     const row=await new DocumentRepository(tx,ctx.organizationId).admission(input.admissionId);if(!row)throw new DocumentAccessError();
-    const current=await admittedContext(ctx,tx,row),original=documentUploadInput.parse(row.input),parts=original.parts??null;
-    if(current.superseded||!parts&&row.contentType!==documentTemplateMediaType)throw new DocumentConflictError();
+    const current=await admittedContext(ctx,tx,row),original=storedDocumentUploadInput.parse(row.input),parts=original.parts??null;
+    const generated=original.kind==="INSTANCE"?generatedDocumentUploadInput.parse(original):null;
+    if(current.superseded||!parts&&row.contentType!==documentTemplateMediaType&&!generated)throw new DocumentConflictError();
+    if(generated&&(!row.payloadCipher||current.root.instance?.id!==generated.generationInstanceId))throw new DocumentConflictError();
     if(row.contentType===documentTemplateMediaType&&(!original.templateKey||!row.payloadCipher))throw new DocumentConflictError();
     const template=row.contentType===documentTemplateMediaType&&original.templateKey?{...identity(ctx,row),templateKey:original.templateKey,locale:original.locale}:null;
-    const result=row.version?await admissionResult(ctx,tx,row):null;if(result)return{row,parts,template,ttl:current.policy.value.storage_url_seconds,result,decision:null};
+    const result=row.version?await admissionResult(ctx,tx,row):null;if(result)return{row,parts,template,generated,ttl:current.policy.value.storage_url_seconds,result,decision:null};
     const budget=current.policy.value.upload_transport;if(!budget)throw new DocumentConfigurationError();
     const decision=await consumeRateLimit(tx,ctx.organizationId,{key:"document-parts:"+ctx.actorId,limit:budget.max_requests,windowSeconds:budget.window_seconds,now:current.now});
-    return{row,parts,template,ttl:current.policy.value.storage_url_seconds,result:null,decision};
+    return{row,parts,template,generated,ttl:current.policy.value.storage_url_seconds,result:null,decision};
   });
   if(captured.result)return captured.result;if(captured.decision&&!captured.decision.allowed)throw new DocumentRateLimitError(captured.decision.resetAt);
   if(captured.template&&captured.row.payloadCipher)return uploadDocumentBytes(ctx,input,openDocumentTemplatePayload(captured.template,captured.row.payloadCipher,deps.env),deps);
+  if(captured.generated&&captured.row.payloadCipher)return uploadDocumentBytes(ctx,input,openGeneratedDocumentPayload(identity(ctx,captured.row),captured.row.payloadCipher,deps.env),deps);
   const parts=captured.parts;if(!parts)throw new DocumentConflictError();
   if(!deps.objects)throw new DocumentConfigurationError();const objects=deps.objects,chunks:Buffer[]=[];
   for(let offset=0;offset<parts.hashes.length;offset+=4){const indices=Array.from({length:Math.min(4,parts.hashes.length-offset)},(_,index)=>offset+index);

@@ -50,3 +50,6 @@ export const documentGenerationSnapshotSchema = z.object({
 export type DocumentGenerationSnapshot = z.infer<typeof documentGenerationSnapshotSchema>;
 export const documentGenerationReceiptSchema = z.object({ recorded: z.literal(true), id: z.uuid(), documentId: z.uuid(), idempotencyKey: z.uuid(),
   state: z.enum(["PENDING", "COMPLETE", "SOURCE_CHANGED"]), versionId: z.uuid().nullable() }).strict();
+export const documentGenerationRecoverySchema=z.discriminatedUnion("recorded",[documentGenerationReceiptSchema,z.object({recorded:z.literal(false),id:z.null(),documentId:z.null(),idempotencyKey:z.uuid(),state:z.null(),versionId:z.null()}).strict()]);
+export const documentGenerationReviewSchema=z.object({reviewFingerprint:sha256,templateVersionId:z.uuid(),locale:z.enum(["en","fr","ar"]),typeKey:z.string(),source:documentSourceReferenceSchema,
+  privacy:z.array(z.enum(["operational","personal","financial","sensitive"])),variants:z.array(variant).min(2).max(3),contractFingerprint:sha256}).strict();

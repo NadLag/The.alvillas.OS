@@ -5,7 +5,7 @@ import { DocumentAccessError,DocumentConfigurationError,DocumentConflictError,Do
 import { documentUploadChunkBytes } from "@/modules/documents/domain/document-upload-parts";
 import { TemplateDefinitionError } from "@/modules/documents/domain/document-template";
 import { documentTemplateMaximumBytes } from "@/modules/documents/domain/document-template-format";
-const boundary=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),review:vi.fn(),admit:vi.fn(),recover:vi.fn(),history:vi.fn(),upload:vi.fn(),download:vi.fn(),sources:vi.fn(),read:vi.fn(),part:vi.fn(),complete:vi.fn(),templateReview:vi.fn(),templateAdmit:vi.fn(),capture:vi.fn()}));
+const boundary=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),review:vi.fn(),admit:vi.fn(),recover:vi.fn(),history:vi.fn(),upload:vi.fn(),download:vi.fn(),sources:vi.fn(),read:vi.fn(),part:vi.fn(),complete:vi.fn(),templateReview:vi.fn(),templateAdmit:vi.fn(),generationReview:vi.fn(),generationAdmit:vi.fn(),generationRecover:vi.fn(),generationComplete:vi.fn(),capture:vi.fn()}));
 vi.mock("@/platform/auth/session",()=>({auth:boundary.auth}));
 vi.mock("@/platform/authz/session-context",()=>({accountActorContextFromSession:boundary.actor}));
 vi.mock("@/platform/observability/sentry",()=>({captureException:boundary.capture}));
@@ -13,6 +13,9 @@ vi.mock("@/modules/documents/application/document-archive",()=>({reviewDocumentU
 vi.mock("@/modules/documents/application/document-files",()=>({configuredDocumentObjects:()=>({})}));
 vi.mock("@/modules/documents/application/document-workspace",()=>({readDocumentSources:boundary.sources,readDocumentSourceWorkspace:boundary.read}));
 vi.mock("@/modules/documents/application/document-template-authoring",()=>({reviewDocumentTemplate:boundary.templateReview,admitDocumentTemplate:boundary.templateAdmit}));
+vi.mock("@/modules/documents/application/document-generation-review",()=>({reviewDocumentGeneration:boundary.generationReview}));
+vi.mock("@/modules/documents/application/document-generation-admission",()=>({admitDocumentGeneration:boundary.generationAdmit,recoverDocumentGeneration:boundary.generationRecover}));
+vi.mock("@/modules/documents/application/document-generation-publication",()=>({publishDocumentGeneration:boundary.generationComplete}));
 import { POST as review } from "@/app/api/documents/review/route";
 import { POST as admit } from "@/app/api/documents/admit/route";
 import { POST as recover } from "@/app/api/documents/recover/route";
@@ -25,9 +28,14 @@ import { POST as part } from "@/app/api/documents/part/route";
 import { POST as complete } from "@/app/api/documents/complete/route";
 import { POST as templateReview } from "@/app/api/documents/templates/review/route";
 import { POST as templateAdmit } from "@/app/api/documents/templates/admit/route";
+import { POST as generationReview } from "@/app/api/documents/generation/review/route";
+import { POST as generationAdmit } from "@/app/api/documents/generation/admit/route";
+import { POST as generationRecover } from "@/app/api/documents/generation/recover/route";
+import { POST as generationComplete } from "@/app/api/documents/generation/complete/route";
 const origin="http://localhost:3194",actor={organizationId:randomUUID(),actorId:randomUUID()},nonce=randomUUID(),admissionId=randomUUID();
 const templateRoutes=[{name:"templates/review",post:templateReview,service:boundary.templateReview},{name:"templates/admit",post:templateAdmit,service:boundary.templateAdmit}];
-const routes=[{name:"review",post:review,service:boundary.review},{name:"admit",post:admit,service:boundary.admit},{name:"recover",post:recover,service:boundary.recover},{name:"history",post:history,service:boundary.history},{name:"upload",post:upload,service:boundary.upload},{name:"download",post:download,service:boundary.download},{name:"sources",post:sources,service:boundary.sources},{name:"read",post:read,service:boundary.read},{name:"part",post:part,service:boundary.part},{name:"complete",post:complete,service:boundary.complete},...templateRoutes];
+const generationRoutes=[{name:"generation/review",post:generationReview,service:boundary.generationReview},{name:"generation/admit",post:generationAdmit,service:boundary.generationAdmit},{name:"generation/recover",post:generationRecover,service:boundary.generationRecover},{name:"generation/complete",post:generationComplete,service:boundary.generationComplete}];
+const routes=[{name:"review",post:review,service:boundary.review},{name:"admit",post:admit,service:boundary.admit},{name:"recover",post:recover,service:boundary.recover},{name:"history",post:history,service:boundary.history},{name:"upload",post:upload,service:boundary.upload},{name:"download",post:download,service:boundary.download},{name:"sources",post:sources,service:boundary.sources},{name:"read",post:read,service:boundary.read},{name:"part",post:part,service:boundary.part},{name:"complete",post:complete,service:boundary.complete},...templateRoutes,...generationRoutes];
 function request(name:string,options:{origin?:string;type?:string;query?:string;body?:BodyInit}={}){
   const binary=name==="upload"||name==="part";
   return new NextRequest(origin+"/api/documents/"+name+(options.query??(name==="upload"?"?admissionId="+admissionId:name==="part"?"?admissionId="+admissionId+"&index=0":"")),{method:"POST",headers:{origin:options.origin??origin,host:"localhost:3194","content-type":options.type??(binary?"application/octet-stream":"application/json")},body:options.body??(binary?new Uint8Array([1,2,3]):JSON.stringify({idempotencyKey:nonce}))});
