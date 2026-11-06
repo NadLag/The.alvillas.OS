@@ -45,14 +45,16 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
   if (parsed.fileNames.some(file => !retained.has(file)) || [...retained].some(file => !originalInputs.has(file))) throw Error("Every original TypeScript input must remain in a checked project");
   return { root, originalRoots: parsed.fileNames, shared, projects, directory, parallelSafe: !parsed.options.incremental && !parsed.options.composite && !parsed.options.tsBuildInfoFile };
 }
-export async function runTypecheckProjects(plan, projects = plan.projects) {
+export async function runTypecheckProjects(plan, projects = plan.projects, onResult) {
   const megabyte = 1024 * 1024, reserve = 1024 * megabyte, free = () => process.availableMemory?.() ?? freemem();
   const isNative = project => project.name.startsWith("postgres-");
   const heap = project => isNative(project) ? 6144 : project.name === "application" ? 3072 : 2048;
   const run = project => new Promise(resolve => {
+    const started = Date.now(); let settled = false;
+    const finished = exitCode => { if(settled)return;settled=true;onResult?.({name:project.name,exitCode,roots:project.roots.length,elapsedMs:Date.now()-started});resolve(exitCode); };
     const child = spawn(process.execPath, ["--max-old-space-size=" + heap(project), worker, plan.root, project.name, project.path], { cwd: plan.root, stdio: "inherit", env: process.env, windowsHide: true });
-    child.once("error", error => { process.stderr.write(String(error) + "\n"); resolve(1); });
-    child.once("exit", status => resolve(status ?? 1));
+    child.once("error", error => { process.stderr.write(String(error) + "\n"); finished(1); });
+    child.once("exit", status => finished(status ?? 1));
   });
   let failure = 0;
   // Both native partitions keep the original heap and run serially, even after
