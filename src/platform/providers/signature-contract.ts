@@ -51,4 +51,3 @@ export class SignatureProviderError extends Error {
 export class SignatureProviderConfigurationError extends Error {
   constructor() { super("signature_provider_configuration_unavailable"); this.name = "SignatureProviderConfigurationError"; }
 }
-
