@@ -5005,6 +5005,9 @@
     "templatesOnly": "Ce dossier est configuré pour des modèles rédigés. Choisissez Modèle pour continuer."
   },
   "DocumentGeneration": {
+    "amendTitle": "Générer un avenant",
+    "amendGuidance": "Choisissez les versions linguistiques révisées de la même famille de modèles. Le PDF original et son historique sont conservés.",
+    "generateAmendment": "Générer et archiver l’avenant",
     "title": "Générer un PDF",
     "guidance": "Choisissez les versions linguistiques originales, puis vérifiez le document avant de générer son PDF archivé.",
     "pending": "Une demande précédente peut être enregistrée. Récupérez son résultat avant de générer un autre document.",

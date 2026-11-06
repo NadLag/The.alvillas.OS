@@ -4752,7 +4752,7 @@ model Document {
   admissions DocumentAdmission[]
   versions DocumentVersion[]
   template DocumentTemplate?
-  instance DocumentInstance?
+  instances DocumentInstance[]
   actions DocumentAction[]
   @@unique([organizationId,id],map:"document_org_id_unique")
   @@unique([organizationId,createdBy,commandKey],map:"document_command_unique")
@@ -4858,7 +4858,7 @@ model DocumentInstance {
   creator UserAccount @relation("DocumentInstanceCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   signatures Signature[]
   @@unique([organizationId,id],map:"document_instance_org_id_unique")
-  @@unique([organizationId,documentId],map:"document_instance_document_unique")
+  @@index([organizationId,documentId,createdAt,id],map:"document_instance_history_idx")
   @@unique([organizationId,createdBy,commandKey],map:"document_instance_command_unique")
   @@map("document_instance")
 }

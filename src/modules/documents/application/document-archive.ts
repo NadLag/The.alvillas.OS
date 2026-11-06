@@ -71,7 +71,7 @@ export async function documentSourceContext(ctx: DocumentActorContext, tx: Tenan
   return { repository, now, native, policy };
 }
 type ArchiveContext = Awaited<ReturnType<typeof documentSourceContext>> & { type: DocumentTypePolicy | undefined; privacy: ReturnType<typeof retainDocumentPrivacy>; checks: CurrentAuthorityCheck[]; fingerprint: string };
-type CreationIntent = { typeKey: string; kind: "FILE" | "TEMPLATE" | "INSTANCE"; privacy?: readonly string[] };
+type CreationIntent = { typeKey: string; kind: "FILE" | "TEMPLATE" | "INSTANCE"; privacy?: readonly string[];newInstance?:boolean };
 async function context(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export", root?: Root, prospective?: CreationIntent): Promise<ArchiveContext> {
   const generating = action === "create" && (root?.kind ?? prospective?.kind) === "INSTANCE";
   const base = await documentSourceContext(ctx, tx, reference, generating ? "export" : action), { repository, now, native, policy } = base;
@@ -91,7 +91,7 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
       if (!version || !template || template.kind !== "TEMPLATE") throw new DocumentAccessError();
       const origin = await context(ctx, tx, sourceOf(template), action === "view" ? "view" : "export", template);
       originPrivacy.push(...origin.privacy); originChecks.push(...origin.checks); origins.push({ versionId: version.id, fingerprint: origin.fingerprint });
-      if (generation && action === "create") {
+      if (generation && action === "create"&&!prospective?.newInstance) {
         const original = generation.variants.find(item => item.versionId === version.id);
         if (!original || original.documentId !== template.id || original.sha256 !== version.admission.sha256 || original.fingerprint !== origin.fingerprint || template.archivedAt || origin.native.archived) throw new DocumentConflictError();
       }
@@ -101,10 +101,14 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
   if (!privacy.length) throw new DocumentAccessError();
   const checks = [...documentAuthorityChecks(native, privacy, action, root ?? (prospective ? { kind: prospective.kind, createdBy: ctx.actorId } : undefined)), ...originChecks];
   if (generating) checks.push(...documentAuthorityChecks(native, privacy, "export", root ?? (prospective ? { kind: prospective.kind, createdBy: ctx.actorId } : undefined)));
+  if(root&&generating&&(prospective?.newInstance||generation?.command.documentId))checks.push(...documentAuthorityChecks(native,privacy,"edit",{...root,kind:"FILE"}));
   await recheckAccountAuthorization(ctx, tx, now, checks, new DocumentAccessError());
-  if (generation && action === "create") {
+  if (generation && action === "create"&&!prospective?.newInstance) {
+    if(!root?.instance)throw new DocumentAccessError();
     const values = await new DocumentTemplateSourceRepository(tx, ctx.organizationId).templateSourceValues(native, generation.sourceKeys);
-    if (values.fingerprint !== generation.identity.sourceFingerprint || native.fingerprint !== generation.nativeSourceFingerprint || commandFingerprint(policy) !== commandFingerprint(generation.policySnapshot)) throw new DocumentConflictError();
+    if (values.fingerprint !== generation.identity.sourceFingerprint || native.fingerprint !== generation.nativeSourceFingerprint || commandFingerprint(policy) !== commandFingerprint(generation.policySnapshot)||root?.revision.toString()!==(generation.documentRevision??"1")) throw new DocumentConflictError();
+    const latest=await repository.latest(root.id),expected=generation.command.supersedesId??null,own=latest?generatedDocumentUploadInput.safeParse(latest.admission.input):null;
+    if((latest?.id??null)!==expected&&!(own?.success&&own.data.generationInstanceId===root.instance?.id&&latest?.supersedesId===expected))throw new DocumentConflictError();
   }
   if (origins.length) await recheckAccountAuthorization(ctx, tx, await repository.clock(), checks, new DocumentAccessError());
   return { repository, now, native, policy, type, privacy, checks,
@@ -137,9 +141,10 @@ async function historyAction(ctx: DocumentActorContext, tx: TenantTransaction, c
 function identity(ctx: DocumentActorContext, row: Pick<Admission, "id" | "documentId" | "contentType" | "fileSize" | "sha256">) {
   return { organizationId: ctx.organizationId, documentId: row.documentId, admissionId: row.id, contentType: row.contentType as z.infer<typeof documentUploadInput>["contentType"], fileSize: row.fileSize, sha256: row.sha256 };
 }
+function generationInstanceOf(row:Pick<Admission,"input">){const parsed=generatedDocumentUploadInput.safeParse(row.input);return parsed.success?parsed.data.generationInstanceId:undefined;}
 async function admittedContext(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission, justAppendedVersionId?: string) {
   if (row.createdBy !== ctx.actorId) throw new DocumentAccessError();
-  const root = await new DocumentRepository(tx, ctx.organizationId).document(row.documentId); if (!root) throw new DocumentAccessError();
+  const generated=generatedDocumentUploadInput.safeParse(row.input),root = await new DocumentRepository(tx, ctx.organizationId).document(row.documentId,generated.success?generated.data.generationInstanceId:undefined); if (!root) throw new DocumentAccessError();
   const latest = row.version ? null : await new DocumentRepository(tx,ctx.organizationId).latest(root.id);
   const superseded = !row.version && (((latest?.id ?? null) !== row.supersedesId && latest?.id !== justAppendedVersionId) || root.revision !== row.expectedRevision);
   const original = { ...ctx, authContext: restoreAuthorizationCap(row.authorizationCap) }, action = row.version || superseded ? "view" : "create";
@@ -328,17 +333,17 @@ export async function downloadDocumentVersion(actor: DocumentActorContext, raw: 
   const ctx = actorContext(actor), input = z.object({ versionId: z.uuid() }).strict().parse(raw);
   const captured = await withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), row = await repository.version(input.versionId); if (!row) throw new DocumentAccessError();
-    const root = await repository.document(row.documentId); if (!root) throw new DocumentAccessError();
+    const root = await repository.document(row.documentId,generationInstanceOf(row.admission)); if (!root) throw new DocumentAccessError();
     const current = await context(ctx, tx, sourceOf(root), "export", root); return { row, root, fingerprint: current.fingerprint, ttl: current.policy.value.storage_url_seconds };
   });
   if (!deps.objects) throw new DocumentConfigurationError();
   const bytes = await deps.objects.read(identity(ctx, captured.row.admission), captured.row, captured.ttl);
   return withTenant(deps.db, ctx.organizationId, async tx => {
-    const repository = new DocumentRepository(tx, ctx.organizationId), root = await repository.document(captured.root.id); if (!root) throw new DocumentAccessError();
+    const repository = new DocumentRepository(tx, ctx.organizationId), root = await repository.document(captured.root.id,generationInstanceOf(captured.row.admission)); if (!root) throw new DocumentAccessError();
     const current = await context(ctx, tx, sourceOf(root), "export", root); if (current.fingerprint !== captured.fingerprint) throw new DocumentConflictError();
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "documents.version_downloaded", resourceType: "document", resourceId: root.id,
       after: { documentId: root.id, versionId: captured.row.id }, requestId: deps.requestId ?? randomUUID(), occurredAt: current.now });
-    const finalRoot = await repository.document(root.id); if (!finalRoot) throw new DocumentAccessError();
+    const finalRoot = await repository.document(root.id,generationInstanceOf(captured.row.admission)); if (!finalRoot) throw new DocumentAccessError();
     const final = await context(ctx, tx, sourceOf(finalRoot), "export", finalRoot); if (final.fingerprint !== captured.fingerprint) throw new DocumentConflictError();
     return { bytes, fileName: captured.row.admission.fileName, contentType: captured.row.admission.contentType };
   });
