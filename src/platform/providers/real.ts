@@ -315,7 +315,7 @@ export class R2StorageProvider implements StorageProvider {
   }
 
   createSignedDownloadUrl(input: { key: string; expiresInSeconds: number }): Promise<{ url: string }> {
-    if (!Number.isInteger(input.expiresInSeconds) || input.expiresInSeconds < 30 || input.expiresInSeconds > 900) throw new Error("Invalid private document link duration");
+    if (!Number.isInteger(input.expiresInSeconds) || input.expiresInSeconds < 1 || input.expiresInSeconds > 900) throw new Error("Invalid private document link duration");
     return this.signedUrl(input.key, "GET", input.expiresInSeconds);
   }
 

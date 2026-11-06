@@ -19,7 +19,7 @@ async function archiveFixture(f: Fixture) {
     const property = await tx.property.findUniqueOrThrow({ where: { id: task.propertyId } });
     await new ConfigRuleRepository(tx, f.organizationId).createVersion({ key: "documents.archive", scopeType: "property", scopeId: property.id,
       effectiveFrom: new Date("2020-01-01"), createdBy: actorId, reason: "Explicit private archive browser acceptance policy",
-      value: { source: "NATIVE_DOCUMENT_ARCHIVE", encryption: "APP_MANAGED_AEAD", history: "APPEND_ONLY", downloads: "AUTHORIZED_SERVER_PROXY", storage_url_seconds: 30,
+      value: { source: "NATIVE_DOCUMENT_ARCHIVE", encryption: "APP_MANAGED_AEAD", history: "APPEND_ONLY", downloads: "AUTHORIZED_SERVER_PROXY", storage_url_seconds: 1,
         upload_admission: { window_seconds: 3600, max_requests: 100 }, upload_transport: { window_seconds: 3600, max_requests: 200 },
         types: [{ key: "agreement", labels: { en: "Agreement", fr: "Contrat", ar: "اتفاقية" }, sources: ["PROPERTY"], privacy: ["operational"], content_types: ["application/pdf", "text/plain"], max_bytes: 6 * 1024 * 1024 },
           { key: "ledger_evidence", labels: { en: "Ledger evidence", fr: "Justificatif comptable", ar: "إثبات محاسبي" }, sources: ["FINANCIAL_TRANSACTION"], privacy: ["financial"], content_types: ["application/pdf", "text/plain"], max_bytes: 6 * 1024 * 1024 }] } });
@@ -70,7 +70,8 @@ const originalPdf = () => renderToBuffer(createElement(Document, {}, createEleme
 for (const locale of ["en", "fr", "ar"] as const) {
   test(`Private financial archive recovers lost admissions and uploads, retains amendments and revokes access in ${locale}`, async ({ page, browser }, info) => {
     test.skip(!process.env.DATABASE_URL, "Dedicated native PostgreSQL required"); test.setTimeout(240000);
-    const f = await openFieldFixture(page, info, locale), headers = { Origin: new URL(page.url()).origin }, pageErrors: string[] = [];
+    const f = await openFieldFixture(page, info, locale), headers = { Origin: new URL(page.url()).origin }, pageErrors: string[] = []; let exposedStorageLinks = 0;
+    page.on("request", request => { const url = new URL(request.url()); if (url.hostname.endsWith(".r2.cloudflarestorage.com") || url.searchParams.has("X-Amz-Signature")) exposedStorageLinks++; });
     page.on("pageerror", error => pageErrors.push(error.name));
     const anonymous = await browser.newContext({ baseURL: new URL(page.url()).origin, storageState: { cookies: [], origins: [] } });
     try {
@@ -144,7 +145,7 @@ for (const locale of ["en", "fr", "ar"] as const) {
       expect(records.versions.map(row => row.number)).toEqual([2, 1]); expect(records.versions[0].supersedesId).toBe(records.versions[1].id); expect(records.versions[1].supersededById).toBe(records.versions[0].id);
       const download = await page.request.post("/api/documents/download", { headers, data: { versionId: records.versions[1].id } }); expect(download.status()).toBe(200); expect(await download.body()).toEqual(pdf);
       expect(download.headers()["cache-control"]).toBe("private, no-store"); expect(download.headers()["content-security-policy"]).toBe("sandbox"); expect(download.headers()["x-content-type-options"]).toBe("nosniff");
-      await privatePresentation(page, pageErrors); await page.screenshot({ path: info.outputPath("document-financial-archive.png"), fullPage: true });
+      expect(exposedStorageLinks).toBe(0); await privatePresentation(page, pageErrors); await page.screenshot({ path: info.outputPath("document-financial-archive.png"), fullPage: true });
       await page.context().setOffline(true); await page.evaluate(() => window.dispatchEvent(new Event("offline")));
       await expect(page.getByTestId("document-private-unavailable")).toBeVisible(); await expect(page.getByTestId("document-file-editor")).toHaveCount(0); await expect(page.getByTestId("document-version")).toHaveCount(0);
       expect(await page.evaluate(() => document.body.textContent)).not.toContain(file.name);

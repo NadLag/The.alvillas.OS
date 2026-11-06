@@ -19,6 +19,7 @@ import { readDocumentSources, readDocumentSourceWorkspace } from "@/modules/docu
 import { documentUploadChunkBytes } from "@/modules/documents/domain/document-upload-parts";
 import {documentEffectiveHistoryFormat} from "@/modules/documents/domain/document-effective-version";
 import {documentHistorySchema,documentEffectiveHistorySchema} from "@/modules/documents/domain/document-read-model";
+import { R2StorageProvider } from "@/platform/providers/real";
 
 let admin: PrismaClient, db: PrismaClient, server: Server, storageUrl: string;
 const objects = new Map<string, Buffer>(), encryption = { NODE_ENV: "test" as const, ENCRYPTION_KEYS: "documents-native:" + randomBytes(32).toString("base64") };
@@ -79,6 +80,44 @@ async function multipart(f:Fixture,ctx:Actor,bytes=Buffer.alloc(documentUploadCh
 }
 
 describe("native private document archive", () => {
+  it.each([1, 29, 300])("uses the actual %s second R2 download contract behind current private archive authority", async seconds => {
+    const f = await fixture(), ctx = await actor(f);
+    await withTenant(db, f.org, async tx => {
+      await new ConfigRuleRepository(tx, f.org).createVersion({ key: documentArchivePolicyKey, scopeType: "organization", value: { ...policy(["financial"]), storage_url_seconds: seconds },
+        effectiveFrom: new Date("2020-01-01"), reason: "Explicit native short-lived private document download policy" });
+      const finance = new FinanceRepository(tx, f.org), bank = await finance.ensureLedgerAccount({ code: "PRIVATE_LINK_BANK", name: "Original custody", accountType: "ASSET_LOCATION", normalSide: "DEBIT" }),
+        claim = await finance.ensureLedgerAccount({ code: "PRIVATE_LINK_OWNER", name: "Original ownership", accountType: "CLAIM_OWNERSHIP", normalSide: "CREDIT" }), amount = Money.of("9007199254740993.07", "MAD");
+      await finance.createFinancialTransaction({ reference: "PRIVATE_LINK:" + randomUUID(), description: "Actual private-link financial preservation evidence", idempotencyKey: randomUUID(), createdBy: ctx.actorId, occurredAt: await finance.clock(),
+        postings: [{ ledgerAccountId: bank.id, side: "DEBIT", amount, bucket: "OWNER_REVENUE", dimensions: { property_id: f.property.id } }, { ledgerAccountId: claim.id, side: "CREDIT", amount, bucket: "OWNER_REVENUE", dimensions: { property_id: f.property.id } }] });
+    });
+    const original = await uploaded(f, ctx), snapshot = () => withTenant(db, f.org, tx => tx.$queryRaw`SELECT t.id::text,t.xmin::text,md5(to_jsonb(t)::text) AS body FROM financial_transaction t WHERE organization_id=${f.org}::uuid
+      UNION ALL SELECT p.id::text,p.xmin::text,md5(to_jsonb(p)::text) FROM posting p WHERE organization_id=${f.org}::uuid ORDER BY id`), before = await snapshot(), signed: URL[] = [],
+      storage = new R2StorageProvider({ R2_ACCOUNT_ID: "owned-native-link", R2_ACCESS_KEY_ID: "owned-test-access", R2_SECRET_ACCESS_KEY: "owned-test-signing", R2_BUCKET: "private-documents" }),
+      objects = new DocumentObjectStore(storage, (input, init) => {
+        const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url); signed.push(url);
+        expect(url.hostname).toBe("owned-native-link.r2.cloudflarestorage.com"); expect(url.searchParams.get("X-Amz-Expires")).toBe(String(seconds));
+        expect(init?.cache).toBe("no-store"); expect(init?.redirect).toBe("error");
+        return fetch(storageUrl + url.pathname.slice("/private-documents".length), init);
+      }, encryption), result = await downloadDocumentVersion(ctx, { versionId: original.version.id }, { db, objects });
+    expect(result.bytes).toEqual(content()); expect(signed).toHaveLength(1); expect(Object.keys(result).sort()).toEqual(["bytes", "contentType", "fileName"]);
+    expect(await snapshot()).toEqual(before);
+    const audit = await withTenant(db, f.org, tx => tx.auditLog.findFirstOrThrow({ where: { action: "documents.version_downloaded", resourceId: original.documentId } }));
+    expect(audit.after).toEqual({ documentId: original.documentId, versionId: original.version.id }); expect(JSON.stringify(audit)).not.toContain("X-Amz");
+    const held = { ...ctx, authContext: { ...ctx.authContext, permissions: new Set([...ctx.authContext.permissions].filter(key => key !== "property_finance:export")) } };
+    await expect(downloadDocumentVersion(held, { versionId: original.version.id }, { db, objects })).rejects.toThrow("document_unavailable"); expect(signed).toHaveLength(1);
+    const foreign = await fixture(), stranger = await actor(foreign); await expect(downloadDocumentVersion(stranger, { versionId: original.version.id }, { db, objects })).rejects.toThrow("document_unavailable"); expect(signed).toHaveLength(1);
+    await revoke(f, ctx); await expect(downloadDocumentVersion(ctx, { versionId: original.version.id }, { db, objects })).rejects.toThrow("document_unavailable"); expect(signed).toHaveLength(1); expect(await snapshot()).toEqual(before);
+  });
+  it("discards a privately signed object response after source authority is revoked during transport", async () => {
+    const f = await fixture(), ctx = await actor(f), original = await uploaded(f, ctx), storage = new R2StorageProvider({ R2_ACCOUNT_ID: "owned-native-revocation", R2_ACCESS_KEY_ID: "owned-test-access", R2_SECRET_ACCESS_KEY: "owned-test-signing", R2_BUCKET: "private-documents" }); let reads = 0;
+    const objects = new DocumentObjectStore(storage, async (input, init) => {
+      reads++; const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      const response = await fetch(storageUrl + url.pathname.slice("/private-documents".length), init); await revoke(f, ctx); return response;
+    }, encryption);
+    await expect(downloadDocumentVersion(ctx, { versionId: original.version.id }, { db, objects })).rejects.toThrow("document_unavailable"); expect(reads).toBe(1);
+    expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { action: "documents.version_downloaded", resourceId: original.documentId } }))).toBe(0);
+    expect(await withTenant(db, f.org, tx => tx.documentVersion.count({ where: { documentId: original.documentId } }))).toBe(1);
+  });
   it("retains the effective original while a future amendment is recorded and preserves the original history protocol",async()=>{
     const f=await fixture(),ctx=await actor(f),original=await uploaded(f,ctx),future=new Date(Date.now()+86400000).toISOString(),before=await withTenant(db,f.org,tx=>tx.$queryRaw`SELECT v.id::text,v.xmin::text,md5(to_jsonb(v)::text) AS body FROM document_version v WHERE id=${original.version.id}::uuid`),amendment=await uploaded(f,ctx,content("Scheduled amendment"),{documentId:original.documentId,supersedesId:original.version.id,effectiveFrom:future});
     const legacy=await readDocumentHistory(ctx,{documentId:original.documentId},{db});expect(documentHistorySchema.parse(legacy)).toEqual(legacy);expect(Object.keys(legacy).sort()).toEqual(["document","next","versions"]);
