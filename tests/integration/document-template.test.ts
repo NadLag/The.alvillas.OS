@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { PrismaClient, type Prisma } from "@prisma/client";
-import { beforeAll, afterAll, describe, expect, it } from "vitest";
+import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
+import * as auditWriter from "@/platform/audit/audit-writer";
 import { withTenant } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
@@ -11,9 +12,11 @@ import { Money } from "@/platform/money/money";
 import { DocumentObjectStore } from "@/modules/documents/infrastructure/document-object-store";
 import { openDocumentTemplatePayload } from "@/modules/documents/infrastructure/document-template-payload";
 import { documentTemplateMediaType } from "@/modules/documents/domain/document-template-format";
-import { encodeDocumentTemplate } from "@/modules/documents/domain/document-template";
+import { documentTemplateDraftSchema } from "@/modules/documents/domain/document-template-command";
+import { encodeDocumentTemplate, documentTemplateDefinitionSchema } from "@/modules/documents/domain/document-template";
 import { reviewDocumentTemplate, admitDocumentTemplate, prepareDocumentTemplate } from "@/modules/documents/application/document-template-authoring";
-import { completeDocumentParts, recoverDocumentUpload, downloadDocumentVersion, reviewDocumentUpload, admitDocumentUpload } from "@/modules/documents/application/document-archive";
+import { completeDocumentParts, recoverDocumentUpload, downloadDocumentVersion, reviewDocumentUpload, admitDocumentUpload, readDocumentTemplateDefinition } from "@/modules/documents/application/document-archive";
+import { prepareDocumentGeneration, reviewDocumentGeneration } from "@/modules/documents/application/document-generation-review";
 import { provisionIntegrationRole } from "./support/database-role";
 
 let admin:PrismaClient,db:PrismaClient,server:Server,storageUrl:string;
@@ -45,12 +48,45 @@ async function actor(f:Fixture){
     await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}))});const assignment=await tx.roleAssignment.create({data:{organizationId:f.organizationId,userAccountId:account.id,personId:person.id,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});return{account,person,assignment};
   });return{organizationId:f.organizationId,actorId:saved.account.id,authContext:{...await authContextForAccount(f.organizationId,saved.account.id,{db}),personId:saved.person.id},...saved};
 }
-const definition=()=>({schemaVersion:1,templateKey:"owner_agreement",locale:"fr" as const,title:"Convention {{property}}",variables:[{key:"property",kind:"TEXT"}],blocks:[{kind:"PARAGRAPH",text:"Texte original privé {{property}}. النص الأصلي"}]});
-const draft=(f:Fixture)=>({documentId:null,source:{kind:"PROPERTY",id:f.property.id},typeKey:"typed_agreement",title:"Original authored agreement",supersedesId:null,effectiveFrom:null,definition:definition()});
+const definition=()=>documentTemplateDefinitionSchema.parse({schemaVersion:1,templateKey:"owner_agreement",locale:"fr",title:"Convention {{property}}",variables:[{key:"property",kind:"TEXT"}],blocks:[{kind:"PARAGRAPH",text:"Texte original privé {{property}}. النص الأصلي"}]});
+const draft=(f:Fixture)=>documentTemplateDraftSchema.parse({documentId:null,source:{kind:"PROPERTY",id:f.property.id},typeKey:"typed_agreement",title:"Original authored agreement",supersedesId:null,effectiveFrom:null,definition:definition()});
 async function admitted(f:Fixture,ctx:Awaited<ReturnType<typeof actor>>,input=draft(f)){
   const reviewed=await reviewDocumentTemplate(ctx,input,{db}),command={...input,idempotencyKey:randomUUID(),reviewFingerprint:reviewed.reviewFingerprint,reason:"Retain original authored template and nonce"},admission=await admitDocumentTemplate(ctx,command,{db,env});return{command,admission,bytes:encodeDocumentTemplate(input.definition)};
 }
 describe("native durable authored template admission",()=>{
+  it("reads the actual authenticated original for generation after complete source/template authority without another object fetch",async()=>{
+    const f=await fixture(),ctx=await actor(f),original=await admitted(f,ctx),complete=await completeDocumentParts(ctx,{admissionId:original.admission.id},{db,env,objects:store()});let contacted=false;
+    const objects=store(()=>{contacted=true;return Promise.reject(Error("Original server-held definition must not require another object read"));}),read=await readDocumentTemplateDefinition(ctx,{versionId:complete.version!.id},{db,env,objects});
+    expect(read.definition).toEqual(original.command.definition);expect(read.sha256).toBe(sha(original.bytes));expect(read.templateKey).toBe(original.command.definition.templateKey);expect(contacted).toBe(false);
+    expect(await withTenant(db,f.organizationId,tx=>tx.auditLog.count({where:{action:"documents.template_read_for_generation"}}))).toBe(1);
+  });
+  it("denies revoked template authority before attempting to decrypt its original private input",async()=>{
+    const f=await fixture(),ctx=await actor(f),original=await admitted(f,ctx),complete=await completeDocumentParts(ctx,{admissionId:original.admission.id},{db,env,objects:store()});
+    await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:ctx.assignment.id},data:{validTo:new Date("2020-01-02")}}));
+    await expect(readDocumentTemplateDefinition(ctx,{versionId:complete.version!.id},{db,env:{NODE_ENV:"test"}})).rejects.toThrow("document_unavailable");
+    expect(await withTenant(db,f.organizationId,tx=>tx.auditLog.count({where:{action:"documents.template_read_for_generation"}}))).toBe(0);
+  });
+  it("rolls back the private generation-read audit and discards original clauses after actual late source revocation",async()=>{
+    const f=await fixture(),ctx=await actor(f),original=await admitted(f,ctx),complete=await completeDocumentParts(ctx,{admissionId:original.admission.id},{db,env,objects:store()}),write=auditWriter.writeAuditEvent;let changed=false;
+    const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{const result=await write(tx,event);if(!changed&&event.action==="documents.template_read_for_generation"){changed=true;await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:ctx.assignment.id},data:{validTo:new Date("2020-01-02")}}));}return result;});
+    try{await expect(readDocumentTemplateDefinition(ctx,{versionId:complete.version!.id},{db,env})).rejects.toThrow("document_unavailable");}finally{spy.mockRestore();}
+    expect(changed).toBe(true);expect(await withTenant(db,f.organizationId,tx=>tx.auditLog.count({where:{action:"documents.template_read_for_generation"}}))).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.documentVersion.count())).toBe(1);
+  });
+  it("reviews explicitly selected native EN/FR originals and actual values without creating an instance, outbox work or PDF",async()=>{
+    const f=await fixture(),author=await actor(f);await withTenant(db,f.organizationId,async tx=>{const permissions=await tx.permission.findMany({where:{organizationId:f.organizationId,key:{in:["document_instance:view","document_instance:export"]}}});expect(permissions).toHaveLength(2);await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.organizationId,roleId:author.assignment.roleId,permissionId:permission.id}))});});
+    const ctx={...author,authContext:{...await authContextForAccount(f.organizationId,author.actorId,{db}),personId:author.person.id}},versions:string[]=[];
+    for(const locale of ["en","fr"] as const){const original=await admitted(f,author,{...draft(f),definition:{...definition(),locale}}),complete=await completeDocumentParts(author,{admissionId:original.admission.id},{db,env,objects:store()});versions.push(complete.version!.id);}
+    const input={templateVersionId:versions[1],variantVersionIds:[...versions].reverse(),source:{kind:"PROPERTY",id:f.property.id},title:"Actual native generated agreement",effectiveFrom:null},prepared=await prepareDocumentGeneration(ctx,input,{db,env});
+    expect(prepared.renderInput.source.title).toBe("Convention Original template villa");expect(prepared.renderInput.source.privacy).toEqual(["financial","operational"]);expect(prepared.variants.map(variant=>variant.locale).sort()).toEqual(["en","fr"]);expect((await reviewDocumentGeneration(ctx,input,{db,env})).reviewFingerprint).toBe(prepared.reviewFingerprint);
+    await expect(prepareDocumentGeneration(author,input,{db,env})).rejects.toThrow("document_unavailable");
+    expect(await withTenant(db,f.organizationId,tx=>tx.documentInstance.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.outboxEvent.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.documentVersion.count())).toBe(2);
+  });
+  it("rejects incompatible authored locale contracts before generating or fabricating any native bound value",async()=>{
+    const f=await fixture(),ctx=await actor(f),versions:string[]=[];
+    for(const locale of ["en","fr"] as const){const original=await admitted(f,ctx,{...draft(f),definition:{...definition(),locale,variables:[{key:"property",kind:locale==="en"?"MONEY":"TEXT"}]}}),complete=await completeDocumentParts(ctx,{admissionId:original.admission.id},{db,env,objects:store()});versions.push(complete.version!.id);}
+    await expect(prepareDocumentGeneration(ctx,{templateVersionId:versions[1],variantVersionIds:versions,source:{kind:"PROPERTY",id:f.property.id},title:"Actual language contract review",effectiveFrom:null},{db,env})).rejects.toThrow("template_locale_variable_contract_mismatch");
+    expect(await withTenant(db,f.organizationId,tx=>tx.documentInstance.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.outboxEvent.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.documentVersion.count())).toBe(2);
+  });
   it("commits encrypted original content before I/O and completes after nonce-only recovery without any client file",async()=>{
     const f=await fixture(),ctx=await actor(f),original=await admitted(f,ctx),row=await withTenant(db,f.organizationId,tx=>tx.documentAdmission.findUniqueOrThrow({where:{id:original.admission.id}}));
     expect(row.payloadCipher).not.toBeNull();expect(Buffer.from(row.payloadCipher!).includes(Buffer.from(original.bytes))).toBe(false);expect(JSON.stringify(row.input)).not.toContain("Texte original privé");expect(await recoverDocumentUpload(ctx,{idempotencyKey:original.command.idempotencyKey},{db})).toMatchObject({recorded:true,state:"ADMITTED"});

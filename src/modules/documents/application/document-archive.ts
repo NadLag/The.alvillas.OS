@@ -20,6 +20,7 @@ import { documentUploadReviewInput, documentUploadInput, documentRecoveryInput, 
   DocumentAccessError, DocumentConfigurationError, DocumentConflictError,DocumentRateLimitError } from "../domain/document-command";
 import { documentItemSchema, documentVersionItemSchema, documentHistorySchema, documentUploadAdmissionSchema,documentPartReceiptSchema } from "../domain/document-read-model";
 import { documentTemplateMediaType } from "../domain/document-template-format";
+import { decodeDocumentTemplate } from "../domain/document-template";
 import { validateDocumentTemplateBytes, sealDocumentTemplatePayload, openDocumentTemplatePayload } from "../infrastructure/document-template-payload";
 
 export type DocumentActorContext = { organizationId: string; actorId: string; authContext: AuthContext };
@@ -34,6 +35,7 @@ function actorContext(actor: DocumentActorContext): DocumentActorContext {
   if (actor.organizationId !== actor.authContext.organizationId || actor.actorId !== actor.authContext.userAccountId) throw new DocumentAccessError();
   return { ...actor, authContext: restoreAuthorizationCap(captureAuthorizationCap(actor.authContext)) };
 }
+export { actorContext as documentActorContext };
 function sourceOf(root: Root) { return documentSourceReferenceSchema.parse({ kind: root.sourceKind, id: root.sourceId }); }
 export function documentAuthorityChecks(native: DocumentSourceFacts, privacy: readonly string[], action: Action, root?: Pick<Root, "kind"> & { id?: string; createdBy?: string }): CurrentAuthorityCheck[] {
   const checks = [...native.checks], source = native.resource;
@@ -295,5 +297,24 @@ export async function downloadDocumentVersion(actor: DocumentActorContext, raw: 
     const finalRoot = await repository.document(root.id); if (!finalRoot) throw new DocumentAccessError();
     const final = await context(ctx, tx, sourceOf(finalRoot), "export", finalRoot); if (final.fingerprint !== captured.fingerprint) throw new DocumentConflictError();
     return { bytes, fileName: captured.row.admission.fileName, contentType: captured.row.admission.contentType };
+  });
+}
+
+/** Generation reads the same authenticated original retained before object I/O, after complete archive/source export authorization. */
+export async function readDocumentTemplateDefinition(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
+  const ctx = actorContext(actor), input = z.object({ versionId: z.uuid() }).strict().parse(raw);
+  return withTenant(deps.db, ctx.organizationId, async tx => {
+    const repository = new DocumentRepository(tx, ctx.organizationId), row = await repository.version(input.versionId);
+    if (!row) throw new DocumentAccessError();
+    const root = await repository.document(row.documentId); if (!root || root.kind !== "TEMPLATE" || !root.template) throw new DocumentAccessError();
+    const current = await context(ctx, tx, sourceOf(root), "export", root);
+    if (root.archivedAt || current.native.archived || row.admission.contentType !== documentTemplateMediaType || !row.admission.payloadCipher) throw new DocumentConflictError();
+    const locale = z.enum(["en", "fr", "ar"]).parse(root.locale), bytes = openDocumentTemplatePayload({ ...identity(ctx, row.admission), templateKey: root.template.key, locale }, row.admission.payloadCipher, deps.env), definition = decodeDocumentTemplate(bytes);
+    await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "documents.template_read_for_generation", resourceType: "document", resourceId: root.id,
+      after: { documentId: root.id, versionId: row.id }, requestId: deps.requestId ?? randomUUID(), occurredAt: current.now });
+    const latest = await repository.document(root.id); if (!latest) throw new DocumentAccessError();
+    const final = await context(ctx, tx, sourceOf(latest), "export", latest); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError();
+    return { definition, versionId: row.id, documentId: root.id, sha256: row.admission.sha256, typeKey: root.typeKey, templateKey: root.template.key, locale,
+      rootRevision: root.revision.toString(), sourceFingerprint: current.native.fingerprint, policyFingerprint: commandFingerprint(current.policy) };
   });
 }
