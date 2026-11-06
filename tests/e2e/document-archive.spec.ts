@@ -168,7 +168,11 @@ for (const locale of ["en", "fr", "ar"] as const) {
       expect(partSizes).toEqual([262144]); expect(completions).toBe(0);
       expect(await withTenant(f.db, f.organizationId, tx => tx.documentVersion.count({ where: { documentId: originalVersion.documentId } }))).toBe(1);
       await page.reload(); await expect(page.getByTestId("document-resume-file")).toBeVisible();
+      const completion = page.waitForResponse(response => new URL(response.url()).pathname === "/api/documents/complete" && response.request().method() === "POST");
       await page.getByTestId("document-resume-file").setInputFiles(large); await page.getByTestId("document-resume").click();
+      const completed = await completion; expect(completed.status()).toBe(200);
+      expect(await completed.json()).toMatchObject({ recorded: true, state: "COMPLETE", complete: true, documentId: originalVersion.documentId,
+        expected: { fileSize: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") } });
       await expect(page.getByTestId("document-version")).toHaveCount(2); await expect(page.getByTestId("document-recover")).toHaveCount(0);
       expect(firstParts).toBe(2); expect(partSizes).toHaveLength(Math.ceil(bytes.length / 262144) + 1); expect(partSizes.every(size => size > 0 && size <= 262144)).toBe(true); expect(completions).toBe(1);
       await page.unroute("**/api/documents/part?**"); await downloadFile(page, large.name, bytes); await downloadFile(page, original.name, pdf);
