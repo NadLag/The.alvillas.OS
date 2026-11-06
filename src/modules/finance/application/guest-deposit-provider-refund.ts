@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { Money } from "@/platform/money/money";
+import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { restoreAuthorizationCap } from "@/platform/authz/authorization-cap";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import { providerRefundEvidenceSchema } from "@/platform/providers/payment-refund";
@@ -9,6 +10,8 @@ import { guestDepositRefundReviewInput } from "../domain/guest-deposit-command";
 import { retainExternalPaymentRefund, ExternalPaymentRefundError } from "../domain/external-payment-refund-intent";
 import { externalPaymentRefundReviewSnapshot } from "../domain/external-payment-refund-review";
 import { GuestDepositRepository } from "../infrastructure/guest-deposit-repository";
+import { FinanceRepository } from "../infrastructure/finance-repository";
+import { externalRefundAdmissionEvidence } from "../domain/external-payment-refund-admission-evidence";
 import type { FinanceActorContext } from "./finance-access";
 import { externalRefundSupervisionAuthorityDetails, type ExternalRefundSupervisionAuthority } from "./external-refund-supervision-authority";
 
@@ -40,5 +43,13 @@ export async function guestDepositProviderRefundSource(ctx: FinanceActorContext,
     commandFingerprint({ ...originalInput, externalReference: request.identity.refundId }) !== commandFingerprint(input)) throw new ExternalPaymentRefundError();
   const first = await repository.firstCompletedExternalRefund(request.identity.id);
   if (!first?.refundedAt) throw new ExternalPaymentRefundError();
-  return { request, heldContext, policy: review.data.policy, refundedAt: first.refundedAt, afterWritten: supervision?.afterWritten };
+  const afterWritten = async (journal: { id: string; occurredAt: Date }) => {
+    const after = externalRefundAdmissionEvidence.parse({ schemaVersion: 1, intentId: request.id, transactionId: journal.id,
+      originalRequestKey: request.idempotencyKey, originalRequestFingerprint: request.requestFingerprint, originalRequestedBy: request.requestedBy, admittedBy: ctx.actorId,
+      evidenceId: observation.id, settlementId: observation.settlement!.id, firstEvidenceId: first.id, refundedAt: journal.occurredAt.toISOString() });
+    await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "finance.external_payment.refund_admission_evidence", resourceType: "financial_transaction", resourceId: request.id,
+      after, reason: saved.input.refund.reason, requestId: crypto.randomUUID(), occurredAt: await new FinanceRepository(tx, ctx.organizationId).clock() });
+    await supervision?.afterWritten?.(journal);
+  };
+  return { request, heldContext, policy: review.data.policy, refundedAt: first.refundedAt, afterWritten };
 }

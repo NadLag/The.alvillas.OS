@@ -1,0 +1,7 @@
+# Retain the provider facts used by refund admission
+
+Four real PostgreSQL regressions showed that a later read-only provider observation could hide an admitted refund or remove its settlement from private recovery. Preserve the admitted state and economic date from the original sealed journal. Return the latest provider observation separately so a discrepancy remains available for reconciliation.
+
+New admissions retain an immutable audit pointer to the actual completed observation, settlement and first completion used in that transaction. The canonical guest refund path writes it before deferred native guards flush, including independently supervised admissions. An additive migration requires the pointer and original journal to commit together and verifies original request, actual actor, committed provider identities and economic date. Existing guards, original journals and applied migrations remain intact.
+
+Older admissions remain readable without rewriting their financial or audit rows. Their original fee binding and completed settlement history may supply a settlement only when its complete retained payload is unambiguous. If it is ambiguous, return no settlement; retain the actual admitted journal, Money and date rather than choosing a later version. Current and held source permissions still gate every private read before and after its disclosure audit. Later observations never cause a second monetary POST or an automatic financial opposite.

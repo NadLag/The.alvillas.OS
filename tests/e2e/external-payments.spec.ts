@@ -16,6 +16,7 @@ import { acknowledgementBarrier } from "./support/acknowledgement-barrier";
 import { forwardBrowserPostOnce } from "./support/forward-browser-post";
 import { e2eEmail, ensureE2EAdmin, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
 import { externalRefundSupervisionCommandInput } from "@/modules/finance/domain/external-payment-refund-supervision-workspace";
+import { externalRefundViewSchema } from "@/modules/finance/domain/external-payment-refund-workspace";
 
 test.use({ timezoneId: "America/Denver", actionTimeout: 30000, navigationTimeout: 60000 });
 type Fixture = Awaited<ReturnType<typeof openGuestPaymentFixture>>;
@@ -219,11 +220,21 @@ for (const locale of ["en", "fr", "ar"] as const) test(`refunds original capture
       await page.route("**/api/finance/external-payments/refunds/command", async route => {
         try { expect(externalRefundCommandInput.parse(route.request().postDataJSON()).operation).toBe("ADMIT"); expect(await forwardBrowserPostOnce(route.request())).toBe(200); await route.abort(); lostAdmission.resolve(); } catch (error) { lostAdmission.reject(error); throw error; }
       });
-      await page.getByTestId("external-refund-admission-submit").click(); await lostAdmission.promise; await page.unroute("**/api/finance/external-payments/refunds/command"); await page.reload();
+      await page.getByTestId("external-refund-admission-submit").click(); await lostAdmission.promise; await page.unroute("**/api/finance/external-payments/refunds/command");
+      const financialHistory = () => withTenant(f.db, f.organizationId, tx => tx.$queryRaw<Array<{ kind: string; id: string; xmin: string; body: string }>>`SELECT 'journal' AS kind,id::text,xmin::text,to_jsonb(t)::text AS body FROM financial_transaction t WHERE organization_id=${f.organizationId}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p)::text FROM posting p WHERE organization_id=${f.organizationId}::uuid ORDER BY kind,id`), admittedHistory = await financialHistory(),
+        identity = await withTenant(f.db, f.organizationId, tx => tx.externalPaymentRefundIdentity.findUniqueOrThrow({ where: { organizationId_intentId: { organizationId: f.organizationId, intentId: refund.intent.id } } }));
+      await gateway.observeRefund(identity.refundId, locale === "en" ? "PENDING" : locale === "fr" ? "FAILED" : "CANCELLED");
+      await executeExternalPaymentRefundReference({ organizationId: f.organizationId, outboxEventId: refund.event.id }, { db: f.db, provider: gateway.provider });
+      const statusResponse = await page.request.get("/api/finance/external-payments/refunds/status/" + refund.intent.id); expect(statusResponse.status()).toBe(200);
+      const stable = externalRefundViewSchema.parse(await statusResponse.json());
+      expect(stable).toMatchObject({ state: "COMPLETED", amount: { amount, currency: "MAD" }, admission: { state: "ADMITTED" }, settlement: { gross: { amount, currency: "MAD" }, fee: { amount: "0.00", currency: "MAD" } },
+        providerObservation: { state: locale === "en" ? "PENDING" : locale === "fr" ? "FAILED" : "CANCELLED" } });
+      await page.reload();
       await page.getByTestId("deposit-open").filter({ hasText: f.setup.propertyName }).click(); await expect(page.getByTestId("deposit-outstanding")).toBeVisible();
       const proof = await withTenant(f.db, f.organizationId, async tx => ({ journal: await tx.financialTransaction.findFirstOrThrow({ where: { organizationId: f.organizationId, idempotencyKey: "guest-deposit:" + refund.intent.idempotencyKey }, include: { postings: true } }),
-        provider: await tx.externalPaymentRefundEvidence.findFirstOrThrow({ where: { organizationId: f.organizationId, identity: { intentId: refund.intent.id } } }) }));
+        provider: await tx.externalPaymentRefundEvidence.findFirstOrThrow({ where: { organizationId: f.organizationId, state: "COMPLETED", identity: { intentId: refund.intent.id } } }) }));
       expect(proof.journal.occurredAt).toEqual(proof.provider.refundedAt); expect(proof.journal.postings.map(row => row.amount.toFixed(2))).toEqual([amount, amount]); await expect(page.getByTestId("deposit-reverse-open")).toHaveCount(0);
+      expect(await financialHistory()).toEqual(admittedHistory); expect(gateway.facts().refundPosts).toBe(amount === "0.03" ? 1 : 2);
     }
     expect(gateway.facts()).toMatchObject({ posts: 1, refundPosts: 2, refunded: { amount: "0.07", currency: "MAD" } }); expect(errors).toEqual([]); await expect(page.getByTestId("deposit-refund-open")).toHaveCount(0);
   } finally { await gateway.close(); await f.db.$disconnect(); }

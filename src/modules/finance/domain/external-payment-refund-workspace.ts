@@ -7,6 +7,7 @@ const id = z.uuid(), hash = z.string().regex(/^[a-f0-9]{64}$/u), instant = z.iso
   money = z.object({ amount: z.string().regex(/^(?:0|[1-9]\d*)\.\d{2}$/u), currency: z.string().regex(/^[A-Z]{3}$/u) }).strict();
 export const externalRefundViewSchema = z.object({ id, idempotencyKey: id, captureId: id, depositId: id, idempotent: z.boolean(), amount: money,
   state: z.enum(["QUEUED", "UNCONFIRMED", "PENDING", "COMPLETED", "FAILED", "CANCELLED", "RELEASED"]), refundId: z.string().regex(/^[A-Za-z0-9_-]{1,127}$/u).nullable(), refundedAt: instant.nullable(),
+  providerObservation: z.object({ state: z.enum(["PENDING", "COMPLETED", "FAILED", "CANCELLED"]), updatedAt: instant }).strict().nullable().default(null),
   cancellation: z.object({ actorId: id, reason: z.string().min(6).max(500), occurredAt: instant }).strict().nullable().default(null),
   input: externalRefundRequestInput, settlement: providerRefundSettlementSchema.nullable(),
   admission: z.object({ state: z.literal("ADMITTED"), transactionId: id, occurredAt: instant }).strict().nullable()
