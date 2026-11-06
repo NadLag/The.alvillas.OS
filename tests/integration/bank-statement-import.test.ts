@@ -11,6 +11,8 @@ import { requestBankStatementCommand, recoverBankStatementCommand, bankStatement
 import { reviewGuestDepositReceipt, postGuestDepositReceipt } from "@/modules/finance/application/guest-deposit-service";
 import { BankStatementRepository } from "@/modules/finance/infrastructure/bank-statement-repository";
 import { readBankStatementWorkspace } from "@/modules/finance/application/bank-statement-workspace";
+import { readBankReconciliationWorkspace } from "@/modules/finance/application/bank-reconciliation-service";
+import { bankReconciliationSourcesSchema } from "@/modules/finance/domain/bank-reconciliation-workspace";
 import { bankStatementAccountsSchema, bankStatementDetailSchema, bankStatementListSchema } from "@/modules/finance/domain/bank-statement-workspace";
 import { BankStatementAccessError, BankStatementConflictError, BankStatementStorageError, BankStatementValidationError } from "@/modules/finance/domain/bank-statement-import";
 import * as auditWriter from "@/platform/audit/audit-writer";
@@ -84,6 +86,20 @@ const counts = (f: Fixture) => withTenant(db, f.org, async tx => ({ admissions: 
 const convertedSource = (rate = "10.250000") => new TextEncoder().encode(`<OFX><BANKMSGSRSV1><STMTTRNRS><STATUS><CODE>0</CODE></STATUS><STMTRS><CURDEF>MAD</CURDEF><BANKACCTFROM><BANKID>actual-bank</BANKID><ACCTID>actual-account-1234</ACCTID><ACCTTYPE>CHECKING</ACCTTYPE></BANKACCTFROM><BANKTRANLIST><DTSTART>20261103</DTSTART><DTEND>20261103</DTEND><STMTTRN><TRNTYPE>CREDIT</TRNTYPE><DTPOSTED>20261103</DTPOSTED><TRNAMT>0.07</TRNAMT><FITID>converted-original</FITID><NAME>Actual bank-converted receipt</NAME><ORIGCURRENCY><CURSYM>EUR</CURSYM><CURRATE>${rate}</CURRATE></ORIGCURRENCY></STMTTRN></BANKTRANLIST><LEDGERBAL><BALAMT>0.07</BALAMT><DTASOF>20261103</DTASOF></LEDGERBAL></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>`);
 
 describe("actual immutable bank statement admission", () => {
+  it.each([false, true])("keeps retained source currencies selectable after the current bank currency changes (empty statement: %s)", async empty => {
+    const f = await fixture(), bytes = empty ? new TextEncoder().encode("Date;ID;Reference;Description;Amount;Currency\n") : f.bytes,
+      imported = await importBankStatement(f.ctx, await command(f, bytes), bytes, f.deps),
+      moneyFacts = () => withTenant(db, f.org, tx => tx.$queryRaw<Array<{ kind: string; id: string; version: string; body: string }>>`SELECT 'journal' AS kind,id::text,xmin::text AS version,to_jsonb(t)::text AS body FROM financial_transaction t WHERE organization_id=${f.org}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,to_jsonb(p)::text FROM posting p WHERE organization_id=${f.org}::uuid ORDER BY kind,id`), originalMoney = await moneyFacts();
+    await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: "finance.bank_statements", scopeType: "organization", effectiveFrom: new Date(), createdBy: f.account.id,
+      value: { ...f.policy, accounts: [{ ...f.policy.accounts[0], currency: "EUR" }] }, reason: "Retain original bank history while configuring the next statement currency" }));
+    const accounts = bankStatementAccountsSchema.parse(await readBankStatementWorkspace(f.ctx, { operation: "ACCOUNTS" }, f.deps));
+    expect(accounts.items.find(account => account.id === f.banks.receipt.id)).toMatchObject({ currency: "EUR", statementCurrencies: ["MAD"] });
+    const detail = bankStatementDetailSchema.parse(await readBankStatementWorkspace(f.ctx, { operation: "DETAIL", importId: imported.importId }, f.deps));
+    expect(detail.account.currency).toBe("MAD"); expect(detail.lines).toHaveLength(empty ? 0 : 2);
+    const sources = bankReconciliationSourcesSchema.parse(await readBankReconciliationWorkspace(f.ctx, { operation: "SOURCES", accountId: f.banks.receipt.id, currency: "MAD" }, f.deps));
+    expect(sources.items).toHaveLength(empty ? 0 : 2); expect(sources.items.every(row => row.fact.amount?.currency === "MAD" && !row.eligible)).toBe(true);
+    expect(await moneyFacts()).toEqual(originalMoney);
+  });
   it("retains independent bank-reported currency evidence for every original import without converting or rewriting Money", async () => {
     const f = await fixture(), received = await reviewGuestDepositReceipt(f.ctx, f.receiptInput, { db });
     await postGuestDepositReceipt(f.ctx, { ...f.receiptInput, reviewFingerprint: received.reviewFingerprint, idempotencyKey: randomUUID(), reason: "Receive actual original bank funds before converted-source evidence" }, { db });

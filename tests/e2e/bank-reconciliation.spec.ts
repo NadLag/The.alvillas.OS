@@ -2,8 +2,12 @@ import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { withTenant } from "@/platform/db/tenant";
+import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { bankStatementPolicySchema } from "@/platform/config/bank-statement-policy";
+import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { bankReconciliationCommandReceiptSchema } from "@/modules/finance/domain/bank-reconciliation-command";
+import { bankReconciliationWorkspaceInput, bankReconciliationSourcesSchema } from "@/modules/finance/domain/bank-reconciliation-workspace";
 import { openFieldFixture } from "./support/field-fixture";
 import { prepareBankReconciliationFixture } from "./support/bank-reconciliation-fixture";
 import en from "../../messages/en.json" with { type: "json" };
@@ -75,6 +79,29 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Actual grouped and parti
     expect(await unchangedSources(f, setup.receiptId, setup.bank.id)).toEqual(original); expect(await page.content()).not.toContain(setup.ownerName);
     const entries = await withTenant(f.db, f.organizationId, tx => tx.bankReconciliationEntry.findMany({ where: { ledgerAccountId: setup.bank.id }, orderBy: { id: "asc" } }));
     expect(entries.map(row => row.action)).toEqual(["MATCH", "RELEASE", "MATCH"]); expect(entries[1].previousEntryId).toBe(entries[0].id);
+    const originalCurrencyHistory = await unchangedSources(f, setup.receiptId, setup.bank.id);
+    await withTenant(f.db, f.organizationId, async tx => {
+      const rules = new ConfigRuleRepository(tx, f.organizationId), now = await new FinanceRepository(tx, f.organizationId).clock(),
+        policy = await rules.resolve({ key: "finance.bank_statements", scopes: [{ scopeType: "organization", scopeId: null }], asOf: now });
+      if (!policy) throw Error("Original bank statement policy required"); const value = bankStatementPolicySchema.parse(policy.value);
+      await rules.createVersion({ key: "finance.bank_statements", scopeType: "organization", effectiveFrom: now, createdBy: setup.actor.id,
+        value: { ...value, accounts: value.accounts.map(account => account.account_code === setup.bank.code ? { ...account, currency: "EUR" } : account) }, reason: "Keep original statement currency history visible after configuration changes" });
+    });
+    await page.reload(); await page.getByTestId("bank-match-account").filter({ hasText: setup.bank.name }).click();
+    await expect(page.getByTestId("bank-match-currency").locator("option")).toHaveText(["EUR", "MAD"]);
+    await page.getByTestId("bank-match-currency").selectOption("MAD");
+    await expect(page.getByTestId("bank-match-historical-currency")).toHaveText(t.historicalCurrency);
+    await expect(page.getByTestId("bank-match-sources")).toContainText(first); await expect(page.getByTestId("bank-match-sources")).toContainText(second);
+    await expect(page.getByTestId("bank-match-review-button")).toBeDisabled();
+    expect(await unchangedSources(f, setup.receiptId, setup.bank.id)).toEqual(originalCurrencyHistory);
+    const emptyCurrentSources = page.waitForResponse(response => {
+      if (!response.url().endsWith("/api/finance/bank-reconciliation/read") || response.status() !== 200) return false;
+      const input = bankReconciliationWorkspaceInput.safeParse(response.request().postDataJSON());
+      return input.success && input.data.operation === "SOURCES" && input.data.currency === "EUR";
+    });
+    await page.getByTestId("bank-match-currency").selectOption("EUR"); expect(bankReconciliationSourcesSchema.parse(await (await emptyCurrentSources).json()).items).toEqual([]);
+    await expect(page.getByTestId("bank-match-historical-currency")).toHaveCount(0);
+    expect(await unchangedSources(f, setup.receiptId, setup.bank.id)).toEqual(originalCurrencyHistory);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     const origin = new URL(page.url()).origin;
     expect((await page.request.post("/api/finance/bank-reconciliation/read", { headers: { Origin: "https://foreign.example.test" }, data: { operation: "HISTORY", accountId: setup.bank.id } })).status()).toBe(403);

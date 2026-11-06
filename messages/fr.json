@@ -4511,7 +4511,9 @@
     "command_succeeded": "Association originale enregistrée",
     "removalEvidence": "Suppression bancaire conservée comme preuve",
     "removalGuidance": "Comparez cette correction bancaire aux écritures originales et à leurs contrepassations. Libérez les rapprochements précédents avant de l’utiliser.",
-    "retainedRemovals": "Suppressions bancaires conservées : {count}."
+    "retainedRemovals": "Suppressions bancaires conservées : {count}.",
+    "statementCurrency": "Devise du relevé",
+    "historicalCurrency": "Les relevés d’origine restent consultables dans cette devise. Un nouveau rapprochement exige une configuration bancaire actuelle pour cette même devise."
   },
   "VarianceCenter": {
     "eyebrow": "Finances et opérations",
