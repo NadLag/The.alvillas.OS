@@ -33,6 +33,8 @@ jobs:
         run: node scripts/ci/record-verification.mjs start
       - run: npm audit --audit-level=high
       - run: npm run lint
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
       - run: npm run typecheck
       - run: npm run check:i18n
       - run: npm run check:rtl-css
@@ -182,6 +184,8 @@ jobs:
         run: npx prisma migrate deploy
       - run: npm run rehearse:restore
       - run: npm run build
+        env:
+          ALVILLAS_CI_BUILD_TYPECHECK: application
       - name: Record verification outcome
         if: always()
         run: node scripts/ci/record-verification.mjs end
@@ -238,6 +242,8 @@ jobs:
       - name: Prepare isolated browser database
         run: npx prisma migrate deploy
       - run: npm run build
+        env:
+          ALVILLAS_CI_BUILD_TYPECHECK: application
       - run: npx playwright install --with-deps chromium
       - name: Configure isolated browser push signing
         run: |
@@ -327,6 +333,14 @@ jobs:
           merge-multiple: false
       - name: Require complete original browser coverage
         run: node scripts/ci/check-browser-coverage.mjs
+      - name: Read all original compiler and production build evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: verification-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-typecheck-evidence/
+          merge-multiple: false
+      - name: Require complete original compiler coverage
+        run: node scripts/ci/check-typecheck-coverage.mjs
       - name: Record verification outcome
         if: always()
         run: node scripts/ci/record-verification.mjs end

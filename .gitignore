@@ -8,6 +8,7 @@ playwright-report
 test-results
 ci-evidence/
 ci-browser-evidence/
+ci-typecheck-evidence/
 .env
 .env.*
 !.env.example

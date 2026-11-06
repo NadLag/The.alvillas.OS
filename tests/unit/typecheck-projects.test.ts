@@ -29,5 +29,9 @@ describe("complete compiler partition coverage", () => {
       const failed = run(); expect(failed.status).not.toBe(0); expect(failed.stdout).toContain("TS2322");
       writeFileSync(source, original);
     }
+    const observed = execFileSync(process.execPath, ["--input-type=module", "-e", `import {prepareTypecheckProjects,runTypecheckProjects} from ${JSON.stringify(moduleUrl)};const plan=prepareTypecheckProjects(${JSON.stringify(root)}),results=[];const status=await runTypecheckProjects(plan,plan.projects,result=>results.push(result));console.log(JSON.stringify({compilerResults:results,status}));process.exitCode=status;`], { encoding: "utf8", windowsHide: true }).trim().split(/\r?\n/u).at(-1)!;
+    const results = JSON.parse(observed) as { status: number; compilerResults: Array<{ name: string; exitCode: number; roots: number }> };
+    expect(results.status).toBe(0); expect(results.compilerResults.map(result => result.name).sort()).toEqual(plan.projects.map(project => project.name).sort());
+    expect(results.compilerResults.every(result => result.exitCode === 0 && result.roots > 0)).toBe(true);
   });
 });
