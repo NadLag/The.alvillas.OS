@@ -10,7 +10,9 @@ import type { z } from "zod";
 type Source = z.infer<typeof documentSourceReferenceSchema>;
 export type DocumentSourceFacts = { reference: Source; resource: Resource; checks: CurrentAuthorityCheck[]; fingerprint: string; snapshot: unknown; archived: boolean; label: string };
 const versionInclude = { admission: true, next: { select: { id: true } } } as const;
-const rootInclude = { template: true, instance: true } as const;
+const rootInclude = { template: true, instances: { orderBy: [{createdAt:"desc"},{id:"desc"}], take:1 } } satisfies Prisma.DocumentInclude;
+type RootRow=Prisma.DocumentGetPayload<{include:typeof rootInclude}>;
+const rootView=(row:RootRow)=>{const{instances,...root}=row;return{...root,instance:instances[0]??null};};
 
 export class DocumentRepository extends FinancialAttachmentSourceRepository {
   async clock() { const [row] = await this.tx.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`; return row.now; }
@@ -52,26 +54,26 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
     }
     return { reference, resource, checks, archived, snapshot, label, fingerprint: commandFingerprint({ reference, resource, snapshot, checks }) };
   }
-  document(id: string) { return this.tx.document.findFirst({ where: { organizationId: this.organizationId, id }, include: rootInclude }); }
+  async document(id: string,instanceId?:string) { const row=await this.tx.document.findFirst({ where: { organizationId: this.organizationId, id }, include: instanceId?{...rootInclude,instances:{where:{id:instanceId},take:1}}:rootInclude });return row?rootView(row):null; }
   version(id: string) { return this.tx.documentVersion.findFirst({ where: { organizationId: this.organizationId, id }, include: versionInclude }); }
   latest(documentId: string) { return this.tx.documentVersion.findFirst({ where: { organizationId: this.organizationId, documentId }, orderBy: { number: "desc" }, include: versionInclude }); }
   effectiveVersion(documentId:string,at:Date){return this.tx.documentVersion.findFirst({where:{organizationId:this.organizationId,documentId,createdAt:{lte:at},OR:[{effectiveFrom:null},{effectiveFrom:{lte:at}}]},orderBy:{number:"desc"},select:{id:true,number:true,effectiveFrom:true,createdAt:true}});}
   admission(id: string) { return this.tx.documentAdmission.findFirst({ where: { organizationId: this.organizationId, id }, include: { version: { include: versionInclude } } }); }
   byNonce(createdBy: string, commandKey: string) { return this.tx.documentAdmission.findFirst({ where: { organizationId: this.organizationId, createdBy, commandKey }, include: { version: { include: versionInclude } } }); }
   nonceOwner(commandKey: string) { return this.tx.documentAdmission.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { createdBy: true } }); }
-  appendDocument(data: Omit<Prisma.DocumentUncheckedCreateInput, "organizationId">) { return this.tx.document.create({ data: { ...data, organizationId: this.organizationId }, include: rootInclude }); }
+  async appendDocument(data: Omit<Prisma.DocumentUncheckedCreateInput, "organizationId">) { return rootView(await this.tx.document.create({ data: { ...data, organizationId: this.organizationId }, include: rootInclude })); }
   appendAdmission(data: Omit<Prisma.DocumentAdmissionUncheckedCreateInput, "organizationId">) { return this.tx.documentAdmission.create({ data: { ...data, organizationId: this.organizationId } }); }
   appendVersion(data: Omit<Prisma.DocumentVersionUncheckedCreateInput, "organizationId">) { return this.tx.documentVersion.create({ data: { ...data, organizationId: this.organizationId }, include: versionInclude }); }
   appendTemplate(data: Omit<Prisma.DocumentTemplateUncheckedCreateInput, "organizationId">) { return this.tx.documentTemplate.create({ data: { ...data, organizationId: this.organizationId } }); }
   appendInstance(data: Omit<Prisma.DocumentInstanceUncheckedCreateInput, "organizationId">) { return this.tx.documentInstance.create({ data: { ...data, organizationId: this.organizationId } }); }
-  instance(id: string) { return this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, id }, include: { document: { include: rootInclude } } }); }
-  instanceByNonce(createdBy: string, commandKey: string) { return this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, createdBy, commandKey }, include: { document: { include: rootInclude } } }); }
+  async instance(id: string) { const row=await this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, id } });if(!row)return null;const document=await this.document(row.documentId,row.id);return document?{...row,document}:null; }
+  async instanceByNonce(createdBy: string, commandKey: string) { const row=await this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, createdBy, commandKey } });if(!row)return null;const document=await this.document(row.documentId,row.id);return document?{...row,document}:null; }
   instanceNonceOwner(commandKey: string) { return this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { createdBy: true } }); }
   appendAction(data: Omit<Prisma.DocumentActionUncheckedCreateInput, "organizationId">) { return this.tx.documentAction.create({ data: { ...data, organizationId: this.organizationId } }); }
   async snapshot(id: string) { const [row] = await this.tx.$queryRaw<{ value: Prisma.JsonObject }[]>`SELECT to_jsonb(d) AS value FROM document d WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid`; return row?.value ?? null; }
-  protect(id: string, revision: bigint, privacy: string[]) { return this.tx.document.update({ where: { organizationId_id: { organizationId: this.organizationId, id }, revision }, data: { privacy, revision: { increment: 1 } }, include: rootInclude }); }
-  roots(source: Source, before?: string, typeKey?: string, locale?: string) { return this.tx.document.findMany({ where: { organizationId: this.organizationId, sourceKind: source.kind, sourceId: source.id,
-    ...(before ? { id: { lt: before } } : {}), ...(typeKey ? { typeKey } : {}), ...(locale ? { locale } : {}) }, include: rootInclude, orderBy: { id: "desc" }, take: 51 }); }
+  async protect(id: string, revision: bigint, privacy: string[]) { return rootView(await this.tx.document.update({ where: { organizationId_id: { organizationId: this.organizationId, id }, revision }, data: { privacy, revision: { increment: 1 } }, include: rootInclude })); }
+  async roots(source: Source, before?: string, typeKey?: string, locale?: string) { return (await this.tx.document.findMany({ where: { organizationId: this.organizationId, sourceKind: source.kind, sourceId: source.id,
+    ...(before ? { id: { lt: before } } : {}), ...(typeKey ? { typeKey } : {}), ...(locale ? { locale } : {}) }, include: rootInclude, orderBy: { id: "desc" }, take: 51 })).map(rootView); }
   versions(documentId: string, before?: number) { return this.tx.documentVersion.findMany({ where: { organizationId: this.organizationId, documentId, ...(before ? { number: { lt: before } } : {}) }, include: versionInclude, orderBy: { number: "desc" }, take: 51 }); }
   async rootProtections(ids: string[]) { const rows = await this.tx.document.findMany({ where: { organizationId: this.organizationId, id: { in: ids } }, select: { id: true, privacy: true, revision: true } }); return new Map(rows.map(row => [row.id,row])); }
   async sourceCandidates(kind: Source["kind"], query: string, before?: string) {

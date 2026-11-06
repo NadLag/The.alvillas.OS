@@ -5005,6 +5005,9 @@
     "templatesOnly": "This record is configured for authored templates. Choose Template to continue."
   },
   "DocumentGeneration": {
+    "amendTitle": "Generate an amendment",
+    "amendGuidance": "Choose the revised language versions from the same template family. The original PDF and its history are retained.",
+    "generateAmendment": "Generate and archive the amendment",
     "title": "Generate a PDF",
     "guidance": "Choose the original language versions and review the document before generating its archived PDF.",
     "pending": "An earlier request may be recorded. Recover its result before generating another document.",

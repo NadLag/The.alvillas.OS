@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { documentGenerationCommandSchema, documentGenerationSnapshotSchema, documentGenerationProtocol } from "@/modules/documents/domain/document-generation";
 import { encodeDocumentGenerationInput, sealDocumentGenerationInput, openDocumentGenerationInput } from "@/modules/documents/infrastructure/document-generation-payload";
+import {commandFingerprint} from "@/platform/http/command-fingerprint";
 
 function fixture() {
   const env = { NODE_ENV: "test" as const, ENCRYPTION_KEYS: "generation-original:" + randomBytes(32).toString("base64") }, templateVersionId = randomUUID(), input = {
@@ -20,6 +21,8 @@ function fixture() {
   return { env, input, bytes, identity, cipher, command, snapshot };
 }
 describe("immutable native document generation inputs", () => {
+  it("retains the exact legacy command and nonce hash without inserting amendment defaults",()=>{const f=fixture(),original=documentGenerationCommandSchema.parse(f.command);expect(original).toEqual(f.command);expect(Object.keys(original).sort()).toEqual(Object.keys(f.command).sort());expect(commandFingerprint(original)).toBe(commandFingerprint(f.command));expect(documentGenerationSnapshotSchema.parse(f.snapshot)).toEqual(f.snapshot);});
+  it("requires an explicit generated amendment root and immutable predecessor together",()=>{const f=fixture();for(const change of [{documentId:randomUUID()},{supersedesId:randomUUID()}])expect(documentGenerationCommandSchema.safeParse({...f.command,...change}).success).toBe(false);const amended={...f.command,documentId:f.identity.documentId,supersedesId:randomUUID()};expect(documentGenerationCommandSchema.parse(amended)).toEqual(amended);expect(documentGenerationSnapshotSchema.parse({...f.snapshot,command:amended,documentRevision:"2"})).toMatchObject({documentRevision:"2",command:amended});expect(documentGenerationSnapshotSchema.safeParse({...f.snapshot,command:{...amended,documentId:randomUUID()}}).success).toBe(false);});
   it("retains original private clauses and exact formatted Money in authenticated encrypted input", () => {
     const f = fixture(); expect(openDocumentGenerationInput(f.identity, f.cipher, f.env)).toEqual(f.input); expect(f.cipher.includes(Buffer.from("Texte privé original"))).toBe(false); expect(documentGenerationSnapshotSchema.parse(f.snapshot)).toEqual(f.snapshot);
   });

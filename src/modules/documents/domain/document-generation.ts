@@ -12,8 +12,10 @@ const sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 export const documentGenerationDraftSchema = z.object({
   templateVersionId: z.uuid(), variantVersionIds: z.array(z.uuid()).min(2).max(3).refine(values => new Set(values).size === values.length),
   source: documentSourceReferenceSchema, title: documentUploadReviewInput.shape.title,
-  effectiveFrom: documentUploadReviewInput.shape.effectiveFrom
-}).strict().superRefine((value, ctx) => { if (!value.variantVersionIds.includes(value.templateVersionId)) ctx.addIssue({ code: "custom", message: "selected_original_variant_required" }); });
+  effectiveFrom: documentUploadReviewInput.shape.effectiveFrom,
+  documentId:z.uuid().nullable().optional(),supersedesId:z.uuid().nullable().optional()
+}).strict().superRefine((value, ctx) => { if (!value.variantVersionIds.includes(value.templateVersionId)) ctx.addIssue({ code: "custom", message: "selected_original_variant_required" });
+  if(Boolean(value.documentId)!==Boolean(value.supersedesId))ctx.addIssue({code:"custom",message:"explicit_generated_amendment_predecessor_required"}); });
 export const documentGenerationCommandSchema = documentGenerationDraftSchema.safeExtend({
   idempotencyKey: documentUploadInput.shape.idempotencyKey, reviewFingerprint: documentUploadInput.shape.reviewFingerprint,
   reason: documentUploadInput.shape.reason
@@ -31,10 +33,11 @@ export const documentGenerationSnapshotSchema = z.object({
   policySnapshot: z.object({ id: z.uuid(), version: z.number().int().positive(), value: documentArchivePolicySchema }).strict(),
   authorizationCap: authorizationCapSchema, variants: z.array(variant).min(2).max(3), contractFingerprint: sha256,
   sourceKeys: z.array(documentTemplateVariableKeySchema).max(200).refine(values => new Set(values).size === values.length),
-  payloadCipher: z.base64().max(Math.ceil((documentGenerationMaximumInputBytes + 256) / 3) * 4)
+  payloadCipher: z.base64().max(Math.ceil((documentGenerationMaximumInputBytes + 256) / 3) * 4),documentRevision:z.string().regex(/^[1-9]\d*$/u).optional()
 }).strict().superRefine((value, ctx) => {
   if (value.authorizationCap.organizationId !== value.identity.organizationId || value.command.templateVersionId !== value.identity.templateVersionId)
     ctx.addIssue({ code: "custom", message: "original_generation_identity_required" });
+  if(value.command.documentId&&value.command.documentId!==value.identity.documentId)ctx.addIssue({code:"custom",message:"original_generation_document_required"});
   if (new Set(value.variants.map(item => item.locale)).size !== value.variants.length || !value.variants.some(item => item.locale === "en") || !value.variants.some(item => item.locale === "fr") || !value.variants.some(item => item.versionId === value.identity.templateVersionId))
     ctx.addIssue({ code: "custom", message: "explicit_original_generation_variants_required" });
   if (!value.payloadCipher.length) ctx.addIssue({ code: "custom", message: "encrypted_original_render_input_required" });

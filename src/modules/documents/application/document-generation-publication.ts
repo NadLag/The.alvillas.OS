@@ -37,6 +37,7 @@ export async function publishDocumentGeneration(actor: DocumentActorContext, raw
     catch { throw new DocumentPdfConfigurationError(); }
     admissionId = await withTenant(deps.db, ctx.organizationId, async tx => {
       const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + captured.snapshot.command.idempotencyKey);
+      await repository.lock("root:"+captured.snapshot.identity.documentId);
       const row = await repository.instance(input.instanceId); if (!row) throw new DocumentAccessError();
       const receipt = await documentGenerationResult(ctx, tx, row); if (receipt.state === "SOURCE_CHANGED") throw new DocumentConflictError();
       const existing = await repository.byNonce(ctx.actorId, row.commandKey);
@@ -50,12 +51,12 @@ export async function publishDocumentGeneration(actor: DocumentActorContext, raw
       if (current.fingerprint !== held.fingerprint || !current.policy.value.upload_transport) throw new DocumentConflictError();
       const id = randomUUID(), sha256 = createHash("sha256").update(bytes).digest("hex"), metadata = generatedDocumentUploadInput.parse({ documentId: root.id, source: snapshot.command.source, typeKey: root.typeKey, kind: "INSTANCE", locale: root.locale,
         title: snapshot.command.title, effectiveFrom: snapshot.command.effectiveFrom, reason: snapshot.command.reason, reviewFingerprint: snapshot.command.reviewFingerprint, idempotencyKey: snapshot.command.idempotencyKey,
-        templateKey: null, supersedesId: null, fileName: "document-" + row.id + ".pdf", contentType: "application/pdf", fileSize: bytes.length, sha256, generationInstanceId: row.id });
+        templateKey: null, supersedesId: snapshot.command.supersedesId??null, fileName: "document-" + row.id + ".pdf", contentType: "application/pdf", fileSize: bytes.length, sha256, generationInstanceId: row.id });
       if (!current.type?.content_types.includes("application/pdf") || bytes.length > current.type.max_bytes) throw new DocumentConflictError();
       const identity = { organizationId: ctx.organizationId, documentId: root.id, admissionId: id, contentType: "application/pdf" as const, fileSize: bytes.length, sha256 };
       await repository.appendAdmission({ id, documentId: root.id, commandKey: row.commandKey, commandHash: row.commandHash, input: documentJson(metadata), fileName: metadata.fileName,
         contentType: metadata.contentType, fileSize: bytes.length, sha256, storageKey: "organizations/" + ctx.organizationId + "/documents/" + root.id + "/admissions/" + id + ".encrypted",
-        expectedRevision: root.revision, supersedesId: null, sourceFingerprint: current.native.fingerprint, policySnapshot: documentJson(current.policy), authorizationCap: documentJson(snapshot.authorizationCap),
+        expectedRevision: root.revision, supersedesId: metadata.supersedesId, sourceFingerprint: current.native.fingerprint, policySnapshot: documentJson(current.policy), authorizationCap: documentJson(snapshot.authorizationCap),
         reason: metadata.reason, payloadCipher: new Uint8Array(sealGeneratedDocumentPayload(identity, bytes, deps.env)), createdBy: ctx.actorId, createdAt: current.now });
       await appendDocumentHistory(ctx, tx, current, root.id, "ADMITTED", row.commandKey, row.commandHash, metadata.reason, {}, { admissionId: id }, deps);
       const final = await documentArchiveContext(ctx, tx, snapshot.command.source, "create", root), finalHeld = await documentArchiveContext(originalActor, tx, snapshot.command.source, "create", root);

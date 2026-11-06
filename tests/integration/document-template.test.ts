@@ -17,6 +17,7 @@ import { encodeDocumentTemplate, documentTemplateDefinitionSchema } from "@/modu
 import { reviewDocumentTemplate, admitDocumentTemplate, prepareDocumentTemplate } from "@/modules/documents/application/document-template-authoring";
 import { completeDocumentParts, recoverDocumentUpload, downloadDocumentVersion, reviewDocumentUpload, admitDocumentUpload, readDocumentTemplateDefinition } from "@/modules/documents/application/document-archive";
 import { prepareDocumentGeneration, reviewDocumentGeneration } from "@/modules/documents/application/document-generation-review";
+import { admitDocumentGeneration } from "@/modules/documents/application/document-generation-admission";
 import { provisionIntegrationRole } from "./support/database-role";
 
 let admin:PrismaClient,db:PrismaClient,server:Server,storageUrl:string;
@@ -79,6 +80,7 @@ describe("native durable authored template admission",()=>{
     const input={templateVersionId:versions[1],variantVersionIds:[...versions].reverse(),source:{kind:"PROPERTY",id:f.property.id},title:"Actual native generated agreement",effectiveFrom:null},prepared=await prepareDocumentGeneration(ctx,input,{db,env});
     expect(prepared.renderInput.source.title).toBe("Convention Original template villa");expect(prepared.renderInput.source.privacy).toEqual(["financial","operational"]);expect(prepared.variants.map(variant=>variant.locale).sort()).toEqual(["en","fr"]);expect((await reviewDocumentGeneration(ctx,input,{db,env})).reviewFingerprint).toBe(prepared.reviewFingerprint);
     await expect(prepareDocumentGeneration(author,input,{db,env})).rejects.toThrow("document_unavailable");
+    await expect(admitDocumentGeneration(ctx,{...input,idempotencyKey:randomUUID(),reviewFingerprint:prepared.reviewFingerprint,reason:"Review access cannot authorize actual generation admission"},{db,env})).rejects.toThrow("document_unavailable");
     expect(await withTenant(db,f.organizationId,tx=>tx.documentInstance.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.outboxEvent.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.documentVersion.count())).toBe(2);
   });
   it("rejects incompatible authored locale contracts before generating or fabricating any native bound value",async()=>{
