@@ -18,6 +18,11 @@ export class BankStatementRepository {
   accounts(codes: string[]) {
     return this.tx.ledgerAccount.findMany({ where: { organizationId: this.organizationId, code: { in: codes }, archivedAt: null, accountType: "ASSET_LOCATION", normalSide: "DEBIT", teamWallet: null }, orderBy: { id: "asc" } });
   }
+  statementCurrencies() {
+    return this.tx.$queryRaw<Array<{ accountId: string; currency: string }>>`SELECT DISTINCT a.ledger_account_id AS "accountId",i.statement->>'currency' AS currency
+      FROM bank_statement_admission a JOIN bank_statement_import i ON i.organization_id=a.organization_id AND i.admission_id=a.id
+      WHERE a.organization_id=${this.organizationId}::uuid ORDER BY "accountId",currency`;
+  }
   async historyAccounts() {
     const latest = await this.tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`SELECT DISTINCT ON (a.ledger_account_id) a.id FROM bank_statement_admission a
       WHERE a.organization_id=${this.organizationId}::uuid AND EXISTS(SELECT 1 FROM bank_statement_import i WHERE i.organization_id=a.organization_id AND i.admission_id=a.id)

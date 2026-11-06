@@ -26,9 +26,9 @@ function summary(row: NonNullable<Awaited<ReturnType<BankStatementRepository["im
   return bankStatementImportSummarySchema.parse({ id: row.id, admissionId: row.admissionId, accountId: row.admission.ledgerAccountId, format: row.admission.format,
     fileSha256: row.admission.fileSha256, fileSize: row.admission.fileSize, rowCount: row.rowCount, newRows: row._count.originalLines, reusedRows: row.rowCount - row._count.originalLines, importedAt: row.createdAt.toISOString(), reason: row.admission.reason });
 }
-function accountView(account: { id: string; code: string; name: string }, binding: BankStatementPolicy["accounts"][number], canImport: boolean, maxBytes: number) {
+function accountView(account: { id: string; code: string; name: string }, binding: BankStatementPolicy["accounts"][number], canImport: boolean, maxBytes: number, statementCurrencies: string[] = []) {
   return bankStatementAccountSchema.parse({ id: account.id, code: account.code, name: account.name, currency: binding.currency, lastFour: binding.account_id.slice(-4),
-    formats: [...binding.csv ? ["CSV"] : [], ...binding.ofx ? ["OFX"] : []], maxBytes, canImport });
+    statementCurrencies, formats: [...binding.csv ? ["CSV"] : [], ...binding.ofx ? ["OFX"] : []], maxBytes, canImport });
 }
 export async function readBankStatementWorkspace(context: FinanceActorContext, raw: unknown, deps: Deps = {}) {
   const ctx = { ...context, authContext: restoreAuthorizationCap(captureAuthorizationCap(context.authContext)) }, input = bankStatementWorkspaceInput.parse(raw);
@@ -51,17 +51,19 @@ export async function readBankStatementWorkspace(context: FinanceActorContext, r
       const policy = await configuration(ctx, tx), historical = await repository.historyAccounts(), rows = await repository.accounts(policy?.accounts.map(account => account.account_code) ?? []), items = [];
       if (!policy && !historical.length) throw new BankStatementConfigurationError();
       const accountIds = new Set(rows.map(row => row.id));
+      const currencies = new Map<string, string[]>();
+      for (const source of await repository.statementCurrencies()) currencies.set(source.accountId, [...(currencies.get(source.accountId) ?? []), source.currency]);
       for (const row of rows) {
         const checks = accountChecks(ctx, row.id); if (!allows(checks)) continue; complete.push(...checks);
         const binding = policy!.accounts.find(binding => binding.account_code === row.code)!;
-        items.push(accountView(row, binding, allows([{ action: "create", resource: { ...checks[0].resource }, unconditional: true }]), policy!.max_bytes));
+        items.push(accountView(row, binding, allows([{ action: "create", resource: { ...checks[0].resource }, unconditional: true }]), policy!.max_bytes, currencies.get(row.id)));
       }
       for (const source of historical) {
         if (accountIds.has(source.ledgerAccountId)) continue;
         const checks = accountChecks(ctx, source.ledgerAccountId); if (!allows(checks)) continue; complete.push(...checks);
         const retained = bankStatementPolicySchema.parse((source.policySnapshot as { value: unknown }).value), binding = retained.accounts.find(binding => bankStatementBankIdentity(binding) === source.bankIdentityHash);
         if (!binding) throw new BankStatementAccessError();
-        items.push(accountView(source.ledgerAccount, binding, false, retained.max_bytes));
+        items.push(accountView(source.ledgerAccount, binding, false, retained.max_bytes, currencies.get(source.ledgerAccountId)));
       }
       return disclose(bankStatementAccountsSchema.parse({ items }), ctx.organizationId, "finance.bank_statement.accounts_viewed");
     }

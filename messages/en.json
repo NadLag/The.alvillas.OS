@@ -4511,7 +4511,9 @@
     "command_succeeded": "Original association recorded",
     "removalEvidence": "Bank removal retained as evidence",
     "removalGuidance": "Compare this bank correction with the original entries and any reversals. Release earlier matches before using the correction.",
-    "retainedRemovals": "Retained bank removal records: {count}."
+    "retainedRemovals": "Retained bank removal records: {count}.",
+    "statementCurrency": "Statement currency",
+    "historicalCurrency": "Original statements remain available in this currency. New matching requires a current bank configuration for the same currency."
   },
   "VarianceCenter": {
     "eyebrow": "Finance and operations",

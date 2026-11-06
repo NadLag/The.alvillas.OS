@@ -49,13 +49,14 @@ function History({ accountId, selected, locale, revision, ready, onSelect, onInv
 }
 
 export function BankReconciliationWorkspace({ locale, scope }: { locale: AppLocale; scope: string }) {
-  const t = useTranslations("BankReconciliation"), [blocked, setBlocked] = useState(false), [accountId, setAccountId] = useState<string | null>(null), [selected, setSelected] = useState<string | null>(null), [revision, setRevision] = useState(0);
-  const invalidate = useCallback(() => { setBlocked(true); setAccountId(null); setSelected(null); }, []);
+  const t = useTranslations("BankReconciliation"), [blocked, setBlocked] = useState(false), [accountId, setAccountId] = useState<string | null>(null), [selected, setSelected] = useState<string | null>(null), [revision, setRevision] = useState(0), [currency, setCurrency] = useState<string | null>(null);
+  const invalidate = useCallback(() => { setBlocked(true); setAccountId(null); setSelected(null); setCurrency(null); }, []);
   const success = useCallback((receipt: BankReconciliationCommandReceipt) => { setAccountId(receipt.result.accountId); setSelected(receipt.result.id); setRevision(value => value + 1); }, []);
   const command = useCompensationCommand({ storageKey: `alvillas:bank-reconciliation:${scope}`, inputSchema: bankReconciliationCommandInput, receiptSchema: bankReconciliationCommandReceiptSchema, recoverySchema: bankReconciliationCommandRecoverySchema,
     requestPath: "/api/finance/bank-reconciliation/command", recoveryPath: "/api/finance/bank-reconciliation/recover", recoveryInput, statusPath, accept, onSuccess: success, onInvalidate: invalidate });
   const accounts = useCompensationRead(blocked ? null : "/api/finance/bank-statements/read", bankStatementAccountsSchema, invalidate, JSON.stringify({ operation: "ACCOUNTS" }), revision);
   const active = accounts.data?.items.find(account => account.id === accountId), ready = command.state === "ready";
+  const currencies = active ? [...new Set([active.currency, ...active.statementCurrencies])].sort() : [], selectedCurrency = currency && currencies.includes(currency) ? currency : active?.currency;
   const send = (draft: Draft) => { void command.send(draft); };
   if (blocked) return <section className="resource-form"><p role="alert">{t("privateUnavailable")}</p><button className="secondary-button" onClick={() => window.location.reload()}>{t("reload")}</button></section>;
   return <div className="resource-form"><section className="resource-form"><h2>{t("status")}</h2><p role="status" data-testid="bank-match-command-state">{t(`command_${command.state}`)}</p>
@@ -64,9 +65,12 @@ export function BankReconciliationWorkspace({ locale, scope }: { locale: AppLoca
       {command.state === "uncertain" ? <button className="secondary-button" onClick={() => { void command.send(); }}>{t("retryExact")}</button> : null}
       {command.state === "succeeded" ? <button className="secondary-button" onClick={command.startNew} data-testid="bank-match-new">{t("newCommand")}</button> : null}</div></section>
     <section className="resource-form"><h2>{t("accounts")}</h2>{accounts.error ? <p role="alert">{t(accounts.error)}</p> : accounts.pending ? <SkeletonBlock rows={3}/> : <>
-      <ul className="resource-list" data-testid="bank-match-accounts">{accounts.data?.items.map(account => <li key={account.id}><button className="secondary-button" type="button" disabled={!["ready", "succeeded"].includes(command.state)} aria-pressed={active?.id === account.id} data-testid="bank-match-account" onClick={() => { if (command.state === "succeeded") command.startNew(); setSelected(null); setAccountId(account.id); }}>
+      <ul className="resource-list" data-testid="bank-match-accounts">{accounts.data?.items.map(account => <li key={account.id}><button className="secondary-button" type="button" disabled={!["ready", "succeeded"].includes(command.state)} aria-pressed={active?.id === account.id} data-testid="bank-match-account" onClick={() => { if (command.state === "succeeded") command.startNew(); setSelected(null); setCurrency(null); setAccountId(account.id); }}>
         <span dir="auto">{account.name} · {account.lastFour} · {account.currency}</span></button></li>)}</ul>{!accounts.data?.items.length ? <p>{t("empty")}</p> : null}</>}</section>
-    {active ? <><History key={active.id} accountId={active.id} selected={selected} locale={locale} revision={revision} ready={ready} onSelect={setSelected} onInvalidate={invalidate} onCommand={send}/>
-      <BankReconciliationEditor key={active.id + ":" + revision} accountId={active.id} currency={active.currency} locale={locale} ready={ready} revision={revision} onInvalidate={invalidate} onMatch={send}/></> : null}
+    {active && selectedCurrency ? <><label className="field"><span>{t("statementCurrency")}</span><select value={selectedCurrency} disabled={!["ready", "succeeded"].includes(command.state)} data-testid="bank-match-currency" onChange={event => { if (command.state === "succeeded") command.startNew(); setSelected(null); setCurrency(event.target.value); }}>
+      {currencies.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      {selectedCurrency !== active.currency ? <p role="status" data-testid="bank-match-historical-currency">{t("historicalCurrency")}</p> : null}
+      <History key={active.id} accountId={active.id} selected={selected} locale={locale} revision={revision} ready={ready} onSelect={setSelected} onInvalidate={invalidate} onCommand={send}/>
+      <BankReconciliationEditor key={active.id + ":" + selectedCurrency + ":" + revision} accountId={active.id} currency={selectedCurrency} locale={locale} ready={ready && selectedCurrency === active.currency} revision={revision} onInvalidate={invalidate} onMatch={send}/></> : null}
   </div>;
 }
