@@ -8,6 +8,7 @@ import { documentTemplateMaximumBytes } from "./document-template-format";
 export { documentTemplateMediaType } from "./document-template-format";
 
 const key = z.string().regex(/^[a-z][a-z0-9_]{0,79}$/u).refine(value => !["constructor", "prototype"].includes(value));
+export { key as documentTemplateVariableKeySchema };
 const text = (maximum: number) => z.string().min(1).max(maximum).refine(value => value.trim().length > 0 && !/\p{Cc}/u.test(value.replaceAll("\t", "").replaceAll("\r", "").replaceAll("\n", "")));
 export const templateVariableKinds = ["TEXT", "DATE", "INTEGER", "MONEY"] as const;
 const variable = z.object({ key, kind: z.enum(templateVariableKinds) }).strict();
@@ -77,7 +78,16 @@ export function renderDocumentTemplate(raw: unknown, supplied: ReadonlyMap<strin
     else formatted = value.value;
     values.set(declared.key, formatted);
   }
-  const interpolate = (value: string) => value.replace(token, (_match: string, name: string) => { const replacement = values.get(name); if (replacement === undefined) throw new TemplateBindingError(); return replacement; });
+  let remainingBytes = documentTemplateMaximumBytes;
+  const encoder = new TextEncoder(), interpolate = (value: string) => {
+    const pieces: string[] = []; let cursor = 0;
+    const append = (piece: string) => { remainingBytes -= encoder.encode(piece).length; if (remainingBytes < 0) throw new TemplateBindingError(); pieces.push(piece); };
+    for (const match of value.matchAll(token)) {
+      append(value.slice(cursor, match.index)); const replacement = values.get(match[1]); if (replacement === undefined) throw new TemplateBindingError();
+      append(replacement); cursor = match.index + match[0].length;
+    }
+    append(value.slice(cursor)); return pieces.join("");
+  };
   return { templateKey: definition.templateKey, locale: definition.locale, title: interpolate(definition.title),
     blocks: definition.blocks.map(item => ({ ...item, text: interpolate(item.text) })), privacy: [...classification].sort() };
 }

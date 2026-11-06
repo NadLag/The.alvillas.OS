@@ -1,24 +1,14 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { Document, Page, Text, View, Font, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
+import { Document, Page, Text, View, StyleSheet, renderToBuffer } from "@react-pdf/renderer";
 import { z } from "zod";
 import type { PdfRenderer } from "@/platform/providers";
 import { HttpPdfRenderer } from "@/platform/providers/real";
+import { alvillasPdfFontFamily, registerAlvillasPdfFonts } from "@/platform/exports/pdf-fonts";
 import { validateAccountantExportDocument, AccountantExportConfigurationError } from "../domain/accountant-export";
 import { accountantExportLabelsSchema } from "./accountant-tabular-renderer";
 
 export const accountantPdfTemplate = "finance.accountant-export.v1";
 const inputSchema = z.object({ source: z.unknown(), labels: accountantExportLabelsSchema, maxRows: z.number().int().positive().max(100000) }).strict();
-let fontsRegistered = false;
-function registerFonts() {
-  if (fontsRegistered) return;
-  // Fixed local assets keep financial document rendering independent of font/CDN requests.
-  const regular = readFileSync(join(process.cwd(), "src/platform/exports/fonts/SourceSans3-Regular.ttf"));
-  const bold = readFileSync(join(process.cwd(), "src/platform/exports/fonts/SourceSans3-Bold.ttf"));
-  Font.register({ family: "Alvillas Source Sans 3", fonts: [{ src: "data:font/ttf;base64," + regular.toString("base64"), fontWeight: 400 },
-    { src: "data:font/ttf;base64," + bold.toString("base64"), fontWeight: 700 }] }); fontsRegistered = true;
-}
-const styles = StyleSheet.create({ page: { fontFamily: "Alvillas Source Sans 3", fontSize: 9, padding: 32, color: "#182326" },
+const styles = StyleSheet.create({ page: { fontFamily: alvillasPdfFontFamily, fontSize: 9, padding: 32, color: "#182326" },
   title: { fontSize: 18, fontWeight: 700, marginBottom: 12, color: "#0B6B5F" }, metadata: { marginBottom: 16 },
   record: { borderTopWidth: 0.5, borderTopColor: "#CDD5D0", paddingTop: 8, marginBottom: 12 },
   pair: { flexDirection: "row", marginBottom: 3 }, label: { width: "32%", paddingRight: 12, fontWeight: 700 }, value: { width: "68%" } });
@@ -33,7 +23,7 @@ export class AccountantPdfRenderer implements PdfRenderer {
       if (!this.arabicRenderer) throw new AccountantExportConfigurationError();
       return this.arabicRenderer.render({ ...input, data: { ...payload, source } });
     }
-    registerFonts();
+    registerAlvillasPdfFonts();
     const metadata = { report: labels.title, fromOn: source.fromOn, toOn: source.toOn, currency: source.currency, timezone: source.timezone,
       policyId: source.policy.id, policyVersion: String(source.policy.version), sourceFingerprint: source.sourceFingerprint, generatedAt: source.generatedAt,
       propertyId: source.scope.propertyId ?? "", ownerId: source.scope.ownerId ?? "", accountId: source.scope.accountId ?? "" };

@@ -26,6 +26,8 @@ import {tickRecurringCompanyExpenses} from "@/modules/finance/application/recurr
 import {tickLedgerIntegrity} from "@/modules/finance/application/ledger-integrity-service";
 import {externalPaymentCaptureRequested,executeExternalPaymentCaptureReference,failExternalPaymentCaptureReference} from "@/modules/finance/application/external-payment-service";
 import {externalPaymentRefundRequested,executeExternalPaymentRefundReference,failExternalPaymentRefundReference} from "@/modules/finance/application/external-payment-refund-service";
+import {documentGenerationRequested} from "@/modules/documents/domain/document-generation";
+import {executeDocumentGenerationReference,failDocumentGenerationReference} from "@/modules/documents/application/document-generation-worker";
 
 export { outboxDispatchEvent };
 export const outboxDispatchInput = z.object({ organizationId: z.string().uuid(), outboxEventId: z.string().uuid() }).strict();
@@ -139,4 +141,9 @@ export const failSupplierInvoiceRecognitions = inngest.createFunction({ id: "sup
   return step.run(failure.data.event.name === supplierInvoiceReversalRequested ? "record-terminal-reversal-failure" : "record-terminal-recognition-failure",
     () => failSupplierInvoiceRecognitionReference(failure.data.event.data, { eventType: failure.data.event.name }));
 });
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions];
+export const generateDocuments=inngest.createFunction({id:"native-document-generation",name:"ALVILLAS OS document generation",triggers:[{event:documentGenerationRequested}],concurrency:{limit:1},retries:3},
+  async({event,step})=>step.run("publish-original-native-document",()=>executeDocumentGenerationReference(event.data)));
+const failedDocumentExecution=z.object({function_id:z.literal("alvillas-os-native-document-generation"),event:z.object({name:z.literal(documentGenerationRequested),data:outboxDispatchInput})});
+export const failDocumentGenerations=inngest.createFunction({id:"native-document-generation-failure",name:"ALVILLAS OS retained document generation failures",triggers:[{event:"inngest/function.failed",if:"event.data.function_id == 'alvillas-os-native-document-generation'"}],concurrency:{limit:1},retries:3},
+  async({event,step})=>{const failure=failedDocumentExecution.safeParse(event.data);if(!failure.success)throw new NonRetriableError("document_generation_failure_reference_denied");return step.run("retain-original-generation-failure",()=>failDocumentGenerationReference(failure.data.event.data));});
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations];

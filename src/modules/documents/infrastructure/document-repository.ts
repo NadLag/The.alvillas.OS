@@ -62,6 +62,10 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   appendAdmission(data: Omit<Prisma.DocumentAdmissionUncheckedCreateInput, "organizationId">) { return this.tx.documentAdmission.create({ data: { ...data, organizationId: this.organizationId } }); }
   appendVersion(data: Omit<Prisma.DocumentVersionUncheckedCreateInput, "organizationId">) { return this.tx.documentVersion.create({ data: { ...data, organizationId: this.organizationId }, include: versionInclude }); }
   appendTemplate(data: Omit<Prisma.DocumentTemplateUncheckedCreateInput, "organizationId">) { return this.tx.documentTemplate.create({ data: { ...data, organizationId: this.organizationId } }); }
+  appendInstance(data: Omit<Prisma.DocumentInstanceUncheckedCreateInput, "organizationId">) { return this.tx.documentInstance.create({ data: { ...data, organizationId: this.organizationId } }); }
+  instance(id: string) { return this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, id }, include: { document: { include: rootInclude } } }); }
+  instanceByNonce(createdBy: string, commandKey: string) { return this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, createdBy, commandKey }, include: { document: { include: rootInclude } } }); }
+  instanceNonceOwner(commandKey: string) { return this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { createdBy: true } }); }
   appendAction(data: Omit<Prisma.DocumentActionUncheckedCreateInput, "organizationId">) { return this.tx.documentAction.create({ data: { ...data, organizationId: this.organizationId } }); }
   async snapshot(id: string) { const [row] = await this.tx.$queryRaw<{ value: Prisma.JsonObject }[]>`SELECT to_jsonb(d) AS value FROM document d WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid`; return row?.value ?? null; }
   protect(id: string, revision: bigint, privacy: string[]) { return this.tx.document.update({ where: { organizationId_id: { organizationId: this.organizationId, id }, revision }, data: { privacy, revision: { increment: 1 } }, include: rootInclude }); }

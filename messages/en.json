@@ -5003,5 +5003,24 @@
     "value_INTEGER": "Whole number",
     "value_MONEY": "Money",
     "templatesOnly": "This record is configured for authored templates. Choose Template to continue."
+  },
+  "DocumentGeneration": {
+    "title": "Generate a PDF",
+    "guidance": "Choose the original language versions and review the document before generating its archived PDF.",
+    "pending": "An earlier request may be recorded. Recover its result before generating another document.",
+    "complete": "Complete the recorded PDF",
+    "changed": "The source or its protection has changed. The original request is retained; review a new document with the current source.",
+    "libraryKind": "Templates belonging to",
+    "find": "Find template sources",
+    "noTemplates": "No authored templates are available for this source.",
+    "language": "PDF language",
+    "variant": "Original {language} version",
+    "template": "Template",
+    "version": "Immutable version",
+    "choose": "Choose an original",
+    "review": "Review generation",
+    "generate": "Generate and archive PDF",
+    "reviewed": "The original {language} template and current source have been checked. Confirm to generate this PDF.",
+    "selectSource": "Select the document’s source above to generate a PDF."
   }
 }
