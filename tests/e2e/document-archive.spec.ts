@@ -97,7 +97,7 @@ for (const locale of ["en", "fr", "ar"] as const) {
       const serialized = JSON.stringify(storage); for (const value of [file.name, title, reason, "9007199254740993.07"]) expect(serialized).not.toContain(value);
       expect(Object.keys(storage.session).filter(key => key.startsWith("alvillas:document-upload:"))).toEqual([storageKey]);
       expect(admissionPosts).toBe(1); await page.unroute("**/api/documents/admit");
-      await page.reload(); await expect(page.getByTestId("document-resume-file")).toBeVisible();
+      await page.reload(); await expect(page.getByTestId("document-resume-file")).toBeVisible(); await expect(page.getByTestId("document-source-kind")).toHaveValue("FINANCIAL_TRANSACTION");
       const uploaded = acknowledgementBarrier();
       await page.route("**/api/documents/upload?**", async route => {
         uploadPosts++;

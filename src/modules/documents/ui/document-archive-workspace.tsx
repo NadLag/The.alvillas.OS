@@ -69,7 +69,9 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
     setReceipt(value);setUnrecorded(false);if(value.state==="ADMITTED")setState("ready");
     if(value.state!=="ADMITTED"){clearDocumentNonce(storageKey,value.idempotencyKey);nonce.current=null;intent.current=null;originalFile.current=null;setCanRetry(false);setHasPending(false);setResumeFile(null);setFormSerial(number=>number+1);setState(value.state==="COMPLETE"?"saved":"conflict");}
     const data=await loadHistory(value.documentId,undefined,false);if(!data)return;
-    const mode=data.document.kind==="TEMPLATE"?"TEMPLATE":"FILE";view.current.source=data.document.source;view.current.documentId=data.document.id;view.current.kind=mode;setSource(data.document.source);setKind(mode);setHistory(data);setAmendment(null);
+    const mode=data.document.kind==="TEMPLATE"?"TEMPLATE":"FILE";view.current.source=data.document.source;view.current.documentId=data.document.id;view.current.kind=mode;
+    if(view.current.sourceKind!==data.document.source.kind){view.current.sourceKind=data.document.source.kind;view.current.query="";setSourceKind(data.document.source.kind);setQuery("");}
+    setSource(data.document.source);setKind(mode);setHistory(data);setAmendment(null);
     await loadWorkspace(data.document.source,mode);
   },[loadHistory,loadWorkspace,storageKey]);
   const uploadBytes=useCallback(async(admission:Admission,file:File,bytes?:Uint8Array<ArrayBuffer>)=>{
