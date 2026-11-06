@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 import type { Action, AuthContext, DataClass } from "@/platform/authz/authorize";
 import { captureAuthorizationCap, restoreAuthorizationCap } from "@/platform/authz/authorization-cap";
 import { recheckAccountAuthorization, type CurrentAuthorityCheck } from "@/platform/authz/current-authority";
+import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { present } from "@/platform/authz/present";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
@@ -31,10 +32,10 @@ function actorContext(actor: DocumentActorContext): DocumentActorContext {
   return { ...actor, authContext: restoreAuthorizationCap(captureAuthorizationCap(actor.authContext)) };
 }
 function sourceOf(root: Root) { return documentSourceReferenceSchema.parse({ kind: root.sourceKind, id: root.sourceId }); }
-function documentChecks(native: DocumentSourceFacts, privacy: readonly string[], action: Action, root?: Pick<Root, "kind"> & { id?: string }): CurrentAuthorityCheck[] {
+export function documentAuthorityChecks(native: DocumentSourceFacts, privacy: readonly string[], action: Action, root?: Pick<Root, "kind"> & { id?: string; createdBy?: string }): CurrentAuthorityCheck[] {
   const checks = [...native.checks], source = native.resource;
   for (const dataClass of privacy) {
-    const resource = { ...source, type: "document", id: root?.id, documentId: root?.id, dataClass: dataClass as DataClass };
+    const resource = { ...source, type: "document", id: root?.id, documentId: root?.id, assignedUserAccountId: root?.createdBy ?? source.assignedUserAccountId, dataClass: dataClass as DataClass };
     checks.push({ action: "view", resource }, ...(action === "view" ? [] : [{ action, resource }]));
     if (root?.kind === "TEMPLATE") checks.push({ action: "view", resource: { ...resource, type: "document_template" } }, ...(action === "view" ? [] : [{ action, resource: { ...resource, type: "document_template" } }]));
     if (root?.kind === "INSTANCE") checks.push({ action: "view", resource: { ...resource, type: "document_instance" } }, ...(action === "view" ? [] : [{ action, resource: { ...resource, type: "document_instance" } }]));
@@ -47,7 +48,7 @@ function documentChecks(native: DocumentSourceFacts, privacy: readonly string[],
   }
   return checks;
 }
-async function context(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export", root?: Root, prospective?: ReviewInput) {
+export async function documentSourceContext(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export") {
   const repository = new DocumentRepository(tx, ctx.organizationId), now = await repository.clock(), native = await repository.documentSource(reference, action === "export" ? "export" : "view");
   if (!native) throw new DocumentAccessError();
   await recheckAccountAuthorization(ctx, tx, now, native.checks, new DocumentAccessError());
@@ -55,11 +56,16 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
     { scopeType: "organization", scopeId: null }, ...(source.city ? [{ scopeType: "city", scopeId: source.city }] : []),
     ...(source.ownerId ? [{ scopeType: "owner", scopeId: source.ownerId }] : []), ...(source.propertyId ? [{ scopeType: "property", scopeId: source.propertyId }] : [])] });
   const value = documentArchivePolicySchema.safeParse(rule?.value); if (!rule || !value.success) throw new DocumentConfigurationError();
-  const policy = { id: rule.id, version: rule.version, value: value.data }, type = value.data.types.find(type => type.key === (prospective?.typeKey ?? root?.typeKey));
+  const policy = { id: rule.id, version: rule.version, value: value.data };
+  return { repository, now, native, policy };
+}
+async function context(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export", root?: Root, prospective?: ReviewInput) {
+  const base = await documentSourceContext(ctx, tx, reference, action), { repository, now, native, policy } = base;
+  const type = policy.value.types.find(type => type.key === (prospective?.typeKey ?? root?.typeKey));
   if (action === "create" && (!type || !type.sources.includes(reference.kind) || native.archived || root?.archivedAt)) throw new DocumentConfigurationError();
   const privacy = retainDocumentPrivacy(root?.privacy ?? [], type?.privacy ?? [], reference.kind);
   if (!privacy.length) throw new DocumentAccessError();
-  const checks = documentChecks(native, privacy, action, root ?? (prospective?.kind === "TEMPLATE" ? { kind: "TEMPLATE" } : undefined));
+  const checks = documentAuthorityChecks(native, privacy, action, root ?? (prospective ? { kind: prospective.kind, createdBy: ctx.actorId } : undefined));
   await recheckAccountAuthorization(ctx, tx, now, checks, new DocumentAccessError());
   return { repository, now, native, policy, type, privacy, checks,
     fingerprint: commandFingerprint({ source: native.fingerprint, policy, privacy, revision: root?.revision.toString() ?? null, archivedAt: root?.archivedAt ?? null }) };
@@ -75,9 +81,9 @@ async function review(ctx: DocumentActorContext, tx: TenantTransaction, input: R
 function publicVersion(ctx: DocumentActorContext, current: Awaited<ReturnType<typeof context>>, root: Root, row: Version) {
   const data = { id: row.id, documentId: row.documentId, number: row.number, title: row.title, fileName: row.admission.fileName,
     contentType: row.admission.contentType, fileSize: row.admission.fileSize, sha256: row.admission.sha256,
-    supersedesId: row.supersedesId, supersededById: row.next[0]?.id ?? null, effectiveFrom: row.effectiveFrom?.toISOString() ?? null, createdAt: row.createdAt.toISOString() };
+    supersedesId: row.supersedesId, supersededById: row.next[0]?.id ?? null, effectiveFrom: row.effectiveFrom?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), createdBy: row.createdBy, reason: row.admission.reason };
   return documentVersionItemSchema.parse(present({ ...ctx.authContext, visibleDataClasses: new Set<DataClass>(current.privacy) }, "view",
-    { ...current.native.resource, type: "document", id: root.id, documentId: root.id, data }, Object.fromEntries(Object.keys(data).map(key => [key, { dataClass: current.privacy[0] }])), current.now));
+    { ...current.native.resource, type: "document", id: root.id, documentId: root.id, assignedUserAccountId: root.createdBy, data }, Object.fromEntries(Object.keys(data).map(key => [key, { dataClass: current.privacy[0] }])), current.now));
 }
 async function historyAction(ctx: DocumentActorContext, tx: TenantTransaction, current: Awaited<ReturnType<typeof context>>, rootId: string,
   action: string, commandKey: string, commandHash: string, reason: string, before: Prisma.InputJsonValue, after: Prisma.InputJsonValue, deps: Dependencies) {
@@ -99,7 +105,8 @@ async function admittedContext(ctx: DocumentActorContext, tx: TenantTransaction,
 }
 async function admissionResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission) {
   const current = await admittedContext(ctx, tx, row);
-  return documentUploadAdmissionSchema.parse({ id: row.id, documentId: row.documentId, complete: Boolean(row.version), version: row.version ? publicVersion(ctx, current, current.root, row.version) : null });
+  return documentUploadAdmissionSchema.parse({ recorded: true, id: row.id, documentId: row.documentId, idempotencyKey: row.commandKey, complete: Boolean(row.version), version: row.version ? publicVersion(ctx, current, current.root, row.version) : null,
+    expected: { fileName: row.fileName, contentType: row.contentType, fileSize: row.fileSize, sha256: row.sha256 } });
 }
 
 export async function reviewDocumentUpload(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
@@ -156,7 +163,14 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
 
 export async function recoverDocumentUpload(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx = actorContext(actor), input = documentRecoveryInput.parse(raw);
-  return withTenant(deps.db, ctx.organizationId, async tx => { const row = await new DocumentRepository(tx, ctx.organizationId).byNonce(ctx.actorId, input.idempotencyKey); if (!row) throw new DocumentAccessError(); return admissionResult(ctx, tx, row); });
+  return withTenant(deps.db, ctx.organizationId, async tx => {
+    const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);
+    const row = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (row) return admissionResult(ctx, tx, row);
+    if (await repository.nonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
+    const current = await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);
+    if ([ctx.authContext,current].some(authority => ["document:view","document:create"].some(key => !authority.permissions.has(key)))) throw new DocumentAccessError();
+    return { recorded: false as const, id: null, documentId: null, idempotencyKey: input.idempotencyKey, complete: false as const, version: null, expected: null };
+  });
 }
 
 const uploadReference = z.object({ admissionId: z.uuid() }).strict();
@@ -195,7 +209,7 @@ export async function readDocumentHistory(actor: DocumentActorContext, raw: unkn
     const current = await context(ctx, tx, sourceOf(root), "view", root), rows = await repository.versions(root.id, input.before), data = { id: root.id, source: sourceOf(root), typeKey: root.typeKey, kind: root.kind, locale: root.locale,
       title: root.title, privacy: current.privacy, revision: root.revision.toString(), createdAt: root.createdAt.toISOString(), archivedAt: root.archivedAt?.toISOString() ?? null };
     const document = documentItemSchema.parse(present({ ...ctx.authContext, visibleDataClasses: new Set<DataClass>(current.privacy) }, "view",
-      { ...current.native.resource, type: "document", id: root.id, documentId: root.id, data }, {}, current.now));
+      { ...current.native.resource, type: "document", id: root.id, documentId: root.id, assignedUserAccountId: root.createdBy, data }, {}, current.now));
     const result = documentHistorySchema.parse({ document, versions: rows.slice(0,50).map(row => publicVersion(ctx, current, root, row)), next: rows.length>50 ? rows[49].number : null });
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "documents.history_read", resourceType: "document", resourceId: root.id,
       after: { documentId: root.id, count: result.versions.length }, requestId: deps.requestId ?? randomUUID(), occurredAt: current.now });

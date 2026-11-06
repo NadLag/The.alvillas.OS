@@ -15,6 +15,7 @@ import { provisionIntegrationRole } from "./support/database-role";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { Money } from "@/platform/money/money";
 import { listAuditHistory, exportAuditHistoryCsv } from "@/modules/audit/application/audit-service";
+import { readDocumentSources, readDocumentSourceWorkspace } from "@/modules/documents/application/document-workspace";
 
 let admin: PrismaClient, db: PrismaClient, server: Server, storageUrl: string;
 const objects = new Map<string, Buffer>(), encryption = { NODE_ENV: "test", ENCRYPTION_KEYS: "documents-native:" + randomBytes(32).toString("base64") };
@@ -187,5 +188,61 @@ describe("native private document archive", () => {
     const policies=await admin.$queryRaw<{relname:string;relrowsecurity:boolean;relforcerowsecurity:boolean}[]>`SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class WHERE relnamespace='public'::regnamespace AND relname=ANY(${tables}::text[])`;
     expect(policies).toHaveLength(9);expect(policies.every(row=>row.relrowsecurity&&row.relforcerowsecurity)).toBe(true);expect(await db.document.count()).toBe(0);expect(await db.documentVersion.count()).toBe(0);
     await expect(withTenant(db,f.org,async tx=>{const source=await new DocumentRepository(tx,f.org).document(original.documentId);if(!source)throw Error("Original source required");const{id,template,instance,...copy}=source;if(id!==original.documentId||template||instance)throw Error("Original file identity required");return tx.document.create({data:{...copy,id:randomUUID(),commandKey:randomUUID(),propertyId:null,personId:ctx.person.id}});})).rejects.toThrow("document_source_shape");
+  });
+  it("paginates past denied source rows with encrypted actor-and-filter-bound cursors",async()=>{
+    const f=await fixture(),ctx=await actor(f,["document:view","property:view"],true),other=await actor(f,["document:view","property:view"],true);
+    await withTenant(db,f.org,tx=>tx.property.createMany({data:Array.from({length:32},(_,index)=>({organizationId:f.org,name:"Other archive villa "+index,addressLine1:"Owned other source",city:"Marrakech",propertyType:"VILLA",bedrooms:1,bathrooms:1,maxGuests:2,amenities:[],photoUrls:[]}))}));
+    const first=await readDocumentSources(ctx,{kind:"PROPERTY"},{db});expect(first.items).toEqual([]);expect(first.next).toBeTruthy();expect(first.next).not.toContain(f.property.id);
+    const second=await readDocumentSources(ctx,{kind:"PROPERTY",cursor:first.next},{db});expect(second.items).toEqual([{source:{kind:"PROPERTY",id:f.property.id},label:f.property.name}]);expect(second.next).toBe(null);
+    await expect(readDocumentSources(other,{kind:"PROPERTY",cursor:first.next},{db})).rejects.toThrow("document_source_changed");
+    await expect(readDocumentSources(ctx,{kind:"PROPERTY",query:"changed",cursor:first.next},{db})).rejects.toThrow("document_source_changed");
+  });
+  it("keeps all source-linked document pages reachable and discloses only independently allowed upload types",async()=>{
+    const f=await fixture(),ctx=await actor(f),reader=await actor(f,["document:view","property:view"],true),ids=[];
+    for(let index=0;index<52;index++){const prepared=await admit(f,ctx,content(),{title:"Original archive record "+index});ids.push(prepared.admission.documentId);}
+    const source={kind:"PROPERTY",id:f.property.id},first=await readDocumentSourceWorkspace(reader,{source},{db});expect(first.items).toHaveLength(50);expect(first.types).toEqual([]);expect(first.next).toBeTruthy();
+    const second=await readDocumentSourceWorkspace(reader,{source,cursor:first.next},{db});expect(second.items).toHaveLength(2);expect(second.next).toBe(null);expect(new Set([...first.items,...second.items].map(item=>item.id))).toEqual(new Set(ids));
+    await expect(readDocumentSourceWorkspace(ctx,{source,cursor:first.next},{db})).rejects.toThrow("document_source_changed");
+    expect((await readDocumentSourceWorkspace(ctx,{source},{db})).types).toEqual([{key:"agreement",labels:{en:"Agreement",fr:"Convention",ar:"اتفاقية"},contentTypes:["application/pdf"],maxBytes:1048576}]);
+    const operations=await actor(f,["property:view"]);await expect(readDocumentSourceWorkspace(operations,{source},{db})).rejects.toThrow("document_unavailable");
+  });
+  it.each(["documents.sources_read","documents.source_read"])("rechecks current source authority after the actual %s audit",async action=>{
+    const f=await fixture(),ctx=await actor(f),original=await uploaded(f,ctx),write=auditWriter.writeAuditEvent;let changed=false;
+    const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{const result=await write(tx,event);if(!changed&&event.action===action){changed=true;await revoke(f,ctx);}return result;});
+    try{await expect(action==="documents.sources_read"?readDocumentSources(ctx,{kind:"PROPERTY"},{db}):readDocumentSourceWorkspace(ctx,{source:{kind:"PROPERTY",id:f.property.id}},{db})).rejects.toThrow("document_unavailable");}finally{spy.mockRestore();}expect(changed).toBe(true);
+    expect(await withTenant(db,f.org,tx=>tx.documentVersion.count({where:{documentId:original.documentId}}))).toBe(1);expect(await withTenant(db,f.org,tx=>tx.auditLog.count({where:{action}}))).toBe(0);
+  });
+  it("keeps an unrecorded nonce reusable without creating a second command identity",async()=>{
+    const f=await fixture(),ctx=await actor(f),idempotencyKey=randomUUID(),recovered=await recoverDocumentUpload(ctx,{idempotencyKey},{db});
+    expect(recovered).toEqual({recorded:false,id:null,documentId:null,idempotencyKey,complete:false,version:null,expected:null});
+    const original=await admit(f,ctx,content(),{},idempotencyKey);expect(original.admission.idempotencyKey).toBe(idempotencyKey);expect(await recoverDocumentUpload(ctx,{idempotencyKey},{db})).toEqual(original.admission);
+    expect(original.admission.expected).toEqual({fileName:original.command.fileName,contentType:"application/pdf",fileSize:content().length,sha256:hash(content())});expect(await withTenant(db,f.org,tx=>tx.document.count())).toBe(1);
+  });
+  it("serializes an unrecorded recovery against competing original admissions using the same retained nonce",async()=>{
+    const f=await fixture(),ctx=await actor(f),idempotencyKey=randomUUID(),a=input(f,content(),{title:"Original candidate A"}),b=input(f,content(),{title:"Original candidate B"});
+    const command=async(metadata:ReturnType<typeof input>)=>({...metadata,idempotencyKey,reviewFingerprint:(await reviewDocumentUpload(ctx,metadata,{db})).reviewFingerprint,reason:"Retain one actual original document command"});
+    const[one,two]=await Promise.all([command(a),command(b)]),pending=recoverDocumentUpload(ctx,{idempotencyKey},{db});
+    const results=await Promise.allSettled([admitDocumentUpload(ctx,one,{db}),admitDocumentUpload(ctx,two,{db})]);await pending;
+    expect(results.filter(result=>result.status==="fulfilled")).toHaveLength(1);expect(results.filter(result=>result.status==="rejected")).toHaveLength(1);
+    const recovered=await recoverDocumentUpload(ctx,{idempotencyKey},{db});expect(recovered.recorded).toBe(true);expect(recovered.idempotencyKey).toBe(idempotencyKey);expect(await withTenant(db,f.org,tx=>tx.documentAdmission.count())).toBe(1);expect(await withTenant(db,f.org,tx=>tx.document.count())).toBe(1);
+  });
+  it("applies document creator conditions independently of the native property source grant",async()=>{
+    const f=await fixture(),ctx=await actor(f),other=await actor(f);
+    await revoke(f,ctx);await withTenant(db,f.org,async tx=>{
+      for(const[key,keys,conditions]of [["native",["property:view","property:export"],undefined],["own",["document:view","document:create","document:export"],{assignedToMe:true}]] as const){
+        const role=await tx.role.create({data:{organizationId:f.org,key:"archive_condition_"+key+randomUUID(),name:"Explicit independent archive condition"}}),permissions=await tx.permission.findMany({where:{organizationId:f.org,key:{in:[...keys]}}});
+        await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:role.id,permissionId:permission.id}))});await tx.roleAssignment.create({data:{organizationId:f.org,roleId:role.id,userAccountId:ctx.actorId,personId:ctx.personId,scopeType:"organization",validFrom:new Date("2020-01-01"),conditions}});
+      }
+    });
+    const restricted={...ctx,authContext:{...await authContextForAccount(f.org,ctx.actorId,{db}),personId:ctx.personId}},own=await uploaded(f,restricted),foreign=await uploaded(f,other);
+    expect(own.version.createdBy).toBe(ctx.actorId);expect((await readDocumentHistory(restricted,{documentId:own.documentId},{db})).versions[0].id).toBe(own.version.id);
+    await expect(readDocumentHistory(restricted,{documentId:foreign.documentId},{db})).rejects.toThrow("document_unavailable");
+    expect((await readDocumentSourceWorkspace(restricted,{source:{kind:"PROPERTY",id:f.property.id}},{db})).items.map(item=>item.id)).toEqual([own.documentId]);
+  });
+  it("rejects a different reselected file before any object transport and retains original admission metadata",async()=>{
+    const f=await fixture(),ctx=await actor(f),original=await admit(f,ctx),before=objects.size;let transported=false;
+    const transport:typeof fetch=(url,init)=>{transported=true;return fetch(url,init);};
+    await expect(uploadDocumentBytes(ctx,{admissionId:original.admission.id},content("Different original"),{db,objects:objectStore(transport)})).rejects.toThrow("document_source_changed");
+    expect(transported).toBe(false);expect(objects.size).toBe(before);expect((await recoverDocumentUpload(ctx,{idempotencyKey:original.command.idempotencyKey},{db})).expected).toEqual(original.admission.expected);
   });
 });
