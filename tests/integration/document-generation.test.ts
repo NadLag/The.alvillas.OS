@@ -33,8 +33,14 @@ import { reviewNativeSignature, admitNativeSignature, recoverNativeSignature, si
 import { nativeSignatureSnapshotSchema, nativeSignatureRecipientIdentitySchema, nativeSignatureDraftCreated } from "@/modules/documents/domain/document-signature-command";
 import { openNativeSignatureRecipient } from "@/modules/documents/infrastructure/document-signature-recipient-payload";
 import { createSupplier } from "@/modules/finance/application/supplier-service";
+import { ownedSignatureProvider } from "./support/document-signature-provider";
+import { readSignaturePreparationTarget, reviewSignaturePreparation, admitSignaturePreparation, recoverSignaturePreparation, signaturePreparationOutboxKey } from "@/modules/documents/application/document-signature-preparation";
+import { executeSignaturePreparationReference } from "@/modules/documents/application/document-signature-preparation-worker";
+import { SignaturePreparationRepository } from "@/modules/documents/infrastructure/signature-preparation-repository";
+import { openSignatureProviderEvidence } from "@/modules/documents/infrastructure/signature-provider-payload";
 
 let admin: PrismaClient, db: PrismaClient, server: Server, base: string, puts = 0;
+const signatureServers: Array<Awaited<ReturnType<typeof ownedSignatureProvider>>> = [];
 const objects = new Map<string, Buffer>(), env = { NODE_ENV: "test" as const, ENCRYPTION_KEYS: "native-generation:" + randomBytes(32).toString("base64") };
 const store = (transport: typeof fetch = fetch) => new DocumentObjectStore({ createSignedUploadUrl: ({ key }) => Promise.resolve({ url: base + "/" + key }), createSignedDownloadUrl: ({ key }) => Promise.resolve({ url: base + "/" + key }) }, transport, env);
 beforeAll(async () => {
@@ -45,7 +51,7 @@ beforeAll(async () => {
     else { const value = objects.get(key); if (value) response.writeHead(200, { "content-length": value.length }).end(value); else response.writeHead(404).end(); }
   })().catch(() => response.destroy()); }); await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve)); const address = server.address(); if (!address || typeof address === "string") throw Error("Owned object transport required"); base = "http://127.0.0.1:" + address.port;
 });
-afterAll(async () => { await db?.$disconnect(); await admin?.$disconnect(); if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } });
+afterAll(async () => { for (const provider of signatureServers) await provider.close(); await db?.$disconnect(); await admin?.$disconnect(); if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } });
 async function fixture(financial = false, selectedLocale: "en" | "fr" = "fr", amendments = false) {
   const organizationId = randomUUID(); await admin.organization.create({ data: { id: organizationId, name: "Actual native generation acceptance", baseCurrency: "MAD" } }); await ensureStandardIdentitySetup(organizationId, { db });
   const saved = await withTenant(db, organizationId, async tx => {
@@ -116,6 +122,121 @@ async function revokeSignaturePermission(f: Awaited<ReturnType<typeof signatureF
   await withTenant(db, f.organizationId, async tx => { const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.organizationId, key } });
     await tx.rolePermission.deleteMany({ where: { organizationId: f.organizationId, roleId: f.assignment.roleId, permissionId: permission.id } }); });
 }
+async function preparationFixture(locale: "en" | "fr" = "fr", shared?: Awaited<ReturnType<typeof ownedSignatureProvider>>) {
+  const f = await signatureFixture(locale), http = shared ?? await ownedSignatureProvider(); if (!shared) signatureServers.push(http);
+  await withTenant(db, f.organizationId, tx => new ConfigRuleRepository(tx, f.organizationId).createVersion({ key: "documents.signatures", scopeType: "organization", effectiveFrom: new Date("2020-01-01"), reason: "Explicit owned technical provider contract; no legal acceptance claim",
+    value: { source: "NATIVE_DOCUMENT_SIGNATURES", provider: "DOCUMENSO", enabled: true, account: { origin: http.origin, teamId: 17, scopeEnvelopeId: http.scopeEnvelopeId, scopeReference: http.scopeReference },
+      legal: { signatureLevel: "owned technical fixture only", ownerDecisionReference: "owned legal decision fixture", certificateDecisionReference: "owned certificate decision fixture" },
+      signing: { order: "SEQUENTIAL", methods: { typed: true, draw: false, upload: false }, delivery: { expiration: { unit: "day", amount: 17 }, reminders: { sendAfter: { disabled: true }, repeatEvery: { disabled: true } },
+        emailSettings: { recipientSigningRequest: true, recipientRemoved: false, recipientSigned: false, documentPending: false, documentCompleted: true, documentDeleted: false, ownerDocumentCompleted: true, ownerRecipientExpired: true, ownerDocumentCreated: false } } } } }));
+  const signature = await admitNativeSignature(f.ctx, f.signatureCommand, { db, env }), row = await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(signature.id)); if (!row) throw Error("Original signature required");
+  const preparationDraft = { signatureId: row.id, recipients: row.recipients.map((recipient, index) => ({ recipientId: recipient.id, role: "SIGNER" as const, signingOrder: index + 1, fields: [{ type: "SIGNATURE" as const, page: 1, positionX: 10, positionY: 80, width: 30, height: 5 }] })) },
+    review = await reviewSignaturePreparation(f.ctx, preparationDraft, { db, env, objects: store() }), preparationCommand = { ...preparationDraft, idempotencyKey: randomUUID(), reviewFingerprint: review.reviewFingerprint, reason: "Prepare the exact native original without distribution" };
+  return { ...f, http, signature, preparationDraft, preparationCommand, deps: { db, env, objects: store(), provider: http.provider, providerOrigin: http.origin } };
+}
+async function admitPreparation(f: Awaited<ReturnType<typeof preparationFixture>>) {
+  const receipt = await admitSignaturePreparation(f.ctx, f.preparationCommand, f.deps), event = await withTenant(db, f.organizationId, tx => tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: { organizationId: f.organizationId, idempotencyKey: signaturePreparationOutboxKey(f.ctx.actorId, receipt.idempotencyKey) } } }));
+  return { receipt, reference: { organizationId: f.organizationId, outboxEventId: event.id } };
+}
+describe("durable native signature provider preparation", () => {
+  it.each(["documents.signature.preparation_target_read", "documents.signature.preparation_reviewed", "documents.signature.preparation_requested", "documents.signature.preparation_started"])("rolls back a private result or external attempt after late authority revocation at %s", async action => {
+    const f = await preparationFixture(), admitted = action === "documents.signature.preparation_started" ? await admitPreparation(f) : null, auditBefore = await withTenant(db, f.organizationId, tx => tx.auditLog.count({ where: { action } })), write = auditWriter.writeAuditEvent; let revoked = false;
+    const spy = vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const value = await write(tx, event); if (!revoked && event.action === action) { revoked = true; await revokeSignaturePermission(f, "owner:export"); } return value; });
+    try { await expect(action === "documents.signature.preparation_target_read" ? readSignaturePreparationTarget(f.ctx, { signatureId: f.signature.id }, f.deps) : action === "documents.signature.preparation_reviewed" ? reviewSignaturePreparation(f.ctx, f.preparationDraft, f.deps) : admitted ? executeSignaturePreparationReference(admitted.reference, f.deps) : admitSignaturePreparation(f.ctx, f.preparationCommand, f.deps)).rejects.toThrow("document_unavailable"); }
+    finally { spy.mockRestore(); }
+    expect(revoked).toBe(true); expect(f.http.calls.filter(call => call.method === "POST")).toHaveLength(0); expect(await withTenant(db, f.organizationId, tx => tx.signatureProviderAttempt.count())).toBe(0);
+    expect(await withTenant(db, f.organizationId, tx => tx.signatureProviderIntent.count())).toBe(admitted ? 1 : 0); expect(await withTenant(db, f.organizationId, tx => tx.auditLog.count({ where: { action } }))).toBe(auditBefore);
+  });
+  it("denies a withheld original capability and a foreign durable reference before provider I/O", async () => {
+    const f = await preparationFixture(), restricted = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => key !== "owner:export")) } };
+    await expect(admitSignaturePreparation(restricted, f.preparationCommand, f.deps)).rejects.toThrow("document_unavailable");
+    const { reference } = await admitPreparation(f), foreign = await preparationFixture();
+    await expect(executeSignaturePreparationReference({ ...reference, organizationId: foreign.organizationId }, f.deps)).rejects.toThrow("document_unavailable"); expect(f.http.calls).toHaveLength(0);
+  });
+  it("guards native attempts, evidence, scope and outbox history under forced tenant isolation", async () => {
+    const f = await preparationFixture(), { receipt, reference } = await admitPreparation(f);
+    await expect(withTenant(db, f.organizationId, tx => tx.signatureProviderAttempt.create({ data: { organizationId: f.organizationId, intentId: receipt.id, signatureId: f.signature.id, phase: "PREPARE" } }))).rejects.toThrow("atomic system audit");
+    expect(await withTenant(db, f.organizationId, tx => tx.signatureProviderAttempt.count())).toBe(0);
+    await executeSignaturePreparationReference(reference, f.deps); const attempt = await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).preparationAttempt(f.signature.id));
+    for (const query of [
+      () => withTenant(db, f.organizationId, tx => tx.signatureProviderScope.updateMany({ data: { teamId: 18 } })),
+      () => withTenant(db, f.organizationId, tx => tx.signatureProviderIntent.update({ where: { id: receipt.id }, data: { reason: "Rewritten historical command" } })),
+      () => withTenant(db, f.organizationId, tx => tx.signatureProviderAttempt.delete({ where: { id: attempt!.id } })),
+      () => withTenant(db, f.organizationId, tx => tx.signatureProviderEvidence.delete({ where: { id: attempt!.evidence[0].id } })),
+      () => withTenant(db, f.organizationId, tx => tx.outboxEvent.delete({ where: { id: reference.outboxEventId } }))
+    ]) await expect(query()).rejects.toThrow("append-only");
+    const foreign = await preparationFixture(); expect(await withTenant(db, foreign.organizationId, tx => tx.signatureProviderIntent.findFirst({ where: { id: receipt.id } }))).toBeNull();
+    expect(await withTenant(db, foreign.organizationId, tx => tx.signatureProviderEvidence.count({ where: { attemptId: attempt!.id } }))).toBe(0);
+    const guarded = await admin.$queryRaw<Array<{ count: bigint }>>`SELECT count(*) FROM pg_class WHERE relname IN ('signature_provider_scope','signature_provider_intent','signature_provider_attempt','signature_provider_evidence') AND relrowsecurity AND relforcerowsecurity`; expect(guarded[0].count).toBe(4n);
+  });
+  it.each(["en", "fr"] as const)("prepares the exact %s PDF and native recipient through actual HTTP without changing Money, archive or signature history", async locale => {
+    const f = await preparationFixture(locale), originalMoney = await money(f.organizationId), originalLineage = await lineage(f.organizationId, f.complete.documentId), originalSignature = await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(f.signature.id)), target = await readSignaturePreparationTarget(f.ctx, { signatureId: f.signature.id }, f.deps);
+    expect(target.document.pageCount).toBe(1); expect(target.recipients[0].email).toBe(f.parties.owner.email); expect(f.http.calls).toHaveLength(0);
+    const { receipt, reference } = await admitPreparation(f); expect(receipt.state).toBe("ADMITTED"); expect(f.http.calls).toHaveLength(0);
+    expect(await executeSignaturePreparationReference(reference, f.deps)).toEqual({ intentId: receipt.id, state: "PREPARED" });
+    expect((await recoverSignaturePreparation(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).state).toBe("PREPARED");
+    const attempt = await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).preparationAttempt(f.signature.id)), prepared = attempt!.evidence.find(evidence => evidence.kind === "PREPARED")!;
+    const intent = await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).preparation(receipt.id));
+    const privateEvidence = openSignatureProviderEvidence({ organizationId: f.organizationId, signatureId: f.signature.id, intentId: receipt.id, attemptId: attempt!.id, evidenceId: prepared.id, commandHash: intent!.commandHash,
+      providerScopeHash: prepared.providerScopeHash, contractHash: prepared.contractHash, originalPdfSha256: prepared.originalPdfSha256, sha256: prepared.payloadSha256, byteSize: prepared.payloadByteSize }, prepared.payloadCipher, env);
+    expect(privateEvidence.observation).toMatchObject({ reference: f.signature.id, status: "DRAFT", distributionMethod: "NONE", locale, allowDictateNextSigner: false });
+    expect(Buffer.from(privateEvidence.prepareReceipt!, "base64").toString()).toContain(f.http.token);
+    const publicRows = await withTenant(db, f.organizationId, async tx => ({ audit: await tx.auditLog.findMany({ where: { action: { startsWith: "documents.signature" } } }), outbox: await tx.outboxEvent.findMany() }));
+    for (const secret of [f.parties.owner.email, f.http.token, f.parties.owner.displayName]) { expect(JSON.stringify(publicRows)).not.toContain(secret); expect(Buffer.from(prepared.payloadCipher).includes(Buffer.from(secret))).toBe(false); }
+    expect(f.http.calls.filter(call => call.method === "POST")).toHaveLength(1); expect(f.http.calls.some(call => call.path.includes("distribute"))).toBe(false);
+    expect(await money(f.organizationId)).toEqual(originalMoney); expect(await lineage(f.organizationId, f.complete.documentId)).toEqual(originalLineage); expect(await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(f.signature.id))).toEqual(originalSignature);
+    expect(await executeSignaturePreparationReference(reference, f.deps)).toEqual({ intentId: receipt.id, state: "PREPARED" }); expect(f.http.calls.filter(call => call.method === "POST")).toHaveLength(1);
+  });
+  it("deduplicates competing admissions and workers without a second provider creation", async () => {
+    const f = await preparationFixture(), receipts = await Promise.all(Array.from({ length: 3 }, () => admitSignaturePreparation(f.ctx, f.preparationCommand, f.deps))); expect(new Set(receipts.map(receipt => receipt.id)).size).toBe(1);
+    const { reference } = await admitPreparation(f), outcomes = await Promise.all(Array.from({ length: 3 }, () => executeSignaturePreparationReference(reference, f.deps)));
+    expect(outcomes.some(outcome => outcome.state === "PREPARED")).toBe(true); expect(f.http.calls.filter(call => call.method === "POST")).toHaveLength(1);
+    const attempt = await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).preparationAttempt(f.signature.id)); expect(attempt!.evidence.filter(item => item.kind === "PREPARED")).toHaveLength(1);
+    await expect(admitSignaturePreparation(f.ctx, { ...f.preparationCommand, reason: "A changed command cannot replace the original receipt" }, f.deps)).rejects.toThrow("document_source_changed");
+  });
+  it("retains a lost creation acknowledgement as uncertain and never automatically repeats POST", async () => {
+    const f = await preparationFixture(), { receipt, reference } = await admitPreparation(f); f.http.state.fault = "lost-create";
+    expect((await executeSignaturePreparationReference(reference, f.deps)).state).toBe("UNCERTAIN"); f.http.state.fault = "none";
+    expect((await executeSignaturePreparationReference(reference, f.deps)).state).toBe("UNCERTAIN"); expect(f.http.calls.filter(call => call.method === "POST")).toHaveLength(1);
+    expect((await recoverSignaturePreparation(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).state).toBe("UNCERTAIN");
+  });
+  it.each(["fail-read", "wrong-pdf", "substituted-recipient"] as const)("retains the real creation receipt after %s and reconciles by authenticated reads without reposting", async fault => {
+    const f = await preparationFixture(), { reference } = await admitPreparation(f); f.http.state.fault = fault;
+    expect((await executeSignaturePreparationReference(reference, f.deps)).state).toBe("UNCERTAIN"); const first = await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).preparationAttempt(f.signature.id));
+    expect(first!.evidence.some(evidence => evidence.providerRequestId !== null)).toBe(true); expect(first!.evidence.some(evidence => evidence.kind === "PREPARED")).toBe(false);
+    f.http.state.fault = "none"; expect((await executeSignaturePreparationReference(reference, f.deps)).state).toBe("PREPARED"); expect(f.http.calls.filter(call => call.method === "POST")).toHaveLength(1);
+  });
+  it("rejects a wrong real provider team before exporting a company PDF or admitting an attempt", async () => {
+    const f = await preparationFixture(), { reference } = await admitPreparation(f); f.http.state.fault = "wrong-team";
+    await expect(executeSignaturePreparationReference(reference, f.deps)).rejects.toThrow("document_configuration_unavailable"); expect(f.http.calls.filter(call => call.method === "POST")).toHaveLength(0);
+    expect(await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).preparationAttempt(f.signature.id))).toBeNull();
+  });
+  it("uses global native scope ownership to prevent another tenant claiming an RLS-hidden provider account", async () => {
+    const first = await preparationFixture(); await admitPreparation(first); const second = await preparationFixture("fr", first.http);
+    await expect(admitPreparation(second)).rejects.toMatchObject({ code: "P2002" }); expect(await withTenant(db, second.organizationId, tx => tx.signatureProviderIntent.count())).toBe(0); expect(first.http.calls).toHaveLength(0);
+  });
+  it.each(["signature:create", "owner:export", "property_finance:export"])("denies revoked %s before the attempt and preserves independent financial data", async key => {
+    const f = await preparationFixture(), { reference } = await admitPreparation(f), originalMoney = await money(f.organizationId); await revokeSignaturePermission(f, key);
+    await expect(executeSignaturePreparationReference(reference, f.deps)).rejects.toThrow("document_unavailable"); expect(f.http.calls).toHaveLength(0); expect(await money(f.organizationId)).toEqual(originalMoney);
+  });
+  it("retains real provider evidence after human authority is revoked during the external effect, while denying private recovery", async () => {
+    const f = await preparationFixture(), { receipt, reference } = await admitPreparation(f); f.http.state.afterCreate = () => revokeSignaturePermission(f, "owner:export");
+    expect((await executeSignaturePreparationReference(reference, f.deps)).state).toBe("PREPARED");
+    await expect(recoverSignaturePreparation(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable");
+    expect((await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).preparationAttempt(f.signature.id)))!.evidence.some(item => item.kind === "PREPARED")).toBe(true);
+    expect(f.http.calls.filter(call => call.method === "POST")).toHaveLength(1);
+  });
+  it("validates page geometry against the actual archived PDF and rejects nonce reuse across native protocols", async () => {
+    const f = await preparationFixture(), invalid = { ...f.preparationDraft, recipients: f.preparationDraft.recipients.map(recipient => ({ ...recipient, fields: recipient.fields.map(field => ({ ...field, page: 2 })) })) };
+    await expect(reviewSignaturePreparation(f.ctx, invalid, f.deps)).rejects.toThrow("document_source_changed"); const { receipt } = await admitPreparation(f);
+    await expect(recoverNativeSignature(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable");
+    await expect(recoverDocumentGeneration(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable");
+    await expect(recoverDocumentUpload(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable");
+    await expect(admitNativeSignature(f.ctx, { ...f.signatureCommand, idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_source_changed");
+    await expect(admitDocumentGeneration(f.ctx, { ...f.command, idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_source_changed");
+    expect(f.http.calls).toHaveLength(0);
+  });
+});
 describe("native signature draft", () => {
   it("lists only authorized native contacts and binds pagination to the actual PDF, actor and filter", async () => {
     const f = await signatureFixture();

@@ -4,6 +4,7 @@ import { financialAttachmentPolicyKey, financialAttachmentPolicySchema } from "@
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
 import { documentArchivePolicyKey, documentArchivePolicySchema } from "@/modules/documents/domain/document-policy";
+import { documentSignaturePolicyKey, documentSignaturePolicySchema } from "@/modules/documents/domain/document-signature-policy";
 import {serviceTaxAssessmentConfigSchema} from "./service-tax-policy";
 import {accountantExportPolicyKey,accountantExportPolicySchema} from "@/modules/finance/domain/accountant-export-policy";
 import {serviceAllocationPolicyKey,serviceAllocationPolicySchema} from "./service-allocation-policy";
@@ -408,6 +409,7 @@ export const configRuleSchemas = {
   [receivableExportPolicyKey]:receivableExportPolicySchema,
   [financialAttachmentPolicyKey]:financialAttachmentPolicySchema,
   [documentArchivePolicyKey]: documentArchivePolicySchema,
+  [documentSignaturePolicyKey]: documentSignaturePolicySchema,
   [accountantExportPolicyKey]:accountantExportPolicySchema,
   [receivableReminderPolicyKey]:receivableReminderPolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,

@@ -223,6 +223,10 @@ model Organization {
   documentSignatures Signature[]
   documentSignatureRecipients SignatureRecipient[]
   documentSignatureEvents SignatureEvent[]
+  signatureProviderIntents SignatureProviderIntent[]
+  signatureProviderScopes SignatureProviderScope[]
+  signatureProviderAttempts SignatureProviderAttempt[]
+  signatureProviderEvidence SignatureProviderEvidence[]
   documentActions DocumentAction[]
   externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentFees ExternalPaymentFee[]
@@ -618,6 +622,8 @@ model UserAccount {
   documentTemplates DocumentTemplate[] @relation("DocumentTemplateCreator")
   documentInstances DocumentInstance[] @relation("DocumentInstanceCreator")
   documentSignatures Signature[] @relation("DocumentSignatureRequester")
+  signatureProviderIntents SignatureProviderIntent[] @relation("SignatureProviderRequester")
+  signatureProviderScopes SignatureProviderScope[] @relation("SignatureProviderScopeClaimant")
   documentActions DocumentAction[] @relation("DocumentActionActor")
   externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentFees ExternalPaymentFee[]
@@ -2118,6 +2124,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  signatureProviderScopes SignatureProviderScope[] @relation("SignatureProviderScopePolicy")
   externalPaymentIntents ExternalPaymentIntent[]
   ledgerIntegrityRuns LedgerIntegrityRun[]
  financialAttachmentAdmissions FinancialAttachmentAdmission[] @relation("FinancialAttachmentAdmissionPolicy")
@@ -4864,6 +4871,7 @@ model DocumentInstance {
 }
 
 model Signature {
+  providerIntents SignatureProviderIntent[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   instanceId String @map("instance_id") @db.Uuid
@@ -4887,6 +4895,94 @@ model Signature {
   @@index([organizationId,commandKey],map:"signature_nonce_owner_idx")
   @@index([organizationId,documentVersionId],map:"signature_document_version_idx")
   @@map("signature")
+}
+
+model SignatureProviderScope {
+  scopeHash String @id @map("scope_hash") @db.Char(64)
+  organizationId String @map("organization_id") @db.Uuid
+  origin String
+  teamId Int @map("team_id")
+  policyId String @map("policy_id") @db.Uuid
+  policyVersion Int @map("policy_version")
+  claimedBy String @map("claimed_by") @db.Uuid
+  claimedAt DateTime @default(now()) @map("claimed_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  claimant UserAccount @relation("SignatureProviderScopeClaimant",fields:[organizationId,claimedBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  policy ConfigRule @relation("SignatureProviderScopePolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  intents SignatureProviderIntent[]
+  @@unique([organizationId,scopeHash],map:"signature_provider_scope_org_hash_unique")
+  @@map("signature_provider_scope")
+}
+
+model SignatureProviderIntent {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  signatureId String @map("signature_id") @db.Uuid
+  phase String
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash") @db.Char(64)
+  canonicalRequest String @map("canonical_request")
+  input Json
+  policySnapshot Json @map("policy_snapshot")
+  authorizationCap Json @map("authorization_cap")
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  providerScopeHash String @map("provider_scope_hash") @db.Char(64)
+  reason String
+  requestedBy String @map("requested_by") @db.Uuid
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  signature Signature @relation(fields:[organizationId,signatureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  providerScope SignatureProviderScope @relation(fields:[organizationId,providerScopeHash],references:[organizationId,scopeHash],onDelete:Restrict,onUpdate:NoAction)
+  requester UserAccount @relation("SignatureProviderRequester",fields:[organizationId,requestedBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  attempt SignatureProviderAttempt?
+  @@unique([organizationId,id],map:"signature_provider_intent_org_id_unique")
+  @@unique([organizationId,id,signatureId,phase],map:"signature_provider_intent_phase_unique")
+  @@unique([organizationId,requestedBy,commandKey],map:"signature_provider_intent_command_unique")
+  @@index([organizationId,commandKey],map:"signature_provider_intent_nonce_idx")
+  @@index([providerScopeHash,organizationId],map:"signature_provider_intent_scope_idx")
+  @@map("signature_provider_intent")
+}
+
+model SignatureProviderAttempt {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  intentId String @map("intent_id") @db.Uuid
+  signatureId String @map("signature_id") @db.Uuid
+  phase String
+  startedAt DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  intent SignatureProviderIntent @relation(fields:[organizationId,intentId,signatureId,phase],references:[organizationId,id,signatureId,phase],onDelete:Restrict,onUpdate:NoAction)
+  evidence SignatureProviderEvidence[]
+  @@unique([organizationId,id],map:"signature_provider_attempt_org_id_unique")
+  @@unique([organizationId,id,signatureId,phase],map:"signature_provider_attempt_phase_unique")
+  @@unique([organizationId,intentId,signatureId,phase],map:"signature_provider_attempt_intent_unique")
+  @@unique([organizationId,signatureId,phase],map:"signature_provider_attempt_effect_unique")
+  @@map("signature_provider_attempt")
+}
+
+model SignatureProviderEvidence {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  attemptId String @map("attempt_id") @db.Uuid
+  signatureId String @map("signature_id") @db.Uuid
+  phase String
+  kind String
+  providerScopeHash String @map("provider_scope_hash") @db.Char(64)
+  providerRequestId String? @map("provider_request_id")
+  providerState String? @map("provider_state")
+  originalPdfSha256 String @map("original_pdf_sha256") @db.Char(64)
+  contractHash String @map("contract_hash") @db.Char(64)
+  observationHash String @map("observation_hash") @db.Char(64)
+  payloadSha256 String @map("payload_sha256") @db.Char(64)
+  payloadByteSize Int @map("payload_byte_size")
+  payloadCipher Bytes @map("payload_cipher")
+  observedAt DateTime @default(now()) @map("observed_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  attempt SignatureProviderAttempt @relation(fields:[organizationId,attemptId,signatureId,phase],references:[organizationId,id,signatureId,phase],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"signature_provider_evidence_org_id_unique")
+  @@unique([organizationId,attemptId,observationHash],map:"signature_provider_evidence_observation_unique")
+  @@index([organizationId,signatureId,observedAt,id],map:"signature_provider_evidence_history_idx")
+  @@map("signature_provider_evidence")
 }
 
 model SignatureRecipient {

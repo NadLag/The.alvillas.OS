@@ -1,6 +1,6 @@
 import type { NormalizedReservationAdapter } from "./reservation-types";
 import type { AppLocale } from "@/i18n/routing";
-import type { SignatureRequestInput, SignatureRequestObservation, SignatureRequestReceipt } from "./signature-request";
+import type { SignatureRequestInput, SignatureRequestObservation, SignatureRequestReceipt, SignatureRequestDownloadInput, SignatureRequestDownload } from "./signature-request";
 import type { BrowserPushSubscription } from "@/platform/notifications/web-push";
 
 export interface EmailProvider {
@@ -21,6 +21,7 @@ export interface SignatureProvider {
   prepareSignatureRequest(input: SignatureRequestInput): Promise<SignatureRequestReceipt>;
   readSignatureRequest(input: { requestId: string; reference: string }): Promise<SignatureRequestObservation>;
   distributeSignatureRequest(input: { requestId: string }): Promise<SignatureRequestReceipt>;
+  downloadSignatureRequest(input: SignatureRequestDownloadInput): Promise<SignatureRequestDownload>;
 }
 
 export interface PaymentProvider {
