@@ -19,10 +19,11 @@ import { externalRefundSupervisionCommandInput } from "@/modules/finance/domain/
 
 test.use({ timezoneId: "America/Denver", actionTimeout: 30000, navigationTimeout: 60000 });
 type Fixture = Awaited<ReturnType<typeof openGuestPaymentFixture>>;
+const providerClock = (f: Fixture) => () => withTenant(f.db, f.organizationId, tx => new FinanceRepository(tx, f.organizationId).clock());
 for (const locale of ["en", "fr", "ar"] as const) for (const credit of ["0.00", "0.01"] as const) test(`independently records paid provider refund credit ${credit} after requester access ends with recovery in ${locale}`, async ({ page, browser }, info) => {
   test.setTimeout(240000);
   const f = await openGuestPaymentFixture(page, info, locale, { "finance.expense_treatment": { default_treatment: "OWNER_PAID" }, "finance.approval_thresholds": { thresholds: [] } }), orderId = "SUPERVISED_REFUND_" + randomUUID(),
-    originalFee = credit === "0.00" ? "0.00" : "0.02", gateway = await paypalHttpFixture(orderId, originalFee, [credit]), errors: string[] = [],
+    originalFee = credit === "0.00" ? "0.00" : "0.02", gateway = await paypalHttpFixture(orderId, originalFee, [credit], providerClock(f)), errors: string[] = [],
     independent = await browser.newContext({ baseURL: new URL(page.url()).origin, timezoneId: "America/Denver", viewport: page.viewportSize(), isMobile: Boolean(info.project.use.isMobile), hasTouch: Boolean(info.project.use.hasTouch), userAgent: info.project.use.userAgent, deviceScaleFactor: info.project.use.deviceScaleFactor });
   page.on("pageerror", error => errors.push(error.name));
   try {
@@ -121,7 +122,7 @@ function acknowledgement(page: Page, operation: "CAPTURE" | "ADMIT" | "PREPARE_F
 for (const locale of ["en", "fr", "ar"] as const) for (const fee of ["0.00", "0.02"] as const) test(`retains original external capture, ${fee === "0.00" ? "lost acknowledgements" : "approved fee and net"}, and history in ${locale}`, async ({ page }, info) => {
   test.setTimeout(240000);
   const target = new URL(process.env.DATABASE_URL!); if (!["localhost", "127.0.0.1"].includes(target.hostname) || !(target.pathname.startsWith("/alvillas_automation_") || process.env.GITHUB_ACTIONS === "true" && target.pathname === "/alvillas_os")) throw Error("Owned browser financial acceptance database required");
-  const f = await openGuestPaymentFixture(page, info, locale, { "finance.expense_treatment": { default_treatment: "OWNER_PAID" }, "finance.approval_thresholds": { thresholds: [] } }), orderId = "BROWSER_ORDER_" + randomUUID(), gateway = await paypalHttpFixture(orderId, fee), errors: string[] = [];
+  const f = await openGuestPaymentFixture(page, info, locale, { "finance.expense_treatment": { default_treatment: "OWNER_PAID" }, "finance.approval_thresholds": { thresholds: [] } }), orderId = "BROWSER_ORDER_" + randomUUID(), gateway = await paypalHttpFixture(orderId, fee, [], providerClock(f)), errors: string[] = [];
   page.on("pageerror", error => errors.push(error.name));
   try {
     const merchant = await configure(f), url = `/${locale}/app/finance/guest-deposits`; await page.goto(url); await prepare(page, f, merchant.id, orderId);
@@ -164,7 +165,7 @@ for (const locale of ["en", "fr", "ar"] as const) for (const fee of ["0.00", "0.
 for (const locale of ["en", "fr", "ar"] as const) test(`refunds original captured guest funds partially and fully with durable acknowledgement recovery in ${locale}`, async ({ page }, info) => {
   test.setTimeout(240000);
   const target = new URL(process.env.DATABASE_URL!); if (!["localhost", "127.0.0.1"].includes(target.hostname) || !(target.pathname.startsWith("/alvillas_automation_") || process.env.GITHUB_ACTIONS === "true" && target.pathname === "/alvillas_os")) throw Error("Owned browser financial acceptance database required");
-  const f = await openGuestPaymentFixture(page, info, locale), orderId = "REFUND_ORDER_" + randomUUID(), gateway = await paypalHttpFixture(orderId), errors: string[] = [];
+  const f = await openGuestPaymentFixture(page, info, locale), orderId = "REFUND_ORDER_" + randomUUID(), gateway = await paypalHttpFixture(orderId, "0.00", [], providerClock(f)), errors: string[] = [];
   page.on("pageerror", error => errors.push(error.name));
   try {
     const merchant = await configure(f);
@@ -231,7 +232,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`refunds original capture
 for (const locale of ["en", "fr", "ar"] as const) for (const credit of ["0.01", "0.02"] as const) test(`records original provider fee credits ${credit} with approved remaining cost and refund recovery in ${locale}`, async ({ page }, info) => {
   test.setTimeout(240000);
   const f = await openGuestPaymentFixture(page, info, locale, { "finance.expense_treatment": { default_treatment: "OWNER_PAID" }, "finance.approval_thresholds": { thresholds: [] } }), orderId = "REFUND_FEE_ORDER_" + randomUUID(),
-    gateway = await paypalHttpFixture(orderId, "0.02", credit === "0.01" ? ["0.01", "0.01"] : ["0.02", "0.00"]), errors: string[] = [];
+    gateway = await paypalHttpFixture(orderId, "0.02", credit === "0.01" ? ["0.01", "0.01"] : ["0.02", "0.00"], providerClock(f)), errors: string[] = [];
   page.on("pageerror", error => errors.push(error.name));
   try {
     const merchant = await configure(f, true), url = `/${locale}/app/finance/guest-deposits`; await page.goto(url); await prepare(page, f, merchant.id, orderId);
