@@ -15,13 +15,13 @@ export async function prepareDocumentGeneration(actor: DocumentActorContext, raw
   documentTemplateVariantsSchema.parse(variants.map(variant => variant.definition));
   const selected = variants.find(variant => variant.versionId === draft.templateVersionId);
   if (!selected || variants.some(variant => variant.typeKey !== selected.typeKey || variant.templateKey !== selected.templateKey)) throw new DocumentConflictError();
-  const values = await resolveDocumentTemplateValues(ctx, draft.source, selected.definition, selected.typeKey, deps), type = values.policySnapshot.value.types.find(type => type.key === selected.typeKey);
+  const values = await resolveDocumentTemplateValues(ctx, draft.source, selected.definition, selected.typeKey, { ...deps, additionalPrivacy: variants.flatMap(variant => variant.privacy) }), type = values.policySnapshot.value.types.find(type => type.key === selected.typeKey);
   if (!type || !values.policySnapshot.value.upload_transport) throw new DocumentConfigurationError();
   const contractFingerprint = commandFingerprint([...selected.definition.variables].sort((left, right) => left.key.localeCompare(right.key))),
     renderInput = documentPdfInputSchema.parse({ source: values.rendered, provenance: { templateVersionId: selected.versionId, templateSha256: selected.sha256, sourceFingerprint: values.sourceFingerprint }, maximumBytes: type.max_bytes }),
-    originalVariants = variants.map(variant => ({ versionId: variant.versionId, sha256: variant.sha256, locale: variant.locale }));
+    originalVariants = variants.map(variant => ({ versionId: variant.versionId, documentId: variant.documentId, fingerprint: variant.fingerprint, sha256: variant.sha256, locale: variant.locale }));
   const reviewFingerprint = commandFingerprint({ actorId: ctx.actorId, command: { ...draft, variantVersionIds: ids }, templates: variants.map(original => ({ versionId: original.versionId, documentId: original.documentId,
-    sha256: original.sha256, typeKey: original.typeKey, templateKey: original.templateKey, locale: original.locale, rootRevision: original.rootRevision, sourceFingerprint: original.sourceFingerprint, policyFingerprint: original.policyFingerprint })),
+    sha256: original.sha256, typeKey: original.typeKey, templateKey: original.templateKey, locale: original.locale, rootRevision: original.rootRevision, sourceFingerprint: original.sourceFingerprint, policyFingerprint: original.policyFingerprint, privacy: original.privacy, fingerprint: original.fingerprint })),
     contractFingerprint, sourceFingerprint: values.sourceFingerprint, nativeSourceFingerprint: values.nativeSourceFingerprint, policy: values.policySnapshot, cap: captureAuthorizationCap(ctx.authContext) });
   return { draft: { ...draft, variantVersionIds: ids }, selected, variants: originalVariants, renderInput, contractFingerprint, sourceFingerprint: values.sourceFingerprint,
     nativeSourceFingerprint: values.nativeSourceFingerprint, policySnapshot: values.policySnapshot, reviewFingerprint };

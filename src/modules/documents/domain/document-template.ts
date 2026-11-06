@@ -8,6 +8,7 @@ import { documentTemplateMaximumBytes } from "./document-template-format";
 export { documentTemplateMediaType } from "./document-template-format";
 
 const key = z.string().regex(/^[a-z][a-z0-9_]{0,79}$/u).refine(value => !["constructor", "prototype"].includes(value));
+export { key as documentTemplateVariableKeySchema };
 const text = (maximum: number) => z.string().min(1).max(maximum).refine(value => value.trim().length > 0 && !/\p{Cc}/u.test(value.replaceAll("\t", "").replaceAll("\r", "").replaceAll("\n", "")));
 export const templateVariableKinds = ["TEXT", "DATE", "INTEGER", "MONEY"] as const;
 const variable = z.object({ key, kind: z.enum(templateVariableKinds) }).strict();

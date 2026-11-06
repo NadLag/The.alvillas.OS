@@ -15,12 +15,14 @@ import { DocumentRepository, type DocumentSourceFacts } from "../infrastructure/
 import type { DocumentObjectStore } from "../infrastructure/document-object-store";
 import { documentObjectKey } from "../domain/document-object";
 import { documentPartContract,documentUploadChunkBytes } from "../domain/document-upload-parts";
-import { documentArchivePolicyKey, documentArchivePolicySchema, retainDocumentPrivacy } from "../domain/document-policy";
+import { documentArchivePolicyKey, documentArchivePolicySchema, retainDocumentPrivacy, type DocumentTypePolicy } from "../domain/document-policy";
 import { documentUploadReviewInput, documentUploadInput, documentRecoveryInput, documentSourceReferenceSchema,
   DocumentAccessError, DocumentConfigurationError, DocumentConflictError,DocumentRateLimitError } from "../domain/document-command";
 import { documentItemSchema, documentVersionItemSchema, documentHistorySchema, documentUploadAdmissionSchema,documentPartReceiptSchema } from "../domain/document-read-model";
 import { documentTemplateMediaType } from "../domain/document-template-format";
 import { decodeDocumentTemplate } from "../domain/document-template";
+import { documentGenerationProtocol, documentGenerationSnapshotSchema } from "../domain/document-generation";
+import { DocumentTemplateSourceRepository } from "../infrastructure/document-template-source-repository";
 import { validateDocumentTemplateBytes, sealDocumentTemplatePayload, openDocumentTemplatePayload } from "../infrastructure/document-template-payload";
 
 export type DocumentActorContext = { organizationId: string; actorId: string; authContext: AuthContext };
@@ -64,17 +66,47 @@ export async function documentSourceContext(ctx: DocumentActorContext, tx: Tenan
   const policy = { id: rule.id, version: rule.version, value: value.data };
   return { repository, now, native, policy };
 }
-async function context(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export", root?: Root, prospective?: ReviewInput) {
-  const base = await documentSourceContext(ctx, tx, reference, action), { repository, now, native, policy } = base;
+type ArchiveContext = Awaited<ReturnType<typeof documentSourceContext>> & { type: DocumentTypePolicy | undefined; privacy: ReturnType<typeof retainDocumentPrivacy>; checks: CurrentAuthorityCheck[]; fingerprint: string };
+type CreationIntent = { typeKey: string; kind: "FILE" | "TEMPLATE" | "INSTANCE"; privacy?: readonly string[] };
+async function context(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export", root?: Root, prospective?: CreationIntent): Promise<ArchiveContext> {
+  const generating = action === "create" && (root?.kind ?? prospective?.kind) === "INSTANCE";
+  const base = await documentSourceContext(ctx, tx, reference, generating ? "export" : action), { repository, now, native, policy } = base;
   const type = policy.value.types.find(type => type.key === (prospective?.typeKey ?? root?.typeKey));
   if (action === "create" && (!type || !type.sources.includes(reference.kind) || native.archived || root?.archivedAt)) throw new DocumentConfigurationError();
-  const privacy = retainDocumentPrivacy(root?.privacy ?? [], type?.privacy ?? [], reference.kind);
+  const originPrivacy: string[] = [], originChecks: CurrentAuthorityCheck[] = [], origins: { versionId: string; fingerprint: string }[] = [];
+  const parsed = root?.kind === "INSTANCE" && root.instance ? documentGenerationSnapshotSchema.safeParse(root.instance.sourceSnapshot) : null,
+    generation = parsed?.success ? parsed.data : null;
+  if (root?.kind === "INSTANCE") {
+    if (!root.instance) throw new DocumentAccessError();
+    const snapshot = root.instance.sourceSnapshot;
+    if (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) && snapshot.protocol === documentGenerationProtocol && !generation) throw new DocumentConflictError();
+    if (generation && (generation.identity.organizationId !== ctx.organizationId || generation.identity.documentId !== root.id || generation.identity.instanceId !== root.instance.id || generation.authorizationCap.userAccountId !== root.instance.createdBy)) throw new DocumentConflictError();
+    const references = generation?.variants ?? [{ versionId: root.instance.templateVersionId }];
+    for (const reference of references) {
+      const version = await repository.version(reference.versionId), template = version ? await repository.document(version.documentId) : null;
+      if (!version || !template || template.kind !== "TEMPLATE") throw new DocumentAccessError();
+      const origin = await context(ctx, tx, sourceOf(template), action === "view" ? "view" : "export", template);
+      originPrivacy.push(...origin.privacy); originChecks.push(...origin.checks); origins.push({ versionId: version.id, fingerprint: origin.fingerprint });
+      if (generation && action === "create") {
+        const original = generation.variants.find(item => item.versionId === version.id);
+        if (!original || original.documentId !== template.id || original.sha256 !== version.admission.sha256 || original.fingerprint !== origin.fingerprint || template.archivedAt || origin.native.archived) throw new DocumentConflictError();
+      }
+    }
+  }
+  const privacy = retainDocumentPrivacy(root?.privacy ?? [], [...type?.privacy ?? [], ...prospective?.privacy ?? [], ...originPrivacy], reference.kind);
   if (!privacy.length) throw new DocumentAccessError();
-  const checks = documentAuthorityChecks(native, privacy, action, root ?? (prospective ? { kind: prospective.kind, createdBy: ctx.actorId } : undefined));
+  const checks = [...documentAuthorityChecks(native, privacy, action, root ?? (prospective ? { kind: prospective.kind, createdBy: ctx.actorId } : undefined)), ...originChecks];
+  if (generating) checks.push(...documentAuthorityChecks(native, privacy, "export", root ?? (prospective ? { kind: prospective.kind, createdBy: ctx.actorId } : undefined)));
   await recheckAccountAuthorization(ctx, tx, now, checks, new DocumentAccessError());
+  if (generation && action === "create") {
+    const values = await new DocumentTemplateSourceRepository(tx, ctx.organizationId).templateSourceValues(native, generation.sourceKeys);
+    if (values.fingerprint !== generation.identity.sourceFingerprint || native.fingerprint !== generation.nativeSourceFingerprint || commandFingerprint(policy) !== commandFingerprint(generation.policySnapshot)) throw new DocumentConflictError();
+  }
+  if (origins.length) await recheckAccountAuthorization(ctx, tx, await repository.clock(), checks, new DocumentAccessError());
   return { repository, now, native, policy, type, privacy, checks,
-    fingerprint: commandFingerprint({ source: native.fingerprint, policy, privacy, revision: root?.revision.toString() ?? null, archivedAt: root?.archivedAt ?? null }) };
+    fingerprint: commandFingerprint({ source: native.fingerprint, policy, privacy, revision: root?.revision.toString() ?? null, archivedAt: root?.archivedAt ?? null, ...origins.length ? { origins } : {} }) };
 }
+export { context as documentArchiveContext, historyAction as appendDocumentHistory, json as documentJson };
 async function review(ctx: DocumentActorContext, tx: TenantTransaction, input: ReviewInput) {
   const repository = new DocumentRepository(tx, ctx.organizationId), root = input.documentId ? await repository.document(input.documentId) : null;
   if (input.documentId && !root) throw new DocumentAccessError();
@@ -130,6 +162,7 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
   if(prepared){if(input.contentType!==documentTemplateMediaType||!input.templateKey)throw new DocumentConflictError();validateDocumentTemplateBytes({...input,templateKey:input.templateKey},prepared);}
   const rate = await withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), existing = await repository.byNonce(ctx.actorId, input.idempotencyKey);
+    if (await repository.instanceByNonce(ctx.actorId, input.idempotencyKey)) throw new DocumentConflictError();
     if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return { kind:"recovered" as const,receipt:await admissionResult(ctx, tx, existing) }; }
     if(input.contentType===documentTemplateMediaType&&!prepared)throw new DocumentConfigurationError();
     const current = await review(ctx, tx, inputReview); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
@@ -141,6 +174,7 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
   if (!rate.allowed) throw new DocumentRateLimitError(rate.resetAt);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);
+    if (await repository.instanceByNonce(ctx.actorId, input.idempotencyKey)) throw new DocumentConflictError();
     const existing = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return admissionResult(ctx, tx, existing); }
     if (input.documentId) await repository.lock("root:" + input.documentId);
     const current = await review(ctx, tx, inputReview); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
@@ -177,6 +211,7 @@ export async function recoverDocumentUpload(actor: DocumentActorContext, raw: un
   const ctx = actorContext(actor), input = documentRecoveryInput.parse(raw);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);
+    if (await repository.instanceNonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
     const row = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (row) return admissionResult(ctx, tx, row);
     if (await repository.nonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
     const current = await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);
@@ -315,6 +350,6 @@ export async function readDocumentTemplateDefinition(actor: DocumentActorContext
     const latest = await repository.document(root.id); if (!latest) throw new DocumentAccessError();
     const final = await context(ctx, tx, sourceOf(latest), "export", latest); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError();
     return { definition, versionId: row.id, documentId: root.id, sha256: row.admission.sha256, typeKey: root.typeKey, templateKey: root.template.key, locale,
-      rootRevision: root.revision.toString(), sourceFingerprint: current.native.fingerprint, policyFingerprint: commandFingerprint(current.policy) };
+      rootRevision: root.revision.toString(), sourceFingerprint: current.native.fingerprint, policyFingerprint: commandFingerprint(current.policy), privacy: current.privacy, fingerprint: current.fingerprint };
   });
 }

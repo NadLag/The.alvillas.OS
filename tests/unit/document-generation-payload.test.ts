@@ -14,7 +14,8 @@ function fixture() {
     authorizationCap: { schemaVersion: 1, organizationId: identity.organizationId, userAccountId: randomUUID(), permissions: [], scopes: [{ organizationId: identity.organizationId, scopeType: "organization" }] },
     policySnapshot: { id: randomUUID(), version: 1, value: { source: "NATIVE_DOCUMENT_ARCHIVE", encryption: "APP_MANAGED_AEAD", history: "APPEND_ONLY", downloads: "AUTHORIZED_SERVER_PROXY", storage_url_seconds: 30,
       upload_admission: { window_seconds: 3600, max_requests: 100 }, upload_transport: { window_seconds: 3600, max_requests: 100 }, types: [{ key: "actual_agreement", labels: { en: "Agreement", fr: "Convention", ar: "اتفاقية" }, sources: ["PROPERTY"], privacy: ["financial"], content_types: ["application/pdf"], max_bytes: 1048576 }] } },
-    variants: [{ versionId: templateVersionId, sha256: "a".repeat(64), locale: "fr" }, { versionId: otherVersionId, sha256: "f".repeat(64), locale: "en" }], contractFingerprint: "a".repeat(64), payloadCipher: cipher.toString("base64")
+    variants: [{ versionId: templateVersionId, documentId: randomUUID(), fingerprint: "a".repeat(64), sha256: "a".repeat(64), locale: "fr" }, { versionId: otherVersionId, documentId: randomUUID(), fingerprint: "f".repeat(64), sha256: "f".repeat(64), locale: "en" }],
+    sourceKeys: ["transaction_amount"], contractFingerprint: "a".repeat(64), payloadCipher: cipher.toString("base64")
   };
   return { env, input, bytes, identity, cipher, command, snapshot };
 }
@@ -57,6 +58,10 @@ describe("immutable native document generation inputs", () => {
     const f = fixture();
     for (const variantVersionIds of [[f.identity.templateVersionId], [f.identity.templateVersionId, f.identity.templateVersionId], [randomUUID(), randomUUID()]]) expect(documentGenerationCommandSchema.safeParse({ ...f.command, variantVersionIds }).success).toBe(false);
     expect(documentGenerationSnapshotSchema.safeParse({ ...f.snapshot, command: { ...f.command, variantVersionIds: [f.identity.templateVersionId, randomUUID()] } }).success).toBe(false);
+  });
+  it("retains a bounded unique native field selection and rejects executable paths", () => {
+    const f = fixture();
+    for (const sourceKeys of [["property.name"], ["constructor"], ["transaction_amount", "transaction_amount"], Array.from({ length: 201 }, (_, index) => "field_" + index)]) expect(documentGenerationSnapshotSchema.safeParse({ ...f.snapshot, sourceKeys }).success).toBe(false);
   });
   it("rejects an unrelated captured tenant and missing or oversized encrypted input", () => {
     const f = fixture(); expect(documentGenerationSnapshotSchema.safeParse({ ...f.snapshot, authorizationCap: { ...f.snapshot.authorizationCap, organizationId: randomUUID() } }).success).toBe(false);
