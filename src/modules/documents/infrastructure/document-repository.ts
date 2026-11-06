@@ -6,10 +6,12 @@ import { FinancialAttachmentSourceRepository } from "@/platform/ledger/financial
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import type { documentSourceReferenceSchema } from "../domain/document-command";
 import type { z } from "zod";
+import type { signatureRecipientReferenceSchema } from "../domain/document-signature-command";
 
 type Source = z.infer<typeof documentSourceReferenceSchema>;
 export type DocumentSourceFacts = { reference: Source; resource: Resource; checks: CurrentAuthorityCheck[]; fingerprint: string; snapshot: unknown; archived: boolean; label: string };
 const versionInclude = { admission: true, next: { select: { id: true } } } as const;
+const signatureInclude = { recipients: { orderBy: { id: "asc" } }, events: { orderBy: [{ occurredAt: "asc" }, { id: "asc" }] } } satisfies Prisma.SignatureInclude;
 const rootInclude = { template: true, instances: { orderBy: [{createdAt:"desc"},{id:"desc"}], take:1 } } satisfies Prisma.DocumentInclude;
 type RootRow=Prisma.DocumentGetPayload<{include:typeof rootInclude}>;
 const rootView=(row:RootRow)=>{const{instances,...root}=row;return{...root,instance:instances[0]??null};};
@@ -69,6 +71,32 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   async instance(id: string) { const row=await this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, id } });if(!row)return null;const document=await this.document(row.documentId,row.id);return document?{...row,document}:null; }
   async instanceByNonce(createdBy: string, commandKey: string) { const row=await this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, createdBy, commandKey } });if(!row)return null;const document=await this.document(row.documentId,row.id);return document?{...row,document}:null; }
   instanceNonceOwner(commandKey: string) { return this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { createdBy: true } }); }
+  signature(id: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, id }, include: signatureInclude }); }
+  signatureByNonce(requestedBy: string, commandKey: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, include: signatureInclude }); }
+  signatureNonceOwner(commandKey: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { requestedBy: true } }); }
+  appendSignature(data: Omit<Prisma.SignatureUncheckedCreateInput, "organizationId">) { return this.tx.signature.create({ data: { ...data, organizationId: this.organizationId } }); }
+  appendSignatureRecipient(data: Omit<Prisma.SignatureRecipientUncheckedCreateInput, "organizationId">) { return this.tx.signatureRecipient.create({ data: { ...data, organizationId: this.organizationId } }); }
+  appendSignatureEvent(data: Omit<Prisma.SignatureEventUncheckedCreateInput, "organizationId">) { return this.tx.signatureEvent.create({ data: { ...data, organizationId: this.organizationId } }); }
+  async versionMatchesInstance(versionId: string, instanceId: string) { const [row] = await this.tx.$queryRaw<Array<{ matches: boolean }>>`SELECT app_document_version_matches_instance(${this.organizationId}::uuid,${versionId}::uuid,${instanceId}::uuid) AS matches`; return row?.matches === true; }
+  async signatureRecipientSource(reference: z.infer<typeof signatureRecipientReferenceSchema>) {
+    const where = { organizationId: this.organizationId, id: reference.id }, select = { id: true, displayName: true, email: true, archivedAt: true, updatedAt: true } as const;
+    const row = reference.kind === "PERSON" ? await this.tx.person.findFirst({ where, select }) : reference.kind === "OWNER" ? await this.tx.owner.findFirst({ where, select }) :
+      reference.kind === "SUPPLIER" ? await this.tx.supplier.findFirst({ where, select }) : await this.tx.guestRecord.findFirst({ where, select: { ...select, mergedIntoId: true } });
+    if (!row) return null; const type = reference.kind === "PERSON" ? "team_member" : reference.kind.toLowerCase(), resource: Resource = { organizationId: this.organizationId, type, id: row.id, dataClass: reference.kind === "GUEST" ? "guest" : "personal",
+      ...(reference.kind === "OWNER" ? { ownerId: row.id } : {}), ...(reference.kind === "PERSON" ? { assignedPersonId: row.id } : {}) };
+    const checks: CurrentAuthorityCheck[] = [{ action: "view", resource, organizationOnly: reference.kind !== "OWNER" }, { action: "export", resource, organizationOnly: reference.kind !== "OWNER" }];
+    if (reference.kind === "PERSON") checks.push({ action: "view", resource: { ...resource, type: "staff_document", dataClass: "sensitive" }, organizationOnly: true }, { action: "export", resource: { ...resource, type: "staff_document", dataClass: "sensitive" }, organizationOnly: true });
+    const archived = Boolean(row.archivedAt || ("mergedIntoId" in row && row.mergedIntoId)), fingerprint = commandFingerprint({ reference, row, checks });
+    return { reference, displayName: row.displayName, email: row.email, archived, resource, checks, fingerprint };
+  }
+  signatureRecipientCandidates(kind: z.infer<typeof signatureRecipientReferenceSchema>["kind"], query: string, before?: string) {
+    const where = { organizationId: this.organizationId, archivedAt: null, displayName: { contains: query, mode: "insensitive" as const }, ...(before ? { id: { lt: before } } : {}) },
+      args = { where, select: { id: true }, orderBy: { id: "desc" as const }, take: 31 };
+    if (kind === "PERSON") return this.tx.person.findMany(args);
+    if (kind === "OWNER") return this.tx.owner.findMany(args);
+    if (kind === "SUPPLIER") return this.tx.supplier.findMany(args);
+    return this.tx.guestRecord.findMany({ ...args, where: { ...where, mergedIntoId: null } });
+  }
   appendAction(data: Omit<Prisma.DocumentActionUncheckedCreateInput, "organizationId">) { return this.tx.documentAction.create({ data: { ...data, organizationId: this.organizationId } }); }
   async snapshot(id: string) { const [row] = await this.tx.$queryRaw<{ value: Prisma.JsonObject }[]>`SELECT to_jsonb(d) AS value FROM document d WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid`; return row?.value ?? null; }
   async protect(id: string, revision: bigint, privacy: string[]) { return rootView(await this.tx.document.update({ where: { organizationId_id: { organizationId: this.organizationId, id }, revision }, data: { privacy, revision: { increment: 1 } }, include: rootInclude })); }

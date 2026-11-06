@@ -5039,5 +5039,31 @@
     "latestRecorded": "Dernière version enregistrée",
     "showEffective": "Afficher la version en vigueur",
     "archiveTimestamp": "Prise d’effet à l’horodatage d’archivage"
+  },
+  "DocumentSignatures": {
+    "title": "Brouillon de signature",
+    "prepare": "Préparer une signature",
+    "guidance": "Vérifiez cette version archivée et choisissez les destinataires dans les fiches de l’entreprise. Enregistrez un brouillon privé avant l’étape d’envoi.",
+    "recipientKind": "Type de destinataire",
+    "OWNER": "Propriétaire",
+    "GUEST": "Voyageur",
+    "SUPPLIER": "Fournisseur",
+    "PERSON": "Membre de l’équipe",
+    "search": "Rechercher des destinataires",
+    "find": "Rechercher",
+    "add": "Ajouter ce destinataire",
+    "remove": "Retirer",
+    "selected": "Destinataires sélectionnés",
+    "empty": "Aucun contact admissible. Vérifiez ses coordonnées et vos droits d’accès.",
+    "more": "Autres destinataires",
+    "review": "Vérifier le brouillon",
+    "reviewed": "Confirmez la version archivée et les destinataires",
+    "save": "Enregistrer le brouillon",
+    "saved": "Brouillon de signature enregistré.",
+    "changed": "La source du document ou les coordonnées ont changé. Vérifiez un nouveau brouillon avant l’envoi.",
+    "pending": "Récupérez la demande précédente avant de créer un autre brouillon.",
+    "recover": "Récupérer le brouillon",
+    "newDraft": "Commencer un nouveau brouillon",
+    "close": "Fermer le brouillon"
   }
 }

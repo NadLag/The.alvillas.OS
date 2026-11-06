@@ -171,7 +171,7 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
   if(prepared){if(input.contentType!==documentTemplateMediaType||!input.templateKey)throw new DocumentConflictError();validateDocumentTemplateBytes({...input,templateKey:input.templateKey},prepared);}
   const rate = await withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), existing = await repository.byNonce(ctx.actorId, input.idempotencyKey);
-    if (await repository.instanceByNonce(ctx.actorId, input.idempotencyKey)) throw new DocumentConflictError();
+    if (await repository.instanceByNonce(ctx.actorId, input.idempotencyKey) || await repository.signatureByNonce(ctx.actorId, input.idempotencyKey)) throw new DocumentConflictError();
     if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return { kind:"recovered" as const,receipt:await admissionResult(ctx, tx, existing) }; }
     if(input.contentType===documentTemplateMediaType&&!prepared)throw new DocumentConfigurationError();
     const current = await review(ctx, tx, inputReview); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
@@ -183,7 +183,7 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
   if (!rate.allowed) throw new DocumentRateLimitError(rate.resetAt);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);
-    if (await repository.instanceByNonce(ctx.actorId, input.idempotencyKey)) throw new DocumentConflictError();
+    if (await repository.instanceByNonce(ctx.actorId, input.idempotencyKey) || await repository.signatureByNonce(ctx.actorId, input.idempotencyKey)) throw new DocumentConflictError();
     const existing = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return admissionResult(ctx, tx, existing); }
     if (input.documentId) await repository.lock("root:" + input.documentId);
     const current = await review(ctx, tx, inputReview); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
@@ -220,7 +220,7 @@ export async function recoverDocumentUpload(actor: DocumentActorContext, raw: un
   const ctx = actorContext(actor), input = documentRecoveryInput.parse(raw);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);
-    if (await repository.instanceNonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
+    if (await repository.instanceNonceOwner(input.idempotencyKey) || await repository.signatureNonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
     const row = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (row) return admissionResult(ctx, tx, row);
     if (await repository.nonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
     const current = await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);

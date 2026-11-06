@@ -9,6 +9,7 @@ import type {
   StorageProvider
 } from "@/platform/providers";
 import type { AppLocale } from "@/i18n/routing";
+import { captureSignatureRequest, SignatureProviderError, type SignatureRequestInput, type SignatureRequestObservation, type SignatureRequestReceipt } from "./signature-request";
 
 export function assertFakeProviderAllowed(nodeEnv: string | undefined = process.env.NODE_ENV): void {
   if (nodeEnv === "production") {
@@ -30,12 +31,31 @@ export class FakeEmailProvider implements EmailProviderContract {
 }
 
 export class FakeSignatureProvider implements SignatureProvider {
+  private readonly requests = new Map<string, { input: SignatureRequestInput; sent: boolean }>();
   constructor(nodeEnv?: string) {
     assertFakeProviderAllowed(nodeEnv);
   }
 
   createRequest(input: { documentId: string; signerEmail: string }): Promise<{ requestId: string }> {
     return Promise.resolve({ requestId: `fake-signature-${input.documentId}` });
+  }
+  prepareSignatureRequest(raw: SignatureRequestInput): Promise<SignatureRequestReceipt> {
+    const input = captureSignatureRequest(raw), requestId = "fake-signature-" + (this.requests.size + 1); this.requests.set(requestId, { input, sent: false });
+    return Promise.resolve({ requestId, evidence: new TextEncoder().encode(JSON.stringify({ id: requestId, externalId: input.reference, fake: true })) });
+  }
+  readSignatureRequest(input: { requestId: string; reference: string }): Promise<SignatureRequestObservation> {
+    const row = this.requests.get(input.requestId); if (!row || row.input.reference !== input.reference) return Promise.reject(new SignatureProviderError("NONE", 404));
+    const recipients = row.input.recipients.map((recipient, index) => ({ id: index + 1, requestId: input.requestId, name: recipient.name, email: recipient.email, role: recipient.role,
+      readStatus: "NOT_OPENED" as const, signingStatus: "NOT_SIGNED" as const, sendStatus: row.sent ? "SENT" as const : "NOT_SENT" as const, signedAt: null, expiresAt: null }));
+    let fieldId = 0; const item = { id: "fake-item-" + input.requestId, requestId: input.requestId, title: row.input.file.name }, fields = row.input.recipients.flatMap((recipient, index) => recipient.fields.map(field => ({ ...field, id: ++fieldId, recipientId: index + 1, itemId: item.id }))),
+      observation: SignatureRequestObservation = { requestId: input.requestId, reference: row.input.reference, title: row.input.title, status: row.sent ? "PENDING" : "DRAFT", teamId: 1,
+        locale: row.input.locale, signingOrder: row.input.signingOrder, methods: { ...row.input.methods }, distributionMethod: row.sent ? "EMAIL" : "NONE", recipients, items: [item], fields,
+        evidence: new TextEncoder().encode(JSON.stringify({ id: input.requestId, fake: true, sent: row.sent })) };
+    return Promise.resolve(observation);
+  }
+  distributeSignatureRequest(input: { requestId: string }): Promise<SignatureRequestReceipt> {
+    const row = this.requests.get(input.requestId); if (!row) return Promise.reject(new SignatureProviderError("NONE", 404)); row.sent = true;
+    return Promise.resolve({ requestId: input.requestId, evidence: new TextEncoder().encode(JSON.stringify({ id: input.requestId, fake: true, sent: true })) });
   }
 }
 

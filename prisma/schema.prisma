@@ -4884,6 +4884,7 @@ model Signature {
   events SignatureEvent[]
   @@unique([organizationId,id],map:"signature_org_id_unique")
   @@unique([organizationId,requestedBy,commandKey],map:"signature_command_unique")
+  @@index([organizationId,commandKey],map:"signature_nonce_owner_idx")
   @@index([organizationId,documentVersionId],map:"signature_document_version_idx")
   @@map("signature")
 }

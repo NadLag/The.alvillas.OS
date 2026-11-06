@@ -34,6 +34,7 @@ function before(ctx: DocumentActorContext, filter: string, raw?: string) {
   try {const value=cursorSchema.parse(JSON.parse(decryptSecret(raw)));if(value.organizationId!==ctx.organizationId||value.actorId!==ctx.actorId||value.filter!==filter)throw new DocumentConflictError();return value.before;}
   catch {throw new DocumentConflictError();}
 }
+export { cursor as documentReadCursor, before as readDocumentCursor };
 
 export async function readDocumentSources(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx=actorContext(actor),input=candidatesInput.parse(raw),filter=commandFingerprint({operation:"SOURCES",kind:input.kind,query:input.query}),after=before(ctx,filter,input.cursor);

@@ -15,6 +15,10 @@ import type { AppLocale } from "@/i18n/routing";
 import type { AppEnv } from "@/platform/env/env";
 import { paymentCaptureIntent, verifiedPayPalCapture, verifiedPayPalCaptureEvidence, payPalOrderState, PaymentCaptureEvidenceError } from "./payment-capture";
 import { paymentRefundIntent, paymentRefundLookup, verifiedPayPalRefundResult, PaymentRefundEvidenceError } from "./payment-refund";
+import { z } from "zod";
+import { readBoundedResponseBytes } from "@/platform/http/read-exact-response";
+import { captureSignatureRequest, signatureMaximumEvidenceBytes, signatureTransportTimeoutMs, signatureRequestIdSchema, signatureRecipientRoleSchema, signatureProviderStatusSchema,
+  SignatureProviderError, SignatureProviderConfigurationError, type SignatureRequestInput, type SignatureRequestReceipt, type SignatureRequestObservation } from "./signature-request";
 
 export type HttpTransport = (
   url: string,
@@ -141,10 +145,67 @@ export class DocumensoSignatureProvider implements SignatureProvider {
 
   constructor(
     env: EnvLike = process.env,
-    private readonly transport: HttpTransport = fetch
+    private readonly transport: HttpTransport = fetch,
+    private readonly signatureTransport: typeof fetch = fetch
   ) {
     this.apiBaseUrl = `${baseUrl(required(env, "DOCUMENSO_URL"))}/api/v2`;
     this.token = required(env, "DOCUMENSO_API_TOKEN");
+    this.nodeEnv = env.NODE_ENV;
+  }
+
+  private readonly nodeEnv: string | undefined;
+  private signatureEndpoint(path: string) {
+    try { const base = new URL(this.apiBaseUrl), owned = this.nodeEnv === "test" && ["localhost", "127.0.0.1", "[::1]"].includes(base.hostname);
+      if (base.username || base.password || base.search || base.hash || (base.protocol !== "https:" && !(owned && base.protocol === "http:"))) throw new SignatureProviderConfigurationError();
+      return this.apiBaseUrl + path;
+    } catch { throw new SignatureProviderConfigurationError(); }
+  }
+  private async signatureJson(path: string, body?: BodyInit, json = false) {
+    const effect = body === undefined ? "NONE" : "UNCERTAIN", endpoint = this.signatureEndpoint(path); let status: number | undefined;
+    try {
+      const response = await this.signatureTransport(endpoint, { method: body === undefined ? "GET" : "POST", body, credentials: "omit", cache: "no-store", redirect: "error",
+        signal: AbortSignal.timeout(signatureTransportTimeoutMs), headers: { Authorization: this.token, ...json ? { "content-type": "application/json" } : {} } }); status = response.status;
+      if (!response.ok || response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/json") { await response.body?.cancel().catch(() => undefined); throw new SignatureProviderError(effect, status); }
+      const bytes = await readBoundedResponseBytes(response, signatureMaximumEvidenceBytes), value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+      return { value, evidence: bytes };
+    } catch { throw new SignatureProviderError(effect, status); }
+  }
+  async prepareSignatureRequest(raw: SignatureRequestInput): Promise<SignatureRequestReceipt> {
+    const input = captureSignatureRequest(raw); if (input.locale === "ar") throw new SignatureProviderConfigurationError();
+    const payload = { type: "DOCUMENT", title: input.title, externalId: input.reference, visibility: "ADMIN", recipients: input.recipients.map(recipient => ({ ...recipient, fields: recipient.fields.map(field => ({ ...field, identifier: 0 })) })),
+      meta: { language: input.locale, signingOrder: input.signingOrder, distributionMethod: "NONE", typedSignatureEnabled: input.methods.typed, drawSignatureEnabled: input.methods.draw, uploadSignatureEnabled: input.methods.upload } };
+    const encoded = JSON.stringify(payload); if (Buffer.byteLength(encoded) > signatureMaximumEvidenceBytes) throw new SignatureProviderConfigurationError();
+    const form = new FormData(); form.set("payload", encoded); form.append("files", new Blob([new Uint8Array(input.file.bytes)], { type: "application/pdf" }), input.file.name);
+    const response = await this.signatureJson("/envelope/create", form);
+    try { return { requestId: z.object({ id: signatureRequestIdSchema }).parse(response.value).id, evidence: response.evidence }; }
+    catch { throw new SignatureProviderError("UNCERTAIN"); }
+  }
+  async readSignatureRequest(raw: { requestId: string; reference: string }): Promise<SignatureRequestObservation> {
+    const input = z.object({ requestId: signatureRequestIdSchema, reference: z.string().min(1).max(255) }).strict().parse(raw), response = await this.signatureJson("/envelope/" + encodeURIComponent(input.requestId));
+    const position = z.union([z.number(), z.string().regex(/^\d+(?:\.\d+)?$/u).transform(Number)]).pipe(z.number().min(0).max(100)), date = z.iso.datetime({ offset: true }).nullable();
+    try {
+      const envelope = z.object({ id: signatureRequestIdSchema, externalId: z.string().min(1).max(255), title: z.string().min(1).max(255), type: z.literal("DOCUMENT"), source: z.literal("DOCUMENT"), visibility: z.literal("ADMIN"), status: signatureProviderStatusSchema, teamId: z.number().int().positive(),
+        documentMeta: z.object({ language: z.enum(["en", "fr"]), signingOrder: z.enum(["PARALLEL", "SEQUENTIAL"]), distributionMethod: z.enum(["NONE", "EMAIL"]), typedSignatureEnabled: z.boolean(), drawSignatureEnabled: z.boolean(), uploadSignatureEnabled: z.boolean() }),
+        recipients: z.array(z.object({ id: z.number().int().positive(), envelopeId: signatureRequestIdSchema, name: z.string().max(255), email: z.email().max(254), role: signatureRecipientRoleSchema,
+          readStatus: z.enum(["NOT_OPENED", "OPENED"]), signingStatus: z.enum(["NOT_SIGNED", "SIGNED", "REJECTED"]), sendStatus: z.enum(["NOT_SENT", "SENT"]), signedAt: date, expiresAt: date })).max(100),
+        envelopeItems: z.array(z.object({ id: signatureRequestIdSchema, envelopeId: signatureRequestIdSchema, title: z.string().max(255) })).min(1).max(100),
+        fields: z.array(z.object({ id: z.number().int().positive(), recipientId: z.number().int().positive(), envelopeItemId: signatureRequestIdSchema, type: z.string().min(1).max(40), page: z.number().int().positive(), positionX: position, positionY: position, width: position, height: position })).max(10000)
+      }).parse(response.value);
+      if (envelope.id !== input.requestId || envelope.externalId !== input.reference || [...envelope.recipients, ...envelope.envelopeItems].some(item => item.envelopeId !== envelope.id) ||
+        new Set(envelope.recipients.map(item => item.id)).size !== envelope.recipients.length || new Set(envelope.envelopeItems.map(item => item.id)).size !== envelope.envelopeItems.length ||
+        new Set(envelope.fields.map(field => field.id)).size !== envelope.fields.length || envelope.fields.some(field => !envelope.recipients.some(recipient => recipient.id === field.recipientId) ||
+          !envelope.envelopeItems.some(item => item.id === field.envelopeItemId) || field.width <= 0 || field.height <= 0 || field.positionX + field.width > 100 || field.positionY + field.height > 100)) throw new SignatureProviderError("NONE");
+      return { requestId: envelope.id, reference: envelope.externalId, title: envelope.title, status: envelope.status, teamId: envelope.teamId,
+        locale: envelope.documentMeta.language, signingOrder: envelope.documentMeta.signingOrder, methods: { typed: envelope.documentMeta.typedSignatureEnabled, draw: envelope.documentMeta.drawSignatureEnabled, upload: envelope.documentMeta.uploadSignatureEnabled }, distributionMethod: envelope.documentMeta.distributionMethod,
+        recipients: envelope.recipients.map(({ envelopeId, ...recipient }) => ({ ...recipient, requestId: envelopeId })), items: envelope.envelopeItems.map(({ envelopeId, ...item }) => ({ ...item, requestId: envelopeId })),
+        fields: envelope.fields.map(({ envelopeItemId, ...field }) => ({ ...field, itemId: envelopeItemId })), evidence: response.evidence };
+    } catch { throw new SignatureProviderError("NONE"); }
+  }
+  async distributeSignatureRequest(raw: { requestId: string }): Promise<SignatureRequestReceipt> {
+    const input = z.object({ requestId: signatureRequestIdSchema }).strict().parse(raw), response = await this.signatureJson("/envelope/distribute", JSON.stringify({ envelopeId: input.requestId, meta: { distributionMethod: "EMAIL" } }), true);
+    try { const result = z.object({ id: signatureRequestIdSchema, success: z.literal(true), recipients: z.array(z.object({ id: z.number().int().positive() })).min(1).max(100) }).parse(response.value);
+      if (result.id !== input.requestId) throw new SignatureProviderError("UNCERTAIN"); return { requestId: result.id, evidence: response.evidence }; }
+    catch { throw new SignatureProviderError("UNCERTAIN"); }
   }
 
   async createRequest(input: {

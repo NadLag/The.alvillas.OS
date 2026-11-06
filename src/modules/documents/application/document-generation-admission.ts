@@ -43,7 +43,7 @@ export async function admitDocumentGeneration(actor: DocumentActorContext, raw: 
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + command.idempotencyKey);
     const existing = await repository.instanceByNonce(ctx.actorId, command.idempotencyKey);
     if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return documentGenerationResult(ctx, tx, existing); }
-    if (await repository.byNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError(); return null;
+    if (await repository.byNonce(ctx.actorId, command.idempotencyKey) || await repository.signatureByNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError(); return null;
   });
   if (replay) return replay;
   const prepared = await prepareDocumentGeneration(ctx, draft, deps); if (prepared.reviewFingerprint !== command.reviewFingerprint) throw new DocumentConflictError();
@@ -57,7 +57,7 @@ export async function admitDocumentGeneration(actor: DocumentActorContext, raw: 
     if(draft.documentId)await repository.lock("root:"+draft.documentId);
     const existing = await repository.instanceByNonce(ctx.actorId, command.idempotencyKey);
     if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return documentGenerationResult(ctx, tx, existing); }
-    if (await repository.byNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError();
+    if (await repository.byNonce(ctx.actorId, command.idempotencyKey) || await repository.signatureByNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError();
     let target=await documentGenerationTarget(ctx,tx,draft,prepared.selected,prepared.renderInput.source.privacy),current=target.current,root=target.root;
     if (current.fingerprint!==prepared.targetFingerprint||current.native.fingerprint !== prepared.nativeSourceFingerprint || commandFingerprint(current.policy) !== commandFingerprint(prepared.policySnapshot)) throw new DocumentConflictError();
     const id = randomUUID(),documentId=root?.id??randomUUID();
@@ -92,7 +92,7 @@ export async function recoverDocumentGeneration(actor: DocumentActorContext, raw
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);
     const row = await repository.instanceByNonce(ctx.actorId, input.idempotencyKey); if (row) return documentGenerationResult(ctx, tx, row);
-    if (await repository.instanceNonceOwner(input.idempotencyKey) || await repository.nonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
+    if (await repository.instanceNonceOwner(input.idempotencyKey) || await repository.nonceOwner(input.idempotencyKey) || await repository.signatureNonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
     const current = await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId);
     if ([ctx.authContext, current].some(authority => ["document:view", "document_instance:view", "document_instance:create"].some(key => !authority.permissions.has(key)))) throw new DocumentAccessError();
     return { recorded: false as const, id: null, documentId: null, idempotencyKey: input.idempotencyKey, state: null, versionId: null };

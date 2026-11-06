@@ -17,6 +17,7 @@ import { documentTemplateAdmissionSchema,documentTemplateDraftSchema } from "../
 import { encodeDocumentTemplate,decodeDocumentTemplate,type DocumentTemplateDefinition } from "../domain/document-template";
 import { documentTemplateMediaType,documentTemplateFileName } from "../domain/document-template-format";
 import {DocumentGenerationPanel} from "./document-generation-panel";
+import {DocumentSignaturePanel} from "./document-signature-panel";
 import {documentEffectiveHistoryFormat} from "../domain/document-effective-version";
 
 type Source=z.infer<typeof documentSourceReferenceSchema>;
@@ -35,7 +36,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
   const t=useTranslations("DocumentArchive"),tt=useTranslations("DocumentTemplates"),storageKey="alvillas:document-upload:"+scope;
   const[sources,setSources]=useState<z.infer<typeof documentSourceChoicesSchema>|null>(null),[workspace,setWorkspace]=useState<Workspace|null>(null),[history,setHistory]=useState<History|null>(null),
     [editor,setEditor]=useState<Pick<Workspace,"types"|"policyFingerprint">|null>(null),[source,setSource]=useState<Source|null>(null),[sourceKind,setSourceKind]=useState<Source["kind"]>("PROPERTY"),[query,setQuery]=useState(""),
-    [kind,setKind]=useState<"FILE"|"TEMPLATE">("FILE"),[amendment,setAmendment]=useState<{document:Document;version:Version}|null>(null),[receipt,setReceipt]=useState<Admission|null>(null),[resumeFile,setResumeFile]=useState<File|null>(null),
+    [kind,setKind]=useState<"FILE"|"TEMPLATE">("FILE"),[amendment,setAmendment]=useState<{document:Document;version:Version}|null>(null),[signatureVersion,setSignatureVersion]=useState<Version|null>(null),[receipt,setReceipt]=useState<Admission|null>(null),[resumeFile,setResumeFile]=useState<File|null>(null),
     [state,setState]=useState<DocumentBrowserState>("loading"),[busy,setBusy]=useState(false),[hasPending,setHasPending]=useState(false),[unrecorded,setUnrecorded]=useState(false),[canRetry,setCanRetry]=useState(false),[epoch,setEpoch]=useState(0),[formSerial,setFormSerial]=useState(0),
     [templateMode,setTemplateMode]=useState<"AUTHORED"|"ORIGINAL">("AUTHORED"),[templateDefinition,setTemplateDefinition]=useState<DocumentTemplateDefinition|null>(null);
   const alive=useRef(false),generation=useRef(0),requests=useRef(new Set<AbortController>()),sequences=useRef({sources:0,workspace:0,history:0}),
@@ -45,7 +46,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
   const wipe=useCallback(()=>{
     generation.current++;operation.current++;busyRef.current=false;for(const controller of requests.current)controller.abort();requests.current.clear();
     intent.current=null;originalFile.current=null;templateIntent.current=null;setTemplateDefinition(null);setTemplateMode("AUTHORED");setCanRetry(false);view.current={source:null,documentId:null,kind:"FILE",sourceKind:"PROPERTY",query:""};
-    setSources(null);setWorkspace(null);setHistory(null);setEditor(null);setSource(null);setReceipt(null);setResumeFile(null);setAmendment(null);setQuery("");setSourceKind("PROPERTY");setKind("FILE");setBusy(false);setUnrecorded(false);setHasPending(Boolean(nonce.current));setEpoch(value=>value+1);
+    setSources(null);setWorkspace(null);setHistory(null);setEditor(null);setSource(null);setReceipt(null);setResumeFile(null);setAmendment(null);setSignatureVersion(null);setQuery("");setSourceKind("PROPERTY");setKind("FILE");setBusy(false);setUnrecorded(false);setHasPending(Boolean(nonce.current));setEpoch(value=>value+1);
   },[]);
   const failed=useCallback((error:unknown)=>{
     const code=!navigator.onLine?"offline":error instanceof DocumentBrowserError?error.state:error instanceof z.ZodError?"validation":"unavailable";
@@ -65,7 +66,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
     catch(error){if(active(own)&&sequence===sequences.current.workspace&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);}
   },[active,controller,failed,scope]);
   const loadHistory=useCallback(async(documentId:string,before?:number,publish=true)=>{
-    const own=generation.current,sequence=++sequences.current.history,abort=controller();setHistory(null);
+    const own=generation.current,sequence=++sequences.current.history,abort=controller();setHistory(null);setSignatureVersion(null);
     try{const response=await documentRequest(scope,"history",{documentId,format:documentEffectiveHistoryFormat,...before?{before}:{}},abort.signal),data=documentEffectiveHistorySchema.parse(await response.json());
       if(active(own)&&sequence===sequences.current.history){if(publish){view.current.documentId=documentId;setHistory(data);}return data;}}
     catch(error){if(active(own)&&sequence===sequences.current.history&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);}
@@ -205,6 +206,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
       {canEdit?authoring?<DocumentTemplateEditor key={formKey+":authored"} locale={locale} types={authoredTypes} identity={amendment?.document.templateKey?{templateKey:amendment.document.templateKey,locale:amendment.document.locale,typeKey:amendment.document.typeKey,title:amendment.version.title}:null} definition={templateDefinition} disabled={busy||!workspace} onSubmit={value=>{void sendTemplate(value);}}/>:fileTypes.length?<DocumentFileEditor key={formKey+":original"} locale={locale} types={fileTypes} kind={kind} amendment={amendment} disabled={busy||!workspace} onSubmit={(draft,file)=>{void send(draft,file);}}/>:<p>{editor?.types.length?tt("templatesOnly"):t("readOnly")}</p>:null}
     </section>:null}
     <DocumentGenerationPanel locale={locale} key={scope+":"+source?.id+":"+epoch+":"+(amendment?.document.kind==="INSTANCE"?amendment.version.id:"new")} scope={scope} source={source} amendment={amendment?.document.kind==="INSTANCE"?amendment:null} onCancel={()=>setAmendment(null)} disabled={locked} onComplete={async documentId=>{const data=await loadHistory(documentId);if(data){view.current.source=data.document.source;view.current.kind="FILE";setSource(data.document.source);setKind("FILE");setAmendment(null);await loadWorkspace(data.document.source,"FILE");}}}/>
-    {history?<DocumentHistoryPanel locale={locale} data={history} disabled={locked} canAmend={Boolean(workspace?.types.some(type=>type.key===history.document.typeKey))} onMore={()=>{if(history.next)void loadHistory(history.document.id,history.next);}} onCurrent={()=>{void loadHistory(history.document.id);}} onEffective={()=>{if(history.effectiveVersion)void loadHistory(history.document.id,history.effectiveVersion.number+1);}} onDownload={version=>{void download(version);}} onAmend={version=>{void amend(version);}}/>:null}
+    {history?<DocumentHistoryPanel locale={locale} data={history} disabled={locked} canAmend={Boolean(workspace?.types.some(type=>type.key===history.document.typeKey))} onMore={()=>{if(history.next)void loadHistory(history.document.id,history.next);}} onCurrent={()=>{void loadHistory(history.document.id);}} onEffective={()=>{if(history.effectiveVersion)void loadHistory(history.document.id,history.effectiveVersion.number+1);}} onDownload={version=>{void download(version);}} onAmend={version=>{void amend(version);}} onSignature={version=>setSignatureVersion(version)}/>:null}
+    {signatureVersion?<DocumentSignaturePanel key={scope+":"+signatureVersion.id+":"+epoch} scope={scope} version={signatureVersion} disabled={locked} onClose={()=>setSignatureVersion(null)}/>:null}
   </div>;
 }
