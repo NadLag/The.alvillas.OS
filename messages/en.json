@@ -5039,5 +5039,31 @@
     "latestRecorded": "Latest recorded version",
     "showEffective": "Show the effective version",
     "archiveTimestamp": "Effective from the archive timestamp"
+  },
+  "DocumentSignatures": {
+    "title": "Signature draft",
+    "prepare": "Prepare signature draft",
+    "guidance": "Review this archived version and choose recipients from company records. Save a private draft before the separate sending step.",
+    "recipientKind": "Recipient type",
+    "OWNER": "Owner",
+    "GUEST": "Guest",
+    "SUPPLIER": "Supplier",
+    "PERSON": "Team member",
+    "search": "Search recipients",
+    "find": "Find recipients",
+    "add": "Add recipient",
+    "remove": "Remove",
+    "selected": "Selected recipients",
+    "empty": "No eligible contacts found. Check their contact details and your access.",
+    "more": "More recipients",
+    "review": "Review draft",
+    "reviewed": "Confirm the archived version and recipients",
+    "save": "Save signature draft",
+    "saved": "Signature draft saved.",
+    "changed": "The document source or recipient details have changed. Review a new draft before sending.",
+    "pending": "Recover the earlier request before creating another draft.",
+    "recover": "Recover signature draft",
+    "newDraft": "Start a new draft",
+    "close": "Close signature draft"
   }
 }
