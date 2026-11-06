@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import { beforeEach,describe,expect,it,vi } from "vitest";
-import { DocumentAccessError,DocumentConfigurationError,DocumentConflictError,DocumentStorageError } from "@/modules/documents/domain/document-command";
-const boundary=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),review:vi.fn(),admit:vi.fn(),recover:vi.fn(),history:vi.fn(),upload:vi.fn(),download:vi.fn(),sources:vi.fn(),read:vi.fn(),capture:vi.fn()}));
+import { DocumentAccessError,DocumentConfigurationError,DocumentConflictError,DocumentStorageError,DocumentRateLimitError } from "@/modules/documents/domain/document-command";
+import { documentUploadChunkBytes } from "@/modules/documents/domain/document-upload-parts";
+const boundary=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),review:vi.fn(),admit:vi.fn(),recover:vi.fn(),history:vi.fn(),upload:vi.fn(),download:vi.fn(),sources:vi.fn(),read:vi.fn(),part:vi.fn(),complete:vi.fn(),capture:vi.fn()}));
 vi.mock("@/platform/auth/session",()=>({auth:boundary.auth}));
 vi.mock("@/platform/authz/session-context",()=>({accountActorContextFromSession:boundary.actor}));
 vi.mock("@/platform/observability/sentry",()=>({captureException:boundary.capture}));
-vi.mock("@/modules/documents/application/document-archive",()=>({reviewDocumentUpload:boundary.review,admitDocumentUpload:boundary.admit,recoverDocumentUpload:boundary.recover,readDocumentHistory:boundary.history,uploadDocumentBytes:boundary.upload,downloadDocumentVersion:boundary.download}));
+vi.mock("@/modules/documents/application/document-archive",()=>({reviewDocumentUpload:boundary.review,admitDocumentUpload:boundary.admit,recoverDocumentUpload:boundary.recover,readDocumentHistory:boundary.history,uploadDocumentBytes:boundary.upload,downloadDocumentVersion:boundary.download,uploadDocumentPart:boundary.part,completeDocumentParts:boundary.complete}));
 vi.mock("@/modules/documents/application/document-files",()=>({configuredDocumentObjects:()=>({})}));
 vi.mock("@/modules/documents/application/document-workspace",()=>({readDocumentSources:boundary.sources,readDocumentSourceWorkspace:boundary.read}));
 import { POST as review } from "@/app/api/documents/review/route";
@@ -17,10 +18,13 @@ import { POST as upload } from "@/app/api/documents/upload/route";
 import { POST as download } from "@/app/api/documents/download/route";
 import { POST as sources } from "@/app/api/documents/sources/route";
 import { POST as read } from "@/app/api/documents/read/route";
+import { POST as part } from "@/app/api/documents/part/route";
+import { POST as complete } from "@/app/api/documents/complete/route";
 const origin="http://localhost:3194",actor={organizationId:randomUUID(),actorId:randomUUID()},nonce=randomUUID(),admissionId=randomUUID();
-const routes=[{name:"review",post:review,service:boundary.review},{name:"admit",post:admit,service:boundary.admit},{name:"recover",post:recover,service:boundary.recover},{name:"history",post:history,service:boundary.history},{name:"upload",post:upload,service:boundary.upload},{name:"download",post:download,service:boundary.download},{name:"sources",post:sources,service:boundary.sources},{name:"read",post:read,service:boundary.read}];
+const routes=[{name:"review",post:review,service:boundary.review},{name:"admit",post:admit,service:boundary.admit},{name:"recover",post:recover,service:boundary.recover},{name:"history",post:history,service:boundary.history},{name:"upload",post:upload,service:boundary.upload},{name:"download",post:download,service:boundary.download},{name:"sources",post:sources,service:boundary.sources},{name:"read",post:read,service:boundary.read},{name:"part",post:part,service:boundary.part},{name:"complete",post:complete,service:boundary.complete}];
 function request(name:string,options:{origin?:string;type?:string;query?:string;body?:BodyInit}={}){
-  return new NextRequest(origin+"/api/documents/"+name+(options.query??(name==="upload"?"?admissionId="+admissionId:"")),{method:"POST",headers:{origin:options.origin??origin,host:"localhost:3194","content-type":options.type??(name==="upload"?"application/octet-stream":"application/json")},body:options.body??(name==="upload"?new Uint8Array([1,2,3]):JSON.stringify({idempotencyKey:nonce}))});
+  const binary=name==="upload"||name==="part";
+  return new NextRequest(origin+"/api/documents/"+name+(options.query??(name==="upload"?"?admissionId="+admissionId:name==="part"?"?admissionId="+admissionId+"&index=0":"")),{method:"POST",headers:{origin:options.origin??origin,host:"localhost:3194","content-type":options.type??(binary?"application/octet-stream":"application/json")},body:options.body??(binary?new Uint8Array([1,2,3]):JSON.stringify({idempotencyKey:nonce}))});
 }
 function privateResponse(response:Response){expect(response.headers.get("cache-control")).toBe("private, no-store");expect(response.headers.get("vary")).toBe("Cookie, Origin");}
 describe("private native document HTTP",()=>{
@@ -38,4 +42,7 @@ describe("private native document HTTP",()=>{
   it("downloads through a private sandboxed attachment response with the exact Unicode filename",async()=>{const response=await download(request("download"));privateResponse(response);expect(response.headers.get("content-type")).toBe("application/pdf");expect(response.headers.get("x-content-type-options")).toBe("nosniff");expect(response.headers.get("content-security-policy")).toBe("sandbox");expect(response.headers.get("content-disposition")).toContain("filename*=UTF-8''"+encodeURIComponent("اتفاقية propriétaire.pdf"));expect(Buffer.from(await response.arrayBuffer()).toString()).toBe("%PDF-1.7\n%%EOF");});
   it("rejects an old browser account scope before reading or mutating document data",async()=>{const req=request("admit");req.headers.set("x-alvillas-document-scope",actor.organizationId+"."+randomUUID());const response=await admit(req);expect(response.status).toBe(403);privateResponse(response);expect(boundary.admit).not.toHaveBeenCalled();});
   it("accepts the actual current browser account scope",async()=>{const req=request("admit");req.headers.set("x-alvillas-document-scope",actor.organizationId+"."+actor.actorId);expect((await admit(req)).status).toBe(200);expect(boundary.admit).toHaveBeenCalledOnce();});
+  it("bounds an individual part before its source service receives bytes",async()=>{const response=await part(request("part",{body:new Uint8Array(documentUploadChunkBytes+1)}));expect(response.status).toBe(400);privateResponse(response);expect(boundary.part).not.toHaveBeenCalled();});
+  it.each(["&index=1","&organizationId=foreign","&storageKey=foreign"])("rejects duplicate or injected part query state %s",async suffix=>{const response=await part(request("part",{query:"?admissionId="+admissionId+"&index=0"+suffix}));expect(response.status).toBe(400);privateResponse(response);expect(boundary.part).not.toHaveBeenCalled();});
+  it("reports the explicit transport rate limit without pretending access was revoked",async()=>{boundary.part.mockRejectedValue(new DocumentRateLimitError(new Date(Date.now()+60000)));const response=await part(request("part"));expect(response.status).toBe(429);expect(await response.json()).toEqual({error:"rate_limited"});expect(response.headers.get("retry-after")).toMatch(/^[1-9]\d*$/u);privateResponse(response);expect(boundary.capture).not.toHaveBeenCalled();});
 });

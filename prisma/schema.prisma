@@ -4788,6 +4788,7 @@ model DocumentAdmission {
   @@unique([organizationId,id],map:"document_admission_org_id_unique")
   @@unique([organizationId,createdBy,commandKey],map:"document_admission_command_unique")
   @@unique([organizationId,storageKey],map:"document_admission_storage_unique")
+  @@index([organizationId,commandKey],map:"document_admission_nonce_owner_idx")
   @@map("document_admission")
 }
 

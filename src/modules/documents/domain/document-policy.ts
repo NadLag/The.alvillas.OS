@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { privateUploadSingleRequestBytes } from "@/platform/storage/upload-protocol";
 
 export const documentArchivePolicyKey = "documents.archive";
 export const documentSourceKinds = ["ORGANIZATION", "PROPERTY", "OWNER", "RESERVATION", "PERSON", "FINANCIAL_TRANSACTION"] as const;
@@ -16,8 +17,9 @@ export const documentTypePolicySchema = z.object({ key: z.string().regex(/^[a-z]
 export const documentArchivePolicySchema = z.object({ source: z.literal("NATIVE_DOCUMENT_ARCHIVE"), types: z.array(documentTypePolicySchema).nonempty().refine(values => unique(values.map(value => value.key))),
   encryption: z.literal("APP_MANAGED_AEAD"), history: z.literal("APPEND_ONLY"), downloads: z.literal("AUTHORIZED_SERVER_PROXY"),
   upload_admission: z.object({ window_seconds: z.number().int().min(1).max(86400), max_requests: z.number().int().min(1).max(10000) }).strict(),
+  upload_transport: z.object({ window_seconds: z.number().int().min(1).max(86400), max_requests: z.number().int().min(1).max(100000) }).strict().optional(),
   storage_url_seconds: z.number().int().min(1).max(300)
-}).strict();
+}).strict().superRefine((value,ctx)=>{if(value.types.some(type=>type.max_bytes>privateUploadSingleRequestBytes)&&!value.upload_transport)ctx.addIssue({code:"custom",message:"explicit_document_transport_budget_required"});});
 export type DocumentArchivePolicy = z.infer<typeof documentArchivePolicySchema>;
 export type DocumentTypePolicy = z.infer<typeof documentTypePolicySchema>;
 

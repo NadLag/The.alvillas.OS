@@ -6,7 +6,7 @@ import { readBoundedJsonRequest } from "@/platform/http/read-exact-response";
 import { isSameOriginContentType } from "@/platform/http/same-origin";
 import { captureException } from "@/platform/observability/sentry";
 import type { DocumentActorContext } from "../application/document-archive";
-import { DocumentAccessError, DocumentConfigurationError, DocumentConflictError, DocumentStorageError } from "../domain/document-command";
+import { DocumentAccessError, DocumentConfigurationError, DocumentConflictError, DocumentStorageError,DocumentRateLimitError } from "../domain/document-command";
 
 const headers = { "Cache-Control": "private, no-store", Vary: "Cookie, Origin" };
 const failure = (error: string, status: number) => NextResponse.json({ error }, { status, headers });
@@ -29,6 +29,7 @@ export async function documentHttp<T>(request: NextRequest, work: (actor: Docume
     if (error instanceof DocumentConfigurationError) return failure("configuration_unavailable",409);
     if (error instanceof DocumentConflictError) return failure("conflict",409);
     if (error instanceof DocumentStorageError) return failure("storage_unavailable",503);
+    if(error instanceof DocumentRateLimitError){const response=failure("rate_limited",429);response.headers.set("Retry-After",String(Math.max(1,Math.ceil((error.resetAt.getTime()-Date.now())/1000))));return response;}
     try { await captureException(new Error("Document archive request failed"), { source: "api", requestId, tags: { feature: "F-DOC-01" } }); } catch { /* Keep the private response when telemetry is unavailable. */ }
     return failure("unavailable",503);
   }

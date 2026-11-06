@@ -98,6 +98,8 @@ export default async function AppPage({
             <Link className="secondary-button" data-testid="financial-accounts-link" href={`/${appLocale}/app/finance/accounts`}>{t("financialAccounts")}</Link> : null}
           {reservationContext && ["financial_attachment:view","financial_transaction:view"].every(key=>reservationContext.authContext.permissions.has(key)) ?
             <Link className="secondary-button" data-testid="financial-attachments-link" href={`/${appLocale}/app/finance/attachments`} prefetch={false}>{(await getTranslations("FinancialAttachments"))("title")}</Link> : null}
+          {reservationContext?.authContext.permissions.has("document:view") ?
+            <Link className="secondary-button" data-testid="documents-link" href={`/${appLocale}/app/documents`} prefetch={false}>{(await getTranslations("DocumentArchive"))("title")}</Link> : null}
           {reservationContext && canViewAccountantExport(reservationContext.authContext, "export", new Date()) ?
             <Link className="secondary-button" data-testid="accountant-exports-link" href={`/${appLocale}/app/finance/accountant-exports`} prefetch={false}>{(await getTranslations("AccountantExports"))("title")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?

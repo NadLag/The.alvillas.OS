@@ -9,13 +9,14 @@ import { ensureStandardIdentitySetup } from "@/modules/identity/application/iden
 import { DocumentObjectStore } from "@/modules/documents/infrastructure/document-object-store";
 import { DocumentRepository } from "@/modules/documents/infrastructure/document-repository";
 import { documentArchivePolicyKey } from "@/modules/documents/domain/document-policy";
-import { reviewDocumentUpload, admitDocumentUpload, recoverDocumentUpload, uploadDocumentBytes, readDocumentHistory, downloadDocumentVersion } from "@/modules/documents/application/document-archive";
+import { reviewDocumentUpload, admitDocumentUpload, recoverDocumentUpload, uploadDocumentBytes, readDocumentHistory, downloadDocumentVersion,uploadDocumentPart,completeDocumentParts } from "@/modules/documents/application/document-archive";
 import * as auditWriter from "@/platform/audit/audit-writer";
 import { provisionIntegrationRole } from "./support/database-role";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { Money } from "@/platform/money/money";
 import { listAuditHistory, exportAuditHistoryCsv } from "@/modules/audit/application/audit-service";
 import { readDocumentSources, readDocumentSourceWorkspace } from "@/modules/documents/application/document-workspace";
+import { documentUploadChunkBytes } from "@/modules/documents/domain/document-upload-parts";
 
 let admin: PrismaClient, db: PrismaClient, server: Server, storageUrl: string;
 const objects = new Map<string, Buffer>(), encryption = { NODE_ENV: "test", ENCRYPTION_KEYS: "documents-native:" + randomBytes(32).toString("base64") };
@@ -67,6 +68,12 @@ async function admit(f: Fixture, ctx: Actor, bytes = content(), overrides = {}, 
 }
 async function uploaded(f: Fixture, ctx: Actor, bytes = content(), overrides = {}) { const prepared = await admit(f,ctx,bytes,overrides), completed = await uploadDocumentBytes(ctx,{admissionId:prepared.admission.id},bytes,{db,objects:objectStore()}); if (!completed.version) throw Error("Completed archive version required"); return { ...prepared, ...completed, version: completed.version }; }
 const revoke = (f: Fixture, ctx: Actor) => withTenant(db,f.org,tx => tx.roleAssignment.update({ where: { id: ctx.assignment.id }, data: { validTo: new Date("2020-01-02") } }));
+async function multipart(f:Fixture,ctx:Actor,bytes=Buffer.alloc(documentUploadChunkBytes+17,65),budget=200,source={kind:"PROPERTY",id:f.property.id}){
+  const configured=policy(["financial"]);await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:documentArchivePolicyKey,scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:ctx.actorId,
+    value:{...configured,upload_transport:{window_seconds:3600,max_requests:budget},types:[{...configured.types[0],sources:["PROPERTY","FINANCIAL_TRANSACTION"],content_types:["text/plain"],max_bytes:6*1024*1024}]},reason:"Explicit bounded financial document transport policy"}));
+  const parts={schemaVersion:1 as const,chunkBytes:documentUploadChunkBytes,hashes:Array.from({length:Math.ceil(bytes.length/documentUploadChunkBytes)},(_,index)=>hash(bytes.subarray(index*documentUploadChunkBytes,(index+1)*documentUploadChunkBytes)))};
+  return{...await admit(f,ctx,bytes,{source,parts,fileName:"original-financial-evidence.txt",contentType:"text/plain"}),parts,bytes};
+}
 
 describe("native private document archive", () => {
   it("durably recovers a lost admission response and appends only one encrypted original version", async () => {
@@ -100,6 +107,10 @@ describe("native private document archive", () => {
     const f=await fixture(),ctx=await actor(f),original=await uploaded(f,ctx),a=await admit(f,ctx,content("Concurrent A"),{documentId:original.documentId,supersedesId:original.version.id}),b=await admit(f,ctx,content("Concurrent B"),{documentId:original.documentId,supersedesId:original.version.id});
     const results=await Promise.allSettled([uploadDocumentBytes(ctx,{admissionId:a.admission.id},content("Concurrent A"),{db,objects:objectStore()}),uploadDocumentBytes(ctx,{admissionId:b.admission.id},content("Concurrent B"),{db,objects:objectStore()})]);
     expect(results.filter(result=>result.status==="fulfilled")).toHaveLength(1);expect(results.filter(result=>result.status==="rejected")).toHaveLength(1);expect(await withTenant(db,f.org,tx=>tx.documentAdmission.count())).toBe(3);expect(await withTenant(db,f.org,tx=>tx.documentVersion.count())).toBe(2);
+    const loser=results[0].status==="rejected"?a:b,recovery=await recoverDocumentUpload(ctx,{idempotencyKey:loser.command.idempotencyKey},{db});
+    expect(recovery.recorded).toBe(true);if(!recovery.recorded)throw Error("Original losing admission required");expect(recovery.state).toBe("SUPERSEDED");expect(recovery.complete).toBe(false);expect(recovery.version).toBe(null);
+    let transported=false;const transport:typeof fetch=(url,init)=>{transported=true;return fetch(url,init);};
+    await expect(uploadDocumentBytes(ctx,{admissionId:loser.admission.id},content(loser===a?"Concurrent A":"Concurrent B"),{db,objects:objectStore(transport)})).rejects.toThrow("document_source_changed");expect(transported).toBe(false);
   });
   it("rejects nonce substitution, another actor's recovery and foreign-tenant document reads",async()=>{
     const f=await fixture(),ctx=await actor(f),original=await uploaded(f,ctx),other=await actor(f),foreign=await fixture(),foreignActor=await actor(foreign);
@@ -216,7 +227,7 @@ describe("native private document archive", () => {
     const f=await fixture(),ctx=await actor(f),idempotencyKey=randomUUID(),recovered=await recoverDocumentUpload(ctx,{idempotencyKey},{db});
     expect(recovered).toEqual({recorded:false,id:null,documentId:null,idempotencyKey,complete:false,version:null,expected:null});
     const original=await admit(f,ctx,content(),{},idempotencyKey);expect(original.admission.idempotencyKey).toBe(idempotencyKey);expect(await recoverDocumentUpload(ctx,{idempotencyKey},{db})).toEqual(original.admission);
-    expect(original.admission.expected).toEqual({fileName:original.command.fileName,contentType:"application/pdf",fileSize:content().length,sha256:hash(content())});expect(await withTenant(db,f.org,tx=>tx.document.count())).toBe(1);
+    expect(original.admission.expected).toEqual({fileName:original.command.fileName,contentType:"application/pdf",fileSize:content().length,sha256:hash(content()),parts:null});expect(await withTenant(db,f.org,tx=>tx.document.count())).toBe(1);
   });
   it("serializes an unrecorded recovery against competing original admissions using the same retained nonce",async()=>{
     const f=await fixture(),ctx=await actor(f),idempotencyKey=randomUUID(),a=input(f,content(),{title:"Original candidate A"}),b=input(f,content(),{title:"Original candidate B"});
@@ -244,5 +255,45 @@ describe("native private document archive", () => {
     const transport:typeof fetch=(url,init)=>{transported=true;return fetch(url,init);};
     await expect(uploadDocumentBytes(ctx,{admissionId:original.admission.id},content("Different original"),{db,objects:objectStore(transport)})).rejects.toThrow("document_source_changed");
     expect(transported).toBe(false);expect(objects.size).toBe(before);expect((await recoverDocumentUpload(ctx,{idempotencyKey:original.command.idempotencyKey},{db})).expected).toEqual(original.admission.expected);
+  });
+  it("assembles a file above the hosting payload limit without changing its original exact Money source",async()=>{
+    const f=await fixture(),ctx=await actor(f,["document:view","document:create","document:export","financial_transaction:view","financial_transaction:export"]);
+    const journal=await withTenant(db,f.org,async tx=>{const finance=new FinanceRepository(tx,f.org),bank=await finance.ensureLedgerAccount({code:"PARTS_BANK",name:"Original upload source bank",accountType:"ASSET_LOCATION",normalSide:"DEBIT"}),claim=await finance.ensureLedgerAccount({code:"PARTS_OWNER",name:"Original upload ownership",accountType:"CLAIM_OWNERSHIP",normalSide:"CREDIT"});
+      return finance.createFinancialTransaction({reference:"PARTS:"+randomUUID(),description:"Actual original financial upload source",idempotencyKey:randomUUID(),createdBy:ctx.actorId,occurredAt:await finance.clock(),postings:[{ledgerAccountId:bank.id,side:"DEBIT",amount:Money.of("9007199254740993.07","MAD"),bucket:"OWNER_REVENUE",dimensions:{property_id:f.property.id}},{ledgerAccountId:claim.id,side:"CREDIT",amount:Money.of("9007199254740993.07","MAD"),bucket:"OWNER_REVENUE",dimensions:{property_id:f.property.id}}]});});
+    const original=await multipart(f,ctx,Buffer.alloc(5*1024*1024+73,65),200,{kind:"FINANCIAL_TRANSACTION",id:journal.id}),before=await withTenant(db,f.org,tx=>tx.$queryRaw`SELECT 'journal' AS kind,to_jsonb(t) AS body,xmin::text FROM financial_transaction t WHERE organization_id=${f.org}::uuid UNION ALL SELECT 'posting',to_jsonb(p),xmin::text FROM posting p WHERE organization_id=${f.org}::uuid ORDER BY kind,body`);
+    for(let index=0;index<original.parts.hashes.length;index++){const receipt=await uploadDocumentPart(ctx,{admissionId:original.admission.id,index},original.bytes.subarray(index*documentUploadChunkBytes,(index+1)*documentUploadChunkBytes),{db,objects:objectStore()});expect(receipt).toEqual({admissionId:original.admission.id,idempotencyKey:original.command.idempotencyKey,index,sha256:original.parts.hashes[index]});}
+    expect(await withTenant(db,f.org,tx=>tx.documentVersion.count())).toBe(0);const completed=await completeDocumentParts(ctx,{admissionId:original.admission.id},{db,objects:objectStore()});expect(completed.state).toBe("COMPLETE");if(!completed.version)throw Error("Original complete version required");
+    expect((await downloadDocumentVersion(ctx,{versionId:completed.version.id},{db,objects:objectStore()})).bytes).toEqual(original.bytes);expect((await completeDocumentParts(ctx,{admissionId:original.admission.id},{db,objects:objectStore()})).version?.id).toBe(completed.version.id);expect(await withTenant(db,f.org,tx=>tx.documentVersion.count())).toBe(1);
+    expect(await withTenant(db,f.org,tx=>tx.$queryRaw`SELECT 'journal' AS kind,to_jsonb(t) AS body,xmin::text FROM financial_transaction t WHERE organization_id=${f.org}::uuid UNION ALL SELECT 'posting',to_jsonb(p),xmin::text FROM posting p WHERE organization_id=${f.org}::uuid ORDER BY kind,body`)).toEqual(before);
+  });
+  it("recovers an exact encrypted part after a lost acknowledgement without replacing its original bytes",async()=>{
+    const f=await fixture(),ctx=await actor(f),original=await multipart(f,ctx);let lost=true,puts=0;
+    const transport:typeof fetch=async(url,init)=>{const response=await fetch(url,init);if(init?.method==="PUT"){puts++;if(lost){lost=false;throw Error("Lost original part acknowledgement");}}return response;};
+    const first=original.bytes.subarray(0,documentUploadChunkBytes);await expect(uploadDocumentPart(ctx,{admissionId:original.admission.id,index:0},first,{db,objects:objectStore(transport)})).rejects.toThrow("document_storage_unavailable");expect(puts).toBe(1);
+    const key=[...objects.keys()].find(key=>key.includes(original.admission.id+"/parts/0.encrypted"));if(!key)throw Error("Retained original part required");const retained=Buffer.from(objects.get(key)!);
+    await uploadDocumentPart(ctx,{admissionId:original.admission.id,index:0},first,{db,objects:objectStore(transport)});expect(puts).toBe(2);expect(objects.get(key)).toEqual(retained);
+    await uploadDocumentPart(ctx,{admissionId:original.admission.id,index:1},original.bytes.subarray(documentUploadChunkBytes),{db,objects:objectStore()});expect((await completeDocumentParts(ctx,{admissionId:original.admission.id},{db,objects:objectStore()})).state).toBe("COMPLETE");
+  });
+  it("rejects missing, substituted and foreign-actor parts without creating a financial document version",async()=>{
+    const f=await fixture(),ctx=await actor(f),other=await actor(f),original=await multipart(f,ctx);let transported=false;const transport:typeof fetch=(url,init)=>{transported=true;return fetch(url,init);};
+    await expect(uploadDocumentPart(ctx,{admissionId:original.admission.id,index:0},Buffer.alloc(documentUploadChunkBytes,66),{db,objects:objectStore(transport)})).rejects.toThrow("document_source_changed");expect(transported).toBe(false);
+    await expect(uploadDocumentPart(other,{admissionId:original.admission.id,index:0},original.bytes.subarray(0,documentUploadChunkBytes),{db,objects:objectStore(transport)})).rejects.toThrow("document_unavailable");expect(transported).toBe(false);
+    await expect(completeDocumentParts(ctx,{admissionId:original.admission.id},{db,objects:objectStore()})).rejects.toThrow("document_storage_unavailable");expect(await withTenant(db,f.org,tx=>tx.documentVersion.count())).toBe(0);expect(await withTenant(db,f.org,tx=>tx.documentAdmission.count())).toBe(1);
+  });
+  it("fences a late source revocation after the actual part audit while retaining its durable original admission",async()=>{
+    const f=await fixture(),ctx=await actor(f),original=await multipart(f,ctx),write=auditWriter.writeAuditEvent;let changed=false;
+    const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{const result=await write(tx,event);if(!changed&&event.action==="documents.upload_part_saved"){changed=true;await revoke(f,ctx);}return result;});
+    try{await expect(uploadDocumentPart(ctx,{admissionId:original.admission.id,index:0},original.bytes.subarray(0,documentUploadChunkBytes),{db,objects:objectStore()})).rejects.toThrow("document_unavailable");}finally{spy.mockRestore();}
+    expect(changed).toBe(true);expect(await withTenant(db,f.org,tx=>tx.documentVersion.count())).toBe(0);expect(await withTenant(db,f.org,tx=>tx.auditLog.count({where:{action:"documents.upload_part_saved"}}))).toBe(0);expect(await withTenant(db,f.org,tx=>tx.documentAdmission.count())).toBe(1);
+  });
+  it("keeps the configured transport budget spent across successful parts and reports an explicit rate limit",async()=>{
+    const f=await fixture(),ctx=await actor(f),original=await multipart(f,ctx,undefined,1);await uploadDocumentPart(ctx,{admissionId:original.admission.id,index:0},original.bytes.subarray(0,documentUploadChunkBytes),{db,objects:objectStore()});
+    await expect(uploadDocumentPart(ctx,{admissionId:original.admission.id,index:1},original.bytes.subarray(documentUploadChunkBytes),{db,objects:objectStore()})).rejects.toThrow("document_rate_limited");expect(await withTenant(db,f.org,tx=>tx.documentVersion.count())).toBe(0);expect(await withTenant(db,f.org,tx=>tx.documentAdmission.count())).toBe(1);
+  });
+  it("rejects malformed manifests natively while preserving legacy admissions and all original constraints",async()=>{
+    const f=await fixture(),ctx=await actor(f),original=await multipart(f,ctx),malformed={...original.parts,hashes:[]};
+    const valid=await withTenant(db,f.org,tx=>tx.$queryRaw<{valid:boolean;legacy:boolean}[]>`SELECT app_document_parts_valid(${JSON.stringify(original.command)}::jsonb) AS valid,app_document_parts_valid('{}'::jsonb) AS legacy`);expect(valid).toEqual([{valid:true,legacy:true}]);
+    await expect(withTenant(db,f.org,async tx=>{const row=await tx.documentAdmission.findUniqueOrThrow({where:{id:original.admission.id}}),id=randomUUID(),commandKey=randomUUID();return tx.documentAdmission.create({data:{...row,id,commandKey,storageKey:`organizations/${f.org}/documents/${row.documentId}/admissions/${id}.encrypted`,input:{...original.command,idempotencyKey:commandKey,parts:malformed}}});})).rejects.toThrow("document_admission_parts_shape");
+    expect(await withTenant(db,f.org,tx=>tx.documentAdmission.count())).toBe(1);
   });
 });

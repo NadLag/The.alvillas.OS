@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DocumentObjectStore } from "@/modules/documents/infrastructure/document-object-store";
 import { documentEncryptionContext, documentObjectKey } from "@/modules/documents/domain/document-object";
 import { decryptBytes } from "@/platform/auth/secret-encryption";
+import { documentUploadChunkBytes } from "@/modules/documents/domain/document-upload-parts";
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 function fixture() {
@@ -73,5 +74,30 @@ describe("private versioned document objects", () => {
     const f = fixture(), stored = await f.store.put(f.identity, f.bytes, 30), cipher = [...f.objects.values()][0];
     const identity = { ...f.identity, ...(field === "fileSize" ? { fileSize: f.identity.fileSize + 1 } : field === "sha256" ? { sha256: "a".repeat(64) } : { contentType: "image/png" as const }) };
     await expect(new DocumentObjectStore(f.storage, () => Promise.resolve(new Response(new Uint8Array(cipher))), f.env).read(identity, stored, 30)).rejects.toThrow("document_storage_unavailable");
+  });
+});
+
+describe("immutable encrypted document upload parts",()=>{
+  it("stores parts in the original admission namespace and preserves first ciphertext after a lost acknowledgement",async()=>{
+    const f=fixture(),parts={schemaVersion:1 as const,chunkBytes:documentUploadChunkBytes,hashes:[sha256(f.bytes)]};let lost=true;
+    const transport:typeof fetch=async(url,init)=>{const response=await f.transport(url,init);if(lost&&init?.method==="PUT"){lost=false;throw Error("lost part acknowledgement");}return response;};
+    const store=new DocumentObjectStore(f.storage,transport,f.env);await expect(store.putPart(f.identity,0,parts,f.bytes,30)).rejects.toThrow("document_storage_unavailable");expect(f.requests.map(request=>request.method)).toEqual(["PUT"]);
+    const retained=Buffer.from([...f.objects.values()][0]);const result=await store.putPart(f.identity,0,parts,f.bytes,30);expect(result.storageKey).toContain(`/admissions/${f.identity.admissionId}/parts/0.encrypted`);
+    expect(Buffer.from([...f.objects.values()][0])).toEqual(retained);expect(await store.readPart(f.identity,0,parts,30)).toEqual(f.bytes);expect(Buffer.from(retained).includes(f.bytes)).toBe(false);
+  });
+  it("rejects a changed part hash or admission even when the object server substitutes original ciphertext",async()=>{
+    const f=fixture(),parts={schemaVersion:1 as const,chunkBytes:documentUploadChunkBytes,hashes:[sha256(f.bytes)]};await f.store.putPart(f.identity,0,parts,f.bytes,30);const cipher=[...f.objects.values()][0],store=new DocumentObjectStore(f.storage,()=>Promise.resolve(new Response(new Uint8Array(cipher))),f.env);
+    await expect(store.readPart({...f.identity,admissionId:randomUUID()},0,parts,30)).rejects.toThrow("document_storage_unavailable");await expect(store.readPart(f.identity,0,{...parts,hashes:["a".repeat(64)]},30)).rejects.toThrow("document_storage_unavailable");
+    await expect(store.read(f.identity,{cipherSize:cipher.length,cipherSha256:sha256(cipher),keyVersion:"archive-one"},30)).rejects.toThrow("document_storage_unavailable");
+  });
+  it("refuses malformed framing and mismatched bytes before any transport",async()=>{
+    const f=fixture(),parts={schemaVersion:1 as const,chunkBytes:documentUploadChunkBytes,hashes:[sha256(f.bytes)]};
+    await expect(f.store.putPart(f.identity,1,parts,f.bytes,30)).rejects.toThrow("document_storage_unavailable");await expect(f.store.putPart(f.identity,0,{...parts,hashes:[...parts.hashes,...parts.hashes]},f.bytes,30)).rejects.toThrow("document_storage_unavailable");
+    await expect(f.store.putPart(f.identity,0,parts,Buffer.from("different"),30)).rejects.toThrow("document_storage_unavailable");expect(f.requests).toHaveLength(0);
+  });
+  it("authenticates distinct part indices and rejects reordered ciphertext",async()=>{
+    const f=fixture(),bytes=Buffer.concat([Buffer.alloc(documentUploadChunkBytes,97),f.bytes]),identity={...f.identity,fileSize:bytes.length,sha256:sha256(bytes)},parts={schemaVersion:1 as const,chunkBytes:documentUploadChunkBytes,hashes:[sha256(bytes.subarray(0,documentUploadChunkBytes)),sha256(f.bytes)]};
+    await f.store.putPart(identity,0,parts,bytes.subarray(0,documentUploadChunkBytes),30);await f.store.putPart(identity,1,parts,f.bytes,30);const entries=[...f.objects];f.objects.set(entries[0][0],entries[1][1]);f.objects.set(entries[1][0],entries[0][1]);
+    await expect(f.store.readPart(identity,0,parts,30)).rejects.toThrow("document_storage_unavailable");await expect(f.store.readPart(identity,1,parts,30)).rejects.toThrow("document_storage_unavailable");
   });
 });

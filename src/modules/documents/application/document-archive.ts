@@ -14,10 +14,11 @@ import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { DocumentRepository, type DocumentSourceFacts } from "../infrastructure/document-repository";
 import type { DocumentObjectStore } from "../infrastructure/document-object-store";
 import { documentObjectKey } from "../domain/document-object";
+import { documentPartContract,documentUploadChunkBytes } from "../domain/document-upload-parts";
 import { documentArchivePolicyKey, documentArchivePolicySchema, retainDocumentPrivacy } from "../domain/document-policy";
 import { documentUploadReviewInput, documentUploadInput, documentRecoveryInput, documentSourceReferenceSchema,
-  DocumentAccessError, DocumentConfigurationError, DocumentConflictError } from "../domain/document-command";
-import { documentItemSchema, documentVersionItemSchema, documentHistorySchema, documentUploadAdmissionSchema } from "../domain/document-read-model";
+  DocumentAccessError, DocumentConfigurationError, DocumentConflictError,DocumentRateLimitError } from "../domain/document-command";
+import { documentItemSchema, documentVersionItemSchema, documentHistorySchema, documentUploadAdmissionSchema,documentPartReceiptSchema } from "../domain/document-read-model";
 
 export type DocumentActorContext = { organizationId: string; actorId: string; authContext: AuthContext };
 type Dependencies = { db: TenantTransactionRunner; objects?: DocumentObjectStore; requestId?: string };
@@ -76,6 +77,7 @@ async function review(ctx: DocumentActorContext, tx: TenantTransaction, input: R
   if (root && (root.sourceKind !== input.source.kind || root.sourceId !== input.source.id || root.typeKey !== input.typeKey || root.kind !== input.kind || root.locale !== input.locale || (root.template?.key ?? null) !== input.templateKey)) throw new DocumentConflictError();
   const current = await context(ctx, tx, input.source, "create", root ?? undefined, input), previous = root ? await repository.latest(root.id) : null;
   if (!current.type?.content_types.includes(input.contentType) || input.fileSize > current.type.max_bytes || (previous?.id ?? null) !== input.supersedesId) throw new DocumentConflictError();
+  if(input.parts&&!current.policy.value.upload_transport)throw new DocumentConfigurationError();
   return { ...current, root, previous, reviewFingerprint: commandFingerprint({ actorId: ctx.actorId, input, source: current.fingerprint, latest: previous?.id ?? null, cap: captureAuthorizationCap(ctx.authContext) }) };
 }
 function publicVersion(ctx: DocumentActorContext, current: Awaited<ReturnType<typeof context>>, root: Root, row: Version) {
@@ -98,15 +100,17 @@ function identity(ctx: DocumentActorContext, row: Pick<Admission, "id" | "docume
 async function admittedContext(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission) {
   if (row.createdBy !== ctx.actorId) throw new DocumentAccessError();
   const root = await new DocumentRepository(tx, ctx.organizationId).document(row.documentId); if (!root) throw new DocumentAccessError();
-  const original = { ...ctx, authContext: restoreAuthorizationCap(row.authorizationCap) }, action = row.version ? "view" : "create";
+  const latest = row.version ? null : await new DocumentRepository(tx,ctx.organizationId).latest(root.id);
+  const superseded = !row.version && ((latest?.id ?? null) !== row.supersedesId || root.revision !== row.expectedRevision);
+  const original = { ...ctx, authContext: restoreAuthorizationCap(row.authorizationCap) }, action = row.version || superseded ? "view" : "create";
   const current = await context(ctx, tx, sourceOf(root), action, root), held = await context(original, tx, sourceOf(root), action, root);
-  if (!row.version && (row.sourceFingerprint !== current.native.fingerprint || commandFingerprint(savedPolicy.parse(row.policySnapshot)) !== commandFingerprint(current.policy) || root.revision !== row.expectedRevision)) throw new DocumentConflictError();
-  if (current.fingerprint !== held.fingerprint) throw new DocumentConflictError(); return { ...current, root };
+  if (!row.version && !superseded && (row.sourceFingerprint !== current.native.fingerprint || commandFingerprint(savedPolicy.parse(row.policySnapshot)) !== commandFingerprint(current.policy))) throw new DocumentConflictError();
+  if (current.fingerprint !== held.fingerprint) throw new DocumentConflictError(); return { ...current, root, superseded };
 }
 async function admissionResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission) {
   const current = await admittedContext(ctx, tx, row);
-  return documentUploadAdmissionSchema.parse({ recorded: true, id: row.id, documentId: row.documentId, idempotencyKey: row.commandKey, complete: Boolean(row.version), version: row.version ? publicVersion(ctx, current, current.root, row.version) : null,
-    expected: { fileName: row.fileName, contentType: row.contentType, fileSize: row.fileSize, sha256: row.sha256 } });
+  return documentUploadAdmissionSchema.parse({ recorded: true, id: row.id, documentId: row.documentId, idempotencyKey: row.commandKey, state: row.version ? "COMPLETE" : current.superseded ? "SUPERSEDED" : "ADMITTED", complete: Boolean(row.version), version: row.version ? publicVersion(ctx, current, current.root, row.version) : null,
+    expected: { fileName: row.fileName, contentType: row.contentType, fileSize: row.fileSize, sha256: row.sha256,parts:documentUploadInput.parse(row.input).parts??null } });
 }
 
 export async function reviewDocumentUpload(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
@@ -124,10 +128,10 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
     const current = await review(ctx, tx, inputReview); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
     const budget = current.policy.value.upload_admission;
     const decision = await consumeRateLimit(tx, ctx.organizationId, { key: "document-archive:" + ctx.actorId, limit: budget.max_requests, windowSeconds: budget.window_seconds, now: current.now });
-    return { allowed: decision.allowed };
+    return { allowed: decision.allowed,resetAt:decision.resetAt };
   });
   if ("recovered" in rate) return rate.recovered;
-  if (!rate.allowed) throw new DocumentAccessError();
+  if (!rate.allowed) throw new DocumentRateLimitError(rate.resetAt);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);
     const existing = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return admissionResult(ctx, tx, existing); }
@@ -179,7 +183,10 @@ export async function uploadDocumentBytes(actor: DocumentActorContext, raw: unkn
   const captured = await withTenant(deps.db, ctx.organizationId, async tx => {
     const row = await new DocumentRepository(tx, ctx.organizationId).admission(input.admissionId); if (!row) throw new DocumentAccessError();
     const current = await admittedContext(ctx, tx, row);
+    if (current.superseded) throw new DocumentConflictError();
     if (bytes.length !== row.fileSize || createHash("sha256").update(bytes).digest("hex") !== row.sha256) throw new DocumentConflictError();
+    const parts=documentUploadInput.parse(row.input).parts;
+    if(parts&&parts.hashes.some((hash,index)=>createHash("sha256").update(bytes.subarray(index*documentUploadChunkBytes,(index+1)*documentUploadChunkBytes)).digest("hex")!==hash))throw new DocumentConflictError();
     return { row, ttl: current.policy.value.storage_url_seconds, result: row.version ? await admissionResult(ctx, tx, row) : null };
   });
   if (captured.result) return captured.result;
@@ -189,6 +196,7 @@ export async function uploadDocumentBytes(actor: DocumentActorContext, raw: unkn
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("root:" + captured.row.documentId);
     const row = await repository.admission(input.admissionId); if (!row) throw new DocumentAccessError();
     const current = await admittedContext(ctx, tx, row);
+    if (current.superseded) throw new DocumentConflictError();
     if (!row.version) {
       const previous = await repository.latest(row.documentId); if ((previous?.id ?? null) !== row.supersedesId) throw new DocumentConflictError();
       const originalInput = documentUploadInput.parse(row.input), version = await repository.appendVersion({ documentId: row.documentId, admissionId: row.id, number: (previous?.number ?? 0) + 1,
@@ -201,13 +209,53 @@ export async function uploadDocumentBytes(actor: DocumentActorContext, raw: unkn
   });
 }
 
+const partReference=z.object({admissionId:z.uuid(),index:z.number().int().min(0)}).strict();
+export async function uploadDocumentPart(actor:DocumentActorContext,raw:unknown,bytes:Uint8Array,deps:Dependencies){
+  const ctx=actorContext(actor),input=partReference.parse(raw);
+  const captured=await withTenant(deps.db,ctx.organizationId,async tx=>{
+    const repository=new DocumentRepository(tx,ctx.organizationId),row=await repository.admission(input.admissionId);if(!row)throw new DocumentAccessError();
+    const current=await admittedContext(ctx,tx,row),parts=documentUploadInput.parse(row.input).parts;if(!parts||current.superseded)throw new DocumentConflictError();
+    const contract=documentPartContract(identity(ctx,row),input.index,parts);
+    if(bytes.length!==contract.size||createHash("sha256").update(bytes).digest("hex")!==contract.sha256)throw new DocumentConflictError();
+    const budget=current.policy.value.upload_transport;if(!budget)throw new DocumentConfigurationError();
+    const decision=await consumeRateLimit(tx,ctx.organizationId,{key:"document-parts:"+ctx.actorId,limit:budget.max_requests,windowSeconds:budget.window_seconds,now:current.now});
+    return{row,parts,sha256:contract.sha256,fingerprint:current.fingerprint,ttl:current.policy.value.storage_url_seconds,allowed:decision.allowed,resetAt:decision.resetAt};
+  });
+  if(!captured.allowed)throw new DocumentRateLimitError(captured.resetAt);
+  if(!captured.row.version){if(!deps.objects)throw new DocumentConfigurationError();await deps.objects.putPart(identity(ctx,captured.row),input.index,captured.parts,bytes,captured.ttl);}
+  return withTenant(deps.db,ctx.organizationId,async tx=>{
+    const repository=new DocumentRepository(tx,ctx.organizationId),row=await repository.admission(input.admissionId);if(!row)throw new DocumentAccessError();
+    const current=await admittedContext(ctx,tx,row);if(current.superseded||current.fingerprint!==captured.fingerprint)throw new DocumentConflictError();
+    await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"documents.upload_part_saved",resourceType:"document",resourceId:row.documentId,
+      after:{documentId:row.documentId,admissionId:row.id,index:input.index},requestId:deps.requestId??randomUUID(),occurredAt:current.now});
+    const final=await admittedContext(ctx,tx,row);if(final.superseded||current.fingerprint!==final.fingerprint)throw new DocumentConflictError();
+    return documentPartReceiptSchema.parse({admissionId:row.id,idempotencyKey:row.commandKey,index:input.index,sha256:captured.sha256});
+  });
+}
+
+export async function completeDocumentParts(actor:DocumentActorContext,raw:unknown,deps:Dependencies){
+  const ctx=actorContext(actor),input=uploadReference.parse(raw),captured=await withTenant(deps.db,ctx.organizationId,async tx=>{
+    const row=await new DocumentRepository(tx,ctx.organizationId).admission(input.admissionId);if(!row)throw new DocumentAccessError();
+    const current=await admittedContext(ctx,tx,row),parts=documentUploadInput.parse(row.input).parts;if(!parts||current.superseded)throw new DocumentConflictError();
+    const result=row.version?await admissionResult(ctx,tx,row):null;if(result)return{row,parts,ttl:current.policy.value.storage_url_seconds,result,decision:null};
+    const budget=current.policy.value.upload_transport;if(!budget)throw new DocumentConfigurationError();
+    const decision=await consumeRateLimit(tx,ctx.organizationId,{key:"document-parts:"+ctx.actorId,limit:budget.max_requests,windowSeconds:budget.window_seconds,now:current.now});
+    return{row,parts,ttl:current.policy.value.storage_url_seconds,result:null,decision};
+  });
+  if(captured.result)return captured.result;if(captured.decision&&!captured.decision.allowed)throw new DocumentRateLimitError(captured.decision.resetAt);
+  if(!deps.objects)throw new DocumentConfigurationError();const objects=deps.objects,chunks:Buffer[]=[];
+  for(let offset=0;offset<captured.parts.hashes.length;offset+=4){const indices=Array.from({length:Math.min(4,captured.parts.hashes.length-offset)},(_,index)=>offset+index);
+    chunks.push(...await Promise.all(indices.map(index=>objects.readPart(identity(ctx,captured.row),index,captured.parts,captured.ttl))));}
+  return uploadDocumentBytes(ctx,input,Buffer.concat(chunks),deps);
+}
+
 const historyInput = z.object({ documentId: z.uuid(), before: z.number().int().positive().optional() }).strict();
 export async function readDocumentHistory(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx = actorContext(actor), input = historyInput.parse(raw);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), root = await repository.document(input.documentId); if (!root) throw new DocumentAccessError();
     const current = await context(ctx, tx, sourceOf(root), "view", root), rows = await repository.versions(root.id, input.before), data = { id: root.id, source: sourceOf(root), typeKey: root.typeKey, kind: root.kind, locale: root.locale,
-      title: root.title, privacy: current.privacy, revision: root.revision.toString(), createdAt: root.createdAt.toISOString(), archivedAt: root.archivedAt?.toISOString() ?? null };
+      title: root.title, privacy: current.privacy, revision: root.revision.toString(), createdAt: root.createdAt.toISOString(), archivedAt: root.archivedAt?.toISOString() ?? null, templateKey: root.template?.key ?? null };
     const document = documentItemSchema.parse(present({ ...ctx.authContext, visibleDataClasses: new Set<DataClass>(current.privacy) }, "view",
       { ...current.native.resource, type: "document", id: root.id, documentId: root.id, assignedUserAccountId: root.createdBy, data }, {}, current.now));
     const result = documentHistorySchema.parse({ document, versions: rows.slice(0,50).map(row => publicVersion(ctx, current, root, row)), next: rows.length>50 ? rows[49].number : null });

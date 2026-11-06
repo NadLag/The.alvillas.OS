@@ -3,6 +3,7 @@ import { maximumUploadGeneration } from "./upload-generation";
 
 // Technical framing limits; the effective Operations policy controls image size.
 export const fieldUploadChunkBytes = 256 * 1024;
+export const privateUploadSingleRequestBytes = 12 * fieldUploadChunkBytes;
 export const fieldUploadMaximumParts = 64;
 // Signature validity and transport bounds, not business retention settings.
 export const privateUploadUrlLifetimeSeconds = 900;

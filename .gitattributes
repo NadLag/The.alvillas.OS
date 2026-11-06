@@ -93,3 +93,4 @@ prisma/migrations/20261105235000_external_payment_refund_supervised_admission/mi
 prisma/migrations/20261106001000_external_payment_refund_supervised_cost/migration.sql text eol=lf
 prisma/migrations/20261106010000_external_payment_refund_admission_evidence/migration.sql text eol=lf
 prisma/migrations/20261106033000_versioned_document_archive/migration.sql text eol=lf
+prisma/migrations/20261106050000_document_upload_parts/migration.sql text eol=lf

@@ -1,15 +1,18 @@
 import { z } from "zod";
 import { documentContentTypes, documentSourceKinds } from "./document-policy";
+import { documentUploadPartsSchema,documentSingleBodyBytes,documentUploadChunkBytes } from "./document-upload-parts";
 
 export const documentSourceReferenceSchema = z.object({ kind: z.enum(documentSourceKinds), id: z.uuid() }).strict();
 export const documentFileNameSchema = z.string().min(1).max(240).refine(value => value === value.trim() && !/[\\/\p{Cc}\u202a-\u202e\u2066-\u2069]/u.test(value), "invalid_document_file_name");
 export const documentUploadReviewInput = z.object({ documentId: z.uuid().nullable(), source: documentSourceReferenceSchema,
   typeKey: z.string().regex(/^[a-z][a-z0-9_]{0,119}$/u), kind: z.enum(["FILE", "TEMPLATE"]), locale: z.enum(["en", "fr", "ar"]), title: z.string().trim().min(1).max(500),
   fileName: documentFileNameSchema, contentType: z.enum(documentContentTypes), fileSize: z.number().int().min(1).max(10 * 1024 * 1024), sha256: z.string().regex(/^[a-f0-9]{64}$/u),
-  supersedesId: z.uuid().nullable(), effectiveFrom: z.iso.datetime({ offset: true }).nullable(), templateKey: z.string().regex(/^[a-z][a-z0-9_]{0,119}$/u).nullable()
+  supersedesId: z.uuid().nullable(), effectiveFrom: z.iso.datetime({ offset: true }).nullable(), templateKey: z.string().regex(/^[a-z][a-z0-9_]{0,119}$/u).nullable(),parts:documentUploadPartsSchema.optional()
 }).strict().superRefine((value, ctx) => {
   if (!value.documentId && value.supersedesId) ctx.addIssue({ code: "custom", message: "original_document_required" });
   if ((value.kind === "TEMPLATE") !== Boolean(value.templateKey)) ctx.addIssue({ code: "custom", message: "explicit_template_identity_required" });
+  if(value.fileSize>documentSingleBodyBytes&&!value.parts)ctx.addIssue({code:"custom",message:"bounded_document_parts_required"});
+  if(value.parts&&value.parts.hashes.length!==Math.ceil(value.fileSize/documentUploadChunkBytes))ctx.addIssue({code:"custom",message:"exact_document_part_count_required"});
 });
 export const documentUploadInput = documentUploadReviewInput.safeExtend({ idempotencyKey: z.uuid(), reviewFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), reason: z.string().trim().min(8).max(1000) });
 export const documentRecoveryInput = z.object({ idempotencyKey: z.uuid() }).strict();
@@ -21,3 +24,4 @@ export class DocumentAccessError extends Error { constructor() { super("document
 export class DocumentConfigurationError extends Error { constructor() { super("document_configuration_unavailable"); } }
 export class DocumentConflictError extends Error { constructor() { super("document_source_changed"); } }
 export class DocumentStorageError extends Error { constructor() { super("document_storage_unavailable"); } }
+export class DocumentRateLimitError extends Error { constructor(readonly resetAt:Date){super("document_rate_limited");} }
