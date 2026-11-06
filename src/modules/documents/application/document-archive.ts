@@ -19,9 +19,11 @@ import { documentArchivePolicyKey, documentArchivePolicySchema, retainDocumentPr
 import { documentUploadReviewInput, documentUploadInput, documentRecoveryInput, documentSourceReferenceSchema,
   DocumentAccessError, DocumentConfigurationError, DocumentConflictError,DocumentRateLimitError } from "../domain/document-command";
 import { documentItemSchema, documentVersionItemSchema, documentHistorySchema, documentUploadAdmissionSchema,documentPartReceiptSchema } from "../domain/document-read-model";
+import { documentTemplateMediaType } from "../domain/document-template-format";
+import { validateDocumentTemplateBytes, sealDocumentTemplatePayload, openDocumentTemplatePayload } from "../infrastructure/document-template-payload";
 
 export type DocumentActorContext = { organizationId: string; actorId: string; authContext: AuthContext };
-type Dependencies = { db: TenantTransactionRunner; objects?: DocumentObjectStore; requestId?: string };
+type Dependencies = { db: TenantTransactionRunner; objects?: DocumentObjectStore; requestId?: string; preparedTemplate?:Uint8Array; env?:NodeJS.ProcessEnv };
 type Root = NonNullable<Awaited<ReturnType<DocumentRepository["document"]>>>;
 type Admission = NonNullable<Awaited<ReturnType<DocumentRepository["admission"]>>>;
 type Version = NonNullable<Awaited<ReturnType<DocumentRepository["version"]>>>;
@@ -122,9 +124,12 @@ export async function reviewDocumentUpload(actor: DocumentActorContext, raw: unk
 /** Durable admission commits before any object I/O; the browser retains only its nonce. */
 export async function admitDocumentUpload(actor: DocumentActorContext, raw: unknown, deps: Dependencies):Promise<z.infer<typeof documentUploadAdmissionSchema>> {
   const ctx = actorContext(actor), input = documentUploadInput.parse(raw), inputReview = documentUploadReviewInput.parse(Object.fromEntries(Object.entries(input).filter(([key]) => !["idempotencyKey", "reviewFingerprint", "reason"].includes(key)))), commandHash = commandFingerprint(input);
+  const prepared=deps.preparedTemplate?Buffer.from(deps.preparedTemplate):null;
+  if(prepared){if(input.contentType!==documentTemplateMediaType||!input.templateKey)throw new DocumentConflictError();validateDocumentTemplateBytes({...input,templateKey:input.templateKey},prepared);}
   const rate = await withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), existing = await repository.byNonce(ctx.actorId, input.idempotencyKey);
     if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return { kind:"recovered" as const,receipt:await admissionResult(ctx, tx, existing) }; }
+    if(input.contentType===documentTemplateMediaType&&!prepared)throw new DocumentConfigurationError();
     const current = await review(ctx, tx, inputReview); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
     const budget = current.policy.value.upload_admission;
     const decision = await consumeRateLimit(tx, ctx.organizationId, { key: "document-archive:" + ctx.actorId, limit: budget.max_requests, windowSeconds: budget.window_seconds, now: current.now });
@@ -153,10 +158,11 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
     const before = await repository.snapshot(root.id), changed = root.privacy.join("\0") !== current.privacy.join("\0");
     if (changed) root = await repository.protect(root.id, root.revision, current.privacy);
     const id = randomUUID(), objectIdentity = identity(ctx, { ...input, id, documentId: root.id });
+    const payloadCipher=prepared&&input.templateKey?sealDocumentTemplatePayload({...objectIdentity,templateKey:input.templateKey,locale:input.locale},prepared,deps.env):null;
     await repository.appendAdmission({ id, documentId: root.id, supersedesId: input.supersedesId, expectedRevision: root.revision,
       authorizationCap: json(captureAuthorizationCap(ctx.authContext)), policySnapshot: json(current.policy), sourceFingerprint: current.native.fingerprint,
       input: json(input), commandKey: input.idempotencyKey, commandHash, fileName: input.fileName, contentType: input.contentType, fileSize: input.fileSize, sha256: input.sha256,
-      storageKey: documentObjectKey(objectIdentity), reason: input.reason, createdBy: ctx.actorId, createdAt: current.now });
+      storageKey: documentObjectKey(objectIdentity), payloadCipher, reason: input.reason, createdBy: ctx.actorId, createdAt: current.now });
     await historyAction(ctx, tx, current, root.id, "ADMITTED", input.idempotencyKey, commandHash, input.reason, changed ? json(before) : {},
       json({ admissionId: id, document: await repository.snapshot(root.id) }), deps);
     const final = await context(ctx, tx, input.source, "create", await repository.document(root.id) ?? undefined, inputReview);
@@ -186,6 +192,7 @@ export async function uploadDocumentBytes(actor: DocumentActorContext, raw: unkn
     if (current.superseded) throw new DocumentConflictError();
     if (bytes.length !== row.fileSize || createHash("sha256").update(bytes).digest("hex") !== row.sha256) throw new DocumentConflictError();
     const parts=documentUploadInput.parse(row.input).parts;
+    if(row.contentType===documentTemplateMediaType){const original=documentUploadInput.parse(row.input);if(!original.templateKey||!row.payloadCipher)throw new DocumentConflictError();validateDocumentTemplateBytes({...identity(ctx,row),templateKey:original.templateKey,locale:original.locale},bytes);}
     if(parts&&parts.hashes.some((hash,index)=>createHash("sha256").update(bytes.subarray(index*documentUploadChunkBytes,(index+1)*documentUploadChunkBytes)).digest("hex")!==hash))throw new DocumentConflictError();
     return { row, ttl: current.policy.value.storage_url_seconds, result: row.version ? await admissionResult(ctx, tx, row) : null };
   });
@@ -236,16 +243,21 @@ export async function uploadDocumentPart(actor:DocumentActorContext,raw:unknown,
 export async function completeDocumentParts(actor:DocumentActorContext,raw:unknown,deps:Dependencies){
   const ctx=actorContext(actor),input=uploadReference.parse(raw),captured=await withTenant(deps.db,ctx.organizationId,async tx=>{
     const row=await new DocumentRepository(tx,ctx.organizationId).admission(input.admissionId);if(!row)throw new DocumentAccessError();
-    const current=await admittedContext(ctx,tx,row),parts=documentUploadInput.parse(row.input).parts;if(!parts||current.superseded)throw new DocumentConflictError();
-    const result=row.version?await admissionResult(ctx,tx,row):null;if(result)return{row,parts,ttl:current.policy.value.storage_url_seconds,result,decision:null};
+    const current=await admittedContext(ctx,tx,row),original=documentUploadInput.parse(row.input),parts=original.parts??null;
+    if(current.superseded||!parts&&row.contentType!==documentTemplateMediaType)throw new DocumentConflictError();
+    if(row.contentType===documentTemplateMediaType&&(!original.templateKey||!row.payloadCipher))throw new DocumentConflictError();
+    const template=row.contentType===documentTemplateMediaType&&original.templateKey?{...identity(ctx,row),templateKey:original.templateKey,locale:original.locale}:null;
+    const result=row.version?await admissionResult(ctx,tx,row):null;if(result)return{row,parts,template,ttl:current.policy.value.storage_url_seconds,result,decision:null};
     const budget=current.policy.value.upload_transport;if(!budget)throw new DocumentConfigurationError();
     const decision=await consumeRateLimit(tx,ctx.organizationId,{key:"document-parts:"+ctx.actorId,limit:budget.max_requests,windowSeconds:budget.window_seconds,now:current.now});
-    return{row,parts,ttl:current.policy.value.storage_url_seconds,result:null,decision};
+    return{row,parts,template,ttl:current.policy.value.storage_url_seconds,result:null,decision};
   });
   if(captured.result)return captured.result;if(captured.decision&&!captured.decision.allowed)throw new DocumentRateLimitError(captured.decision.resetAt);
+  if(captured.template&&captured.row.payloadCipher)return uploadDocumentBytes(ctx,input,openDocumentTemplatePayload(captured.template,captured.row.payloadCipher,deps.env),deps);
+  const parts=captured.parts;if(!parts)throw new DocumentConflictError();
   if(!deps.objects)throw new DocumentConfigurationError();const objects=deps.objects,chunks:Buffer[]=[];
-  for(let offset=0;offset<captured.parts.hashes.length;offset+=4){const indices=Array.from({length:Math.min(4,captured.parts.hashes.length-offset)},(_,index)=>offset+index);
-    chunks.push(...await Promise.all(indices.map(index=>objects.readPart(identity(ctx,captured.row),index,captured.parts,captured.ttl))));}
+  for(let offset=0;offset<parts.hashes.length;offset+=4){const indices=Array.from({length:Math.min(4,parts.hashes.length-offset)},(_,index)=>offset+index);
+    chunks.push(...await Promise.all(indices.map(index=>objects.readPart(identity(ctx,captured.row),index,parts,captured.ttl))));}
   return uploadDocumentBytes(ctx,input,Buffer.concat(chunks),deps);
 }
 

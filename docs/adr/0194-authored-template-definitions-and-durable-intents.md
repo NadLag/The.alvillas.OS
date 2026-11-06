@@ -1,5 +1,7 @@
 # 0194 — Authored template definitions and durable intents
 
+F-DOC-02 and F-DOC-03. Scope unchanged: all 355 features remain required.
+
 Use an explicit, versioned UTF-8 document definition for editable templates. Its media type is `application/vnd.alvillas.document-template+json`. The existing template root owns the organization, template key and locale; the encrypted immutable archive version owns the original definition bytes. Existing PDF, DOCX, JSON and other archive originals remain readable under their original contracts.
 
 Definitions contain authored headings, paragraphs, bullets and declared typed variables. Tokens select exact keys from a native resolver's map. They cannot evaluate expressions, traverse objects, invoke helpers or interpret inserted values as HTML or further tokens. Money uses the existing Money and exact locale formatter; integers use BigInt. A calendar date remains a calendar date. Classification follows the native bound values and Money always carries financial protection.

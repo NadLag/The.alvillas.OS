@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { privateUploadSingleRequestBytes } from "@/platform/storage/upload-protocol";
+import { documentTemplateMediaType } from "./document-template-format";
 
 export const documentArchivePolicyKey = "documents.archive";
 export const documentSourceKinds = ["ORGANIZATION", "PROPERTY", "OWNER", "RESERVATION", "PERSON", "FINANCIAL_TRANSACTION"] as const;
 export const documentPrivacyTags = ["operational", "sensitive", "financial"] as const;
-export const documentContentTypes = ["application/pdf", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/json", "text/plain"] as const;
+export const documentContentTypes = ["application/pdf", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/json", "text/plain", documentTemplateMediaType] as const;
 const labels = z.object({ en: z.string().trim().min(1).max(160), fr: z.string().trim().min(1).max(160), ar: z.string().trim().min(1).max(160) }).strict();
 const unique = <T>(values: readonly T[]) => new Set(values).size === values.length;
 export const documentTypePolicySchema = z.object({ key: z.string().regex(/^[a-z][a-z0-9_]{0,119}$/u), labels,
@@ -19,7 +20,7 @@ export const documentArchivePolicySchema = z.object({ source: z.literal("NATIVE_
   upload_admission: z.object({ window_seconds: z.number().int().min(1).max(86400), max_requests: z.number().int().min(1).max(10000) }).strict(),
   upload_transport: z.object({ window_seconds: z.number().int().min(1).max(86400), max_requests: z.number().int().min(1).max(100000) }).strict().optional(),
   storage_url_seconds: z.number().int().min(1).max(300)
-}).strict().superRefine((value,ctx)=>{if(value.types.some(type=>type.max_bytes>privateUploadSingleRequestBytes)&&!value.upload_transport)ctx.addIssue({code:"custom",message:"explicit_document_transport_budget_required"});});
+}).strict().superRefine((value,ctx)=>{if(value.types.some(type=>type.max_bytes>privateUploadSingleRequestBytes||type.content_types.includes(documentTemplateMediaType))&&!value.upload_transport)ctx.addIssue({code:"custom",message:"explicit_document_transport_budget_required"});});
 export type DocumentArchivePolicy = z.infer<typeof documentArchivePolicySchema>;
 export type DocumentTypePolicy = z.infer<typeof documentTypePolicySchema>;
 

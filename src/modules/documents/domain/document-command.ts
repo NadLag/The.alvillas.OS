@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { documentTemplateMediaType,documentTemplateMaximumBytes } from "./document-template-format";
 import { documentContentTypes, documentSourceKinds } from "./document-policy";
 import { documentUploadPartsSchema,documentSingleBodyBytes,documentUploadChunkBytes } from "./document-upload-parts";
 
@@ -13,6 +14,7 @@ export const documentUploadReviewInput = z.object({ documentId: z.uuid().nullabl
   if ((value.kind === "TEMPLATE") !== Boolean(value.templateKey)) ctx.addIssue({ code: "custom", message: "explicit_template_identity_required" });
   if(value.fileSize>documentSingleBodyBytes&&!value.parts)ctx.addIssue({code:"custom",message:"bounded_document_parts_required"});
   if(value.parts&&value.parts.hashes.length!==Math.ceil(value.fileSize/documentUploadChunkBytes))ctx.addIssue({code:"custom",message:"exact_document_part_count_required"});
+  if(value.contentType===documentTemplateMediaType&&(value.kind!=="TEMPLATE"||value.parts||value.fileSize>documentTemplateMaximumBytes))ctx.addIssue({code:"custom",message:"durable_template_definition_protocol_required"});
 });
 export const documentUploadInput = documentUploadReviewInput.safeExtend({ idempotencyKey: z.uuid(), reviewFingerprint: z.string().regex(/^[a-f0-9]{64}$/u), reason: z.string().trim().min(8).max(1000) });
 export const documentRecoveryInput = z.object({ idempotencyKey: z.uuid() }).strict();

@@ -4,10 +4,11 @@ import type { AppLocale } from "@/i18n/routing";
 import { formatCurrency, formatDate } from "@/i18n/format";
 import { Money } from "@/platform/money/money";
 import { documentPrivacyTags } from "./document-policy";
+import { documentTemplateMaximumBytes } from "./document-template-format";
+export { documentTemplateMediaType } from "./document-template-format";
 
 const key = z.string().regex(/^[a-z][a-z0-9_]{0,79}$/u).refine(value => !["constructor", "prototype"].includes(value));
 const text = (maximum: number) => z.string().min(1).max(maximum).refine(value => value.trim().length > 0 && !/\p{Cc}/u.test(value.replaceAll("\t", "").replaceAll("\r", "").replaceAll("\n", "")));
-export const documentTemplateMediaType = "application/vnd.alvillas.document-template+json";
 export const templateVariableKinds = ["TEXT", "DATE", "INTEGER", "MONEY"] as const;
 const variable = z.object({ key, kind: z.enum(templateVariableKinds) }).strict();
 const block = z.object({ kind: z.enum(["HEADING", "PARAGRAPH", "BULLET"]), text: text(20000) }).strict();
@@ -29,7 +30,7 @@ export const documentTemplateDefinitionSchema = z.object({ schemaVersion: z.lite
     const used = [...new Set([value.title, ...value.blocks.map(item => item.text)].flatMap(templateReferences))].sort();
     if (JSON.stringify(used) !== JSON.stringify([...declared].sort())) ctx.addIssue({ code: "custom", message: "template_exact_declared_variables_required" });
   } catch { ctx.addIssue({ code: "custom", message: "template_invalid_variable_syntax" }); }
-  if (new TextEncoder().encode(JSON.stringify(value)).length > 1024 * 1024) ctx.addIssue({ code: "custom", message: "template_definition_too_large" });
+  if (new TextEncoder().encode(JSON.stringify(value)).length > documentTemplateMaximumBytes) ctx.addIssue({ code: "custom", message: "template_definition_too_large" });
 });
 export type DocumentTemplateDefinition = z.infer<typeof documentTemplateDefinitionSchema>;
 export const documentTemplateVariantsSchema = z.array(documentTemplateDefinitionSchema).min(2).max(3).superRefine((values, ctx) => {
@@ -56,7 +57,7 @@ export function encodeDocumentTemplate(raw: unknown): Uint8Array<ArrayBuffer> {
 }
 export function decodeDocumentTemplate(bytes: Uint8Array): DocumentTemplateDefinition {
   try {
-    if (!bytes.length || bytes.length > 1024 * 1024) throw new TemplateDefinitionError();
+    if (!bytes.length || bytes.length > documentTemplateMaximumBytes) throw new TemplateDefinitionError();
     return documentTemplateDefinitionSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
   } catch { throw new TemplateDefinitionError(); }
 }
