@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { storageFixtureEnvironment } from "./tests/e2e/support/storage-fixture-config";
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -16,7 +17,7 @@ export default defineConfig({
     command: process.env.PLAYWRIGHT_PRODUCTION === "1"
       ? "node --import ./tests/e2e/support/storage-transport.mjs node_modules/next/dist/bin/next start --hostname=127.0.0.1 --port=3000"
       : "node --import ./tests/e2e/support/storage-transport.mjs node_modules/next/dist/bin/next dev --hostname=127.0.0.1 --port=3000",
-    env: { R2_ACCOUNT_ID: "alvillas-e2e-local", R2_BUCKET: "private-e2e-evidence", R2_ACCESS_KEY_ID: "local-e2e-access", R2_SECRET_ACCESS_KEY: "local-e2e-signing-fixture" },
+    env: storageFixtureEnvironment,
     url: "http://127.0.0.1:3000/en",
     reuseExistingServer: !process.env.CI,
     timeout: 120000
