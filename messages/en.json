@@ -4887,5 +4887,15 @@
     "feeReady": "The verified fee credit is ready to be recorded with this refund.",
     "prepareFee": "Prepare the fee credit",
     "refreshFee": "Refresh expense approval"
+  },
+  "ExternalRefundSupervision": {
+    "title": "Record an already-paid refund",
+    "guidance": "Use your own financial permissions to record the verified payment and preserve its original request and history.",
+    "empty": "This page has no eligible refunds.",
+    "originalPreserved": "The original requester, guest funds, payment confirmation and cost ownership remain recorded in the financial history.",
+    "reason": "Your reason for recording this refund",
+    "review": "Review the verified refund",
+    "admissionTitle": "Record the verified refund",
+    "confirm": "I reviewed the original guest funds, provider confirmation, required cost approval and my reason for recording this refund."
   }
 }
