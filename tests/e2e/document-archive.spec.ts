@@ -45,8 +45,18 @@ async function downloadFile(page: Page, name: string, bytes: Buffer) {
     const box = element.getBoundingClientRect(), x = box.x + box.width / 2, y = box.y + box.height / 2;
     return box.width >= 48 && box.height >= 48 && x >= 0 && x < window.innerWidth && y >= 0 && y < window.innerHeight && element.contains(document.elementFromPoint(x, y));
   })).toBe(true);
+  const geometry = await button.evaluate(element => {
+    const box = (item: Element) => { const rect = item.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height, top: rect.top, right: rect.right, bottom: rect.bottom, left: rect.left }; };
+    return {
+    innerWidth: window.innerWidth, innerHeight: window.innerHeight, screenWidth: screen.width, scrollWidth: document.documentElement.scrollWidth,
+    viewport: window.visualViewport ? { width: visualViewport!.width, height: visualViewport!.height, scale: visualViewport!.scale } : null,
+    button: box(element),
+    overflow: [...document.querySelectorAll("body *")].filter(item => item.getBoundingClientRect().right > document.documentElement.clientWidth + 1).map(item => ({ tag: item.tagName, className: item.className, testId: item.getAttribute("data-testid"), box: box(item) })).slice(0, 30)
+  }; });
+  await test.info().attach("document-download-geometry", { body: JSON.stringify(geometry), contentType: "application/json" });
+  const viewport = page.viewportSize(); if (viewport) expect(geometry.scrollWidth).toBeLessThanOrEqual(viewport.width);
   const pending = page.waitForEvent("download"); await button.click();
-  const file = await pending, path = await file.path(); if (!path) throw Error("Actual downloaded original bytes required");
+  const file = await pending, path = test.info().outputPath("download-" + randomUUID()); await file.saveAs(path);
   expect(file.suggestedFilename()).toBe(name); expect(await readFile(path)).toEqual(bytes);
   await expect(page.getByTestId("document-download").first()).toBeEnabled();
 }
@@ -152,8 +162,11 @@ for (const locale of ["en", "fr", "ar"] as const) {
       await page.goto(`/${locale}/app/documents`); await chooseSource(page, "PROPERTY", fixture.property.name);
       await page.getByTestId("document-kind").selectOption("TEMPLATE"); await page.getByTestId("document-template-code").fill(key);
       const original = { name: "modèle-original.pdf", mimeType: "application/pdf", buffer: pdf };
-      await fillFile(page, original, "Retained original agreement template", "Original versioned template archive acceptance");
+      const originalTitle = "Retained original agreement template " + key;
+      await fillFile(page, original, originalTitle, "Original versioned template archive acceptance");
       await page.getByTestId("document-save").click(); await expect(page.getByTestId("document-version")).toHaveCount(1);
+      await expect(page.getByTestId("document-item")).toContainText(originalTitle);
+      const viewport = page.viewportSize(); if (viewport) expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
       const originalVersion = await withTenant(f.db, f.organizationId, tx => tx.documentVersion.findFirstOrThrow({ where: { createdBy: fixture.actorId } }));
       const originalRows = () => withTenant(f.db, f.organizationId, tx => tx.$queryRaw<{ id: string; xmin: string; body: string }[]>`
         SELECT v.id::text,v.xmin::text,md5(to_jsonb(v)::text) AS body FROM document_version v WHERE v.organization_id=${f.organizationId}::uuid AND v.id=${originalVersion.id}::uuid`), before = await originalRows();
