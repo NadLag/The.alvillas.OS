@@ -120,17 +120,17 @@ export async function reviewDocumentUpload(actor: DocumentActorContext, raw: unk
 }
 
 /** Durable admission commits before any object I/O; the browser retains only its nonce. */
-export async function admitDocumentUpload(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
+export async function admitDocumentUpload(actor: DocumentActorContext, raw: unknown, deps: Dependencies):Promise<z.infer<typeof documentUploadAdmissionSchema>> {
   const ctx = actorContext(actor), input = documentUploadInput.parse(raw), inputReview = documentUploadReviewInput.parse(Object.fromEntries(Object.entries(input).filter(([key]) => !["idempotencyKey", "reviewFingerprint", "reason"].includes(key)))), commandHash = commandFingerprint(input);
   const rate = await withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), existing = await repository.byNonce(ctx.actorId, input.idempotencyKey);
-    if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return { recovered: await admissionResult(ctx, tx, existing) }; }
+    if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return { kind:"recovered" as const,receipt:await admissionResult(ctx, tx, existing) }; }
     const current = await review(ctx, tx, inputReview); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
     const budget = current.policy.value.upload_admission;
     const decision = await consumeRateLimit(tx, ctx.organizationId, { key: "document-archive:" + ctx.actorId, limit: budget.max_requests, windowSeconds: budget.window_seconds, now: current.now });
-    return { allowed: decision.allowed,resetAt:decision.resetAt };
+    return { kind:"rate" as const,allowed: decision.allowed,resetAt:decision.resetAt };
   });
-  if ("recovered" in rate) return rate.recovered;
+  if (rate.kind==="recovered") return rate.receipt;
   if (!rate.allowed) throw new DocumentRateLimitError(rate.resetAt);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);

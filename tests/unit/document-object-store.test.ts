@@ -7,7 +7,7 @@ import { documentUploadChunkBytes } from "@/modules/documents/domain/document-up
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 function fixture() {
-  const bytes = Buffer.from("%PDF-1.7\nOwner agreement version one\n%%EOF\n"), env = { NODE_ENV: "test", ENCRYPTION_KEYS: "archive-one:" + randomBytes(32).toString("base64") };
+  const bytes = Buffer.from("%PDF-1.7\nOwner agreement version one\n%%EOF\n"), env = { NODE_ENV: "test" as const, ENCRYPTION_KEYS: "archive-one:" + randomBytes(32).toString("base64") };
   const identity = { organizationId: randomUUID(), documentId: randomUUID(), admissionId: randomUUID(), contentType: "application/pdf" as const, fileSize: bytes.length, sha256: sha256(bytes) };
   const objects = new Map<string, Uint8Array>(), requests: { method: string; init: RequestInit }[] = [];
   const storage = { createSignedUploadUrl: ({ key }: { key: string }) => Promise.resolve({ url: "https://archive.example.test/" + key }),
@@ -51,8 +51,8 @@ describe("private versioned document objects", () => {
   });
   it("retains old encrypted versions across key rotation and refuses a missing historical key", async () => {
     const f = fixture(), stored = await f.store.put(f.identity, f.bytes, 30), rotated = "archive-two:" + randomBytes(32).toString("base64");
-    expect(await new DocumentObjectStore(f.storage, f.transport, { ENCRYPTION_KEYS: rotated + "," + f.env.ENCRYPTION_KEYS }).read(f.identity, stored, 30)).toEqual(f.bytes);
-    await expect(new DocumentObjectStore(f.storage, f.transport, { ENCRYPTION_KEYS: rotated }).read(f.identity, stored, 30)).rejects.toThrow("document_storage_unavailable");
+    expect(await new DocumentObjectStore(f.storage, f.transport, { NODE_ENV:"test", ENCRYPTION_KEYS: rotated + "," + f.env.ENCRYPTION_KEYS }).read(f.identity, stored, 30)).toEqual(f.bytes);
+    await expect(new DocumentObjectStore(f.storage, f.transport, { NODE_ENV:"test", ENCRYPTION_KEYS: rotated }).read(f.identity, stored, 30)).rejects.toThrow("document_storage_unavailable");
   });
   it("rejects mutated original ciphertext on download and conditional admission recovery", async () => {
     const f = fixture(), stored = await f.store.put(f.identity, f.bytes, 30), [key, original] = [...f.objects][0], changed = new Uint8Array(original); changed[changed.length - 1] ^= 1; f.objects.set(key, changed);
@@ -66,7 +66,7 @@ describe("private versioned document objects", () => {
   });
   it("requires persistent encryption keys and rejects path injection before transport", async () => {
     const f = fixture();
-    await expect(new DocumentObjectStore(f.storage, f.transport, { AUTH_SECRET: "not-the-archive-key" }).put(f.identity, f.bytes, 30)).rejects.toThrow("document_storage_unavailable");
+    await expect(new DocumentObjectStore(f.storage, f.transport, { NODE_ENV:"test", AUTH_SECRET: "not-the-archive-key" }).put(f.identity, f.bytes, 30)).rejects.toThrow("document_storage_unavailable");
     await expect(f.store.put({ ...f.identity, documentId: "../../another-document" }, f.bytes, 30)).rejects.toThrow("document_storage_unavailable");
     expect(f.requests).toHaveLength(0);
   });

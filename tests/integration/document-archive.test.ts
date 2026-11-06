@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Prisma } from "@prisma/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { withTenant } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
@@ -19,9 +19,10 @@ import { readDocumentSources, readDocumentSourceWorkspace } from "@/modules/docu
 import { documentUploadChunkBytes } from "@/modules/documents/domain/document-upload-parts";
 
 let admin: PrismaClient, db: PrismaClient, server: Server, storageUrl: string;
-const objects = new Map<string, Buffer>(), encryption = { NODE_ENV: "test", ENCRYPTION_KEYS: "documents-native:" + randomBytes(32).toString("base64") };
+const objects = new Map<string, Buffer>(), encryption = { NODE_ENV: "test" as const, ENCRYPTION_KEYS: "documents-native:" + randomBytes(32).toString("base64") };
 const content = (title = "Original owner agreement") => Buffer.from("%PDF-1.7\n" + title + "\n%%EOF\n");
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+const inputJson=(value:Prisma.JsonValue):Prisma.InputJsonValue=>{if(value===null)throw Error("Original non-null JSON provenance required");return value;};
 const objectStore = (transport: typeof fetch = fetch) => new DocumentObjectStore({ createSignedUploadUrl: ({ key }) => Promise.resolve({ url: storageUrl + "/" + key }),
   createSignedDownloadUrl: ({ key }) => Promise.resolve({ url: storageUrl + "/" + key }) }, transport, encryption);
 beforeAll(async () => {
@@ -148,7 +149,7 @@ describe("native private document archive", () => {
     await expect(withTenant(db,f.org,tx=>tx.documentAdmission.update({where:{id:original.admission.id},data:{reason:"Rewrite original provenance"}}))).rejects.toThrow("append-only");
     await expect(withTenant(db,f.org,tx=>tx.document.delete({where:{id:original.documentId}}))).rejects.toThrow("hard-deleted");
     await expect(withTenant(db,f.org,tx=>tx.document.update({where:{id:original.documentId},data:{sourceKind:"ORGANIZATION",sourceId:f.org,propertyId:null}}))).rejects.toThrow("cannot be rewritten");
-    await expect(withTenant(db,f.org,async tx=>{const source=await new DocumentRepository(tx,f.org).document(original.documentId);if(!source)throw Error("Original source required");const{id,template,instance,...copy}=source;if(id!==original.documentId||template||instance)throw Error("Original file identity required");return tx.document.create({data:{...copy,id:randomUUID(),commandKey:randomUUID()}});})).rejects.toThrow("atomic private history");
+    await expect(withTenant(db,f.org,async tx=>{const source=await new DocumentRepository(tx,f.org).document(original.documentId);if(!source)throw Error("Original source required");const{id,template,instance,...copy}=source;if(id!==original.documentId||template||instance)throw Error("Original file identity required");return tx.document.create({data:{...copy,sourceSnapshot:inputJson(copy.sourceSnapshot),policySnapshot:inputJson(copy.policySnapshot),id:randomUUID(),commandKey:randomUUID()}});})).rejects.toThrow("atomic private history");
     expect((await readDocumentHistory(ctx,{documentId:original.documentId},{db})).versions[0].title).toBe("Convention propriétaire");
   });
   it("archives a template as a separate native document identity without inventing a signed instance",async()=>{
@@ -198,7 +199,7 @@ describe("native private document archive", () => {
     const tables=["document","document_admission","document_version","document_template","document_instance","signature","signature_recipient","signature_event","document_action"];
     const policies=await admin.$queryRaw<{relname:string;relrowsecurity:boolean;relforcerowsecurity:boolean}[]>`SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_class WHERE relnamespace='public'::regnamespace AND relname=ANY(${tables}::text[])`;
     expect(policies).toHaveLength(9);expect(policies.every(row=>row.relrowsecurity&&row.relforcerowsecurity)).toBe(true);expect(await db.document.count()).toBe(0);expect(await db.documentVersion.count()).toBe(0);
-    await expect(withTenant(db,f.org,async tx=>{const source=await new DocumentRepository(tx,f.org).document(original.documentId);if(!source)throw Error("Original source required");const{id,template,instance,...copy}=source;if(id!==original.documentId||template||instance)throw Error("Original file identity required");return tx.document.create({data:{...copy,id:randomUUID(),commandKey:randomUUID(),propertyId:null,personId:ctx.person.id}});})).rejects.toThrow("document_source_shape");
+    await expect(withTenant(db,f.org,async tx=>{const source=await new DocumentRepository(tx,f.org).document(original.documentId);if(!source)throw Error("Original source required");const{id,template,instance,...copy}=source;if(id!==original.documentId||template||instance)throw Error("Original file identity required");return tx.document.create({data:{...copy,sourceSnapshot:inputJson(copy.sourceSnapshot),policySnapshot:inputJson(copy.policySnapshot),id:randomUUID(),commandKey:randomUUID(),propertyId:null,personId:ctx.person.id}});})).rejects.toThrow("document_source_shape");
   });
   it("paginates past denied source rows with encrypted actor-and-filter-bound cursors",async()=>{
     const f=await fixture(),ctx=await actor(f,["document:view","property:view"],true),other=await actor(f,["document:view","property:view"],true);
@@ -293,7 +294,7 @@ describe("native private document archive", () => {
   it("rejects malformed manifests natively while preserving legacy admissions and all original constraints",async()=>{
     const f=await fixture(),ctx=await actor(f),original=await multipart(f,ctx),malformed={...original.parts,hashes:[]};
     const valid=await withTenant(db,f.org,tx=>tx.$queryRaw<{valid:boolean;legacy:boolean}[]>`SELECT app_document_parts_valid(${JSON.stringify(original.command)}::jsonb) AS valid,app_document_parts_valid('{}'::jsonb) AS legacy`);expect(valid).toEqual([{valid:true,legacy:true}]);
-    await expect(withTenant(db,f.org,async tx=>{const row=await tx.documentAdmission.findUniqueOrThrow({where:{id:original.admission.id}}),id=randomUUID(),commandKey=randomUUID();return tx.documentAdmission.create({data:{...row,id,commandKey,storageKey:`organizations/${f.org}/documents/${row.documentId}/admissions/${id}.encrypted`,input:{...original.command,idempotencyKey:commandKey,parts:malformed}}});})).rejects.toThrow("document_admission_parts_shape");
+    await expect(withTenant(db,f.org,async tx=>{const row=await tx.documentAdmission.findUniqueOrThrow({where:{id:original.admission.id}}),id=randomUUID(),commandKey=randomUUID();return tx.documentAdmission.create({data:{...row,authorizationCap:inputJson(row.authorizationCap),policySnapshot:inputJson(row.policySnapshot),id,commandKey,storageKey:`organizations/${f.org}/documents/${row.documentId}/admissions/${id}.encrypted`,input:{...original.command,idempotencyKey:commandKey,parts:malformed}}});})).rejects.toThrow("document_admission_parts_shape");
     expect(await withTenant(db,f.org,tx=>tx.documentAdmission.count())).toBe(1);
   });
 });
