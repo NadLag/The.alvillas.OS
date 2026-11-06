@@ -26,6 +26,8 @@ import { DocumentTemplateSourceRepository } from "../infrastructure/document-tem
 import { validateDocumentTemplateBytes, sealDocumentTemplatePayload, openDocumentTemplatePayload } from "../infrastructure/document-template-payload";
 import { storedDocumentUploadInput, generatedDocumentUploadInput } from "../domain/document-generated-upload";
 import { openGeneratedDocumentPayload } from "../infrastructure/document-generated-payload";
+import {documentEffectiveHistoryFormat} from "../domain/document-effective-version";
+import {documentEffectiveHistorySchema} from "../domain/document-read-model";
 
 export type DocumentActorContext = { organizationId: string; actorId: string; authContext: AuthContext };
 type Dependencies = { db: TenantTransactionRunner; objects?: DocumentObjectStore; requestId?: string; preparedTemplate?:Uint8Array; env?:NodeJS.ProcessEnv };
@@ -303,16 +305,18 @@ export async function completeDocumentParts(actor:DocumentActorContext,raw:unkno
   return uploadDocumentBytes(ctx,input,Buffer.concat(chunks),deps);
 }
 
-const historyInput = z.object({ documentId: z.uuid(), before: z.number().int().positive().optional() }).strict();
+const historyInput = z.object({ documentId: z.uuid(), before: z.number().int().positive().optional(),format:z.literal(documentEffectiveHistoryFormat).optional() }).strict();
 export async function readDocumentHistory(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx = actorContext(actor), input = historyInput.parse(raw);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), root = await repository.document(input.documentId); if (!root) throw new DocumentAccessError();
-    const current = await context(ctx, tx, sourceOf(root), "view", root), rows = await repository.versions(root.id, input.before), data = { id: root.id, source: sourceOf(root), typeKey: root.typeKey, kind: root.kind, locale: root.locale,
+    const current = await context(ctx, tx, sourceOf(root), "view", root);
+    await repository.lock("root:"+root.id);
+    const observedAt=await repository.clock(),rows = await repository.versions(root.id, input.before),effective=input.format?await repository.effectiveVersion(root.id,observedAt):null,data = { id: root.id, source: sourceOf(root), typeKey: root.typeKey, kind: root.kind, locale: root.locale,
       title: root.title, privacy: current.privacy, revision: root.revision.toString(), createdAt: root.createdAt.toISOString(), archivedAt: root.archivedAt?.toISOString() ?? null, templateKey: root.template?.key ?? null };
     const document = documentItemSchema.parse(present({ ...ctx.authContext, visibleDataClasses: new Set<DataClass>(current.privacy) }, "view",
       { ...current.native.resource, type: "document", id: root.id, documentId: root.id, assignedUserAccountId: root.createdBy, data }, {}, current.now));
-    const result = documentHistorySchema.parse({ document, versions: rows.slice(0,50).map(row => publicVersion(ctx, current, root, row)), next: rows.length>50 ? rows[49].number : null });
+    const history={ document, versions: rows.slice(0,50).map(row => publicVersion(ctx, current, root, row)), next: rows.length>50 ? rows[49].number : null },result=input.format?documentEffectiveHistorySchema.parse({...history,observedAt:observedAt.toISOString(),effectiveVersion:effective?{id:effective.id,number:effective.number,effectiveAt:(effective.effectiveFrom??effective.createdAt).toISOString()}:null}):documentHistorySchema.parse(history);
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "documents.history_read", resourceType: "document", resourceId: root.id,
       after: { documentId: root.id, count: result.versions.length }, requestId: deps.requestId ?? randomUUID(), occurredAt: current.now });
     const finalRoot = await repository.document(root.id); if (!finalRoot) throw new DocumentAccessError();

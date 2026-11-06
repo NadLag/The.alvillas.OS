@@ -10,6 +10,7 @@ export const documentItemSchema = z.object({ id: z.uuid(), source: documentSourc
   locale: z.enum(["en", "fr", "ar"]), title: z.string(), privacy: z.array(z.enum(documentPrivacyTags)), revision: z.string().regex(/^[1-9]\d*$/u),
   createdAt: z.iso.datetime(), archivedAt: z.iso.datetime().nullable(), templateKey: z.string().nullable() }).strict();
 export const documentHistorySchema = z.object({ document: documentItemSchema, versions: z.array(documentVersionItemSchema), next: z.number().int().positive().nullable() }).strict();
+export const documentEffectiveHistorySchema=documentHistorySchema.extend({observedAt:z.iso.datetime(),effectiveVersion:z.object({id:z.uuid(),number:z.number().int().positive(),effectiveAt:z.iso.datetime()}).strict().nullable()});
 export const documentUploadAdmissionSchema = z.object({ recorded: z.literal(true), id: z.uuid(), documentId: z.uuid(), idempotencyKey: z.uuid(), state: z.enum(["ADMITTED","COMPLETE","SUPERSEDED"]), complete: z.boolean(), version: documentVersionItemSchema.nullable(),
   expected: z.object({ fileName: z.string(), contentType: z.enum(documentContentTypes), fileSize: z.number().int().positive(), sha256: z.string().regex(/^[a-f0-9]{64}$/u),parts:documentUploadPartsSchema.nullable() }).strict() }).strict().superRefine((value,ctx)=>{
     if(value.complete!==(value.state==="COMPLETE")||Boolean(value.version)!==value.complete)ctx.addIssue({code:"custom",message:"consistent_original_admission_state_required"});

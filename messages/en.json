@@ -5022,5 +5022,19 @@
     "generate": "Generate and archive PDF",
     "reviewed": "The original {language} template and current source have been checked. Confirm to generate this PDF.",
     "selectSource": "Select the document’s source above to generate a PDF."
+  },
+  "DocumentEffectiveDates": {
+    "effectiveFromUtc": "Effective from (UTC)",
+    "effectiveGuidance": "Choose a UTC date and time, or leave this blank to use the archive timestamp. Earlier originals remain available.",
+    "observedAt": "Archive observed at {at} (UTC)",
+    "effectiveSummary": "Version {number} is effective at the observation time.",
+    "noEffectiveVersion": "No recorded version is effective at the observation time.",
+    "effectiveAt": "Effective from {at} (UTC)",
+    "effectiveVersion": "Effective at the observation time",
+    "scheduledVersion": "Scheduled amendment",
+    "retainedVersion": "Retained original",
+    "latestRecorded": "Latest recorded version",
+    "showEffective": "Show the effective version",
+    "archiveTimestamp": "Effective from the archive timestamp"
   }
 }

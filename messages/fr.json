@@ -5022,5 +5022,19 @@
     "generate": "Générer et archiver le PDF",
     "reviewed": "Le modèle original en {language} et la source actuelle ont été vérifiés. Confirmez pour générer ce PDF.",
     "selectSource": "Sélectionnez la source du document ci-dessus pour générer un PDF."
+  },
+  "DocumentEffectiveDates": {
+    "effectiveFromUtc": "Prise d’effet (UTC)",
+    "effectiveGuidance": "Choisissez une date et une heure UTC, ou laissez ce champ vide pour utiliser l’horodatage d’archivage. Les originaux précédents restent disponibles.",
+    "observedAt": "Archive consultée le {at} (UTC)",
+    "effectiveSummary": "La version {number} est en vigueur à l’heure de consultation.",
+    "noEffectiveVersion": "Aucune version enregistrée n’est en vigueur à l’heure de consultation.",
+    "effectiveAt": "Prise d’effet le {at} (UTC)",
+    "effectiveVersion": "En vigueur à l’heure de consultation",
+    "scheduledVersion": "Avenant programmé",
+    "retainedVersion": "Original conservé",
+    "latestRecorded": "Dernière version enregistrée",
+    "showEffective": "Afficher la version en vigueur",
+    "archiveTimestamp": "Prise d’effet à l’horodatage d’archivage"
   }
 }

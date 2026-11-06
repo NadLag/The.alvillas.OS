@@ -5022,5 +5022,19 @@
     "generate": "إنشاء ملف PDF وأرشفته",
     "reviewed": "تم التحقق من القالب الأصلي باللغة {language} والمصدر الحالي. أكد لإنشاء ملف PDF.",
     "selectSource": "اختر مصدر المستند أعلاه لإنشاء ملف PDF."
+  },
+  "DocumentEffectiveDates": {
+    "effectiveFromUtc": "بدء السريان (UTC)",
+    "effectiveGuidance": "اختر التاريخ والوقت بالتوقيت العالمي UTC، أو اترك الحقل فارغاً لاستخدام وقت الأرشفة. تبقى النسخ الأصلية السابقة متاحة.",
+    "observedAt": "تمت معاينة الأرشيف في {at} (UTC)",
+    "effectiveSummary": "النسخة {number} سارية وقت المعاينة.",
+    "noEffectiveVersion": "لا توجد نسخة مسجلة سارية وقت المعاينة.",
+    "effectiveAt": "سارية من {at} (UTC)",
+    "effectiveVersion": "سارية وقت المعاينة",
+    "scheduledVersion": "تعديل مجدول",
+    "retainedVersion": "نسخة أصلية محفوظة",
+    "latestRecorded": "أحدث نسخة مسجلة",
+    "showEffective": "عرض النسخة السارية",
+    "archiveTimestamp": "سارية من وقت الأرشفة"
   }
 }

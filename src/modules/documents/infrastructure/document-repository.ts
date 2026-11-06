@@ -55,6 +55,7 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   document(id: string) { return this.tx.document.findFirst({ where: { organizationId: this.organizationId, id }, include: rootInclude }); }
   version(id: string) { return this.tx.documentVersion.findFirst({ where: { organizationId: this.organizationId, id }, include: versionInclude }); }
   latest(documentId: string) { return this.tx.documentVersion.findFirst({ where: { organizationId: this.organizationId, documentId }, orderBy: { number: "desc" }, include: versionInclude }); }
+  effectiveVersion(documentId:string,at:Date){return this.tx.documentVersion.findFirst({where:{organizationId:this.organizationId,documentId,createdAt:{lte:at},OR:[{effectiveFrom:null},{effectiveFrom:{lte:at}}]},orderBy:{number:"desc"},select:{id:true,number:true,effectiveFrom:true,createdAt:true}});}
   admission(id: string) { return this.tx.documentAdmission.findFirst({ where: { organizationId: this.organizationId, id }, include: { version: { include: versionInclude } } }); }
   byNonce(createdBy: string, commandKey: string) { return this.tx.documentAdmission.findFirst({ where: { organizationId: this.organizationId, createdBy, commandKey }, include: { version: { include: versionInclude } } }); }
   nonceOwner(commandKey: string) { return this.tx.documentAdmission.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { createdBy: true } }); }

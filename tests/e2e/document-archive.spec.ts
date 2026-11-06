@@ -95,6 +95,7 @@ for (const locale of ["en", "fr", "ar"] as const) {
       await page.goto(`/${locale}/app/documents`); await chooseSource(page, "FINANCIAL_TRANSACTION", source.reference);
       const pdf = await originalPdf(), file = { name: "إثبات-original.pdf", mimeType: "application/pdf", buffer: pdf }, reason = "Original private ledger source evidence", title = "Private immutable financial original";
       await fillFile(page, file, title, reason);
+      await page.getByTestId("document-effective-from").fill("2020-01-01T09:30");
       let admissionPosts = 0, uploadPosts = 0;
       const admitted = acknowledgementBarrier();
       await page.route("**/api/documents/admit", async route => {
@@ -105,6 +106,7 @@ for (const locale of ["en", "fr", "ar"] as const) {
       await page.getByTestId("document-save").click(); await admitted.promise;
       await expect(page.getByTestId("document-recover")).toBeEnabled();
       const originalAdmission = await withTenant(f.db, f.organizationId, tx => tx.documentAdmission.findFirstOrThrow({ where: { createdBy: fixture.actorId } }));
+      expect(originalAdmission.input).toMatchObject({effectiveFrom:"2020-01-01T09:30:00.000Z"});
       expect(await withTenant(f.db, f.organizationId, tx => tx.documentVersion.count({ where: { documentId: originalAdmission.documentId } }))).toBe(0);
       const storageKey = "alvillas:document-upload:" + f.organizationId + "." + fixture.actorId;
       const storage = await page.evaluate(() => ({ session: { ...sessionStorage }, local: { ...localStorage } }));
@@ -131,7 +133,10 @@ for (const locale of ["en", "fr", "ar"] as const) {
       await page.getByTestId("document-amend").click();
       const correction = { name: "retained-amendment.pdf", mimeType: "application/pdf", buffer: await originalPdf() };
       await fillFile(page, correction, "Private financial amendment", "Document amendment retains the original source evidence");
+      const scheduledField=new Date(Date.now()+86400000).toISOString().slice(0,16),scheduledIso=scheduledField+":00.000Z";await page.getByTestId("document-effective-from").fill(scheduledField);
       await page.getByTestId("document-save").click(); await expect(page.getByTestId("document-version")).toHaveCount(2);
+      await expect(page.getByTestId("document-history").locator('[data-effective-state="effective"]')).toHaveCount(1);await expect(page.getByTestId("document-history").locator('[data-effective-state="scheduled"]')).toHaveCount(1);
+      expect((await withTenant(f.db,f.organizationId,tx=>tx.documentVersion.findFirstOrThrow({where:{documentId:originalAdmission.documentId,number:2}}))).effectiveFrom?.toISOString()).toBe(scheduledIso);
       await downloadFile(page, correction.name, correction.buffer); await downloadFile(page, file.name, pdf);
       expect(await originalRows()).toEqual(originalBefore); expect(await moneyRows()).toEqual(before);
       const history = await page.request.post("/api/documents/history", { headers, data: { documentId: originalAdmission.documentId } }); expect(history.status()).toBe(200);
