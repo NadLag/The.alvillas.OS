@@ -12,7 +12,7 @@ import { FinanceRepository } from "../infrastructure/finance-repository";
 import { OutboxRepository } from "@/platform/events/outbox-repository";
 import { externalPaymentContext } from "./external-payment-service";
 import { externalPaymentRefundRequested } from "./external-payment-refund-service";
-import { retainedExternalRefund, authorizeExternalRefundSourceView } from "./external-payment-refund-admission";
+import { retainedExternalRefund, authorizeExternalRefundSourceView } from "./external-payment-refund-access";
 import { inspectGuestDepositRefundInTransaction, presentGuestDepositResult } from "./guest-deposit-service";
 import type { FinanceActorContext } from "./finance-access";
 import type { z } from "zod";

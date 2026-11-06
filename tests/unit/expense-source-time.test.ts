@@ -23,4 +23,14 @@ describe("canonical native expense source time", () => {
     expect(authorize(ctx, "view", expenseResource(organizationId, property, native))).toBe(false);
     expect(viewableExpenseResource(ctx, property, native, [randomUUID()])).toBeNull();
   });
+  it("uses the first verified refund date for a corrected provider cost and its financial audit resource", () => {
+    const refundedAt = new Date("2026-12-01T01:02:03.004Z"), correction = { ...facts, externalPaymentRefundFeeCorrection: { refundIntent: { identity: { observations: [{ refundedAt }] } } } };
+    expect(expenseOccurredAt(property, { ...correction, occurredAt: occurredOn })).toEqual(refundedAt);
+    expect(expenseResource(organizationId, property, correction).occurredAt).toEqual(refundedAt);
+    const ctx: AuthContext = { organizationId, userAccountId: actorId, permissions: new Set(["expense:view"]), scopes: [{ organizationId, scopeType: "organization" }], assignments: [{ scope: { organizationId, scopeType: "organization" }, permissions: new Set(["expense:view"]), conditions: { timeWindow: { endsAt: "2026-11-30T23:59:59Z" } } }] };
+    expect(viewableExpenseResource(ctx, property, correction, [])).toBeNull();
+  });
+  it("requires an actual retained completion date rather than guessing the correction's original civil day", () => {
+    expect(() => expenseOccurredAt(property, { ...facts, externalPaymentRefundFeeCorrection: { refundIntent: { identity: null } } })).toThrow("Actual original provider fee return time required");
+  });
 });

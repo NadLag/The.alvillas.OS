@@ -2548,7 +2548,8 @@
     "correctionSource": "This invoice corrects a posted invoice.",
     "viewOriginalExpense": "View original invoice",
     "correctionDraftGuidance": "Revise the amount and supply a reason. Source currency, funding, category, invoice date and agreement versions are retained. The revised invoice requires its own approval.",
-    "correctionPostingGuidance": "After approval, explicitly record the correction in the current open period. The original payment is reversed exactly and the approved replacement is posted in one transaction; the original invoice and its audit history are retained."
+    "correctionPostingGuidance": "After approval, explicitly record the correction in the current open period. The original payment is reversed exactly and the approved replacement is posted in one transaction; the original invoice and its audit history are retained.",
+    "refundAdmissionGuidance": "This expense belongs to a verified provider refund. Complete its approval here, then return to the original refund to record both together."
   },
   "FinancialAccounts": {
     "eyebrow": "Finance",
@@ -4877,6 +4878,14 @@
     "admit": "Record confirmed refund",
     "cancelQueued": "Cancel unsent refund",
     "cancellationGuidance": "Cancellation releases this reservation only if the provider attempt has not started. An uncertain or attempted refund remains reserved for reconciliation.",
-    "confirmCancel": "I confirm cancellation of this original unsent refund request."
+    "confirmCancel": "I confirm cancellation of this original unsent refund request.",
+    "feeCorrectionTitle": "Returned provider fee",
+    "feeCorrectionGuidance": "Review this fee credit against its original expense. The remaining cost follows the original agreement and approval rules.",
+    "remainingCost": "Remaining original cost: {amount}",
+    "openFeeExpense": "Review and approve the remaining expense",
+    "feeApprovalRequired": "Complete the original expense approval before recording this refund.",
+    "feeReady": "The verified fee credit is ready to be recorded with this refund.",
+    "prepareFee": "Prepare the fee credit",
+    "refreshFee": "Refresh expense approval"
   }
 }

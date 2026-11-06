@@ -3,12 +3,18 @@ import { calendarDateStart } from "@/platform/time/calendar";
 
 export type ExpenseProperty = { id: string; cityId?: string | null; city?: string | null; regionId?: string | null; region?: string | null; timezone: string };
 export type ExpenseFacts = { id: string; amount: string; reservationId?: string | null; state: string; occurredOn: Date; occurredAt?: Date; createdBy: string;
-  externalPaymentFee?: { capture: { capturedAt: Date | null } } | null };
+  externalPaymentFee?: { capture: { capturedAt: Date | null } } | null;
+  externalPaymentRefundFeeCorrection?: { refundIntent: { identity: { observations: { refundedAt: Date | null }[] } | null } } | null };
 export function expenseOccurredAt(property: ExpenseProperty, facts: ExpenseFacts): Date {
   if (facts.externalPaymentFee) {
     const capturedAt = facts.externalPaymentFee.capture.capturedAt;
     if (!capturedAt || !Number.isFinite(capturedAt.getTime())) throw Error("Actual original provider fee time required");
     return capturedAt;
+  }
+  if (facts.externalPaymentRefundFeeCorrection) {
+    const refundedAt = facts.externalPaymentRefundFeeCorrection.refundIntent.identity?.observations[0]?.refundedAt;
+    if (!refundedAt || !Number.isFinite(refundedAt.getTime())) throw Error("Actual original provider fee return time required");
+    return refundedAt;
   }
   return facts.occurredAt ?? calendarDateStart(facts.occurredOn.toISOString().slice(0, 10), property.timezone);
 }

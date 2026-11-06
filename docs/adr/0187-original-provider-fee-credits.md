@@ -1,0 +1,11 @@
+# Original provider fee credits
+
+A returned provider fee reduces the cost of the original captured payment. Reuse the native expense correction and approval engine: reverse the current posted expense exactly, then post the approved remaining cost. A fully credited cost needs the exact opposite and no zero-value replacement. Frozen original owners, shares, agreement versions, allocation rules, approval rules, funding account and currency remain authoritative.
+
+Retain an immutable tenant-bound fee plan for the verified refund, original capture, current posted cost and its version. Reserve one successor per cost head. Successive refunds follow only the prior admitted correction; a draft or unadmitted head blocks competing plans. Completed provider gross, returned fee and merchant net must be independently committed and conserve exact Money. An unsupported fee, currency conversion, revised provider fee or credit exceeding the original remaining cost requires reconciliation.
+
+Prepare and approve the remaining cost through the ordinary expense workflow. Admit its native opposite, approved replacement and original gross guest refund in one transaction. Every new cost journal and the original guest refund must share the transaction, original actor and reason. Use the first independently verified provider completion time for these new movements, retaining all original journals, postings, dates and audit history. Existing posting-period locks and authorization gates still apply.
+
+The native ledger seals new headers through deferred constraints in insertion order. A sibling header may still be unsealed during that visit only if its tuple belongs to the same transaction. Every existing balance, immutability and final-seal constraint remains mandatory before commit. Committed siblings must already be sealed. Applied migrations are immutable; fixes extend them through additive migrations.
+
+Intersect original request authority with current stored grants for the guest source, original expense, correction, funding and monetary admission. Recheck after the last audit write. Private fee views, expense screens and financial audit resources use the verified source time. The browser retains only the original nonce and requires confirmation of the current review fingerprint; a prepared credit never grants approval or financial admission.

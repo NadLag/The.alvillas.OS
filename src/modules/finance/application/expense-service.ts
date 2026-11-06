@@ -267,7 +267,7 @@ export async function getExpenseDraftEditor(ctx:FinanceActorContext,id:string,de
     if(row.state!=="DRAFT")throw new ExpenseConflictError();
     await recheckFinanceAuthorization(heldCtx,tx,clock.now,[{action:"view",resource:target},{action:"edit",resource:target}],new ExpenseAccessError());
     const choices=await editorChoices(ctx,tx,target,clock.now,row.reservationId,row.fundingAccountId,[heldCtx.authContext]);
-    if(row.externalPaymentFee){
+    if(row.externalPaymentFee||row.externalPaymentRefundFeeCorrection){
       await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"expense.editor_viewed",resourceType:"expense",resourceId:row.id,propertyScopeId:row.propertyId,after:{expenseId:row.id},reason:"Viewed the original provider deduction expense editor",requestId:deps.requestId??crypto.randomUUID(),occurredAt:(await repository.clock()).now});
       const finalClock=await repository.clock(),fresh=await current(heldCtx,tx);await recheckFinanceAuthorization(heldCtx,tx,finalClock.now,[{action:"view",resource:target},{action:"edit",resource:target}],new ExpenseAccessError());
       if(JSON.stringify(choices)!==JSON.stringify(await editorChoices(fresh,tx,target,finalClock.now,row.reservationId,row.fundingAccountId,[heldCtx.authContext])))throw new ExpenseAccessError();
@@ -326,25 +326,27 @@ export async function getExpense(ctx: FinanceActorContext, id: string, deps: Dep
         }
       }
     }
-    const canPostOriginalDate=payable&&!row.correctsExpenseId&&!sourcePeriodClosed&&authorize(ctx.authContext,"create",financialSource,clock.now);
-    const canPostInCurrentPeriod=payable&&correctionCanPost&&(Boolean(row.correctsExpenseId)||sourcePeriodClosed)&&authorize(ctx.authContext,"override",financialSource,clock.now)&&
+    const providerManaged=Boolean(row.externalPaymentFee||row.externalPaymentRefundFeeCorrection);
+    const canPostOriginalDate=payable&&!row.externalPaymentRefundFeeCorrection&&!row.correctsExpenseId&&!sourcePeriodClosed&&authorize(ctx.authContext,"create",financialSource,clock.now);
+    const canPostInCurrentPeriod=payable&&!row.externalPaymentRefundFeeCorrection&&correctionCanPost&&(Boolean(row.correctsExpenseId)||sourcePeriodClosed)&&authorize(ctx.authContext,"override",financialSource,clock.now)&&
       authorize(ctx.authContext,"create",{...financialSource,occurredAt:clock.now},clock.now);
     const originalJournal={...financialSource,id:row.transactionId??row.id,financialRecordId:row.transactionId??row.id,occurredAt:row.transaction?.occurredAt??occurredAt};
-    const canCorrect=!row.externalPaymentFee&&walletVisible&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&
+    const canCorrect=!providerManaged&&walletVisible&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&
       authorize(ctx.authContext,"view",originalJournal,clock.now)&&authorize(ctx.authContext,"override",originalJournal,clock.now)&&
       authorize(ctx.authContext,"create",{...postingSource,id:undefined,financialRecordId:undefined,status:"DRAFT",assignedUserAccountId:ctx.actorId},clock.now)&&
       authorize(ctx.authContext,"view",{...financialSource,id:row.fundingAccountId,financialRecordId:row.fundingAccountId},clock.now);
     const visibleAdjustment=row.periodAdjustment&&row.transactionId&&row.transaction&&authorize(ctx.authContext,"view",{...target,type:"financial_transaction",
       id:row.transactionId,financialRecordId:row.transactionId,occurredAt:row.transaction.occurredAt},clock.now)?row.periodAdjustment:null;
     const data = { ...facts(row), propertyName: row.property.name, approvalId: row.approval?.id ?? null,
+      providerRefund: Boolean(row.externalPaymentRefundFeeCorrection), canEditDraft: row.state === "DRAFT" && !row.externalPaymentRefundFeeCorrection && authorize(ctx.authContext,"edit",target,clock.now),
       emergencyException:stored.success&&Boolean(stored.data.postHocOwnerNotificationRequired),canSubmit: row.state === "DRAFT" && authorize(ctx.authContext, "edit", target, clock.now),
       canPost:canPostOriginalDate||canPostInCurrentPeriod,canPostOriginalDate,canPostInCurrentPeriod,sourcePeriodClosed,canCorrect,
       postingAdjustment:visibleAdjustment?{id:visibleAdjustment.id,sourcePeriodId:visibleAdjustment.period.id,
         sourceMonth:visibleAdjustment.period.month.toISOString().slice(0,7),sourceOccurredAt:visibleAdjustment.sourceOccurredAt.toISOString(),
         postedAt:row.transaction!.occurredAt.toISOString(),reason:visibleAdjustment.reason}:null,
-      canVoid:!row.externalPaymentFee&&walletVisible&&(!wallet||authorize(ctx.authContext,"void",wallet,clock.now))&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"void",postingSource,clock.now)&&
+      canVoid:!providerManaged&&walletVisible&&(!wallet||authorize(ctx.authContext,"void",wallet,clock.now))&&row.state==="POSTED"&&Boolean(row.transactionId)&&authorize(ctx.authContext,"view",postingSource,clock.now)&&authorize(ctx.authContext,"void",postingSource,clock.now)&&
         authorize(ctx.authContext,"void",{...financialSource,id:row.transactionId!,financialRecordId:row.transactionId!,occurredAt:row.transaction?.occurredAt??occurredAt},clock.now) };
-    if(row.externalPaymentFee){
+    if(providerManaged){
       await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"expense.viewed",resourceType:"expense",resourceId:row.id,propertyScopeId:row.propertyId,after:{expenseId:row.id,occurredAt:occurredAt.toISOString()},reason:"Viewed the original source-bound provider deduction expense",requestId:deps.requestId??crypto.randomUUID(),occurredAt:(await repository.clock()).now});
       await recheckFinanceAuthorization(heldCtx,tx,(await repository.clock()).now,[{action:"view",resource:target}],new ExpenseAccessError());
     }

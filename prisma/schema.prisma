@@ -215,6 +215,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentFees ExternalPaymentFee[]
   externalPaymentAttempts ExternalPaymentAttempt[]
   externalPaymentRefundIntents ExternalPaymentRefundIntent[]
@@ -600,6 +601,7 @@ model Person {
 }
 
 model UserAccount {
+  externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentFees ExternalPaymentFee[]
   externalPaymentIntents ExternalPaymentIntent[]
   externalPaymentRefundIntents ExternalPaymentRefundIntent[]
@@ -2042,6 +2044,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentRefundIntents ExternalPaymentRefundIntent[]
   externalPaymentIntents ExternalPaymentIntent[]
   externalPaymentCaptures ExternalPaymentCapture[]
@@ -2967,6 +2970,8 @@ model AccountingPeriodAdjustment {
 }
 
 model Expense {
+  externalPaymentRefundFeeSource ExternalPaymentRefundFee? @relation("RefundFeeOriginalExpense")
+  externalPaymentRefundFeeCorrection ExternalPaymentRefundFee? @relation("RefundFeeCorrectionExpense")
   externalPaymentFee ExternalPaymentFee?
   recurringOccurrence RecurringExpenseOccurrence?
   correctsExpenseId      String?                     @map("corrects_expense_id") @db.Uuid
@@ -4518,6 +4523,7 @@ model ExternalPaymentIntent {
 }
 
 model ExternalPaymentCapture {
+  refundFees ExternalPaymentRefundFee[]
   refundIntents ExternalPaymentRefundIntent[]
   fee ExternalPaymentFee?
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -4571,6 +4577,7 @@ model ExternalPaymentAttempt {
 }
 
 model ExternalPaymentRefundIntent {
+  fee ExternalPaymentRefundFee?
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   captureId String @map("capture_id") @db.Uuid
@@ -4595,6 +4602,36 @@ model ExternalPaymentRefundIntent {
   @@unique([organizationId,idempotencyKey],map:"external_payment_refund_intent_key_unique")
   @@index([organizationId,depositId,id],map:"external_payment_refund_intent_deposit_idx")
   @@map("external_payment_refund_intent")
+}
+
+model ExternalPaymentRefundFee {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  refundIntentId String @map("refund_intent_id") @db.Uuid
+  captureId String @map("capture_id") @db.Uuid
+  originalExpenseId String @map("original_expense_id") @db.Uuid
+  correctionExpenseId String? @map("correction_expense_id") @db.Uuid
+  originalExpenseVersion Int @map("original_expense_version")
+  currentCost Decimal @map("current_cost") @db.Decimal(18,2)
+  returnedFee Decimal @map("returned_fee") @db.Decimal(18,2)
+  remainingCost Decimal @map("remaining_cost") @db.Decimal(18,2)
+  currency String @db.Char(3)
+  propertyTimezone String @map("property_timezone")
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  refundIntent ExternalPaymentRefundIntent @relation(fields:[organizationId,refundIntentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"external_refund_fee_org_intent_fk")
+  capture ExternalPaymentCapture @relation(fields:[organizationId,captureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  originalExpense Expense @relation("RefundFeeOriginalExpense",fields:[organizationId,originalExpenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"external_refund_fee_org_original_fk")
+  correctionExpense Expense? @relation("RefundFeeCorrectionExpense",fields:[organizationId,correctionExpenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"external_refund_fee_org_correction_fk")
+  actor UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  currencyRef Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"external_payment_refund_fee_org_id_unique")
+  @@unique([organizationId,refundIntentId],map:"external_payment_refund_fee_intent_unique")
+  @@unique([organizationId,originalExpenseId],map:"external_payment_refund_fee_original_unique")
+  @@unique([organizationId,correctionExpenseId],map:"external_payment_refund_fee_correction_unique")
+  @@index([organizationId,captureId,id],map:"external_payment_refund_fee_capture_idx")
+  @@map("external_payment_refund_fee")
 }
 
 model ExternalPaymentRefundAttempt {

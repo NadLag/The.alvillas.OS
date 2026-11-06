@@ -33,7 +33,8 @@ export async function guestDepositProviderRefundSource(ctx: FinanceActorContext,
     evidence.data.refundId !== request.identity.refundId || evidence.data.captureId !== request.capture.paymentId || evidence.data.requestId !== key ||
     !Money.of(evidence.data.amount.amount, evidence.data.amount.currency).equals(Money.of(request.amount.toString(), request.currency)) ||
     !Money.of(settlement.data.gross.amount, settlement.data.gross.currency).equals(Money.of(request.amount.toString(), request.currency)) ||
-    !Money.of(settlement.data.fee.amount, settlement.data.fee.currency).amount.isZero() || !Money.of(settlement.data.net.amount, settlement.data.net.currency).equals(Money.of(request.amount.toString(), request.currency)) ||
+    !Money.of(settlement.data.gross.amount, settlement.data.gross.currency).subtract(Money.of(settlement.data.fee.amount, settlement.data.fee.currency)).equals(Money.of(settlement.data.net.amount, settlement.data.net.currency)) ||
+    (!Money.of(settlement.data.fee.amount, settlement.data.fee.currency).amount.isZero() && (!request.fee || request.fee.returnedFee.toFixed(2) !== settlement.data.fee.amount || request.fee.currency !== settlement.data.fee.currency)) ||
     commandFingerprint({ ...originalInput, externalReference: request.identity.refundId }) !== commandFingerprint(input)) throw new ExternalPaymentRefundError();
   const first = await repository.firstCompletedExternalRefund(request.identity.id);
   if (!first?.refundedAt) throw new ExternalPaymentRefundError();

@@ -9,11 +9,13 @@ export const externalRefundAdmissionInput = externalRefundIdentityInput.extend({
 export const externalRefundCancellationInput = externalRefundIdentityInput.extend({ reason: guestDepositRefundInput.shape.reason }).strict();
 export const externalRefundReconciliationInput = externalRefundIdentityInput.extend({ refundId: z.string().regex(/^[A-Za-z0-9_-]{1,127}$/u).optional() }).strict();
 export const externalRefundReadInput = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("GET_FEE"), input: externalRefundIdentityInput }).strict(),
   z.object({ operation: z.literal("REVIEW"), input: externalRefundReviewInput }).strict(),
   z.object({ operation: z.literal("GET"), input: externalRefundIdentityInput }).strict(),
   z.object({ operation: z.literal("REVIEW_ADMISSION"), input: externalRefundIdentityInput }).strict()
 ]);
 export const externalRefundCommandInput = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("PREPARE_FEE"), input: externalRefundIdentityInput }).strict(),
   z.object({ operation: z.literal("CANCEL"), input: externalRefundCancellationInput }).strict(),
   z.object({ operation: z.literal("REQUEST"), input: externalRefundRequestInput }).strict(),
   z.object({ operation: z.literal("ADMIT"), input: externalRefundAdmissionInput }).strict(),

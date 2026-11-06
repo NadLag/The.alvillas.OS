@@ -18,10 +18,11 @@ export default async function ExpensePage({ params }: { params: Promise<{ locale
   try { expense = await getExpense(actor, input.id); }
   catch (error) { if (error instanceof ExpenseAccessError || error instanceof Error && error.name === "ZodError") notFound(); throw error; }
   return <AdminShell className="resource-page expense-page" testId="expense-detail-page"><ShellHeader eyebrow={expense.propertyName} title={expense.purpose} subtitle={t("description")}
-    actions={<div className="form-actions">{expense.canSubmit?<Link className="secondary-button" data-testid="expense-edit" href={`/${locale}/app/expenses/${expense.id}/edit`}>{t("editDraft")}</Link>:null}
+    actions={<div className="form-actions">{expense.canEditDraft?<Link className="secondary-button" data-testid="expense-edit" href={`/${locale}/app/expenses/${expense.id}/edit`}>{t("editDraft")}</Link>:null}
       <Link className="secondary-button" href={`/${locale}/app/properties/${expense.propertyId}`}>{t("back")}</Link></div>} />
     <section className="notification-settings"><p data-testid="expense-state" role="status">{t(`states.${expense.state}`)}</p>
       {expense.emergencyException?<p role="status" data-testid="expense-emergency-notice">{t("emergencyException")}</p>:null}
+      {expense.providerRefund?<p role="status" data-testid="expense-refund-guidance">{t("refundAdmissionGuidance")}</p>:null}
       {expense.correctsExpenseId?<p data-testid="expense-correction-source">{t("correctionSource")} <Link href={`/${locale}/app/expenses/${expense.correctsExpenseId}`}>{t("viewOriginalExpense")}</Link></p>:null}
       <dl className="detail-grid"><div><dt>{t("amount")}</dt><dd data-testid="expense-total" dir="auto">{formatCurrencyAmount(locale, expense.amount, expense.currency)}</dd></div>
         <div><dt>{t("category")}</dt><dd>{expense.category}</dd></div><div><dt>{t("occurredOn")}</dt><dd>{formatDate(locale, new Date(`${expense.occurredOn}T00:00:00Z`), { timeZone: "UTC" })}</dd></div></dl>
