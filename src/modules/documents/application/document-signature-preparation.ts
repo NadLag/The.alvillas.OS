@@ -11,6 +11,7 @@ import { DocumentAccessError, DocumentConfigurationError, DocumentConflictError,
 import { signaturePreparationCommandSchema, signaturePreparationDraftSchema, signaturePreparationSnapshotSchema, signaturePreparationReceiptSchema, signaturePreparationTargetInput, signaturePreparationTargetSchema, signaturePreparationReviewSchema, signaturePreparationProtocol, signaturePreparationRequested } from "../domain/document-signature-preparation";
 import { SignaturePreparationRepository } from "../infrastructure/signature-preparation-repository";
 import { documentPdfPageCount } from "../infrastructure/document-pdf-metadata";
+import { readNativeSignatureProviderEvidence } from "./document-signature-provider-evidence";
 import type { DocumentObjectStore } from "../infrastructure/document-object-store";
 import { documentActorContext, documentJson, downloadDocumentVersion, type DocumentActorContext } from "./document-archive";
 import { configuredDocumentObjects } from "./document-files";
@@ -59,6 +60,10 @@ export function originalSignaturePreparation(row: Intent) {
   const cap = restoreAuthorizationCap(row.authorizationCap);
   if (cap.organizationId !== row.organizationId || cap.userAccountId !== row.requestedBy || commandFingerprint(signaturePreparationCommandSchema.parse(row.input)) !== commandFingerprint(snapshot.command) || canonical !== row.canonicalRequest || commandFingerprint(original) !== row.commandHash || snapshot.commandHash !== row.commandHash || snapshot.command.idempotencyKey !== row.commandKey || snapshot.command.reason !== row.reason || snapshot.command.signatureId !== row.signatureId || snapshot.providerScopeHash !== row.providerScopeHash || row.phase !== "PREPARE") throw new DocumentConflictError();
   return { snapshot, draft };
+}
+export function readSignaturePreparationEvidence(row: Intent, evidence: NonNullable<Intent["attempt"]>["evidence"][number], env?: NodeJS.ProcessEnv) {
+  const { snapshot } = originalSignaturePreparation(row);
+  return readNativeSignatureProviderEvidence(row, evidence, snapshot, env);
 }
 export async function signaturePreparationResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Intent, env?: NodeJS.ProcessEnv) {
   if (row.requestedBy !== ctx.actorId) throw new DocumentAccessError(); const { snapshot, draft } = originalSignaturePreparation(row), original = documentActorContext({ ...ctx, authContext: restoreAuthorizationCap(row.authorizationCap) }),

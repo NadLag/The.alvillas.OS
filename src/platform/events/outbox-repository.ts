@@ -27,6 +27,9 @@ export class OutboxRepository {
   event(id: string) {
     return this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id } });
   }
+  byIdempotencyKey(idempotencyKey: string) {
+    return this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, idempotencyKey } });
+  }
 
   requestDispatch(idempotencyKey: string) {
     return this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } },

@@ -5119,5 +5119,22 @@
     "reviewed": "Reviewed private preparation",
     "fieldCount": "Explicit fields: {count}",
     "save": "Queue private preparation"
+  },
+  "SignatureDistribution": {
+    "title": "Send for signature",
+    "guidance": "Review the retained original and its recipients before sending signature requests by email.",
+    "pending": "A send command is retained. Recover its state before taking another action.",
+    "recover": "Check send command",
+    "reconcile": "Check provider outcome",
+    "newReview": "Start a new review",
+    "ADMITTED": "Sending is queued.",
+    "SENT": "Signature requests have been sent by email.",
+    "UNCERTAIN": "The outcome is unconfirmed. Check the retained request with the provider before taking another action.",
+    "SUPERSEDED": "Another reviewed command already owns this signature’s send attempt.",
+    "SOURCE_CHANGED": "The original source or configuration changed. Review the retained request before proceeding.",
+    "review": "Review email distribution",
+    "reviewed": "Reviewed original and recipients",
+    "confirm": "Confirm sending this retained original to these recipients by email.",
+    "send": "Queue signature request emails"
   }
 }

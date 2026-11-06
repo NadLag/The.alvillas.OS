@@ -5119,5 +5119,22 @@
     "reviewed": "Préparation privée vérifiée",
     "fieldCount": "Champs explicites : {count}",
     "save": "Mettre la préparation privée en attente"
+  },
+  "SignatureDistribution": {
+    "title": "Envoyer pour signature",
+    "guidance": "Vérifiez l’original conservé et ses destinataires avant d’envoyer les demandes de signature par e-mail.",
+    "pending": "Une commande d’envoi est conservée. Retrouvez son état avant toute autre action.",
+    "recover": "Vérifier la commande d’envoi",
+    "reconcile": "Vérifier le résultat du prestataire",
+    "newReview": "Commencer une nouvelle vérification",
+    "ADMITTED": "L’envoi est en attente.",
+    "SENT": "Les demandes de signature ont été envoyées par e-mail.",
+    "UNCERTAIN": "Le résultat reste non confirmé. Vérifiez la demande conservée auprès du prestataire avant toute autre action.",
+    "SUPERSEDED": "Une autre commande vérifiée détient déjà la tentative d’envoi de cette signature.",
+    "SOURCE_CHANGED": "La source ou la configuration originale a changé. Vérifiez la demande conservée avant de poursuivre.",
+    "review": "Vérifier l’envoi par e-mail",
+    "reviewed": "Original et destinataires vérifiés",
+    "confirm": "Confirmez l’envoi de cet original conservé à ces destinataires par e-mail.",
+    "send": "Mettre les demandes de signature en attente"
   }
 }

@@ -12,6 +12,21 @@ function fixture() {
   return { env, payload, ...sealSignatureProviderEvidence(payload, env) };
 }
 describe("encrypted native signature provider evidence", () => {
+  it("preserves old preparation ciphertext while accepting an independently acknowledged native distribution", () => {
+    const f = fixture(), old = openSignatureProviderEvidence(f.identity, f.cipher, f.env); expect(Object.hasOwn(old, "distributionProof")).toBe(false); expect(Object.hasOwn(old, "distributionReceipt")).toBe(false);
+    const requestId = f.payload.providerRequestId!, observation = { requestId, reference: f.payload.identity.signatureId, title: "Owned technical signing contract", status: "PENDING", teamId: 17, locale: "fr", signingOrder: "SEQUENTIAL", methods: { typed: true, draw: false, upload: false }, distributionMethod: "EMAIL", allowDictateNextSigner: false, expiration: null, emailSettings: null,
+      recipients: [{ id: 1, requestId, name: "Owned private recipient", email: "owned-private@example.test", role: "SIGNER", signingOrder: 1, readStatus: "NOT_OPENED", signingStatus: "NOT_SIGNED", sendStatus: "SENT", signedAt: null, expiresAt: null }], items: [{ id: "owned_item", requestId, title: "original.pdf" }], fields: [{ id: 1, recipientId: 1, itemId: "owned_item", type: "SIGNATURE", page: 1, positionX: 10, positionY: 80, width: 30, height: 5 }] },
+      payload = signatureProviderEvidencePayloadSchema.parse({ ...f.payload, kind: "SENT", observation, observationReceipt: Buffer.from(JSON.stringify(observation)).toString("base64"), distributionProof: "POST_ACKNOWLEDGED", distributionReceipt: Buffer.from(JSON.stringify({ success: true, id: requestId })).toString("base64"), failureCode: null }), sealed = sealSignatureProviderEvidence(payload, f.env);
+    expect(openSignatureProviderEvidence(sealed.identity, sealed.cipher, f.env)).toEqual(payload); expect(openSignatureProviderEvidence(f.identity, f.cipher, f.env)).toEqual(f.payload);
+    const reconciled = { ...payload, distributionProof: "READBACK_RECONCILED" as const, distributionReceipt: null }, recovered = sealSignatureProviderEvidence(reconciled, f.env);
+    expect(openSignatureProviderEvidence(recovered.identity, recovered.cipher, f.env)).toEqual(reconciled); expect(reconciled.distributionReceipt).toBeNull();
+    for (const changed of [{ distributionProof: null }, { distributionProof: "POST_ACKNOWLEDGED", distributionReceipt: null }, { distributionProof: "READBACK_RECONCILED" }, { kind: "SIGNED" }, { observation: { ...observation, status: "DRAFT", distributionMethod: "NONE" } }]) expect(signatureProviderEvidencePayloadSchema.safeParse({ ...payload, ...changed }).success).toBe(false);
+  });
+  it("never turns an uncertain outcome into a reconciled or signed claim based only on a caller-supplied status", () => {
+    const f = fixture(); expect(signatureProviderEvidencePayloadSchema.safeParse({ ...f.payload, distributionProof: "READBACK_RECONCILED" }).success).toBe(false);
+    expect(signatureProviderEvidencePayloadSchema.safeParse({ ...f.payload, kind: "SENT", distributionProof: "READBACK_RECONCILED", failureCode: null }).success).toBe(false);
+    expect(signatureProviderEvidencePayloadSchema.safeParse({ ...f.payload, kind: "SIGNED" }).success).toBe(false);
+  });
   it("retains the original uncertain receipt without exposing contact details or provider capabilities", () => {
     const f = fixture(); expect(openSignatureProviderEvidence(f.identity, f.cipher, f.env)).toEqual(f.payload);
     for (const value of ["OWNED-PRIVATE-PROVIDER-CAPABILITY", "owned-private@example.test", f.payload.prepareReceipt!]) expect(Buffer.from(f.cipher).includes(Buffer.from(value))).toBe(false);
