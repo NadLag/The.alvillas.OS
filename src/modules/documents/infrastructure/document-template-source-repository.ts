@@ -8,7 +8,7 @@ export class DocumentTemplateSourceRepository extends DocumentRepository {
   async templateSourceValues(native: DocumentSourceFacts, requested: readonly string[]) {
     if (requested.length > 200 || new Set(requested).size !== requested.length) throw new TemplateBindingError();
     const reference = native.reference, where = { organizationId: this.organizationId, id: reference.id }, values = new Map<string, DocumentTemplateBinding>();
-    const sourcePrivacy = reference.kind === "FINANCIAL_TRANSACTION" ? "financial" : ["OWNER", "PERSON"].includes(reference.kind) ? "sensitive" : "operational";
+    const sourcePrivacy = reference.kind === "FINANCIAL_TRANSACTION" ? "financial" : ["OWNER", "PERSON", "SUPPLIER", "GUEST"].includes(reference.kind) ? "sensitive" : "operational";
     const text = (key: string, value: string, privacy: "operational" | "sensitive" | "financial" = sourcePrivacy) => values.set(key, { kind: "TEXT", value, privacy: [privacy] });
     const integer = (key: string, value: number) => { if (!Number.isSafeInteger(value)) throw new TemplateBindingError(); values.set(key, { kind: "INTEGER", value: String(value), privacy: ["operational"] }); };
     text("source_label", native.label);
@@ -29,6 +29,14 @@ export class DocumentTemplateSourceRepository extends DocumentRepository {
       const row = reference.kind === "OWNER" ? await this.tx.owner.findFirst({ where, select: { id: true, displayName: true, archivedAt: true, updatedAt: true } }) :
         await this.tx.person.findFirst({ where, select: { id: true, displayName: true, archivedAt: true, updatedAt: true } });
       if (!row || row.archivedAt) throw new TemplateBindingError(); snapshot = row; text(reference.kind === "OWNER" ? "owner_name" : "person_name", row.displayName, "sensitive");
+    } else if (reference.kind === "SUPPLIER") {
+      const row = await this.tx.supplier.findFirst({ where, select: { id: true, displayName: true, reference: true, archivedAt: true, version: true } });
+      if (!row || row.archivedAt) throw new TemplateBindingError(); snapshot = row;
+      text("supplier_name", row.displayName); text("supplier_reference", row.reference);
+    } else if (reference.kind === "GUEST") {
+      const row = await this.tx.guestRecord.findFirst({ where, select: { id: true, displayName: true, archivedAt: true, mergedIntoId: true, updatedAt: true } });
+      if (!row || row.archivedAt || row.mergedIntoId) throw new TemplateBindingError(); snapshot = row;
+      if (row.displayName !== null) text("guest_name", row.displayName);
     } else {
       const source = await this.source(reference.id); if (!source) throw new TemplateBindingError(); snapshot = { identity: source.identity, transaction: source.transaction };
       text("transaction_reference", source.transaction.reference, "financial");

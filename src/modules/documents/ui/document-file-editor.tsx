@@ -24,6 +24,7 @@ export function DocumentFileEditor({locale,types,kind,amendment,disabled,onSubmi
     {amendment?<p dir="auto">{t("amends",{title:amendment.document.title,version:amendment.version.number})}</p>:null}
     <label className="field"><span>{t("documentType")}</span><select value={selected?.key??""} disabled={disabled||Boolean(amendment)} onChange={event=>{setTypeKey(event.target.value);setFile(null);}} data-testid="document-type">
       {types.map(type=><option key={type.key} value={type.key}>{type.labels[locale]}</option>)}</select></label>
+    {selected?.category?<p data-testid="document-category">{t(`category_${selected.category}`)}</p>:null}
     <label className="field"><span>{t("documentTitle")}</span><input required maxLength={500} value={title} disabled={disabled} onChange={event=>setTitle(event.target.value)} dir="auto" data-testid="document-title-input"/></label>
     <label className="field"><span>{t("language")}</span><select value={amendment?.document.locale??language} disabled={disabled||Boolean(amendment)} onChange={event=>setLanguage(event.target.value as AppLocale)} data-testid="document-locale">
       {(["en","fr","ar"] as const).map(value=><option key={value} value={value}>{t(`language_${value}`)}</option>)}</select></label>

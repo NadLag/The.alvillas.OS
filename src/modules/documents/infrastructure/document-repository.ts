@@ -45,14 +45,23 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
       const { displayName, ...facts } = row; label = displayName;
       archived = Boolean(row.archivedAt); resource = { ...base, type: "team_member", id: row.id, assignedPersonId: row.id, dataClass: "personal" };
       checks.push({ action: "view", resource: { ...resource, type: "staff_document", dataClass: "sensitive" } }); snapshot = facts;
+    } else if (reference.kind === "SUPPLIER") {
+      const row = await this.tx.supplier.findFirst({ where: { ...base, id: reference.id }, select: { id: true, displayName: true, reference: true, archivedAt: true, version: true } }); if (!row) return null;
+      const { displayName, ...facts } = row; label = displayName; archived = Boolean(row.archivedAt);
+      resource = { ...base, type: "supplier", id: row.id, dataClass: "personal" }; snapshot = facts;
+    } else if (reference.kind === "GUEST") {
+      const row = await this.tx.guestRecord.findFirst({ where: { ...base, id: reference.id }, select: { id: true, displayName: true, archivedAt: true, mergedIntoId: true, updatedAt: true } }); if (!row) return null;
+      const { displayName, ...facts } = row; label = displayName ?? row.id; archived = Boolean(row.archivedAt || row.mergedIntoId);
+      resource = { ...base, type: "guest", id: row.id, dataClass: "guest" }; snapshot = facts;
     } else {
       if (reference.id !== this.organizationId) return null;
       const row = await this.tx.organization.findFirst({ where: { id: this.organizationId }, select: { id: true, name: true } }); if (!row) return null;
       label = row.name; resource = { ...base, type: "organization", id: row.id, dataClass: "operational" }; snapshot = { id: row.id };
     }
     if (reference.kind !== "FINANCIAL_TRANSACTION") {
-      checks.push({ action: "view", resource, organizationOnly: reference.kind === "ORGANIZATION" || reference.kind === "PERSON" });
-      if (action === "export") checks.push({ action, resource, organizationOnly: reference.kind === "ORGANIZATION" || reference.kind === "PERSON" });
+      const organizationOnly = ["ORGANIZATION", "PERSON", "SUPPLIER", "GUEST"].includes(reference.kind);
+      checks.push({ action: "view", resource, organizationOnly });
+      if (action === "export") checks.push({ action, resource, organizationOnly });
     }
     return { reference, resource, checks, archived, snapshot, label, fingerprint: commandFingerprint({ reference, resource, snapshot, checks }) };
   }
@@ -86,8 +95,8 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   }
   signatureByNonce(requestedBy: string, commandKey: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, include: signatureInclude }); }
   signatureNonceOwner(commandKey: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { requestedBy: true } }); }
-  async providerPreparationByNonce(requestedBy: string, commandKey: string) { return await this.tx.signatureProviderIntent.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, select: { id: true } }) ?? this.tx.signatureProviderIdentityRecovery.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, select: { id: true } }); }
-  async providerPreparationNonceOwner(commandKey: string) { return await this.tx.signatureProviderIntent.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { requestedBy: true } }) ?? this.tx.signatureProviderIdentityRecovery.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { requestedBy: true } }); }
+  async providerPreparationByNonce(requestedBy: string, commandKey: string) { return await this.tx.signatureProviderIntent.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, select: { id: true } }) ?? await this.tx.signatureProviderIdentityRecovery.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, select: { id: true } }) ?? this.tx.documentAction.findFirst({ where: { organizationId: this.organizationId, actorId: requestedBy, commandKey, action: "SIGNED_ARCHIVE_RECONCILED" }, select: { id: true } }); }
+  async providerPreparationNonceOwner(commandKey: string) { const original = await this.tx.signatureProviderIntent.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { requestedBy: true } }) ?? await this.tx.signatureProviderIdentityRecovery.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { requestedBy: true } }); if (original) return original; const manual = await this.tx.documentAction.findFirst({ where: { organizationId: this.organizationId, commandKey, action: "SIGNED_ARCHIVE_RECONCILED" }, select: { actorId: true } }); return manual?.actorId ? { requestedBy: manual.actorId } : null; }
   appendSignature(data: Omit<Prisma.SignatureUncheckedCreateInput, "organizationId">) { return this.tx.signature.create({ data: { ...data, organizationId: this.organizationId } }); }
   appendSignatureRecipient(data: Omit<Prisma.SignatureRecipientUncheckedCreateInput, "organizationId">) { return this.tx.signatureRecipient.create({ data: { ...data, organizationId: this.organizationId } }); }
   appendSignatureEvent(data: Omit<Prisma.SignatureEventUncheckedCreateInput, "organizationId">) { return this.tx.signatureEvent.create({ data: { ...data, organizationId: this.organizationId } }); }
@@ -128,6 +137,8 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
     if (kind === "OWNER") return (await this.tx.owner.findMany({ where: { ...where, displayName: { contains: query, mode: "insensitive" } }, select: { id: true, displayName: true }, orderBy, take })).map(row => ({ id: row.id, label: row.displayName }));
     if (kind === "PERSON") return (await this.tx.person.findMany({ where: { ...where, displayName: { contains: query, mode: "insensitive" } }, select: { id: true, displayName: true }, orderBy, take })).map(row => ({ id: row.id, label: row.displayName }));
     if (kind === "RESERVATION") return (await this.tx.reservation.findMany({ where: { ...where, reference: { contains: query, mode: "insensitive" } }, select: { id: true, reference: true }, orderBy, take })).map(row => ({ id: row.id, label: row.reference }));
+    if (kind === "SUPPLIER") return (await this.tx.supplier.findMany({ where: { ...where, displayName: { contains: query, mode: "insensitive" } }, select: { id: true, displayName: true }, orderBy, take })).map(row => ({ id: row.id, label: row.displayName }));
+    if (kind === "GUEST") return (await this.tx.guestRecord.findMany({ where: { ...where, displayName: { contains: query, mode: "insensitive" } }, select: { id: true, displayName: true }, orderBy, take })).map(row => ({ id: row.id, label: row.displayName ?? row.id }));
     return (await this.tx.financialTransaction.findMany({ where: { ...where, sealed: true, reference: { contains: query, mode: "insensitive" } }, select: { id: true, reference: true }, orderBy, take })).map(row => ({ id: row.id, label: row.reference }));
   }
 }

@@ -11,6 +11,12 @@ import { Money } from "@/platform/money/money";
 import { openFieldFixture } from "./support/field-fixture";
 import { forwardBrowserPostOnce } from "./support/forward-browser-post";
 import { acknowledgementBarrier } from "./support/acknowledgement-barrier";
+import { authContextForAccount } from "@/platform/authz/account-context";
+import { createSupplier } from "@/modules/finance/application/supplier-service";
+import { documentCategories } from "@/modules/documents/domain/document-policy";
+import en from "../../messages/en.json" with { type: "json" };
+import fr from "../../messages/fr.json" with { type: "json" };
+import ar from "../../messages/ar.json" with { type: "json" };
 
 type Fixture = Awaited<ReturnType<typeof openFieldFixture>>;
 async function archiveFixture(f: Fixture) {
@@ -208,5 +214,37 @@ for (const locale of ["en", "fr", "ar"] as const) {
       expect(retained.instances).toBe(0); expect(retained.signatures).toBe(0); expect(await originalRows()).toEqual(before);
       await privatePresentation(page, pageErrors); await page.screenshot({ path: info.outputPath("document-template-multipart.png"), fullPage: true });
     } finally { await f.db.$disconnect(); }
+  });
+
+  test(`All approved document types retain private native sources and localized classification in ${locale}`, async ({page},info)=>{
+    test.skip(!process.env.DATABASE_URL,"Dedicated native PostgreSQL required");test.setTimeout(240000);
+    const f=await openFieldFixture(page,info,locale),pageErrors:string[]=[];page.on("pageerror",error=>pageErrors.push(error.name));
+    try{
+      const native=await withTenant(f.db,f.organizationId,async tx=>{
+        const task=await tx.operationTask.findUniqueOrThrow({where:{id:f.taskId}}),actorId=task.assignedToUserAccountId!,account=await tx.userAccount.findUniqueOrThrow({where:{id:actorId}}),property=await tx.property.findUniqueOrThrow({where:{id:task.propertyId}}),organization=await tx.organization.findUniqueOrThrow({where:{id:f.organizationId}});
+        if(!account.personId)throw Error("Actual native document actor person required");
+        const role=await tx.role.create({data:{organizationId:f.organizationId,key:"typed_documents_"+randomUUID(),name:"Explicit independent native document type acceptance"}}),keys=["document:view","document:create","document:export","organization:view","organization:export","property:view","property:export","owner:view","owner:export","guest:view","guest:export","supplier:view","supplier:create","supplier:export","team_member:view","team_member:export","staff_document:view","staff_document:export","financial_transaction:view","financial_transaction:export","property_finance:view","property_finance:export"],permissions=await tx.permission.findMany({where:{organizationId:f.organizationId,key:{in:keys}}});expect(permissions).toHaveLength(keys.length);
+        await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}))});
+        await tx.roleAssignment.create({data:{organizationId:f.organizationId,userAccountId:actorId,personId:account.personId,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});
+        const owner=await tx.owner.create({data:{organizationId:f.organizationId,displayName:"Actual document owner "+randomUUID()}}),guest=await tx.guestRecord.create({data:{organizationId:f.organizationId,displayName:"Actual document guest "+randomUUID()}}),staff=await tx.person.create({data:{organizationId:f.organizationId,displayName:"Actual document staff "+randomUUID()}});
+        return{actorId,personId:account.personId,property,organization,owner,guest,staff};
+      }),ctx={organizationId:f.organizationId,actorId:native.actorId,authContext:{...await authContextForAccount(f.organizationId,native.actorId,{db:f.db}),personId:native.personId}},supplier=await createSupplier(ctx,{displayName:"Actual document supplier "+randomUUID(),category:"Contract services",idempotencyKey:randomUUID(),reason:"Create independently authorized native supplier for document acceptance"},{db:f.db}),supplierRow=await withTenant(f.db,f.organizationId,tx=>tx.supplier.findUniqueOrThrow({where:{id:supplier.id}})),journal=await withTenant(f.db,f.organizationId,async tx=>{
+        const finance=new FinanceRepository(tx,f.organizationId),bank=await finance.ensureLedgerAccount({code:"TYPED_DOCUMENT_BANK",name:"Native document custody",accountType:"ASSET_LOCATION",normalSide:"DEBIT"}),claim=await finance.ensureLedgerAccount({code:"OWNER_PAYABLE",name:"Native document ownership",accountType:"CLAIM_OWNERSHIP",normalSide:"CREDIT"}),amount=Money.of("9007199254740993.07","MAD"),dimensions={property_id:native.property.id};
+        return finance.createFinancialTransaction({reference:"DOC-TYPES:"+randomUUID(),description:"Original financial evidence for typed documents",idempotencyKey:randomUUID(),createdBy:native.actorId,occurredAt:await finance.clock(),postings:[{ledgerAccountId:bank.id,side:"DEBIT",amount,bucket:"OWNER_REVENUE",dimensions},{ledgerAccountId:claim.id,side:"CREDIT",amount,bucket:"OWNER_REVENUE",dimensions}]});
+      });
+      type Source={kind:"ORGANIZATION"|"PROPERTY"|"OWNER"|"GUEST"|"SUPPLIER"|"PERSON"|"FINANCIAL_TRANSACTION";id:string;label:string};
+      const owner:Source={kind:"OWNER",id:native.owner.id,label:native.owner.displayName},property:Source={kind:"PROPERTY",id:native.property.id,label:native.property.name},financial:Source={kind:"FINANCIAL_TRANSACTION",id:journal.id,label:journal.reference},sources:Record<typeof documentCategories[number],Source>={OWNER_CONTRACT:owner,AMENDMENT:owner,GUEST_AGREEMENT:{kind:"GUEST",id:native.guest.id,label:native.guest.displayName!},HOUSE_RULES:property,INVOICE:financial,RECEIPT:financial,PROPERTY:property,SUPPLIER:{kind:"SUPPLIER",id:supplier.id,label:supplierRow.displayName},STAFF:{kind:"PERSON",id:native.staff.id,label:native.staff.displayName},REPORT:{kind:"ORGANIZATION",id:f.organizationId,label:native.organization.name}},translations={en,fr,ar};
+      const labels=(category:typeof documentCategories[number])=>({en:en.DocumentArchive[`category_${category}`],fr:fr.DocumentArchive[`category_${category}`],ar:ar.DocumentArchive[`category_${category}`]});
+      await withTenant(f.db,f.organizationId,tx=>new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"documents.archive",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:native.actorId,reason:"Explicit approved native document categories and separate privacy",value:{source:"NATIVE_DOCUMENT_ARCHIVE",encryption:"APP_MANAGED_AEAD",history:"APPEND_ONLY",downloads:"AUTHORIZED_SERVER_PROXY",storage_url_seconds:1,upload_admission:{window_seconds:3600,max_requests:100},types:documentCategories.map(category=>({key:"approved_"+category.toLowerCase(),category,labels:labels(category),sources:[sources[category].kind],privacy:category==="INVOICE"||category==="RECEIPT"?["financial"]:["sensitive"],content_types:["application/pdf"],max_bytes:1048576}))}}));
+      const moneyRows=()=>withTenant(f.db,f.organizationId,tx=>tx.$queryRaw`SELECT t.id::text,t.xmin::text,md5(to_jsonb(t)::text) AS body FROM financial_transaction t WHERE t.organization_id=${f.organizationId}::uuid UNION ALL SELECT p.id::text,p.xmin::text,md5(to_jsonb(p)::text) FROM posting p WHERE p.organization_id=${f.organizationId}::uuid ORDER BY id`),before=await moneyRows(),pdf=await originalPdf();
+      await page.goto(`/${locale}/app/documents`);
+      for(const category of documentCategories){
+        const source=sources[category],label=translations[locale].DocumentArchive[`category_${category}`];await chooseSource(page,source.kind,source.label);await page.getByTestId("document-type").selectOption("approved_"+category.toLowerCase());
+        await expect(page.getByTestId("document-file-editor").getByTestId("document-category")).toHaveText(label);
+        const file={name:category.toLowerCase()+".pdf",mimeType:"application/pdf",buffer:pdf},title=label+" "+randomUUID();await fillFile(page,file,title,"Retain actual native source and configured classification");await page.getByTestId("document-save").click();
+        await expect(page.getByTestId("document-history").getByRole("heading",{name:title,exact:true})).toBeVisible();await expect(page.getByTestId("document-history").getByTestId("document-category")).toHaveText(label);await expect(page.getByTestId("document-version")).toHaveCount(1);await downloadFile(page,file.name,pdf);
+      }
+      expect(await moneyRows()).toEqual(before);await privatePresentation(page,pageErrors);await page.screenshot({path:info.outputPath("approved-native-document-types.png"),fullPage:true});
+    }finally{await f.db.$disconnect();}
   });
 }

@@ -69,6 +69,7 @@ export async function admitDocumentGeneration(actor: DocumentActorContext, raw: 
     }else{
       root=await repository.appendDocument({ id: documentId, sourceKind: draft.source.kind, sourceId: draft.source.id, propertyId: draft.source.kind === "PROPERTY" ? draft.source.id : null,
       ownerId: draft.source.kind === "OWNER" ? draft.source.id : null, reservationId: draft.source.kind === "RESERVATION" ? draft.source.id : null, personId: draft.source.kind === "PERSON" ? draft.source.id : null,
+      supplierId: draft.source.kind === "SUPPLIER" ? draft.source.id : null, guestId: draft.source.kind === "GUEST" ? draft.source.id : null,
       transactionId: draft.source.kind === "FINANCIAL_TRANSACTION" ? draft.source.id : null, typeKey: prepared.selected.typeKey, kind: "INSTANCE", locale: prepared.selected.locale, title: draft.title,
       privacy: current.privacy, sourceSnapshot: documentJson(current.native.snapshot), policySnapshot: documentJson(current.policy), commandKey: command.idempotencyKey, commandHash, createdBy: ctx.actorId, createdAt: current.now });
       await appendDocumentHistory(ctx, tx, current, root.id, "CREATED", command.idempotencyKey, commandHash, command.reason, {}, { document: await repository.snapshot(root.id) }, deps);
