@@ -14,14 +14,14 @@ describe("source-bound private document expiry notices",()=>{
   it("retains every independent current source and financial grant",()=>expect(canReadDocumentExpiryNotice(context(),target,now)).toBe(true));
   it.each(keys)("denies a held caller without %s despite its own inbox",key=>expect(canReadDocumentExpiryNotice(context(keys.filter(value=>value!==key)),target,now)).toBe(false));
   it.each(["organizationId","documentId","documentExpiryAudienceId"]as const)("rejects substituted native %s",key=>expect(canReadDocumentExpiryNotice(context(),{...target,[key]:randomUUID()},now)).toBe(false));
-  it.each([0,-1,1.1,Number.MAX_SAFE_INTEGER+1])("rejects invalid version number %s",number=>expect(canReadDocumentExpiryNotice(context(),{...target,documentExpiryVersionNumber:number},now)).toBe(false));
+  it.each([0,-1,1.1,Number.MAX_SAFE_INTEGER+1])("rejects invalid version number %s",number=>{const subject:DocumentExpiryNoticeResource={...target,documentExpiryVersionNumber:number};expect(canReadDocumentExpiryNotice(context(),subject,now)).toBe(false);});
   it("rejects an empty or foreign check list and requires the actual document view",()=>{
-    for(const checks of[[],target.documentExpiryChecks.slice(1),target.documentExpiryChecks.map(check=>({...check,resource:{...check.resource,organizationId:randomUUID()}}))])expect(canReadDocumentExpiryNotice(context(),{...target,documentExpiryChecks:checks},now)).toBe(false);
+    for(const checks of[[],target.documentExpiryChecks.slice(1),target.documentExpiryChecks.map(check=>({...check,resource:{...check.resource,organizationId:randomUUID()}}))]){const subject:DocumentExpiryNoticeResource={...target,documentExpiryChecks:checks};expect(canReadDocumentExpiryNotice(context(),subject,now)).toBe(false);}
   });
   it("retains unconditional and organization-only source requirements",()=>{
     const ctx=context(),financial={...target.documentExpiryChecks[2].resource,amount:"0.50"},base={...target,documentExpiryChecks:[...target.documentExpiryChecks.slice(0,2),{action:"view" as const,resource:financial}]};ctx.assignments=[{scope,permissions:new Set(keys.slice(0,2))},{scope,permissions:new Set([keys[2]]),conditions:{maxAmount:"1.00"}}];
     expect(canReadDocumentExpiryNotice(ctx,base,now)).toBe(true);
-    for(const check of[{organizationOnly:true},{unconditional:true}])expect(canReadDocumentExpiryNotice(ctx,{...base,documentExpiryChecks:[...base.documentExpiryChecks,{action:"view",resource:financial,...check}]},now)).toBe(false);
+    for(const check of[{organizationOnly:true},{unconditional:true}]){const subject:DocumentExpiryNoticeResource={...base,documentExpiryChecks:[...base.documentExpiryChecks,{action:"view",resource:financial,...check}]};expect(canReadDocumentExpiryNotice(ctx,subject,now)).toBe(false);}
   });
   it("rejects expired held authority",()=>{const ctx=context();ctx.assignments=[{scope,permissions:new Set(keys),validTo:new Date(now.getTime()-1)}];expect(canReadDocumentExpiryNotice(ctx,target,now)).toBe(false);});
   it.each(["en","fr","ar"]as const)("resolves only the actual recipient and opaque immutable version in %s",locale=>{
