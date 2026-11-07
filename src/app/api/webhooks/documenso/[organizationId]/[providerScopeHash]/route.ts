@@ -4,7 +4,7 @@ import { logger } from "@/platform/observability/logger";
 import { readBoundedRequestBytes } from "@/platform/http/read-exact-response";
 import { signatureMaximumEvidenceBytes } from "@/platform/providers/signature-contract";
 import { DocumentRateLimitError } from "@/modules/documents/domain/document-command";
-import { authenticateDocumensoWebhook, SignatureWebhookPayloadError } from "@/modules/documents/infrastructure/documenso-webhook";
+import { authenticateDocumensoWebhook, SignatureWebhookPayloadError } from "@/modules/documents/application/document-signature-webhook-authentication";
 import { receiveSignatureWebhook } from "@/modules/documents/application/document-signature-webhook";
 
 export const runtime = "nodejs";
