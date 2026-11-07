@@ -215,6 +215,8 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  documentExpiryRevisions DocumentExpiryRevision[]
+  documentExpiryReminders DocumentExpiryReminder[]
   signedSignatureArchives SignatureSignedArchive[]
   signedSignatureArtifacts SignatureSignedArtifact[]
   documents Document[]
@@ -620,6 +622,8 @@ model Person {
 }
 
 model UserAccount {
+  documentExpiryRevisions DocumentExpiryRevision[] @relation("DocumentExpiryAuthor")
+  documentExpiryReminders DocumentExpiryReminder[] @relation("DocumentExpiryPrincipal")
   createdDocuments Document[] @relation("DocumentCreator")
   documentAdmissions DocumentAdmission[] @relation("DocumentAdmissionCreator")
   documentVersions DocumentVersion[] @relation("DocumentVersionCreator")
@@ -4814,6 +4818,7 @@ model DocumentAdmission {
 }
 
 model DocumentVersion {
+  expiryRevisions DocumentExpiryRevision[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   documentId String @map("document_id") @db.Uuid
@@ -4842,6 +4847,64 @@ model DocumentVersion {
   @@unique([organizationId,admissionId],map:"document_version_admission_unique")
   @@unique([organizationId,supersedesId],map:"document_version_successor_unique")
   @@map("document_version")
+}
+
+model DocumentExpiryRevision {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  versionId String @map("version_id") @db.Uuid
+  previousId String? @map("previous_id") @db.Uuid
+  number Int
+  expiresOn DateTime? @map("expires_on") @db.Date
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash") @db.Char(64)
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  authorizationCap Json @map("authorization_cap")
+  sourceSnapshot Json @map("source_snapshot")
+  policySnapshot Json @map("policy_snapshot")
+  input Json
+  reason String
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  version DocumentVersion @relation(fields:[organizationId,versionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  previous DocumentExpiryRevision? @relation("DocumentExpiryLineage",fields:[organizationId,previousId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  next DocumentExpiryRevision[] @relation("DocumentExpiryLineage")
+  creator UserAccount @relation("DocumentExpiryAuthor",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  reminders DocumentExpiryReminder[]
+  @@unique([organizationId,id],map:"document_expiry_revision_org_id_unique")
+  @@unique([organizationId,versionId,number],map:"document_expiry_revision_number_unique")
+  @@unique([organizationId,previousId],map:"document_expiry_revision_successor_unique")
+  @@unique([organizationId,createdBy,commandKey],map:"document_expiry_revision_command_unique")
+  @@index([organizationId,expiresOn,id],map:"document_expiry_revision_due_idx")
+  @@index([organizationId,commandKey],map:"document_expiry_revision_nonce_owner_idx")
+  @@map("document_expiry_revision")
+}
+
+model DocumentExpiryReminder {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  revisionId String @map("revision_id") @db.Uuid
+  principalId String @map("principal_id") @db.Uuid
+  idempotencyKey String @map("idempotency_key") @db.VarChar(400)
+  commandHash String @map("command_hash") @db.Char(64)
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  stageKey String @map("stage_key")
+  occurredOn DateTime @map("occurred_on") @db.Date
+  policySnapshot Json @map("policy_snapshot")
+  routingSnapshot Json @map("routing_snapshot")
+  sourceSnapshot Json @map("source_snapshot")
+  authorizationSnapshots Json @map("authorization_snapshots")
+  recipientIds String[] @map("recipient_ids") @db.Uuid
+  outboxEventIds String[] @map("outbox_event_ids") @db.Uuid
+  observedAt DateTime @default(now()) @map("observed_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  revision DocumentExpiryRevision @relation(fields:[organizationId,revisionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  principal UserAccount @relation("DocumentExpiryPrincipal",fields:[organizationId,principalId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"document_expiry_reminder_org_id_unique")
+  @@unique([organizationId,idempotencyKey],map:"document_expiry_reminder_occurrence_unique")
+  @@index([organizationId,revisionId,id],map:"document_expiry_reminder_revision_idx")
+  @@map("document_expiry_reminder")
 }
 
 model DocumentTemplate {

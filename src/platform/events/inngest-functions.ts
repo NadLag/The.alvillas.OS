@@ -1,3 +1,4 @@
+import {tickDocumentExpiryReminders} from "@/modules/documents/application/document-expiry-reminders";
 import { scheduleReservationSyncs } from "@/modules/reservations/application/reservation-management-service";
 import { cleanupFieldUploadParts } from "@/modules/reservations/application/field-upload-cleanup";
 import { Inngest, NonRetriableError } from "inngest";
@@ -76,6 +77,7 @@ export const dispatchOutbox = inngest.createFunction({ id: "dispatch-outbox", na
     const operationProperties=await step.run(`operations-properties-${id}`,()=>operationSchedulerProperties(id));
     for(const propertyId of operationProperties)await step.run(`schedule-operations-${id}-${propertyId}`,()=>scheduleOperationTasks(id,{propertyId}));
     await step.run(`schedule-staff-documents-${id}`, () => scheduleTeamDocumentReminders(id));
+    await step.run(`schedule-document-expiry-${id}`,()=>tickDocumentExpiryReminders(id));
     await step.run(`schedule-receivable-reminders-${id}`,()=>tickReceivableReminders(id));
     await step.run(`schedule-recurring-expenses-${id}`,()=>tickRecurringExpenses(id));
     await step.run(`schedule-recurring-company-expenses-${id}`,()=>tickRecurringCompanyExpenses(id));

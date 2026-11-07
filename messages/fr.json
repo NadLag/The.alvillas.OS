@@ -1292,7 +1292,8 @@
       "supplier_invoice_emergency": "Coût de facture urgente soumis",
       "employee_cost_emergency": "Avis de coûts urgents du personnel",
       "receivable_reminder": "Une créance nécessite votre attention.",
-      "ledger_integrity_failed": "Échec du contrôle d’intégrité du grand livre"
+      "ledger_integrity_failed": "Échec du contrôle d’intégrité du grand livre",
+      "document_expiring": "Un document approche de sa date d’expiration."
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -1560,7 +1561,8 @@
         "identity_invitation_delivery_requested": "Invitation au compte",
         "identity_recovery_delivery_requested": "Récupération du compte",
         "other": "Autre notification",
-        "staff_document_expiring": "Un document du personnel arrive à expiration."
+        "staff_document_expiring": "Un document du personnel arrive à expiration.",
+        "document_expiring": "Un document approche de sa date d’expiration."
       }
     }
   },
@@ -5214,5 +5216,25 @@
     "SIGNED_ORIGINAL": "PDF signé",
     "CERTIFICATE": "Certificat de finalisation",
     "openOriginalVersion": "Ouvrir la version d’origine {number}"
+  },
+  "DocumentExpiry": {
+    "title": "Historique des échéances et rappels",
+    "guidance": "Chaque date concerne cette version exacte du document. Les modifications ajoutent un historique et conservent le document original.",
+    "open": "Échéance et rappels",
+    "load": "Charger l’historique des échéances",
+    "date": "Date d’expiration",
+    "clearGuidance": "Laissez la date vide pour supprimer l’échéance actuelle. Les anciennes dates restent dans l’historique.",
+    "current": "Échéance actuelle : {date}",
+    "none": "Aucune date d’expiration actuelle.",
+    "readOnly": "Vous pouvez consulter cet historique. Modifier la date nécessite les autorisations actuelles sur le document et sa source.",
+    "empty": "Aucune modification d’échéance enregistrée.",
+    "review": "Vérifier la modification d’échéance",
+    "reviewed": "Modification d’échéance vérifiée",
+    "admit": "Enregistrer la modification d’échéance",
+    "cleared": "Échéance effacée",
+    "revision": "Modification {number}",
+    "more": "Modifications antérieures",
+    "saved": "Modification d’échéance {number} enregistrée.",
+    "newReview": "Commencer une nouvelle vérification"
   }
 }
