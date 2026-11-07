@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { financialAttachmentMaximumBytes, financialAttachmentPartsSchema, financialAttachmentUploadChunkBytes } from "./financial-attachment-parts";
 
 export const financialAttachmentKinds = ["RECEIPT", "INVOICE"] as const;
 export const financialAttachmentContentTypes = ["application/pdf", "image/jpeg", "image/png", "image/webp"] as const;
@@ -6,12 +7,15 @@ const id = z.uuid().transform(value => value.toLowerCase());
 const extensions = { "application/pdf": ["pdf"], "image/jpeg": ["jpg", "jpeg"], "image/png": ["png"], "image/webp": ["webp"] } as const;
 export const financialAttachmentIntentSchema = z.object({ transactionId: id, idempotencyKey: id, kind: z.enum(financialAttachmentKinds),
   fileName: z.string().trim().min(1).max(180).refine(value => !/[\p{Cc}\\/]/u.test(value)).transform(value => value.normalize("NFC")),
-  contentType: z.enum(financialAttachmentContentTypes), fileSize: z.number().int().positive().max(50 * 1024 * 1024),
+  contentType: z.enum(financialAttachmentContentTypes), fileSize: z.number().int().positive().max(financialAttachmentMaximumBytes),
+  parts:financialAttachmentPartsSchema.optional(),
   sha256: z.string().regex(/^[a-f0-9]{64}$/iu).transform(value => value.toLowerCase()), supersedesId: id.nullable().default(null),
   reason: z.string().trim().min(6).max(1000) }).strict().refine(input => {
     const extension = input.fileName.split(".").at(-1)?.toLowerCase();
     return extension !== undefined && (extensions[input.contentType] as readonly string[]).includes(extension);
-  }, { path: ["fileName"], message: "file_extension_must_match_content_type" });
+  }, { path: ["fileName"], message: "file_extension_must_match_content_type" }).superRefine((input,ctx)=>{
+    if(input.parts&&input.parts.hashes.length!==Math.ceil(input.fileSize/financialAttachmentUploadChunkBytes))ctx.addIssue({code:"custom",path:["parts","hashes"],message:"exact_original_part_count_required"});
+  });
 export type FinancialAttachmentIntent = z.infer<typeof financialAttachmentIntentSchema>;
 export const financialAttachmentReferenceSchema = z.object({ id }).strict();
 export const financialAttachmentListSchema = z.object({ transactionId: id, before: id.optional() }).strict();
