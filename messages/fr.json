@@ -5236,5 +5236,31 @@
     "more": "Modifications antérieures",
     "saved": "Modification d’échéance {number} enregistrée.",
     "newReview": "Commencer une nouvelle vérification"
+  },
+  "DocumentRetention": {
+    "open": "Étiquettes de conservation",
+    "title": "Conservation de la version",
+    "guidance": "Enregistrez les étiquettes configurées pour cette version originale. Chaque modification conserve les anciens libellés, blocages et références de politique saisis.",
+    "load": "Charger les étiquettes et l’historique",
+    "selection": "Étiquettes configurées",
+    "clearGuidance": "Désélectionnez toutes les étiquettes pour enregistrer leur retrait motivé. Les étiquettes retirées peuvent être supprimées de la sélection ; un nouvel examen utilise les étiquettes disponibles.",
+    "retired": " (retirée)",
+    "review": "Examiner les modifications",
+    "reviewed": "Étiquettes de version examinées",
+    "admit": "Enregistrer les étiquettes examinées",
+    "cleared": "Aucune étiquette enregistrée",
+    "hold": "Blocage de conservation enregistré",
+    "descriptive": "Contexte descriptif ; aucune autorisation de suppression",
+    "readOnly": "Vous pouvez consulter ces étiquettes. Leur modification exige les droits actuels sur la version originale et une politique configurée.",
+    "unconfigured": "L’étiquetage attend sa politique configurée. L’historique conservé reste consultable.",
+    "empty": "Aucune modification de conservation enregistrée.",
+    "revision": "Révision {number}",
+    "more": "Modifications antérieures",
+    "saved": "Révision de conservation {number} enregistrée",
+    "newReview": "Commencer une nouvelle modification examinée",
+    "inherited": "Étiquettes héritées de la version originale {number}. Ouvrez l’original pour demander une modification.",
+    "context": "Consulter le contexte de politique",
+    "contextTitle": "Contexte de politique conservé",
+    "policyGuidance": "Les étiquettes et références saisies n’autorisent aucune suppression. Toute disposition exige le processus de confidentialité approuvé par le propriétaire et la politique juridique."
   }
 }

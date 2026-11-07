@@ -5236,5 +5236,31 @@
     "more": "Earlier expiry changes",
     "saved": "Expiry change {number} recorded.",
     "newReview": "Start a new expiry review"
+  },
+  "DocumentRetention": {
+    "open": "Retention tags",
+    "title": "Version retention",
+    "guidance": "Record the configured tags for this original version. Each change preserves its earlier labels, holds and entered policy references.",
+    "load": "Load tags and history",
+    "selection": "Configured tags",
+    "clearGuidance": "Clear every selection to record a reasoned removal. Retired tags may be removed; a new review uses available tags.",
+    "retired": " (retired)",
+    "review": "Review tag changes",
+    "reviewed": "Reviewed version tags",
+    "admit": "Record reviewed tags",
+    "cleared": "No tags recorded",
+    "hold": "Retention hold recorded",
+    "descriptive": "Descriptive policy context; no disposal approval",
+    "readOnly": "You can read these tags. Editing requires the original version's current permissions and configured policy.",
+    "unconfigured": "Tagging is unavailable until its policy is configured. Retained history remains readable.",
+    "empty": "No retention changes recorded.",
+    "revision": "Revision {number}",
+    "more": "Earlier changes",
+    "saved": "Retention revision {number} recorded",
+    "newReview": "Start a new reviewed change",
+    "inherited": "Tags inherited from original version {number}. Open the original to request a change.",
+    "context": "Read policy context",
+    "contextTitle": "Retained policy context",
+    "policyGuidance": "Tags and entered references do not authorize disposal. Any disposition requires the owner-approved privacy workflow and legal policy."
   }
 }

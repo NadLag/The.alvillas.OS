@@ -216,6 +216,7 @@ model ReceivableCollectionReversal {
 
 model Organization {
   documentExpiryRevisions DocumentExpiryRevision[]
+  documentRetentionRevisions DocumentRetentionRevision[]
   documentExpiryReminders DocumentExpiryReminder[]
   signedSignatureArchives SignatureSignedArchive[]
   signedSignatureArtifacts SignatureSignedArtifact[]
@@ -623,6 +624,7 @@ model Person {
 
 model UserAccount {
   documentExpiryRevisions DocumentExpiryRevision[] @relation("DocumentExpiryAuthor")
+  documentRetentionRevisions DocumentRetentionRevision[] @relation("DocumentRetentionAuthor")
   documentExpiryReminders DocumentExpiryReminder[] @relation("DocumentExpiryPrincipal")
   createdDocuments Document[] @relation("DocumentCreator")
   documentAdmissions DocumentAdmission[] @relation("DocumentAdmissionCreator")
@@ -4819,6 +4821,7 @@ model DocumentAdmission {
 
 model DocumentVersion {
   expiryRevisions DocumentExpiryRevision[]
+  retentionRevisions DocumentRetentionRevision[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   documentId String @map("document_id") @db.Uuid
@@ -4847,6 +4850,37 @@ model DocumentVersion {
   @@unique([organizationId,admissionId],map:"document_version_admission_unique")
   @@unique([organizationId,supersedesId],map:"document_version_successor_unique")
   @@map("document_version")
+}
+
+model DocumentRetentionRevision {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  versionId String @map("version_id") @db.Uuid
+  previousId String? @map("previous_id") @db.Uuid
+  number Int
+  tagKeys String[] @map("tag_keys")
+  tags Json
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash") @db.Char(64)
+  sourceFingerprint String @map("source_fingerprint") @db.Char(64)
+  authorizationCap Json @map("authorization_cap")
+  sourceSnapshot Json @map("source_snapshot")
+  policySnapshot Json @map("policy_snapshot")
+  input Json
+  reason String
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  version DocumentVersion @relation(fields:[organizationId,versionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  previous DocumentRetentionRevision? @relation("DocumentRetentionLineage",fields:[organizationId,previousId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  next DocumentRetentionRevision[] @relation("DocumentRetentionLineage")
+  creator UserAccount @relation("DocumentRetentionAuthor",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"document_retention_revision_org_id_unique")
+  @@unique([organizationId,versionId,number],map:"document_retention_revision_number_unique")
+  @@unique([organizationId,previousId],map:"document_retention_revision_successor_unique")
+  @@unique([organizationId,createdBy,commandKey],map:"document_retention_revision_command_unique")
+  @@index([organizationId,commandKey],map:"document_retention_revision_nonce_owner_idx")
+  @@map("document_retention_revision")
 }
 
 model DocumentExpiryRevision {

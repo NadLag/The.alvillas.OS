@@ -2747,3 +2747,7 @@ textarea:disabled {
 .document-archive-page .form-actions > button { white-space: normal; overflow-wrap: anywhere; }
 .document-template-section { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); min-inline-size: 0; max-inline-size: 100%; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-5); }
 .document-template-section legend { padding-inline: var(--space-3); overflow-wrap: anywhere; }
+
+.document-retention-tags .checkbox-field { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--target-min); min-inline-size: 0; cursor: pointer; }
+.document-retention-tags .checkbox-field > span { min-inline-size: 0; overflow-wrap: anywhere; }
+.document-archive-page .document-retention-tags input[type="checkbox"] { flex: 0 0 var(--space-5); inline-size: var(--space-5); block-size: var(--space-5); min-block-size: var(--space-5); }
