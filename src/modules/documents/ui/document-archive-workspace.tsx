@@ -17,6 +17,7 @@ import { documentTemplateAdmissionSchema,documentTemplateDraftSchema } from "../
 import { encodeDocumentTemplate,decodeDocumentTemplate,type DocumentTemplateDefinition } from "../domain/document-template";
 import { documentTemplateMediaType,documentTemplateFileName } from "../domain/document-template-format";
 import {DocumentGenerationPanel} from "./document-generation-panel";
+import {DocumentExpiryPanel} from "./document-expiry-panel";
 import {DocumentSignaturePanel} from "./document-signature-panel";
 import {documentEffectiveHistoryFormat} from "../domain/document-effective-version";
 
@@ -32,21 +33,21 @@ const templateReviewSchema=reviewSchema.extend({metadata:documentUploadReviewInp
 const digest=async(bytes:Uint8Array<ArrayBuffer>)=>[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(value=>value.toString(16).padStart(2,"0")).join("");
 
 /** Private document data stays in memory; only the actual account's random command nonce survives a reload. */
-export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:string}){
+export function DocumentArchiveWorkspace({locale,scope,initialReference}:{locale:AppLocale;scope:string;initialReference?:{documentId:string;number:number}}){
   const signed=useTranslations("SignedArchive"),t=useTranslations("DocumentArchive"),tt=useTranslations("DocumentTemplates"),storageKey="alvillas:document-upload:"+scope;
   const[sources,setSources]=useState<z.infer<typeof documentSourceChoicesSchema>|null>(null),[workspace,setWorkspace]=useState<Workspace|null>(null),[history,setHistory]=useState<History|null>(null),
     [editor,setEditor]=useState<Pick<Workspace,"types"|"policyFingerprint">|null>(null),[source,setSource]=useState<Source|null>(null),[sourceKind,setSourceKind]=useState<Source["kind"]>("PROPERTY"),[query,setQuery]=useState(""),
-    [kind,setKind]=useState<"FILE"|"TEMPLATE">("FILE"),[amendment,setAmendment]=useState<{document:Document;version:Version}|null>(null),[signatureVersion,setSignatureVersion]=useState<Version|null>(null),[receipt,setReceipt]=useState<Admission|null>(null),[resumeFile,setResumeFile]=useState<File|null>(null),
+    [kind,setKind]=useState<"FILE"|"TEMPLATE">("FILE"),[amendment,setAmendment]=useState<{document:Document;version:Version}|null>(null),[signatureVersion,setSignatureVersion]=useState<Version|null>(null),[expiryVersion,setExpiryVersion]=useState<Version|null>(null),[receipt,setReceipt]=useState<Admission|null>(null),[resumeFile,setResumeFile]=useState<File|null>(null),
     [state,setState]=useState<DocumentBrowserState>("loading"),[busy,setBusy]=useState(false),[hasPending,setHasPending]=useState(false),[unrecorded,setUnrecorded]=useState(false),[canRetry,setCanRetry]=useState(false),[epoch,setEpoch]=useState(0),[formSerial,setFormSerial]=useState(0),
     [templateMode,setTemplateMode]=useState<"AUTHORED"|"ORIGINAL">("AUTHORED"),[templateDefinition,setTemplateDefinition]=useState<DocumentTemplateDefinition|null>(null);
-  const alive=useRef(false),generation=useRef(0),requests=useRef(new Set<AbortController>()),sequences=useRef({sources:0,workspace:0,history:0}),
+  const initialHandled=useRef(false),alive=useRef(false),generation=useRef(0),requests=useRef(new Set<AbortController>()),sequences=useRef({sources:0,workspace:0,history:0}),
     nonce=useRef<string|null>(null),intent=useRef<Command|null>(null),originalFile=useRef<File|null>(null),templateIntent=useRef<z.infer<typeof documentTemplateAdmissionSchema>|null>(null),busyRef=useRef(false),operation=useRef(0),denied=useRef(false),
     view=useRef<{source:Source|null;documentId:string|null;kind:"FILE"|"TEMPLATE";sourceKind:Source["kind"];query:string}>({source:null,documentId:null,kind:"FILE",sourceKind:"PROPERTY",query:""});
   const active=useCallback((own:number)=>alive.current&&generation.current===own,[]);
   const wipe=useCallback(()=>{
     generation.current++;operation.current++;busyRef.current=false;for(const controller of requests.current)controller.abort();requests.current.clear();
     intent.current=null;originalFile.current=null;templateIntent.current=null;setTemplateDefinition(null);setTemplateMode("AUTHORED");setCanRetry(false);view.current={source:null,documentId:null,kind:"FILE",sourceKind:"PROPERTY",query:""};
-    setSources(null);setWorkspace(null);setHistory(null);setEditor(null);setSource(null);setReceipt(null);setResumeFile(null);setAmendment(null);setSignatureVersion(null);setQuery("");setSourceKind("PROPERTY");setKind("FILE");setBusy(false);setUnrecorded(false);setHasPending(Boolean(nonce.current));setEpoch(value=>value+1);
+    setSources(null);setWorkspace(null);setHistory(null);setEditor(null);setSource(null);setReceipt(null);setResumeFile(null);setAmendment(null);setSignatureVersion(null);setExpiryVersion(null);setQuery("");setSourceKind("PROPERTY");setKind("FILE");setBusy(false);setUnrecorded(false);setHasPending(Boolean(nonce.current));setEpoch(value=>value+1);
   },[]);
   const failed=useCallback((error:unknown)=>{
     const code=!navigator.onLine?"offline":error instanceof DocumentBrowserError?error.state:error instanceof z.ZodError?"validation":"unavailable";
@@ -66,7 +67,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
     catch(error){if(active(own)&&sequence===sequences.current.workspace&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);}
   },[active,controller,failed,scope]);
   const loadHistory=useCallback(async(documentId:string,before?:number,publish=true)=>{
-    const own=generation.current,sequence=++sequences.current.history,abort=controller();setHistory(null);setSignatureVersion(null);
+    const own=generation.current,sequence=++sequences.current.history,abort=controller();setHistory(null);setSignatureVersion(null);setExpiryVersion(null);
     try{const response=await documentRequest(scope,"history",{documentId,format:documentEffectiveHistoryFormat,...before?{before}:{}},abort.signal),data=documentEffectiveHistorySchema.parse(await response.json());
       if(active(own)&&sequence===sequences.current.history){if(publish){view.current.documentId=documentId;setHistory(data);}return data;}}
     catch(error){if(active(own)&&sequence===sequences.current.history&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);}
@@ -172,9 +173,14 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
       if(active(own)){setTemplateDefinition(definition);setTemplateMode("AUTHORED");setAmendment({document:original,version});setFormSerial(value=>value+1);await loadHistory(original.id);setState("ready");}}
     catch(error){if(active(own)&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);if(operation.current===token){busyRef.current=false;setBusy(false);}}
   };
+  const openInitial=useCallback(async(reference:{documentId:string;number:number})=>{
+    const own=generation.current,data=await loadHistory(reference.documentId,reference.number+1,false);if(!data||!active(own))return;
+    const version=data.versions.find(item=>item.number===reference.number);if(!version){failed(new DocumentBrowserError("unavailable"));return;}
+    const mode=data.document.kind==="TEMPLATE"?"TEMPLATE":"FILE";view.current={source:data.document.source,documentId:data.document.id,kind:mode,sourceKind:data.document.source.kind,query:""};setSource(data.document.source);setSourceKind(data.document.source.kind);setQuery("");setKind(mode);setHistory(data);setExpiryVersion(version);await loadWorkspace(data.document.source,mode);
+  },[active,failed,loadHistory,loadWorkspace]);
   useEffect(()=>{
     alive.current=true;let disposed=false;const pending=requests.current,invalidate=()=>{generation.current++;};
-    queueMicrotask(()=>{if(disposed)return;nonce.current=readDocumentNonce(storageKey);setHasPending(Boolean(nonce.current));if(!navigator.onLine){wipe();setState("offline");return;}if(nonce.current)void recover();else setState("ready");});
+    queueMicrotask(()=>{if(disposed)return;nonce.current=readDocumentNonce(storageKey);setHasPending(Boolean(nonce.current));if(!navigator.onLine){wipe();setState("offline");return;}if(nonce.current)void recover();else if(initialReference&&!initialHandled.current){initialHandled.current=true;void openInitial(initialReference);}else setState("ready");});
     const offline=()=>{wipe();setState("offline");},refresh=()=>{
       if(busyRef.current||denied.current||!navigator.onLine||document.visibilityState==="hidden")return;if(nonce.current){void recover();return;}
       const current=view.current;setSources(null);setWorkspace(null);setHistory(null);
@@ -182,7 +188,7 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
     },visibility=()=>{if(document.visibilityState==="hidden"){wipe();setState(navigator.onLine?"ready":"offline");}else refresh();};
     window.addEventListener("offline",offline);window.addEventListener("online",refresh);window.addEventListener("focus",refresh);window.addEventListener("pagehide",wipe);document.addEventListener("visibilitychange",visibility);
     return()=>{disposed=true;alive.current=false;invalidate();for(const abort of pending)abort.abort();pending.clear();window.removeEventListener("offline",offline);window.removeEventListener("online",refresh);window.removeEventListener("focus",refresh);window.removeEventListener("pagehide",wipe);document.removeEventListener("visibilitychange",visibility);};
-  },[loadHistory,loadSources,loadWorkspace,recover,storageKey,wipe]);
+  },[initialReference,openInitial,loadHistory,loadSources,loadWorkspace,recover,storageKey,wipe]);
   const blocked=state==="offline"||state==="forbidden";
   useEffect(()=>{if(blocked||!navigator.onLine||document.visibilityState==="hidden"||hasPending&&!unrecorded)return;const timer=setTimeout(()=>{void loadSources(sourceKind,query);},200);return()=>clearTimeout(timer);},[sourceKind,query,epoch,hasPending,unrecorded,loadSources,blocked]);
   const locked=busy||(hasPending&&!unrecorded),selectSource=(reference:Source)=>{if(locked)return;sequences.current.history++;setHistory(null);setEditor(null);setAmendment(null);setTemplateDefinition(null);setSource(reference);view.current.source=reference;view.current.documentId=null;void loadWorkspace(reference,kind);};
@@ -206,7 +212,8 @@ export function DocumentArchiveWorkspace({locale,scope}:{locale:AppLocale;scope:
       {canEdit?authoring?<DocumentTemplateEditor key={formKey+":authored"} locale={locale} types={authoredTypes} identity={amendment?.document.templateKey?{templateKey:amendment.document.templateKey,locale:amendment.document.locale,typeKey:amendment.document.typeKey,title:amendment.version.title}:null} definition={templateDefinition} disabled={busy||!workspace} onSubmit={value=>{void sendTemplate(value);}}/>:fileTypes.length?<DocumentFileEditor key={formKey+":original"} locale={locale} types={fileTypes} kind={kind} amendment={amendment} disabled={busy||!workspace} onSubmit={(draft,file)=>{void send(draft,file);}}/>:<p>{editor?.types.length?tt("templatesOnly"):t("readOnly")}</p>:null}
     </section>:null}
     <DocumentGenerationPanel locale={locale} key={scope+":"+source?.id+":"+epoch+":"+(amendment?.document.kind==="INSTANCE"?amendment.version.id:"new")} scope={scope} source={source} amendment={amendment?.document.kind==="INSTANCE"?amendment:null} onCancel={()=>setAmendment(null)} disabled={locked} onComplete={async documentId=>{const data=await loadHistory(documentId);if(data){view.current.source=data.document.source;view.current.kind="FILE";setSource(data.document.source);setKind("FILE");setAmendment(null);await loadWorkspace(data.document.source,"FILE");}}}/>
-    {history?<DocumentHistoryPanel locale={locale} data={history} disabled={locked} canAmend={Boolean(workspace?.types.some(type=>type.key===history.document.typeKey))} onMore={()=>{if(history.next)void loadHistory(history.document.id,history.next);}} onCurrent={()=>{void loadHistory(history.document.id);}} onEffective={()=>{if(history.effectiveVersion)void loadHistory(history.document.id,history.effectiveVersion.number+1);}} onDownload={version=>{void download(version);}} onAmend={version=>{void amend(version);}} onSignature={version=>setSignatureVersion(version)} onOriginal={(documentId,number)=>{setSignatureVersion(null);void loadHistory(documentId,number+1);}}/>:null}
+    {history?<DocumentHistoryPanel locale={locale} data={history} disabled={locked} canAmend={Boolean(workspace?.types.some(type=>type.key===history.document.typeKey))} onMore={()=>{if(history.next)void loadHistory(history.document.id,history.next);}} onCurrent={()=>{void loadHistory(history.document.id);}} onEffective={()=>{if(history.effectiveVersion)void loadHistory(history.document.id,history.effectiveVersion.number+1);}} onDownload={version=>{void download(version);}} onAmend={version=>{void amend(version);}} onExpiry={version=>{setSignatureVersion(null);setExpiryVersion(version);}} onSignature={version=>{setExpiryVersion(null);setSignatureVersion(version);}} onOriginal={(documentId,number)=>{setSignatureVersion(null);void loadHistory(documentId,number+1);}}/>:null}
+    {expiryVersion&&history?.versions.some(version=>version.id===expiryVersion.id)&&["FILE","INSTANCE"].includes(history.document.kind)&&!history.document.signedArtifact?<DocumentExpiryPanel key={scope+":"+expiryVersion.id+":"+epoch} scope={scope} versionId={expiryVersion.id} disabled={locked} onForbidden={()=>failed(new DocumentBrowserError("forbidden"))}/>:null}
     {signatureVersion?<DocumentSignaturePanel key={scope+":"+signatureVersion.id+":"+epoch} scope={scope} version={signatureVersion} disabled={locked} onClose={()=>setSignatureVersion(null)} onForbidden={()=>failed(new DocumentBrowserError("forbidden"))} onOpenArchive={documentId=>{setSignatureVersion(null);void loadHistory(documentId);}}/>:null}
   </div>;
 }

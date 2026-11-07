@@ -1,6 +1,6 @@
 import type { Notification, OutboxEvent } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
-import type { Resource } from "@/platform/authz/authorize";
+import type { AuthContext, Resource } from "@/platform/authz/authorize";
 import { notificationEventType, notificationInputSchema, NotificationAudienceUnavailableError,type NotificationCursor, type NotificationInput } from "./notification";
 import { Prisma } from "@prisma/client";
 import { digestSettingsSchema, nextDigestAt } from "./digest";
@@ -27,6 +27,10 @@ import {calendarDateAt} from "@/i18n/format";
 import {commandFingerprint} from "@/platform/http/command-fingerprint";
 import {ledgerIntegrityPolicyKey,ledgerIntegrityRoutingKey,ledgerIntegrityRoutingSchema} from "@/modules/finance/domain/ledger-integrity";
 import {canReadLedgerIntegrityFailure,ledgerIntegrityNoticeKey} from "@/modules/finance/domain/ledger-integrity-notification";
+
+import {documentExpiryNoticeTarget} from "@/modules/documents/application/document-expiry-notification";
+import {DocumentExpiryRepository} from "@/modules/documents/infrastructure/document-expiry-repository";
+import {canReadDocumentExpiryNotice} from "@/modules/documents/domain/document-expiry-notification";
 
 type InvoiceEmergencyNotice = ExpenseEmergencyNotice & { lineId: string; propertyId: string | null };
 const invoiceEmergencyNoticeSchema = expenseEmergencyNoticeSchema.extend({ lineId: z.uuid(), propertyId: z.uuid().nullable() });
@@ -93,11 +97,11 @@ export class NotificationRepository {
 
   private async deliverLocked(event: OutboxEvent, batch?: DeliveryBatch): Promise<void> {
     const input = notificationInputSchema.parse(event.payload);
-    const financialNotice=input.kind==="expense_emergency"?await this.expenseEmergencySource(event,input):
+    const financialNotice=input.kind==="document_expiring"?await this.documentExpirySource(input):input.kind==="expense_emergency"?await this.expenseEmergencySource(event,input):
       input.kind==="supplier_invoice_emergency"?await this.invoiceEmergencySource(event,input):input.kind==="employee_cost_emergency"?(batch?.employeeNotices?batch.employeeNotices.get(event.id)??null:await this.employeeCostEmergencySource(event,input)):input.kind==="receivable_reminder"?(batch?.reminderNotices?batch.reminderNotices.get(event.id)??null:(await this.receivableReminderSources([event])).notices.get(event.id)??null):input.kind==="ledger_integrity_failed"?(batch?.ledgerNotices?batch.ledgerNotices.get(event.id)??null:(await this.ledgerIntegritySources([event])).notices.get(event.id)??null):null;
     const target = financialNotice?.target ?? (batch ? batch.targets.get(`${input.kind}:${input.targetId}`) :
       (await this.targets([{ kind: input.kind, targetId: input.targetId }])).get(input.targetId));
-    if((input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")&&!financialNotice)return this.finish(event.id,batch);
+    if((input.kind==="document_expiring"||input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")&&!financialNotice)return this.finish(event.id,batch);
     if (!target) return this.finish(event.id, batch);
     if (input.kind === "task_assigned" && target.assignedUserAccountId !== input.recipientId) return this.finish(event.id, batch);
     const identity = target.type === "identity";
@@ -109,7 +113,7 @@ export class NotificationRepository {
     const approvalRecipients = stage?.recipients ?? approval?.recipients;
     const routingKey = JSON.stringify([input.kind, target.propertyId, event.occurredAt]);
     let routing:NotificationRouting;
-    if(input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")routing=financialNotice!.notice.routing;
+    if(input.kind==="document_expiring"||input.kind==="expense_emergency"||input.kind==="supplier_invoice_emergency"||input.kind==="employee_cost_emergency"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")routing=financialNotice!.notice.routing;
     else routing=approval?notificationRoutingSchema.parse(stage?.routingSnapshot??approval.routingSnapshot):batch?.routing.get(routingKey)??await this.routing(input.kind,target.propertyId??null,event.occurredAt);
     if (batch && !approval&&!financialNotice) batch.routing.set(routingKey, routing);
     const mandatory = input.kind === "security_session_revoked";
@@ -137,6 +141,7 @@ export class NotificationRepository {
       const current=financialNotice?(batchState?{account:captured?.account??null,assignments:captured?.assignments??[],now:batchState.now}:await new IdentityRepository(this.tx,this.organizationId).authorizationState(candidate.id)):null;
       const ctx = contextForRoleAssignments(this.organizationId, candidate.id, current?current.assignments:explicit || selected || approval ? assignments : roleAssignments);
       if(current&&(!current.account||securityEnrollment(current.account,current.now).setupRequired))continue;
+      if(input.kind==="document_expiring"&&!canReadDocumentExpiryNotice(ctx,target,current!.now))continue;
       if(input.kind==="receivable_reminder"&&!canReadReceivableReminder(ctx,target,current!.now))continue;
       if(input.kind==="ledger_integrity_failed"&&!canReadLedgerIntegrityFailure(ctx,target,current!.now))continue;
       if (!identity && !current&&securityEnrollment({ ...candidate, roleAssignments: assignments }, observation!.now).setupRequired) continue;
@@ -147,13 +152,19 @@ export class NotificationRepository {
         await this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } }, update: {},
           create: { organizationId: this.organizationId, type: "notification.channel.requested", payload: { channel, recipientId: candidate.id, kind: input.kind, targetId: input.targetId, sourceEventId: event.id }, idempotencyKey: `notification:${event.id}:${candidate.id}:${channel}` } });
       }
-      if (!mandatory && (!financialNotice||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")&&(!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
+      if (!mandatory && (!financialNotice||input.kind==="document_expiring"||input.kind==="receivable_reminder"||input.kind==="ledger_integrity_failed")&&(!routing.channels.includes("in_app") || !shouldDeliverNotification(input.kind, "in_app", this.preferenceValue(candidate.notificationPreference)))) continue;
       data.push({ organizationId: this.organizationId, recipientId: candidate.id,
         eventId: event.id, kind: input.kind, targetId: input.targetId, createdAt: event.occurredAt });
     }
     if (batch) batch.inbox.push(...data);
     else if (data.length) await this.tx.notification.createMany({ data, skipDuplicates: true });
     await this.finish(event.id, batch);
+  }
+
+  private async documentExpirySource(input:Extract<NotificationInput,{kind:"document_expiring"}>):Promise<ReminderNoticeSource|null>{
+    const target=await documentExpiryNoticeTarget(this.tx,this.organizationId,input.targetId,input.recipientId);if(!target)return null;
+    const reminder=await new DocumentExpiryRepository(this.tx,this.organizationId).expiryReminder(input.targetId);if(!reminder)return null;
+    const routing=notificationRoutingSchema.safeParse((reminder.routingSnapshot as Prisma.JsonObject).value);return routing.success?{target,notice:{routing:routing.data}}:null;
   }
 
   private reminderRecipient(state:ReminderAuthority|undefined,personId:string|undefined,routing:NotificationRouting,now:Date){
@@ -371,6 +382,15 @@ export class NotificationRepository {
   async viewers(routing:NotificationRouting,resource:Resource):Promise<string[]> {
     return(await this.viewerAudiences([{routing,resource}]))[0];
   }
+  async explicitRecipientContext(recipientId:string,routing:NotificationRouting):Promise<AuthContext|null>{
+    if(routing.assigned)return null;
+    const candidate=(await this.candidates({roles:[],people:[],assigned:false,channels:routing.channels},undefined,[recipientId],true))[0];
+    if(!candidate)return null;
+    const state=await new IdentityRepository(this.tx,this.organizationId).authorizationState(recipientId);
+    if(!state.account||securityEnrollment(state.account,state.now).setupRequired)return null;
+    const assignments=routing.people.includes(candidate.personId)?state.assignments:state.assignments.filter(assignment=>routing.roles.includes(assignment.role.id));
+    return assignments.length?contextForRoleAssignments(this.organizationId,recipientId,assignments):null;
+  }
   async viewerAudiences(entries:ReadonlyArray<{routing:NotificationRouting;resource:Resource}>):Promise<string[][]>{
     if(!entries.length)return[];const routing={roles:[...new Set(entries.flatMap(entry=>entry.routing.roles))],people:[...new Set(entries.flatMap(entry=>entry.routing.people))],assigned:false,channels:["in_app" as const]};
     const candidates=await this.candidates(routing,undefined,undefined,true),current=await new IdentityRepository(this.tx,this.organizationId).authorizationStates(candidates.map(candidate=>candidate.id));
@@ -474,7 +494,7 @@ export class NotificationRepository {
     const inputs = pending.map(event => notificationInputSchema.parse(event.payload));
     const targets = new Map<string, Resource>();
     for (const kind of new Set(inputs.map(input => input.kind))) {
-      if(kind==="expense_emergency"||kind==="supplier_invoice_emergency"||kind==="employee_cost_emergency"||kind==="receivable_reminder"||kind==="ledger_integrity_failed")continue;
+      if(kind==="document_expiring"||kind==="expense_emergency"||kind==="supplier_invoice_emergency"||kind==="employee_cost_emergency"||kind==="receivable_reminder"||kind==="ledger_integrity_failed")continue;
       for (const [id, target] of await this.targets(inputs.filter(input => input.kind === kind)))
         targets.set(`${kind}:${id}`, target);
     }
@@ -521,6 +541,9 @@ export class NotificationRepository {
       status: task.state, assignedUserAccountId: task.assignedToUserAccountId
     }]));
     for (const row of rows) if (row.kind === "language_updated" || row.kind === "security_session_revoked") targets.set(row.targetId, { type: "identity", organizationId: this.organizationId, id: row.targetId });
+    if(readerId)for(const row of rows)if(row.kind==="document_expiring"){
+      const target=await documentExpiryNoticeTarget(this.tx,this.organizationId,row.targetId,readerId);if(target)targets.set(row.targetId,target);
+    }
     const documentIds = rows.filter(row => row.kind === "staff_document_expiring").map(row => row.targetId);
     const documents = documentIds.length ? await this.tx.teamDocument.findMany({ where: { organizationId: this.organizationId, id: { in: documentIds }, archivedAt: null, confirmedAt: { not: null }, person: { archivedAt: null } }, select: { id: true, personId: true } }) : [];
     for (const row of documents) targets.set(row.id, { type: "staff_document", organizationId: this.organizationId, id: row.personId, documentId: row.id, assignedPersonId: row.personId });

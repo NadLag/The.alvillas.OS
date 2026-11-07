@@ -5,6 +5,7 @@ import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/deli
 import { z } from "zod";
 import { documentArchivePolicyKey, documentArchivePolicySchema } from "@/modules/documents/domain/document-policy";
 import { documentSignaturePolicyKey, documentSignaturePolicySchema } from "@/modules/documents/domain/document-signature-policy";
+import { documentExpiryPolicyKey, documentExpiryPolicySchema, documentExpiryRoutingKey } from "@/modules/documents/domain/document-expiry-policy";
 import {serviceTaxAssessmentConfigSchema} from "./service-tax-policy";
 import {accountantExportPolicyKey,accountantExportPolicySchema} from "@/modules/finance/domain/accountant-export-policy";
 import {serviceAllocationPolicyKey,serviceAllocationPolicySchema} from "./service-allocation-policy";
@@ -17,7 +18,7 @@ import { operationPolicySchema, recurringTasksSchema } from "./operation-policy"
 import { teamPolicyKey, teamPolicySchema } from "@/modules/identity/domain/team";
 import { pinLockoutConfigKey, pinLockoutPolicySchema } from "@/modules/identity/domain/pin-lockout";
 import { localizedTextSchema } from "@/i18n/content";
-import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
+import { notificationRoutingSchema, explicitNotificationRoutingSchema } from "@/platform/notifications/notification-routing";
 import { pushPolicyKey, pushPolicySchema } from "@/platform/notifications/web-push";
 
 import { digestPolicyKey, digestPolicySchema } from "@/platform/notifications/digest";
@@ -410,6 +411,8 @@ export const configRuleSchemas = {
   [financialAttachmentPolicyKey]:financialAttachmentPolicySchema,
   [documentArchivePolicyKey]: documentArchivePolicySchema,
   [documentSignaturePolicyKey]: documentSignaturePolicySchema,
+  [documentExpiryPolicyKey]: documentExpiryPolicySchema,
+  [documentExpiryRoutingKey]: explicitNotificationRoutingSchema,
   [accountantExportPolicyKey]:accountantExportPolicySchema,
   [receivableReminderPolicyKey]:receivableReminderPolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,

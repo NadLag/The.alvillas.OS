@@ -1292,7 +1292,8 @@
       "supplier_invoice_emergency": "Emergency invoice cost submitted",
       "employee_cost_emergency": "Emergency employee work cost notice",
       "receivable_reminder": "A receivable needs your review.",
-      "ledger_integrity_failed": "Ledger integrity check failed"
+      "ledger_integrity_failed": "Ledger integrity check failed",
+      "document_expiring": "A document is approaching its expiry date."
     },
     "settings": {
       "eyebrow": "Your account",
@@ -1560,7 +1561,8 @@
         "identity_invitation_delivery_requested": "Account invitation",
         "identity_recovery_delivery_requested": "Account recovery",
         "other": "Other notification",
-        "staff_document_expiring": "A staff document is expiring."
+        "staff_document_expiring": "A staff document is expiring.",
+        "document_expiring": "A document is approaching its expiry date."
       }
     }
   },
@@ -5214,5 +5216,25 @@
     "SIGNED_ORIGINAL": "Signed PDF",
     "CERTIFICATE": "Completion certificate",
     "openOriginalVersion": "Open original version {number}"
+  },
+  "DocumentExpiry": {
+    "title": "Expiry history and reminders",
+    "guidance": "Each date applies to this exact document version. Changes append history and preserve the original document.",
+    "open": "Expiry and reminders",
+    "load": "Load expiry history",
+    "date": "Expiry date",
+    "clearGuidance": "Leave the date empty to clear the expiry. Earlier dates remain in history.",
+    "current": "Current expiry: {date}",
+    "none": "No current expiry date.",
+    "readOnly": "You can read this history. Changing the date requires current document and source permissions.",
+    "empty": "No expiry changes recorded.",
+    "review": "Review expiry change",
+    "reviewed": "Reviewed expiry change",
+    "admit": "Record expiry change",
+    "cleared": "Expiry cleared",
+    "revision": "Change {number}",
+    "more": "Earlier expiry changes",
+    "saved": "Expiry change {number} recorded.",
+    "newReview": "Start a new expiry review"
   }
 }
