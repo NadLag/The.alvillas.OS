@@ -48,8 +48,10 @@ async function retain(reference: Reference, attemptId: string, value: SignatureP
 export async function executeSignatureDistributionReference(raw: unknown, deps: Dependencies = {}) {
   const reference = referenceSchema.parse(raw), db = deps.db ?? prisma, initial = await withTenant(db, reference.organizationId, tx => referenced(tx, reference)),
     previous = await withTenant(db, reference.organizationId, tx => new SignaturePreparationRepository(tx, reference.organizationId).distributionAttempt(initial.row.signatureId));
-  if (deps.reconcileActor && !previous) throw new DocumentConflictError();
   if (previous && previous.intentId !== initial.row.id) return summary(initial.row.id, "SUPERSEDED");
+  const confirmed = () => withTenant(db, reference.organizationId, tx => new SignaturePreparationRepository(tx, reference.organizationId).signatureSent(initial.row.signatureId, initial.row.providerScopeHash, initial.original.snapshot.preparation.providerRequestId));
+  if (await confirmed()) return summary(initial.row.id, "SENT");
+  if (deps.reconcileActor && !previous) throw new DocumentConflictError();
   if (previous?.evidence.some(item => item.kind === "SENT")) return summary(initial.row.id, "SENT");
   const actor = deps.reconcileActor ? documentActorContext(deps.reconcileActor) : initial.actor;
   const current = await withTenant(db, reference.organizationId, async tx => authorized(tx, await referenced(tx, reference), deps.env, actor)), account = current.policy.value.account, { origin, provider } = signatureProviderBoundary(account, deps),
@@ -92,7 +94,7 @@ export async function executeSignatureDistributionReference(raw: unknown, deps: 
     distributionReceipt: receipt ? Buffer.from(receipt.evidence).toString("base64") : null, distributionProof: receipt ? "POST_ACKNOWLEDGED" : null, scopeProof, failureCode });
   if (start.post) {
     try { receipt = captureSignatureProviderReceipt(await provider.distributeSignatureRequest({ requestId })); if (receipt.requestId !== requestId) { receipt = null; throw new DocumentConflictError(); } }
-    catch { await retain(reference, start.attempt.id, unconfirmed("SIGNATURE_OUTCOME_UNCONFIRMED"), deps); return summary(initial.row.id, "UNCERTAIN"); }
+    catch { await retain(reference, start.attempt.id, unconfirmed("SIGNATURE_OUTCOME_UNCONFIRMED"), deps); return summary(initial.row.id, await confirmed() ? "SENT" : "UNCERTAIN"); }
     await retain(reference, start.attempt.id, unconfirmed("SIGNATURE_OUTCOME_UNCONFIRMED"), deps);
   }
   try {
@@ -104,5 +106,5 @@ export async function executeSignatureDistributionReference(raw: unknown, deps: 
     await retain(reference, start.attempt.id, { kind: "SENT", providerRequestId: requestId, prepareReceipt: prepared.prepareReceipt, observation: signatureObservationFactsSchema.strip().parse(final), observationReceipt: Buffer.from(final.evidence).toString("base64"),
       distributionReceipt: receipt ? Buffer.from(receipt.evidence).toString("base64") : null, distributionProof: receipt ? "POST_ACKNOWLEDGED" : "READBACK_RECONCILED", scopeProof, failureCode: null }, deps);
     return summary(initial.row.id, "SENT");
-  } catch { await retain(reference, start.attempt.id, unconfirmed("SIGNATURE_CONTRACT_UNCONFIRMED"), deps); return summary(initial.row.id, "UNCERTAIN"); }
+  } catch { if (await confirmed()) return summary(initial.row.id, "SENT"); await retain(reference, start.attempt.id, unconfirmed("SIGNATURE_CONTRACT_UNCONFIRMED"), deps); return summary(initial.row.id, "UNCERTAIN"); }
 }

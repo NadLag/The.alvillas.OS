@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import { storageFixtureEnvironment } from "./tests/e2e/support/storage-fixture-config";
+import { signatureFixtureEnvironment } from "./tests/e2e/support/signature-fixture-config";
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -17,7 +18,7 @@ export default defineConfig({
     command: process.env.PLAYWRIGHT_PRODUCTION === "1"
       ? "node --import ./tests/e2e/support/storage-transport.mjs node_modules/next/dist/bin/next start --hostname=127.0.0.1 --port=3000"
       : "node --import ./tests/e2e/support/storage-transport.mjs node_modules/next/dist/bin/next dev --hostname=127.0.0.1 --port=3000",
-    env: storageFixtureEnvironment,
+    env: { ...storageFixtureEnvironment, ...signatureFixtureEnvironment },
     url: "http://127.0.0.1:3000/en",
     reuseExistingServer: !process.env.CI,
     timeout: 120000

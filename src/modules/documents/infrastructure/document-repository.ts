@@ -75,10 +75,15 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   signatureRecord(id: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, id }, include: { recipients: { orderBy: { id: "asc" } } } }); }
   signaturesForVersion(documentVersionId: string, before?: string) { return this.tx.signature.findMany({ where: { organizationId: this.organizationId, documentVersionId, ...(before ? { id: { lt: before } } : {}) }, select: { id: true }, orderBy: { id: "desc" }, take: 31 }); }
   async signatureEvents(signatureId: string, before?: string) {
-    const anchor = before ? await this.tx.signatureEvent.findFirst({ where: { organizationId: this.organizationId, signatureId, id: before }, select: { id: true, observedAt: true } }) : null; if (before && !anchor) return null;
-    return this.tx.signatureEvent.findMany({ where: { organizationId: this.organizationId, signatureId, ...(anchor ? { OR: [{ observedAt: { lt: anchor.observedAt } }, { observedAt: anchor.observedAt, id: { lt: anchor.id } }] } : {}) }, orderBy: [{ observedAt: "desc" }, { id: "desc" }], take: 51 });
+    const anchor = before ? await this.tx.signatureEvent.findFirst({ where: { organizationId: this.organizationId, signatureId, id: before }, select: { id: true, occurredAt: true } }) : null; if (before && !anchor) return null;
+    return this.tx.signatureEvent.findMany({ where: { organizationId: this.organizationId, signatureId, ...(anchor ? { OR: [{ occurredAt: { lt: anchor.occurredAt } }, { occurredAt: anchor.occurredAt, id: { lt: anchor.id } }] } : {}) }, orderBy: [{ occurredAt: "desc" }, { id: "desc" }], take: 51 });
   }
-  latestSignatureEvent(signatureId: string) { return this.tx.signatureEvent.findFirst({ where: { organizationId: this.organizationId, signatureId }, orderBy: [{ observedAt: "desc" }, { id: "desc" }] }); }
+  async latestSignatureEvent(signatureId: string) {
+    // Delivery order cannot regress a verified lifecycle. Completion still needs
+    // its native signed archive; a provider completion receipt has no SIGNED row.
+    const rows = await this.tx.$queryRaw<Array<{ state: string }>>`SELECT state FROM signature_event WHERE organization_id=${this.organizationId}::uuid AND signature_id=${signatureId}::uuid
+      ORDER BY CASE state WHEN 'SIGNED' THEN 4 WHEN 'DECLINED' THEN 3 WHEN 'EXPIRED' THEN 3 WHEN 'VIEWED' THEN 2 WHEN 'SENT' THEN 1 ELSE 0 END DESC,occurred_at DESC,observed_at DESC,id DESC LIMIT 1`; return rows[0] ?? null;
+  }
   signatureByNonce(requestedBy: string, commandKey: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, include: signatureInclude }); }
   signatureNonceOwner(commandKey: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { requestedBy: true } }); }
   providerPreparationByNonce(requestedBy: string, commandKey: string) { return this.tx.signatureProviderIntent.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, select: { id: true } }); }
