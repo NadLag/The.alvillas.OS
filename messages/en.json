@@ -5262,5 +5262,32 @@
     "context": "Read policy context",
     "contextTitle": "Retained policy context",
     "policyGuidance": "Tags and entered references do not authorize disposal. Any disposition requires the owner-approved privacy workflow and legal policy."
+  },
+  "DocumentSearch": {
+    "title": "Search documents",
+    "guidance": "Find original titles and file names across the archives you can access. Open an exact version or download its authorized original.",
+    "filters": "Search filters",
+    "query": "Title or file name",
+    "kind": "Document format",
+    "allKinds": "All formats",
+    "versions": "Version history",
+    "currentOnly": "Current effective versions",
+    "allVersions": "All retained and scheduled versions",
+    "sourceKind": "Source type",
+    "allSources": "All accessible sources",
+    "language": "Original language",
+    "allLanguages": "All languages",
+    "category": "Document category",
+    "allCategories": "All categories",
+    "sourceOnly": "Limit to the selected source",
+    "includeArchived": "Include archived documents and sources",
+    "submit": "Search archive",
+    "observedAt": "Archive observed at {at}",
+    "empty": "No accessible original versions match these filters.",
+    "CURRENT_EFFECTIVE": "Current effective version",
+    "SCHEDULED": "Scheduled version",
+    "RETAINED": "Retained version",
+    "open": "Open version in archive",
+    "more": "More matching versions"
   }
 }

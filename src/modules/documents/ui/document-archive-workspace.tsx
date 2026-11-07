@@ -17,6 +17,7 @@ import { documentTemplateAdmissionSchema,documentTemplateDraftSchema } from "../
 import { encodeDocumentTemplate,decodeDocumentTemplate,type DocumentTemplateDefinition } from "../domain/document-template";
 import { documentTemplateMediaType,documentTemplateFileName } from "../domain/document-template-format";
 import {DocumentGenerationPanel} from "./document-generation-panel";
+import {DocumentSearchPanel} from "./document-search-panel";
 import {DocumentRetentionPanel} from "./document-retention-panel";
 import {DocumentExpiryPanel} from "./document-expiry-panel";
 import {DocumentSignaturePanel} from "./document-signature-panel";
@@ -157,11 +158,11 @@ export function DocumentArchiveWorkspace({locale,scope,initialReference}:{locale
     try{const typed=templateIntent.current,value=documentUploadAdmissionSchema.parse(await(await documentRequest(scope,typed?"templates/admit":"admit",typed??intent.current,abort.signal)).json());if(!active(own))return;if(value.idempotencyKey!==nonce.current)throw new DocumentBrowserError("unavailable");if(value.state==="ADMITTED"){if(typed){const result=documentUploadAdmissionSchema.parse(await(await documentRequest(scope,"complete",{admissionId:value.id},abort.signal)).json());if(active(own))await receive(result);}else if(originalFile.current)await uploadBytes(value,originalFile.current);}else await receive(value);}
     catch(error){if(active(own)&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);if(operation.current===token){busyRef.current=false;setBusy(false);}}
   };
-  const download=async(version:Version)=>{
+  const download=async(version:Version,refresh=true)=>{
     if(busyRef.current)return;const own=generation.current,token=++operation.current,abort=controller();busyRef.current=true;setBusy(true);setState("loading");setHistory(null);
     try{const response=await documentRequest(scope,"download",{versionId:version.id},abort.signal),blob=await response.blob();if(!active(own))return;
       const url=URL.createObjectURL(blob),link=document.createElement("a");link.href=url;link.download=version.fileName;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),0);
-      if(view.current.documentId)await loadHistory(view.current.documentId);setState("ready");}
+      if(refresh&&view.current.documentId)await loadHistory(view.current.documentId);setState("ready");}
     catch(error){if(active(own)&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);if(operation.current===token){busyRef.current=false;setBusy(false);}}
   };
   const amend=async(version:Version)=>{
@@ -197,7 +198,7 @@ export function DocumentArchiveWorkspace({locale,scope,initialReference}:{locale
   const authoredTypes=editor?.types.filter(type=>type.contentTypes.includes(documentTemplateMediaType))??[],fileTypes=editor?.types.map(type=>({...type,contentTypes:type.contentTypes.filter(value=>value!==documentTemplateMediaType)})).filter(type=>type.contentTypes.length)??[],
     authoring=kind==="TEMPLATE"&&authoredTypes.length>0&&(templateMode==="AUTHORED"||fileTypes.length===0),canEdit=editor&&(!hasPending||unrecorded)&&amendment?.document.kind!=="INSTANCE",formKey=`${scope}:${epoch}:${formSerial}:${source?.id}:${kind}:${editor?.policyFingerprint}:${amendment?.version.id??"new"}`;
   if(state==="offline"||state==="forbidden")return <section className="resource-form" data-testid="document-private-unavailable"><p role="alert">{t(state)}</p><button className="secondary-button" onClick={()=>window.location.reload()}>{t("reload")}</button></section>;
-  return <div className="resource-form" data-testid="document-archive-workspace"><section className="resource-form"><h2>{t("status")}</h2><p role="status" data-testid="document-status">{t(busy?"sending":state)}</p>
+  return <div className="resource-form" data-testid="document-archive-workspace"><DocumentSearchPanel key={scope+":"+epoch} scope={scope} source={source} disabled={locked} onOpen={reference=>{void openInitial(reference);}} onDownload={version=>{void download(version,false);}} onForbidden={()=>failed(new DocumentBrowserError("forbidden"))}/><section className="resource-form"><h2>{t("status")}</h2><p role="status" data-testid="document-status">{t(busy?"sending":state)}</p>
     {hasPending?<><p>{t(unrecorded?"unrecorded":"pendingGuidance")}</p><div className="form-actions"><button className="secondary-button" disabled={busy} onClick={()=>{void recover();}} data-testid="document-recover">{t("recover")}</button>
       {canRetry&&!unrecorded?<button className="secondary-button" disabled={busy} onClick={()=>{void retryExact();}}>{t("retryExact")}</button>:null}</div></>:null}
     {receipt?.state==="SUPERSEDED"?<p>{t("supersededRequest")}</p>:null}</section>
