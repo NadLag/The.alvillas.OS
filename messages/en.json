@@ -5136,5 +5136,22 @@
     "reviewed": "Reviewed original and recipients",
     "confirm": "Confirm sending this retained original to these recipients by email.",
     "send": "Queue signature request emails"
+  },
+  "SignatureHistory": {
+    "title": "Stored signature requests",
+    "guidance": "Find the requests retained for this exact original version. Contacts and events show their retained originals; access uses your current permissions.",
+    "find": "Find stored requests",
+    "read": "Read retained history",
+    "empty": "No authorized requests on this page.",
+    "more": "More requests",
+    "original": "Retained original",
+    "moreEvents": "Earlier events",
+    "open": "Open original request",
+    "DRAFT": "Draft",
+    "SENT": "Sent",
+    "VIEWED": "Viewed",
+    "SIGNED": "Signed",
+    "DECLINED": "Declined",
+    "EXPIRED": "Expired"
   }
 }

@@ -6,6 +6,7 @@ import { nativeSignatureChoicesSchema, nativeSignatureCommandSchema, nativeSigna
 import { clearDocumentNonce, documentRequest, DocumentBrowserError, readDocumentNonce, writeDocumentNonce, type DocumentBrowserState } from "./document-browser";
 import { DocumentSignaturePreparationPanel } from "./document-signature-preparation-panel";
 import { DocumentSignatureDistributionPanel } from "./document-signature-distribution-panel";
+import { DocumentSignatureHistoryPanel } from "./document-signature-history-panel";
 
 type Choices = z.infer<typeof nativeSignatureChoicesSchema>;
 type Party = Choices["items"][number];
@@ -14,7 +15,7 @@ const partyKey = (party: Party) => party.reference.kind + ":" + party.reference.
 
 export function DocumentSignaturePanel({ scope, version, disabled, onClose, onForbidden }: { scope: string; version: { id: string; title: string; number: number }; disabled: boolean; onClose: () => void; onForbidden: () => void }) {
   const t = useTranslations("DocumentSignatures"), a = useTranslations("DocumentArchive"), key = "alvillas:document-signature:" + scope;
-  const [preparedId, setPreparedId] = useState<string | null>(null), [kind, setKind] = useState<Party["reference"]["kind"]>("OWNER"), [query, setQuery] = useState(""), [choices, setChoices] = useState<Choices | null>(null),
+  const [historicalId, setHistoricalId] = useState<string | null>(null), [preparedId, setPreparedId] = useState<string | null>(null), [kind, setKind] = useState<Party["reference"]["kind"]>("OWNER"), [query, setQuery] = useState(""), [choices, setChoices] = useState<Choices | null>(null),
     [selected, setSelected] = useState<Party[]>([]), [reason, setReason] = useState(""), [review, setReview] = useState<Review | null>(null),
     [state, setState] = useState<DocumentBrowserState>("ready"), [busy, setBusy] = useState(false), [pending, setPending] = useState(false), [unrecorded, setUnrecorded] = useState(false),
     [canRetry, setCanRetry] = useState(false), [receipt, setReceipt] = useState<z.infer<typeof nativeSignatureReceiptSchema> | null>(null);
@@ -22,7 +23,7 @@ export function DocumentSignaturePanel({ scope, version, disabled, onClose, onFo
   useEffect(() => {
     live.current = true; nonce.current = readDocumentNonce(key); queueMicrotask(() => { if (live.current) setPending(Boolean(nonce.current)); });
     const wipe = () => { for (const controller of requests.current) controller.abort(); requests.current.clear(); running.current = false; original.current = null;
-      setChoices(null); setSelected([]); setQuery(""); setReason(""); setReview(null); setReceipt(null); setPreparedId(null); setCanRetry(false); setBusy(false); setUnrecorded(false); setPending(Boolean(nonce.current)); setState(navigator.onLine ? "ready" : "offline"); },
+      setChoices(null); setSelected([]); setQuery(""); setReason(""); setReview(null); setReceipt(null); setHistoricalId(null); setPreparedId(null); setCanRetry(false); setBusy(false); setUnrecorded(false); setPending(Boolean(nonce.current)); setState(navigator.onLine ? "ready" : "offline"); },
       hidden = () => { if (document.visibilityState === "hidden") wipe(); };
     window.addEventListener("offline", wipe); window.addEventListener("pagehide", wipe); window.addEventListener("focus", wipe); document.addEventListener("visibilitychange", hidden);
     const active = requests.current;
@@ -45,7 +46,7 @@ export function DocumentSignaturePanel({ scope, version, disabled, onClose, onFo
   };
   const receive = (value: z.infer<typeof nativeSignatureReceiptSchema>) => {
     if (value.idempotencyKey !== nonce.current || (original.current && (value.instanceId !== original.current.instanceId || value.documentVersionId !== original.current.documentVersionId))) throw new DocumentBrowserError("unavailable");
-    clearDocumentNonce(key, value.idempotencyKey); nonce.current = null; original.current = null; setPending(false); setCanRetry(false); setUnrecorded(false); setReview(null); setChoices(null); setSelected([]); setReason(""); setQuery(""); setPreparedId(null); setReceipt(value); setState(value.state === "DRAFT" ? "saved" : "conflict");
+    clearDocumentNonce(key, value.idempotencyKey); nonce.current = null; original.current = null; setPending(false); setCanRetry(false); setUnrecorded(false); setReview(null); setChoices(null); setSelected([]); setReason(""); setQuery(""); setHistoricalId(null); setPreparedId(null); setReceipt(value); setState(value.state === "DRAFT" ? "saved" : "conflict");
   };
   const search = (cursor?: string) => { void perform(async signal => {
     const data = nativeSignatureChoicesSchema.parse(await ask("choices", { documentVersionId: version.id, kind, query, ...cursor ? { cursor } : {} }, signal));
@@ -55,7 +56,7 @@ export function DocumentSignaturePanel({ scope, version, disabled, onClose, onFo
     const draft = nativeSignatureDraftSchema.parse({ instanceId: choices.instanceId, documentVersionId: version.id, recipients: selected.map(party => party.reference) });
     if (reason.trim().length < 8) throw new DocumentBrowserError("validation"); const value = nativeSignatureReviewSchema.parse(await ask("review", draft, signal));
     if (value.document.instanceId !== draft.instanceId || value.document.versionId !== draft.documentVersionId) throw new DocumentBrowserError("unavailable");
-    setReview({ draft, value, reason: reason.trim() }); setReceipt(null); setPreparedId(null); setState("ready");
+    setReview({ draft, value, reason: reason.trim() }); setReceipt(null); setHistoricalId(null); setPreparedId(null); setState("ready");
   }); };
   const save = () => { if (!review) return; void perform(async signal => {
     nonce.current ??= crypto.randomUUID(); writeDocumentNonce(key, nonce.current); setPending(true); setUnrecorded(false);
@@ -83,7 +84,8 @@ export function DocumentSignaturePanel({ scope, version, disabled, onClose, onFo
       <button type="submit" className="secondary-button" disabled={locked || !choices || !selected.length} data-testid="signature-review">{t("review")}</button>
     </form> : null}
     {review && !pending ? <section className="resource-form" data-testid="signature-reviewed"><h3>{t("reviewed")}</h3><p dir="auto">{review.value.document.title}</p><ul className="resource-list">{review.value.recipients.map(party => <li key={partyKey(party)} dir="auto">{party.displayName} · {party.email}</li>)}</ul><button className="primary-button" disabled={locked} onClick={save} data-testid="signature-save">{t("save")}</button></section> : null}
-    <DocumentSignaturePreparationPanel scope={scope} signatureId={receipt?.state === "DRAFT" ? receipt.id : null} disabled={disabled || busy} onPrepared={setPreparedId} onForbidden={onForbidden} />
+    <DocumentSignatureHistoryPanel scope={scope} versionId={version.id} disabled={disabled || busy || pending} onForbidden={onForbidden} onOpen={value => { setReceipt(null); setReview(null); setChoices(null); setSelected([]); setReason(""); setQuery(""); setHistoricalId(value.signature.state === "DRAFT" ? value.signature.id : null); setPreparedId(value.signature.state === "DRAFT" && value.preparation?.state === "PREPARED" ? value.preparation.id : null); }} />
+    <DocumentSignaturePreparationPanel scope={scope} signatureId={historicalId ?? (receipt?.state === "DRAFT" ? receipt.id : null)} disabled={disabled || busy} onPrepared={setPreparedId} onForbidden={onForbidden} />
     <DocumentSignatureDistributionPanel scope={scope} preparationId={preparedId} disabled={disabled || busy} onForbidden={onForbidden} />
     <button className="quiet-button" disabled={busy} onClick={onClose}>{t("close")}</button>
   </section>;

@@ -25,14 +25,14 @@ const normalized = (draft: Draft): Draft => ({ ...draft, recipients: [...draft.r
 export const signatureDraftOutboxKey = (actorId: string, nonce: string) => "document-signature-draft:" + actorId + ":" + nonce;
 
 /** All source, template-origin, signature and actual counterparty grants remain independent. */
-export async function nativeSignatureContext(ctx: DocumentActorContext, tx: TenantTransaction, draft: Draft, action: "view" | "create", signatureId?: string, requestedBy = ctx.actorId) {
+export async function nativeSignatureContext(ctx: DocumentActorContext, tx: TenantTransaction, draft: Draft, action: "view" | "create" | "history", signatureId?: string, requestedBy = ctx.actorId) {
   const repository = new DocumentRepository(tx, ctx.organizationId), instance = await repository.instance(draft.instanceId), version = await repository.version(draft.documentVersionId);
   if (!instance || !version || version.documentId !== instance.documentId || version.admission.contentType !== "application/pdf" || !(await repository.versionMatchesInstance(version.id, instance.id))) throw new DocumentAccessError();
   const input = generatedDocumentUploadInput.safeParse(version.admission.input); if (!input.success || input.data.generationInstanceId !== instance.id) throw new DocumentAccessError();
   const source = documentSourceReferenceSchema.parse({ kind: instance.document.sourceKind, id: instance.document.sourceId }), archive = await documentArchiveContext(ctx, tx, source, "export", instance.document),
     parties = await Promise.all(draft.recipients.map(reference => repository.signatureRecipientSource(reference)));
   if (action === "create" && (instance.document.archivedAt || archive.native.archived)) throw new DocumentAccessError();
-  if (parties.some(party => !party || party.archived)) throw new DocumentAccessError();
+  if (parties.some(party => !party || action !== "history" && party.archived)) throw new DocumentAccessError();
   const actual = parties.map(party => { if (!party) throw new DocumentAccessError(); return party; }), checks: CurrentAuthorityCheck[] = actual.flatMap(party => party.checks);
   for (const dataClass of archive.privacy) {
     const resource = { ...archive.native.resource, type: "signature", id: signatureId, documentId: instance.documentId, assignedUserAccountId: requestedBy, dataClass };
@@ -45,11 +45,14 @@ export async function nativeSignatureContext(ctx: DocumentActorContext, tx: Tena
 type Context = Awaited<ReturnType<typeof nativeSignatureContext>>;
 function partyPresentation(ctx: DocumentActorContext, current: Context) {
   return current.parties.map(party => {
-    const data = { displayName: party.displayName, email: party.email }, visible = present({ ...ctx.authContext, visibleDataClasses: new Set() }, "export", { ...party.resource, data }, catalogFieldPolicy<typeof data>(party.resource.type), current.archive.now);
-    if (visible.displayName !== data.displayName || visible.email !== data.email) throw new DocumentAccessError();
-    const value = z.object({ displayName: z.string().min(1).max(500), email: z.email().max(254) }).safeParse(visible); if (!value.success) throw new DocumentConfigurationError();
-    return { reference: party.reference, ...value.data, fingerprint: party.fingerprint, identityHash: commandFingerprint(party.reference) };
+    const value = presentNativeSignatureParty(ctx, current, party, { displayName: party.displayName, email: party.email });
+    return { reference: party.reference, ...value, fingerprint: party.fingerprint, identityHash: commandFingerprint(party.reference) };
   });
+}
+export function presentNativeSignatureParty(ctx: DocumentActorContext, current: Context, party: Context["parties"][number], data: { displayName: string | null; email: string | null }) {
+  const visible = present({ ...ctx.authContext, visibleDataClasses: new Set() }, "export", { ...party.resource, data }, catalogFieldPolicy<typeof data>(party.resource.type), current.archive.now);
+  if (visible.displayName !== data.displayName || visible.email !== data.email) throw new DocumentAccessError();
+  const value = z.object({ displayName: z.string().min(1).max(500), email: z.email().max(254) }).safeParse(visible); if (!value.success) throw new DocumentConfigurationError(); return value.data;
 }
 export { partyPresentation as presentSignatureParties };
 function reviewFingerprint(ctx: DocumentActorContext, draft: Draft, current: Context) { return commandFingerprint({ actorId: ctx.actorId, draft, source: current.fingerprint, cap: captureAuthorizationCap(ctx.authContext) }); }
@@ -87,7 +90,7 @@ export async function reviewNativeSignature(actor: DocumentActorContext, raw: un
       recipients: partyPresentation(ctx, final), privacy: final.archive.privacy };
   });
 }
-export function nativeSignatureOriginalDefinition(row: Signature) {
+export function nativeSignatureOriginalDefinition(row: Omit<Signature, "events">) {
   const snapshot = nativeSignatureSnapshotSchema.parse(row.policySnapshot), command = snapshot.command, cap = restoreAuthorizationCap(row.authorizationCap),
     draft = normalized(nativeSignatureDraftSchema.parse({ instanceId: command.instanceId, documentVersionId: command.documentVersionId, recipients: command.recipients }));
   if (snapshot.commandHash !== row.commandHash || commandFingerprint(command) !== row.commandHash || snapshot.nativeSourceFingerprint !== row.sourceFingerprint || snapshot.document.instanceId !== row.instanceId || snapshot.document.versionId !== row.documentVersionId || command.idempotencyKey !== row.commandKey) throw new DocumentConflictError();

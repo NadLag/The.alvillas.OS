@@ -72,6 +72,13 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   async instanceByNonce(createdBy: string, commandKey: string) { const row=await this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, createdBy, commandKey } });if(!row)return null;const document=await this.document(row.documentId,row.id);return document?{...row,document}:null; }
   instanceNonceOwner(commandKey: string) { return this.tx.documentInstance.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { createdBy: true } }); }
   signature(id: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, id }, include: signatureInclude }); }
+  signatureRecord(id: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, id }, include: { recipients: { orderBy: { id: "asc" } } } }); }
+  signaturesForVersion(documentVersionId: string, before?: string) { return this.tx.signature.findMany({ where: { organizationId: this.organizationId, documentVersionId, ...(before ? { id: { lt: before } } : {}) }, select: { id: true }, orderBy: { id: "desc" }, take: 31 }); }
+  async signatureEvents(signatureId: string, before?: string) {
+    const anchor = before ? await this.tx.signatureEvent.findFirst({ where: { organizationId: this.organizationId, signatureId, id: before }, select: { id: true, observedAt: true } }) : null; if (before && !anchor) return null;
+    return this.tx.signatureEvent.findMany({ where: { organizationId: this.organizationId, signatureId, ...(anchor ? { OR: [{ observedAt: { lt: anchor.observedAt } }, { observedAt: anchor.observedAt, id: { lt: anchor.id } }] } : {}) }, orderBy: [{ observedAt: "desc" }, { id: "desc" }], take: 51 });
+  }
+  latestSignatureEvent(signatureId: string) { return this.tx.signatureEvent.findFirst({ where: { organizationId: this.organizationId, signatureId }, orderBy: [{ observedAt: "desc" }, { id: "desc" }] }); }
   signatureByNonce(requestedBy: string, commandKey: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, include: signatureInclude }); }
   signatureNonceOwner(commandKey: string) { return this.tx.signature.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { requestedBy: true } }); }
   providerPreparationByNonce(requestedBy: string, commandKey: string) { return this.tx.signatureProviderIntent.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey }, select: { id: true } }); }
