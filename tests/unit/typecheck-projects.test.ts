@@ -5,6 +5,19 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 describe("complete compiler partition coverage", () => {
+  it("bounds larger native groups while retaining every original root and rejecting errors in each group", () => {
+    const directory = join(process.cwd(), ".tmp"); mkdirSync(directory, { recursive: true }); const root = mkdtempSync(join(directory, "compiler-bounds-"));
+    writeFileSync(join(root, "package.json"), '{"type":"module"}'); writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, target: "ES2023", types: [], skipLibCheck: true, ignoreDeprecations: "6.0" }, include: ["**/*.ts"], exclude: [".tmp"] }));
+    writeFileSync(join(root, "ambient.ts"), 'interface BoundContext { amount: string }\n'); mkdirSync(join(root, "tests/integration"), { recursive: true });
+    for (let index = 0; index < 74; index++) writeFileSync(join(root, "tests/integration", String(index).padStart(3, "0") + ".ts"), 'export const value: BoundContext = { amount: "9007199254740993.07" };\n');
+    const moduleUrl = pathToFileURL(join(process.cwd(), "scripts/typecheck-projects.mjs")).href, plan = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `import {prepareTypecheckProjects} from ${JSON.stringify(moduleUrl)};console.log(JSON.stringify(prepareTypecheckProjects(${JSON.stringify(root)})));`], { encoding: "utf8", windowsHide: true })) as { nativeRootCount: number; originalRoots: string[]; shared: string[]; projects: { name: string; path: string; roots: string[] }[] }, native = plan.projects.filter(project => project.name.startsWith("postgres-")), primary = native.flatMap(project => project.roots.filter(file => !plan.shared.includes(file)));
+    expect(plan.nativeRootCount).toBe(74); expect(native).toHaveLength(3); expect(primary).toHaveLength(74); expect(new Set(primary).size).toBe(74); expect(new Set(plan.projects.flatMap(project => project.roots))).toEqual(new Set([...plan.originalRoots, ...plan.shared]));
+    for (const project of native) {
+      expect(project.roots.filter(file => !plan.shared.includes(file)).length).toBeLessThanOrEqual(36); expect(plan.shared.every(file => project.roots.includes(file))).toBe(true);
+      const run = () => spawnSync(process.execPath, ["node_modules/typescript/lib/tsc.js", "--noEmit", "--project", project.path], { cwd: process.cwd(), encoding: "utf8", windowsHide: true }), valid = run(); expect(valid.status, valid.stdout + valid.stderr).toBe(0);
+      const source = project.roots.find(file => !plan.shared.includes(file))!, original = readFileSync(source, "utf8"); writeFileSync(source, 'export const value: BoundContext = { amount: 0.07 };\n'); const failed = run(); expect(failed.status).not.toBe(0); expect(failed.stdout).toContain("TS2322"); writeFileSync(source, original);
+    }
+  });
   it("preserves shared ambient declarations and reports an error from either native partition", () => {
     const directory = join(process.cwd(), ".tmp"); mkdirSync(directory, { recursive: true });
     const root = mkdtempSync(join(directory, "compiler-coverage-"));
