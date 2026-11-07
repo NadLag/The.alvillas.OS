@@ -30,6 +30,9 @@ export type SignatureRequestReceipt = { requestId: string; evidence: Uint8Array 
 export const signatureDownloadInputSchema = z.object({ requestId: signatureRequestIdSchema, reference: z.string().min(1).max(255), itemId: signatureRequestIdSchema, version: z.enum(["original", "signed"]) }).strict();
 export type SignatureRequestDownloadInput = z.infer<typeof signatureDownloadInputSchema>;
 export type SignatureRequestDownload = { requestId: string; itemId: string; version: "original" | "signed"; bytes: Uint8Array; sha256: string; observation: SignatureRequestObservation };
+export const signatureCertificateInputSchema = z.object({ requestId: signatureRequestIdSchema, reference: z.string().min(1).max(255) }).strict();
+export type SignatureCertificateDownloadInput = z.infer<typeof signatureCertificateInputSchema>;
+export type SignatureCertificateDownload = { requestId: string; bytes: Uint8Array; sha256: string; observation: SignatureRequestObservation };
 const instant = z.iso.datetime({ offset: true }).nullable();
 export const signatureObservationFactsSchema = z.object({ requestId: signatureRequestIdSchema, reference: z.string().min(1).max(255), title: z.string().min(1).max(255), status: signatureProviderStatusSchema, teamId: signatureTeamIdSchema,
   createdAt: z.iso.datetime({ offset: true }).optional(),

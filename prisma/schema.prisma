@@ -215,6 +215,8 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  signedSignatureArchives SignatureSignedArchive[]
+  signedSignatureArtifacts SignatureSignedArtifact[]
   documents Document[]
   documentAdmissions DocumentAdmission[]
   documentVersions DocumentVersion[]
@@ -4730,6 +4732,7 @@ model ExternalPaymentRefundSettlement {
 
 
 model Document {
+  signedSignatureArtifact SignatureSignedArtifact?
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   sourceKind String @map("source_kind")
@@ -4771,6 +4774,7 @@ model Document {
 }
 
 model DocumentAdmission {
+  signedSignatureArtifact SignatureSignedArtifact?
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   documentId String @map("document_id") @db.Uuid
@@ -4874,6 +4878,7 @@ model DocumentInstance {
 }
 
 model Signature {
+  signedArchive SignatureSignedArchive?
   identityRecoveries SignatureProviderIdentityRecovery[]
   providerWebhooks SignatureProviderWebhook[]
   providerIntents SignatureProviderIntent[]
@@ -4903,6 +4908,7 @@ model Signature {
 }
 
 model SignatureProviderScope {
+  signedArchives SignatureSignedArchive[]
   identityRecoveries SignatureProviderIdentityRecovery[]
   webhooks SignatureProviderWebhook[]
   scopeHash String @id @map("scope_hash") @db.Char(64)
@@ -4951,6 +4957,7 @@ model SignatureProviderIntent {
 }
 
 model SignatureProviderAttempt {
+  signedArchives SignatureSignedArchive[]
   identityRecoveries SignatureProviderIdentityRecovery[]
   webhooks SignatureProviderWebhook[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
@@ -4970,6 +4977,9 @@ model SignatureProviderAttempt {
 }
 
 model SignatureProviderEvidence {
+  signedArchiveId String? @map("signed_archive_id") @db.Uuid
+  signedArchive SignatureSignedArchive? @relation("SignedArchiveEvidence",fields:[organizationId,signedArchiveId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  archiveCompletions SignatureSignedArchive[] @relation("SignedArchiveCompletion")
   identityRecoveryId String? @map("identity_recovery_id") @db.Uuid
   identityRecovery SignatureProviderIdentityRecovery? @relation(fields:[organizationId,identityRecoveryId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   webhookId String? @map("webhook_id") @db.Uuid
@@ -4996,6 +5006,7 @@ model SignatureProviderEvidence {
   @@unique([organizationId,id],map:"signature_provider_evidence_org_id_unique")
   @@unique([organizationId,attemptId,observationHash],map:"signature_provider_evidence_observation_unique")
   @@unique([organizationId,identityRecoveryId],map:"signature_provider_evidence_identity_recovery_unique")
+  @@unique([organizationId,signedArchiveId,kind],map:"signature_provider_evidence_signed_archive_unique")
   @@index([organizationId,signatureId,observedAt,id],map:"signature_provider_evidence_history_idx")
   @@map("signature_provider_evidence")
 }
@@ -5118,13 +5129,59 @@ model DocumentAction {
   sourceFingerprint String @map("source_fingerprint") @db.Char(64)
   commandKey String @map("command_key") @db.Uuid
   commandHash String @map("command_hash") @db.Char(64)
-  actorId String @map("actor_id") @db.Uuid
+  actorId String? @map("actor_id") @db.Uuid
   occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
   organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
   document Document @relation(fields:[organizationId,documentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
-  actor UserAccount @relation("DocumentActionActor",fields:[organizationId,actorId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  actor UserAccount? @relation("DocumentActionActor",fields:[organizationId,actorId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   @@unique([organizationId,id],map:"document_action_org_id_unique")
   @@unique([organizationId,actorId,commandKey,action],map:"document_action_command_unique")
   @@index([organizationId,documentId,occurredAt,id],map:"document_action_history_idx")
   @@map("document_action")
+}
+
+model SignatureSignedArchive {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  signatureId String @map("signature_id") @db.Uuid
+  preparationAttemptId String @map("preparation_attempt_id") @db.Uuid
+  completionEvidenceId String @map("completion_evidence_id") @db.Uuid
+  providerScopeHash String @map("provider_scope_hash") @db.Char(64)
+  providerRequestId String @map("provider_request_id")
+  commandHash String @map("command_hash") @db.Char(64)
+  canonicalRequest String @map("canonical_request")
+  sourceSnapshot Json @map("source_snapshot")
+  admittedAt DateTime @default(now()) @map("admitted_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  signature Signature @relation(fields:[organizationId,signatureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  preparationAttempt SignatureProviderAttempt @relation(fields:[organizationId,preparationAttemptId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  completionEvidence SignatureProviderEvidence @relation("SignedArchiveCompletion",fields:[organizationId,completionEvidenceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  providerScope SignatureProviderScope @relation(fields:[organizationId,providerScopeHash],references:[organizationId,scopeHash],onDelete:Restrict,onUpdate:NoAction)
+  artifacts SignatureSignedArtifact[]
+  evidence SignatureProviderEvidence[] @relation("SignedArchiveEvidence")
+  @@unique([organizationId,id],map:"signature_signed_archive_org_id_unique")
+  @@unique([organizationId,signatureId],map:"signature_signed_archive_original_unique")
+  @@index([organizationId,admittedAt,id],map:"signature_signed_archive_history_idx")
+  @@map("signature_signed_archive")
+}
+
+model SignatureSignedArtifact {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  archiveId String @map("archive_id") @db.Uuid
+  kind String
+  documentId String @map("document_id") @db.Uuid
+  admissionId String @map("admission_id") @db.Uuid
+  sourceSnapshot Json @map("source_snapshot")
+  payloadCipher Bytes @map("payload_cipher")
+  capturedAt DateTime @default(now()) @map("captured_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  archive SignatureSignedArchive @relation(fields:[organizationId,archiveId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  document Document @relation(fields:[organizationId,documentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  admission DocumentAdmission @relation(fields:[organizationId,admissionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id],map:"signature_signed_artifact_org_id_unique")
+  @@unique([organizationId,archiveId,kind],map:"signature_signed_artifact_kind_unique")
+  @@unique([organizationId,documentId],map:"signature_signed_artifact_document_unique")
+  @@unique([organizationId,admissionId],map:"signature_signed_artifact_admission_unique")
+  @@map("signature_signed_artifact")
 }

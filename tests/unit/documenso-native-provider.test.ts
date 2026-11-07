@@ -7,12 +7,13 @@ import { DocumensoSignatureProvider } from "@/platform/providers/real";
 import { FakeSignatureProvider } from "@/platform/providers/fakes";
 import { assertDistributedSignatureRequestObservation, assertSignatureRequestObservation, signatureMaximumEvidenceBytes, signatureMaximumPdfBytes, type SignatureRequestInput } from "@/platform/providers/signature-request";
 
-let server: Server, origin: string, pdf: Buffer, completedPdf: Buffer, calls: Array<{ method: string; path: string }>, completed = false, stored: { payload: Record<string, unknown>; bytes: Buffer; fileName: string; sent: boolean } | null,
-  fault: "none" | "lost-create" | "lost-send" | "wrong-reference" | "foreign-parent" | "public" | "oversized" | "chunked-oversized" | "html" | "pdf-html" | "pdf-oversized" | "pdf-chunked-oversized" | "pdf-truncated" | "pdf-redirect" | "pdf-invalid" | "completion-regressed";
+let server: Server, origin: string, pdf: Buffer, completedPdf: Buffer, certificatePdf: Buffer, calls: Array<{ method: string; path: string }>, completed = false, stored: { payload: Record<string, unknown>; bytes: Buffer; fileName: string; sent: boolean } | null,
+  fault: "none" | "lost-create" | "lost-send" | "wrong-reference" | "foreign-parent" | "public" | "oversized" | "chunked-oversized" | "html" | "pdf-html" | "pdf-oversized" | "pdf-chunked-oversized" | "pdf-truncated" | "pdf-redirect" | "pdf-invalid" | "completion-regressed" | "unsigned-required";
 const requestId = "envelope_native_contract", privateToken = "OWNED-PRIVATE-SIGNING-TOKEN";
 beforeAll(async () => {
   pdf = await renderToBuffer(createElement(Document, {}, createElement(Page, { size: "A4" }, createElement(Text, {}, "Actual private native signing fixture PDF"))));
   completedPdf = await renderToBuffer(createElement(Document, {}, createElement(Page, { size: "A4" }, createElement(Text, {}, "Owned completed provider representation; transport fixture only"))));
+  certificatePdf = await renderToBuffer(createElement(Document, {}, createElement(Page, { size: "A4" }, createElement(Text, {}, "Owned completion certificate for " + requestId + "; no hosted or legal acceptance claim"))));
   server = createServer((request, response) => { void (async () => {
     const path = request.url!, method = request.method!; calls.push({ method, path }); expect(request.headers.authorization).toBe("owned-test-token");
     const chunks: Buffer[] = []; for await (const chunk of request as AsyncIterable<Uint8Array>) chunks.push(Buffer.from(chunk)); const bytes = Buffer.concat(chunks);
@@ -24,7 +25,7 @@ beforeAll(async () => {
       if (fault === "lost-create") { response.destroy(); return; } response.end(JSON.stringify({ id: requestId })); return;
     }
     if (!stored) { response.writeHead(404).end("{}"); return; }
-    if (path.startsWith("/api/v2/envelope/item/item_native_original/download?version=")) {
+    if (path.startsWith("/api/v2/envelope/item/item_native_original/download?version=") || path === "/api/v2/envelope/" + requestId + "/certificate/download") {
       if (fault === "pdf-redirect") { response.writeHead(302, { location: origin + "/PRIVATE-SIGNING-URL" }).end(); return; }
       if (fault === "pdf-html") { response.setHeader("content-type", "text/html"); response.end("PRIVATE-PROVIDER-DOWNLOAD"); return; }
       response.setHeader("content-type", "application/pdf");
@@ -33,7 +34,7 @@ beforeAll(async () => {
       if (fault === "pdf-truncated") { response.setHeader("connection", "close"); response.setHeader("content-length", String(pdf.length + 10)); response.end(pdf); return; }
       if (fault === "pdf-invalid") { response.end("not-a-pdf-private-body"); return; }
       if (fault === "completion-regressed") completed = false;
-      response.end(new URL(origin + path).searchParams.get("version") === "signed" ? completedPdf : stored.bytes); return;
+      response.end(path.endsWith("/certificate/download") ? certificatePdf : new URL(origin + path).searchParams.get("version") === "signed" ? completedPdf : stored.bytes); return;
     }
     if (path === "/api/v2/envelope/distribute") { expect(JSON.parse(bytes.toString())).toEqual({ envelopeId: requestId, meta: { distributionMethod: "EMAIL" } }); stored.sent = true;
       if (fault === "lost-send") { response.destroy(); return; } response.end(JSON.stringify({ success: true, id: requestId, recipients: [{ id: 1, token: privateToken }] })); return; }
@@ -45,7 +46,7 @@ beforeAll(async () => {
     response.end(JSON.stringify({ id: requestId, type: "DOCUMENT", source: "DOCUMENT", visibility: fault === "public" ? "EVERYONE" : "ADMIN", title: input.title, externalId: fault === "wrong-reference" ? "different-native-reference" : input.externalId,
       status: completed ? "COMPLETED" : stored.sent ? "PENDING" : "DRAFT", teamId: 17, documentMeta: { ...input.meta as object, distributionMethod: stored.sent ? "EMAIL" : "NONE" },
       recipients: recipients.map((recipient, index) => ({ id: index + 1, envelopeId: fault === "foreign-parent" ? "envelope_foreign" : requestId, name: recipient.name, email: recipient.email, role: recipient.role,
-        signingOrder: recipient.signingOrder, readStatus: "NOT_OPENED", signingStatus: completed ? "SIGNED" : "NOT_SIGNED", sendStatus: stored!.sent ? "SENT" : "NOT_SENT", signedAt: completed ? "2026-11-06T12:00:00.000Z" : null, expiresAt: null, token: privateToken })),
+        signingOrder: recipient.signingOrder, readStatus: "NOT_OPENED", signingStatus: completed && fault !== "unsigned-required" ? "SIGNED" : "NOT_SIGNED", sendStatus: stored!.sent ? "SENT" : "NOT_SENT", signedAt: completed && fault !== "unsigned-required" ? "2026-11-06T12:00:00.000Z" : null, expiresAt: null, token: privateToken })),
       envelopeItems: [{ id: "item_native_original", envelopeId: requestId, title: stored.fileName }], fields: recipients.flatMap((recipient, index) => recipient.fields.map(field => ({ ...field, id: ++nextField, recipientId: index + 1,
         envelopeItemId: "item_native_original", positionX: String(field.positionX), positionY: String(field.positionY), width: String(field.width), height: String(field.height) }))) }));
   })().catch(() => response.destroy()); });
@@ -60,6 +61,24 @@ const provider = (url = origin, transport: typeof fetch = fetch, nodeEnv: "test"
   () => Promise.reject(Error("Native envelope requests must not use the legacy recipient endpoint")), transport);
 
 describe("actual bounded Documenso envelope protocol", () => {
+  it("downloads the actual request-bound certificate through authenticated GETs only after complete required actions", async () => {
+    const p = provider(), input = fixture(); await p.prepareSignatureRequest(input); await p.distributeSignatureRequest({ requestId }); const posts = calls.filter(call => call.method === "POST").length;
+    await expect(p.downloadSignatureCertificate({ requestId, reference: input.reference })).rejects.toMatchObject({ effect: "NONE" }); expect(calls.some(call => call.path.endsWith("/certificate/download"))).toBe(false); completed = true;
+    const result = await p.downloadSignatureCertificate({ requestId, reference: input.reference }); expect(result.requestId).toBe(requestId); expect(Buffer.from(result.bytes)).toEqual(certificatePdf); expect(result.sha256).toBe(createHash("sha256").update(certificatePdf).digest("hex")); expect(result.observation.status).toBe("COMPLETED"); expect(calls.slice(-3).map(call => call.path)).toEqual(["/api/v2/envelope/" + requestId, "/api/v2/envelope/" + requestId + "/certificate/download", "/api/v2/envelope/" + requestId]); expect(calls.filter(call => call.method === "POST")).toHaveLength(posts);
+  });
+  it("rejects incomplete required signing actions for both signed PDF and certificate despite COMPLETED status", async () => {
+    const p = provider(), input = fixture(); await p.prepareSignatureRequest(input); await p.distributeSignatureRequest({ requestId }); completed = true; fault = "unsigned-required";
+    await expect(p.downloadSignatureCertificate({ requestId, reference: input.reference })).rejects.toMatchObject({ effect: "NONE" }); await expect(p.downloadSignatureRequest({ requestId, reference: input.reference, itemId: "item_native_original", version: "signed" })).rejects.toMatchObject({ effect: "NONE" }); expect(calls.some(call => call.path.includes("/download"))).toBe(false);
+  });
+  it("discards a certificate when the actual completed request regresses during its binary read", async () => {
+    const p = provider(), input = fixture(); await p.prepareSignatureRequest(input); await p.distributeSignatureRequest({ requestId }); completed = true; fault = "completion-regressed"; await expect(p.downloadSignatureCertificate({ requestId, reference: input.reference })).rejects.toMatchObject({ effect: "NONE" }); expect(calls.filter(call => call.path.endsWith("/certificate/download"))).toHaveLength(1);
+  });
+  it.each(["pdf-html", "pdf-oversized", "pdf-chunked-oversized", "pdf-truncated", "pdf-redirect", "pdf-invalid"] as const)("rejects %s certificate transport under the unchanged bounded PDF contract", async mode => {
+    const p = provider(), input = fixture(); await p.prepareSignatureRequest(input); await p.distributeSignatureRequest({ requestId }); completed = true; fault = mode; await expect(p.downloadSignatureCertificate({ requestId, reference: input.reference })).rejects.toMatchObject({ effect: "NONE", message: "signature_provider_unavailable" }); expect(calls.filter(call => call.path.endsWith("/certificate/download"))).toHaveLength(1); expect(calls.some(call => call.path.includes("PRIVATE-SIGNING-URL"))).toBe(false);
+  });
+  it("rejects foreign certificate references and URL-shaped identity before any binary read and never fakes a certificate", async () => {
+    const p = provider(), input = fixture(); await p.prepareSignatureRequest(input); await p.distributeSignatureRequest({ requestId }); completed = true; await expect(p.downloadSignatureCertificate({ requestId, reference: "foreign-native-reference" })).rejects.toMatchObject({ effect: "NONE" }); await expect(p.downloadSignatureCertificate({ requestId: "https://foreign.example.test/private", reference: input.reference })).rejects.toThrow(); expect(calls.some(call => call.path.includes("/download"))).toBe(false); await expect(new FakeSignatureProvider("test").downloadSignatureCertificate({ requestId, reference: input.reference })).rejects.toMatchObject({ effect: "NONE" });
+  });
   it("confirms actual email distribution against the original PDF and rejects draft, rejected, cancelled or unsent readback", async () => {
     const p = provider(), input = fixture(); await p.prepareSignatureRequest(input); await p.distributeSignatureRequest({ requestId });
     const download = await p.downloadSignatureRequest({ requestId, reference: input.reference, itemId: "item_native_original", version: "original" }), scope = { requestId, teamId: 17, originalPdf: download.bytes };
