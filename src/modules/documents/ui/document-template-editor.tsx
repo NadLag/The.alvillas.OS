@@ -26,6 +26,7 @@ export function DocumentTemplateEditor({locale,types,identity,definition,disable
     setInvalid(false);onSubmit({typeKey:selected.key,title:title.trim(),reason:reason.trim(),definition:parsed.data,effectiveFrom});
   };
   return <form className="resource-form" data-testid="document-template-editor" onSubmit={submit}><h2>{t(identity?"editTitle":"newTitle")}</h2>
+    {selected?.category?<p data-testid="document-category">{archive(`category_${selected.category}`)}</p>:null}
     <label className="field"><span>{archive("documentType")}</span><select value={selected?.key??""} disabled={disabled||Boolean(identity)} onChange={event=>setTypeKey(event.target.value)} data-testid="template-type">{types.map(type=><option key={type.key} value={type.key}>{type.labels[locale]}</option>)}</select></label>
     <label className="field"><span>{t("archiveLabel")}</span><input required maxLength={500} value={title} disabled={disabled} onChange={event=>setTitle(event.target.value)} dir="auto" data-testid="template-archive-title"/></label>
     <label className="field"><span>{archive("templateCode")}</span><input required pattern="[a-z][a-z0-9_]{0,119}" maxLength={120} value={identity?.templateKey??templateKey} disabled={disabled||Boolean(identity)} onChange={event=>setTemplateKey(event.target.value)} dir="ltr" data-testid="template-code"/></label>

@@ -8,7 +8,15 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
 import { DocumentObjectStore } from "@/modules/documents/infrastructure/document-object-store";
 import { DocumentRepository } from "@/modules/documents/infrastructure/document-repository";
-import { documentArchivePolicyKey } from "@/modules/documents/domain/document-policy";
+import { documentArchivePolicyKey, documentCategories } from "@/modules/documents/domain/document-policy";
+import { createSupplier, setSupplierArchived } from "@/modules/finance/application/supplier-service";
+import { DocumentTemplateSourceRepository } from "@/modules/documents/infrastructure/document-template-source-repository";
+import { reviewDocumentTemplate, admitDocumentTemplate } from "@/modules/documents/application/document-template-authoring";
+import { reviewDocumentGeneration } from "@/modules/documents/application/document-generation-review";
+import { admitDocumentGeneration } from "@/modules/documents/application/document-generation-admission";
+import { publishDocumentGeneration } from "@/modules/documents/application/document-generation-publication";
+import { documentTemplateMediaType } from "@/modules/documents/domain/document-template-format";
+import { documentPdfPageCount } from "@/modules/documents/infrastructure/document-pdf-metadata";
 import { reviewDocumentUpload, admitDocumentUpload, recoverDocumentUpload, uploadDocumentBytes, readDocumentHistory, downloadDocumentVersion,uploadDocumentPart,completeDocumentParts } from "@/modules/documents/application/document-archive";
 import * as auditWriter from "@/platform/audit/audit-writer";
 import { provisionIntegrationRole } from "./support/database-role";
@@ -368,5 +376,87 @@ describe("native private document archive", () => {
     const valid=await withTenant(db,f.org,tx=>tx.$queryRaw<{valid:boolean;legacy:boolean}[]>`SELECT app_document_parts_valid(${JSON.stringify(original.command)}::jsonb) AS valid,app_document_parts_valid('{}'::jsonb) AS legacy`);expect(valid).toEqual([{valid:true,legacy:true}]);
     await expect(withTenant(db,f.org,async tx=>{const row=await tx.documentAdmission.findUniqueOrThrow({where:{id:original.admission.id}}),id=randomUUID(),commandKey=randomUUID();return tx.documentAdmission.create({data:{...row,authorizationCap:inputJson(row.authorizationCap),policySnapshot:inputJson(row.policySnapshot),id,commandKey,storageKey:`organizations/${f.org}/documents/${row.documentId}/admissions/${id}.encrypted`,input:{...original.command,idempotencyKey:commandKey,parts:malformed}}});})).rejects.toThrow("document_admission_parts_shape");
     expect(await withTenant(db,f.org,tx=>tx.documentAdmission.count())).toBe(1);
+  });
+});
+
+
+describe("approved document types and native party sources", () => {
+  it.each(documentCategories)("retains the configured %s classification, real bytes and original rule after replacement", async category => {
+    const f=await fixture(),ctx=await actor(f),configured={...policy(["financial","sensitive"]),types:[{...policy().types[0],category,privacy:["financial","sensitive"]}]};
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:documentArchivePolicyKey,scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:ctx.actorId,reason:"Explicit approved original document type classification",value:configured}));
+    const original=await uploaded(f,ctx,content(category));
+    expect((await readDocumentHistory(ctx,{documentId:original.documentId},{db})).document.category).toBe(category);
+    expect((await readDocumentSourceWorkspace(ctx,{source:{kind:"PROPERTY",id:f.property.id}},{db})).items[0].category).toBe(category);
+    expect((await downloadDocumentVersion(ctx,{versionId:original.version.id},{db,objects:objectStore()})).bytes).toEqual(content(category));
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:documentArchivePolicyKey,scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:ctx.actorId,reason:"Replace current classification without rewriting the original",value:{...configured,types:[{...configured.types[0],category:category==="REPORT"?"HOUSE_RULES":"REPORT"}]}}));
+    expect((await readDocumentHistory(ctx,{documentId:original.documentId},{db})).document.category).toBe(category);
+    expect(await withTenant(db,f.org,tx=>tx.documentVersion.count({where:{documentId:original.documentId}}))).toBe(1);
+  });
+  async function partyFixture(kind:"SUPPLIER"|"GUEST"){
+    const f=await fixture(),ctx=await actor(f),keys=kind==="SUPPLIER"?["supplier:view","supplier:create","supplier:export","supplier:edit"]:["guest:view","guest:export"],partyAssignment=await withTenant(db,f.org,async tx=>{
+      const role=await tx.role.create({data:{organizationId:f.org,key:"document_party_"+randomUUID(),name:"Independent document party access"}}),permissions=await tx.permission.findMany({where:{organizationId:f.org,key:{in:keys}}});expect(permissions).toHaveLength(keys.length);
+      await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:role.id,permissionId:permission.id}))});return tx.roleAssignment.create({data:{organizationId:f.org,userAccountId:ctx.actorId,personId:ctx.personId,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});
+    }),full={...ctx,authContext:{...await authContextForAccount(f.org,ctx.actorId,{db}),personId:ctx.personId}},party=kind==="SUPPLIER"?await createSupplier(full,{displayName:"Original supplier document source",category:"Contract services",idempotencyKey:randomUUID(),reason:"Create independently authorized native supplier document source"},{db}):await withTenant(db,f.org,tx=>tx.guestRecord.create({data:{organizationId:f.org,displayName:"Original guest document source"}})),source={kind,id:party.id};
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:documentArchivePolicyKey,scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:ctx.actorId,reason:"Explicit protected native party document policy",value:{...policy(["sensitive"]),types:[{...policy().types[0],category:kind==="SUPPLIER"?"SUPPLIER":"GUEST_AGREEMENT",sources:[kind],privacy:["sensitive"]}]}}));
+    return{...f,ctx:full,source,partyAssignment};
+  }
+  it.each(["SUPPLIER","GUEST"] as const)("archives a real tenant %s source and resolves only its authorized native template values",async kind=>{
+    const f=await partyFixture(kind),original=await uploaded(f,f.ctx,content(kind),{source:f.source});
+    expect((await readDocumentSources(f.ctx,{kind},{db})).items.map(item=>item.source)).toEqual([f.source]);
+    const root=await withTenant(db,f.org,tx=>tx.document.findFirstOrThrow({where:{id:original.documentId}}));expect(root.supplierId).toBe(kind==="SUPPLIER"?f.source.id:null);expect(root.guestId).toBe(kind==="GUEST"?f.source.id:null);expect(root.privacy).toContain("sensitive");
+    const values=await withTenant(db,f.org,async tx=>{const repository=new DocumentTemplateSourceRepository(tx,f.org),native=await repository.documentSource(f.source);if(!native)throw Error("Actual native source required");return repository.templateSourceValues(native,[kind==="SUPPLIER"?"supplier_name":"guest_name"]);});
+    expect([...values.bindings.values()][0]).toMatchObject({kind:"TEXT",privacy:["sensitive"],value:kind==="SUPPLIER"?"Original supplier document source":"Original guest document source"});
+    expect((await downloadDocumentVersion(f.ctx,{versionId:original.version.id},{db,objects:objectStore()})).bytes).toEqual(content(kind));
+  });
+  it.each(["SUPPLIER","GUEST"] as const)("denies a %s source after its independent grant expires while document grants remain",async kind=>{
+    const f=await partyFixture(kind),original=await uploaded(f,f.ctx,content(kind),{source:f.source});
+    await withTenant(db,f.org,tx=>tx.roleAssignment.update({where:{id:f.partyAssignment.id},data:{validTo:new Date("2020-01-02")}}));
+    expect((await authContextForAccount(f.org,f.ctx.actorId,{db})).permissions.has("document:view")).toBe(true);
+    await expect(readDocumentHistory(f.ctx,{documentId:original.documentId},{db})).rejects.toThrow("document_unavailable");
+    await expect(downloadDocumentVersion(f.ctx,{versionId:original.version.id},{db,objects:objectStore()})).rejects.toThrow("document_unavailable");
+    expect((await readDocumentSources(f.ctx,{kind},{db})).items).toEqual([]);
+  });
+  it.each(["SUPPLIER","GUEST"] as const)("rejects a late %s grant withdrawal at the final download audit without returning private bytes",async kind=>{
+    const f=await partyFixture(kind),original=await uploaded(f,f.ctx,content(kind),{source:f.source}),write=auditWriter.writeAuditEvent;let changed=false;
+    const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{const result=await write(tx,event);if(!changed&&event.action==="documents.version_downloaded"){changed=true;await withTenant(db,f.org,inner=>inner.roleAssignment.update({where:{id:f.partyAssignment.id},data:{validTo:new Date("2020-01-02")}}));}return result;});
+    try{await expect(downloadDocumentVersion(f.ctx,{versionId:original.version.id},{db,objects:objectStore()})).rejects.toThrow("document_unavailable");}finally{spy.mockRestore();}expect(changed).toBe(true);
+  });
+  it.each(["SUPPLIER","GUEST"] as const)("denies cross-tenant %s source references and property-only grants before admitting a document",async kind=>{
+    const f=await partyFixture(kind),other=await fixture(),restricted=await actor(f,["document:view","document:create",kind.toLowerCase()+":view"],true);
+    expect((await readDocumentSources(restricted,{kind},{db})).items).toEqual([]);
+    await expect(reviewDocumentUpload(restricted,input(f,content(),{source:f.source}),{db})).rejects.toThrow("document_unavailable");
+    await expect(reviewDocumentUpload(f.ctx,input(f,content(),{source:{kind,id:other.property.id}}),{db})).rejects.toThrow("document_unavailable");
+    expect(await withTenant(db,f.org,tx=>tx.documentAdmission.count())).toBe(0);
+  });
+  it.each(["SUPPLIER","GUEST"] as const)("generates a real EN/FR PDF from independently authorized native %s values through retained templates",async kind=>{
+    const f=await partyFixture(kind),keys=["document_instance:view","document_instance:create","document_instance:export"];
+    await withTenant(db,f.org,async tx=>{const permissions=await tx.permission.findMany({where:{organizationId:f.org,key:{in:keys}}});expect(permissions).toHaveLength(keys.length);await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:f.ctx.role.id,permissionId:permission.id}))});
+      await new ConfigRuleRepository(tx,f.org).createVersion({key:documentArchivePolicyKey,scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:f.ctx.actorId,reason:"Explicit bilingual authored native party document policy",value:{...policy(["sensitive"]),upload_transport:{window_seconds:3600,max_requests:100},types:[{...policy().types[0],category:kind==="SUPPLIER"?"SUPPLIER":"GUEST_AGREEMENT",sources:[kind],privacy:["sensitive"],content_types:["application/pdf",documentTemplateMediaType]}]}});});
+    const ctx={...f.ctx,authContext:{...await authContextForAccount(f.org,f.ctx.actorId,{db}),personId:f.ctx.personId}},key=kind==="SUPPLIER"?"supplier_name":"guest_name",versions:string[]=[];
+    for(const locale of ["en","fr"] as const){const definition={schemaVersion:1,templateKey:"native_party_original",locale,title:locale==="en"?"Original agreement":"Convention originale",variables:[{key,kind:"TEXT"}],blocks:[{kind:"PARAGRAPH",text:"{{"+key+"}}"}]},draft={documentId:null,source:f.source,typeKey:"agreement",title:definition.title,supersedesId:null,effectiveFrom:null,definition},reviewed=await reviewDocumentTemplate(ctx,draft,{db}),admission=await admitDocumentTemplate(ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:reviewed.reviewFingerprint,reason:"Retain independently authorized native language variant"},{db}),complete=await completeDocumentParts(ctx,{admissionId:admission.id},{db,objects:objectStore()});expect(complete.version).not.toBeNull();versions.push(complete.version!.id);}
+    for(const versionId of versions){const draft={templateVersionId:versionId,variantVersionIds:versions,source:f.source,title:"Original native party PDF",effectiveFrom:null},reviewed=await reviewDocumentGeneration(ctx,draft,{db}),admitted=await admitDocumentGeneration(ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:reviewed.reviewFingerprint,reason:"Generate from retained independently authorized native party"},{db}),published=await publishDocumentGeneration(ctx,{instanceId:admitted.id},{db,objects:objectStore()});expect(published.versionId).toBeTruthy();const downloaded=await downloadDocumentVersion(ctx,{versionId:published.versionId!},{db,objects:objectStore()});expect(await documentPdfPageCount(downloaded.bytes)).toBeGreaterThan(0);const history=await readDocumentHistory(ctx,{documentId:published.documentId},{db});expect(history.document.category).toBe(kind==="SUPPLIER"?"SUPPLIER":"GUEST_AGREEMENT");expect(history.versions).toHaveLength(1);}
+  });
+  it.each(["SUPPLIER","GUEST"] as const)("retains archived or merged %s party history while denying new document admission",async kind=>{
+    const f=await partyFixture(kind),original=await uploaded(f,f.ctx,content(kind),{source:f.source});
+    if(kind==="SUPPLIER")await setSupplierArchived(f.ctx,{id:f.source.id,expectedVersion:(await withTenant(db,f.org,tx=>tx.supplier.findFirstOrThrow({where:{id:f.source.id},select:{version:true}}))).version,archived:true,reason:"Archive actual native supplier while preserving document history"},{db});
+    else await withTenant(db,f.org,async tx=>{const target=await tx.guestRecord.create({data:{organizationId:f.org,displayName:"Actual retained merged guest"}});await tx.guestRecord.update({where:{id:f.source.id},data:{mergedIntoId:target.id}});});
+    expect((await readDocumentHistory(f.ctx,{documentId:original.documentId},{db})).versions[0].id).toBe(original.version.id);
+    await expect(reviewDocumentUpload(f.ctx,input(f,content(),{source:f.source}),{db})).rejects.toThrow("document_configuration_unavailable");
+  });
+  it("enforces financial category protection natively without rewriting any prior document",async()=>{
+    const f=await fixture(),ctx=await actor(f),configured={...policy(["financial"]),types:[{...policy().types[0],category:"INVOICE",privacy:["financial"]}]};
+    await withTenant(db,f.org,tx=>new ConfigRuleRepository(tx,f.org).createVersion({key:documentArchivePolicyKey,scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:ctx.actorId,reason:"Explicit private invoice category protection",value:configured}));
+    const original=await uploaded(f,ctx);
+    await expect(withTenant(db,f.org,tx=>tx.$executeRaw`UPDATE document SET privacy=ARRAY['operational'] WHERE id=${original.documentId}::uuid`)).rejects.toThrow("document_captured_category_protection");
+    expect((await readDocumentHistory(ctx,{documentId:original.documentId},{db})).document.privacy).toEqual(["financial"]);
+    expect(await withTenant(db,f.org,tx=>tx.documentVersion.count({where:{documentId:original.documentId}}))).toBe(1);
+  });
+  it.each(["value","version","foreign-rule"] as const)("rejects a substituted original classification %s natively before accepting another root",async fault=>{
+    const f=await fixture(),ctx=await actor(f),original=await uploaded(f,ctx),row=await withTenant(db,f.org,tx=>tx.document.findFirstOrThrow({where:{id:original.documentId}})),snapshot=JSON.parse(JSON.stringify(row.policySnapshot)) as {id:string;version:number;value:ReturnType<typeof policy>};
+    let forged:Prisma.InputJsonObject;
+    if(fault==="foreign-rule"){const other=await fixture(),rule=await withTenant(db,other.org,tx=>tx.configRule.findFirstOrThrow({where:{key:documentArchivePolicyKey},select:{id:true,version:true,value:true}}));forged={id:rule.id,version:rule.version,value:inputJson(rule.value)};}
+    else forged=fault==="version"?{...snapshot,version:snapshot.version+1}:{...snapshot,value:{...snapshot.value,types:[{...snapshot.value.types[0],labels:{en:"Substituted retained classification",fr:"Classification substituée",ar:"تصنيف مستبدل"}}]}};
+    await expect(withTenant(db,f.org,async tx=>{await tx.document.create({data:{...row,id:randomUUID(),commandKey:randomUUID(),sourceSnapshot:inputJson(row.sourceSnapshot),policySnapshot:forged}});await tx.$executeRawUnsafe("SET CONSTRAINTS document_captured_classification_guard IMMEDIATE");})).rejects.toThrow("document original classification requires its exact tenant rule");
+    expect(await withTenant(db,f.org,tx=>tx.document.count())).toBe(1);expect((await readDocumentHistory(ctx,{documentId:original.documentId},{db})).versions[0].id).toBe(original.version.id);
   });
 });

@@ -11,7 +11,7 @@ import { encryptSecret, decryptSecret } from "@/platform/auth/secret-encryption"
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { DocumentRepository } from "../infrastructure/document-repository";
-import { documentSourceKinds, retainDocumentPrivacy } from "../domain/document-policy";
+import { documentSourceKinds, retainedDocumentCategory, retainDocumentPrivacy } from "../domain/document-policy";
 import { documentSourceReferenceSchema, documentListInput, DocumentAccessError, DocumentConflictError } from "../domain/document-command";
 import { documentItemSchema, documentSourceChoicesSchema, documentSourceWorkspaceSchema } from "../domain/document-read-model";
 import { documentSourceContext, documentAuthorityChecks, documentArchiveContext, type DocumentActorContext } from "./document-archive";
@@ -64,7 +64,7 @@ export async function readDocumentSourceWorkspace(actor: DocumentActorContext, r
     if([ctx.authContext,stored].some(authority=>!authority.permissions.has("document:view")))throw new DocumentAccessError();
     for(const type of base.policy.value.types.filter(type=>type.sources.includes(input.source.kind))){
       const privacy=retainDocumentPrivacy([],type.privacy,input.source.kind),required=documentAuthorityChecks(base.native,privacy,"create",{kind:input.kind,createdBy:ctx.actorId});
-      if(!base.native.archived&&[ctx.authContext,stored].every(authority=>allowed(authority,required,base.now))){checks.push(...required);types.push({key:type.key,labels:type.labels,contentTypes:type.content_types,maxBytes:type.max_bytes});}
+      if(!base.native.archived&&[ctx.authContext,stored].every(authority=>allowed(authority,required,base.now))){checks.push(...required);types.push({key:type.key,...type.category?{category:type.category}:{},labels:type.labels,contentTypes:type.content_types,maxBytes:type.max_bytes});}
     }
     const rows=await base.repository.roots(input.source,after,input.typeKey,input.locale);
     for(const root of rows.slice(0,50)){
@@ -76,7 +76,7 @@ export async function readDocumentSourceWorkspace(actor: DocumentActorContext, r
         catch(error){if(error instanceof DocumentAccessError)continue;throw error;}
       }
       checks.push(...required);captured.push({id:root.id,revision:root.revision.toString(),privacy:root.privacy,instanceFingerprint});
-      const data={id:root.id,source:input.source,typeKey:root.typeKey,kind:root.kind,locale:root.locale,title:root.title,privacy,revision:root.revision.toString(),createdAt:root.createdAt.toISOString(),archivedAt:root.archivedAt?.toISOString()??null,templateKey:root.template?.key??null,...signedArtifact?{signedArtifact}:{}};
+      const data={id:root.id,source:input.source,typeKey:root.typeKey,...retainedDocumentCategory(root.policySnapshot,root.typeKey),kind:root.kind,locale:root.locale,title:root.title,privacy,revision:root.revision.toString(),createdAt:root.createdAt.toISOString(),archivedAt:root.archivedAt?.toISOString()??null,templateKey:root.template?.key??null,...signedArtifact?{signedArtifact}:{}};
       items.push(documentItemSchema.parse(present({...ctx.authContext,visibleDataClasses:new Set(privacy)},"view",{...base.native.resource,type:"document",id:root.id,documentId:root.id,assignedUserAccountId:root.createdBy,data},{},base.now)));
     }
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"documents.source_read",resourceType:"document",resourceId:null,after:{count:items.length},requestId:deps.requestId??randomUUID(),occurredAt:base.now});
