@@ -9,7 +9,7 @@ export class SignaturePreparationRepository extends DocumentRepository {
   appendScope(data: Omit<Prisma.SignatureProviderScopeUncheckedCreateInput, "organizationId">) { return this.tx.signatureProviderScope.create({ data: { ...data, organizationId: this.organizationId } }); }
   preparation(id: string) { return this.tx.signatureProviderIntent.findFirst({ where: { organizationId: this.organizationId, id, phase: "PREPARE" }, include: intentInclude }); }
   preparationByNonce(requestedBy: string, commandKey: string) { return this.tx.signatureProviderIntent.findFirst({ where: { organizationId: this.organizationId, requestedBy, commandKey, phase: "PREPARE" }, include: intentInclude }); }
-  preparationNonceOwner(commandKey: string) { return this.tx.signatureProviderIntent.findFirst({ where: { organizationId: this.organizationId, commandKey }, select: { requestedBy: true } }); }
+  preparationNonceOwner(commandKey: string) { return this.providerPreparationNonceOwner(commandKey); }
   appendPreparation(data: Omit<Prisma.SignatureProviderIntentUncheckedCreateInput, "organizationId">) { return this.tx.signatureProviderIntent.create({ data: { ...data, organizationId: this.organizationId }, include: intentInclude }); }
   preparationAttempt(signatureId: string) { return this.tx.signatureProviderAttempt.findFirst({ where: { organizationId: this.organizationId, signatureId, phase: "PREPARE" }, include: { intent: true, evidence: { orderBy: [{ observedAt: "asc" }, { id: "asc" }] } } }); }
   appendPreparationAttempt(data: Omit<Prisma.SignatureProviderAttemptUncheckedCreateInput, "organizationId">) { return this.tx.signatureProviderAttempt.create({ data: { ...data, organizationId: this.organizationId } }); }
