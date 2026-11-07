@@ -104,3 +104,7 @@ prisma/migrations/20261106110000_native_document_generation/migration.sql text e
 prisma/migrations/20261106123000_generated_document_amendments/migration.sql text eol=lf
 prisma/migrations/20261106145000_native_signature_drafts/migration.sql text eol=lf
 prisma/migrations/20261107110000_reviewed_signature_identity_recovery/migration.sql text eol=lf
+
+prisma/migrations/20261107130000_original_signed_document_archive/migration.sql text eol=lf
+prisma/migrations/20261107133000_signed_archive_system_attribution/migration.sql text eol=lf
+prisma/migrations/20261107143000_explicit_signed_archive_isolation/migration.sql text eol=lf

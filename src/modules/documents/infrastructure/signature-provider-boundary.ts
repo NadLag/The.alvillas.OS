@@ -32,5 +32,5 @@ export async function readOriginalSignatureProviderRequest(account: Account, met
   for (const actual of [first, observation]) assertSignatureRequestObservation(input, actual, { requestId, teamId: account.teamId, distributionMethod: actual.distributionMethod, originalPdf: download.bytes });
   const providerCreatedAt = observation.createdAt ? new Date(observation.createdAt).toISOString() : null; if ((first.createdAt ? new Date(first.createdAt).toISOString() : null) !== providerCreatedAt) throw new DocumentConflictError();
   const identityHash = commandFingerprint({ origin, teamId: account.teamId, requestId, reference: metadata.reference, providerCreatedAt, original: metadata });
-  return { observation, scopeProof, providerCreatedAt, identityHash };
+  return { observation, scopeProof, providerCreatedAt, identityHash, originalPdf: new Uint8Array(download.bytes) };
 }

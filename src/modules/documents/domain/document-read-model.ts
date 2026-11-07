@@ -8,7 +8,7 @@ export const documentVersionItemSchema = z.object({ id: z.uuid(), documentId: z.
   supersedesId: z.uuid().nullable(), supersededById: z.uuid().nullable(), effectiveFrom: z.iso.datetime().nullable(), createdAt: z.iso.datetime(), createdBy: z.uuid(), reason: z.string() }).strict();
 export const documentItemSchema = z.object({ id: z.uuid(), source: documentSourceReferenceSchema, typeKey: z.string(), kind: z.enum(["FILE", "TEMPLATE", "INSTANCE"]),
   locale: z.enum(["en", "fr", "ar"]), title: z.string(), privacy: z.array(z.enum(documentPrivacyTags)), revision: z.string().regex(/^[1-9]\d*$/u),
-  createdAt: z.iso.datetime(), archivedAt: z.iso.datetime().nullable(), templateKey: z.string().nullable() }).strict();
+  createdAt: z.iso.datetime(), archivedAt: z.iso.datetime().nullable(), templateKey: z.string().nullable(), signedArtifact: z.object({ kind: z.enum(["SIGNED_ORIGINAL", "CERTIFICATE"]), signatureId: z.uuid(), originalDocumentId: z.uuid(), originalVersionId: z.uuid(), originalVersionNumber: z.number().int().positive() }).strict().optional() }).strict();
 export const documentHistorySchema = z.object({ document: documentItemSchema, versions: z.array(documentVersionItemSchema), next: z.number().int().positive().nullable() }).strict();
 export const documentEffectiveHistorySchema=documentHistorySchema.extend({observedAt:z.iso.datetime(),effectiveVersion:z.object({id:z.uuid(),number:z.number().int().positive(),effectiveAt:z.iso.datetime()}).strict().nullable()});
 export const documentUploadAdmissionSchema = z.object({ recorded: z.literal(true), id: z.uuid(), documentId: z.uuid(), idempotencyKey: z.uuid(), state: z.enum(["ADMITTED","COMPLETE","SUPERSEDED"]), complete: z.boolean(), version: documentVersionItemSchema.nullable(),

@@ -10,7 +10,7 @@ import type {
 } from "@/platform/providers";
 import type { AppLocale } from "@/i18n/routing";
 import { createHash } from "node:crypto";
-import { captureSignatureRequest, signatureDownloadInputSchema, SignatureProviderError, type SignatureRequestInput, type SignatureRequestObservation, type SignatureRequestReceipt, type SignatureRequestDownloadInput, type SignatureRequestDownload } from "./signature-request";
+import { captureSignatureRequest, signatureDownloadInputSchema, signatureCertificateInputSchema, SignatureProviderError, type SignatureRequestInput, type SignatureRequestObservation, type SignatureRequestReceipt, type SignatureRequestDownloadInput, type SignatureRequestDownload, type SignatureCertificateDownloadInput, type SignatureCertificateDownload } from "./signature-request";
 
 export function assertFakeProviderAllowed(nodeEnv: string | undefined = process.env.NODE_ENV): void {
   if (nodeEnv === "production") {
@@ -35,6 +35,9 @@ export class FakeSignatureProvider implements SignatureProvider {
   private readonly requests = new Map<string, { input: SignatureRequestInput; sent: boolean }>();
   constructor(nodeEnv?: string) {
     assertFakeProviderAllowed(nodeEnv);
+  }
+  downloadSignatureCertificate(raw: SignatureCertificateDownloadInput): Promise<SignatureCertificateDownload> {
+    signatureCertificateInputSchema.parse(raw); return Promise.reject(new SignatureProviderError("NONE"));
   }
 
   createRequest(input: { documentId: string; signerEmail: string }): Promise<{ requestId: string }> {

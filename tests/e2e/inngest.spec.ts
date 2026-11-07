@@ -10,7 +10,7 @@ test("Inngest authenticates discovery and denies unsigned execution", async ({ r
   expect(discovery.status()).toBe(200);
   // The original nine consumers, document generation and its failure consumer,
   // plus private preparation, explicit distribution and authenticated observation workers.
-  expect(await discovery.json()).toMatchObject({ function_count: 15 });
+  expect(await discovery.json()).toMatchObject({ function_count: 16 });
   const response = await request.post("/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { data: {} });
   expect(response.status()).toBe(401);
   expect((await request.get("/api/inngest")).status()).toBe(401);

@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { signatureRequestInputSchema, signatureMaximumPdfBytes, signatureRequestIdSchema, signatureExpirationSchema, signatureEmailSettingsSchema, SignatureProviderError, SignatureProviderConfigurationError, type SignatureRequestInput, type SignatureRequestObservation } from "./signature-contract";
 export * from "./signature-contract";
 
+/** Completion requires every actual signer/approver, rather than a status alone. */
+export function signatureRequestHasCompletedActions(actual: SignatureRequestObservation) {
+  const required = actual.recipients.filter(recipient => ["SIGNER", "APPROVER"].includes(recipient.role));
+  return actual.status === "COMPLETED" && actual.distributionMethod === "EMAIL" && required.some(recipient => recipient.role === "SIGNER") && required.every(recipient => recipient.signingStatus === "SIGNED" && recipient.signedAt !== null);
+}
+
 /** Capture owned immutable PDF bytes before the first asynchronous provider boundary. */
 export function captureSignatureRequest(raw: unknown): SignatureRequestInput {
   const input = signatureRequestInputSchema.parse(raw), bytes = new Uint8Array(input.file.bytes);
