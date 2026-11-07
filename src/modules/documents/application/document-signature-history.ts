@@ -30,6 +30,7 @@ async function retainedContext(ctx: DocumentActorContext, tx: TenantTransaction,
   if (recipients.length !== original.snapshot.recipients.length) throw new DocumentConflictError();
   return { repository, row, current, recipients, fingerprint: current.fingerprint };
 }
+export { retainedContext as retainedNativeSignatureReadContext };
 async function summary(current: Awaited<ReturnType<typeof retainedContext>>) {
   const latest = await current.repository.latestSignatureEvent(current.row.id); if (!latest) throw new DocumentConflictError();
   return { id: current.row.id, documentId: current.current.instance.documentId, instanceId: current.row.instanceId, documentVersionId: current.row.documentVersionId, requestedAt: current.row.requestedAt.toISOString(), state: nativeSignatureHistoryStates.parse(latest.state) };

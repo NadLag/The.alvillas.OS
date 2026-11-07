@@ -100,3 +100,7 @@ prisma/migrations/20261106174500_signature_provider_explicit_tenant_policies/mig
 prisma/migrations/20261106180000_native_signature_distribution/migration.sql text eol=lf
 
 prisma/migrations/20261106194500_native_signature_webhook_evidence/migration.sql text eol=lf
+prisma/migrations/20261106110000_native_document_generation/migration.sql text eol=lf
+prisma/migrations/20261106123000_generated_document_amendments/migration.sql text eol=lf
+prisma/migrations/20261106145000_native_signature_drafts/migration.sql text eol=lf
+prisma/migrations/20261107110000_reviewed_signature_identity_recovery/migration.sql text eol=lf

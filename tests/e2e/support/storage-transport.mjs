@@ -32,6 +32,13 @@ const fixtureResponse = async request => {
 
 globalThis.fetch = async (input, init) => {
   const target = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  // Route this single owned signature fixture to its real HTTP server. Provider
+  // requests, original PDFs and SDK parsing remain real; production TLS policy
+  // is unchanged and no TLS acceptance is claimed by this fixture.
+  if (target.origin === "https://alvillas-e2e-signatures.localhost" && process.env.DOCUMENSO_URL === target.origin && process.env.DOCUMENSO_API_TOKEN === "owned-signature-test-token") {
+    const request = new globalThis.Request(input, init); if (request.headers.get("authorization") !== "owned-signature-test-token") return new globalThis.Response(null, { status: 401 });
+    return realFetch(new globalThis.Request("http://127.0.0.1:3198" + target.pathname + target.search, request));
+  }
   if (target.origin !== "https://alvillas-e2e-local.r2.cloudflarestorage.com") return realFetch(input, init);
   return fixtureResponse(new globalThis.Request(input, init));
 };

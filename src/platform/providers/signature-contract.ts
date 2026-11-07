@@ -32,6 +32,7 @@ export type SignatureRequestDownloadInput = z.infer<typeof signatureDownloadInpu
 export type SignatureRequestDownload = { requestId: string; itemId: string; version: "original" | "signed"; bytes: Uint8Array; sha256: string; observation: SignatureRequestObservation };
 const instant = z.iso.datetime({ offset: true }).nullable();
 export const signatureObservationFactsSchema = z.object({ requestId: signatureRequestIdSchema, reference: z.string().min(1).max(255), title: z.string().min(1).max(255), status: signatureProviderStatusSchema, teamId: signatureTeamIdSchema,
+  createdAt: z.iso.datetime({ offset: true }).optional(),
   locale: z.enum(["en", "fr", "ar"]), signingOrder: signatureSigningOrderSchema, methods: signatureMethodsSchema, distributionMethod: z.enum(["NONE", "EMAIL"]), allowDictateNextSigner: z.boolean(), expiration: signatureExpirationSchema.nullable(), emailSettings: signatureEmailSettingsSchema.nullable(),
   recipients: z.array(z.object({ id: positiveInteger, requestId: signatureRequestIdSchema, name: z.string().max(255), email: z.email().max(254), role: signatureRecipientRoleSchema, signingOrder: z.number().int().nonnegative().nullable(),
     readStatus: z.enum(["NOT_OPENED", "OPENED"]), signingStatus: z.enum(["NOT_SIGNED", "SIGNED", "REJECTED"]), sendStatus: z.enum(["NOT_SENT", "SENT"]), signedAt: instant, expiresAt: instant }).strict()).max(100),

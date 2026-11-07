@@ -32,6 +32,8 @@ import {executeSignaturePreparationReference} from "@/modules/documents/applicat
 import {signatureDistributionRequested} from "@/modules/documents/domain/document-signature-distribution";
 import {signatureWebhookReceived} from "@/modules/documents/domain/document-signature-webhook";
 import {executeSignatureWebhookReference} from "@/modules/documents/application/document-signature-webhook-worker";
+import {signatureIdentityRecoveryRequested} from "@/modules/documents/domain/document-signature-identity-recovery";
+import {executeSignatureIdentityRecoveryReference} from "@/modules/documents/application/document-signature-identity-worker";
 import {executeSignatureDistributionReference} from "@/modules/documents/application/document-signature-distribution-worker";
 import {executeDocumentGenerationReference,failDocumentGenerationReference} from "@/modules/documents/application/document-generation-worker";
 
@@ -158,4 +160,6 @@ export const distributeSignatures=inngest.createFunction({id:"native-signature-d
   async({event,step})=>step.run("distribute-original-private-signature-once",()=>executeSignatureDistributionReference(event.data)));
 export const observeSignatureWebhooks=inngest.createFunction({id:"native-signature-webhook-observation",name:"ALVILLAS OS authenticated original signature observations",triggers:[{event:signatureWebhookReceived}],concurrency:{limit:1},retries:3},
   async({event,step})=>step.run("verify-original-authenticated-signature-observation",()=>executeSignatureWebhookReference(event.data)));
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,observeSignatureWebhooks];
+export const recoverSignatureIdentities=inngest.createFunction({id:"native-signature-identity-recovery",name:"ALVILLAS OS reviewed original signature identity recovery",triggers:[{event:signatureIdentityRecoveryRequested}],concurrency:{limit:1},retries:3},
+  async({event,step})=>step.run("bind-reviewed-original-signature-through-readback",()=>executeSignatureIdentityRecoveryReference(event.data)));
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,observeSignatureWebhooks,recoverSignatureIdentities];

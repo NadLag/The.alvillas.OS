@@ -58,7 +58,8 @@ export async function executeSignatureDistributionReference(raw: unknown, deps: 
     scopeProof = await readSignatureProviderScope(provider, account, origin), prepared = readSignaturePreparationEvidence(current.preparation, current.preparationEvidence, deps.env),
     file = await downloadDocumentVersion(actor, { versionId: current.current.version.id }, { ...deps, db, objects: deps.objects ?? configuredDocumentObjects() }),
     input = captureSignatureRequest({ ...current.metadata, file: { ...current.metadata.file, bytes: file.bytes } }), requestId = current.retainedPreparation.providerRequestId;
-  if (prepared.kind !== "PREPARED" || !prepared.prepareReceipt || prepared.providerRequestId !== requestId) throw new DocumentConflictError();
+  if (prepared.kind !== "PREPARED" || !prepared.prepareReceipt && prepared.preparationProof !== "READBACK_IDENTITY_RECOVERY" || prepared.providerRequestId !== requestId) throw new DocumentConflictError();
+  const preparationIdentity = prepared.prepareReceipt ? undefined : { evidenceId: current.preparationEvidence.id, payloadSha256: current.preparationEvidence.payloadSha256, proof: "READBACK_IDENTITY_RECOVERY" as const };
   // Verify the original private envelope immediately before a first send. A
   // redelivery can only reconcile this already-known identity through GETs.
   if (!previous) {
@@ -90,7 +91,7 @@ export async function executeSignatureDistributionReference(raw: unknown, deps: 
   if (!start.post && !previous) return summary(initial.row.id, "UNCERTAIN");
   const old = previous?.evidence.map(evidence => readNativeSignatureProviderEvidence(initial.row, evidence, initial.original.snapshot, deps.env)).find(value => value.distributionReceipt);
   let receipt: SignatureRequestReceipt | null = old?.distributionReceipt ? captureSignatureProviderReceipt({ requestId, evidence: new Uint8Array(Buffer.from(old.distributionReceipt, "base64")) }) : null;
-  const unconfirmed = (failureCode: SignatureProviderObservation["failureCode"]): SignatureProviderObservation => ({ kind: "UNCERTAIN", providerRequestId: requestId, prepareReceipt: prepared.prepareReceipt, observation: null, observationReceipt: null,
+  const unconfirmed = (failureCode: SignatureProviderObservation["failureCode"]): SignatureProviderObservation => ({ kind: "UNCERTAIN", providerRequestId: requestId, prepareReceipt: prepared.prepareReceipt, ...preparationIdentity ? { preparationIdentity } : {}, observation: null, observationReceipt: null,
     distributionReceipt: receipt ? Buffer.from(receipt.evidence).toString("base64") : null, distributionProof: receipt ? "POST_ACKNOWLEDGED" : null, scopeProof, failureCode });
   if (start.post) {
     try { receipt = captureSignatureProviderReceipt(await provider.distributeSignatureRequest({ requestId })); if (receipt.requestId !== requestId) { receipt = null; throw new DocumentConflictError(); } }
@@ -103,7 +104,7 @@ export async function executeSignatureDistributionReference(raw: unknown, deps: 
     if (download.requestId !== requestId || download.itemId !== observation.items[0].id || download.version !== "original" || download.sha256 !== input.file.sha256) throw new DocumentConflictError();
     assertDistributedSignatureRequestObservation(input, observation, { requestId, teamId: account.teamId, originalPdf: download.bytes });
     const final = signatureRequestObservationSchema.parse(download.observation); assertDistributedSignatureRequestObservation(input, final, { requestId, teamId: account.teamId, originalPdf: download.bytes });
-    await retain(reference, start.attempt.id, { kind: "SENT", providerRequestId: requestId, prepareReceipt: prepared.prepareReceipt, observation: signatureObservationFactsSchema.strip().parse(final), observationReceipt: Buffer.from(final.evidence).toString("base64"),
+    await retain(reference, start.attempt.id, { kind: "SENT", providerRequestId: requestId, prepareReceipt: prepared.prepareReceipt, ...preparationIdentity ? { preparationIdentity } : {}, observation: signatureObservationFactsSchema.strip().parse(final), observationReceipt: Buffer.from(final.evidence).toString("base64"),
       distributionReceipt: receipt ? Buffer.from(receipt.evidence).toString("base64") : null, distributionProof: receipt ? "POST_ACKNOWLEDGED" : "READBACK_RECONCILED", scopeProof, failureCode: null }, deps);
     return summary(initial.row.id, "SENT");
   } catch { if (await confirmed()) return summary(initial.row.id, "SENT"); await retain(reference, start.attempt.id, unconfirmed("SIGNATURE_CONTRACT_UNCONFIRMED"), deps); return summary(initial.row.id, "UNCERTAIN"); }

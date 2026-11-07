@@ -7,6 +7,7 @@ import { clearDocumentNonce, documentRequest, DocumentBrowserError, readDocument
 import { DocumentSignaturePreparationPanel } from "./document-signature-preparation-panel";
 import { DocumentSignatureDistributionPanel } from "./document-signature-distribution-panel";
 import { DocumentSignatureHistoryPanel } from "./document-signature-history-panel";
+import { DocumentSignatureIdentityPanel } from "./document-signature-identity-panel";
 
 type Choices = z.infer<typeof nativeSignatureChoicesSchema>;
 type Party = Choices["items"][number];
@@ -87,6 +88,7 @@ export function DocumentSignaturePanel({ scope, version, disabled, onClose, onFo
     <DocumentSignatureHistoryPanel scope={scope} versionId={version.id} disabled={disabled || busy || pending} onForbidden={onForbidden} onOpen={value => { setReceipt(null); setReview(null); setChoices(null); setSelected([]); setReason(""); setQuery(""); setHistoricalId(value.signature.state === "DRAFT" ? value.signature.id : null); setPreparedId(value.signature.state === "DRAFT" && value.preparation?.state === "PREPARED" ? value.preparation.id : null); }} />
     <DocumentSignaturePreparationPanel scope={scope} signatureId={historicalId ?? (receipt?.state === "DRAFT" ? receipt.id : null)} disabled={disabled || busy} onPrepared={setPreparedId} onForbidden={onForbidden} />
     <DocumentSignatureDistributionPanel scope={scope} preparationId={preparedId} disabled={disabled || busy} onForbidden={onForbidden} />
+    <DocumentSignatureIdentityPanel scope={scope} signatureId={historicalId ?? (receipt?.state === "DRAFT" ? receipt.id : null)} disabled={disabled || busy} onForbidden={onForbidden} />
     <button className="quiet-button" disabled={busy} onClick={onClose}>{t("close")}</button>
   </section>;
 }
