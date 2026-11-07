@@ -1,3 +1,4 @@
+import { FinancialAttachmentSourceRepository } from "@/platform/ledger/financial-attachment-source-repository";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { PrismaClient } from "@prisma/client";
@@ -119,6 +120,10 @@ describe("native immutable transaction receipts and invoices", () => {
     expect(changed).toBe(true); expect(await withTenant(db, f.org, tx => tx.auditLog.count({ where: { resourceId: admission.id, action } }))).toBe(0);
     expect(await withTenant(db, f.org, tx => tx.financialAttachment.count())).toBe(action.endsWith("downloaded") ? 1 : 0);
   });
+  class PreparedFinancialAttachmentAcceptance extends FinancialAttachmentSourceRepository {
+    async assertCanonical(ids:string[]){const original=await Promise.all(ids.map(id=>this.source(id)));await this.prepareFinancialAttachmentSources(ids);expect(await Promise.all(ids.map(id=>this.source(id)))).toEqual(original);}
+  }
+  const assertPreparedSalarySource=(organizationId:string,ids:string[])=>withTenant(db,organizationId,tx=>new PreparedFinancialAttachmentAcceptance(tx,organizationId).assertCanonical(ids));
   it("retains original salary and earned-source restrictions on actual approved employee journals and their file audit", async () => {
     const fixtures = employeePercentageFixtures(() => db, () => admin), f = await fixtures.financialFixture(), base = await fixtures.posting(f, { dimensions: {} }),
       run = await createEmployeePercentageCompensationRun(f.actor, fixtures.input(f, [base.source.id]), { db }), now = await withTenant(db, f.org, tx => new FinanceRepository(tx, f.org).clock());
@@ -130,6 +135,7 @@ describe("native immutable transaction receipts and invoices", () => {
       recognition = await recognizeEmployeeCompensation(f.actor, { id: submission.id, claimId, idempotencyKey: randomUUID(), currentPeriod: false, reason: "Recognize original approved salary for private document acceptance" }, { db }),
       owner = await actor(f, { keys: ["financial_transaction:view", "financial_transaction:export", "financial_attachment:view", "financial_attachment:create", "financial_attachment:export", "audit_log:view", "audit_log:export", "staff_compensation:view", "employee_payable:view", "expense:view", "company_expense:view", "company_expense:create", "company_expense:edit"] }), financier = await actor(f), bytes = content("Actual earned staff compensation receipt");
     await withTenant(db, f.org, tx => new ConfigRuleRepository(tx, f.org).createVersion({ key: financialAttachmentPolicyKey, scopeType: "organization", effectiveFrom: new Date("2020-01-01"), createdBy: owner.actorId, value: policy(), reason: "Explicit original salary attachment policy" }));
+    await assertPreparedSalarySource(f.org,recognition.transactionIds);
     const command = { transactionId: recognition.transactionIds[0], idempotencyKey: randomUUID(), kind: "RECEIPT", fileName: "private-earned-staff-receipt.pdf", contentType: "application/pdf", fileSize: bytes.length, sha256: hash(bytes), reason: "Actual original staff financial receipt" };
     await expect(admitFinancialAttachment(financier, command, { db })).rejects.toThrow("financial_attachment_forbidden");
     const admission = await admitFinancialAttachment(owner, command, { db }), file = await uploadFinancialAttachment(owner, { id: admission.id }, bytes, { db, objects: objectStore() });
@@ -149,8 +155,10 @@ describe("native immutable transaction receipts and invoices", () => {
       dueOn: now.toISOString().slice(0,10), purpose: "Actual original company salary document source", idempotencyKey: randomUUID(), reason: "Actual company salary document plan" }, { db }),
       binding = { companyExpenseId: plan.id, employeeCostId: cost.id, expectedPlanVersion: 1, reason: "Retained original company classification for salary documents" };
     await changeCompanyExpenseCompensationSource(owner, { ...binding, operation: "ATTACH", expectedSourceVersion: 0 }, { db });
+    await assertPreparedSalarySource(f.org,recognition.transactionIds);
     await expect(downloadFinancialAttachment(salaryReader, { id: file.id }, { db, objects: objectStore() })).rejects.toThrow("financial_attachment_forbidden");
     await changeCompanyExpenseCompensationSource(owner, { ...binding, operation: "RELEASE", expectedSourceVersion: 1 }, { db });
+    await assertPreparedSalarySource(f.org,recognition.transactionIds);
     await expect(downloadFinancialAttachment(salaryReader, { id: file.id }, { db, objects: objectStore() })).rejects.toThrow("financial_attachment_forbidden");
     expect((await downloadFinancialAttachment(owner, { id: file.id }, { db, objects: objectStore() })).bytes).toEqual(bytes);
   });

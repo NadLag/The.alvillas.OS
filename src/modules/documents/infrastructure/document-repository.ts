@@ -1,3 +1,4 @@
+import type { ConfigScopeCandidate } from "@/platform/config/config-rule-repository";
 import { Prisma } from "@prisma/client";
 import type { Resource } from "@/platform/authz/authorize";
 import type { CurrentAuthorityCheck } from "@/platform/authz/current-authority";
@@ -9,17 +10,56 @@ import type { z } from "zod";
 import type { signatureRecipientReferenceSchema } from "../domain/document-signature-command";
 
 type Source = z.infer<typeof documentSourceReferenceSchema>;
+export function documentSourceRuleScopes(source:Resource):ConfigScopeCandidate[]{return[{scopeType:"organization",scopeId:null},...(source.city?[{scopeType:"city",scopeId:source.city}]:[]),...(source.ownerId?[{scopeType:"owner",scopeId:source.ownerId}]:[]),...(source.propertyId?[{scopeType:"property",scopeId:source.propertyId}]:[])];}
 export type DocumentSourceFacts = { reference: Source; resource: Resource; checks: CurrentAuthorityCheck[]; fingerprint: string; snapshot: unknown; archived: boolean; label: string };
 const versionInclude = { admission: true, next: { select: { id: true } } } as const;
 const signatureInclude = { recipients: { orderBy: { id: "asc" } }, events: { orderBy: [{ occurredAt: "asc" }, { id: "asc" }] } } satisfies Prisma.SignatureInclude;
 const rootInclude = { template: true, instances: { orderBy: [{createdAt:"desc"},{id:"desc"}], take:1 } } satisfies Prisma.DocumentInclude;
 type RootRow=Prisma.DocumentGetPayload<{include:typeof rootInclude}>;
-const rootView=(row:RootRow)=>{const{instances,...root}=row;return{...root,instance:instances[0]??null};};
+const rootView=(row:RootRow):Omit<RootRow,"instances">&{instance:RootRow["instances"][number]|null}=>{const{instances,...root}=row;return{...root,instance:instances[0]??null};};
+
+const documentPropertyReadSelect={ id: true, name: true, cityId: true, regionId: true, archivedAt: true, status: true } as const;
+const documentReservationReadSelect={ id: true, reference: true, status: true, archivedAt: true, version: true, property: { select: { id: true, cityId: true, regionId: true, archivedAt: true } } } as const;
+const documentOwnerReadSelect={ id: true, displayName: true, archivedAt: true, updatedAt: true } as const;
+const documentPersonReadSelect={ id: true, displayName: true, archivedAt: true, updatedAt: true } as const;
+const documentSupplierReadSelect={ id: true, displayName: true, reference: true, archivedAt: true, version: true } as const;
+const documentGuestRecordReadSelect={ id: true, displayName: true, archivedAt: true, mergedIntoId: true, updatedAt: true } as const;
+const documentOrganizationReadSelect={ id: true, name: true } as const;
 
 export class DocumentRepository extends FinancialAttachmentSourceRepository {
+  private documentSourceReads?:Map<string,DocumentSourceFacts|null>;
+  private documentPropertyReads?:Map<string,Prisma.PropertyGetPayload<{select:typeof documentPropertyReadSelect}>|null>;
+  private async documentReadProperty(id:string){if(this.documentPropertyReads?.has(id))return this.documentPropertyReads.get(id)??null;return this.tx.property.findFirst({where:{organizationId:this.organizationId,id},select:documentPropertyReadSelect});}
+  private documentReservationReads?:Map<string,Prisma.ReservationGetPayload<{select:typeof documentReservationReadSelect}>|null>;
+  private async documentReadReservation(id:string){if(this.documentReservationReads?.has(id))return this.documentReservationReads.get(id)??null;return this.tx.reservation.findFirst({where:{organizationId:this.organizationId,id},select:documentReservationReadSelect});}
+  private documentOwnerReads?:Map<string,Prisma.OwnerGetPayload<{select:typeof documentOwnerReadSelect}>|null>;
+  private async documentReadOwner(id:string){if(this.documentOwnerReads?.has(id))return this.documentOwnerReads.get(id)??null;return this.tx.owner.findFirst({where:{organizationId:this.organizationId,id},select:documentOwnerReadSelect});}
+  private documentPersonReads?:Map<string,Prisma.PersonGetPayload<{select:typeof documentPersonReadSelect}>|null>;
+  private async documentReadPerson(id:string){if(this.documentPersonReads?.has(id))return this.documentPersonReads.get(id)??null;return this.tx.person.findFirst({where:{organizationId:this.organizationId,id},select:documentPersonReadSelect});}
+  private documentSupplierReads?:Map<string,Prisma.SupplierGetPayload<{select:typeof documentSupplierReadSelect}>|null>;
+  private async documentReadSupplier(id:string){if(this.documentSupplierReads?.has(id))return this.documentSupplierReads.get(id)??null;return this.tx.supplier.findFirst({where:{organizationId:this.organizationId,id},select:documentSupplierReadSelect});}
+  private documentGuestRecordReads?:Map<string,Prisma.GuestRecordGetPayload<{select:typeof documentGuestRecordReadSelect}>|null>;
+  private async documentReadGuestRecord(id:string){if(this.documentGuestRecordReads?.has(id))return this.documentGuestRecordReads.get(id)??null;return this.tx.guestRecord.findFirst({where:{organizationId:this.organizationId,id},select:documentGuestRecordReadSelect});}
+  private documentOrganizationReads?:Map<string,Prisma.OrganizationGetPayload<{select:typeof documentOrganizationReadSelect}>|null>;
+  private async documentReadOrganization(id:string){if(this.documentOrganizationReads?.has(id))return this.documentOrganizationReads.get(id)??null;return this.tx.organization.findFirst({where:{id},select:documentOrganizationReadSelect});}
+  /** Materialize one bounded view snapshot using the same source checks and fingerprints. */
+  async prepareDocumentSources(references:readonly Source[]){
+    const unique=[...new Map(references.map(ref=>[ref.kind+":"+ref.id,ref])).values()];if(unique.length>100)throw Error("Bounded native document source read required");this.documentSourceReads=new Map();
+    {const ids=unique.filter(ref=>ref.kind==="PROPERTY").map(ref=>ref.id);this.documentPropertyReads=undefined;if(ids.length){const rows=await this.tx.property.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentPropertyReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentPropertyReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
+    {const ids=unique.filter(ref=>ref.kind==="RESERVATION").map(ref=>ref.id);this.documentReservationReads=undefined;if(ids.length){const rows=await this.tx.reservation.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentReservationReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentReservationReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
+    {const ids=unique.filter(ref=>ref.kind==="OWNER").map(ref=>ref.id);this.documentOwnerReads=undefined;if(ids.length){const rows=await this.tx.owner.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentOwnerReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentOwnerReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
+    {const ids=unique.filter(ref=>ref.kind==="PERSON").map(ref=>ref.id);this.documentPersonReads=undefined;if(ids.length){const rows=await this.tx.person.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentPersonReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentPersonReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
+    {const ids=unique.filter(ref=>ref.kind==="SUPPLIER").map(ref=>ref.id);this.documentSupplierReads=undefined;if(ids.length){const rows=await this.tx.supplier.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentSupplierReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentSupplierReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
+    {const ids=unique.filter(ref=>ref.kind==="GUEST").map(ref=>ref.id);this.documentGuestRecordReads=undefined;if(ids.length){const rows=await this.tx.guestRecord.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentGuestRecordReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentGuestRecordReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
+    {const ids=unique.filter(ref=>ref.kind==="ORGANIZATION").map(ref=>ref.id);this.documentOrganizationReads=undefined;if(ids.length){const rows=await this.tx.organization.findMany({where:{id:{in:ids.filter(id=>id===this.organizationId)}},select:documentOrganizationReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentOrganizationReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
+    await this.prepareFinancialAttachmentSources(unique.filter(reference=>reference.kind==="FINANCIAL_TRANSACTION").map(reference=>reference.id));
+    for(const reference of unique){const native=await this.documentSource(reference);this.documentSourceReads.set(reference.kind+":"+reference.id,native);}
+  }
+
   async clock() { const [row] = await this.tx.$queryRaw<{ now: Date }[]>`SELECT clock_timestamp() AS now`; return row.now; }
   async lock(key: string) { await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":documents:" + key},0))::text`); }
   async documentSource(reference: Source, action: "view" | "export" = "view"): Promise<DocumentSourceFacts | null> {
+    const readKey=reference.kind+":"+reference.id;if(action==="view"&&this.documentSourceReads?.has(readKey))return this.documentSourceReads.get(readKey)??null;
     const base = { organizationId: this.organizationId }, checks: CurrentAuthorityCheck[] = [];
     let resource: Resource, snapshot: unknown, label: string, archived = false;
     if (reference.kind === "FINANCIAL_TRANSACTION") {
@@ -28,34 +68,34 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
       checks.push(...inherited.filter(check => check.resource.type !== "financial_attachment"), ...native.extraChecks);
       resource = native.source; snapshot = { reference, identity: native.identity }; label = native.transaction.reference;
     } else if (reference.kind === "PROPERTY") {
-      const row = await this.tx.property.findFirst({ where: { ...base, id: reference.id }, select: { id: true, name: true, cityId: true, regionId: true, archivedAt: true, status: true } }); if (!row) return null;
+      const row = await this.documentReadProperty(reference.id); if (!row) return null;
       const { name, ...facts } = row; label = name;
       archived = Boolean(row.archivedAt); resource = { ...base, type: "property", id: row.id, propertyId: row.id, city: row.cityId, region: row.regionId, status: row.status, dataClass: "operational" }; snapshot = facts;
     } else if (reference.kind === "RESERVATION") {
-      const row = await this.tx.reservation.findFirst({ where: { ...base, id: reference.id }, select: { id: true, reference: true, status: true, archivedAt: true, version: true, property: { select: { id: true, cityId: true, regionId: true, archivedAt: true } } } }); if (!row) return null;
+      const row = await this.documentReadReservation(reference.id); if (!row) return null;
       archived = Boolean(row.archivedAt || row.property.archivedAt); resource = { ...base, type: "reservation", id: row.id, reservationId: row.id, propertyId: row.property.id, city: row.property.cityId, region: row.property.regionId, status: row.status, dataClass: "operational" };
       const { reference: name, ...facts } = row; label = name;
       checks.push({ action: "view", resource: { ...resource, type: "property", id: row.property.id } }); snapshot = facts;
     } else if (reference.kind === "OWNER") {
-      const row = await this.tx.owner.findFirst({ where: { ...base, id: reference.id }, select: { id: true, displayName: true, archivedAt: true, updatedAt: true } }); if (!row) return null;
+      const row = await this.documentReadOwner(reference.id); if (!row) return null;
       const { displayName, ...facts } = row; label = displayName;
       archived = Boolean(row.archivedAt); resource = { ...base, type: "owner", id: row.id, ownerId: row.id, dataClass: "personal" }; snapshot = facts;
     } else if (reference.kind === "PERSON") {
-      const row = await this.tx.person.findFirst({ where: { ...base, id: reference.id }, select: { id: true, displayName: true, archivedAt: true, updatedAt: true } }); if (!row) return null;
+      const row = await this.documentReadPerson(reference.id); if (!row) return null;
       const { displayName, ...facts } = row; label = displayName;
       archived = Boolean(row.archivedAt); resource = { ...base, type: "team_member", id: row.id, assignedPersonId: row.id, dataClass: "personal" };
       checks.push({ action: "view", resource: { ...resource, type: "staff_document", dataClass: "sensitive" } }); snapshot = facts;
     } else if (reference.kind === "SUPPLIER") {
-      const row = await this.tx.supplier.findFirst({ where: { ...base, id: reference.id }, select: { id: true, displayName: true, reference: true, archivedAt: true, version: true } }); if (!row) return null;
+      const row = await this.documentReadSupplier(reference.id); if (!row) return null;
       const { displayName, ...facts } = row; label = displayName; archived = Boolean(row.archivedAt);
       resource = { ...base, type: "supplier", id: row.id, dataClass: "personal" }; snapshot = facts;
     } else if (reference.kind === "GUEST") {
-      const row = await this.tx.guestRecord.findFirst({ where: { ...base, id: reference.id }, select: { id: true, displayName: true, archivedAt: true, mergedIntoId: true, updatedAt: true } }); if (!row) return null;
+      const row = await this.documentReadGuestRecord(reference.id); if (!row) return null;
       const { displayName, ...facts } = row; label = displayName ?? row.id; archived = Boolean(row.archivedAt || row.mergedIntoId);
       resource = { ...base, type: "guest", id: row.id, dataClass: "guest" }; snapshot = facts;
     } else {
       if (reference.id !== this.organizationId) return null;
-      const row = await this.tx.organization.findFirst({ where: { id: this.organizationId }, select: { id: true, name: true } }); if (!row) return null;
+      const row = await this.documentReadOrganization(reference.id); if (!row) return null;
       label = row.name; resource = { ...base, type: "organization", id: row.id, dataClass: "operational" }; snapshot = { id: row.id };
     }
     if (reference.kind !== "FINANCIAL_TRANSACTION") {

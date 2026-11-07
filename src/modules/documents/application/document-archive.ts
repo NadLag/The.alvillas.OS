@@ -12,7 +12,7 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { consumeRateLimit } from "@/platform/rate-limit/postgres-rate-limiter";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
-import { DocumentRepository, type DocumentSourceFacts } from "../infrastructure/document-repository";
+import { DocumentRepository, documentSourceRuleScopes, type DocumentSourceFacts } from "../infrastructure/document-repository";
 import type { DocumentObjectStore } from "../infrastructure/document-object-store";
 import { documentObjectKey } from "../domain/document-object";
 import { documentPartContract,documentUploadChunkBytes } from "../domain/document-upload-parts";
@@ -63,12 +63,10 @@ export function documentAuthorityChecks(native: DocumentSourceFacts, privacy: re
 }
 export async function documentSourceContext(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export", readPhase?:DocumentArchiveReadPhase) {
   if(readPhase&&action!=="view")throw new DocumentAccessError();
-  const repository = new DocumentRepository(tx, ctx.organizationId), now = readPhase?readPhase.instant(ctx,tx):await repository.clock(), native = await repository.documentSource(reference, action === "export" ? "export" : "view");
+  const repository = readPhase?readPhase.repository(ctx,tx):new DocumentRepository(tx, ctx.organizationId), now = readPhase?readPhase.instant(ctx,tx):await repository.clock(), native = await repository.documentSource(reference, action === "export" ? "export" : "view");
   if (!native) throw new DocumentAccessError();
   if(readPhase)readPhase.check(ctx,tx,native.checks);else await recheckAccountAuthorization(ctx, tx, now, native.checks, new DocumentAccessError());
-  const source = native.resource, rule = await new ConfigRuleRepository(tx, ctx.organizationId).resolve({ key: documentArchivePolicyKey, asOf: now, scopes: [
-    { scopeType: "organization", scopeId: null }, ...(source.city ? [{ scopeType: "city", scopeId: source.city }] : []),
-    ...(source.ownerId ? [{ scopeType: "owner", scopeId: source.ownerId }] : []), ...(source.propertyId ? [{ scopeType: "property", scopeId: source.propertyId }] : [])] });
+  const rule = readPhase?await readPhase.archiveRule(ctx,tx,native):await new ConfigRuleRepository(tx,ctx.organizationId).resolve({key:documentArchivePolicyKey,asOf:now,scopes:documentSourceRuleScopes(native.resource)});
   const value = documentArchivePolicySchema.safeParse(rule?.value); if (!rule || !value.success) throw new DocumentConfigurationError();
   const policy = { id: rule.id, version: rule.version, value: value.data };
   return { repository, now, native, policy };
@@ -82,7 +80,7 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
   const type = policy.value.types.find(type => type.key === (prospective?.typeKey ?? root?.typeKey));
   if (action === "create" && (!type || !type.sources.includes(reference.kind) || native.archived || root?.archivedAt)) throw new DocumentConfigurationError();
   const originPrivacy: string[] = [], originChecks: CurrentAuthorityCheck[] = [], origins: { versionId: string; fingerprint: string }[] = [];
-  const signed = root?.kind === "FILE" ? await signedArchiveAccess(ctx, tx, root, action, env) : null;
+  const signed = root?.kind === "FILE" ? await signedArchiveAccess(ctx, tx, root, action, env,readPhase?.knownAbsentSignedArtifact(ctx,tx,root.id)??false) : null;
   if (signed) { originPrivacy.push(...signed.privacy); originChecks.push(...signed.checks); origins.push({ versionId: root!.id, fingerprint: signed.fingerprint }); }
   const parsed = root?.kind === "INSTANCE" && root.instance ? documentGenerationSnapshotSchema.safeParse(root.instance.sourceSnapshot) : null,
     generation = parsed?.success ? parsed.data : null;
@@ -130,7 +128,8 @@ async function review(ctx: DocumentActorContext, tx: TenantTransaction, input: R
   if(input.parts&&!current.policy.value.upload_transport)throw new DocumentConfigurationError();
   return { ...current, root, previous, reviewFingerprint: commandFingerprint({ actorId: ctx.actorId, input, source: current.fingerprint, latest: previous?.id ?? null, cap: captureAuthorizationCap(ctx.authContext) }) };
 }
-function publicVersion(ctx: DocumentActorContext, current: Awaited<ReturnType<typeof context>>, root: Root, row: Version) {
+type PresentedVersion=Pick<Version,"id"|"documentId"|"number"|"title"|"next"|"supersedesId"|"effectiveFrom"|"createdAt"|"createdBy">&{admission:Pick<Version["admission"],"fileName"|"contentType"|"fileSize"|"sha256"|"reason">};
+function publicVersion(ctx: DocumentActorContext, current: Awaited<ReturnType<typeof context>>, root: Root, row: PresentedVersion) {
   const data = { id: row.id, documentId: row.documentId, number: row.number, title: row.title, fileName: row.admission.fileName,
     contentType: row.admission.contentType, fileSize: row.admission.fileSize, sha256: row.admission.sha256,
     supersedesId: row.supersedesId, supersededById: row.next[0]?.id ?? null, effectiveFrom: row.effectiveFrom?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), createdBy: row.createdBy, reason: row.admission.reason };
