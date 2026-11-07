@@ -21,10 +21,10 @@ export async function reconcileSignatureDistribution(actor: DocumentActorContext
       event = await new OutboxRepository(tx, ctx.organizationId).byIdempotencyKey(signatureDistributionOutboxKey(row.requestedBy, row.commandKey));
     if (!event || event.type !== signatureDistributionRequested || event.occurredAt.getTime() !== row.requestedAt.getTime()) throw new DocumentConflictError();
     const budget = current.current.archive.policy.value.upload_admission, rate = await consumeRateLimit(tx, ctx.organizationId, { key: "document-signature-reconcile:" + ctx.actorId, limit: budget.max_requests, windowSeconds: budget.window_seconds, now: current.current.archive.now });
-    return { row, snapshot, current, attempt, event, rate };
+    const confirmed = await repository.signatureSent(row.signatureId, row.providerScopeHash, snapshot.preparation.providerRequestId); return { row, snapshot, current, attempt, event, rate, confirmed };
   });
   if (!captured.rate.allowed) throw new DocumentRateLimitError(captured.rate.resetAt);
-  const outcome = !captured.attempt ? { state: "ADMITTED" as const } : captured.attempt.intentId !== captured.row.id ? { state: "SUPERSEDED" as const } : await executeSignatureDistributionReference({ organizationId: ctx.organizationId, outboxEventId: captured.event.id }, { ...deps, reconcileActor: ctx });
+  const outcome = captured.attempt && captured.attempt.intentId !== captured.row.id ? { state: "SUPERSEDED" as const } : captured.confirmed ? { state: "SENT" as const } : !captured.attempt ? { state: "ADMITTED" as const } : await executeSignatureDistributionReference({ organizationId: ctx.organizationId, outboxEventId: captured.event.id }, { ...deps, reconcileActor: ctx });
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const current = await nativeSignatureDistributionContext(ctx, tx, captured.snapshot.preparation.intentId, deps.env); if (current.fingerprint !== captured.current.fingerprint) throw new DocumentConflictError();
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "documents.signature.distribution_reconciled", resourceType: "signature", resourceId: captured.row.signatureId,

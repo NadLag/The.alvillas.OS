@@ -30,6 +30,8 @@ import {documentGenerationRequested} from "@/modules/documents/domain/document-g
 import {signaturePreparationRequested} from "@/modules/documents/domain/document-signature-preparation";
 import {executeSignaturePreparationReference} from "@/modules/documents/application/document-signature-preparation-worker";
 import {signatureDistributionRequested} from "@/modules/documents/domain/document-signature-distribution";
+import {signatureWebhookReceived} from "@/modules/documents/domain/document-signature-webhook";
+import {executeSignatureWebhookReference} from "@/modules/documents/application/document-signature-webhook-worker";
 import {executeSignatureDistributionReference} from "@/modules/documents/application/document-signature-distribution-worker";
 import {executeDocumentGenerationReference,failDocumentGenerationReference} from "@/modules/documents/application/document-generation-worker";
 
@@ -154,4 +156,6 @@ export const prepareSignatures=inngest.createFunction({id:"native-signature-prep
   async({event,step})=>step.run("prepare-original-private-signature-once",()=>executeSignaturePreparationReference(event.data)));
 export const distributeSignatures=inngest.createFunction({id:"native-signature-distribution",name:"ALVILLAS OS explicit signature distribution",triggers:[{event:signatureDistributionRequested}],concurrency:{limit:1},retries:3},
   async({event,step})=>step.run("distribute-original-private-signature-once",()=>executeSignatureDistributionReference(event.data)));
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures];
+export const observeSignatureWebhooks=inngest.createFunction({id:"native-signature-webhook-observation",name:"ALVILLAS OS authenticated original signature observations",triggers:[{event:signatureWebhookReceived}],concurrency:{limit:1},retries:3},
+  async({event,step})=>step.run("verify-original-authenticated-signature-observation",()=>executeSignatureWebhookReference(event.data)));
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,observeSignatureWebhooks];

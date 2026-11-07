@@ -3,6 +3,7 @@ import { DocumentRepository } from "./document-repository";
 
 const intentInclude = { attempt: { include: { evidence: { orderBy: [{ observedAt: "asc" }, { id: "asc" }] } } } } satisfies Prisma.SignatureProviderIntentInclude;
 export class SignaturePreparationRepository extends DocumentRepository {
+  signatureSent(signatureId: string, providerScopeHash: string, providerRequestId: string) { return this.tx.signatureEvent.findFirst({ where: { organizationId: this.organizationId, signatureId, state: "SENT", providerIdentityHash: providerScopeHash, providerRequestId, providerEvidenceId: { not: null } }, select: { id: true } }); }
   scope(scopeHash: string) { return this.tx.signatureProviderScope.findFirst({ where: { organizationId: this.organizationId, scopeHash } }); }
   async lockProviderScope(scopeHash: string) { await this.tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'signature-provider-scope:' + scopeHash},0))::text`; }
   appendScope(data: Omit<Prisma.SignatureProviderScopeUncheckedCreateInput, "organizationId">) { return this.tx.signatureProviderScope.create({ data: { ...data, organizationId: this.organizationId } }); }

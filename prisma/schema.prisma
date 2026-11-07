@@ -227,6 +227,7 @@ model Organization {
   signatureProviderScopes SignatureProviderScope[]
   signatureProviderAttempts SignatureProviderAttempt[]
   signatureProviderEvidence SignatureProviderEvidence[]
+  signatureProviderWebhooks SignatureProviderWebhook[]
   documentActions DocumentAction[]
   externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentFees ExternalPaymentFee[]
@@ -4871,6 +4872,7 @@ model DocumentInstance {
 }
 
 model Signature {
+  providerWebhooks SignatureProviderWebhook[]
   providerIntents SignatureProviderIntent[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -4898,6 +4900,7 @@ model Signature {
 }
 
 model SignatureProviderScope {
+  webhooks SignatureProviderWebhook[]
   scopeHash String @id @map("scope_hash") @db.Char(64)
   organizationId String @map("organization_id") @db.Uuid
   origin String
@@ -4944,6 +4947,7 @@ model SignatureProviderIntent {
 }
 
 model SignatureProviderAttempt {
+  webhooks SignatureProviderWebhook[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   intentId String @map("intent_id") @db.Uuid
@@ -4961,6 +4965,8 @@ model SignatureProviderAttempt {
 }
 
 model SignatureProviderEvidence {
+  webhookId String? @map("webhook_id") @db.Uuid
+  webhook SignatureProviderWebhook? @relation(fields:[organizationId,webhookId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   attemptId String @map("attempt_id") @db.Uuid
@@ -4984,6 +4990,31 @@ model SignatureProviderEvidence {
   @@unique([organizationId,attemptId,observationHash],map:"signature_provider_evidence_observation_unique")
   @@index([organizationId,signatureId,observedAt,id],map:"signature_provider_evidence_history_idx")
   @@map("signature_provider_evidence")
+}
+
+model SignatureProviderWebhook {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  signatureId String @map("signature_id") @db.Uuid
+  preparationAttemptId String @map("preparation_attempt_id") @db.Uuid
+  providerScopeHash String @map("provider_scope_hash") @db.Char(64)
+  providerRequestId String @map("provider_request_id")
+  providerEventId String @map("provider_event_id") @db.Char(64)
+  eventType String @map("event_type")
+  payloadSha256 String @map("payload_sha256") @db.Char(64)
+  payloadByteSize Int @map("payload_byte_size")
+  payloadCipher Bytes @map("payload_cipher")
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  signature Signature @relation(fields:[organizationId,signatureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  preparationAttempt SignatureProviderAttempt @relation(fields:[organizationId,preparationAttemptId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  providerScope SignatureProviderScope @relation(fields:[organizationId,providerScopeHash],references:[organizationId,scopeHash],onDelete:Restrict,onUpdate:NoAction)
+  evidence SignatureProviderEvidence[]
+  @@unique([organizationId,id],map:"signature_provider_webhook_org_id_unique")
+  @@unique([organizationId,providerScopeHash,providerEventId],map:"signature_provider_webhook_dedup_unique")
+  @@index([organizationId,signatureId,receivedAt,id],map:"signature_provider_webhook_history_idx")
+  @@map("signature_provider_webhook")
 }
 
 model SignatureRecipient {

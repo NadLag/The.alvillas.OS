@@ -23,6 +23,10 @@ const webhook = z.object({ event: z.enum(documensoDocumentEvents), createdAt: z.
 /** This private result carries evidence for encrypted persistence; it does not establish a signed archive version. */
 export function decodeDocumensoWebhook(received: string | null | undefined, expected: string | undefined, raw: Uint8Array) {
   if (!authenticateDocumensoWebhook(received, expected)) throw new SignatureWebhookAccessError();
+  return parseDocumensoWebhookEvidence(raw);
+}
+/** Parse only after transport authentication or an identity-bound retained decrypt. */
+export function parseDocumensoWebhookEvidence(raw: Uint8Array) {
   if (!raw.length || raw.length > signatureMaximumEvidenceBytes) throw new SignatureWebhookPayloadError();
   try {
     const evidence = new Uint8Array(raw), parsed = webhook.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(evidence))), payload = parsed.payload;

@@ -25,8 +25,8 @@ export function originalSignatureDistribution(row: Intent) {
 export async function signatureDistributionResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Intent, env?: NodeJS.ProcessEnv) {
   if (row.requestedBy !== ctx.actorId) throw new DocumentAccessError(); const { snapshot, cap } = originalSignatureDistribution(row), original = documentActorContext({ ...ctx, authContext: cap }),
     current = await nativeSignatureDistributionContext(ctx, tx, snapshot.command.preparationId, env), held = await nativeSignatureDistributionContext(original, tx, snapshot.command.preparationId, env);
-  if (current.fingerprint !== held.fingerprint) throw new DocumentConflictError(); const attempt = await current.repository.distributionAttempt(row.signatureId),
-    state = attempt && attempt.intentId !== row.id ? "SUPERSEDED" : attempt?.evidence.some(item => item.kind === "SENT") ? "SENT" : attempt ? "UNCERTAIN" : current.fingerprint !== snapshot.contextFingerprint ? "SOURCE_CHANGED" : "ADMITTED";
+  if (current.fingerprint !== held.fingerprint) throw new DocumentConflictError(); const attempt = await current.repository.distributionAttempt(row.signatureId), confirmed = await current.repository.signatureSent(row.signatureId, row.providerScopeHash, snapshot.preparation.providerRequestId),
+    state = attempt && attempt.intentId !== row.id ? "SUPERSEDED" : confirmed || attempt?.evidence.some(item => item.kind === "SENT") ? "SENT" : attempt ? "UNCERTAIN" : current.fingerprint !== snapshot.contextFingerprint ? "SOURCE_CHANGED" : "ADMITTED";
   return signatureDistributionReceiptSchema.parse({ recorded: true, id: row.id, signatureId: row.signatureId, preparationId: snapshot.preparation.intentId, idempotencyKey: row.commandKey, state });
 }
 export async function reviewSignatureDistribution(actor: DocumentActorContext, raw: unknown, deps: SignatureDistributionDependencies) {
