@@ -14,9 +14,9 @@ import { acknowledgementBarrier } from "./support/acknowledgement-barrier";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { createSupplier } from "@/modules/finance/application/supplier-service";
 import { documentCategories } from "@/modules/documents/domain/document-policy";
-import en from "../../messages/en.json";
-import fr from "../../messages/fr.json";
-import ar from "../../messages/ar.json";
+import en from "../../messages/en.json" with { type: "json" };
+import fr from "../../messages/fr.json" with { type: "json" };
+import ar from "../../messages/ar.json" with { type: "json" };
 
 type Fixture = Awaited<ReturnType<typeof openFieldFixture>>;
 async function archiveFixture(f: Fixture) {
