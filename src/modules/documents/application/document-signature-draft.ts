@@ -25,7 +25,7 @@ const normalized = (draft: Draft): Draft => ({ ...draft, recipients: [...draft.r
 export const signatureDraftOutboxKey = (actorId: string, nonce: string) => "document-signature-draft:" + actorId + ":" + nonce;
 
 /** All source, template-origin, signature and actual counterparty grants remain independent. */
-export async function nativeSignatureContext(ctx: DocumentActorContext, tx: TenantTransaction, draft: Draft, action: "view" | "create", signatureId?: string) {
+export async function nativeSignatureContext(ctx: DocumentActorContext, tx: TenantTransaction, draft: Draft, action: "view" | "create", signatureId?: string, requestedBy = ctx.actorId) {
   const repository = new DocumentRepository(tx, ctx.organizationId), instance = await repository.instance(draft.instanceId), version = await repository.version(draft.documentVersionId);
   if (!instance || !version || version.documentId !== instance.documentId || version.admission.contentType !== "application/pdf" || !(await repository.versionMatchesInstance(version.id, instance.id))) throw new DocumentAccessError();
   const input = generatedDocumentUploadInput.safeParse(version.admission.input); if (!input.success || input.data.generationInstanceId !== instance.id) throw new DocumentAccessError();
@@ -35,7 +35,7 @@ export async function nativeSignatureContext(ctx: DocumentActorContext, tx: Tena
   if (parties.some(party => !party || party.archived)) throw new DocumentAccessError();
   const actual = parties.map(party => { if (!party) throw new DocumentAccessError(); return party; }), checks: CurrentAuthorityCheck[] = actual.flatMap(party => party.checks);
   for (const dataClass of archive.privacy) {
-    const resource = { ...archive.native.resource, type: "signature", id: signatureId, documentId: instance.documentId, assignedUserAccountId: ctx.actorId, dataClass };
+    const resource = { ...archive.native.resource, type: "signature", id: signatureId, documentId: instance.documentId, assignedUserAccountId: requestedBy, dataClass };
     checks.push({ action: "view", resource }, ...action === "create" ? [{ action: "create" as const, resource }] : []);
   }
   await recheckAccountAuthorization(ctx, tx, await repository.clock(), checks, new DocumentAccessError());
@@ -51,6 +51,7 @@ function partyPresentation(ctx: DocumentActorContext, current: Context) {
     return { reference: party.reference, ...value.data, fingerprint: party.fingerprint, identityHash: commandFingerprint(party.reference) };
   });
 }
+export { partyPresentation as presentSignatureParties };
 function reviewFingerprint(ctx: DocumentActorContext, draft: Draft, current: Context) { return commandFingerprint({ actorId: ctx.actorId, draft, source: current.fingerprint, cap: captureAuthorizationCap(ctx.authContext) }); }
 export async function readNativeSignatureChoices(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx = documentActorContext(actor), input = nativeSignatureChoicesInput.parse(raw), filter = commandFingerprint({ operation: "SIGNATURE_PARTIES", documentVersionId: input.documentVersionId, kind: input.kind, query: input.query }), before = readDocumentCursor(ctx, filter, input.cursor);
@@ -86,15 +87,26 @@ export async function reviewNativeSignature(actor: DocumentActorContext, raw: un
       recipients: partyPresentation(ctx, final), privacy: final.archive.privacy };
   });
 }
-async function signatureResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Signature) {
-  if (row.requestedBy !== ctx.actorId) throw new DocumentAccessError(); const snapshot = nativeSignatureSnapshotSchema.parse(row.policySnapshot), command = snapshot.command,
-    original = documentActorContext({ ...ctx, authContext: restoreAuthorizationCap(row.authorizationCap) }), draft = normalized(nativeSignatureDraftSchema.parse({ instanceId: command.instanceId, documentVersionId: command.documentVersionId, recipients: command.recipients }));
+export function nativeSignatureOriginalDefinition(row: Signature) {
+  const snapshot = nativeSignatureSnapshotSchema.parse(row.policySnapshot), command = snapshot.command, cap = restoreAuthorizationCap(row.authorizationCap),
+    draft = normalized(nativeSignatureDraftSchema.parse({ instanceId: command.instanceId, documentVersionId: command.documentVersionId, recipients: command.recipients }));
   if (snapshot.commandHash !== row.commandHash || commandFingerprint(command) !== row.commandHash || snapshot.nativeSourceFingerprint !== row.sourceFingerprint || snapshot.document.instanceId !== row.instanceId || snapshot.document.versionId !== row.documentVersionId || command.idempotencyKey !== row.commandKey) throw new DocumentConflictError();
-  const current = await nativeSignatureContext(ctx, tx, draft, "create", row.id), held = await nativeSignatureContext(original, tx, draft, "create", row.id);
+  if (cap.organizationId !== row.organizationId || cap.userAccountId !== row.requestedBy || command.reason !== row.reason) throw new DocumentConflictError();
+  return { snapshot, command, draft, cap };
+}
+export function assertSignatureOriginalArchive(current: Context, snapshot: z.infer<typeof nativeSignatureSnapshotSchema>) {
   if (snapshot.document.id !== current.instance.documentId || snapshot.document.admissionId !== current.version.admission.id || snapshot.document.sha256 !== current.version.admission.sha256 ||
     snapshot.document.byteSize !== current.version.admission.fileSize || snapshot.document.locale !== current.instance.document.locale || commandFingerprint(snapshot.document.source) !== commandFingerprint(current.source)) throw new DocumentConflictError();
+}
+export function signatureNativeInputsChanged(current: Context, snapshot: z.infer<typeof nativeSignatureSnapshotSchema>) {
+  return current.archive.fingerprint !== snapshot.archiveFingerprint || current.archive.native.fingerprint !== snapshot.nativeSourceFingerprint || current.parties.some((party, index) => party.fingerprint !== snapshot.recipients[index]?.fingerprint);
+}
+async function signatureResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Signature) {
+  if (row.requestedBy !== ctx.actorId) throw new DocumentAccessError(); const { snapshot, draft, cap } = nativeSignatureOriginalDefinition(row), original = documentActorContext({ ...ctx, authContext: cap });
+  const current = await nativeSignatureContext(ctx, tx, draft, "create", row.id), held = await nativeSignatureContext(original, tx, draft, "create", row.id);
+  assertSignatureOriginalArchive(current, snapshot);
   if (current.fingerprint !== held.fingerprint) throw new DocumentConflictError();
-  const changed = current.archive.fingerprint !== snapshot.archiveFingerprint || current.archive.native.fingerprint !== snapshot.nativeSourceFingerprint || current.parties.some((party, index) => party.fingerprint !== snapshot.recipients[index]?.fingerprint);
+  const changed = signatureNativeInputsChanged(current, snapshot);
   return nativeSignatureReceiptSchema.parse({ recorded: true, id: row.id, idempotencyKey: row.commandKey, documentId: current.instance.documentId, instanceId: row.instanceId, documentVersionId: row.documentVersionId, state: changed ? "SOURCE_CHANGED" : "DRAFT" });
 }
 export async function admitNativeSignature(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
@@ -103,7 +115,7 @@ export async function admitNativeSignature(actor: DocumentActorContext, raw: unk
   const replay = await withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + command.idempotencyKey);
     const existing = await repository.signatureByNonce(ctx.actorId, command.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return signatureResult(ctx, tx, existing); }
-    if (await repository.byNonce(ctx.actorId, command.idempotencyKey) || await repository.instanceByNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError(); return null;
+    if (await repository.byNonce(ctx.actorId, command.idempotencyKey) || await repository.instanceByNonce(ctx.actorId, command.idempotencyKey) || await repository.providerPreparationByNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError(); return null;
   }); if (replay) return replay;
   const rate = await withTenant(deps.db, ctx.organizationId, async tx => {
     const current = await nativeSignatureContext(ctx, tx, draft, "create"); partyPresentation(ctx, current); if (reviewFingerprint(ctx, draft, current) !== command.reviewFingerprint) throw new DocumentConflictError();
@@ -112,7 +124,7 @@ export async function admitNativeSignature(actor: DocumentActorContext, raw: unk
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + command.idempotencyKey);
     const existing = await repository.signatureByNonce(ctx.actorId, command.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return signatureResult(ctx, tx, existing); }
-    if (await repository.byNonce(ctx.actorId, command.idempotencyKey) || await repository.instanceByNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError();
+    if (await repository.byNonce(ctx.actorId, command.idempotencyKey) || await repository.instanceByNonce(ctx.actorId, command.idempotencyKey) || await repository.providerPreparationByNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError();
     const id = randomUUID(); let current = await nativeSignatureContext(ctx, tx, draft, "create", id); await repository.lock("root:" + current.instance.documentId); current = await nativeSignatureContext(ctx, tx, draft, "create", id);
     const parties = partyPresentation(ctx, current); if (reviewFingerprint(ctx, draft, current) !== command.reviewFingerprint) throw new DocumentConflictError();
     const snapshot = nativeSignatureSnapshotSchema.parse({ protocol: nativeSignatureProtocol, schemaVersion: 1, command, commandHash, archiveFingerprint: current.archive.fingerprint, nativeSourceFingerprint: current.archive.native.fingerprint, archivePolicy: current.archive.policy,
@@ -135,7 +147,7 @@ export async function recoverNativeSignature(actor: DocumentActorContext, raw: u
   const ctx = documentActorContext(actor), input = documentRecoveryInput.parse(raw);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey); const existing = await repository.signatureByNonce(ctx.actorId, input.idempotencyKey); if (existing) return signatureResult(ctx, tx, existing);
-    if (await repository.signatureNonceOwner(input.idempotencyKey) || await repository.nonceOwner(input.idempotencyKey) || await repository.instanceNonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
+    if (await repository.signatureNonceOwner(input.idempotencyKey) || await repository.nonceOwner(input.idempotencyKey) || await repository.instanceNonceOwner(input.idempotencyKey) || await repository.providerPreparationNonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
     const current = await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId); if ([current, ctx.authContext].some(cap => ["signature:view", "signature:create", "document:view"].some(key => !cap.permissions.has(key)))) throw new DocumentAccessError();
     return { recorded: false as const, id: null, idempotencyKey: input.idempotencyKey, state: null };
   });

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { NonRetriableError } from "inngest";
 import { createHmac } from "node:crypto";
-import { cleanupUploadParts, consumeAutomations, dispatchOutbox, dispatchRequestOrganization, inngestFunctions, outboxDispatchEvent, recognizeSupplierInvoices, failSupplierInvoiceRecognitions, generateDocuments, failDocumentGenerations } from "@/platform/events/inngest-functions";
+import { cleanupUploadParts, consumeAutomations, dispatchOutbox, dispatchRequestOrganization, inngestFunctions, outboxDispatchEvent, recognizeSupplierInvoices, failSupplierInvoiceRecognitions, generateDocuments, failDocumentGenerations, prepareSignatures } from "@/platform/events/inngest-functions";
 import type { OutboxDatabase } from "@/platform/events/outbox-repository";
 
 const organizationId = "018f0a0b-0000-7000-9000-000000000001";
@@ -17,8 +17,9 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe("Inngest signed outbox dispatcher", () => {
   it("registers the dispatcher and durable automation consumer", () => {
-    expect(inngestFunctions).toHaveLength(11);
+    expect(inngestFunctions).toHaveLength(12);
     expect(inngestFunctions).toContain(generateDocuments);expect(inngestFunctions).toContain(failDocumentGenerations);
+    expect(inngestFunctions).toContain(prepareSignatures);expect(prepareSignatures.opts.triggers).toEqual([{event:"documents.signature.prepare_requested"}]);expect(prepareSignatures.opts.concurrency).toEqual({limit:1});expect(prepareSignatures.opts.retries).toBe(3);
     expect(generateDocuments.opts.triggers).toEqual([{event:"documents.instance.requested"}]);expect(generateDocuments.opts.concurrency).toEqual({limit:1});expect(generateDocuments.opts.retries).toBe(3);
     expect(failDocumentGenerations.opts.triggers).toEqual([{event:"inngest/function.failed",if:"event.data.function_id == 'alvillas-os-native-document-generation'"}]);expect(failDocumentGenerations.opts.concurrency).toEqual({limit:1});expect(failDocumentGenerations.opts.retries).toBe(3);
     expect(recognizeSupplierInvoices.opts.triggers).toEqual([{ event: "SupplierInvoiceRecognitionRequested" }, { event: "SupplierInvoiceReversalRequested" },{event:"EmployeeCompensationSubmissionRequested"},{event:"EmployeeCompensationRecognitionRequested"},{event:"EmployeeMonthlyRunRequested"},{event:"EmployeeEarningRunRequested"},{event:"ExternalPaymentCaptureRequested"},{event:"ExternalPaymentRefundRequested"}]);
@@ -49,7 +50,7 @@ describe("Inngest signed outbox dispatcher", () => {
     expect(response.status).toBe(200);
     const registration = await response.json() as { functions: Array<{ idempotency?: string; rateLimit?: unknown; concurrency?: { limit: number } | Array<{ limit: number }>; steps: { step: { retries: { attempts: number } } } }> };
     // The terminal-failure consumer has its own explicit concurrency limit.
-    expect(registration.functions).toHaveLength(11);
+    expect(registration.functions).toHaveLength(12);
     // Cloud validates each emitted function against the existing staging plan.
     // Rejecting one consumer prevents synchronization of the whole application.
     for (const fn of registration.functions) {
@@ -90,7 +91,7 @@ describe("Inngest signed outbox dispatcher", () => {
     expect((await GET(new NextRequest("http://localhost:3000/api/inngest"), {})).status).toBe(401);
     const discovery = await GET(new NextRequest("http://localhost:3000/api/inngest", { headers: signature("") }), {});
     expect(discovery.status).toBe(200);
-    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(11);
+    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(12);
     expect(JSON.stringify(body)).not.toContain(process.env.INNGEST_SIGNING_KEY!);
     const execution = await POST(new NextRequest("http://localhost:3000/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { method: "POST", body: "{}" }), {});
     expect(execution.status).toBe(401);

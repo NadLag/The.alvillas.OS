@@ -9,7 +9,8 @@ import type {
   StorageProvider
 } from "@/platform/providers";
 import type { AppLocale } from "@/i18n/routing";
-import { captureSignatureRequest, SignatureProviderError, type SignatureRequestInput, type SignatureRequestObservation, type SignatureRequestReceipt } from "./signature-request";
+import { createHash } from "node:crypto";
+import { captureSignatureRequest, signatureDownloadInputSchema, SignatureProviderError, type SignatureRequestInput, type SignatureRequestObservation, type SignatureRequestReceipt, type SignatureRequestDownloadInput, type SignatureRequestDownload } from "./signature-request";
 
 export function assertFakeProviderAllowed(nodeEnv: string | undefined = process.env.NODE_ENV): void {
   if (nodeEnv === "production") {
@@ -45,17 +46,22 @@ export class FakeSignatureProvider implements SignatureProvider {
   }
   readSignatureRequest(input: { requestId: string; reference: string }): Promise<SignatureRequestObservation> {
     const row = this.requests.get(input.requestId); if (!row || row.input.reference !== input.reference) return Promise.reject(new SignatureProviderError("NONE", 404));
-    const recipients = row.input.recipients.map((recipient, index) => ({ id: index + 1, requestId: input.requestId, name: recipient.name, email: recipient.email, role: recipient.role,
+    const recipients = row.input.recipients.map((recipient, index) => ({ id: index + 1, requestId: input.requestId, name: recipient.name, email: recipient.email, role: recipient.role, signingOrder: recipient.signingOrder,
       readStatus: "NOT_OPENED" as const, signingStatus: "NOT_SIGNED" as const, sendStatus: row.sent ? "SENT" as const : "NOT_SENT" as const, signedAt: null, expiresAt: null }));
     let fieldId = 0; const item = { id: "fake-item-" + input.requestId, requestId: input.requestId, title: row.input.file.name }, fields = row.input.recipients.flatMap((recipient, index) => recipient.fields.map(field => ({ ...field, id: ++fieldId, recipientId: index + 1, itemId: item.id }))),
       observation: SignatureRequestObservation = { requestId: input.requestId, reference: row.input.reference, title: row.input.title, status: row.sent ? "PENDING" : "DRAFT", teamId: 1,
-        locale: row.input.locale, signingOrder: row.input.signingOrder, methods: { ...row.input.methods }, distributionMethod: row.sent ? "EMAIL" : "NONE", recipients, items: [item], fields,
+        locale: row.input.locale, signingOrder: row.input.signingOrder, methods: { ...row.input.methods }, distributionMethod: row.sent ? "EMAIL" : "NONE", allowDictateNextSigner: false, expiration: structuredClone(row.input.delivery?.expiration ?? null), emailSettings: structuredClone(row.input.delivery?.emailSettings ?? null), recipients, items: [item], fields,
         evidence: new TextEncoder().encode(JSON.stringify({ id: input.requestId, fake: true, sent: row.sent })) };
     return Promise.resolve(observation);
   }
   distributeSignatureRequest(input: { requestId: string }): Promise<SignatureRequestReceipt> {
     const row = this.requests.get(input.requestId); if (!row) return Promise.reject(new SignatureProviderError("NONE", 404)); row.sent = true;
     return Promise.resolve({ requestId: input.requestId, evidence: new TextEncoder().encode(JSON.stringify({ id: input.requestId, fake: true, sent: true })) });
+  }
+  async downloadSignatureRequest(raw: SignatureRequestDownloadInput): Promise<SignatureRequestDownload> {
+    const input = signatureDownloadInputSchema.parse(raw), observation = await this.readSignatureRequest({ requestId: input.requestId, reference: input.reference }), row = this.requests.get(input.requestId);
+    if (!row || input.version !== "original" || observation.items[0].id !== input.itemId) throw new SignatureProviderError("NONE");
+    const bytes = new Uint8Array(row.input.file.bytes); return { requestId: input.requestId, itemId: input.itemId, version: input.version, bytes, sha256: createHash("sha256").update(bytes).digest("hex"), observation };
   }
 }
 

@@ -8,8 +8,9 @@ test("Inngest authenticates discovery and denies unsigned execution", async ({ r
   const digest = createHmac("sha256", key!.replace(/^signkey-\w+-/u, "")).update(seconds).digest("hex");
   const discovery = await request.get("/api/inngest", { headers: { "x-inngest-signature": `t=${seconds}&s=${digest}` } });
   expect(discovery.status()).toBe(200);
-  // The original nine consumers plus document generation and its terminal-failure consumer.
-  expect(await discovery.json()).toMatchObject({ function_count: 11 });
+  // The original nine consumers, document generation and its failure consumer,
+  // plus the single-attempt private signature preparation worker.
+  expect(await discovery.json()).toMatchObject({ function_count: 12 });
   const response = await request.post("/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { data: {} });
   expect(response.status()).toBe(401);
   expect((await request.get("/api/inngest")).status()).toBe(401);

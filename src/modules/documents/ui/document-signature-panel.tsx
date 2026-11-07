@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import { z } from "zod";
 import { nativeSignatureChoicesSchema, nativeSignatureCommandSchema, nativeSignatureDraftSchema, nativeSignatureReceiptSchema, nativeSignatureRecoverySchema, nativeSignatureReviewSchema, signatureRecipientReferenceSchema } from "../domain/document-signature-command";
 import { clearDocumentNonce, documentRequest, DocumentBrowserError, readDocumentNonce, writeDocumentNonce, type DocumentBrowserState } from "./document-browser";
+import { DocumentSignaturePreparationPanel } from "./document-signature-preparation-panel";
 
 type Choices = z.infer<typeof nativeSignatureChoicesSchema>;
 type Party = Choices["items"][number];
@@ -81,6 +82,7 @@ export function DocumentSignaturePanel({ scope, version, disabled, onClose }: { 
       <button type="submit" className="secondary-button" disabled={locked || !choices || !selected.length} data-testid="signature-review">{t("review")}</button>
     </form> : null}
     {review && !pending ? <section className="resource-form" data-testid="signature-reviewed"><h3>{t("reviewed")}</h3><p dir="auto">{review.value.document.title}</p><ul className="resource-list">{review.value.recipients.map(party => <li key={partyKey(party)} dir="auto">{party.displayName} · {party.email}</li>)}</ul><button className="primary-button" disabled={locked} onClick={save} data-testid="signature-save">{t("save")}</button></section> : null}
+    <DocumentSignaturePreparationPanel scope={scope} signatureId={receipt?.state === "DRAFT" ? receipt.id : null} disabled={disabled || busy} />
     <button className="quiet-button" disabled={busy} onClick={onClose}>{t("close")}</button>
   </section>;
 }

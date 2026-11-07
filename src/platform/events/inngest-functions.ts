@@ -27,6 +27,8 @@ import {tickLedgerIntegrity} from "@/modules/finance/application/ledger-integrit
 import {externalPaymentCaptureRequested,executeExternalPaymentCaptureReference,failExternalPaymentCaptureReference} from "@/modules/finance/application/external-payment-service";
 import {externalPaymentRefundRequested,executeExternalPaymentRefundReference,failExternalPaymentRefundReference} from "@/modules/finance/application/external-payment-refund-service";
 import {documentGenerationRequested} from "@/modules/documents/domain/document-generation";
+import {signaturePreparationRequested} from "@/modules/documents/domain/document-signature-preparation";
+import {executeSignaturePreparationReference} from "@/modules/documents/application/document-signature-preparation-worker";
 import {executeDocumentGenerationReference,failDocumentGenerationReference} from "@/modules/documents/application/document-generation-worker";
 
 export { outboxDispatchEvent };
@@ -146,4 +148,6 @@ export const generateDocuments=inngest.createFunction({id:"native-document-gener
 const failedDocumentExecution=z.object({function_id:z.literal("alvillas-os-native-document-generation"),event:z.object({name:z.literal(documentGenerationRequested),data:outboxDispatchInput})});
 export const failDocumentGenerations=inngest.createFunction({id:"native-document-generation-failure",name:"ALVILLAS OS retained document generation failures",triggers:[{event:"inngest/function.failed",if:"event.data.function_id == 'alvillas-os-native-document-generation'"}],concurrency:{limit:1},retries:3},
   async({event,step})=>{const failure=failedDocumentExecution.safeParse(event.data);if(!failure.success)throw new NonRetriableError("document_generation_failure_reference_denied");return step.run("retain-original-generation-failure",()=>failDocumentGenerationReference(failure.data.event.data));});
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations];
+export const prepareSignatures=inngest.createFunction({id:"native-signature-preparation",name:"ALVILLAS OS private signature preparation",triggers:[{event:signaturePreparationRequested}],concurrency:{limit:1},retries:3},
+  async({event,step})=>step.run("prepare-original-private-signature-once",()=>executeSignaturePreparationReference(event.data)));
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures];

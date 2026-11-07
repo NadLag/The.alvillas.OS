@@ -1,36 +1,6 @@
 import { createHash } from "node:crypto";
-import { z } from "zod";
-
-export const signatureMaximumPdfBytes = 10 * 1024 * 1024;
-export const signatureMaximumEvidenceBytes = 1024 * 1024;
-export const signatureTransportTimeoutMs = 30000;
-export const signatureRequestIdSchema = z.string().min(1).max(255).regex(/^[A-Za-z0-9_-]+$/u);
-export const signatureRecipientRoleSchema = z.enum(["SIGNER", "APPROVER", "VIEWER", "CC", "ASSISTANT"]);
-export const signatureProviderStatusSchema = z.enum(["DRAFT", "PENDING", "COMPLETED", "REJECTED", "CANCELLED"]);
-export const signatureFieldSchema = z.object({ type: z.enum(["SIGNATURE", "INITIALS", "NAME", "EMAIL", "DATE"]), page: z.number().int().min(1),
-  positionX: z.number().min(0).max(100), positionY: z.number().min(0).max(100), width: z.number().gt(0).max(100), height: z.number().gt(0).max(100)
-}).strict().refine(field => field.positionX + field.width <= 100 && field.positionY + field.height <= 100, "signature_field_outside_page");
-export const signatureRequestInputSchema = z.object({ reference: z.string().min(1).max(255), title: z.string().min(1).max(255), locale: z.enum(["en", "fr", "ar"]),
-  signingOrder: z.enum(["PARALLEL", "SEQUENTIAL"]), methods: z.object({ typed: z.boolean(), draw: z.boolean(), upload: z.boolean() }).strict(),
-  file: z.object({ name: z.string().min(1).max(255).regex(/^[^/\\\r\n]+\.pdf$/iu), bytes: z.instanceof(Uint8Array), sha256: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
-  recipients: z.array(z.object({ name: z.string().min(1).max(255), email: z.email().max(254), role: signatureRecipientRoleSchema,
-    signingOrder: z.number().int().min(0), fields: z.array(signatureFieldSchema).max(200) }).strict()).min(1).max(100)
-}).strict();
-export type SignatureRequestInput = z.infer<typeof signatureRequestInputSchema>;
-export type SignatureRequestReceipt = { requestId: string; evidence: Uint8Array };
-export type SignatureRequestObservation = { requestId: string; reference: string; title: string; status: z.infer<typeof signatureProviderStatusSchema>; teamId: number;
-  locale: "en" | "fr" | "ar"; signingOrder: "PARALLEL" | "SEQUENTIAL"; methods: SignatureRequestInput["methods"]; distributionMethod: "NONE" | "EMAIL";
-  recipients: { id: number; requestId: string; name: string; email: string; role: z.infer<typeof signatureRecipientRoleSchema>; readStatus: "NOT_OPENED" | "OPENED";
-    signingStatus: "NOT_SIGNED" | "SIGNED" | "REJECTED"; sendStatus: "NOT_SENT" | "SENT"; signedAt: string | null; expiresAt: string | null }[];
-  items: { id: string; requestId: string; title: string }[];
-  fields: { id: number; recipientId: number; itemId: string; type: string; page: number; positionX: number; positionY: number; width: number; height: number }[]; evidence: Uint8Array };
-
-export class SignatureProviderError extends Error {
-  constructor(readonly effect: "NONE" | "UNCERTAIN", readonly status?: number) { super("signature_provider_unavailable"); this.name = "SignatureProviderError"; }
-}
-export class SignatureProviderConfigurationError extends Error {
-  constructor() { super("signature_provider_configuration_unavailable"); this.name = "SignatureProviderConfigurationError"; }
-}
+import { signatureRequestInputSchema, signatureMaximumPdfBytes, signatureRequestIdSchema, signatureExpirationSchema, signatureEmailSettingsSchema, SignatureProviderError, SignatureProviderConfigurationError, type SignatureRequestInput, type SignatureRequestObservation } from "./signature-contract";
+export * from "./signature-contract";
 
 /** Capture owned immutable PDF bytes before the first asynchronous provider boundary. */
 export function captureSignatureRequest(raw: unknown): SignatureRequestInput {
@@ -38,4 +8,34 @@ export function captureSignatureRequest(raw: unknown): SignatureRequestInput {
   if (bytes.length < 8 || bytes.length > signatureMaximumPdfBytes || Buffer.from(bytes.subarray(0, 5)).toString("ascii") !== "%PDF-" ||
     createHash("sha256").update(bytes).digest("hex") !== input.file.sha256) throw new SignatureProviderConfigurationError();
   return { ...input, file: { ...input.file, bytes } };
+}
+
+/** Verify the provider's real original bytes and native signing contract before any send. */
+export function assertSignatureRequestObservation(raw: SignatureRequestInput, actual: SignatureRequestObservation,
+  scope: { requestId: string; teamId: number; distributionMethod: "NONE" | "EMAIL"; originalPdf: Uint8Array }) {
+  const expected = captureSignatureRequest(raw), fail = (): never => { throw new SignatureProviderError("NONE"); },
+    recipientKey = (recipient: { email: string; name: string; role: string; signingOrder: number | null }) => JSON.stringify([recipient.email, recipient.name, recipient.role, recipient.signingOrder]),
+    fieldKey = (field: { type: string; page: number; positionX: number; positionY: number; width: number; height: number }) => JSON.stringify([field.type, field.page, field.positionX, field.positionY, field.width, field.height]);
+  if (!signatureRequestIdSchema.safeParse(scope.requestId).success || !Number.isSafeInteger(scope.teamId) || scope.teamId <= 0 ||
+    actual.requestId !== scope.requestId || actual.teamId !== scope.teamId || actual.reference !== expected.reference || actual.title !== expected.title || actual.locale !== expected.locale ||
+    actual.distributionMethod !== scope.distributionMethod || actual.signingOrder !== expected.signingOrder || actual.allowDictateNextSigner ||
+    actual.methods.typed !== expected.methods.typed || actual.methods.draw !== expected.methods.draw || actual.methods.upload !== expected.methods.upload ||
+    actual.items.length !== 1 || actual.items[0].requestId !== actual.requestId || actual.items[0].title !== expected.file.name ||
+    scope.originalPdf.length !== expected.file.bytes.length || createHash("sha256").update(scope.originalPdf).digest("hex") !== expected.file.sha256 ||
+    actual.recipients.length !== expected.recipients.length || new Set(expected.recipients.map(recipient => recipient.email.toLowerCase())).size !== expected.recipients.length ||
+    new Set(actual.recipients.map(recipient => recipient.id)).size !== actual.recipients.length || actual.fields.length !== expected.recipients.reduce((count, recipient) => count + recipient.fields.length, 0)) fail();
+  if (scope.distributionMethod === "NONE" && (actual.status !== "DRAFT" || actual.recipients.some(recipient => recipient.sendStatus !== "NOT_SENT" || recipient.signingStatus !== "NOT_SIGNED" || recipient.readStatus !== "NOT_OPENED" || recipient.signedAt !== null))) fail();
+  if (scope.distributionMethod === "EMAIL" && actual.status === "DRAFT") fail();
+  if (expected.delivery) {
+    const expiration = signatureExpirationSchema.safeParse(actual.expiration), settings = signatureEmailSettingsSchema.safeParse(actual.emailSettings);
+    if (!expiration.success || !settings.success || JSON.stringify(expiration.data) !== JSON.stringify(expected.delivery.expiration) || JSON.stringify(settings.data) !== JSON.stringify(expected.delivery.emailSettings)) fail();
+  }
+  const matched = new Set<number>();
+  for (const recipient of expected.recipients) {
+    const candidates = actual.recipients.filter(value => recipientKey(value) === recipientKey(recipient)), native = candidates[0];
+    if (candidates.length !== 1 || !native || native.requestId !== actual.requestId || matched.has(native.id)) fail(); matched.add(native.id);
+    const fields = actual.fields.filter(field => field.recipientId === native.id);
+    if (fields.some(field => field.itemId !== actual.items[0].id) || JSON.stringify(fields.map(fieldKey).sort()) !== JSON.stringify(recipient.fields.map(fieldKey).sort())) fail();
+  }
+  if (actual.fields.some(field => !matched.has(field.recipientId))) fail();
 }

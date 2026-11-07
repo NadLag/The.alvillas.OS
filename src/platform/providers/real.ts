@@ -17,8 +17,8 @@ import { paymentCaptureIntent, verifiedPayPalCapture, verifiedPayPalCaptureEvide
 import { paymentRefundIntent, paymentRefundLookup, verifiedPayPalRefundResult, PaymentRefundEvidenceError } from "./payment-refund";
 import { z } from "zod";
 import { readBoundedResponseBytes } from "@/platform/http/read-exact-response";
-import { captureSignatureRequest, signatureMaximumEvidenceBytes, signatureTransportTimeoutMs, signatureRequestIdSchema, signatureRecipientRoleSchema, signatureProviderStatusSchema,
-  SignatureProviderError, SignatureProviderConfigurationError, type SignatureRequestInput, type SignatureRequestReceipt, type SignatureRequestObservation } from "./signature-request";
+import { captureSignatureRequest, signatureMaximumEvidenceBytes, signatureMaximumPdfBytes, signatureTransportTimeoutMs, signatureRequestIdSchema, signatureRecipientRoleSchema, signatureProviderStatusSchema, signatureDownloadInputSchema, signatureExpirationSchema, signatureEmailSettingsSchema, signatureRequestObservationSchema,
+  SignatureProviderError, SignatureProviderConfigurationError, type SignatureRequestInput, type SignatureRequestReceipt, type SignatureRequestObservation, type SignatureRequestDownloadInput, type SignatureRequestDownload } from "./signature-request";
 
 export type HttpTransport = (
   url: string,
@@ -173,7 +173,8 @@ export class DocumensoSignatureProvider implements SignatureProvider {
   async prepareSignatureRequest(raw: SignatureRequestInput): Promise<SignatureRequestReceipt> {
     const input = captureSignatureRequest(raw); if (input.locale === "ar") throw new SignatureProviderConfigurationError();
     const payload = { type: "DOCUMENT", title: input.title, externalId: input.reference, visibility: "ADMIN", recipients: input.recipients.map(recipient => ({ ...recipient, fields: recipient.fields.map(field => ({ ...field, identifier: 0 })) })),
-      meta: { language: input.locale, signingOrder: input.signingOrder, distributionMethod: "NONE", typedSignatureEnabled: input.methods.typed, drawSignatureEnabled: input.methods.draw, uploadSignatureEnabled: input.methods.upload } };
+      meta: { language: input.locale, signingOrder: input.signingOrder, distributionMethod: "NONE", allowDictateNextSigner: false, typedSignatureEnabled: input.methods.typed, drawSignatureEnabled: input.methods.draw, uploadSignatureEnabled: input.methods.upload,
+        ...input.delivery ? { envelopeExpirationPeriod: input.delivery.expiration, reminderSettings: input.delivery.reminders, emailSettings: input.delivery.emailSettings } : {} } };
     const encoded = JSON.stringify(payload); if (Buffer.byteLength(encoded) > signatureMaximumEvidenceBytes) throw new SignatureProviderConfigurationError();
     const form = new FormData(); form.set("payload", encoded); form.append("files", new Blob([new Uint8Array(input.file.bytes)], { type: "application/pdf" }), input.file.name);
     const response = await this.signatureJson("/envelope/create", form);
@@ -185,20 +186,18 @@ export class DocumensoSignatureProvider implements SignatureProvider {
     const position = z.union([z.number(), z.string().regex(/^\d+(?:\.\d+)?$/u).transform(Number)]).pipe(z.number().min(0).max(100)), date = z.iso.datetime({ offset: true }).nullable();
     try {
       const envelope = z.object({ id: signatureRequestIdSchema, externalId: z.string().min(1).max(255), title: z.string().min(1).max(255), type: z.literal("DOCUMENT"), source: z.literal("DOCUMENT"), visibility: z.literal("ADMIN"), status: signatureProviderStatusSchema, teamId: z.number().int().positive(),
-        documentMeta: z.object({ language: z.enum(["en", "fr"]), signingOrder: z.enum(["PARALLEL", "SEQUENTIAL"]), distributionMethod: z.enum(["NONE", "EMAIL"]), typedSignatureEnabled: z.boolean(), drawSignatureEnabled: z.boolean(), uploadSignatureEnabled: z.boolean() }),
-        recipients: z.array(z.object({ id: z.number().int().positive(), envelopeId: signatureRequestIdSchema, name: z.string().max(255), email: z.email().max(254), role: signatureRecipientRoleSchema,
+        documentMeta: z.object({ language: z.enum(["en", "fr"]), signingOrder: z.enum(["PARALLEL", "SEQUENTIAL"]), distributionMethod: z.enum(["NONE", "EMAIL"]), allowDictateNextSigner: z.boolean(), typedSignatureEnabled: z.boolean(), drawSignatureEnabled: z.boolean(), uploadSignatureEnabled: z.boolean(), envelopeExpirationPeriod: signatureExpirationSchema.nullish(), emailSettings: signatureEmailSettingsSchema.nullish() }),
+        recipients: z.array(z.object({ id: z.number().int().positive(), envelopeId: signatureRequestIdSchema, name: z.string().max(255), email: z.email().max(254), role: signatureRecipientRoleSchema, signingOrder: z.number().int().nonnegative().nullable(),
           readStatus: z.enum(["NOT_OPENED", "OPENED"]), signingStatus: z.enum(["NOT_SIGNED", "SIGNED", "REJECTED"]), sendStatus: z.enum(["NOT_SENT", "SENT"]), signedAt: date, expiresAt: date })).max(100),
         envelopeItems: z.array(z.object({ id: signatureRequestIdSchema, envelopeId: signatureRequestIdSchema, title: z.string().max(255) })).min(1).max(100),
         fields: z.array(z.object({ id: z.number().int().positive(), recipientId: z.number().int().positive(), envelopeItemId: signatureRequestIdSchema, type: z.string().min(1).max(40), page: z.number().int().positive(), positionX: position, positionY: position, width: position, height: position })).max(10000)
       }).parse(response.value);
-      if (envelope.id !== input.requestId || envelope.externalId !== input.reference || [...envelope.recipients, ...envelope.envelopeItems].some(item => item.envelopeId !== envelope.id) ||
-        new Set(envelope.recipients.map(item => item.id)).size !== envelope.recipients.length || new Set(envelope.envelopeItems.map(item => item.id)).size !== envelope.envelopeItems.length ||
-        new Set(envelope.fields.map(field => field.id)).size !== envelope.fields.length || envelope.fields.some(field => !envelope.recipients.some(recipient => recipient.id === field.recipientId) ||
-          !envelope.envelopeItems.some(item => item.id === field.envelopeItemId) || field.width <= 0 || field.height <= 0 || field.positionX + field.width > 100 || field.positionY + field.height > 100)) throw new SignatureProviderError("NONE");
-      return { requestId: envelope.id, reference: envelope.externalId, title: envelope.title, status: envelope.status, teamId: envelope.teamId,
-        locale: envelope.documentMeta.language, signingOrder: envelope.documentMeta.signingOrder, methods: { typed: envelope.documentMeta.typedSignatureEnabled, draw: envelope.documentMeta.drawSignatureEnabled, upload: envelope.documentMeta.uploadSignatureEnabled }, distributionMethod: envelope.documentMeta.distributionMethod,
+      if (envelope.id !== input.requestId || envelope.externalId !== input.reference) throw new SignatureProviderError("NONE");
+      return signatureRequestObservationSchema.parse({ requestId: envelope.id, reference: envelope.externalId, title: envelope.title, status: envelope.status, teamId: envelope.teamId,
+        locale: envelope.documentMeta.language, signingOrder: envelope.documentMeta.signingOrder, methods: { typed: envelope.documentMeta.typedSignatureEnabled, draw: envelope.documentMeta.drawSignatureEnabled, upload: envelope.documentMeta.uploadSignatureEnabled }, distributionMethod: envelope.documentMeta.distributionMethod, allowDictateNextSigner: envelope.documentMeta.allowDictateNextSigner,
+        expiration: envelope.documentMeta.envelopeExpirationPeriod ?? null, emailSettings: envelope.documentMeta.emailSettings ?? null,
         recipients: envelope.recipients.map(({ envelopeId, ...recipient }) => ({ ...recipient, requestId: envelopeId })), items: envelope.envelopeItems.map(({ envelopeId, ...item }) => ({ ...item, requestId: envelopeId })),
-        fields: envelope.fields.map(({ envelopeItemId, ...field }) => ({ ...field, itemId: envelopeItemId })), evidence: response.evidence };
+        fields: envelope.fields.map(({ envelopeItemId, ...field }) => ({ ...field, itemId: envelopeItemId })), evidence: response.evidence });
     } catch { throw new SignatureProviderError("NONE"); }
   }
   async distributeSignatureRequest(raw: { requestId: string }): Promise<SignatureRequestReceipt> {
@@ -206,6 +205,24 @@ export class DocumensoSignatureProvider implements SignatureProvider {
     try { const result = z.object({ id: signatureRequestIdSchema, success: z.literal(true), recipients: z.array(z.object({ id: z.number().int().positive() })).min(1).max(100) }).parse(response.value);
       if (result.id !== input.requestId) throw new SignatureProviderError("UNCERTAIN"); return { requestId: result.id, evidence: response.evidence }; }
     catch { throw new SignatureProviderError("UNCERTAIN"); }
+  }
+  async downloadSignatureRequest(raw: SignatureRequestDownloadInput): Promise<SignatureRequestDownload> {
+    const input = signatureDownloadInputSchema.parse(raw), eligible = (observation: SignatureRequestObservation) => observation.items.length === 1 && observation.items[0].id === input.itemId &&
+      (input.version === "original" || observation.status === "COMPLETED");
+    const lookup = { requestId: input.requestId, reference: input.reference }, before = await this.readSignatureRequest(lookup); if (!eligible(before)) throw new SignatureProviderError("NONE");
+    // The provider can return its unsigned original for a premature signed download. Verify
+    // completion before and after the authenticated binary read instead of trusting the query.
+    let status: number | undefined;
+    try {
+      const response = await this.signatureTransport(this.signatureEndpoint("/envelope/item/" + encodeURIComponent(input.itemId) + "/download?version=" + input.version),
+        { method: "GET", credentials: "omit", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(signatureTransportTimeoutMs), headers: { Authorization: this.token } });
+      status = response.status;
+      if (!response.ok || response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/pdf") { await response.body?.cancel().catch(() => undefined); throw new SignatureProviderError("NONE", status); }
+      const bytes = await readBoundedResponseBytes(response, signatureMaximumPdfBytes);
+      if (bytes.length < 8 || Buffer.from(bytes.subarray(0, 5)).toString("ascii") !== "%PDF-") throw new SignatureProviderError("NONE", status);
+      const observation = await this.readSignatureRequest(lookup); if (!eligible(observation)) throw new SignatureProviderError("NONE", status);
+      return { requestId: input.requestId, itemId: input.itemId, version: input.version, bytes, sha256: createHash("sha256").update(bytes).digest("hex"), observation };
+    } catch { throw new SignatureProviderError("NONE", status); }
   }
 
   async createRequest(input: {
