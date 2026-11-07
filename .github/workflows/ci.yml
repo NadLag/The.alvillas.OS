@@ -131,6 +131,8 @@ jobs:
         run: |
           echo "CREATE DATABASE alvillas_os_shadow;" | npx prisma db execute --stdin --url "$POSTGRES_ADMIN_URL"
       - run: npm run check:schema-drift
+      - name: Prepare isolated integration database
+        run: npx prisma migrate deploy
       - run: npm run test:integration -- --reporter=default --reporter=json --outputFile=ci-evidence/postgres.json
       - name: Record verification outcome
         if: always()
