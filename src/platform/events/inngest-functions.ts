@@ -29,6 +29,8 @@ import {externalPaymentRefundRequested,executeExternalPaymentRefundReference,fai
 import {documentGenerationRequested} from "@/modules/documents/domain/document-generation";
 import {signaturePreparationRequested} from "@/modules/documents/domain/document-signature-preparation";
 import {executeSignaturePreparationReference} from "@/modules/documents/application/document-signature-preparation-worker";
+import {signatureDistributionRequested} from "@/modules/documents/domain/document-signature-distribution";
+import {executeSignatureDistributionReference} from "@/modules/documents/application/document-signature-distribution-worker";
 import {executeDocumentGenerationReference,failDocumentGenerationReference} from "@/modules/documents/application/document-generation-worker";
 
 export { outboxDispatchEvent };
@@ -150,4 +152,6 @@ export const failDocumentGenerations=inngest.createFunction({id:"native-document
   async({event,step})=>{const failure=failedDocumentExecution.safeParse(event.data);if(!failure.success)throw new NonRetriableError("document_generation_failure_reference_denied");return step.run("retain-original-generation-failure",()=>failDocumentGenerationReference(failure.data.event.data));});
 export const prepareSignatures=inngest.createFunction({id:"native-signature-preparation",name:"ALVILLAS OS private signature preparation",triggers:[{event:signaturePreparationRequested}],concurrency:{limit:1},retries:3},
   async({event,step})=>step.run("prepare-original-private-signature-once",()=>executeSignaturePreparationReference(event.data)));
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures];
+export const distributeSignatures=inngest.createFunction({id:"native-signature-distribution",name:"ALVILLAS OS explicit signature distribution",triggers:[{event:signatureDistributionRequested}],concurrency:{limit:1},retries:3},
+  async({event,step})=>step.run("distribute-original-private-signature-once",()=>executeSignatureDistributionReference(event.data)));
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures];

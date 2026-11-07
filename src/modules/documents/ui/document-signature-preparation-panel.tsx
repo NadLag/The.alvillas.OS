@@ -13,7 +13,7 @@ type Layout = { recipientId: string; role: z.infer<typeof signatureRecipientRole
 type Review = { draft: z.infer<typeof signaturePreparationDraftSchema>; value: z.infer<typeof signaturePreparationReviewSchema>; reason: string };
 const geometry = ["page", "positionX", "positionY", "width", "height"] as const;
 
-export function DocumentSignaturePreparationPanel({ scope, signatureId, disabled }: { scope: string; signatureId: string | null; disabled: boolean }) {
+export function DocumentSignaturePreparationPanel({ scope, signatureId, disabled, onPrepared, onForbidden }: { scope: string; signatureId: string | null; disabled: boolean; onPrepared: (id: string) => void; onForbidden: () => void }) {
   const t = useTranslations("SignaturePreparation"), a = useTranslations("DocumentArchive"), key = "alvillas:document-signature-preparation:" + scope;
   const [target, setTarget] = useState<Target | null>(null), [layouts, setLayouts] = useState<Layout[]>([]), [reason, setReason] = useState(""), [review, setReview] = useState<Review | null>(null),
     [receipt, setReceipt] = useState<z.infer<typeof signaturePreparationReceiptSchema> | null>(null), [pending, setPending] = useState(false), [unrecorded, setUnrecorded] = useState(false),
@@ -33,7 +33,7 @@ export function DocumentSignaturePreparationPanel({ scope, signatureId, disabled
     const controller = new AbortController(); requests.current.add(controller); running.current = true; setBusy(true); setState("loading");
     try { await work(controller.signal); }
     catch (error) { if (live.current && !controller.signal.aborted) { const code = error instanceof DocumentBrowserError ? error.state : error instanceof z.ZodError ? "validation" : nonce.current ? "uncertain" : "unavailable"; setState(code);
-      if (code === "forbidden") { setTarget(null); setLayouts([]); setReason(""); setReview(null); setReceipt(null); original.current = null; setCanRetry(false); }
+      if (code === "forbidden") { setTarget(null); setLayouts([]); setReason(""); setReview(null); setReceipt(null); original.current = null; setCanRetry(false); onForbidden(); }
     } } finally { requests.current.delete(controller); if (live.current && !controller.signal.aborted) { running.current = false; setBusy(false); } }
   };
   const receive = (value: z.infer<typeof signaturePreparationReceiptSchema>) => {
@@ -41,6 +41,7 @@ export function DocumentSignaturePreparationPanel({ scope, signatureId, disabled
     setReceipt(value); setTarget(null); setLayouts([]); setReason(""); setReview(null); setUnrecorded(false); original.current = null; setCanRetry(false);
     if (value.state === "PREPARED" || value.state === "SUPERSEDED") { clearDocumentNonce(key, value.idempotencyKey); nonce.current = null; setPending(false); } else setPending(true);
     setState(value.state === "PREPARED" ? "saved" : value.state === "SOURCE_CHANGED" ? "conflict" : value.state === "UNCERTAIN" ? "uncertain" : "ready");
+    if (value.state === "PREPARED") onPrepared(value.id);
   };
   const load = () => { if (!signatureId) return; void perform(async signal => { const value = signaturePreparationTargetSchema.parse(await ask("target", { signatureId }, signal)); if (value.signatureId !== signatureId) throw new DocumentBrowserError("unavailable"); setTarget(value); setLayouts(value.recipients.map(recipient => ({ recipientId: recipient.id, role: "SIGNER", signingOrder: "", fields: [] }))); setReceipt(null); setReview(null); setState("ready"); }); };
   const update = (recipientId: string, change: (layout: Layout) => Layout) => { setLayouts(previous => previous.map(layout => layout.recipientId === recipientId ? change(layout) : layout)); setReview(null); };
@@ -51,7 +52,7 @@ export function DocumentSignaturePreparationPanel({ scope, signatureId, disabled
   const save = () => { if (!review) return; void perform(async signal => { nonce.current ??= crypto.randomUUID(); writeDocumentNonce(key, nonce.current); setPending(true);
     const command = signaturePreparationCommandSchema.parse({ ...review.draft, idempotencyKey: nonce.current, reviewFingerprint: review.value.reviewFingerprint, reason: review.reason }); original.current = command; setCanRetry(true); receive(signaturePreparationReceiptSchema.parse(await ask("admit", command, signal)));
   }); };
-  if (!signatureId && !pending) return null;
+  if (!signatureId && !pending && !receipt) return null;
   const locked = disabled || busy || pending;
   return <section className="resource-form" data-testid="signature-preparation"><h3>{t("title")}</h3><p>{t("guidance")}</p><p role="status" data-testid="signature-preparation-status">{a(busy ? "sending" : state)}</p>
     {state !== "forbidden" && state !== "offline" ? <>

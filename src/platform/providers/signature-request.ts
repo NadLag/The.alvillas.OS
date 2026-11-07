@@ -39,3 +39,10 @@ export function assertSignatureRequestObservation(raw: SignatureRequestInput, ac
   }
   if (actual.fields.some(field => !matched.has(field.recipientId))) fail();
 }
+
+/** An actual provider distribution still retains the original unsigned PDF contract. */
+export function assertDistributedSignatureRequestObservation(raw: SignatureRequestInput, actual: SignatureRequestObservation,
+  scope: { requestId: string; teamId: number; originalPdf: Uint8Array }) {
+  assertSignatureRequestObservation(raw, actual, { ...scope, distributionMethod: "EMAIL" });
+  if (!["PENDING", "COMPLETED"].includes(actual.status) || !actual.recipients.some(recipient => recipient.role === "SIGNER" && recipient.sendStatus === "SENT")) throw new SignatureProviderError("NONE");
+}

@@ -97,3 +97,4 @@ prisma/migrations/20261106050000_document_upload_parts/migration.sql text eol=lf
 prisma/migrations/20261106070000_template_definition_payload/migration.sql text eol=lf
 prisma/migrations/20261106163000_signature_provider_preparation/migration.sql text eol=lf
 prisma/migrations/20261106174500_signature_provider_explicit_tenant_policies/migration.sql text eol=lf
+prisma/migrations/20261106180000_native_signature_distribution/migration.sql text eol=lf

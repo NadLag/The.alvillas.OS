@@ -23,7 +23,7 @@ import { openDocumentGenerationInput } from "@/modules/documents/infrastructure/
 import { provisionIntegrationRole } from "./support/database-role";
 import * as auditWriter from "@/platform/audit/audit-writer";
 import { publishDocumentGeneration } from "@/modules/documents/application/document-generation-publication";
-import { downloadDocumentVersion } from "@/modules/documents/application/document-archive";
+import { downloadDocumentVersion, readDocumentHistory } from "@/modules/documents/application/document-archive";
 import { DocumentPdfRenderer } from "@/modules/documents/infrastructure/document-pdf-renderer";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { executeDocumentGenerationReference, failDocumentGenerationReference } from "@/modules/documents/application/document-generation-worker";
@@ -38,6 +38,10 @@ import { readSignaturePreparationTarget, reviewSignaturePreparation, admitSignat
 import { executeSignaturePreparationReference } from "@/modules/documents/application/document-signature-preparation-worker";
 import { SignaturePreparationRepository } from "@/modules/documents/infrastructure/signature-preparation-repository";
 import { openSignatureProviderEvidence } from "@/modules/documents/infrastructure/signature-provider-payload";
+import { reviewSignatureDistribution, admitSignatureDistribution, recoverSignatureDistribution, signatureDistributionOutboxKey, originalSignatureDistribution } from "@/modules/documents/application/document-signature-distribution";
+import { executeSignatureDistributionReference } from "@/modules/documents/application/document-signature-distribution-worker";
+import { readNativeSignatureProviderEvidence } from "@/modules/documents/application/document-signature-provider-evidence";
+import { reconcileSignatureDistribution } from "@/modules/documents/application/document-signature-reconciliation";
 
 let admin: PrismaClient, db: PrismaClient, server: Server, base: string, puts = 0;
 const signatureServers: Array<Awaited<ReturnType<typeof ownedSignatureProvider>>> = [];
@@ -125,7 +129,7 @@ async function revokeSignaturePermission(f: Awaited<ReturnType<typeof signatureF
 async function preparationFixture(locale: "en" | "fr" = "fr", shared?: Awaited<ReturnType<typeof ownedSignatureProvider>>) {
   const f = await signatureFixture(locale), http = shared ?? await ownedSignatureProvider(); if (!shared) signatureServers.push(http);
   await withTenant(db, f.organizationId, tx => new ConfigRuleRepository(tx, f.organizationId).createVersion({ key: "documents.signatures", scopeType: "organization", effectiveFrom: new Date("2020-01-01"), reason: "Explicit owned technical provider contract; no legal acceptance claim",
-    value: { source: "NATIVE_DOCUMENT_SIGNATURES", provider: "DOCUMENSO", enabled: true, account: { origin: http.origin, teamId: 17, scopeEnvelopeId: http.scopeEnvelopeId, scopeReference: http.scopeReference },
+    value: { source: "NATIVE_DOCUMENT_SIGNATURES", provider: "DOCUMENSO", enabled: true, account: { origin: http.origin, teamId: http.teamId, scopeEnvelopeId: http.scopeEnvelopeId, scopeReference: http.scopeReference },
       legal: { signatureLevel: "owned technical fixture only", ownerDecisionReference: "owned legal decision fixture", certificateDecisionReference: "owned certificate decision fixture" },
       signing: { order: "SEQUENTIAL", methods: { typed: true, draw: false, upload: false }, delivery: { expiration: { unit: "day", amount: 17 }, reminders: { sendAfter: { disabled: true }, repeatEvery: { disabled: true } },
         emailSettings: { recipientSigningRequest: true, recipientRemoved: false, recipientSigned: false, documentPending: false, documentCompleted: true, documentDeleted: false, ownerDocumentCompleted: true, ownerRecipientExpired: true, ownerDocumentCreated: false } } } } }));
@@ -138,6 +142,107 @@ async function admitPreparation(f: Awaited<ReturnType<typeof preparationFixture>
   const receipt = await admitSignaturePreparation(f.ctx, f.preparationCommand, f.deps), event = await withTenant(db, f.organizationId, tx => tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: { organizationId: f.organizationId, idempotencyKey: signaturePreparationOutboxKey(f.ctx.actorId, receipt.idempotencyKey) } } }));
   return { receipt, reference: { organizationId: f.organizationId, outboxEventId: event.id } };
 }
+async function distributionFixture(locale: "en" | "fr" = "fr") {
+  const f = await preparationFixture(locale), prepared = await admitPreparation(f); expect((await executeSignaturePreparationReference(prepared.reference, f.deps)).state).toBe("PREPARED");
+  await withTenant(db, f.organizationId, async tx => { const permission = await tx.permission.findFirstOrThrow({ where: { organizationId: f.organizationId, key: "signature:edit" } }); await tx.rolePermission.create({ data: { organizationId: f.organizationId, roleId: f.assignment.roleId, permissionId: permission.id } }); });
+  const ctx = { ...f.ctx, authContext: { ...await authContextForAccount(f.organizationId, f.ctx.actorId, { db }), personId: f.person.id } }, draft = { preparationId: prepared.receipt.id }, review = await reviewSignatureDistribution(ctx, draft, f.deps), distributionCommand = { ...draft, delivery: "EMAIL" as const, idempotencyKey: randomUUID(), reviewFingerprint: review.reviewFingerprint, reason: "Explicitly send the reviewed original private agreement" };
+  return { ...f, ctx, prepared, distributionCommand };
+}
+async function admitDistribution(f: Awaited<ReturnType<typeof distributionFixture>>) {
+  const receipt = await admitSignatureDistribution(f.ctx, f.distributionCommand, f.deps), event = await withTenant(db, f.organizationId, tx => tx.outboxEvent.findUniqueOrThrow({ where: { organizationId_idempotencyKey: { organizationId: f.organizationId, idempotencyKey: signatureDistributionOutboxKey(f.ctx.actorId, receipt.idempotencyKey) } } }));
+  return { receipt, reference: { organizationId: f.organizationId, outboxEventId: event.id } };
+}
+describe("explicit durable native signature distribution", () => {
+  it("sends an older prepared original after a later amendment without changing business-effective ordering or financial history", async () => {
+    const f = await distributionFixture(), { receipt, reference } = await admitDistribution(f), originalMoney = await money(f.organizationId), ids = await amendedTemplates(f), command = await amendmentCommand(f, f.complete, ids), amendment = await admitDocumentGeneration(f.ctx, command, f.deps), completed = await publishDocumentGeneration(f.ctx, { instanceId: amendment.id }, f.deps);
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("SENT"); const row = await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(f.signature.id)); expect(row!.documentVersionId).toBe(f.complete.versionId); expect(row!.instanceId).toBe(f.intent.id); expect(row!.events.find(event => event.state === "SENT")!.signedVersionId).toBeNull();
+    const history = await readDocumentHistory(f.ctx, { documentId: f.complete.documentId }, f.deps); expect(history.versions[0].id).toBe(completed.versionId); expect(history.versions.some(version => version.id === f.complete.versionId)).toBe(true);
+    expect((await recoverSignatureDistribution(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).state).toBe("SENT"); expect(await money(f.organizationId)).toEqual(originalMoney);
+  });
+  it("rejects fabricated sent or signed history without its exact verified evidence and leaves confirmed history append-only", async () => {
+    const f = await distributionFixture(), { reference } = await admitDistribution(f), original = await money(f.organizationId), base = { organizationId: f.organizationId, signatureId: f.signature.id, providerIdentityHash: "a".repeat(64), providerRequestId: "unverified-original", providerEventId: "unverified-event", evidenceHash: "b".repeat(64), evidenceCipher: new Uint8Array([1, 2, 3]), occurredAt: new Date() };
+    await expect(withTenant(db, f.organizationId, tx => tx.signatureEvent.create({ data: { ...base, state: "SENT" } }))).rejects.toThrow("native signature transition requires");
+    await expect(withTenant(db, f.organizationId, tx => tx.signatureEvent.create({ data: { ...base, state: "SIGNED", signedVersionId: f.complete.versionId } }))).rejects.toThrow("native signature transition requires");
+    await executeSignatureDistributionReference(reference, f.deps); const sent = await withTenant(db, f.organizationId, tx => tx.signatureEvent.findFirstOrThrow({ where: { signatureId: f.signature.id, state: "SENT" } }));
+    await expect(withTenant(db, f.organizationId, tx => tx.signatureEvent.update({ where: { id: sent.id }, data: { providerRequestId: "rewritten-provider-identity" } }))).rejects.toThrow("append-only"); expect(await money(f.organizationId)).toEqual(original);
+  });
+  it("does not let read-only reconciliation issue a first distribution or create an attempt", async () => {
+    const f = await distributionFixture(), { receipt } = await admitDistribution(f), before = f.http.calls.length;
+    expect((await reconcileSignatureDistribution(f.ctx, { distributionId: receipt.id }, f.deps)).state).toBe("ADMITTED"); expect(f.http.calls).toHaveLength(before);
+    expect(await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).distributionAttempt(f.signature.id))).toBeNull();
+  });
+  it("reconciles through an independently authorized operator after the original sender is deactivated without another send", async () => {
+    const f = await distributionFixture(), { receipt, reference } = await admitDistribution(f); f.http.state.fault = "lost-send"; f.http.state.afterDistribute = async () => { await withTenant(db, f.organizationId, tx => tx.userAccount.update({ where: { id: f.ctx.actorId }, data: { status: "DEACTIVATED", deactivatedAt: new Date(), sessionVersion: { increment: 1 } } })); };
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("UNCERTAIN"); f.http.state.fault = "none";
+    const other = await withTenant(db, f.organizationId, async tx => { const person = await tx.person.create({ data: { organizationId: f.organizationId, displayName: "Independent authorized reconciliation operator" } }), account = await tx.userAccount.create({ data: { organizationId: f.organizationId, personId: person.id } }); await tx.roleAssignment.create({ data: { organizationId: f.organizationId, userAccountId: account.id, personId: person.id, roleId: f.assignment.roleId, scopeType: "organization", validFrom: new Date("2020-01-01") } }); return { person, account }; }), ctx = { organizationId: f.organizationId, actorId: other.account.id, authContext: { ...await authContextForAccount(f.organizationId, other.account.id, { db }), personId: other.person.id } };
+    expect((await reconcileSignatureDistribution(ctx, { distributionId: receipt.id }, f.deps)).state).toBe("SENT"); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(1);
+    expect((await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).distribution(receipt.id)))!.requestedBy).toBe(f.ctx.actorId);
+    const audit = await withTenant(db, f.organizationId, tx => tx.auditLog.findFirstOrThrow({ where: { action: "documents.signature.distribution_reconciled" } })); expect(audit.actorId).toBe(ctx.actorId);
+    await expect(recoverSignatureDistribution(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable");
+  });
+  it("retains the independent provider fact but rolls back private reconciliation disclosure after late authority revocation", async () => {
+    const f = await distributionFixture(), { receipt, reference } = await admitDistribution(f); f.http.state.fault = "lost-send"; await executeSignatureDistributionReference(reference, f.deps); f.http.state.fault = "none";
+    const write = auditWriter.writeAuditEvent; let revoked = false; const spy = vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const result = await write(tx, event); if (!revoked && event.action === "documents.signature.distribution_reconciled") { revoked = true; await revokeSignaturePermission(f, "owner:export"); } return result; });
+    try { await expect(reconcileSignatureDistribution(f.ctx, { distributionId: receipt.id }, f.deps)).rejects.toThrow("document_unavailable"); } finally { spy.mockRestore(); }
+    expect(revoked).toBe(true); expect(await withTenant(db, f.organizationId, tx => tx.signatureEvent.count({ where: { signatureId: f.signature.id, state: "SENT" } }))).toBe(1);
+    expect(await withTenant(db, f.organizationId, tx => tx.auditLog.count({ where: { action: "documents.signature.distribution_reconciled" } }))).toBe(0); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(1);
+  });
+  it.each(["en", "fr"] as const)("sends the exact prepared %s original once and appends audited SENT without inventing a signed archive", async locale => {
+    const f = await distributionFixture(locale), originalMoney = await money(f.organizationId), originalLineage = await lineage(f.organizationId, f.complete.documentId), original = await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(f.signature.id)), { receipt, reference } = await admitDistribution(f);
+    expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(0); expect(receipt.state).toBe("ADMITTED");
+    expect(await executeSignatureDistributionReference(reference, f.deps)).toEqual({ intentId: receipt.id, state: "SENT" }); expect((await recoverSignatureDistribution(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).state).toBe("SENT");
+    const row = await withTenant(db, f.organizationId, tx => new DocumentRepository(tx, f.organizationId).signature(f.signature.id)); expect(row!.events).toHaveLength(2); expect(row!.events.find(event => event.state === "DRAFT")).toEqual(original!.events[0]); expect(row!.events.find(event => event.state === "SENT")).toMatchObject({ signedVersionId: null }); expect(row!.recipients).toEqual(original!.recipients);
+    const attempt = await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).distributionAttempt(f.signature.id)), evidence = attempt!.evidence.find(item => item.kind === "SENT")!, intent = await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).distribution(receipt.id)), payload = readNativeSignatureProviderEvidence(intent!, evidence, originalSignatureDistribution(intent!).snapshot, env);
+    expect(payload).toMatchObject({ kind: "SENT", distributionProof: "POST_ACKNOWLEDGED", observation: { status: "PENDING", distributionMethod: "EMAIL", locale } }); expect(payload.distributionReceipt).not.toBeNull(); expect(row!.events.find(event => event.state === "SENT")!.providerEvidenceId).toBe(evidence.id);
+    expect(await executeSignatureDistributionReference(reference, f.deps)).toEqual({ intentId: receipt.id, state: "SENT" }); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(1); expect(f.http.calls.filter(call => call.path.endsWith("/create"))).toHaveLength(1);
+    const audit = await withTenant(db, f.organizationId, tx => tx.auditLog.findMany({ where: { action: { startsWith: "documents.signature" } } })); expect(JSON.stringify(audit)).not.toContain(f.http.token); expect(JSON.stringify(audit)).not.toContain(f.parties.owner.email!); expect(JSON.stringify(audit)).not.toContain(f.distributionCommand.reason);
+    expect(await money(f.organizationId)).toEqual(originalMoney); expect(await lineage(f.organizationId, f.complete.documentId)).toEqual(originalLineage);
+  });
+  it("reconciles a lost send acknowledgement from actual authenticated readback without fabricating a POST receipt or sending again", async () => {
+    const f = await distributionFixture(), { receipt, reference } = await admitDistribution(f); f.http.state.fault = "lost-send";
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("UNCERTAIN"); f.http.state.fault = "none";
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("SENT"); const attempt = await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).distributionAttempt(f.signature.id)), evidence = attempt!.evidence.find(item => item.kind === "SENT")!, intent = await withTenant(db, f.organizationId, tx => new SignaturePreparationRepository(tx, f.organizationId).distribution(receipt.id));
+    expect(readNativeSignatureProviderEvidence(intent!, evidence, originalSignatureDistribution(intent!).snapshot, env)).toMatchObject({ distributionProof: "READBACK_RECONCILED", distributionReceipt: null }); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(1);
+  });
+  it("keeps an unconfirmed DRAFT uncertain instead of treating an HTTP failure or unsent read as proof of no effect", async () => {
+    const f = await distributionFixture(), { reference } = await admitDistribution(f); f.http.state.fault = "send-no-effect";
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("UNCERTAIN"); f.http.state.fault = "none";
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("UNCERTAIN"); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(1); expect(await withTenant(db, f.organizationId, tx => tx.signatureEvent.count({ where: { signatureId: f.signature.id, state: { not: "DRAFT" } } }))).toBe(0);
+  });
+  it("retains the actual send receipt before failed dependent reads and completes through GET reconciliation", async () => {
+    const f = await distributionFixture(), { reference } = await admitDistribution(f); f.http.state.fault = "fail-sent-read";
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("UNCERTAIN"); f.http.state.fault = "none";
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("SENT"); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(1);
+  });
+  it("serializes competing admissions and deliveries into one distribution effect and one native SENT history event", async () => {
+    const f = await distributionFixture(), receipts = await Promise.all(Array.from({ length: 3 }, () => admitSignatureDistribution(f.ctx, f.distributionCommand, f.deps))); expect(new Set(receipts.map(receipt => receipt.id)).size).toBe(1);
+    const { reference } = await admitDistribution(f); await Promise.all(Array.from({ length: 3 }, () => executeSignatureDistributionReference(reference, f.deps)));
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("SENT"); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(1); expect(await withTenant(db, f.organizationId, tx => tx.signatureEvent.count({ where: { signatureId: f.signature.id, state: "SENT" } }))).toBe(1);
+  });
+  it.each(["signature:edit", "owner:export", "property_finance:export"])("denies revoked independent %s authority before sending", async key => {
+    const f = await distributionFixture(), { receipt, reference } = await admitDistribution(f); await revokeSignaturePermission(f, key);
+    await expect(executeSignatureDistributionReference(reference, f.deps)).rejects.toThrow("document_unavailable"); await expect(recoverSignatureDistribution(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable"); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(0);
+  });
+  it("retains independently verified provider facts after sender offboarding during the effect while denying private recovery", async () => {
+    const f = await distributionFixture(), { receipt, reference } = await admitDistribution(f); f.http.state.afterDistribute = async () => { await withTenant(db, f.organizationId, tx => tx.userAccount.update({ where: { id: f.ctx.actorId }, data: { status: "DEACTIVATED", deactivatedAt: new Date(), sessionVersion: { increment: 1 } } })); };
+    expect((await executeSignatureDistributionReference(reference, f.deps)).state).toBe("SENT"); await expect(recoverSignatureDistribution(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable"); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(1);
+    expect(await withTenant(db, f.organizationId, tx => tx.signatureEvent.count({ where: { signatureId: f.signature.id, state: "SENT" } }))).toBe(1);
+  });
+  it.each(["documents.signature.distribution_reviewed", "documents.signature.distribution_requested", "documents.signature.preparation_started"])("rolls back after late edit revocation at %s without issuing another external effect", async action => {
+    const f = await distributionFixture(), admitted = action === "documents.signature.preparation_started" ? await admitDistribution(f) : null, write = auditWriter.writeAuditEvent; let revoked = false;
+    const spy = vi.spyOn(auditWriter, "writeAuditEvent").mockImplementation(async (tx, event) => { const result = await write(tx, event); if (!revoked && event.action === action) { revoked = true; await revokeSignaturePermission(f, "signature:edit"); } return result; });
+    try { await expect(action === "documents.signature.distribution_reviewed" ? reviewSignatureDistribution(f.ctx, { preparationId: f.prepared.receipt.id }, f.deps) : admitted ? executeSignatureDistributionReference(admitted.reference, f.deps) : admitSignatureDistribution(f.ctx, f.distributionCommand, f.deps)).rejects.toThrow("document_unavailable"); } finally { spy.mockRestore(); }
+    expect(revoked).toBe(true); expect(await withTenant(db, f.organizationId, tx => tx.signatureProviderAttempt.count({ where: { phase: "SEND" } }))).toBe(0); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(0);
+  });
+  it("keeps protocol nonces separate and denies a withheld edit capability, foreign actor and cross-tenant outbox reference", async () => {
+    const f = await distributionFixture(), restricted = { ...f.ctx, authContext: { ...f.ctx.authContext, permissions: new Set([...f.ctx.authContext.permissions].filter(key => key !== "signature:edit")) } };
+    await expect(admitSignatureDistribution(restricted, f.distributionCommand, f.deps)).rejects.toThrow("document_unavailable"); await expect(admitSignatureDistribution(f.ctx, { ...f.distributionCommand, idempotencyKey: f.prepared.receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_source_changed");
+    const { receipt, reference } = await admitDistribution(f), foreign = await distributionFixture(); await expect(executeSignatureDistributionReference({ ...reference, organizationId: foreign.organizationId }, f.deps)).rejects.toThrow("document_unavailable");
+    const other = await withTenant(db, f.organizationId, async tx => { const person = await tx.person.create({ data: { organizationId: f.organizationId, displayName: "Another independently authorized signer operator" } }), account = await tx.userAccount.create({ data: { organizationId: f.organizationId, personId: person.id } }); await tx.roleAssignment.create({ data: { organizationId: f.organizationId, userAccountId: account.id, personId: person.id, roleId: f.assignment.roleId, scopeType: "organization", validFrom: new Date("2020-01-01") } }); return { person, account }; }), otherActor = { organizationId: f.organizationId, actorId: other.account.id, authContext: { ...await authContextForAccount(f.organizationId, other.account.id, { db }), personId: other.person.id } };
+    await expect(recoverSignatureDistribution(otherActor, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable");
+    await expect(recoverSignaturePreparation(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable"); await expect(recoverNativeSignature(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable"); await expect(recoverDocumentGeneration(f.ctx, { idempotencyKey: receipt.idempotencyKey }, f.deps)).rejects.toThrow("document_unavailable"); expect(f.http.calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(0);
+  });
+});
 describe("durable native signature provider preparation", () => {
   it.each(["documents.signature.preparation_target_read", "documents.signature.preparation_reviewed", "documents.signature.preparation_requested", "documents.signature.preparation_started"])("rolls back a private result or external attempt after late authority revocation at %s", async action => {
     const f = await preparationFixture(), admitted = action === "documents.signature.preparation_started" ? await admitPreparation(f) : null, auditBefore = await withTenant(db, f.organizationId, tx => tx.auditLog.count({ where: { action } })), write = auditWriter.writeAuditEvent; let revoked = false;

@@ -5,7 +5,7 @@ import { Document, Page, Text, renderToBuffer } from "@react-pdf/renderer";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumensoSignatureProvider } from "@/platform/providers/real";
 import { FakeSignatureProvider } from "@/platform/providers/fakes";
-import { assertSignatureRequestObservation, signatureMaximumEvidenceBytes, signatureMaximumPdfBytes, type SignatureRequestInput } from "@/platform/providers/signature-request";
+import { assertDistributedSignatureRequestObservation, assertSignatureRequestObservation, signatureMaximumEvidenceBytes, signatureMaximumPdfBytes, type SignatureRequestInput } from "@/platform/providers/signature-request";
 
 let server: Server, origin: string, pdf: Buffer, completedPdf: Buffer, calls: Array<{ method: string; path: string }>, completed = false, stored: { payload: Record<string, unknown>; bytes: Buffer; fileName: string; sent: boolean } | null,
   fault: "none" | "lost-create" | "lost-send" | "wrong-reference" | "foreign-parent" | "public" | "oversized" | "chunked-oversized" | "html" | "pdf-html" | "pdf-oversized" | "pdf-chunked-oversized" | "pdf-truncated" | "pdf-redirect" | "pdf-invalid" | "completion-regressed";
@@ -60,6 +60,14 @@ const provider = (url = origin, transport: typeof fetch = fetch, nodeEnv: "test"
   () => Promise.reject(Error("Native envelope requests must not use the legacy recipient endpoint")), transport);
 
 describe("actual bounded Documenso envelope protocol", () => {
+  it("confirms actual email distribution against the original PDF and rejects draft, rejected, cancelled or unsent readback", async () => {
+    const p = provider(), input = fixture(); await p.prepareSignatureRequest(input); await p.distributeSignatureRequest({ requestId });
+    const download = await p.downloadSignatureRequest({ requestId, reference: input.reference, itemId: "item_native_original", version: "original" }), scope = { requestId, teamId: 17, originalPdf: download.bytes };
+    expect(() => assertDistributedSignatureRequestObservation(input, download.observation, scope)).not.toThrow(); expect(download.observation.status).toBe("PENDING"); expect(download.observation.recipients[0].signingStatus).toBe("NOT_SIGNED");
+    for (const status of ["DRAFT", "REJECTED", "CANCELLED"] as const) expect(() => assertDistributedSignatureRequestObservation(input, { ...download.observation, status }, scope)).toThrow("signature_provider_unavailable");
+    expect(() => assertDistributedSignatureRequestObservation(input, { ...download.observation, recipients: download.observation.recipients.map(recipient => ({ ...recipient, sendStatus: "NOT_SENT" })) }, scope)).toThrow("signature_provider_unavailable");
+    expect(calls.filter(call => call.path.endsWith("/distribute"))).toHaveLength(1);
+  });
   it("captures configured expiry and delivery controls explicitly and rejects changed or absent readback", async () => {
     const p = provider(), input = fixture(); input.delivery = { expiration: { unit: "day", amount: 17 }, reminders: { sendAfter: { disabled: true }, repeatEvery: { disabled: true } },
       emailSettings: { recipientSigningRequest: true, recipientRemoved: false, recipientSigned: false, documentPending: false, documentCompleted: true, documentDeleted: false, ownerDocumentCompleted: true, ownerRecipientExpired: true, ownerDocumentCreated: false } };

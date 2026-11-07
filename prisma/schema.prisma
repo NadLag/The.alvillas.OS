@@ -4979,6 +4979,7 @@ model SignatureProviderEvidence {
   observedAt DateTime @default(now()) @map("observed_at") @db.Timestamptz(6)
   organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
   attempt SignatureProviderAttempt @relation(fields:[organizationId,attemptId,signatureId,phase],references:[organizationId,id,signatureId,phase],onDelete:Restrict,onUpdate:NoAction)
+  signatureEvent SignatureEvent?
   @@unique([organizationId,id],map:"signature_provider_evidence_org_id_unique")
   @@unique([organizationId,attemptId,observationHash],map:"signature_provider_evidence_observation_unique")
   @@index([organizationId,signatureId,observedAt,id],map:"signature_provider_evidence_history_idx")
@@ -5016,6 +5017,7 @@ model SignatureEvent {
   providerIdentityHash String? @map("provider_identity_hash") @db.Char(64)
   providerRequestId String? @map("provider_request_id")
   providerEventId String? @map("provider_event_id")
+  providerEvidenceId String? @map("provider_evidence_id") @db.Uuid
   evidenceHash String @map("evidence_hash") @db.Char(64)
   evidenceCipher Bytes? @map("evidence_cipher")
   signedVersionId String? @map("signed_version_id") @db.Uuid
@@ -5024,9 +5026,11 @@ model SignatureEvent {
   organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
   signature Signature @relation(fields:[organizationId,signatureId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   signedVersion DocumentVersion? @relation(fields:[organizationId,signedVersionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  providerEvidence SignatureProviderEvidence? @relation(fields:[organizationId,providerEvidenceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   @@unique([organizationId,id],map:"signature_event_org_id_unique")
   @@unique([providerIdentityHash,providerEventId],map:"signature_event_provider_identity_unique")
   @@unique([organizationId,signatureId,evidenceHash],map:"signature_event_evidence_unique")
+  @@unique([organizationId,providerEvidenceId],map:"signature_event_provider_evidence_unique")
   @@index([organizationId,signatureId,occurredAt,id],map:"signature_event_history_idx")
   @@map("signature_event")
 }
