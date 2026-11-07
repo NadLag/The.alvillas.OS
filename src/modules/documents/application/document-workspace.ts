@@ -16,7 +16,7 @@ import { documentSourceReferenceSchema, documentListInput, DocumentAccessError, 
 import { documentItemSchema, documentSourceChoicesSchema, documentSourceWorkspaceSchema } from "../domain/document-read-model";
 import { documentSourceContext, documentAuthorityChecks, documentArchiveContext, type DocumentActorContext } from "./document-archive";
 
-type Dependencies = { db: TenantTransactionRunner; requestId?: string };
+type Dependencies = { db: TenantTransactionRunner; requestId?: string; env?: NodeJS.ProcessEnv };
 const candidatesInput = z.object({ kind: z.enum(documentSourceKinds), query: z.string().trim().max(120).default(""), cursor: z.string().max(6000).optional() }).strict();
 const workspaceInput = documentListInput.safeExtend({ kind: z.enum(["FILE","TEMPLATE"]).default("FILE") });
 const cursorSchema = z.object({ version: z.literal(1), actorId: z.uuid(), organizationId: z.uuid(), filter: z.string(), before: z.uuid() }).strict();
@@ -70,20 +70,20 @@ export async function readDocumentSourceWorkspace(actor: DocumentActorContext, r
     for(const root of rows.slice(0,50)){
       const type=base.policy.value.types.find(type=>type.key===root.typeKey);let privacy=retainDocumentPrivacy(root.privacy,type?.privacy??[],input.source.kind);const required=documentAuthorityChecks(base.native,privacy,"view",root);
       if(![ctx.authContext,stored].every(authority=>allowed(authority,required,base.now)))continue;
-      let instanceFingerprint: string | null = null;
-      if(root.kind==="INSTANCE"){
-        try{const instance=await documentArchiveContext(ctx,tx,input.source,"view",root);instanceFingerprint=instance.fingerprint;privacy=instance.privacy;checks.push(...instance.checks);}
+      let instanceFingerprint: string | null = null, signedArtifact: z.infer<typeof documentItemSchema>["signedArtifact"];
+      if(root.kind==="INSTANCE"||root.kind==="FILE"){
+        try{const instance=await documentArchiveContext(ctx,tx,input.source,"view",root,undefined,deps.env);instanceFingerprint=instance.fingerprint;privacy=instance.privacy;signedArtifact=instance.signedArtifact;checks.push(...instance.checks);}
         catch(error){if(error instanceof DocumentAccessError)continue;throw error;}
       }
       checks.push(...required);captured.push({id:root.id,revision:root.revision.toString(),privacy:root.privacy,instanceFingerprint});
-      const data={id:root.id,source:input.source,typeKey:root.typeKey,kind:root.kind,locale:root.locale,title:root.title,privacy,revision:root.revision.toString(),createdAt:root.createdAt.toISOString(),archivedAt:root.archivedAt?.toISOString()??null,templateKey:root.template?.key??null};
+      const data={id:root.id,source:input.source,typeKey:root.typeKey,kind:root.kind,locale:root.locale,title:root.title,privacy,revision:root.revision.toString(),createdAt:root.createdAt.toISOString(),archivedAt:root.archivedAt?.toISOString()??null,templateKey:root.template?.key??null,...signedArtifact?{signedArtifact}:{}};
       items.push(documentItemSchema.parse(present({...ctx.authContext,visibleDataClasses:new Set(privacy)},"view",{...base.native.resource,type:"document",id:root.id,documentId:root.id,assignedUserAccountId:root.createdBy,data},{},base.now)));
     }
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"documents.source_read",resourceType:"document",resourceId:null,after:{count:items.length},requestId:deps.requestId??randomUUID(),occurredAt:base.now});
     const final=await documentSourceContext(ctx,tx,input.source,"view");if(final.native.fingerprint!==base.native.fingerprint||commandFingerprint(final.policy)!==commandFingerprint(base.policy))throw new DocumentConflictError();
     const protections=await final.repository.rootProtections(captured.map(root=>root.id));
     for(const capturedRoot of captured){const root=protections.get(capturedRoot.id);if(!root||root.revision.toString()!==capturedRoot.revision||commandFingerprint(root.privacy)!==commandFingerprint(capturedRoot.privacy))throw new DocumentConflictError();}
-    for(const capturedRoot of captured.filter(root=>root.instanceFingerprint!==null)){const root=await final.repository.document(capturedRoot.id);if(!root||(await documentArchiveContext(ctx,tx,input.source,"view",root)).fingerprint!==capturedRoot.instanceFingerprint)throw new DocumentConflictError();}
+    for(const capturedRoot of captured.filter(root=>root.instanceFingerprint!==null)){const root=await final.repository.document(capturedRoot.id);if(!root||(await documentArchiveContext(ctx,tx,input.source,"view",root,undefined,deps.env)).fingerprint!==capturedRoot.instanceFingerprint)throw new DocumentConflictError();}
     await recheckAccountAuthorization(ctx,tx,await base.repository.clock(),checks,new DocumentAccessError());
     if(!(await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId)).permissions.has("document:view"))throw new DocumentAccessError();
     return documentSourceWorkspaceSchema.parse({source:input.source,sourceLabel:final.native.label,policyFingerprint:commandFingerprint(final.policy),items,types,next:rows.length>50?cursor(ctx,filter,rows[49].id):null});

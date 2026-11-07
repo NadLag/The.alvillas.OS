@@ -17,8 +17,8 @@ import { paymentCaptureIntent, verifiedPayPalCapture, verifiedPayPalCaptureEvide
 import { paymentRefundIntent, paymentRefundLookup, verifiedPayPalRefundResult, PaymentRefundEvidenceError } from "./payment-refund";
 import { z } from "zod";
 import { readBoundedResponseBytes } from "@/platform/http/read-exact-response";
-import { captureSignatureRequest, signatureMaximumEvidenceBytes, signatureMaximumPdfBytes, signatureTransportTimeoutMs, signatureRequestIdSchema, signatureRecipientRoleSchema, signatureProviderStatusSchema, signatureDownloadInputSchema, signatureExpirationSchema, signatureEmailSettingsSchema, signatureRequestObservationSchema,
-  SignatureProviderError, SignatureProviderConfigurationError, type SignatureRequestInput, type SignatureRequestReceipt, type SignatureRequestObservation, type SignatureRequestDownloadInput, type SignatureRequestDownload } from "./signature-request";
+import { captureSignatureRequest, signatureMaximumEvidenceBytes, signatureMaximumPdfBytes, signatureTransportTimeoutMs, signatureRequestIdSchema, signatureRecipientRoleSchema, signatureProviderStatusSchema, signatureDownloadInputSchema, signatureCertificateInputSchema, signatureRequestHasCompletedActions, signatureExpirationSchema, signatureEmailSettingsSchema, signatureRequestObservationSchema,
+  SignatureProviderError, SignatureProviderConfigurationError, type SignatureRequestInput, type SignatureRequestReceipt, type SignatureRequestObservation, type SignatureRequestDownloadInput, type SignatureRequestDownload, type SignatureCertificateDownloadInput, type SignatureCertificateDownload } from "./signature-request";
 
 export type HttpTransport = (
   url: string,
@@ -208,20 +208,30 @@ export class DocumensoSignatureProvider implements SignatureProvider {
   }
   async downloadSignatureRequest(raw: SignatureRequestDownloadInput): Promise<SignatureRequestDownload> {
     const input = signatureDownloadInputSchema.parse(raw), eligible = (observation: SignatureRequestObservation) => observation.items.length === 1 && observation.items[0].id === input.itemId &&
-      (input.version === "original" || observation.status === "COMPLETED");
+      (input.version === "original" || signatureRequestHasCompletedActions(observation));
     const lookup = { requestId: input.requestId, reference: input.reference }, before = await this.readSignatureRequest(lookup); if (!eligible(before)) throw new SignatureProviderError("NONE");
     // The provider can return its unsigned original for a premature signed download. Verify
     // completion before and after the authenticated binary read instead of trusting the query.
+    const downloaded = await this.signaturePdf("/envelope/item/" + encodeURIComponent(input.itemId) + "/download?version=" + input.version);
+    const observation = await this.readSignatureRequest(lookup); if (!eligible(observation)) throw new SignatureProviderError("NONE", 200);
+    return { requestId: input.requestId, itemId: input.itemId, version: input.version, ...downloaded, observation };
+  }
+  async downloadSignatureCertificate(raw: SignatureCertificateDownloadInput): Promise<SignatureCertificateDownload> {
+    const input = signatureCertificateInputSchema.parse(raw), before = await this.readSignatureRequest(input); if (!signatureRequestHasCompletedActions(before)) throw new SignatureProviderError("NONE");
+    const downloaded = await this.signaturePdf("/envelope/" + encodeURIComponent(input.requestId) + "/certificate/download"), observation = await this.readSignatureRequest(input);
+    if (!signatureRequestHasCompletedActions(observation)) throw new SignatureProviderError("NONE", 200);
+    return { requestId: input.requestId, ...downloaded, observation };
+  }
+  private async signaturePdf(path: string) {
     let status: number | undefined;
     try {
-      const response = await this.signatureTransport(this.signatureEndpoint("/envelope/item/" + encodeURIComponent(input.itemId) + "/download?version=" + input.version),
+      const response = await this.signatureTransport(this.signatureEndpoint(path),
         { method: "GET", credentials: "omit", cache: "no-store", redirect: "error", signal: AbortSignal.timeout(signatureTransportTimeoutMs), headers: { Authorization: this.token } });
       status = response.status;
       if (!response.ok || response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() !== "application/pdf") { await response.body?.cancel().catch(() => undefined); throw new SignatureProviderError("NONE", status); }
       const bytes = await readBoundedResponseBytes(response, signatureMaximumPdfBytes);
       if (bytes.length < 8 || Buffer.from(bytes.subarray(0, 5)).toString("ascii") !== "%PDF-") throw new SignatureProviderError("NONE", status);
-      const observation = await this.readSignatureRequest(lookup); if (!eligible(observation)) throw new SignatureProviderError("NONE", status);
-      return { requestId: input.requestId, itemId: input.itemId, version: input.version, bytes, sha256: createHash("sha256").update(bytes).digest("hex"), observation };
+      return { bytes, sha256: createHash("sha256").update(bytes).digest("hex") };
     } catch { throw new SignatureProviderError("NONE", status); }
   }
 

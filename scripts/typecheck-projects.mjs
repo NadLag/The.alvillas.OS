@@ -8,6 +8,12 @@ import process from "node:process";
 import { fileURLToPath, URL } from "node:url";
 
 const worker = fileURLToPath(new URL("./typecheck-worker.mjs", import.meta.url));
+// A technical compiler resource bound; every original root remains checked.
+export const nativeCompilerMaxRoots = 36;
+export function compilerProjectNames(nativeRootCount) {
+  if (!Number.isSafeInteger(nativeRootCount) || nativeRootCount < 0) throw RangeError("A complete native root count is required");
+  return ["application", "unit", "browser-and-tools", ...Array.from({ length: Math.max(2, Math.ceil(nativeRootCount / nativeCompilerMaxRoots)) }, (_, index) => "postgres-" + (index + 1))];
+}
 export function prepareTypecheckProjects(projectRoot = process.cwd()) {
   const root = resolve(projectRoot), requireFromRoot = createRequire(join(root, "package.json")), ts = requireFromRoot("typescript");
   const configPath = join(root, "tsconfig.json"), loaded = ts.readConfigFile(configPath, ts.sys.readFile);
@@ -29,10 +35,9 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
   }
   // Independent native test modules share the same ambient context. Bound each
   // compiler process as the catalog grows; no original input is dropped.
-  const native = groups.get("postgres").sort(), middle = Math.ceil(native.length / 2);
+  const native = groups.get("postgres").sort(), nativeNames = compilerProjectNames(native.length).filter(name => name.startsWith("postgres-")), size = Math.ceil(native.length / nativeNames.length);
   groups.delete("postgres");
-  groups.set("postgres-1", native.slice(0, middle));
-  groups.set("postgres-2", native.slice(middle));
+  for (const [index, name] of nativeNames.entries()) groups.set(name, native.slice(index * size, (index + 1) * size));
   const directory = join(root, ".tmp", "typecheck-" + randomUUID()); mkdirSync(directory, { recursive: true });
   const portable = file => relative(directory, file).replaceAll("\\", "/");
   const projects = [...groups].map(([name, files]) => {
@@ -43,7 +48,7 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
   });
   const retained = new Set(projects.flatMap(project => project.roots));
   if (parsed.fileNames.some(file => !retained.has(file)) || [...retained].some(file => !originalInputs.has(file))) throw Error("Every original TypeScript input must remain in a checked project");
-  return { root, originalRoots: parsed.fileNames, shared, projects, directory, parallelSafe: !parsed.options.incremental && !parsed.options.composite && !parsed.options.tsBuildInfoFile };
+  return { root, originalRoots: parsed.fileNames, shared, projects, nativeRootCount: native.length, directory, parallelSafe: !parsed.options.incremental && !parsed.options.composite && !parsed.options.tsBuildInfoFile };
 }
 export async function runTypecheckProjects(plan, projects = plan.projects, onResult) {
   const megabyte = 1024 * 1024, reserve = 1024 * megabyte, free = () => process.availableMemory?.() ?? freemem();
@@ -57,7 +62,7 @@ export async function runTypecheckProjects(plan, projects = plan.projects, onRes
     child.once("exit", status => finished(status ?? 1));
   });
   let failure = 0;
-  // Both native partitions keep the original heap and run serially, even after
+  // All native partitions keep the original heap and run serially, even after
   // a failure, so every partition produces diagnostic evidence.
   for (const project of projects.filter(isNative)) { const status = await run(project); failure ||= status; }
   const queue = projects.filter(project => !isNative(project)), active = new Map(), budget = Math.max(0, free() - reserve);

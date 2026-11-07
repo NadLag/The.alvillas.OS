@@ -8,7 +8,7 @@ import type { SignatureProvider } from "@/platform/providers";
 import { captureSignatureRequest, assertSignatureRequestObservation, signatureRequestObservationSchema, signatureObservationFactsSchema } from "@/platform/providers/signature-request";
 import { DocumentAccessError, DocumentConflictError } from "../domain/document-command";
 import { signatureWebhookIdentitySchema, signatureWebhookReceived } from "../domain/document-signature-webhook";
-import { SignatureWebhookRepository } from "../infrastructure/signature-webhook-repository";
+import { SignedSignatureRepository } from "../infrastructure/signed-signature-repository";
 import { openSignatureWebhook } from "../infrastructure/document-signature-webhook-payload";
 import { parseDocumensoWebhookEvidence } from "../infrastructure/documenso-webhook";
 import { readSignatureProviderScope, signatureProviderBoundary } from "../infrastructure/signature-provider-boundary";
@@ -16,12 +16,13 @@ import { retainedSignatureProviderContract } from "./document-signature-retained
 import { signatureWebhookOutboxKey } from "./document-signature-webhook";
 import { classifySignatureWebhook } from "./document-signature-webhook-observation";
 import { appendNativeSignatureProviderEvidence, readNativeSignatureProviderEvidence, type SignatureProviderObservation } from "./document-signature-provider-evidence";
+import { admitOriginalSignedArchive } from "./document-signed-archive-admission";
 
 const referenceSchema = z.object({ organizationId: z.uuid(), outboxEventId: z.uuid() }).strict(), payloadSchema = z.object({ webhookId: z.uuid() }).strict();
 type Reference = z.infer<typeof referenceSchema>;
 type Dependencies = { db?: TenantTransactionRunner; env?: NodeJS.ProcessEnv; requestId?: string; provider?: Pick<SignatureProvider, "readSignatureRequest" | "downloadSignatureRequest">; providerOrigin?: string };
 async function referenced(tx: TenantTransaction, reference: Reference, env?: NodeJS.ProcessEnv) {
-  const repository = new SignatureWebhookRepository(tx, reference.organizationId), event = await new OutboxRepository(tx, reference.organizationId).event(reference.outboxEventId), payload = payloadSchema.safeParse(event?.payload), row = payload.success ? await repository.webhook(payload.data.webhookId) : null;
+  const repository = new SignedSignatureRepository(tx, reference.organizationId), event = await new OutboxRepository(tx, reference.organizationId).event(reference.outboxEventId), payload = payloadSchema.safeParse(event?.payload), row = payload.success ? await repository.webhook(payload.data.webhookId) : null;
   if (!event || event.type !== signatureWebhookReceived || !row || event.idempotencyKey !== signatureWebhookOutboxKey(row.id) || event.occurredAt.getTime() !== row.receivedAt.getTime()) throw new DocumentAccessError();
   const identity = signatureWebhookIdentitySchema.parse({ organizationId: row.organizationId, webhookId: row.id, signatureId: row.signatureId, preparationAttemptId: row.preparationAttemptId, providerScopeHash: row.providerScopeHash, providerRequestId: row.providerRequestId, providerEventId: row.providerEventId, eventType: row.eventType, occurredAt: row.occurredAt.toISOString(), payloadSha256: row.payloadSha256, payloadByteSize: row.payloadByteSize }), facts = parseDocumensoWebhookEvidence(openSignatureWebhook(identity, row.payloadCipher, env));
   if (facts.eventId !== row.providerEventId || facts.event !== row.eventType || facts.createdAt !== identity.occurredAt || facts.requestId !== row.providerRequestId || facts.evidenceSha256 !== row.payloadSha256 || facts.reference !== null && facts.reference !== row.signatureId) throw new DocumentConflictError();
@@ -39,12 +40,15 @@ async function retain(reference: Reference, value: SignatureProviderObservation,
     const original = current.original, attempt = await current.repository.preparationAttempt(current.row.signatureId); if (!attempt || attempt.id !== current.attempt.id) throw new DocumentConflictError();
     let observed = value; if (observed.kind === "SENT" && await current.repository.signatureSent(current.row.signatureId, current.row.providerScopeHash, current.row.providerRequestId)) observed = { ...observed, kind: "OBSERVED", distributionProof: null };
     await appendNativeSignatureProviderEvidence(tx, current.repository, original.intent, attempt, original.original.snapshot, observed, deps);
-    if (complete) await appendNativeSignatureProviderEvidence(tx, current.repository, original.intent, attempt, original.original.snapshot, { ...observed, kind: "COMPLETION", distributionProof: null, distributionReceipt: null }, deps);
+    if (complete) { const completion = await appendNativeSignatureProviderEvidence(tx, current.repository, original.intent, attempt, original.original.snapshot, { ...observed, kind: "COMPLETION", distributionProof: null, distributionReceipt: null }, deps); await admitOriginalSignedArchive(tx, current.repository, completion, deps); }
   });
 }
 export async function executeSignatureWebhookReference(raw: unknown, deps: Dependencies = {}) {
   const reference = referenceSchema.parse(raw), db = deps.db ?? prisma, current = await withTenant(db, reference.organizationId, async tx => { const source = await referenced(tx, reference, deps.env); return { ...source, recorded: await source.repository.webhookEvidence(source.row.id) }; });
-  if (current.recorded.some(row => row.kind !== "UNCERTAIN")) return { webhookId: current.row.id, state: "RECORDED" as const };
+  if (current.recorded.some(row => row.kind !== "UNCERTAIN")) {
+    const completion = current.recorded.find(row => row.kind === "COMPLETION"); if (completion) await withTenant(db, reference.organizationId, tx => admitOriginalSignedArchive(tx, new SignedSignatureRepository(tx, reference.organizationId), completion, deps));
+    return { webhookId: current.row.id, state: "RECORDED" as const };
+  }
   const { origin, provider } = signatureProviderBoundary(current.original.policy.account, deps), webhook = { id: current.row.id, providerEventId: current.row.providerEventId, payloadSha256: current.row.payloadSha256, occurredAt: current.row.occurredAt.toISOString() };
   let scopeProof: Awaited<ReturnType<typeof readSignatureProviderScope>> | null = null;
   try {

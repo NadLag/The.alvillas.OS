@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { Server } from "node:http";
 import process from "node:process";
 import { URL } from "node:url";
@@ -50,6 +51,16 @@ const emit = Server.prototype.emit;
 Server.prototype.emit = function (event, ...args) {
   if (event !== "request") return Reflect.apply(emit, this, [event, ...args]);
   const [request, response] = args, target = new URL(request.url, "http://127.0.0.1:3000");
+  // Explicit conditional-write bridge for the actual signed-archive worker. The
+  // existing read-only bridge and every application boundary remain unchanged.
+  if (target.pathname === "/__alvillas_e2e/storage-put") {
+    response.setHeader("Cache-Control", "no-store");
+    if (request.method !== "PUT" || request.headers["x-alvillas-e2e-storage"] !== process.env.R2_SECRET_ACCESS_KEY || request.headers["if-none-match"] !== "*" || request.headers["content-type"] !== "application/octet-stream" || target.searchParams.getAll("url").length !== 1) { response.writeHead(403).end(); return true; }
+    void (async () => { const signed = new URL(target.searchParams.get("url")); if (signed.origin !== "https://alvillas-e2e-local.r2.cloudflarestorage.com") { response.writeHead(403).end(); return; }
+      const chunks = []; let total = 0; for await (const chunk of request) { total += chunk.length; if (total > 8 * 1024 * 1024) { response.writeHead(413).end(); return; } chunks.push(chunk); }
+      const stored = await fixtureResponse(new globalThis.Request(signed, { method: "PUT", headers: { "content-type": "application/octet-stream", "if-none-match": "*" }, body: new Uint8Array(Buffer.concat(chunks)) })); response.writeHead(stored.status, Object.fromEntries(stored.headers)); response.end(new Uint8Array(await stored.arrayBuffer()));
+    })().catch(() => { if (!response.headersSent) response.writeHead(503); response.end(); }); return true;
+  }
   if (target.pathname !== "/__alvillas_e2e/storage-object") return Reflect.apply(emit, this, [event, ...args]);
   response.setHeader("Cache-Control", "no-store");
   if (request.method !== "GET" || request.headers["x-alvillas-e2e-storage"] !== process.env.R2_SECRET_ACCESS_KEY || target.searchParams.getAll("url").length !== 1) { response.writeHead(403).end(); return true; }

@@ -16,7 +16,7 @@ import { originalSignaturePreparation, readSignaturePreparationEvidence } from "
 
 type Dependencies = { db: TenantTransactionRunner; env?: NodeJS.ProcessEnv; requestId?: string };
 /** History authorizes the actual retained resources; current business values cannot replace original contacts. */
-async function retainedContext(ctx: DocumentActorContext, tx: TenantTransaction, signatureId: string, deps: Dependencies) {
+async function retainedContext(ctx: DocumentActorContext, tx: TenantTransaction, signatureId: string, deps: Pick<Dependencies, "env">) {
   const repository = new DocumentRepository(tx, ctx.organizationId), row = await repository.signatureRecord(signatureId); if (!row) throw new DocumentAccessError();
   const original = nativeSignatureOriginalDefinition(row), current = await nativeSignatureContext(ctx, tx, original.draft, "history", row.id, row.requestedBy); assertSignatureOriginalArchive(current, original.snapshot);
   const recipients = row.recipients.map(recipient => {

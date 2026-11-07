@@ -34,6 +34,8 @@ import {signatureWebhookReceived} from "@/modules/documents/domain/document-sign
 import {executeSignatureWebhookReference} from "@/modules/documents/application/document-signature-webhook-worker";
 import {signatureIdentityRecoveryRequested} from "@/modules/documents/domain/document-signature-identity-recovery";
 import {executeSignatureIdentityRecoveryReference} from "@/modules/documents/application/document-signature-identity-worker";
+import {signedArchiveRequested} from "@/modules/documents/domain/document-signed-archive";
+import {executeSignedArchiveReference} from "@/modules/documents/application/document-signed-archive-worker";
 import {executeSignatureDistributionReference} from "@/modules/documents/application/document-signature-distribution-worker";
 import {executeDocumentGenerationReference,failDocumentGenerationReference} from "@/modules/documents/application/document-generation-worker";
 
@@ -162,4 +164,6 @@ export const observeSignatureWebhooks=inngest.createFunction({id:"native-signatu
   async({event,step})=>step.run("verify-original-authenticated-signature-observation",()=>executeSignatureWebhookReference(event.data)));
 export const recoverSignatureIdentities=inngest.createFunction({id:"native-signature-identity-recovery",name:"ALVILLAS OS reviewed original signature identity recovery",triggers:[{event:signatureIdentityRecoveryRequested}],concurrency:{limit:1},retries:3},
   async({event,step})=>step.run("bind-reviewed-original-signature-through-readback",()=>executeSignatureIdentityRecoveryReference(event.data)));
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,observeSignatureWebhooks,recoverSignatureIdentities];
+export const archiveSignedDocuments=inngest.createFunction({id:"native-signed-document-archive",name:"ALVILLAS OS original signed document archive",triggers:[{event:signedArchiveRequested}],concurrency:{limit:1},retries:3},
+  async({event,step})=>step.run("retain-original-signed-pdf-and-certificate",()=>executeSignedArchiveReference(event.data)));
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments];

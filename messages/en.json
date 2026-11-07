@@ -5184,5 +5184,23 @@
     "provider_COMPLETED": "Provider reports completion",
     "provider_REJECTED": "Provider reports rejection",
     "provider_CANCELLED": "Provider reports cancellation"
+  },
+  "SignedArchive": {
+    "title": "Signed originals",
+    "guidance": "Retain the signed PDF and completion certificate together. The original generated version remains available in its history.",
+    "check": "Check archive",
+    "reconcile": "Queue archive recovery",
+    "pending": "Recover the recorded request before creating another.",
+    "recover": "Recover recorded request",
+    "newReview": "Start a new review",
+    "openOriginal": "Open signed PDF",
+    "openCertificate": "Open certificate",
+    "AWAITING_COMPLETION": "Waiting for verified completion from the signing provider.",
+    "PENDING": "The verified signature is awaiting archive publication.",
+    "COMPLETE": "Both original signing artifacts are retained.",
+    "publicationReason": "Retain the verified original signing artifact",
+    "SIGNED_ORIGINAL": "Signed PDF",
+    "CERTIFICATE": "Completion certificate",
+    "openOriginalVersion": "Open original version {number}"
   }
 }

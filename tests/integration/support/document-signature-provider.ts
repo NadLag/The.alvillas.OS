@@ -7,7 +7,7 @@ import { DocumensoSignatureProvider } from "@/platform/providers/real";
 export async function ownedSignatureProvider(options: { port?: number; publicOrigin?: string } = {}) {
   type Lifecycle = { status?: "DRAFT" | "PENDING" | "COMPLETED" | "REJECTED" | "CANCELLED"; readStatus?: "NOT_OPENED" | "OPENED"; signingStatus?: "NOT_SIGNED" | "SIGNED" | "REJECTED"; signedAt?: string | null; expiresAt?: string | null; completedAt?: string | null };
   const calls: Array<{ method: string; path: string }> = [], token = "owned-private-provider-capability", scopeEnvelopeId = "owned_scope", scopeReference = "owned-existing-account-scope", teamId = randomInt(1, 2147483646);
-  const state = { fault: "none" as "none" | "lost-create" | "wrong-team" | "wrong-pdf" | "substituted-recipient" | "fail-read" | "lost-send" | "send-no-effect" | "fail-sent-read", afterCreate: null as (() => Promise<void>) | null, afterDistribute: null as (() => Promise<void>) | null, lifecycle: {} as Lifecycle, recipientLifecycle: {} as Record<number, Lifecycle> };
+  const state = { fault: "none" as "none" | "lost-create" | "wrong-team" | "wrong-pdf" | "substituted-recipient" | "fail-read" | "lost-send" | "send-no-effect" | "fail-sent-read", afterCreate: null as (() => Promise<void>) | null, afterDistribute: null as (() => Promise<void>) | null, afterCertificate: null as (() => Promise<void>) | null, signedPdf: null as Uint8Array | null, certificatePdf: null as Uint8Array | null, lifecycle: {} as Lifecycle, recipientLifecycle: {} as Record<number, Lifecycle> };
   let origin = "", stored: { id: string; createdAt: string; sent: boolean; bytes: Uint8Array; name: string; payload: { externalId: string; title: string; meta: Record<string, unknown>; recipients: Array<{ name: string; email: string; role: string; signingOrder: number; fields: Array<Record<string, unknown>> }> } } | null = null;
   const server = createServer((request, response) => { void (async () => {
     const path = request.url ?? "", method = request.method ?? ""; calls.push({ path, method });
@@ -37,6 +37,10 @@ export async function ownedSignatureProvider(options: { port?: number; publicOri
     }
     if (path === "/api/v2/envelope/item/owned_item/download?version=original") {
       response.setHeader("content-type", "application/pdf"); const bytes = new Uint8Array(stored.bytes); if (state.fault === "wrong-pdf") bytes[20] ^= 1; response.end(bytes); return;
+    }
+    if (path === "/api/v2/envelope/item/owned_item/download?version=signed" || path === "/api/v2/envelope/" + stored.id + "/certificate/download") {
+      const certificate = path.endsWith("/certificate/download"), bytes = certificate ? state.certificatePdf : state.signedPdf; if (state.lifecycle.status !== "COMPLETED" || !bytes) { response.writeHead(409).end("{}"); return; }
+      if (certificate && state.afterCertificate) await state.afterCertificate(); response.setHeader("content-type", "application/pdf"); response.end(new Uint8Array(bytes)); return;
     }
     if (path === "/api/v2/envelope/" + stored.id) {
       if (state.fault === "fail-read" || state.fault === "fail-sent-read" && stored.sent) { response.writeHead(503).end(JSON.stringify({ private: token })); return; }
