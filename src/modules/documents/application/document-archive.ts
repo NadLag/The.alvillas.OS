@@ -15,7 +15,7 @@ import { DocumentRepository, type DocumentSourceFacts } from "../infrastructure/
 import type { DocumentObjectStore } from "../infrastructure/document-object-store";
 import { documentObjectKey } from "../domain/document-object";
 import { documentPartContract,documentUploadChunkBytes } from "../domain/document-upload-parts";
-import { documentArchivePolicyKey, documentArchivePolicySchema, retainDocumentPrivacy, type DocumentTypePolicy } from "../domain/document-policy";
+import { documentArchivePolicyKey, documentArchivePolicySchema, retainDocumentPrivacy, retainedDocumentCategory, type DocumentTypePolicy } from "../domain/document-policy";
 import { documentUploadReviewInput, documentUploadInput, documentRecoveryInput, documentSourceReferenceSchema,
   DocumentAccessError, DocumentConfigurationError, DocumentConflictError,DocumentRateLimitError } from "../domain/document-command";
 import { documentItemSchema, documentVersionItemSchema, documentHistorySchema, documentUploadAdmissionSchema,documentPartReceiptSchema } from "../domain/document-read-model";
@@ -195,6 +195,7 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
     if (!root) {
       root = await repository.appendDocument({ sourceKind: input.source.kind, sourceId: input.source.id, propertyId: input.source.kind === "PROPERTY" ? input.source.id : null,
         ownerId: input.source.kind === "OWNER" ? input.source.id : null, reservationId: input.source.kind === "RESERVATION" ? input.source.id : null,
+        supplierId: input.source.kind === "SUPPLIER" ? input.source.id : null, guestId: input.source.kind === "GUEST" ? input.source.id : null,
         personId: input.source.kind === "PERSON" ? input.source.id : null, transactionId: input.source.kind === "FINANCIAL_TRANSACTION" ? input.source.id : null,
         typeKey: input.typeKey, kind: input.kind, locale: input.locale, title: input.title, privacy: current.privacy, sourceSnapshot: json(current.native.snapshot), policySnapshot: json(current.policy),
         commandKey: input.idempotencyKey, commandHash, createdBy: ctx.actorId, createdAt: current.now });
@@ -321,7 +322,7 @@ export async function readDocumentHistory(actor: DocumentActorContext, raw: unkn
     const repository = new DocumentRepository(tx, ctx.organizationId), root = await repository.document(input.documentId); if (!root) throw new DocumentAccessError();
     const current = await context(ctx, tx, sourceOf(root), "view", root, undefined, deps.env);
     await repository.lock("root:"+root.id);
-    const observedAt=await repository.clock(),rows = await repository.versions(root.id, input.before),effective=input.format?await repository.effectiveVersion(root.id,observedAt):null,data = { id: root.id, source: sourceOf(root), typeKey: root.typeKey, kind: root.kind, locale: root.locale,
+    const observedAt=await repository.clock(),rows = await repository.versions(root.id, input.before),effective=input.format?await repository.effectiveVersion(root.id,observedAt):null,data = { id: root.id, source: sourceOf(root), typeKey: root.typeKey, ...retainedDocumentCategory(root.policySnapshot,root.typeKey), kind: root.kind, locale: root.locale,
       title: root.title, privacy: current.privacy, revision: root.revision.toString(), createdAt: root.createdAt.toISOString(), archivedAt: root.archivedAt?.toISOString() ?? null, templateKey: root.template?.key ?? null, ...current.signedArtifact ? { signedArtifact: current.signedArtifact } : {} };
     const document = documentItemSchema.parse(present({ ...ctx.authContext, visibleDataClasses: new Set<DataClass>(current.privacy) }, "view",
       { ...current.native.resource, type: "document", id: root.id, documentId: root.id, assignedUserAccountId: root.createdBy, data }, {}, current.now));

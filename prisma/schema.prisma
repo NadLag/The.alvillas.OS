@@ -2599,6 +2599,7 @@ model NotificationEmailSuppression {
 }
 
 model GuestRecord {
+  documents Document[] @relation("DocumentGuest")
   documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientGuest")
   guestPaymentReceipts GuestPaymentReceipt[]
 
@@ -3137,6 +3138,7 @@ model ApprovalStageRecipient {
 }
 
 model Supplier {
+  documents Document[] @relation("DocumentSupplier")
   documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientSupplier")
   receivableAssignments ReceivableAssignment[] @relation("ReceivableSupplier")
   invoices           SupplierInvoice[]
@@ -4742,6 +4744,8 @@ model Document {
   reservationId String? @map("reservation_id") @db.Uuid
   personId String? @map("person_id") @db.Uuid
   transactionId String? @map("transaction_id") @db.Uuid
+  supplierId String? @map("supplier_id") @db.Uuid
+  guestId String? @map("guest_id") @db.Uuid
   typeKey String @map("type_key")
   kind String
   locale String
@@ -4762,6 +4766,8 @@ model Document {
   reservation Reservation? @relation("DocumentReservation",fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   person Person? @relation("DocumentPerson",fields:[organizationId,personId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   transaction FinancialTransaction? @relation("DocumentTransaction",fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  supplier Supplier? @relation("DocumentSupplier",fields:[organizationId,supplierId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"document_supplier_tenant_fk")
+  guest GuestRecord? @relation("DocumentGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"document_guest_tenant_fk")
   admissions DocumentAdmission[]
   versions DocumentVersion[]
   template DocumentTemplate?
