@@ -1,6 +1,6 @@
 import type { Notification, OutboxEvent } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
-import type { Resource } from "@/platform/authz/authorize";
+import type { AuthContext, Resource } from "@/platform/authz/authorize";
 import { notificationEventType, notificationInputSchema, NotificationAudienceUnavailableError,type NotificationCursor, type NotificationInput } from "./notification";
 import { Prisma } from "@prisma/client";
 import { digestSettingsSchema, nextDigestAt } from "./digest";
@@ -381,6 +381,15 @@ export class NotificationRepository {
   }
   async viewers(routing:NotificationRouting,resource:Resource):Promise<string[]> {
     return(await this.viewerAudiences([{routing,resource}]))[0];
+  }
+  async explicitRecipientContext(recipientId:string,routing:NotificationRouting):Promise<AuthContext|null>{
+    if(routing.assigned)return null;
+    const candidate=(await this.candidates({roles:[],people:[],assigned:false,channels:routing.channels},undefined,[recipientId],true))[0];
+    if(!candidate)return null;
+    const state=await new IdentityRepository(this.tx,this.organizationId).authorizationState(recipientId);
+    if(!state.account||securityEnrollment(state.account,state.now).setupRequired)return null;
+    const assignments=routing.people.includes(candidate.personId)?state.assignments:state.assignments.filter(assignment=>routing.roles.includes(assignment.role.id));
+    return assignments.length?contextForRoleAssignments(this.organizationId,recipientId,assignments):null;
   }
   async viewerAudiences(entries:ReadonlyArray<{routing:NotificationRouting;resource:Resource}>):Promise<string[][]>{
     if(!entries.length)return[];const routing={roles:[...new Set(entries.flatMap(entry=>entry.routing.roles))],people:[...new Set(entries.flatMap(entry=>entry.routing.people))],assigned:false,channels:["in_app" as const]};

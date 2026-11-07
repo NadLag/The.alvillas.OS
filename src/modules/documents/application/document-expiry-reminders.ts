@@ -15,7 +15,7 @@ import { documentExpiryPolicyKey, documentExpiryRoutingKey, documentExpiryOccurr
 import { DocumentAccessError, DocumentConfigurationError, DocumentConflictError } from "../domain/document-command";
 import { documentJson } from "./document-archive";
 import { documentExpiryContext } from "./document-expiry-service";
-import { documentExpiryNoticeTarget, documentExpiryRecipientContext, documentExpiryReminderSettings } from "./document-expiry-notification";
+import { documentExpiryNoticeTarget, documentExpiryReminderSettings } from "./document-expiry-notification";
 
 type Deps={db?:TenantTransactionRunner;requestId?:string;env?:NodeJS.ProcessEnv};
 const result=(configured:boolean)=>({configured,occurrences:0,notificationsRequested:0});
@@ -55,7 +55,7 @@ export async function scheduleDocumentExpiryReminders(organizationId:string,deps
         if(source.archive.native.archived||source.root.archivedAt||source.archive.signedArtifact||!settings.policy.type_keys.includes(source.root.typeKey)||(await repository.effectiveVersion(source.root.id,now))?.id!==source.version.id)return result(true);
         const notifications=new NotificationRepository(tx,organizationId),eligible=await notifications.viewers(settings.routing,source.archive.native.resource),recipients:string[]=[],authorizationSnapshots:Record<string,unknown>={};
         for(const recipientId of eligible){
-          const authority=await documentExpiryRecipientContext(tx,organizationId,recipientId,settings.routing);if(!authority)continue;
+          const authority=await notifications.explicitRecipientContext(recipientId,settings.routing);if(!authority)continue;
           try{await documentExpiryContext({organizationId,actorId:recipientId,authContext:authority},tx,revision.versionId,deps);}catch(error){if(error instanceof DocumentAccessError)continue;throw error;}
           recipients.push(recipientId);authorizationSnapshots[recipientId]=captureAuthorizationCap(authority);
         }

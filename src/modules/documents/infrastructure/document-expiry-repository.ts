@@ -5,9 +5,6 @@ export class DocumentExpiryRepository extends DocumentRepository {
   async expiryCalendar():Promise<{timezone:string}|null>{
     return this.tx.organizationProfile.findUnique({where:{organizationId:this.organizationId},select:{timezone:true}});
   }
-  async expiryRecipient(id:string):Promise<{personId:string}|null>{
-    return this.tx.userAccount.findFirst({where:{organizationId:this.organizationId,id,status:"ACTIVE",person:{archivedAt:null}},select:{personId:true}});
-  }
   async expiryRevision(id:string):Promise<DocumentExpiryRevision|null>{
     return this.tx.documentExpiryRevision.findFirst({where:{organizationId:this.organizationId,id}});
   }
