@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
-import { withTenant } from "@/platform/db/tenant";
+import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { ensureStandardIdentitySetup } from "@/modules/identity/application/identity-service";
@@ -77,12 +77,12 @@ describe("actual configured document expiry reminders",()=>{
     await amend(future.id,"2020-01-01T00:00:00.000Z");expect((await scheduleDocumentExpiryReminders(f.organizationId,deps())).occurrences).toBe(0);expect(await withTenant(db,f.organizationId,tx=>documentExpiryNoticeTarget(tx,f.organizationId,reminder.id,f.account.id,env))).toBeNull();expect(await withTenant(db,f.organizationId,tx=>tx.documentExpiryReminder.count())).toBe(1);
   });
   it("rolls back publication when the policy changes inside its final audit boundary",async()=>{
-    const f=await reminderFixture(),write=auditWriter.writeAuditEvent,resolve=ConfigRuleRepository.prototype.resolve;let changed=false,audited=false;
-    const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{const result=await write(tx,event);if(event.action==="documents.expiry_reminded")audited=true;return result;});
-    const policySpy=vi.spyOn(ConfigRuleRepository.prototype,"resolve").mockImplementation(async function(this:ConfigRuleRepository,input){
-      const rule=await resolve.call(this,input);if(audited&&!changed&&input.key==="documents.expiry_reminders"&&rule){changed=true;await this.createVersion({key:rule.key,scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:f.account.id,reason:"Explicit late configured occurrence change",value:{...documentExpiryPolicySchema.parse(rule.value),send_at:"23:59"}});return resolve.call(this,input);}return rule;
+    const f=await reminderFixture(),write=auditWriter.writeAuditEvent;let changed=false,audited=false,activeTransaction:TenantTransaction|null=null;
+    const observedDb:TenantTransactionRunner={$transaction:(work,options)=>db.$transaction(async tx=>{activeTransaction=tx;try{return await work(tx);}finally{activeTransaction=null;}},options)};
+    const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{
+      const result=await write(tx,event);if(!changed&&event.action==="documents.expiry_reminded"){audited=true;if(!activeTransaction)throw Error("Actual native tenant transaction required at audit boundary");changed=true;const configs=new ConfigRuleRepository(activeTransaction,f.organizationId),rule=await configs.resolve({key:"documents.expiry_reminders",scopes:[{scopeType:"organization",scopeId:null}],asOf:new Date()});if(!rule)throw Error("Actual current policy required");await configs.createVersion({key:rule.key,scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:f.account.id,reason:"Explicit late configured occurrence change",value:{...documentExpiryPolicySchema.parse(rule.value),send_at:"23:59"}});}return result;
     });
-    try{await expect(scheduleDocumentExpiryReminders(f.organizationId,deps())).rejects.toThrow("document_source_changed");}finally{spy.mockRestore();policySpy.mockRestore();}expect(audited).toBe(true);expect(changed).toBe(true);expect(await withTenant(db,f.organizationId,tx=>tx.documentExpiryReminder.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.notification.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.auditLog.count({where:{action:"documents.expiry_reminded"}}))).toBe(0);
+    try{await expect(scheduleDocumentExpiryReminders(f.organizationId,{...deps(),db:observedDb})).rejects.toThrow("document_source_changed");}finally{spy.mockRestore();}expect(audited).toBe(true);expect(changed).toBe(true);expect(await withTenant(db,f.organizationId,tx=>tx.documentExpiryReminder.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.notification.count())).toBe(0);expect(await withTenant(db,f.organizationId,tx=>tx.auditLog.count({where:{action:"documents.expiry_reminded"}}))).toBe(0);
   });
   it("publishes one durable private occurrence, actual inbox and SYSTEM audit while preserving exact financial rows",async()=>{
     const f=await reminderFixture(true),before=await originals(f);
