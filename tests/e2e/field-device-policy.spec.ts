@@ -34,7 +34,9 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
     network = await fieldNetwork(native.context, "unavailable");
     editorContext = await fieldEditorContext(native.context, info); const editor = await editorContext.newPage();
     const configure = async (minutes: number | null) => {
+      await editor.bringToFront();
       await editor.goto(`/${locale}/app/configuration`);
+      await expect.poll(() => editor.evaluate(() => document.visibilityState)).toBe("visible");
       const form = editor.getByTestId("config-rule-create-form");
       await editor.evaluate(() => document.fonts.ready);
       expect(await editor.evaluate(() => innerWidth)).toBe(editor.viewportSize()!.width);
@@ -69,7 +71,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
         return rule;
       });
     };
-    const enabled = await configure(1);
+    const enabled = await configure(1); await page.bringToFront(); await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
     const cachedPolicy = async () => z.array(z.object({ task: z.object({ id: z.uuid(), devicePolicy: fieldDevicePolicySnapshotSchema.nullable().optional() }) }))
       .parse(await storedFieldData(page, "jobs")).find(row => row.task.id === f.taskId)?.task.devicePolicy;
     await expect(page.getByTestId("field-sync-now")).toBeEnabled(); await page.getByTestId("field-sync-now").click();
@@ -89,7 +91,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Configured queue age rem
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.goto(`/${locale}/app/field/${jobs.secondId}`); await page.getByTestId("field-checklist-item").check();
     await expect(page.getByTestId("field-task-complete")).toBeEnabled(); await expect(page.getByTestId("field-queue-age-warning")).toBeVisible();
-    await native.context.setOffline(false); const disabled = await configure(null);
+    await native.context.setOffline(false); const disabled = await configure(null); await page.bringToFront(); await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe("visible");
     await expect(page.getByTestId("field-sync-now")).toBeEnabled(); await page.getByTestId("field-sync-now").click();
     await expect.poll(cachedPolicy).toEqual({ queueWarningAfterMinutes: null, configRuleId: disabled.id, configVersion: disabled.version });
     await expect(page.getByTestId("field-queue-age-warning")).toHaveCount(0); await expect(page.getByTestId("field-checklist-item")).toBeChecked();
