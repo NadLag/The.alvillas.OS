@@ -45,6 +45,7 @@ describe("config rule registry", () => {
       "agreement.special_conditions",
       "documents.archive",
       "documents.expiry_reminders",
+      "documents.retention",
       "documents.signatures",
       "feature_flag",
       "field.device_hygiene",

@@ -1,3 +1,4 @@
+import { readDocumentRetention,readDocumentRetentionPolicyContext,reviewDocumentRetention,admitDocumentRetention } from "@/modules/documents/application/document-retention-service";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { PrismaClient } from "@prisma/client";
@@ -1053,4 +1054,27 @@ describe("durable native generation admission", () => {
     await expect(admitDocumentGeneration(f.ctx, { ...f.command, idempotencyKey: original.idempotencyKey }, { db, env })).rejects.toThrow("document_source_changed");
     expect(await recoverDocumentGeneration(f.ctx, { idempotencyKey: f.command.idempotencyKey }, { db, env })).toEqual(receipt); expect(await withTenant(db, f.organizationId, tx => tx.document.count())).toBe(3);
   });
+});
+
+async function retentionForGenerated(f:Awaited<ReturnType<typeof fixture>>){
+ await withTenant(db,f.organizationId,tx=>new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"documents.retention",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:f.account.id,reason:"Explicit generated original retention policy",value:{source:"NATIVE_DOCUMENT_VERSIONS",artifact_inheritance:"ORIGINAL_SIGNED_VERSION",archive_tagging:"ALLOW",type_keys:["generated_agreement"],change_admission:{window_seconds:3600,max_requests:100},tags:[{key:"hold",labels:{en:"Retain original",fr:"Conserver l’original",ar:"الاحتفاظ بالأصل"},blocks_disposition:true,policy_references:["Entered original version policy reference"]}]}}));
+}
+describe("native document retention inheritance",()=>{
+ it("inherits one original-version hold through both actual signed PDFs without editing their system-owned rows",async()=>{
+  const f=await signedArchiveFixture();await executeSignedArchiveReference(f.archiveReference,f.deps);await retentionForGenerated(f);
+  await withTenant(db,f.organizationId,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"document_instance:edit"}});await tx.rolePermission.create({data:{organizationId:f.organizationId,roleId:f.assignment.roleId,permissionId:permission.id}});});
+  const ctx={...f.ctx,authContext:{...await authContextForAccount(f.organizationId,f.ctx.actorId,{db}),personId:f.person.id}},before=await money(f.organizationId),original=await lineage(f.organizationId,f.complete.documentId),draft={versionId:f.complete.versionId,previousRevisionId:null,tagKeys:["hold"]},review=await reviewDocumentRetention(ctx,draft,f.deps),saved=await admitDocumentRetention(ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Retain the actual signed original governance context"},f.deps);
+  const archive=(await withTenant(db,f.organizationId,tx=>new SignedSignatureRepository(tx,f.organizationId).signedArchive(f.archive.id)))!;
+  for(const asset of archive.artifacts){const versionId=asset.admission.version!.id,history=await readDocumentRetention(ctx,{versionId},f.deps),hook=await readDocumentRetentionPolicyContext(ctx,{versionId},f.deps);expect(history.versionId).toBe(versionId);expect(history.governedVersion.id).toBe(f.complete.versionId);expect(history.current).toEqual(saved.revision);expect(history.canEdit).toBe(false);expect(hook).toMatchObject({governedVersionId:f.complete.versionId,revisionId:saved.revision.id,blocksDisposition:true});await expect(reviewDocumentRetention(ctx,{versionId,previousRevisionId:saved.revision.id,tagKeys:[]},f.deps)).rejects.toThrow("document_unavailable");expect(await withTenant(db,f.organizationId,tx=>tx.documentRetentionRevision.count({where:{versionId}}))).toBe(0);}
+  expect(await money(f.organizationId)).toEqual(before);expect(await lineage(f.organizationId,f.complete.documentId)).toEqual(original);expect(await withTenant(db,f.organizationId,tx=>tx.documentRetentionRevision.count())).toBe(1);
+  await withTenant(db,f.organizationId,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"owner:view"}});await tx.rolePermission.deleteMany({where:{organizationId:f.organizationId,roleId:f.assignment.roleId,permissionId:permission.id}});});
+  for(const asset of archive.artifacts)await expect(readDocumentRetentionPolicyContext(ctx,{versionId:asset.admission.version!.id},f.deps)).rejects.toThrow("document_unavailable");
+ });
+ it("requires independent current and held template authority when tagging an authored original",async()=>{
+  const f=await fixture(false,"fr",true);await retentionForGenerated(f);const draft={versionId:f.templates[0].versionId,previousRevisionId:null,tagKeys:["hold"]},before=await money(f.organizationId);
+  const held={...f.ctx,authContext:{...f.ctx.authContext,permissions:new Set([...f.ctx.authContext.permissions].filter(k=>k!=="document_template:edit")),assignments:f.ctx.authContext.assignments?.map(a=>({...a,permissions:new Set([...a.permissions].filter(k=>k!=="document_template:edit"))}))}};
+  await expect(reviewDocumentRetention(held,draft,{db,env})).rejects.toThrow("document_unavailable");const review=await reviewDocumentRetention(f.ctx,draft,{db,env});await admitDocumentRetention(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Retain the actual authored template policy context"},{db,env});
+  await withTenant(db,f.organizationId,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"document_template:view"}});await tx.rolePermission.deleteMany({where:{organizationId:f.organizationId,roleId:f.assignment.roleId,permissionId:permission.id}});});
+  expect((await authContextForAccount(f.organizationId,f.ctx.actorId,{db})).permissions.has("document:view")).toBe(true);await expect(readDocumentRetention(f.ctx,{versionId:draft.versionId},{db,env})).rejects.toThrow("document_unavailable");expect(await money(f.organizationId)).toEqual(before);
+ });
 });
