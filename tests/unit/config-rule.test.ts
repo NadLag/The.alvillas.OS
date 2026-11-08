@@ -87,6 +87,7 @@ describe("config rule registry", () => {
       "notification.routing.approval_requested",
       "notification.routing.document_expiring",
       "notification.routing.language_updated",
+      "notification.routing.lead_reminder",
       "notification.routing.ledger_integrity_failed",
       "notification.routing.receivable_reminder",
       "notification.routing.reservation_created",

@@ -1293,7 +1293,8 @@
       "employee_cost_emergency": "Avis de coûts urgents du personnel",
       "receivable_reminder": "Une créance nécessite votre attention.",
       "ledger_integrity_failed": "Échec du contrôle d’intégrité du grand livre",
-      "document_expiring": "Un document approche de sa date d’expiration."
+      "document_expiring": "Un document approche de sa date d’expiration.",
+      "lead_reminder": "Un suivi de prospect est à effectuer."
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -1562,7 +1563,8 @@
         "identity_recovery_delivery_requested": "Récupération du compte",
         "other": "Autre notification",
         "staff_document_expiring": "Un document du personnel arrive à expiration.",
-        "document_expiring": "Un document approche de sa date d’expiration."
+        "document_expiring": "Un document approche de sa date d’expiration.",
+        "lead_reminder": "Un suivi de prospect est à effectuer."
       }
     }
   },

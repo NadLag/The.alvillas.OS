@@ -1293,7 +1293,8 @@
       "employee_cost_emergency": "إشعار تكاليف أعمال الموظفين الطارئة",
       "receivable_reminder": "تحتاج مطالبة مالية إلى مراجعتك.",
       "ledger_integrity_failed": "فشل التحقق من سلامة دفتر الأستاذ",
-      "document_expiring": "تقترب وثيقة من تاريخ انتهاء صلاحيتها."
+      "document_expiring": "تقترب وثيقة من تاريخ انتهاء صلاحيتها.",
+      "lead_reminder": "حان موعد متابعة عميل محتمل."
     },
     "settings": {
       "eyebrow": "حسابك",
@@ -1562,7 +1563,8 @@
         "identity_recovery_delivery_requested": "استعادة الحساب",
         "other": "إشعار آخر",
         "staff_document_expiring": "وثيقة موظف تقترب من انتهاء الصلاحية.",
-        "document_expiring": "تقترب وثيقة من تاريخ انتهاء صلاحيتها."
+        "document_expiring": "تقترب وثيقة من تاريخ انتهاء صلاحيتها.",
+        "lead_reminder": "حان موعد متابعة عميل محتمل."
       }
     }
   },

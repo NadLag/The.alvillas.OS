@@ -17,6 +17,6 @@ instant. Terminal history neither delivers a notification nor grants the former
 recipient access. The correction follows applied migration 212 in a new forward
 migration; applied SQL and prior work/financial rows stay unchanged.
 
-The current checkpoint implements domain validation, canonical commands and encryption with 50 affected unit cases. Native admission, configuration wiring, current-authority fences, notification production, localized UI and complete acceptance remain outstanding. No feature is DONE and no legal, provider or production approval is implied.
+Due reminders retain identifier-only native references. Delivery resolves the current subject and independent creator/recipient grants at production, inbox and channel boundaries; completion, cancellation, reassignment or withdrawal cannot be bypassed by an old queue event. Explicit organization routing selects audiences and channels. PostgreSQL extends its existing notification-kind expression in a new forward migration, preserving every previous allowed kind and rejecting unapproved values. Full private UI, restore, browser, CI and hosted acceptance remain mandatory.
 
 Scope unchanged: all 355 features remain required.

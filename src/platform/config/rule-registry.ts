@@ -375,6 +375,7 @@ export const configRuleSchemas = {
   [emailPolicyKey]: emailPolicySchema,
   "notification.routing.approval_requested": notificationRoutingSchema,
   "notification.routing.approval_decided": notificationRoutingSchema,
+  "notification.routing.lead_reminder": explicitNotificationRoutingSchema,
   "notification.routing.language_updated": notificationRoutingSchema,
   "notification.routing.staff_document_expiring": notificationRoutingSchema,
   "notification.routing.task_assigned": notificationRoutingSchema,

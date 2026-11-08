@@ -1293,7 +1293,8 @@
       "employee_cost_emergency": "Emergency employee work cost notice",
       "receivable_reminder": "A receivable needs your review.",
       "ledger_integrity_failed": "Ledger integrity check failed",
-      "document_expiring": "A document is approaching its expiry date."
+      "document_expiring": "A document is approaching its expiry date.",
+      "lead_reminder": "A lead follow-up is due."
     },
     "settings": {
       "eyebrow": "Your account",
@@ -1562,7 +1563,8 @@
         "identity_recovery_delivery_requested": "Account recovery",
         "other": "Other notification",
         "staff_document_expiring": "A staff document is expiring.",
-        "document_expiring": "A document is approaching its expiry date."
+        "document_expiring": "A document is approaching its expiry date.",
+        "lead_reminder": "A lead follow-up is due."
       }
     }
   },

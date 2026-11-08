@@ -3,8 +3,8 @@ import {z,ZodError} from "zod";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import {authorize} from "@/platform/authz/authorize";
-import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
-import {recheckAccountAuthorization} from "@/platform/authz/current-authority";
+import {authContextForAccountInTransaction,authContextsForAccountsInTransaction} from "@/platform/authz/account-context";
+import {recheckAccountAuthorization,assertAccountAuthorization} from "@/platform/authz/current-authority";
 import {captureAuthorizationCap} from "@/platform/authz/authorization-cap";
 import {present,catalogFieldPolicy} from "@/platform/authz/present";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
@@ -22,6 +22,7 @@ import {encryptLeadWorkPayload} from "../domain/lead-work-payload";
 import {leadWorkReceipt,leadWorkSubject,retainedLeadWork} from "./lead-work-snapshot";
 import {leadResource} from "./lead-resource";
 import type {LeadDependencies} from "./lead-capture-service";
+import {leadWorkOptionsSchema,leadWorkCandidatesSchema} from "../domain/lead-work-view";
 
 const protocol="NATIVE_PRIVATE_LEAD_WORK_V1",uuid=z.uuid().transform(v=>v.toLowerCase()),recoveryInput=z.object({idempotencyKey:uuid}).strict(),historyInput=z.object({leadId:uuid,before:z.number().int().positive().max(2147483646).optional()}).strict();
 async function context(actor:AccountActorContext,tx:TenantTransaction,leadId:string){
@@ -78,5 +79,30 @@ export async function recoverLeadWork(actor:AccountActorContext,raw:unknown,deps
   const input=recoveryInput.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{const row=await new LeadWorkRepository(tx,actor.organizationId).byNonce(input.idempotencyKey);if(!row)return{recorded:false,entry:null};if(row.createdBy!==actor.actorId)throw new LeadAccessError();const base=await context(actor,tx,row.leadId);await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_work_recovered",resourceType:"lead",resourceId:row.leadId,after:{leadId:row.leadId,entryId:row.id,commandHash:row.commandHash},requestId:deps.requestId??randomUUID(),occurredAt:base.now});await finalRead(actor,tx,base);return{recorded:true,entry:leadWorkReceipt(row,true)};});
 }
 export async function readLeadWorkHistory(actor:AccountActorContext,raw:unknown,deps:LeadDependencies){
-  const input=historyInput.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{const base=await context(actor,tx,input.leadId),rows=await base.repository.history(input.leadId,input.before),workHistory=rows.slice(0,20).map(row=>({...leadWorkReceipt(row,false),command:retainedLeadWork(row,deps.env),representativePersonId:row.representativePersonId}));await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_work_history_read",resourceType:"lead",resourceId:input.leadId,after:{leadId:input.leadId,count:workHistory.length,before:input.before??null},requestId:deps.requestId??randomUUID(),occurredAt:base.now});const fresh=await finalRead(actor,tx,base),data={leadId:input.leadId,workRevisionId:base.current?.id??null,workHistory,next:rows.length>20?rows[19].number:null};return present({...actor.authContext,visibleDataClasses:new Set(["operational"]as const)},"view",{...fresh.resource,data},catalogFieldPolicy<typeof data>("lead"),fresh.now);});
+  const input=historyInput.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{const base=await context(actor,tx,input.leadId),rows=await base.repository.history(input.leadId,input.before),heads=new Map((await base.repository.subjectHeads(input.leadId,rows.slice(0,20).map(row=>row.subjectId))).map(row=>[row.subjectId,row._max.subjectNumber])),workHistory=rows.slice(0,20).map(row=>({...leadWorkReceipt(row,false),command:retainedLeadWork(row,deps.env),representativePersonId:row.representativePersonId,currentSubject:heads.get(row.subjectId)===row.subjectNumber}));await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_work_history_read",resourceType:"lead",resourceId:input.leadId,after:{leadId:input.leadId,count:workHistory.length,before:input.before??null},requestId:deps.requestId??randomUUID(),occurredAt:base.now});const fresh=await finalRead(actor,tx,base),data={leadId:input.leadId,workRevisionId:base.current?.id??null,workHistory,next:rows.length>20?rows[19].number:null};return present({...actor.authContext,visibleDataClasses:new Set(["operational"]as const)},"view",{...fresh.resource,data},catalogFieldPolicy<typeof data>("lead"),fresh.now);});
+}
+
+export async function readLeadWorkOptions(actor:AccountActorContext,raw:unknown,deps:LeadDependencies){
+  const input=z.object({leadId:uuid}).strict().parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{
+    const base=await context(actor,tx,input.leadId),configured=await settings(tx,actor.organizationId,base.now),stored=await authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId),cap=commandFingerprint(captureAuthorizationCap(stored));
+    const allowed=(action:"edit"|"assign")=>{try{assertAccountAuthorization(actor,stored,base.now,[{action,resource:base.resource}],new LeadAccessError());return true;}catch(error){if(error instanceof LeadAccessError)return false;throw error;}};
+    const result=leadWorkOptionsSchema.parse({leadId:input.leadId,workRevisionId:base.current?.id??null,assignment:base.assignment?{...leadWorkReceipt(base.assignment,false),representativeId:base.assignment.representativeId}:null,activityTypes:configured.policy.activity_types,reminderTransitions:configured.policy.reminders.transitions,canEdit:allowed("edit"),canAssign:allowed("assign"),accountId:actor.actorId});
+    await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_work_options_read",resourceType:"lead",resourceId:input.leadId,after:{leadId:input.leadId,policyId:configured.rule.id,workRevisionId:result.workRevisionId},requestId:deps.requestId??randomUUID(),occurredAt:base.now});
+    const fresh=await finalRead(actor,tx,base),latest=await settings(tx,actor.organizationId,fresh.now);if(cap!==commandFingerprint(captureAuthorizationCap(await authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId)))||commandFingerprint(configured.snapshot)!==commandFingerprint(latest.snapshot)||commandFingerprint(configured.captureSnapshot)!==commandFingerprint(latest.captureSnapshot))throw new LeadWorkConflictError();return result;
+  });
+}
+
+export async function listLeadWorkCandidates(actor:AccountActorContext,raw:unknown,deps:LeadDependencies){
+  const input=z.object({leadId:uuid,purpose:z.enum(["REMINDER","ASSIGNMENT"]),query:z.string().trim().max(200)}).strict().parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{
+    const base=await context(actor,tx,input.leadId);await editable(actor,tx,base,input.purpose);const stored=await authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId),actorCap=commandFingerprint(captureAuthorizationCap(stored)),accounts:Array<{id:string;displayName:string}>=[],selected:Array<{id:string;personId:string;cap:string}>=[];let before:string|undefined;
+    for(let round=0;round<20&&accounts.length<20;round++){
+      const rows=await base.repository.accounts(input.query,before),batch=rows.slice(0,100),authorities=await authContextsForAccountsInTransaction(tx,actor.organizationId,batch.map(row=>row.id));
+      for(const row of batch){try{if(row.id!==actor.actorId)assertAccountAuthorization(actor,stored,base.now,[{action:"view",resource:{type:"team_member",id:row.personId,organizationId:actor.organizationId,dataClass:"personal"}}],new LeadAccessError());}catch(error){if(error instanceof LeadAccessError)continue;throw error;}
+        const authority=authorities.get(row.id);if(!authority)continue;const resource=input.purpose==="ASSIGNMENT"?leadResource(base.lead,base.resource.status,{representativeId:row.id,representativePersonId:row.personId}):base.resource;if(!authorize({...authority,personId:row.personId},"view",resource,base.now))continue;accounts.push({id:row.id,displayName:row.person.displayName});selected.push({id:row.id,personId:row.personId,cap:commandFingerprint(captureAuthorizationCap(authority))});if(accounts.length===20)break;
+      }
+      if(rows.length<=100)break;before=batch[99].id;
+    }
+    await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_work_candidates_read",resourceType:"lead",resourceId:input.leadId,after:{leadId:input.leadId,purpose:input.purpose,count:accounts.length,accountIds:accounts.map(account=>account.id)},requestId:deps.requestId??randomUUID(),occurredAt:base.now});
+    const fresh=await finalRead(actor,tx,base);await editable(actor,tx,fresh,input.purpose);if(actorCap!==commandFingerprint(captureAuthorizationCap(await authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId))))throw new LeadWorkConflictError();const latest=await authContextsForAccountsInTransaction(tx,actor.organizationId,selected.map(row=>row.id)),currentAccounts=new Map((await base.repository.accountsByIds(selected.map(row=>row.id))).map(account=>[account.id,account])),names=new Map(accounts.map(account=>[account.id,account.displayName]));for(const row of selected){const account=currentAccounts.get(row.id),authority=latest.get(row.id);if(!account||account.personId!==row.personId||account.person.displayName!==names.get(row.id)||!authority||commandFingerprint(captureAuthorizationCap(authority))!==row.cap)throw new LeadWorkConflictError();}return leadWorkCandidatesSchema.parse({accounts});
+  });
 }
