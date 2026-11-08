@@ -3,6 +3,7 @@ import { paymentMethodPolicyKey, paymentMethodPolicySchema } from "@/modules/fin
 import { financialAttachmentPolicyKey, financialAttachmentPolicySchema } from "@/modules/finance/domain/financial-attachment-policy";
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
+import {leadCapturePolicyKey,leadCapturePolicySchema} from "@/modules/crm/domain/lead-capture";
 import { documentArchivePolicyKey, documentArchivePolicySchema } from "@/modules/documents/domain/document-policy";
 import { documentSignaturePolicyKey, documentSignaturePolicySchema } from "@/modules/documents/domain/document-signature-policy";
 import { documentExpiryPolicyKey, documentExpiryPolicySchema, documentExpiryRoutingKey } from "@/modules/documents/domain/document-expiry-policy";
@@ -410,6 +411,7 @@ export const configRuleSchemas = {
   [receivableAgingPolicyKey]:receivableAgingPolicySchema,
   [receivableExportPolicyKey]:receivableExportPolicySchema,
   [financialAttachmentPolicyKey]:financialAttachmentPolicySchema,
+  [leadCapturePolicyKey]:leadCapturePolicySchema,
   [documentArchivePolicyKey]: documentArchivePolicySchema,
   [documentSignaturePolicyKey]: documentSignaturePolicySchema,
   [documentExpiryPolicyKey]: documentExpiryPolicySchema,
