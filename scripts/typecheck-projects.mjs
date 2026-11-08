@@ -10,9 +10,11 @@ import { fileURLToPath, URL } from "node:url";
 const worker = fileURLToPath(new URL("./typecheck-worker.mjs", import.meta.url));
 // A technical compiler resource bound; every original root remains checked.
 export const nativeCompilerMaxRoots = 36;
-export function compilerProjectNames(nativeRootCount) {
+export const unitCompilerMaxRoots = 96;
+export function compilerProjectNames(nativeRootCount, unitRootCount) {
   if (!Number.isSafeInteger(nativeRootCount) || nativeRootCount < 0) throw RangeError("A complete native root count is required");
-  return ["application", "unit", "browser-and-tools", ...Array.from({ length: Math.max(2, Math.ceil(nativeRootCount / nativeCompilerMaxRoots)) }, (_, index) => "postgres-" + (index + 1))];
+  if (!Number.isSafeInteger(unitRootCount) || unitRootCount < 0) throw RangeError("A complete unit root count is required");
+  return ["application", ...Array.from({ length: Math.max(1, Math.ceil(unitRootCount / unitCompilerMaxRoots)) }, (_, index) => index === 0 ? "unit" : "unit-" + (index + 1)), "browser-and-tools", ...Array.from({ length: Math.max(2, Math.ceil(nativeRootCount / nativeCompilerMaxRoots)) }, (_, index) => "postgres-" + (index + 1))];
 }
 export function prepareTypecheckProjects(projectRoot = process.cwd()) {
   const root = resolve(projectRoot), requireFromRoot = createRequire(join(root, "package.json")), ts = requireFromRoot("typescript");
@@ -33,11 +35,13 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
     const group = name.startsWith("tests/unit/") ? "unit" : name.startsWith("tests/integration/") ? "postgres" : name.startsWith("tests/") ? "browser-and-tools" : "application";
     groups.get(group).push(file);
   }
-  // Independent native test modules share the same ambient context. Bound each
+  // Independent native and unit test modules share the same ambient context. Bound each
   // compiler process as the catalog grows; no original input is dropped.
-  const native = groups.get("postgres").sort(), nativeNames = compilerProjectNames(native.length).filter(name => name.startsWith("postgres-")), size = Math.ceil(native.length / nativeNames.length);
+  const native = groups.get("postgres").sort(), units = groups.get("unit").sort(), names = compilerProjectNames(native.length, units.length), nativeNames = names.filter(name => name.startsWith("postgres-")), size = Math.ceil(native.length / nativeNames.length);
   groups.delete("postgres");
   for (const [index, name] of nativeNames.entries()) groups.set(name, native.slice(index * size, (index + 1) * size));
+  const unitNames = names.filter(name => name === "unit" || name.startsWith("unit-")), unitSize = Math.ceil(units.length / unitNames.length);
+  for (const [index, name] of unitNames.entries()) groups.set(name, units.slice(index * unitSize, (index + 1) * unitSize));
   const directory = join(root, ".tmp", "typecheck-" + randomUUID()); mkdirSync(directory, { recursive: true });
   const portable = file => relative(directory, file).replaceAll("\\", "/");
   const projects = [...groups].map(([name, files]) => {
@@ -48,7 +52,7 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
   });
   const retained = new Set(projects.flatMap(project => project.roots));
   if (parsed.fileNames.some(file => !retained.has(file)) || [...retained].some(file => !originalInputs.has(file))) throw Error("Every original TypeScript input must remain in a checked project");
-  return { root, originalRoots: parsed.fileNames, shared, projects, nativeRootCount: native.length, directory, parallelSafe: !parsed.options.incremental && !parsed.options.composite && !parsed.options.tsBuildInfoFile };
+  return { root, originalRoots: parsed.fileNames, shared, projects, nativeRootCount: native.length, unitRootCount: units.length, directory, parallelSafe: !parsed.options.incremental && !parsed.options.composite && !parsed.options.tsBuildInfoFile };
 }
 export async function runTypecheckProjects(plan, projects = plan.projects, onResult) {
   const megabyte = 1024 * 1024, reserve = 1024 * megabyte, free = () => process.availableMemory?.() ?? freemem();
