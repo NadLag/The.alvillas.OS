@@ -1305,6 +1305,33 @@ textarea:disabled {
   gap: var(--space-6);
 }
 
+.owners-page {
+  grid-template-columns: minmax(0, 1fr);
+  overflow-wrap: anywhere;
+}
+
+.owners-page > *,
+.owners-page :is(.workspace-main, .workspace-side, .resource-form, .subsection-block, .form-grid, .field, .data-table, .data-table-toolbar, .data-table-view-controls, .data-table-search) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.owners-page :is(.resource-form, .subsection-block) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.owners-page :is(input, select, textarea) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.owners-page :is(.primary-button, .secondary-button, .notification-bell) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .form-grid {
   display: grid;
   gap: var(--space-5);
