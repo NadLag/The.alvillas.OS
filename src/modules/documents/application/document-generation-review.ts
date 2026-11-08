@@ -12,11 +12,11 @@ import {generatedDocumentUploadInput} from "../domain/document-generated-upload"
 import type {z} from "zod";
 
 /** An amendment retains the actual logical source, language and native template family. */
-export async function documentGenerationTarget(ctx:DocumentActorContext,tx:TenantTransaction,draft:z.infer<typeof documentGenerationDraftSchema>,selected:Pick<Awaited<ReturnType<typeof readDocumentTemplateDefinition>>,"typeKey"|"locale"|"templateKey">,privacy:readonly string[]){
+export async function documentGenerationTarget(ctx:DocumentActorContext,tx:TenantTransaction,draft:z.infer<typeof documentGenerationDraftSchema>,selected:Pick<Awaited<ReturnType<typeof readDocumentTemplateDefinition>>,"typeKey"|"locale"|"templateKey">,privacy:readonly string[],env?:NodeJS.ProcessEnv){
   const repository=new DocumentRepository(tx,ctx.organizationId);let root=draft.documentId?await repository.document(draft.documentId):null;
   if(draft.documentId&&!root)throw new DocumentAccessError();
   if(root){
-    await documentArchiveContext(ctx,tx,documentSourceReferenceSchema.parse({kind:root.sourceKind,id:root.sourceId}),"view",root);
+    await documentArchiveContext(ctx,tx,documentSourceReferenceSchema.parse({kind:root.sourceKind,id:root.sourceId}),"view",root,undefined,env);
     if(root.kind!=="INSTANCE"||root.sourceKind!==draft.source.kind||root.sourceId!==draft.source.id||root.typeKey!==selected.typeKey||root.locale!==selected.locale)throw new DocumentConflictError();
     const previous=await repository.latest(root.id);if(!previous||previous.id!==draft.supersedesId)throw new DocumentConflictError();
     const original=generatedDocumentUploadInput.parse(previous.admission.input),prior=await repository.instance(original.generationInstanceId);if(!prior||prior.documentId!==root.id)throw new DocumentConflictError();
@@ -24,9 +24,9 @@ export async function documentGenerationTarget(ctx:DocumentActorContext,tx:Tenan
     root=prior.document;
     documentGenerationSnapshotSchema.parse(prior.sourceSnapshot);const templateVersion=await repository.version(prior.templateVersionId),template=templateVersion?await repository.document(templateVersion.documentId):null;
     if(!template?.template||template.template.key!==selected.templateKey||template.locale!==selected.locale||template.typeKey!==selected.typeKey)throw new DocumentConflictError();
-    const current=await documentArchiveContext(ctx,tx,draft.source,"create",root,{kind:"INSTANCE",typeKey:selected.typeKey,privacy,newInstance:true});return{root,previous,current};
+    const current=await documentArchiveContext(ctx,tx,draft.source,"create",root,{kind:"INSTANCE",typeKey:selected.typeKey,privacy,newInstance:true},env);return{root,previous,current};
   }
-  return{root:null,previous:null,current:await documentArchiveContext(ctx,tx,draft.source,"create",undefined,{kind:"INSTANCE",typeKey:selected.typeKey,privacy,newInstance:true})};
+  return{root:null,previous:null,current:await documentArchiveContext(ctx,tx,draft.source,"create",undefined,{kind:"INSTANCE",typeKey:selected.typeKey,privacy,newInstance:true},env)};
 }
 
 /** Server-only preparation. No caller values, locale fallback or PDF/storage writes. */
@@ -38,8 +38,8 @@ export async function prepareDocumentGeneration(actor: DocumentActorContext, raw
   if (!selected || variants.some(variant => variant.typeKey !== selected.typeKey || variant.templateKey !== selected.templateKey)) throw new DocumentConflictError();
   const values = await resolveDocumentTemplateValues(ctx, draft.source, selected.definition, selected.typeKey, { ...deps, additionalPrivacy: variants.flatMap(variant => variant.privacy) }), type = values.policySnapshot.value.types.find(type => type.key === selected.typeKey);
   if (!type || !values.policySnapshot.value.upload_transport) throw new DocumentConfigurationError();
-  const target=await withTenant(deps.db,ctx.organizationId,async tx=>draft.documentId?documentGenerationTarget(ctx,tx,draft,selected,values.rendered.privacy):{
-    root:null,previous:null,current:await documentArchiveContext(ctx,tx,draft.source,"export",undefined,{kind:"INSTANCE",typeKey:selected.typeKey,privacy:values.rendered.privacy})});
+  const target=await withTenant(deps.db,ctx.organizationId,async tx=>draft.documentId?documentGenerationTarget(ctx,tx,draft,selected,values.rendered.privacy,deps.env):{
+    root:null,previous:null,current:await documentArchiveContext(ctx,tx,draft.source,"export",undefined,{kind:"INSTANCE",typeKey:selected.typeKey,privacy:values.rendered.privacy},deps.env)});
   if(target.current.native.fingerprint!==values.nativeSourceFingerprint||commandFingerprint(target.current.policy)!==commandFingerprint(values.policySnapshot))throw new DocumentConflictError();
   const contractFingerprint = commandFingerprint([...selected.definition.variables].sort((left, right) => left.key.localeCompare(right.key))),
     renderInput = documentPdfInputSchema.parse({ source: values.rendered, provenance: { templateVersionId: selected.versionId, templateSha256: selected.sha256, sourceFingerprint: values.sourceFingerprint }, maximumBytes: type.max_bytes }),

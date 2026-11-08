@@ -35,7 +35,7 @@ const templateReviewSchema=reviewSchema.extend({metadata:documentUploadReviewInp
 const digest=async(bytes:Uint8Array<ArrayBuffer>)=>[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(value=>value.toString(16).padStart(2,"0")).join("");
 
 /** Private document data stays in memory; only the actual account's random command nonce survives a reload. */
-export function DocumentArchiveWorkspace({locale,scope,initialReference}:{locale:AppLocale;scope:string;initialReference?:{documentId:string;number:number}}){
+export function DocumentArchiveWorkspace({locale,scope,initialReference,initialSource}:{locale:AppLocale;scope:string;initialReference?:{documentId:string;number:number};initialSource?:Source}){
   const signed=useTranslations("SignedArchive"),t=useTranslations("DocumentArchive"),tt=useTranslations("DocumentTemplates"),storageKey="alvillas:document-upload:"+scope;
   const[sources,setSources]=useState<z.infer<typeof documentSourceChoicesSchema>|null>(null),[workspace,setWorkspace]=useState<Workspace|null>(null),[history,setHistory]=useState<History|null>(null),
     [editor,setEditor]=useState<Pick<Workspace,"types"|"policyFingerprint">|null>(null),[source,setSource]=useState<Source|null>(null),[sourceKind,setSourceKind]=useState<Source["kind"]>("PROPERTY"),[query,setQuery]=useState(""),
@@ -68,6 +68,9 @@ export function DocumentArchiveWorkspace({locale,scope,initialReference}:{locale
       if(active(own)&&sequence===sequences.current.workspace){setWorkspace(data);setEditor({types:data.types,policyFingerprint:data.policyFingerprint});if(!busyRef.current)setState("ready");return data;}}
     catch(error){if(active(own)&&sequence===sequences.current.workspace&&!abort.signal.aborted)failed(error);}finally{requests.current.delete(abort);}
   },[active,controller,failed,scope]);
+  const openBookmarkedSource=useCallback(async(reference:Source)=>{
+    view.current={source:reference,documentId:null,kind:"FILE",sourceKind:reference.kind,query:""};setSource(reference);setSourceKind(reference.kind);setKind("FILE");setQuery("");await loadWorkspace(reference,"FILE");
+  },[loadWorkspace]);
   const loadHistory=useCallback(async(documentId:string,before?:number,publish=true)=>{
     const own=generation.current,sequence=++sequences.current.history,abort=controller();setHistory(null);setSignatureVersion(null);setExpiryVersion(null);setRetentionVersion(null);
     try{const response=await documentRequest(scope,"history",{documentId,format:documentEffectiveHistoryFormat,...before?{before}:{}},abort.signal),data=documentEffectiveHistorySchema.parse(await response.json());
@@ -182,15 +185,15 @@ export function DocumentArchiveWorkspace({locale,scope,initialReference}:{locale
   },[active,failed,loadHistory,loadWorkspace]);
   useEffect(()=>{
     alive.current=true;let disposed=false;const pending=requests.current,invalidate=()=>{generation.current++;};
-    queueMicrotask(()=>{if(disposed)return;nonce.current=readDocumentNonce(storageKey);setHasPending(Boolean(nonce.current));if(!navigator.onLine){wipe();setState("offline");return;}if(nonce.current)void recover();else if(initialReference&&!initialHandled.current){initialHandled.current=true;void openInitial(initialReference);}else setState("ready");});
+    queueMicrotask(()=>{if(disposed)return;nonce.current=readDocumentNonce(storageKey);setHasPending(Boolean(nonce.current));if(!navigator.onLine){wipe();setState("offline");return;}if(nonce.current)void recover();else if(initialReference&&!initialHandled.current){initialHandled.current=true;void openInitial(initialReference);}else if(initialSource&&!initialReference)void openBookmarkedSource(initialSource);else setState("ready");});
     const offline=()=>{wipe();setState("offline");},refresh=()=>{
       if(busyRef.current||denied.current||!navigator.onLine||document.visibilityState==="hidden")return;if(nonce.current){void recover();return;}
       const current=view.current;setSources(null);setWorkspace(null);setHistory(null);
-      if(current.source){void loadWorkspace(current.source,current.kind);if(current.documentId)void loadHistory(current.documentId);}else void loadSources(current.sourceKind,current.query);
+      if(current.source){void loadWorkspace(current.source,current.kind);if(current.documentId)void loadHistory(current.documentId);}else if(initialSource&&!initialReference)void openBookmarkedSource(initialSource);else void loadSources(current.sourceKind,current.query);
     },visibility=()=>{if(document.visibilityState==="hidden"){wipe();setState(navigator.onLine?"ready":"offline");}else refresh();};
     window.addEventListener("offline",offline);window.addEventListener("online",refresh);window.addEventListener("focus",refresh);window.addEventListener("pagehide",wipe);document.addEventListener("visibilitychange",visibility);
     return()=>{disposed=true;alive.current=false;invalidate();for(const abort of pending)abort.abort();pending.clear();window.removeEventListener("offline",offline);window.removeEventListener("online",refresh);window.removeEventListener("focus",refresh);window.removeEventListener("pagehide",wipe);document.removeEventListener("visibilitychange",visibility);};
-  },[initialReference,openInitial,loadHistory,loadSources,loadWorkspace,recover,storageKey,wipe]);
+  },[initialReference,initialSource,openInitial,openBookmarkedSource,loadHistory,loadSources,loadWorkspace,recover,storageKey,wipe]);
   const blocked=state==="offline"||state==="forbidden";
   useEffect(()=>{if(blocked||!navigator.onLine||document.visibilityState==="hidden"||hasPending&&!unrecorded)return;const timer=setTimeout(()=>{void loadSources(sourceKind,query);},200);return()=>clearTimeout(timer);},[sourceKind,query,epoch,hasPending,unrecorded,loadSources,blocked]);
   const locked=busy||(hasPending&&!unrecorded),selectSource=(reference:Source)=>{if(locked)return;sequences.current.history++;setHistory(null);setEditor(null);setAmendment(null);setTemplateDefinition(null);setSource(reference);view.current.source=reference;view.current.documentId=null;void loadWorkspace(reference,kind);};
