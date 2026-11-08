@@ -29,14 +29,21 @@ const transitionSchema=z.object({
 });
 export const leadPipelinePolicySchema=z.object({
   source:z.literal("NATIVE_IMMUTABLE_LEAD_PIPELINE"),history:z.literal("APPEND_ONLY_STAGE_MOVEMENTS"),
+  document_types:z.object({
+    proposal:z.array(z.string().regex(/^[a-z][a-z0-9_]{0,119}$/u)).min(1).max(100).refine(distinct),
+    contract:z.array(z.string().regex(/^[a-z][a-z0-9_]{0,119}$/u)).min(1).max(100).refine(distinct)
+  }).strict().refine(value=>!value.proposal.some(key=>value.contract.includes(key))),
   transitions:z.array(transitionSchema).min(1).max(leadStages.length*(leadStages.length-1)).refine(values=>distinct(values.map(edge=>edge.from+":"+edge.to))),
   admission:z.object({requests:z.number().int().positive().max(2147483647),window_seconds:z.number().int().positive().max(2147483647)}).strict()
 }).strict();
 export type LeadPipelinePolicy=z.infer<typeof leadPipelinePolicySchema>;
 
-export const leadStageDraftSchema=z.object({leadId:uuid,previousRevisionId:uuid.nullable(),toStage:leadStageSchema}).strict();
+export const leadStageDraftSchema=z.object({leadId:uuid,previousRevisionId:uuid.nullable(),toStage:leadStageSchema,
+  evidenceReferences:z.array(z.object({kind:z.enum(leadPipelineEvidenceKinds),sourceId:uuid}).strict()).max(leadPipelineEvidenceKinds.length).refine(values=>distinct(values.map(value=>value.kind))).optional()
+}).strict();
+export const leadStageReasonSchema=z.string().trim().min(1).max(1000).refine(value=>!/\p{Cc}/u.test(value)).transform(value=>value.normalize("NFC"));
 export const leadStageCommandSchema=leadStageDraftSchema.extend({idempotencyKey:uuid,reviewFingerprint:sha256,
-  reason:z.string().trim().min(1).max(1000).refine(value=>!/\p{Cc}/u.test(value)).transform(value=>value.normalize("NFC"))
+  reason:leadStageReasonSchema
 }).strict();
 export type LeadStageDraft=z.infer<typeof leadStageDraftSchema>;
 export type LeadStageCommand=z.infer<typeof leadStageCommandSchema>;

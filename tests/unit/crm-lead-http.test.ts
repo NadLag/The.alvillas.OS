@@ -2,6 +2,7 @@ import {randomUUID} from "node:crypto";
 import {NextRequest} from "next/server";
 import {beforeEach,describe,expect,it,vi} from "vitest";
 import {LeadAccessError,LeadConfigurationError,LeadConflictError,LeadRateLimitError,LeadValidationError,leadCaptureInputSchema} from "@/modules/crm/domain/lead-capture";
+import {LeadPipelineConflictError,LeadPipelineValidationError,LeadPipelineEvidenceError} from "@/modules/crm/domain/lead-pipeline";
 
 const mocks=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),telemetry:vi.fn()}));
 vi.mock("@/platform/auth/session",()=>({auth:mocks.auth}));
@@ -38,6 +39,9 @@ describe("private native lead HTTP boundaries",()=>{
   });
   it("reports the configured rate-limit reset without exposing request details",async()=>{
     const response=await leadHttp(request(),()=>Promise.reject(new LeadRateLimitError(new Date(Date.now()+41000))));expect(response.status).toBe(429);expect(Number(response.headers.get("retry-after"))).toBeGreaterThan(0);expect(await response.json()).toEqual({error:"rate_limited"});
+  });
+  it.each([{error:new LeadPipelineValidationError(),status:400,code:"validation"},{error:new LeadPipelineConflictError(),status:409,code:"conflict"},{error:new LeadPipelineEvidenceError(),status:409,code:"native_evidence_required"}])("keeps pipeline failures private: $code",async({error,status,code})=>{
+    const response=await leadHttp(request(),()=>Promise.reject(error),"F-CRM-02");expect(response.status).toBe(status);expect(await response.json()).toEqual({error:code});expect(response.headers.get("cache-control")).toBe("private, no-store");expect(mocks.telemetry).not.toHaveBeenCalled();
   });
   it("sanitizes unexpected native and session errors before telemetry or HTTP publication",async()=>{
     const sensitive="private-claim@example.test : secret provider detail";

@@ -5,6 +5,8 @@ import {authContextForAccount} from "@/platform/authz/account-context";
 import {ensureStandardIdentitySetup} from "@/modules/identity/application/identity-service";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {leadCapturePolicyKey,type LeadCaptureInput,type LeadCapturePolicy} from "@/modules/crm/domain/lead-capture";
+import {leadStages,leadPipelineEvidenceKinds,type LeadPipelinePolicy} from "@/modules/crm/domain/lead-pipeline";
+import {captureLead} from "@/modules/crm/application/lead-capture-service";
 
 const label={en:"Actual assessment",fr:"Évaluation réelle",ar:"تقييم فعلي"};
 export function nativeLeadPolicy(changes:Partial<LeadCapturePolicy>={}):LeadCapturePolicy{return{
@@ -37,4 +39,20 @@ export async function nativeLeadFixture(admin:PrismaClient,db:PrismaClient,chang
   });
   const ctx={organizationId,actorId:saved.account.id,authContext:{...await authContextForAccount(organizationId,saved.account.id,{db}),personId:saved.person.id}};
   return{organizationId,...saved,ctx};
+}
+
+export function nativeLeadStagePolicy(changes:Partial<LeadPipelinePolicy>={}):LeadPipelinePolicy{return{
+  source:"NATIVE_IMMUTABLE_LEAD_PIPELINE",history:"APPEND_ONLY_STAGE_MOVEMENTS",document_types:{proposal:["acquisition_proposal"],contract:["management_contract"]},
+  admission:{requests:100,window_seconds:3600},transitions:[...leadStages.slice(0,-1).map((from,index)=>({from,to:leadStages[index+1],kind:"ADVANCE" as const,evidence:[...leadPipelineEvidenceKinds.slice(0,Math.max(0,index-2))]})),
+    {from:"CONTACTED",to:"NEW",kind:"CORRECTION",evidence:[]},{from:"QUALIFIED",to:"NEW",kind:"CORRECTION",evidence:[]},{from:"PROPERTY_ASSESSMENT",to:"NEW",kind:"CORRECTION",evidence:[]}],...changes
+};}
+export async function nativeLeadStageFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv,changes:Partial<LeadPipelinePolicy>={}){
+  const base=await nativeLeadFixture(admin,db),saved=await withTenant(db,base.organizationId,async tx=>{
+    const role=await tx.role.create({data:{organizationId:base.organizationId,key:"actual_stage_editor_"+randomUUID(),name:"Independent actual lead stage editor"}}),permission=await tx.permission.findFirstOrThrow({where:{organizationId:base.organizationId,key:"lead:edit"}});
+    await tx.rolePermission.create({data:{organizationId:base.organizationId,roleId:role.id,permissionId:permission.id}});
+    const assignment=await tx.roleAssignment.create({data:{organizationId:base.organizationId,userAccountId:base.account.id,personId:base.person.id,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}}),stagePolicy=nativeLeadStagePolicy(changes),stageRule=await new ConfigRuleRepository(tx,base.organizationId).createVersion({key:"crm.pipeline",scopeType:"organization",createdBy:base.account.id,effectiveFrom:new Date("2020-01-01"),value:stagePolicy,reason:"Actual explicit native acquisition stage policy"});return{stagePolicy,stageRule,editAssignmentId:assignment.id};
+  });
+  const ctx={...base.ctx,authContext:{...await authContextForAccount(base.organizationId,base.account.id,{db}),personId:base.person.id}},input=nativeLeadInput(),lead=await captureLead(ctx,input,{db,env});
+  const assignments:Record<string,string>={...base.assignments,edit:saved.editAssignmentId};
+  return{...base,...saved,ctx,assignments,input,lead};
 }

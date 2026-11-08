@@ -3,7 +3,7 @@ import {describe,expect,it} from "vitest";
 import {configuredLeadTransition,leadStages,leadPipelineEvidenceKinds,leadPipelinePolicySchema,leadStageCommandSchema,requireNativeLeadStageProofs,type LeadPipelinePolicy,type NativeLeadStageProof} from "@/modules/crm/domain/lead-pipeline";
 
 const organizationId=randomUUID(),leadId=randomUUID(),now=new Date("2030-01-01T12:00:00Z");
-const policy=():LeadPipelinePolicy=>({source:"NATIVE_IMMUTABLE_LEAD_PIPELINE",history:"APPEND_ONLY_STAGE_MOVEMENTS",admission:{requests:10,window_seconds:60},transitions:leadStages.slice(0,-1).map((from,index)=>({from,to:leadStages[index+1],kind:"ADVANCE",evidence:[...leadPipelineEvidenceKinds]}))});
+const policy=():LeadPipelinePolicy=>({source:"NATIVE_IMMUTABLE_LEAD_PIPELINE",history:"APPEND_ONLY_STAGE_MOVEMENTS",document_types:{proposal:["acquisition_proposal"],contract:["management_contract"]},admission:{requests:10,window_seconds:60},transitions:leadStages.slice(0,-1).map((from,index)=>({from,to:leadStages[index+1],kind:"ADVANCE",evidence:[...leadPipelineEvidenceKinds]}))});
 const proof=(kind:NativeLeadStageProof["kind"]):NativeLeadStageProof=>({kind,organizationId,leadId,sourceId:randomUUID(),sourceFingerprint:"a".repeat(64),occurredAt:"2030-01-01T11:00:00Z"});
 
 describe("configured immutable acquisition pipeline",()=>{
@@ -30,6 +30,11 @@ describe("configured immutable acquisition pipeline",()=>{
   });
   it("rejects duplicate edges, unsupported stages and duplicate proof requirements",()=>{
     const value=policy();for(const changed of[{...value,transitions:[value.transitions[0],value.transitions[0]]},{...value,transitions:[{...value.transitions[0],to:"LIVE"}]},{...value,transitions:[{...value.transitions[0],evidence:["PROPOSAL_VERSION","PROPOSAL_VERSION"]}]}])expect(leadPipelinePolicySchema.safeParse(changed).success).toBe(false);
+  });
+  it("requires explicit distinct proposal/contract types and accepts references without accepting proof claims",()=>{
+    for(const document_types of[undefined,{proposal:[],contract:["agreement"]},{proposal:["agreement"],contract:["agreement"]},{proposal:["invalid/type"],contract:["agreement"]}])expect(leadPipelinePolicySchema.safeParse({...policy(),document_types}).success).toBe(false);
+    const command={leadId,previousRevisionId:randomUUID(),toStage:"PROPOSAL",idempotencyKey:randomUUID(),reviewFingerprint:"a".repeat(64),reason:"Actual reviewed native proposal",evidenceReferences:[{kind:"PROPOSAL_VERSION",sourceId:randomUUID()}]};expect(leadStageCommandSchema.parse(command).evidenceReferences).toEqual(command.evidenceReferences);
+    for(const evidenceReferences of[[...command.evidenceReferences,...command.evidenceReferences],[{...command.evidenceReferences[0],sourceFingerprint:"a".repeat(64)}],[{...command.evidenceReferences[0],organizationId}]])expect(leadStageCommandSchema.safeParse({...command,evidenceReferences}).success).toBe(false);
   });
   it("canonicalizes UUIDs and Unicode reasons while rejecting caller-owned authority or proof claims",()=>{
     const input={leadId:leadId.toUpperCase(),previousRevisionId:null,toStage:"CONTACTED",idempotencyKey:randomUUID().toUpperCase(),reviewFingerprint:"a".repeat(64),reason:"  Évaluation documentée  "},parsed=leadStageCommandSchema.parse(input);expect(parsed.leadId).toBe(leadId);expect(parsed.reason).toBe("Évaluation documentée");

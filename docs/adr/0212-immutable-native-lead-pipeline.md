@@ -26,3 +26,10 @@ reads, current source authorization, complete local acceptance, exact-head CI
 and authenticated hosted acceptance must be implemented and verified before
 this feature can satisfy its Definition of Done. This ADR grants no legal,
 signature, owner-conversion or production approval.
+
+Private change reasons reuse the existing versioned authenticated binary
+envelope and the lead capture key requirements. The stage row binds its reason
+cipher to the exact tenant, lead, revision, actor and command nonce. Audit and
+outbox records contain identifiers and hashes rather than contact details or
+the original reason text. Later dependency migrations must add actual native
+conversion/release guards before those stages can admit a movement.

@@ -13,6 +13,7 @@ import {consumeRateLimit} from "@/platform/rate-limit/postgres-rate-limiter";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {LeadRepository} from "../infrastructure/lead-repository";
+import {LeadStageRepository} from "../infrastructure/lead-stage-repository";
 import {leadCaptureInputSchema,leadCapturePolicyKey,leadCapturePolicySchema,leadCaptureMaximumRequestBytes,parseConfiguredLeadCapture,
   LeadAccessError,LeadConfigurationError,LeadConflictError,LeadValidationError,LeadRateLimitError} from "../domain/lead-capture";
 import {encryptLeadPayload,decryptLeadPayload,type LeadPayloadBinding} from "../domain/lead-payload";
@@ -21,7 +22,7 @@ export type LeadDependencies={db:TenantTransactionRunner;requestId?:string;env?:
 const referenceSchema=z.object({leadId:z.uuid().transform(value=>value.toLowerCase())}).strict();
 const receiptSchema=z.object({id:z.uuid(),initialStage:z.literal("NEW"),channel:leadCaptureInputSchema.shape.channel,
   sourceKey:leadCaptureInputSchema.shape.sourceKey,locale:leadCaptureInputSchema.shape.locale,createdAt:z.iso.datetime(),replayed:z.boolean()}).strict();
-const resource=(organizationId:string,id:string,at:Date)=>({type:"lead",id,organizationId,dataClass:"personal" as const,status:"NEW",occurredAt:at});
+const resource=(organizationId:string,id:string,at:Date,status="NEW")=>({type:"lead",id,organizationId,dataClass:"personal" as const,status,occurredAt:at});
 function binding(row:Lead):LeadPayloadBinding{
   if(row.payloadSchemaVersion!==1)throw new LeadConfigurationError();
   return{organizationId:row.organizationId,leadId:row.id,createdBy:row.createdBy,policyId:row.policyId,policyVersion:row.policyVersion,
@@ -45,7 +46,8 @@ function parsedInput(raw:unknown){const input=leadCaptureInputSchema.parse(raw);
 async function finalCaptureFence(actor:AccountActorContext,tx:TenantTransaction,row:Lead,expected:Settings,website:boolean){
   const now=await new LeadRepository(tx,actor.organizationId).clock(),current=await settings(tx,actor.organizationId,now);
   if(commandFingerprint(current.snapshot)!==commandFingerprint(expected.snapshot)||(website&&current.rule.createdBy!==actor.actorId))throw new LeadConflictError();
-  await captureAuthority(actor,tx,now,resource(actor.organizationId,row.id,row.createdAt),website);
+  const position=await new LeadStageRepository(tx,actor.organizationId).position(row.id);
+  await captureAuthority(actor,tx,now,resource(actor.organizationId,row.id,row.createdAt,position.stage),website);
 }
 
 async function capture(organizationInput:string,raw:unknown,actor:AccountActorContext|null,deps:LeadDependencies){
@@ -59,7 +61,8 @@ async function capture(organizationInput:string,raw:unknown,actor:AccountActorCo
     const repository=new LeadRepository(tx,organizationId),now=await repository.clock(),configured=await settings(tx,organizationId,now),principalId=configured.rule.createdBy!;
     const caller=actor??{organizationId,actorId:principalId,authContext:await authContextForAccountInTransaction(tx,organizationId,principalId)};
     const original=await repository.byNonce(input.idempotencyKey);
-    await captureAuthority(caller,tx,now,resource(organizationId,original?.id??candidateId,original?.createdAt??now),website);
+    const position=original?await new LeadStageRepository(tx,organizationId).position(original.id):null;
+    await captureAuthority(caller,tx,now,resource(organizationId,original?.id??candidateId,original?.createdAt??now,position?.stage),website);
     if(original&&original.createdBy!==caller.actorId)throw new LeadConflictError();
     const decision=await consumeRateLimit(tx,organizationId,{key:"crm.lead_capture:organization",limit:configured.policy.rate_limit.requests,windowSeconds:configured.policy.rate_limit.window_seconds,now});
     return{caller,configured,decision};
@@ -71,7 +74,8 @@ async function capture(organizationInput:string,raw:unknown,actor:AccountActorCo
     const now=await repository.clock(),configured=await settings(tx,organizationId,now),caller=budget.caller;
     if(commandFingerprint(configured.snapshot)!==commandFingerprint(budget.configured.snapshot)||(website&&configured.rule.createdBy!==caller.actorId))throw new LeadConflictError();
     const original=await repository.byNonce(input.idempotencyKey);
-    await captureAuthority(caller,tx,now,resource(organizationId,original?.id??candidateId,original?.createdAt??now),website);
+    const position=original?await new LeadStageRepository(tx,organizationId).position(original.id):null;
+    await captureAuthority(caller,tx,now,resource(organizationId,original?.id??candidateId,original?.createdAt??now,position?.stage),website);
     const requestId=deps.requestId??randomUUID();
     if(original){
       if(original.createdBy!==caller.actorId)throw new LeadConflictError();
@@ -107,11 +111,12 @@ export async function readLead(actor:AccountActorContext,raw:unknown,deps:LeadDe
   const input=referenceSchema.parse(raw);
   return withTenant(deps.db,actor.organizationId,async tx=>{
     const repository=new LeadRepository(tx,actor.organizationId),row=await repository.byId(input.leadId);if(!row)throw new LeadAccessError();
-    const target=resource(actor.organizationId,row.id,row.createdAt),now=await repository.clock();
+    const stages=new LeadStageRepository(tx,actor.organizationId),position=await stages.position(row.id),target=resource(actor.organizationId,row.id,row.createdAt,position.stage),now=await repository.clock();
     await recheckAccountAuthorization(actor,tx,now,[{action:"view",resource:target}],new LeadAccessError());
-    const payload=decryptLeadPayload(row.encryptedPayload,binding(row),deps.env),data={...receipt(row,false),fields:payload.fields};
+    const payload=decryptLeadPayload(row.encryptedPayload,binding(row),deps.env),data={...receipt(row,false),stage:position.stage,stageRevisionId:position.revisionId,fields:payload.fields};
     await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_read",resourceType:"lead",resourceId:row.id,
       after:{leadId:row.id,channel:row.channel,commandHash:row.commandHash},requestId:deps.requestId??randomUUID(),occurredAt:now});
+    const finalPosition=await stages.position(row.id);if(commandFingerprint(position)!==commandFingerprint(finalPosition))throw new LeadConflictError();
     const finalNow=await repository.clock();await recheckAccountAuthorization(actor,tx,finalNow,[{action:"view",resource:target}],new LeadAccessError());
     return present({...actor.authContext,visibleDataClasses:new Set(["operational"] as const)},"view",{...target,data},catalogFieldPolicy<typeof data>("lead"),finalNow);
   });
