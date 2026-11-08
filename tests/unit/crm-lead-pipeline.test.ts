@@ -1,12 +1,21 @@
 import {randomUUID} from "node:crypto";
 import {describe,expect,it} from "vitest";
-import {configuredLeadTransition,leadStages,leadPipelineEvidenceKinds,leadPipelinePolicySchema,leadStageCommandSchema,requireNativeLeadStageProofs,type LeadPipelinePolicy,type NativeLeadStageProof} from "@/modules/crm/domain/lead-pipeline";
+import {configuredLeadTransition,canonicalLeadStageDraft,canonicalLeadStageCommand,leadStages,leadPipelineEvidenceKinds,leadPipelinePolicySchema,leadStageCommandSchema,requireNativeLeadStageProofs,type LeadPipelinePolicy,type NativeLeadStageProof} from "@/modules/crm/domain/lead-pipeline";
 
 const organizationId=randomUUID(),leadId=randomUUID(),now=new Date("2030-01-01T12:00:00Z");
 const policy=():LeadPipelinePolicy=>({source:"NATIVE_IMMUTABLE_LEAD_PIPELINE",history:"APPEND_ONLY_STAGE_MOVEMENTS",document_types:{proposal:["acquisition_proposal"],contract:["management_contract"]},admission:{requests:10,window_seconds:60},transitions:leadStages.slice(0,-1).map((from,index)=>({from,to:leadStages[index+1],kind:"ADVANCE",evidence:[...leadPipelineEvidenceKinds]}))});
 const proof=(kind:NativeLeadStageProof["kind"]):NativeLeadStageProof=>({kind,organizationId,leadId,sourceId:randomUUID(),sourceFingerprint:"a".repeat(64),occurredAt:"2030-01-01T11:00:00Z"});
 
 describe("configured immutable acquisition pipeline",()=>{
+  it("gives omitted and empty technical references identical command bytes for durable replay",()=>{
+    const input={leadId,previousRevisionId:null,toStage:"CONTACTED",idempotencyKey:randomUUID(),reviewFingerprint:"a".repeat(64),reason:"Actual original private decision"};expect(JSON.stringify(canonicalLeadStageCommand(input))).toBe(JSON.stringify(canonicalLeadStageCommand({...input,evidenceReferences:[]})));expect(JSON.stringify(canonicalLeadStageDraft({leadId,previousRevisionId:null,toStage:"CONTACTED"}))).toBe(JSON.stringify(canonicalLeadStageDraft({leadId,previousRevisionId:null,toStage:"CONTACTED",evidenceReferences:[]})));
+  });
+  it("canonicalizes reference order without mutating the original selection or accepting a duplicate proof kind",()=>{
+    const references=[{kind:"CONTRACT_VERSION",sourceId:randomUUID()},{kind:"PROPOSAL_VERSION",sourceId:randomUUID()}],before=structuredClone(references),input={leadId,previousRevisionId:randomUUID(),toStage:"CONTRACT_DRAFT",evidenceReferences:references};expect(JSON.stringify(canonicalLeadStageDraft(input))).toBe(JSON.stringify(canonicalLeadStageDraft({...input,evidenceReferences:[...references].reverse()})));expect(references).toEqual(before);expect(()=>canonicalLeadStageDraft({...input,evidenceReferences:[references[0],references[0]]})).toThrow();
+  });
+  it("retains business differences and denies caller-owned authority in canonical replay commands",()=>{
+    const input={leadId,previousRevisionId:null,toStage:"CONTACTED",idempotencyKey:randomUUID(),reviewFingerprint:"a".repeat(64),reason:"Actual original private decision"};expect(JSON.stringify(canonicalLeadStageCommand(input))).not.toBe(JSON.stringify(canonicalLeadStageCommand({...input,reason:"Changed private decision"})));expect(()=>canonicalLeadStageCommand({...input,actorId:randomUUID()})).toThrow();
+  });
   it("preserves every approved stage in its exact product order",()=>{
     expect(leadStages).toEqual(["NEW","CONTACTED","QUALIFIED","PROPERTY_ASSESSMENT","PROPOSAL","CONTRACT_DRAFT","SENT","VIEWED","SIGNED","ALVILLAS_ONBOARDING","GO_LIVE"]);expect(leadPipelinePolicySchema.parse(policy()).transitions).toHaveLength(10);
   });

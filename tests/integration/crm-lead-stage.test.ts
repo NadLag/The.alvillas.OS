@@ -41,6 +41,9 @@ describe("actual immutable lead pipeline admissions",()=>{
   it("serializes simultaneous exact retries into one native movement and audit/outbox",async()=>{
     const f=await fixture(),input=await command(f),results=await Promise.all([admitLeadStage(f.ctx,input,deps()),admitLeadStage(f.ctx,input,deps())]);expect(new Set(results.map(row=>row.id)).size).toBe(1);expect(results.map(row=>row.replayed).sort()).toEqual([false,true]);expect(await counts(f)).toEqual({stages:1,audits:1,events:1});
   });
+  it("recovers the same original nonce when a client explicitly sends an empty reference list",async()=>{
+    const f=await fixture(),input=await command(f),saved=await admitLeadStage(f.ctx,input,deps());expect(await admitLeadStage(f.ctx,{reason:input.reason,reviewFingerprint:input.reviewFingerprint,idempotencyKey:input.idempotencyKey,evidenceReferences:[],toStage:input.toStage,previousRevisionId:input.previousRevisionId,leadId:input.leadId},deps())).toEqual({...saved,replayed:true});expect(await counts(f)).toEqual({stages:1,audits:1,events:1});
+  });
   it("admits only one command against the same reviewed predecessor",async()=>{
     const f=await fixture(),first=await command(f),results=await Promise.allSettled([admitLeadStage(f.ctx,first,deps()),admitLeadStage(f.ctx,{...first,idempotencyKey:randomUUID()},deps())]);expect(results.filter(row=>row.status==="fulfilled")).toHaveLength(1);expect(results.filter(row=>row.status==="rejected")).toHaveLength(1);expect(await counts(f)).toEqual({stages:1,audits:1,events:1});
   });

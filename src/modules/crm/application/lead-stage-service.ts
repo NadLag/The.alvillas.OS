@@ -12,7 +12,7 @@ import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {commandFingerprint} from "@/platform/http/command-fingerprint";
 import {LeadAccessError,LeadConfigurationError,LeadRateLimitError} from "../domain/lead-capture";
-import {configuredLeadTransition,leadPipelinePolicyKey,leadPipelinePolicySchema,leadStageDraftSchema,leadStageCommandSchema,leadStageSchema,leadPipelineEvidenceKinds,LeadPipelineConflictError,type LeadStageDraft,type LeadStagePosition} from "../domain/lead-pipeline";
+import {configuredLeadTransition,canonicalLeadStageDraft,canonicalLeadStageCommand,leadPipelinePolicyKey,leadPipelinePolicySchema,leadStageSchema,leadPipelineEvidenceKinds,LeadPipelineConflictError,type LeadStageDraft,type LeadStagePosition} from "../domain/lead-pipeline";
 import {encryptLeadStageReason,decryptLeadStageReason} from "../domain/lead-stage-reason";
 import {LeadStageRepository} from "../infrastructure/lead-stage-repository";
 import {nativeLeadStageEvidence} from "./lead-stage-evidence";
@@ -23,7 +23,6 @@ const historyInput=z.object({leadId:uuid,before:z.number().int().positive().opti
 const resource=(lead:Lead,stage:string)=>({type:"lead",id:lead.id,organizationId:lead.organizationId,dataClass:"personal" as const,status:stage,occurredAt:lead.createdAt});
 const reasonBinding=(row:LeadStageRevision)=>({organizationId:row.organizationId,leadId:row.leadId,revisionId:row.id,createdBy:row.createdBy,commandKey:row.commandKey});
 const receipt=(row:LeadStageRevision,replayed:boolean)=>({id:row.id,leadId:row.leadId,number:row.number,fromStage:leadStageSchema.parse(row.fromStage),toStage:leadStageSchema.parse(row.toStage),createdAt:row.createdAt.toISOString(),replayed});
-const normalized=<T extends LeadStageDraft>(input:T)=>({...input,evidenceReferences:[...(input.evidenceReferences??[])].sort((left,right)=>leadPipelineEvidenceKinds.indexOf(left.kind)-leadPipelineEvidenceKinds.indexOf(right.kind))});
 async function settings(tx:TenantTransaction,organizationId:string,now:Date){
   try{const rule=await new ConfigRuleRepository(tx,organizationId).resolve({key:leadPipelinePolicyKey,scopes:[{scopeType:"organization",scopeId:null}],asOf:now});if(!rule)throw new LeadConfigurationError();return{rule,policy:leadPipelinePolicySchema.parse(rule.parsedValue),snapshot:{id:rule.id,version:rule.version,value:rule.value}};}catch(error){if(error instanceof ZodError)throw new LeadConfigurationError();throw error;}
 }
@@ -36,7 +35,7 @@ async function moveAuthority(actor:AccountActorContext,tx:TenantTransaction,base
 }
 async function draftContext(actor:AccountActorContext,tx:TenantTransaction,input:LeadStageDraft,deps:LeadDependencies){
   const base=await leadContext(actor,tx,input.leadId),configured=await settings(tx,actor.organizationId,base.now),selected=configuredLeadTransition(base.position,input,configured.policy);await moveAuthority(actor,tx,base,input.toStage);
-  const evidence=await nativeLeadStageEvidence(actor,tx,input,selected.transition.evidence,configured.policy,base.now,deps),reviewFingerprint=commandFingerprint({protocol,leadId:base.lead.id,position:base.position,input:normalized(input),policy:configured.snapshot,evidence,authorizationCap:captureAuthorizationCap(actor.authContext)});
+  const evidence=await nativeLeadStageEvidence(actor,tx,input,selected.transition.evidence,configured.policy,base.now,deps),reviewFingerprint=commandFingerprint({protocol,leadId:base.lead.id,position:base.position,input:canonicalLeadStageDraft(input),policy:configured.snapshot,evidence,authorizationCap:captureAuthorizationCap(actor.authContext)});
   return{...base,configured,selected,evidence,reviewFingerprint};
 }
 async function finalDraftFence(actor:AccountActorContext,tx:TenantTransaction,input:LeadStageDraft,base:Awaited<ReturnType<typeof draftContext>>,deps:LeadDependencies,recordedId?:string){
@@ -49,17 +48,17 @@ async function finalReadFence(actor:AccountActorContext,tx:TenantTransaction,bas
 }
 function retainedCommand(row:LeadStageRevision,env?:NodeJS.ProcessEnv){
   const evidence=z.array(z.object({kind:z.enum(leadPipelineEvidenceKinds),sourceId:uuid}).passthrough()).parse(row.evidence);
-  return normalized(leadStageCommandSchema.parse({leadId:row.leadId,previousRevisionId:row.previousId,toStage:row.toStage,idempotencyKey:row.commandKey,reviewFingerprint:row.reviewFingerprint,reason:decryptLeadStageReason(row.reasonCipher,reasonBinding(row),env),evidenceReferences:evidence.map(proof=>({kind:proof.kind,sourceId:proof.sourceId}))}));
+  return canonicalLeadStageCommand({leadId:row.leadId,previousRevisionId:row.previousId,toStage:row.toStage,idempotencyKey:row.commandKey,reviewFingerprint:row.reviewFingerprint,reason:decryptLeadStageReason(row.reasonCipher,reasonBinding(row),env),evidenceReferences:evidence.map(proof=>({kind:proof.kind,sourceId:proof.sourceId}))});
 }
 
 export async function reviewLeadStage(actor:AccountActorContext,raw:unknown,deps:LeadDependencies){
-  const input=normalized(leadStageDraftSchema.parse(raw));return withTenant(deps.db,actor.organizationId,async tx=>{
+  const input=canonicalLeadStageDraft(raw);return withTenant(deps.db,actor.organizationId,async tx=>{
     const base=await draftContext(actor,tx,input,deps);await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_stage_reviewed",resourceType:"lead",resourceId:input.leadId,after:{leadId:input.leadId,fromStage:base.position.stage,toStage:input.toStage,policyId:base.configured.rule.id,reviewFingerprint:base.reviewFingerprint},requestId:deps.requestId??randomUUID(),occurredAt:base.now});await finalDraftFence(actor,tx,input,base,deps);
     return{leadId:input.leadId,previousRevisionId:base.position.revisionId,fromStage:base.position.stage,toStage:input.toStage,kind:base.selected.transition.kind,requiredEvidence:base.selected.transition.evidence,reviewFingerprint:base.reviewFingerprint};
   });
 }
 export async function admitLeadStage(actor:AccountActorContext,raw:unknown,deps:LeadDependencies){
-  const input=normalized(leadStageCommandSchema.parse(raw));
+  const input=canonicalLeadStageCommand(raw);
   const budget=await withTenant(deps.db,actor.organizationId,async tx=>{
     const base=await leadContext(actor,tx,input.leadId),configured=await settings(tx,actor.organizationId,base.now),existing=await base.repository.byNonce(input.idempotencyKey);
     if(existing){if(existing.createdBy!==actor.actorId||existing.leadId!==input.leadId)throw new LeadAccessError();}else await moveAuthority(actor,tx,base,input.toStage);

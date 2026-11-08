@@ -49,6 +49,16 @@ export type LeadStageDraft=z.infer<typeof leadStageDraftSchema>;
 export type LeadStageCommand=z.infer<typeof leadStageCommandSchema>;
 export type LeadStagePosition={stage:LeadStage;revisionId:string|null};
 
+/** Stable protocol projection also equates absent and empty technical references. */
+export function canonicalLeadStageDraft(raw:unknown){
+  const input=leadStageDraftSchema.parse(raw);
+  return{leadId:input.leadId,previousRevisionId:input.previousRevisionId,toStage:input.toStage,evidenceReferences:[...(input.evidenceReferences??[])].sort((left,right)=>leadPipelineEvidenceKinds.indexOf(left.kind)-leadPipelineEvidenceKinds.indexOf(right.kind))};
+}
+export function canonicalLeadStageCommand(raw:unknown){
+  const input=leadStageCommandSchema.parse(raw);
+  return{...canonicalLeadStageDraft({leadId:input.leadId,previousRevisionId:input.previousRevisionId,toStage:input.toStage,evidenceReferences:input.evidenceReferences}),idempotencyKey:input.idempotencyKey,reviewFingerprint:input.reviewFingerprint,reason:input.reason};
+}
+
 /** Only repository-derived proof snapshots reach this boundary; HTTP accepts references alone. */
 export const nativeLeadStageProofSchema=z.object({
   kind:z.enum(leadPipelineEvidenceKinds),organizationId:uuid,leadId:uuid,sourceId:uuid,sourceFingerprint:sha256,occurredAt:z.iso.datetime()
