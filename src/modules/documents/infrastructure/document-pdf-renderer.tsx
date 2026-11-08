@@ -26,7 +26,7 @@ export class DocumentPdfRenderer implements PdfRenderer {
       try { return validateGeneratedPdf(await this.arabicRenderer.render({ ...input, data: payload }), payload.maximumBytes); }
       catch { throw new DocumentPdfConfigurationError(); }
     }
-    registerAlvillasPdfFonts();
+    await registerAlvillasPdfFonts();
     const pdf = <Document title={source.title} language={input.locale} creator="ALVILLAS OS" producer="ALVILLAS OS"
       subject={[source.templateKey, payload.provenance.templateVersionId, payload.provenance.templateSha256, payload.provenance.sourceFingerprint].join(";")}>
       <Page size="A4" style={styles.page}><Text style={styles.title}>{source.title}</Text>

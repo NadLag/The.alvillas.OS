@@ -23,7 +23,7 @@ export class AccountantPdfRenderer implements PdfRenderer {
       if (!this.arabicRenderer) throw new AccountantExportConfigurationError();
       return this.arabicRenderer.render({ ...input, data: { ...payload, source } });
     }
-    registerAlvillasPdfFonts();
+    await registerAlvillasPdfFonts();
     const metadata = { report: labels.title, fromOn: source.fromOn, toOn: source.toOn, currency: source.currency, timezone: source.timezone,
       policyId: source.policy.id, policyVersion: String(source.policy.version), sourceFingerprint: source.sourceFingerprint, generatedAt: source.generatedAt,
       propertyId: source.scope.propertyId ?? "", ownerId: source.scope.ownerId ?? "", accountId: source.scope.accountId ?? "" };
