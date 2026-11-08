@@ -9,10 +9,11 @@ import {leadCaptureMaximumRequestBytes,LeadAccessError,LeadValidationError,LeadC
 import {LeadPipelineConflictError,LeadPipelineValidationError,LeadPipelineEvidenceError} from "../domain/lead-pipeline";
 import {LeadWorkConflictError} from "../domain/lead-work";
 import {LeadProfileConflictError} from "../domain/lead-profile";
+import {LeadConversionConflictError,LeadConversionSourceError} from "../domain/lead-conversion";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
 const failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
-async function boundary(request:NextRequest,work:(input:unknown,requestId:string)=>Promise<unknown>,options:{publicIntake:boolean;organizationId?:string;feature?:"F-CRM-01"|"F-CRM-02"|"F-CRM-03"|"F-CRM-04"}){
+async function boundary(request:NextRequest,work:(input:unknown,requestId:string)=>Promise<unknown>,options:{publicIntake:boolean;organizationId?:string;feature?:"F-CRM-01"|"F-CRM-02"|"F-CRM-03"|"F-CRM-04"|"F-CRM-07"}){
   const requestId=crypto.randomUUID();
   try{
     if(!isSameOriginContentType(request,"application/json"))return failure("forbidden",403);
@@ -22,8 +23,8 @@ async function boundary(request:NextRequest,work:(input:unknown,requestId:string
     return options.publicIntake?NextResponse.json({accepted:true},{status:202,headers}):NextResponse.json(value,{headers});
   }catch(error){
     if(error instanceof LeadAccessError)return failure(options.publicIntake?"configuration_unavailable":"forbidden",options.publicIntake?503:403);
-    if(error instanceof ZodError||error instanceof LeadValidationError||error instanceof LeadPipelineValidationError)return failure("validation",400);
-    if(error instanceof LeadConflictError||error instanceof LeadPipelineConflictError||error instanceof LeadProfileConflictError||error instanceof LeadWorkConflictError)return failure("conflict",409);
+    if(error instanceof ZodError||error instanceof LeadValidationError||error instanceof LeadPipelineValidationError||error instanceof LeadConversionSourceError)return failure("validation",400);
+    if(error instanceof LeadConflictError||error instanceof LeadPipelineConflictError||error instanceof LeadProfileConflictError||error instanceof LeadWorkConflictError||error instanceof LeadConversionConflictError)return failure("conflict",409);
     if(error instanceof LeadPipelineEvidenceError)return failure("native_evidence_required",409);
     if(error instanceof LeadConfigurationError)return failure("configuration_unavailable",503);
     if(error instanceof LeadRateLimitError){const response=failure("rate_limited",429);response.headers.set("Retry-After",String(Math.max(1,Math.ceil((error.resetAt.getTime()-Date.now())/1000))));return response;}
@@ -32,7 +33,7 @@ async function boundary(request:NextRequest,work:(input:unknown,requestId:string
   }
 }
 
-export async function leadHttp(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>,feature:"F-CRM-01"|"F-CRM-02"|"F-CRM-03"|"F-CRM-04"="F-CRM-01"){
+export async function leadHttp(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>,feature:"F-CRM-01"|"F-CRM-02"|"F-CRM-03"|"F-CRM-04"|"F-CRM-07"="F-CRM-01"){
   try{
     const actor=await accountActorContextFromSession(await auth());if(!actor)return failure("unauthorized",401);
     const scope=request.headers.get("x-alvillas-crm-scope");if(scope!==null&&scope!==actor.organizationId+"."+actor.actorId)return failure("forbidden",403);

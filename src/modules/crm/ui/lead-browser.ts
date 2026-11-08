@@ -2,7 +2,7 @@ import {z} from "zod";
 import {readBoundedResponseBytes} from "@/platform/http/read-exact-response";
 export type LeadBrowserState="ready"|"loading"|"saved"|"uncertain"|"forbidden"|"offline"|"validation"|"conflict"|"configuration_unavailable"|"rate_limited"|"native_evidence_required"|"unavailable";
 export class LeadBrowserError extends Error{constructor(readonly state:LeadBrowserState){super(state);}}
-export type LeadEndpoint="capture"|"capture/recover"|"workspace/list"|"workspace/options"|"profiles/review"|"profiles/admit"|"profiles/recover"|"profiles/history"|"stages/review"|"stages/admit"|"stages/recover"|"stages/history"|"work/review"|"work/admit"|"work/recover"|"work/history"|"work/options"|"work/candidates";
+export type LeadEndpoint="capture"|"capture/recover"|"workspace/list"|"workspace/options"|"profiles/review"|"profiles/admit"|"profiles/recover"|"profiles/history"|"stages/review"|"stages/admit"|"stages/recover"|"stages/history"|"work/review"|"work/admit"|"work/recover"|"work/history"|"work/options"|"work/candidates"|"conversion/options"|"conversion/choices"|"conversion/review"|"conversion/admit"|"conversion/recover"|"conversion/read";
 export async function leadRequest(scope:string,path:LeadEndpoint,input:unknown,signal:AbortSignal):Promise<unknown>{
   const mutation=path==="capture"||path.endsWith("/admit");
   try{

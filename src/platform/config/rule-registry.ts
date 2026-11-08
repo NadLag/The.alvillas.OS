@@ -7,6 +7,7 @@ import {leadCapturePolicyKey,leadCapturePolicySchema} from "@/modules/crm/domain
 import {leadPipelinePolicyKey,leadPipelinePolicySchema} from "@/modules/crm/domain/lead-pipeline";
 import {leadProfilePolicyKey,leadProfilePolicySchema} from "@/modules/crm/domain/lead-profile";
 import {leadWorkPolicyKey,leadWorkPolicySchema} from "@/modules/crm/domain/lead-work";
+import {leadConversionPolicyKey,leadConversionPolicySchema} from "@/modules/crm/domain/lead-conversion";
 import { documentArchivePolicyKey, documentArchivePolicySchema } from "@/modules/documents/domain/document-policy";
 import { documentSignaturePolicyKey, documentSignaturePolicySchema } from "@/modules/documents/domain/document-signature-policy";
 import { documentExpiryPolicyKey, documentExpiryPolicySchema, documentExpiryRoutingKey } from "@/modules/documents/domain/document-expiry-policy";
@@ -419,6 +420,7 @@ export const configRuleSchemas = {
   [leadPipelinePolicyKey]:leadPipelinePolicySchema,
   [leadProfilePolicyKey]:leadProfilePolicySchema,
   [leadWorkPolicyKey]:leadWorkPolicySchema,
+  [leadConversionPolicyKey]:leadConversionPolicySchema,
   [documentArchivePolicyKey]: documentArchivePolicySchema,
   [documentSignaturePolicyKey]: documentSignaturePolicySchema,
   [documentExpiryPolicyKey]: documentExpiryPolicySchema,
