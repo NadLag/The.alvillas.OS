@@ -7,6 +7,16 @@ function fixture(){
   return{measure,emit:(query:string)=>listener({query})};
 }
 describe("complete native transaction query evidence",()=>{
+  it("retains an exact pool health probe separately from every statement of the complete transaction",async()=>{
+    const f=fixture(),first=await f.measure(()=>{f.emit("SELECT 1");f.emit("BEGIN");f.emit("SELECT actual_source");f.emit("COMMIT");return Promise.resolve(true);}),second=await f.measure(()=>{f.emit("BEGIN");f.emit("SELECT actual_source");f.emit("COMMIT");return Promise.resolve(true);});
+    expect(first.queries).toBe(3);expect(second.queries).toBe(first.queries);expect(first.connectionProbes).toBe(1);expect(second.connectionProbes).toBe(0);expect(first.queries+first.connectionProbes).toBe(4);
+  });
+  it("counts SELECT 1 inside the application transaction instead of hiding it as a pool probe",async()=>{
+    const f=fixture(),measured=await f.measure(()=>{f.emit("BEGIN");f.emit("SELECT 1");f.emit("COMMIT");return Promise.resolve(true);});expect(measured.queries).toBe(3);expect(measured.connectionProbes).toBe(0);
+  });
+  it.each(["SELECT actual_source","SELECT 1 FROM actual_source","UPDATE actual_source SET value=1"])("rejects an unaccounted statement outside the application transaction: %s",async query=>{
+    const f=fixture();await expect(f.measure(()=>{f.emit(query);f.emit("BEGIN");f.emit("SELECT actual_source");f.emit("COMMIT");return Promise.resolve(true);})).rejects.toThrow("One complete native transaction");
+  });
   it("counts BEGIN, every source read and the actual terminal COMMIT",async()=>{
     const f=fixture(),measured=await f.measure(()=>{f.emit("BEGIN");f.emit("SELECT actual_source");f.emit("SELECT current_authority");f.emit("COMMIT");return Promise.resolve("original result");});
     expect(measured.result).toBe("original result");expect(measured.queries).toBe(4);expect(measured.elapsedMs).toBeGreaterThanOrEqual(0);
