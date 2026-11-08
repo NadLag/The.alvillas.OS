@@ -6,6 +6,7 @@ import {withTenant} from "@/platform/db/tenant";
 import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
 import {nativeLeadInput,appendNativeLeadFinancialSentinel} from "../integration/support/lead-fixture";
 import {configuredLeadWork} from "./support/crm-fixtures";
+import {utcDateTimeLocalValue} from "./support/date-time-local";
 import {e2eEmail,ensureE2EAdmin,completeE2EAdminMfa,waitForE2EAdminLoginWindow} from "./support/auth";
 import en from "../../messages/en.json" with {type:"json"};
 import fr from "../../messages/fr.json" with {type:"json"};
@@ -28,8 +29,8 @@ type Fixture=Awaited<ReturnType<typeof login>>;
 async function open(page:Page,locale:Locale){await page.getByTestId("lead-open-work").click();const panel=page.getByTestId("lead-work-panel");await expect(panel).toBeVisible();await expect(panel).toContainText(copy[locale].work.title);return panel;}
 async function fill(page:Page,locale:Locale,f:Fixture,kind:"ACTIVITY"|"REMINDER"|"ASSIGNMENT",summary:string){
  const panel=await open(page,locale),text=copy[locale].work;await panel.locator('[name="workKind"]').selectOption(kind);const editor=page.getByTestId("lead-work-editor");
- if(kind==="ACTIVITY"){await editor.locator('[name="activityTypeKey"]').selectOption("call");await editor.locator('[name="occurredAt"]').fill(new Date(Date.now()-1000).toISOString().slice(0,-1));}
- else{if(kind==="REMINDER")await editor.locator('[name="dueAt"]').fill(new Date(Date.now()+3600000).toISOString().slice(0,-1));await editor.locator('input[type="search"]').fill(f.displayName);await editor.getByRole("button",{name:text.search,exact:true}).click();await expect(editor.locator('[name="workAccount"] option[value="'+f.account.id+'"]')).toHaveCount(1);await editor.locator('[name="workAccount"]').selectOption(f.account.id);}
+ if(kind==="ACTIVITY"){await editor.locator('[name="activityTypeKey"]').selectOption("call");await editor.locator('[name="occurredAt"]').fill(utcDateTimeLocalValue(new Date(Date.now()-1000)));}
+ else{if(kind==="REMINDER")await editor.locator('[name="dueAt"]').fill(utcDateTimeLocalValue(new Date(Date.now()+3600000)));await editor.locator('input[type="search"]').fill(f.displayName);await editor.getByRole("button",{name:text.search,exact:true}).click();await expect(editor.locator('[name="workAccount"] option[value="'+f.account.id+'"]')).toHaveCount(1);await editor.locator('[name="workAccount"]').selectOption(f.account.id);}
  if(kind!=="ASSIGNMENT"){await editor.locator('[name="summary"]').fill(summary);await editor.locator('[name="notes"]').fill("Private work note "+"texteprivé".repeat(220));}await editor.locator('[name="reason"]').fill("Actual reviewed work reason "+locale);await editor.getByRole("button",{name:text.review,exact:true}).click();await expect(page.getByTestId("lead-review")).toBeVisible();await expect(page.getByTestId("lead-review")).toContainText(kind==="ASSIGNMENT"?f.displayName:summary);
 }
 async function confirm(page:Page,locale:Locale){await page.getByTestId("lead-review").getByRole("button",{name:copy[locale].work.confirm,exact:true}).click();await expect(page.getByTestId("lead-status")).toHaveText(copy[locale].states.saved);}
