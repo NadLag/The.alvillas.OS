@@ -1,6 +1,7 @@
 import type {LeadWorkEntry} from "@prisma/client";
+import {z} from "zod";
 import {decryptLeadWorkPayload,type LeadWorkPayloadBinding} from "../domain/lead-work-payload";
-import {LeadWorkConflictError,leadWorkKindSchema,type NativeLeadWorkSubject} from "../domain/lead-work";
+import {LeadWorkConflictError,leadWorkKindSchema,leadWorkPolicySchema,type NativeLeadWorkSubject} from "../domain/lead-work";
 import {leadWorkReceiptSchema} from "../domain/lead-work-view";
 
 export function leadWorkBinding(row:LeadWorkEntry):LeadWorkPayloadBinding{
@@ -20,4 +21,8 @@ export function leadWorkSubject(row:LeadWorkEntry,env?:NodeJS.ProcessEnv):Native
 }
 export function leadWorkReceipt(row:LeadWorkEntry,replayed:boolean){
   return leadWorkReceiptSchema.parse({id:row.id,leadId:row.leadId,number:row.number,subjectId:row.subjectId,subjectNumber:row.subjectNumber,previousRevisionId:row.previousId,previousSubjectRevisionId:row.previousSubjectId,kind:leadWorkKindSchema.parse(row.kind),createdAt:row.createdAt.toISOString(),replayed});
+}
+export function leadWorkHistoryItem(row:LeadWorkEntry,currentSubject:boolean,env?:NodeJS.ProcessEnv){
+  const command=retainedLeadWork(row,env),policy=z.object({value:leadWorkPolicySchema}).parse(row.policySnapshot),activityLabel=command.kind==="ACTIVITY"?policy.value.activity_types.find(type=>type.key===command.activityTypeKey)?.label??null:null;
+  if(command.kind==="ACTIVITY"&&!activityLabel)throw new LeadWorkConflictError();return{...leadWorkReceipt(row,false),command,representativePersonId:row.representativePersonId,currentSubject,activityLabel};
 }

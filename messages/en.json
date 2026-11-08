@@ -5404,6 +5404,53 @@
       "native_evidence_required": "Complete the required documents and signatures before changing this stage.",
       "unavailable": "Lead details are unavailable. Reload to try again."
     },
-    "stageMovement": "{from} → {to}"
+    "stageMovement": "{from} → {to}",
+    "recoverWork": "Recover saved activity or reminder",
+    "work": {
+      "title": "Activities, reminders and assignment",
+      "kind": "Work type",
+      "kinds": {
+        "ACTIVITY": "Activity",
+        "REMINDER": "Reminder",
+        "ASSIGNMENT": "Representative assignment"
+      },
+      "representative": "Representative",
+      "recordedAccount": "Recorded account",
+      "unassigned": "No representative",
+      "activityType": "Activity type",
+      "recordedActivity": "Recorded activity type",
+      "occurredAt": "Activity time (UTC)",
+      "reminderState": "Reminder state",
+      "states": {
+        "OPEN": "Open",
+        "COMPLETED": "Completed",
+        "CANCELLED": "Cancelled"
+      },
+      "dueAt": "Due time (UTC)",
+      "recipient": "Reminder recipient",
+      "summary": "Summary",
+      "notes": "Private notes",
+      "correct": "Record a correction",
+      "add": "Record lead work",
+      "choose": "Choose an option",
+      "searchAccounts": "Find an authorized team member",
+      "search": "Search accounts",
+      "accountAccess": "Only independently authorized accounts are available. Assignment does not grant access.",
+      "reason": "Reason for this record",
+      "validation": "Check the selected account, dates and required fields.",
+      "utc": "Activity and reminder times in this section use UTC.",
+      "review": "Review this record",
+      "cancel": "Cancel correction",
+      "refresh": "Refresh work history",
+      "history": "Retained work history",
+      "empty": "No activities, reminders or assignment changes have been recorded.",
+      "historyNumber": "Record {number}",
+      "current": "Current subject revision",
+      "retained": "Retained earlier revision",
+      "more": "Earlier records",
+      "reviewTitle": "Review lead work",
+      "confirm": "Confirm this record",
+      "recordedAt": "Recorded {date} (UTC)"
+    }
   }
 }
