@@ -43,7 +43,7 @@ async function completeOriginal({page,db,provider,signatureId,documentVersionId,
 }
 
 for(const mode of["CREATE","LINK"]as const)for(const locale of["en","fr","ar"]as const)test(`Actual reviewed ${mode} conversion retains native signed Lead and original Owner in ${locale}`,async({page,context},info)=>{
- await nativeLeadContractBrowserFlow(page,context,locale,info,{permissions:["owner:view","owner:create","owner:edit"],afterSent:async value=>{
+ await nativeLeadContractBrowserFlow(page,context,locale,info,{leadEmail:randomUUID()+"@native-conversion.test",permissions:["owner:view","owner:create","owner:edit"],afterSent:async value=>{
   const{db,f,provider,signatureId,errors}=value,{actor,archive}=await completeOriginal(value),financial=await nativeLeadBrowserFinancial(db),ownerCount=await withTenant(db,bootstrapOrganizationId,tx=>tx.owner.count());let existingOwner:{id:string;displayName:string;email:string|null}|null=null;
   if(mode==="LINK"){
    const displayName="Actual independently selected Owner "+randomUUID(),email=randomUUID()+"@existing-owner.test";await page.goto(`/${locale}/app/owners`);await expect(page.getByTestId("owner-create-form")).toBeVisible();await page.getByTestId("owner-display-name").fill(displayName);await page.getByTestId("owner-email").fill(email);await page.getByTestId("owner-preferred-locale").selectOption("en");await page.getByTestId("owner-submit").click();await expect(page).toHaveURL(new RegExp("/"+locale+"/app/owners/[a-f0-9-]+$"));
