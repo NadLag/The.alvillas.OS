@@ -33,4 +33,18 @@ conversion evidence continue through their native producers. Registering the
 lead archive source keeps lead signing closed until F-CRM-06 supplies native
 recipient identity and its required provider evidence.
 
+Retiring the capture policy closes new document generation and pending
+publication. It does not remove the native source of an existing document.
+Authorized historical reads and completed-nonce recovery use retained capture
+approval and current lead/document authority. The source's existing archived
+flag closes creation, and a missing current policy changes its fingerprint;
+no capture, document, version or financial row is rewritten.
+
+The document picker resolves contact labels only after source authorization.
+Contact search filters bounded decrypted pages rather than adding plaintext
+search columns. Initial and final source batches use independent repository
+snapshots; a concurrent profile, stage or representative change withholds the
+response. The same captured resource authorizes its label. An unnamed source
+retains its native identifier and cannot fabricate a contact template binding.
+
 Scope unchanged: all 355 features remain required.

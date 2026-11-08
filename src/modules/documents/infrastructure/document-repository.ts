@@ -5,8 +5,8 @@ import type { CurrentAuthorityCheck } from "@/platform/authz/current-authority";
 import { financialAttachmentAuthorityChecks } from "@/platform/authz/financial-attachment-resource";
 import { FinancialAttachmentSourceRepository } from "@/platform/ledger/financial-attachment-source-repository";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
-import { documentSourceReferenceSchema } from "../domain/document-command";
-import {nativeLeadDocumentSource,nativeLeadDocumentSources} from "@/platform/documents/lead-source";
+import { documentSourceReferenceSchema,DocumentConflictError } from "../domain/document-command";
+import {nativeLeadDocumentSource,nativeLeadDocumentSources,nativeLeadDocumentLabel} from "@/platform/documents/lead-source";
 import type { z } from "zod";
 import type { signatureRecipientReferenceSchema } from "../domain/document-signature-command";
 
@@ -29,7 +29,12 @@ const documentOrganizationReadSelect={ id: true, name: true } as const;
 
 export class DocumentRepository extends FinancialAttachmentSourceRepository {
   private documentLeadReads?:Map<string,Awaited<ReturnType<typeof nativeLeadDocumentSource>>>;
-  private async documentReadLead(id:string){if(this.documentLeadReads?.has(id))return this.documentLeadReads.get(id)??null;return nativeLeadDocumentSource(this.tx,this.organizationId,id);}
+  private async documentReadLead(id:string){if(this.documentLeadReads?.has(id))return this.documentLeadReads.get(id)??null;const native=await nativeLeadDocumentSource(this.tx,this.organizationId,id);(this.documentLeadReads??=new Map()).set(id,native);return native;}
+  /** Reveal a human label only after the caller checks the corresponding captured source. */
+  documentSourceLabel(native:DocumentSourceFacts,env?:NodeJS.ProcessEnv){
+    if(native.reference.kind!=="LEAD")return native.label;const lead=this.documentLeadReads?.get(native.reference.id);
+    if(!lead||commandFingerprint(lead.snapshot)!==commandFingerprint(native.snapshot))throw new DocumentConflictError();return nativeLeadDocumentLabel(lead,env);
+  }
   private documentSourceReads?:Map<string,DocumentSourceFacts|null>;
   private documentPropertyReads?:Map<string,Prisma.PropertyGetPayload<{select:typeof documentPropertyReadSelect}>|null>;
   private async documentReadProperty(id:string){if(this.documentPropertyReads?.has(id))return this.documentPropertyReads.get(id)??null;return this.tx.property.findFirst({where:{organizationId:this.organizationId,id},select:documentPropertyReadSelect});}
@@ -181,8 +186,9 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
       return row ? [{ id: row.id, label: row.name }] : [];
     }
     if(kind==="LEAD"){
-      if(query&&!documentSourceReferenceSchema.safeParse({kind:"LEAD",id:query}).success)return[];
-      return(await this.tx.lead.findMany({where:{...where,...(query?{AND:[{id:query}]}:{})},select:{id:true},orderBy,take})).map(row=>({id:row.id,label:row.id}));
+      const exact=query&&documentSourceReferenceSchema.safeParse({kind:"LEAD",id:query}).success;
+      // Contact names stay encrypted. The boundary filters a bounded authorized page.
+      return(await this.tx.lead.findMany({where:{...where,...(exact?{AND:[{id:query}]}:{})},select:{id:true},orderBy,take})).map(row=>({id:row.id,label:row.id}));
     }
     if (kind === "PROPERTY") return (await this.tx.property.findMany({ where: { ...where, name: { contains: query, mode: "insensitive" } }, select: { id: true, name: true }, orderBy, take })).map(row => ({ id: row.id, label: row.name }));
     if (kind === "OWNER") return (await this.tx.owner.findMany({ where: { ...where, displayName: { contains: query, mode: "insensitive" } }, select: { id: true, displayName: true }, orderBy, take })).map(row => ({ id: row.id, label: row.displayName }));
