@@ -28,7 +28,8 @@ import fr from "../../messages/fr.json" with {type:"json"};
 import ar from "../../messages/ar.json" with {type:"json"};
 
 const messages={en,fr,ar};
-async function completeOriginal({db,provider,signatureId,documentVersionId,deps,f}:LeadContractBrowserContext){
+async function completeOriginal({db,provider,signatureId,documentVersionId,deps:transport,f}:LeadContractBrowserContext){
+ const deps={...transport,env:{...process.env,...signatureFixtureEnvironment}};
  const actor={organizationId:bootstrapOrganizationId,actorId:f.account.id,authContext:await authContextForAccount(bootstrapOrganizationId,f.account.id,{db})},secret=signatureFixtureEnvironment.DOCUMENSO_WEBHOOK_SECRET;if(!secret)throw Error("Owned DOCUMENSO_WEBHOOK_SECRET required for actual completion acceptance");
  const reference=async(key:string)=>withTenant(db,bootstrapOrganizationId,async tx=>({organizationId:bootstrapOrganizationId,outboxEventId:(await tx.outboxEvent.findUniqueOrThrow({where:{organizationId_idempotencyKey:{organizationId:bootstrapOrganizationId,idempotencyKey:key}}})).id}));
  async function callback(event:"DOCUMENT_OPENED"|"DOCUMENT_COMPLETED"){
