@@ -7,9 +7,9 @@ import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
 import {nativeLeadInput,appendNativeLeadFinancialSentinel} from "../integration/support/lead-fixture";
 import {configuredLeadWorkspace} from "./support/crm-fixtures";
 import {e2eEmail,ensureE2EAdmin,completeE2EAdminMfa,waitForE2EAdminLoginWindow} from "./support/auth";
-import en from "../../messages/en.json";
-import fr from "../../messages/fr.json";
-import ar from "../../messages/ar.json";
+import en from "../../messages/en.json" with {type:"json"};
+import fr from "../../messages/fr.json" with {type:"json"};
+import ar from "../../messages/ar.json" with {type:"json"};
 
 type Locale="en"|"fr"|"ar";const copy={en:en.LeadWorkspace,fr:fr.LeadWorkspace,ar:ar.LeadWorkspace};
 const post=(page:Page,path:string,input:unknown)=>page.evaluate(async({path,input})=>{const response=await fetch("/api/crm/leads/"+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)});return{status:response.status,body:await response.json() as unknown};},{path,input});
