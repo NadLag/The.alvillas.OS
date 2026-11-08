@@ -33,3 +33,9 @@ cipher to the exact tenant, lead, revision, actor and command nonce. Audit and
 outbox records contain identifiers and hashes rather than contact details or
 the original reason text. Later dependency migrations must add actual native
 conversion/release guards before those stages can admit a movement.
+
+Cross-module document and signature proof orchestration lives in the platform
+composition layer, alongside the existing shared financial/operational services.
+CRM calls that composition function; it does not import Documents application or
+domain internals. The function retains the original transaction, tenant-bound
+repositories, canonical history reads and all source authorization checks.

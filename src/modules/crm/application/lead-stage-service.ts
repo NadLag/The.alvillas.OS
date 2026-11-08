@@ -15,7 +15,7 @@ import {LeadAccessError,LeadConfigurationError,LeadRateLimitError} from "../doma
 import {configuredLeadTransition,canonicalLeadStageDraft,canonicalLeadStageCommand,leadPipelinePolicyKey,leadPipelinePolicySchema,leadStageSchema,leadPipelineEvidenceKinds,LeadPipelineConflictError,type LeadStageDraft,type LeadStagePosition} from "../domain/lead-pipeline";
 import {encryptLeadStageReason,decryptLeadStageReason} from "../domain/lead-stage-reason";
 import {LeadStageRepository} from "../infrastructure/lead-stage-repository";
-import {nativeLeadStageEvidence} from "./lead-stage-evidence";
+import {nativeLeadStageEvidence} from "@/platform/documents/lead-stage-evidence";
 import type {LeadDependencies} from "./lead-capture-service";
 
 const protocol="ALVILLAS_NATIVE_LEAD_STAGE_V1",uuid=z.uuid().transform(value=>value.toLowerCase());

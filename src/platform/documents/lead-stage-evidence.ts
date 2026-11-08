@@ -6,8 +6,8 @@ import {readNativeSignatureHistory} from "@/modules/documents/application/docume
 import {documentSourceReferenceSchema} from "@/modules/documents/domain/document-command";
 import {documentEffectiveHistoryFormat} from "@/modules/documents/domain/document-effective-version";
 import {documentEffectiveHistorySchema} from "@/modules/documents/domain/document-read-model";
-import {LeadStageRepository} from "../infrastructure/lead-stage-repository";
-import {LeadPipelineEvidenceError,leadPipelineEvidenceKinds,requireNativeLeadStageProofs,type LeadStageDraft,type LeadPipelinePolicy,type NativeLeadStageProof,type LeadPipelineEvidenceKind} from "../domain/lead-pipeline";
+import {LeadStageRepository} from "@/modules/crm/infrastructure/lead-stage-repository";
+import {LeadPipelineEvidenceError,leadPipelineEvidenceKinds,requireNativeLeadStageProofs,type LeadStageDraft,type LeadPipelinePolicy,type NativeLeadStageProof,type LeadPipelineEvidenceKind} from "@/modules/crm/domain/lead-pipeline";
 
 /** Reuse complete canonical document/signature reads in the actual stage transaction. */
 export async function nativeLeadStageEvidence(actor:AccountActorContext,tx:TenantTransaction,input:LeadStageDraft,required:readonly LeadPipelineEvidenceKind[],policy:LeadPipelinePolicy,now:Date,deps:{env?:NodeJS.ProcessEnv;requestId?:string}){

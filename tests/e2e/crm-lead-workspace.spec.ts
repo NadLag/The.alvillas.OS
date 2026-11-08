@@ -4,7 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 import {test,expect,type Page,type TestInfo,type Route} from "@playwright/test";
 import {withTenant} from "@/platform/db/tenant";
 import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
-import {nativeLeadInput} from "../integration/support/lead-fixture";
+import {nativeLeadInput,appendNativeLeadFinancialSentinel} from "../integration/support/lead-fixture";
 import {configuredLeadWorkspace} from "./support/crm-fixtures";
 import {e2eEmail,ensureE2EAdmin,completeE2EAdminMfa,waitForE2EAdminLoginWindow} from "./support/auth";
 import en from "../../messages/en.json";
@@ -15,6 +15,7 @@ type Locale="en"|"fr"|"ar";const copy={en:en.LeadWorkspace,fr:fr.LeadWorkspace,a
 const post=(page:Page,path:string,input:unknown)=>page.evaluate(async({path,input})=>{const response=await fetch("/api/crm/leads/"+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)});return{status:response.status,body:await response.json() as unknown};},{path,input});
 const financial=(db:PrismaClient)=>db.$queryRaw`SELECT 'journal' AS kind,id::text,xmin::text,md5(to_jsonb(t)::text) AS body FROM financial_transaction t UNION ALL SELECT 'posting',id::text,xmin::text,md5(to_jsonb(t)::text) FROM posting t ORDER BY kind,id`;
 async function login(page:Page,db:PrismaClient,locale:Locale,info:TestInfo){
+  await appendNativeLeadFinancialSentinel(db,db);
   const email=e2eEmail("lead-ui-"+locale+"-"+randomUUID().slice(0,8),info.project.name),password=process.env.ADMIN_PASSWORD??"correct horse battery staple";await ensureE2EAdmin(email,password);await configuredLeadWorkspace(db,bootstrapOrganizationId);
   await page.goto("/en/login");await waitForE2EAdminLoginWindow(page,email);await page.getByTestId("login-email").fill(email);await page.getByTestId("login-password").fill(password);await page.getByTestId("login-submit").click();await completeE2EAdminMfa(page,email);await expect(page).toHaveURL(/\/en\/app/u);
   const account=await withTenant(db,bootstrapOrganizationId,tx=>tx.userAccount.findFirstOrThrow({where:{organizationId:bootstrapOrganizationId,email}}));
