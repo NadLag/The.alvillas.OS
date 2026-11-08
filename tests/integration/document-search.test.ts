@@ -19,6 +19,7 @@ import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repo
 import { Money } from "@/platform/money/money";
 import * as auditWriter from "@/platform/audit/audit-writer";
 import { provisionIntegrationRole } from "./support/database-role";
+import { transactionQueryMeter } from "./support/transaction-query-meter";
 
 let admin:PrismaClient,db:PrismaClient,server:Server,base:string;
 const objects=new Map<string,Buffer>(),env={NODE_ENV:"test" as const,ENCRYPTION_KEYS:"search-native:"+randomBytes(32).toString("base64")};
@@ -104,10 +105,10 @@ describe("measured native document search at100 and500 properties",()=>{
     if(!uploaded.version)throw Error("Actual admitted scale original required");retainedVersionIds.push(uploaded.version.id);propertyIds.push(property.id);
    }));
   };
-  const measured=new PrismaClient({datasourceUrl:asUser.toString(),log:[{emit:"event",level:"query"}]}),originalFinancial=await originals(f);let count=0;measured.$on("query",()=>count++);
+  const measured=new PrismaClient({datasourceUrl:asUser.toString(),log:[{emit:"event",level:"query"}]}),originalFinancial=await originals(f),measureTransaction=transactionQueryMeter(listener=>{measured.$on("query",listener);});
   try{
    await append(0,100);await measured.$queryRaw`SELECT 1`;
-   const measure=async(query:string,cursor?:string)=>{count=0;const started=performance.now(),result=await searchDocuments(f.ctx,{query,kind:"ALL",versionSelection:"CURRENT_EFFECTIVE",includeArchived:false,...cursor?{cursor}:{}},{db:measured,env});return{result,elapsedMs:performance.now()-started,queries:count};};
+   const measure=(query:string,cursor?:string)=>measureTransaction(()=>searchDocuments(f.ctx,{query,kind:"ALL",versionSelection:"CURRENT_EFFECTIVE",includeArchived:false,...cursor?{cursor}:{}},{db:measured,env}));
    const sample=async(properties:number)=>{
     await measure(needle);const single=await measure(needle),page=await measure("Search scale original");expect(single.result.items).toHaveLength(1);expect(page.result.items).toHaveLength(20);expect(page.result.next).not.toBeNull();expect(page.queries).toBe(single.queries);expect(page.queries).toBeLessThanOrEqual(40);
     const samples:number[]=[];for(let i=0;i<10;i++)samples.push((await measure("Search scale original")).elapsedMs);samples.sort((a,b)=>a-b);const p95=samples[Math.ceil(samples.length*.95)-1];expect(p95).toBeLessThan(300);
@@ -134,9 +135,9 @@ describe("native search with distinct immutable financial sources",()=>{
    const journal=await withTenant(db,f.organizationId,async tx=>{const finance=new FinanceRepository(tx,f.organizationId),bank=await finance.ensureLedgerAccount({code:"EXPIRY_BANK",name:"Actual custody",accountType:"ASSET_LOCATION",normalSide:"DEBIT"}),claim=await finance.ensureLedgerAccount({code:"OWNER_PAYABLE",name:"Actual owner claim",accountType:"CLAIM_OWNERSHIP",normalSide:"CREDIT"}),amount=Money.of("9007199254740993.07","MAD"),dimensions={property_id:f.property.id};return finance.createFinancialTransaction({reference:"SEARCH-DISTINCT:"+randomUUID(),description:"Original distinct search financial source",idempotencyKey:randomUUID(),createdBy:f.ctx.actorId,occurredAt:await finance.clock(),postings:[{ledgerAccountId:bank.id,side:"DEBIT",amount,bucket:"OWNER_REVENUE",dimensions},{ledgerAccountId:claim.id,side:"CREDIT",amount,bucket:"OWNER_REVENUE",dimensions}]});}),draft={documentId:null,source:{kind:"FINANCIAL_TRANSACTION",id:journal.id},typeKey:"search_document",kind:"FILE",locale:"fr",title:prefix+" "+index,fileName:"distinct-financial-search-"+index+".pdf",contentType:"application/pdf",fileSize:bytes.length,sha256:createHash("sha256").update(bytes).digest("hex"),supersedesId:null,effectiveFrom:null,templateKey:null},review=await reviewDocumentUpload(f.ctx,draft,deps()),admission=await admitDocumentUpload(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Retain actual distinct immutable financial search source"},deps());
    expect((await uploadDocumentBytes(f.ctx,{admissionId:admission.id},bytes,{...deps(),objects:store()})).complete).toBe(true);
   }
-  const raw=new URL(process.env.TEST_DATABASE_URL!);raw.username=raw.password="alvillas_ops_tests";const measured=new PrismaClient({datasourceUrl:raw.toString(),log:[{emit:"event",level:"query"}]}),before=await originals(f);let count=0;measured.$on("query",()=>count++);
+  const raw=new URL(process.env.TEST_DATABASE_URL!);raw.username=raw.password="alvillas_ops_tests";const measured=new PrismaClient({datasourceUrl:raw.toString(),log:[{emit:"event",level:"query"}]}),before=await originals(f),measureTransaction=transactionQueryMeter(listener=>{measured.$on("query",listener);});
   try{
-   const measure=async(query:string)=>{count=0;const started=performance.now(),result=await searchDocuments(f.ctx,{query,kind:"ALL",versionSelection:"CURRENT_EFFECTIVE",includeArchived:false},{db:measured,env});return{result,queries:count,elapsedMs:performance.now()-started};};
+   const measure=(query:string)=>measureTransaction(()=>searchDocuments(f.ctx,{query,kind:"ALL",versionSelection:"CURRENT_EFFECTIVE",includeArchived:false},{db:measured,env}));
    await measure(prefix+" 20");const single=await measure(prefix+" 20"),page=await measure(prefix);expect(single.result.items).toHaveLength(1);expect(page.result.items).toHaveLength(20);expect(page.result.next).not.toBeNull();expect(await originals(f)).toEqual(before);
    console.info(JSON.stringify({financialSearchBenchmark:{single:{queries:single.queries,elapsedMs:single.elapsedMs},page:{queries:page.queries,elapsedMs:page.elapsedMs},distinctNativeJournals:21,exactTuplesUnchanged:true}}));
    expect(page.queries).toBe(single.queries);expect(page.queries).toBeLessThanOrEqual(64);
