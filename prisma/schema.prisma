@@ -4423,6 +4423,7 @@ model FinancialAttachmentAdmission {
  contentType String @map("content_type") @db.VarChar(40)
  fileSize Int @map("file_size")
  sha256 String @db.Char(64)
+ uploadParts Json? @map("upload_parts") @db.JsonB
  reason String @db.VarChar(1000)
  requestFingerprint String @map("request_fingerprint") @db.Char(64)
  sourceFingerprint String @map("source_fingerprint") @db.Char(64)

@@ -5,8 +5,9 @@ import { ZodError } from "zod";
 import type { AppLocale } from "@/i18n/routing";
 import { formatCurrencyAmount } from "@/i18n/format";
 import { financialAttachmentKinds, financialAttachmentIntentSchema, type FinancialAttachmentIntent } from "../domain/financial-attachment";
-import { financialAttachmentEditorSchema, financialAttachmentHistorySchema, financialAttachmentAdmissionResultSchema,
+import { financialAttachmentEditorSchema, financialAttachmentHistorySchema, financialAttachmentAdmissionResultSchema,financialAttachmentPartReceiptSchema,
   financialAttachmentItemSchema, type AttachmentTransaction, type FinancialAttachmentHistory, type FinancialAttachmentItem } from "../domain/financial-attachment-read-model";
+import { financialAttachmentPartsSchema,financialAttachmentUploadChunkBytes,financialAttachmentSingleBodyBytes } from "../domain/financial-attachment-parts";
 
 type State = "ready" | "loading" | "sending" | "success" | "validation" | "forbidden" | "offline" | "configuration_unavailable" | "source_unavailable" | "conflict" | "rate_limited" | "storage_unavailable" | "unavailable";
 class AttachmentHttpError extends Error { constructor(readonly state: State) { super(state); } }
@@ -28,23 +29,25 @@ export function FinancialAttachmentsWorkspace({ locale, initialTransactionId = "
     [kind, setKind] = useState<FinancialAttachmentIntent["kind"]>("RECEIPT"), [file, setFile] = useState<File | null>(null), [reason, setReason] = useState(""),
     [supersedes, setSupersedes] = useState<FinancialAttachmentItem | null>(null), [state, setState] = useState<State>("loading");
   const picker = useRef<HTMLInputElement | null>(null), command = useRef<AbortController | null>(null), generation = useRef(0),
-    recovery = useRef<{ input: FinancialAttachmentIntent; admissionId?: string } | null>(null), privateRequests = useRef(new Set<AbortController>());
+    recovery = useRef<{ input: FinancialAttachmentIntent; admissionId?: string } | null>(null), privateRequests = useRef(new Set<AbortController>()),privateVisible=useRef(true);
   const clearFile = useCallback(() => { setFile(null); recovery.current = null; if (picker.current) picker.current.value = ""; }, []);
   const wipe = useCallback(() => {
-    generation.current++; for (const controller of privateRequests.current) controller.abort(); privateRequests.current.clear(); command.current?.abort();
-    setChoices([]); setNextChoice(null); setHistory(null); setTransactionId(""); setSupersedes(null); setReason(""); clearFile();
+    generation.current++; for (const controller of privateRequests.current) controller.abort(); privateRequests.current.clear(); command.current?.abort();command.current=null;
+    setQuery("");setChoices([]); setNextChoice(null); setHistory(null); setTransactionId(""); setSupersedes(null); setReason(""); clearFile();
   }, [clearFile]);
   const failed = useCallback((error: unknown) => {
     const code = navigator.onLine ? error instanceof AttachmentHttpError ? error.state : error instanceof ZodError ? "validation" : "unavailable" : "offline";
-    if (code === "forbidden" || code === "offline") wipe(); if (code === "conflict") recovery.current = null; setState(code);
+    if (code === "forbidden" || code === "offline") {privateVisible.current=false;wipe();} if (code === "conflict") recovery.current = null; setState(code);
   }, [wipe]);
   useEffect(() => {
+    privateVisible.current=navigator.onLine&&document.visibilityState==="visible";
     const requests = privateRequests.current;
-    const offline = () => { wipe(); setState("offline"); }, online = () => { setState("loading"); setRevision(value => value + 1); };
-    window.addEventListener("offline", offline); window.addEventListener("online", online);
-    return () => { window.removeEventListener("offline", offline); window.removeEventListener("online", online); for (const controller of requests) controller.abort(); command.current?.abort(); };
+    const offline = () => { privateVisible.current=false;wipe(); setState("offline"); }, refresh=()=>{if(document.visibilityState!=="visible"||!navigator.onLine||command.current)return;privateVisible.current=true;setState("loading");setRevision(value=>value+1);},hidden=()=>{if(document.visibilityState==="hidden"){privateVisible.current=false;wipe();setState("ready");}else refresh();},pagehide=()=>{privateVisible.current=false;wipe();setState("ready");};
+    window.addEventListener("offline", offline); window.addEventListener("online",refresh);window.addEventListener("focus",refresh);window.addEventListener("pagehide",pagehide);document.addEventListener("visibilitychange",hidden);
+    return () => { privateVisible.current=false;recovery.current=null;window.removeEventListener("offline", offline); window.removeEventListener("online",refresh);window.removeEventListener("focus",refresh);window.removeEventListener("pagehide",pagehide);document.removeEventListener("visibilitychange",hidden);for (const controller of requests) controller.abort(); command.current?.abort();command.current=null; };
   }, [wipe]);
   useEffect(() => {
+    if(!privateVisible.current||document.visibilityState!=="visible"||!navigator.onLine)return;
     const controller = new AbortController(), version = generation.current, requests = privateRequests.current; requests.add(controller);
     const timer = setTimeout(() => { if (!navigator.onLine) { failed(new AttachmentHttpError("offline")); return; }
       void request("editor", { query }, controller.signal).then(response => response.json()).then(value => financialAttachmentEditorSchema.parse(value)).then(result => {
@@ -53,7 +56,7 @@ export function FinancialAttachmentsWorkspace({ locale, initialTransactionId = "
     return () => { clearTimeout(timer); controller.abort(); requests.delete(controller); };
   }, [query, revision, failed, transactionId]);
   useEffect(() => {
-    if (!transactionId) return; const controller = new AbortController(), version = generation.current, requests = privateRequests.current; requests.add(controller);
+    if (!transactionId||!privateVisible.current||document.visibilityState!=="visible"||!navigator.onLine) return; const controller = new AbortController(), version = generation.current, requests = privateRequests.current; requests.add(controller);
     void request("history", { transactionId }, controller.signal).then(response => response.json()).then(value => financialAttachmentHistorySchema.parse(value)).then(result => {
       if (controller.signal.aborted || version !== generation.current) return; setHistory(result); setState("ready");
     }).catch(error => { if (!controller.signal.aborted) { setHistory(null); failed(error); } }).finally(() => requests.delete(controller));
@@ -67,14 +70,17 @@ export function FinancialAttachmentsWorkspace({ locale, initialTransactionId = "
     try {
       if (!recovery.current) {
         const bytes = await file.arrayBuffer(), sha256 = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map(value => value.toString(16).padStart(2, "0")).join("");
+        let manifest:ReturnType<typeof financialAttachmentPartsSchema.parse>|undefined;if(file.size>financialAttachmentSingleBodyBytes){const hashes:string[]=[];for(let offset=0;offset<bytes.byteLength;offset+=financialAttachmentUploadChunkBytes){if(controller.signal.aborted||version!==generation.current)return;hashes.push([...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes.slice(offset,offset+financialAttachmentUploadChunkBytes)))].map(value=>value.toString(16).padStart(2,"0")).join(""));}manifest=financialAttachmentPartsSchema.parse({schemaVersion:1,chunkBytes:financialAttachmentUploadChunkBytes,hashes});}
         const parsed = financialAttachmentIntentSchema.parse({ transactionId, idempotencyKey: crypto.randomUUID(), kind, fileName: file.name,
-          contentType: file.type, fileSize: file.size, sha256, supersedesId: supersedes?.id ?? null, reason });
+          contentType: file.type, fileSize: file.size, sha256,...manifest?{parts:manifest}:{}, supersedesId: supersedes?.id ?? null, reason });
         if (file.size > history.maxBytes || !history.contentTypes.includes(parsed.contentType)) throw new AttachmentHttpError("validation");
         if (controller.signal.aborted || version !== generation.current) return; recovery.current = { input: parsed };
       }
       const pending = recovery.current;
       if (!pending.admissionId) pending.admissionId = financialAttachmentAdmissionResultSchema.parse(await (await request("admit", pending.input, controller.signal)).json()).id;
-      const response = await fetch("/api/finance/attachments/upload?id=" + encodeURIComponent(pending.admissionId), { method: "POST", credentials: "same-origin", cache: "no-store",
+      let response:Response;
+      if(pending.input.parts){for(let index=0;index<pending.input.parts.hashes.length;index++){if(controller.signal.aborted||version!==generation.current)return;const part=await fetch("/api/finance/attachments/part?id="+encodeURIComponent(pending.admissionId)+"&index="+index,{method:"POST",credentials:"same-origin",cache:"no-store",headers:{"Content-Type":"application/octet-stream"},body:file.slice(index*financialAttachmentUploadChunkBytes,Math.min((index+1)*financialAttachmentUploadChunkBytes,file.size)),signal:controller.signal});if(!part.ok)await reject(part);const saved=financialAttachmentPartReceiptSchema.parse(await part.json());if(saved.id!==pending.admissionId||saved.idempotencyKey!==pending.input.idempotencyKey||saved.index!==index||saved.sha256!==pending.input.parts.hashes[index])throw new AttachmentHttpError("conflict");if(saved.attached)break;}response=await request("complete",{id:pending.admissionId},controller.signal);}
+      else response = await fetch("/api/finance/attachments/upload?id=" + encodeURIComponent(pending.admissionId), { method: "POST", credentials: "same-origin", cache: "no-store",
         headers: { "Content-Type": "application/octet-stream" }, body: file, signal: controller.signal });
       if (!response.ok) await reject(response); financialAttachmentItemSchema.parse(await response.json());
       if (controller.signal.aborted || version !== generation.current) return;
@@ -129,6 +135,6 @@ export function FinancialAttachmentsWorkspace({ locale, initialTransactionId = "
         </li>)}</ul>}{history.next ? <button type="button" className="secondary-button" disabled={busy || blocked} onClick={() => { void more("history"); }}>{t("moreHistory")}</button> : null}
       </section></> : null}
     {state !== "ready" ? <p role={["loading", "sending", "success"].includes(state) ? "status" : "alert"} data-testid="attachment-result">{t(state)}</p> : null}
-    {state !== "loading" && state !== "sending" ? <button className="secondary-button" type="button" onClick={() => { setState(navigator.onLine ? "loading" : "offline"); setRevision(value => value + 1); }}>{t("reload")}</button> : null}
+    {state !== "loading" && state !== "sending" ? <button className="secondary-button" type="button" onClick={() => { privateVisible.current=navigator.onLine&&document.visibilityState==="visible";setState(navigator.onLine ? "loading" : "offline"); setRevision(value => value + 1); }}>{t("reload")}</button> : null}
   </div>;
 }

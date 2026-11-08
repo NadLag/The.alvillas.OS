@@ -19,8 +19,12 @@ import { financialAttachmentIntentSchema, financialAttachmentReferenceSchema, fi
   FinancialAttachmentAccessError, FinancialAttachmentConfigurationError, FinancialAttachmentConflictError, FinancialAttachmentSourceError,
   FinancialAttachmentValidationError, FinancialAttachmentRateLimitError } from "../domain/financial-attachment";
 import type { FinanceActorContext } from "./finance-access";
+import { financialAttachmentPartsSchema,financialAttachmentUploadChunkBytes } from "../domain/financial-attachment-parts";
 
 type Deps = { db: TenantTransactionRunner; objects?: FinancialAttachmentObjectStore; requestId?: string };
+export type FinancialAttachmentDependencies=Deps;
+export {copyActor as financialAttachmentActor,context as financialAttachmentContext,checkAdmission as financialAttachmentAdmissionContext,
+  identity as financialAttachmentObjectIdentity,audit as auditFinancialAttachment,presentAttachment as presentFinancialAttachment};
 type Admission = NonNullable<Awaited<ReturnType<FinancialAttachmentRepository["admission"]>>>;
 type Attached = NonNullable<Awaited<ReturnType<FinancialAttachmentRepository["attachment"]>>>;
 const savedPolicySchema = z.object({ id: z.uuid(), version: z.number().int().positive(), value: financialAttachmentPolicySchema }).strict();
@@ -74,6 +78,7 @@ export async function admitFinancialAttachment(actor: FinanceActorContext, raw: 
     if (input.supersedesId && (!previous || previous.transactionId !== input.transactionId || previous.admission.kind !== input.kind)) throw new FinancialAttachmentAccessError();
     const current = await context(ctx, tx, input.transactionId, "create", previous?.rootId);
     if (!current.policy.content_types.includes(input.contentType) || input.fileSize > current.policy.max_bytes) throw new FinancialAttachmentValidationError();
+    if(input.parts&&!current.policy.upload_transport)throw new FinancialAttachmentConfigurationError();
     const decision = await consumeRateLimit(tx, ctx.organizationId, { key: "finance.financial_attachment:" + ctx.actorId, limit: current.policy.rate_limit.requests,
       windowSeconds: current.policy.rate_limit.window_seconds, now: current.now }); return { decision, source: current.native.identity, policy: current.policyIdentity };
   });
@@ -87,7 +92,8 @@ export async function admitFinancialAttachment(actor: FinanceActorContext, raw: 
     if (input.supersedesId && (!previous || previous.next)) throw new FinancialAttachmentConflictError();
     const current = await context(ctx, tx, input.transactionId, "create", previous?.rootId);
     if (current.native.identity !== admitted.source || current.policyIdentity !== admitted.policy) throw new FinancialAttachmentConflictError();
-    const row = await repository.appendAdmission({ ...input, requestFingerprint: fingerprint, sourceFingerprint: current.native.identity,
+    const {parts,...metadata}=input;
+    const row = await repository.appendAdmission({ ...metadata,...parts?{uploadParts:json(parts)}:{}, requestFingerprint: fingerprint, sourceFingerprint: current.native.identity,
       policyRuleId: current.policySnapshot.id, policySnapshot: json(current.policySnapshot), createdBy: ctx.actorId, createdAt: current.now,
       expiresAt: new Date(current.now.getTime() + current.policy.intent_lifetime_seconds * 1000) });
     await audit(ctx, tx, row, "finance.financial_attachment.admitted", current.now, deps, { requestFingerprint: fingerprint });
@@ -103,6 +109,7 @@ export async function uploadFinancialAttachment(actor: FinanceActorContext, raw:
     const repository = new FinancialAttachmentRepository(tx, ctx.organizationId), row = await repository.admission(id);
     if (!row) throw new FinancialAttachmentAccessError(); const current = await checkAdmission(ctx, tx, row);
     if (bytes.length !== row.fileSize || createHash("sha256").update(bytes).digest("hex") !== row.sha256) throw new FinancialAttachmentValidationError();
+    if(row.uploadParts!==null&&row.uploadParts!==undefined){const parts=financialAttachmentPartsSchema.parse(row.uploadParts);if(parts.hashes.length!==Math.ceil(row.fileSize/financialAttachmentUploadChunkBytes))throw new FinancialAttachmentValidationError();for(let index=0;index<parts.hashes.length;index++){const chunk=bytes.subarray(index*financialAttachmentUploadChunkBytes,Math.min((index+1)*financialAttachmentUploadChunkBytes,bytes.length));if(createHash("sha256").update(chunk).digest("hex")!==parts.hashes[index])throw new FinancialAttachmentValidationError();}}
     const parsed = financialAttachmentIntentSchema.parse({ transactionId: row.transactionId, idempotencyKey: row.idempotencyKey, kind: row.kind,
       fileName: row.fileName, contentType: row.contentType, fileSize: row.fileSize, sha256: row.sha256, supersedesId: row.supersedesId, reason: row.reason });
     validateFinancialAttachmentBytes(bytes, parsed);

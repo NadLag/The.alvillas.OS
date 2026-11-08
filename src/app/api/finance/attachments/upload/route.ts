@@ -7,13 +7,14 @@ import { compensationHttp } from "@/modules/finance/ui/compensation-http";
 import { uploadFinancialAttachment } from "@/modules/finance/application/financial-attachments";
 import { configuredFinancialAttachmentObjects } from "@/modules/finance/application/financial-attachment-files";
 import { FinancialAttachmentAccessError, FinancialAttachmentValidationError } from "@/modules/finance/domain/financial-attachment";
+import { financialAttachmentSingleBodyBytes } from "@/modules/finance/domain/financial-attachment-parts";
 
 export async function POST(request: NextRequest) {
   return compensationHttp(request, async (actor, _input, requestId) => {
     if (!isSameOriginContentType(request, "application/octet-stream")) throw new FinancialAttachmentAccessError();
     if ([...request.nextUrl.searchParams.keys()].join(",") !== "id") throw new FinancialAttachmentValidationError();
     const id = z.uuid().parse(request.nextUrl.searchParams.get("id")); let bytes: Uint8Array;
-    try { bytes = await readBoundedRequestBytes(request, 50 * 1024 * 1024); } catch { throw new FinancialAttachmentValidationError(); }
+    try { bytes = await readBoundedRequestBytes(request, financialAttachmentSingleBodyBytes); } catch { throw new FinancialAttachmentValidationError(); }
     return uploadFinancialAttachment(actor, { id }, bytes, { db: prisma, requestId, objects: configuredFinancialAttachmentObjects() });
   }, { feature: "F-FIN-38.upload" });
 }

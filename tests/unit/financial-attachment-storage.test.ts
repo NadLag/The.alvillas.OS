@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { FinancialAttachmentObjectStore } from "@/modules/finance/infrastructure/financial-attachment-storage";
 import { decryptBytes } from "@/platform/auth/secret-encryption";
 import { financialAttachmentEncryptionContext } from "@/modules/finance/domain/financial-attachment";
+import { financialAttachmentUploadChunkBytes,financialAttachmentPartContract } from "@/modules/finance/domain/financial-attachment-parts";
 
 const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 function fixture() {
@@ -74,4 +75,30 @@ describe("original encrypted financial attachment storage", () => {
       () => Promise.resolve(new Response(new Uint8Array(f.bytes.length + 257))), f.env);
     await expect(store.read(f.identity, saved, 30)).rejects.toThrow("financial_attachment_storage_unavailable");
   });
+});
+
+function partFixture(){const f=fixture(),first=Buffer.alloc(financialAttachmentUploadChunkBytes,97),last=Buffer.alloc(17,98),bytes=Buffer.concat([first,last]),identity={...f.identity,fileSize:bytes.length,sha256:hash(bytes)},parts={schemaVersion:1 as const,chunkBytes:financialAttachmentUploadChunkBytes,hashes:[hash(first),hash(last)]};return{...f,first,last,bytes,identity,parts};}
+describe("original encrypted financial multipart storage",()=>{
+ it("stores only conditionally created authenticated parts and reads exact bounded originals",async()=>{
+  const f=partFixture(),saved=await f.store.putPart(f.identity,0,f.parts,f.first,30),ciphertext=[...f.objects.values()][0],contract=financialAttachmentPartContract(f.identity,0,f.parts);expect(saved.storageKey).toBe(contract.key);expect(saved.cipherSha256).toBe(hash(ciphertext));expect(Buffer.from(ciphertext).includes(f.first)).toBe(false);expect(f.requests[0].headers.get("if-none-match")).toBe("*");expect(decryptBytes(ciphertext,contract.context,f.env)).toEqual(f.first);expect(await f.store.readPart(f.identity,0,f.parts,30)).toEqual(f.first);
+ });
+ it("retains the original part after a lost acknowledgement without automatic HTTP retries",async()=>{
+  const f=partFixture();let lost=false;const transport:typeof fetch=async(url,init)=>{const response=await f.transport(url,init);if(!lost&&init?.method==="PUT"){lost=true;throw Error("Owned lost part acknowledgement");}return response;},store=new FinancialAttachmentObjectStore(f.storage,transport,f.env);
+  await expect(store.putPart(f.identity,0,f.parts,f.first,30)).rejects.toThrow("financial_attachment_storage_unavailable");expect(f.requests).toHaveLength(1);const original=Buffer.from([...f.objects.values()][0]),recovered=await store.putPart(f.identity,0,f.parts,f.first,30);expect(recovered.cipherSha256).toBe(hash(original));expect(Buffer.from([...f.objects.values()][0])).toEqual(original);expect(f.requests.map(request=>request.method)).toEqual(["PUT","PUT","GET"]);
+ });
+ it.each(["organizationId","transactionId","id","contentType","sha256"]as const)("authenticates original %s even when storage substitutes another part",async field=>{
+  const f=partFixture();await f.store.putPart(f.identity,0,f.parts,f.first,30);const ciphertext=[...f.objects.values()][0],store=new FinancialAttachmentObjectStore(f.storage,()=>Promise.resolve(new Response(new Uint8Array(ciphertext))),f.env),changed={...f.identity,[field]:field==="contentType"?"image/png":field==="sha256"?hash(Buffer.from("another immutable original")):randomUUID()};await expect(store.readPart(changed,0,f.parts,30)).rejects.toThrow("financial_attachment_storage_unavailable");
+ });
+ it("authenticates a changed whole-file size without relying on different part lengths",async()=>{
+  const f=partFixture();await f.store.putPart(f.identity,0,f.parts,f.first,30);const ciphertext=[...f.objects.values()][0],store=new FinancialAttachmentObjectStore(f.storage,()=>Promise.resolve(new Response(new Uint8Array(ciphertext))),f.env);expect(financialAttachmentPartContract({...f.identity,fileSize:f.identity.fileSize+1},0,f.parts).size).toBe(f.first.length);await expect(store.readPart({...f.identity,fileSize:f.identity.fileSize+1},0,f.parts,30)).rejects.toThrow("financial_attachment_storage_unavailable");
+ });
+ it("cannot substitute equal-size identical-content parts at another index",async()=>{
+  const f=partFixture(),identity={...f.identity,fileSize:2*f.first.length,sha256:hash(Buffer.concat([f.first,f.first]))},parts={...f.parts,hashes:[hash(f.first),hash(f.first)]};await f.store.putPart(identity,0,parts,f.first,30);const ciphertext=[...f.objects.values()][0],store=new FinancialAttachmentObjectStore(f.storage,()=>Promise.resolve(new Response(new Uint8Array(ciphertext))),f.env);await expect(store.readPart(identity,1,parts,30)).rejects.toThrow("financial_attachment_storage_unavailable");
+ });
+ it("keeps original whole-file ciphertext and part ciphertext in different authenticated protocols",async()=>{
+  const f=partFixture(),identity={...f.identity,fileSize:f.first.length,sha256:hash(f.first)},parts={...f.parts,hashes:[hash(f.first)]},whole=await f.store.put(identity,f.first,30),wholeCiphertext=[...f.objects.values()][0],substituted=new FinancialAttachmentObjectStore(f.storage,()=>Promise.resolve(new Response(new Uint8Array(wholeCiphertext))),f.env);await expect(substituted.readPart(identity,0,parts,30)).rejects.toThrow("financial_attachment_storage_unavailable");const part=await f.store.putPart(identity,0,parts,f.first,30),partCiphertext=[...f.objects.values()][1],substitutedPart=new FinancialAttachmentObjectStore(f.storage,()=>Promise.resolve(new Response(new Uint8Array(partCiphertext))),f.env);expect(whole.cipherSize).toBe(part.cipherSize);await expect(substitutedPart.read(identity,part,30)).rejects.toThrow("financial_attachment_storage_unavailable");
+ });
+ it("does not write a malformed part or accept mutated retained ciphertext",async()=>{
+  const f=partFixture();await expect(f.store.putPart(f.identity,0,f.parts,f.last,30)).rejects.toThrow("financial_attachment_storage_unavailable");expect(f.requests).toHaveLength(0);await f.store.putPart(f.identity,0,f.parts,f.first,30);const[key,bytes]=[...f.objects][0],changed=new Uint8Array(bytes);changed[changed.length-1]^=1;f.objects.set(key,changed);await expect(f.store.readPart(f.identity,0,f.parts,30)).rejects.toThrow("financial_attachment_storage_unavailable");await expect(f.store.putPart(f.identity,0,f.parts,f.first,30)).rejects.toThrow("financial_attachment_storage_unavailable");
+ });
 });

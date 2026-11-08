@@ -9,6 +9,12 @@ import { URL } from "node:url";
 const database = new URL(process.env.DATABASE_URL ?? "invalid:");
 if (process.env.VERCEL || process.env.VERCEL_ENV || !["127.0.0.1", "localhost", "[::1]"].includes(database.hostname) ||
   process.env.R2_ACCOUNT_ID !== "alvillas-e2e-local") throw new Error("Local storage fixture requires an isolated test server");
+// Model the approved encrypted application envelope with a bounded local budget.
+// The application still validates every source's own admission and HTTP limits.
+const configuredMaximum = process.env.ALVILLAS_E2E_STORAGE_MAX_OBJECT_BYTES;
+if (configuredMaximum !== undefined && !/^[1-9]\d*$/u.test(configuredMaximum)) throw new Error("Invalid local object fixture capacity");
+const maximumObjectBytes = configuredMaximum === undefined ? 8 * 1024 * 1024 : Number(configuredMaximum);
+if (!Number.isSafeInteger(maximumObjectBytes) || maximumObjectBytes < 1 || maximumObjectBytes > 64 * 1024 * 1024) throw new Error("Bounded local object fixture capacity required");
 const objects = new Map();
 const realFetch = globalThis.fetch;
 // Intercept only the object fixture origin; all other fetch calls retain their
@@ -20,7 +26,7 @@ const fixtureResponse = async request => {
   if (request.method === "PUT") {
     if (request.headers.get("if-none-match") === "*" && objects.has(key)) return new globalThis.Response(null, { status: 412 });
     const bytes = new Uint8Array(await request.arrayBuffer());
-    if (bytes.length > 8 * 1024 * 1024) return new globalThis.Response(null, { status: 413 });
+    if (bytes.length > maximumObjectBytes) return new globalThis.Response(null, { status: 413 });
     objects.set(key, { bytes, contentType: request.headers.get("content-type") ?? "application/octet-stream" });
     return new globalThis.Response(null, { status: 200 });
   }
@@ -57,7 +63,7 @@ Server.prototype.emit = function (event, ...args) {
     response.setHeader("Cache-Control", "no-store");
     if (request.method !== "PUT" || request.headers["x-alvillas-e2e-storage"] !== process.env.R2_SECRET_ACCESS_KEY || request.headers["if-none-match"] !== "*" || request.headers["content-type"] !== "application/octet-stream" || target.searchParams.getAll("url").length !== 1) { response.writeHead(403).end(); return true; }
     void (async () => { const signed = new URL(target.searchParams.get("url")); if (signed.origin !== "https://alvillas-e2e-local.r2.cloudflarestorage.com") { response.writeHead(403).end(); return; }
-      const chunks = []; let total = 0; for await (const chunk of request) { total += chunk.length; if (total > 8 * 1024 * 1024) { response.writeHead(413).end(); return; } chunks.push(chunk); }
+      const chunks = []; let total = 0; for await (const chunk of request) { total += chunk.length; if (total > maximumObjectBytes) { response.writeHead(413).end(); return; } chunks.push(chunk); }
       const stored = await fixtureResponse(new globalThis.Request(signed, { method: "PUT", headers: { "content-type": "application/octet-stream", "if-none-match": "*" }, body: new Uint8Array(Buffer.concat(chunks)) })); response.writeHead(stored.status, Object.fromEntries(stored.headers)); response.end(new Uint8Array(await stored.arrayBuffer()));
     })().catch(() => { if (!response.headersSent) response.writeHead(503); response.end(); }); return true;
   }
