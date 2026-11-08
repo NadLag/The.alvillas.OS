@@ -5262,5 +5262,32 @@
     "context": "Consulter le contexte de politique",
     "contextTitle": "Contexte de politique conservé",
     "policyGuidance": "Les étiquettes et références saisies n’autorisent aucune suppression. Toute disposition exige le processus de confidentialité approuvé par le propriétaire et la politique juridique."
+  },
+  "DocumentSearch": {
+    "title": "Rechercher des documents",
+    "guidance": "Recherchez les titres originaux et noms de fichiers dans les archives accessibles. Ouvrez une version précise ou téléchargez son original autorisé.",
+    "filters": "Filtres de recherche",
+    "query": "Titre ou nom de fichier",
+    "kind": "Format du document",
+    "allKinds": "Tous les formats",
+    "versions": "Historique des versions",
+    "currentOnly": "Versions actuellement en vigueur",
+    "allVersions": "Toutes les versions conservées et planifiées",
+    "sourceKind": "Type de source",
+    "allSources": "Toutes les sources accessibles",
+    "language": "Langue originale",
+    "allLanguages": "Toutes les langues",
+    "category": "Catégorie du document",
+    "allCategories": "Toutes les catégories",
+    "sourceOnly": "Limiter à la source sélectionnée",
+    "includeArchived": "Inclure les documents et sources archivés",
+    "submit": "Rechercher dans les archives",
+    "observedAt": "Archives observées le {at}",
+    "empty": "Aucune version originale accessible ne correspond à ces filtres.",
+    "CURRENT_EFFECTIVE": "Version en vigueur",
+    "SCHEDULED": "Version planifiée",
+    "RETAINED": "Version conservée",
+    "open": "Ouvrir la version dans les archives",
+    "more": "Autres versions correspondantes"
   }
 }

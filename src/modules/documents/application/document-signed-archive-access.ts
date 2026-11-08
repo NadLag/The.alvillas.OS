@@ -12,8 +12,8 @@ import { originalSignedArchive } from "./document-signed-archive-admission";
 
 type Root = NonNullable<Awaited<ReturnType<DocumentRepository["document"]>>>;
 /** Signed artifacts inherit every original source, template, signature and recipient check. */
-export async function signedArchiveAccess(ctx: DocumentActorContext, tx: TenantTransaction, root: Root, action: "view" | "create" | "export", env?: NodeJS.ProcessEnv) {
-  const repository = new SignedSignatureRepository(tx, ctx.organizationId), artifact = await repository.signedArtifactForDocument(root.id), marker = root.sourceSnapshot;
+export async function signedArchiveAccess(ctx: DocumentActorContext, tx: TenantTransaction, root: Root, action: "view" | "create" | "export", env?: NodeJS.ProcessEnv, knownAbsent=false) {
+  const repository = new SignedSignatureRepository(tx, ctx.organizationId), artifact = knownAbsent?null:await repository.signedArtifactForDocument(root.id), marker = root.sourceSnapshot;
   if (!artifact) {
     if (marker && typeof marker === "object" && !Array.isArray(marker) && marker.protocol === signedArchiveProtocol) throw new DocumentAccessError();
     return null;

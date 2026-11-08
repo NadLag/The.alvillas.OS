@@ -1,3 +1,4 @@
+import type { DocumentArchiveReadPhase } from "./document-archive-read-phase";
 import { randomUUID, createHash } from "node:crypto";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
@@ -11,7 +12,7 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { consumeRateLimit } from "@/platform/rate-limit/postgres-rate-limiter";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
-import { DocumentRepository, type DocumentSourceFacts } from "../infrastructure/document-repository";
+import { DocumentRepository, documentSourceRuleScopes, type DocumentSourceFacts } from "../infrastructure/document-repository";
 import type { DocumentObjectStore } from "../infrastructure/document-object-store";
 import { documentObjectKey } from "../domain/document-object";
 import { documentPartContract,documentUploadChunkBytes } from "../domain/document-upload-parts";
@@ -60,26 +61,26 @@ export function documentAuthorityChecks(native: DocumentSourceFacts, privacy: re
   }
   return checks;
 }
-export async function documentSourceContext(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export") {
-  const repository = new DocumentRepository(tx, ctx.organizationId), now = await repository.clock(), native = await repository.documentSource(reference, action === "export" ? "export" : "view");
+export async function documentSourceContext(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export", readPhase?:DocumentArchiveReadPhase) {
+  if(readPhase&&action!=="view")throw new DocumentAccessError();
+  const repository = readPhase?readPhase.repository(ctx,tx):new DocumentRepository(tx, ctx.organizationId), now = readPhase?readPhase.instant(ctx,tx):await repository.clock(), native = await repository.documentSource(reference, action === "export" ? "export" : "view");
   if (!native) throw new DocumentAccessError();
-  await recheckAccountAuthorization(ctx, tx, now, native.checks, new DocumentAccessError());
-  const source = native.resource, rule = await new ConfigRuleRepository(tx, ctx.organizationId).resolve({ key: documentArchivePolicyKey, asOf: now, scopes: [
-    { scopeType: "organization", scopeId: null }, ...(source.city ? [{ scopeType: "city", scopeId: source.city }] : []),
-    ...(source.ownerId ? [{ scopeType: "owner", scopeId: source.ownerId }] : []), ...(source.propertyId ? [{ scopeType: "property", scopeId: source.propertyId }] : [])] });
+  if(readPhase)readPhase.check(ctx,tx,native.checks);else await recheckAccountAuthorization(ctx, tx, now, native.checks, new DocumentAccessError());
+  const rule = readPhase?await readPhase.archiveRule(ctx,tx,native):await new ConfigRuleRepository(tx,ctx.organizationId).resolve({key:documentArchivePolicyKey,asOf:now,scopes:documentSourceRuleScopes(native.resource)});
   const value = documentArchivePolicySchema.safeParse(rule?.value); if (!rule || !value.success) throw new DocumentConfigurationError();
   const policy = { id: rule.id, version: rule.version, value: value.data };
   return { repository, now, native, policy };
 }
 type ArchiveContext = Awaited<ReturnType<typeof documentSourceContext>> & { type: DocumentTypePolicy | undefined; privacy: ReturnType<typeof retainDocumentPrivacy>; checks: CurrentAuthorityCheck[]; fingerprint: string; signedArtifact?: z.infer<typeof documentItemSchema>["signedArtifact"] };
 type CreationIntent = { typeKey: string; kind: "FILE" | "TEMPLATE" | "INSTANCE"; privacy?: readonly string[];newInstance?:boolean };
-async function context(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export", root?: Root, prospective?: CreationIntent, env?: NodeJS.ProcessEnv): Promise<ArchiveContext> {
+async function context(ctx: DocumentActorContext, tx: TenantTransaction, reference: z.infer<typeof documentSourceReferenceSchema>, action: "view" | "create" | "export", root?: Root, prospective?: CreationIntent, env?: NodeJS.ProcessEnv, readPhase?:DocumentArchiveReadPhase): Promise<ArchiveContext> {
+  if(readPhase&&action!=="view")throw new DocumentAccessError();
   const generating = action === "create" && (root?.kind ?? prospective?.kind) === "INSTANCE";
-  const base = await documentSourceContext(ctx, tx, reference, generating ? "export" : action), { repository, now, native, policy } = base;
+  const base = await documentSourceContext(ctx, tx, reference, generating ? "export" : action,readPhase), { repository, now, native, policy } = base;
   const type = policy.value.types.find(type => type.key === (prospective?.typeKey ?? root?.typeKey));
   if (action === "create" && (!type || !type.sources.includes(reference.kind) || native.archived || root?.archivedAt)) throw new DocumentConfigurationError();
   const originPrivacy: string[] = [], originChecks: CurrentAuthorityCheck[] = [], origins: { versionId: string; fingerprint: string }[] = [];
-  const signed = root?.kind === "FILE" ? await signedArchiveAccess(ctx, tx, root, action, env) : null;
+  const signed = root?.kind === "FILE" ? await signedArchiveAccess(ctx, tx, root, action, env,readPhase?.knownAbsentSignedArtifact(ctx,tx,root.id)??false) : null;
   if (signed) { originPrivacy.push(...signed.privacy); originChecks.push(...signed.checks); origins.push({ versionId: root!.id, fingerprint: signed.fingerprint }); }
   const parsed = root?.kind === "INSTANCE" && root.instance ? documentGenerationSnapshotSchema.safeParse(root.instance.sourceSnapshot) : null,
     generation = parsed?.success ? parsed.data : null;
@@ -92,7 +93,7 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
     for (const reference of references) {
       const version = await repository.version(reference.versionId), template = version ? await repository.document(version.documentId) : null;
       if (!version || !template || template.kind !== "TEMPLATE") throw new DocumentAccessError();
-      const origin = await context(ctx, tx, sourceOf(template), action === "view" ? "view" : "export", template, undefined, env);
+      const origin = await context(ctx, tx, sourceOf(template), action === "view" ? "view" : "export", template, undefined, env,readPhase);
       originPrivacy.push(...origin.privacy); originChecks.push(...origin.checks); origins.push({ versionId: version.id, fingerprint: origin.fingerprint });
       if (generation && action === "create"&&!prospective?.newInstance) {
         const original = generation.variants.find(item => item.versionId === version.id);
@@ -105,7 +106,7 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
   const checks = [...documentAuthorityChecks(native, privacy, action, root ?? (prospective ? { kind: prospective.kind, createdBy: ctx.actorId } : undefined)), ...originChecks];
   if (generating) checks.push(...documentAuthorityChecks(native, privacy, "export", root ?? (prospective ? { kind: prospective.kind, createdBy: ctx.actorId } : undefined)));
   if(root&&generating&&(prospective?.newInstance||generation?.command.documentId))checks.push(...documentAuthorityChecks(native,privacy,"edit",{...root,kind:"FILE"}));
-  await recheckAccountAuthorization(ctx, tx, now, checks, new DocumentAccessError());
+  if(readPhase)readPhase.check(ctx,tx,checks);else await recheckAccountAuthorization(ctx, tx, now, checks, new DocumentAccessError());
   if (generation && action === "create"&&!prospective?.newInstance) {
     if(!root?.instance)throw new DocumentAccessError();
     const values = await new DocumentTemplateSourceRepository(tx, ctx.organizationId).templateSourceValues(native, generation.sourceKeys);
@@ -113,11 +114,11 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
     const latest=await repository.latest(root.id),expected=generation.command.supersedesId??null,own=latest?generatedDocumentUploadInput.safeParse(latest.admission.input):null;
     if((latest?.id??null)!==expected&&!(own?.success&&own.data.generationInstanceId===root.instance?.id&&latest?.supersedesId===expected))throw new DocumentConflictError();
   }
-  if (origins.length) await recheckAccountAuthorization(ctx, tx, await repository.clock(), checks, new DocumentAccessError());
+  if(origins.length){if(readPhase)readPhase.check(ctx,tx,checks);else await recheckAccountAuthorization(ctx, tx, await repository.clock(), checks, new DocumentAccessError());}
   return { repository, now, native, policy, type, privacy, checks, ...signed ? { signedArtifact: signed.artifact } : {},
     fingerprint: commandFingerprint({ source: native.fingerprint, policy, privacy, revision: root?.revision.toString() ?? null, archivedAt: root?.archivedAt ?? null, ...origins.length ? { origins } : {} }) };
 }
-export { context as documentArchiveContext, historyAction as appendDocumentHistory, json as documentJson };
+export { context as documentArchiveContext, historyAction as appendDocumentHistory, json as documentJson, publicVersion as presentDocumentVersion };
 async function review(ctx: DocumentActorContext, tx: TenantTransaction, input: ReviewInput) {
   const repository = new DocumentRepository(tx, ctx.organizationId), root = input.documentId ? await repository.document(input.documentId) : null;
   if (input.documentId && !root) throw new DocumentAccessError();
@@ -127,7 +128,8 @@ async function review(ctx: DocumentActorContext, tx: TenantTransaction, input: R
   if(input.parts&&!current.policy.value.upload_transport)throw new DocumentConfigurationError();
   return { ...current, root, previous, reviewFingerprint: commandFingerprint({ actorId: ctx.actorId, input, source: current.fingerprint, latest: previous?.id ?? null, cap: captureAuthorizationCap(ctx.authContext) }) };
 }
-function publicVersion(ctx: DocumentActorContext, current: Awaited<ReturnType<typeof context>>, root: Root, row: Version) {
+type PresentedVersion=Pick<Version,"id"|"documentId"|"number"|"title"|"next"|"supersedesId"|"effectiveFrom"|"createdAt"|"createdBy">&{admission:Pick<Version["admission"],"fileName"|"contentType"|"fileSize"|"sha256"|"reason">};
+function publicVersion(ctx: DocumentActorContext, current: Awaited<ReturnType<typeof context>>, root: Root, row: PresentedVersion) {
   const data = { id: row.id, documentId: row.documentId, number: row.number, title: row.title, fileName: row.admission.fileName,
     contentType: row.admission.contentType, fileSize: row.admission.fileSize, sha256: row.admission.sha256,
     supersedesId: row.supersedesId, supersededById: row.next[0]?.id ?? null, effectiveFrom: row.effectiveFrom?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), createdBy: row.createdBy, reason: row.admission.reason };

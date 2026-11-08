@@ -1,3 +1,4 @@
+import { searchDocuments } from "@/modules/documents/application/document-search-service";
 import { readDocumentRetention,readDocumentRetentionPolicyContext,reviewDocumentRetention,admitDocumentRetention } from "@/modules/documents/application/document-retention-service";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
@@ -1076,5 +1077,19 @@ describe("native document retention inheritance",()=>{
   await expect(reviewDocumentRetention(held,draft,{db,env})).rejects.toThrow("document_unavailable");const review=await reviewDocumentRetention(f.ctx,draft,{db,env});await admitDocumentRetention(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Retain the actual authored template policy context"},{db,env});
   await withTenant(db,f.organizationId,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"document_template:view"}});await tx.rolePermission.deleteMany({where:{organizationId:f.organizationId,roleId:f.assignment.roleId,permissionId:permission.id}});});
   expect((await authContextForAccount(f.organizationId,f.ctx.actorId,{db})).permissions.has("document:view")).toBe(true);await expect(readDocumentRetention(f.ctx,{versionId:draft.versionId},{db,env})).rejects.toThrow("document_unavailable");expect(await money(f.organizationId)).toEqual(before);
+ });
+});
+
+describe("native document search original authority",()=>{
+ it("searches both actual signed artifacts through their original financial, template and counterparty checks",async()=>{
+  const f=await signedArchiveFixture();await executeSignedArchiveReference(f.archiveReference,f.deps);const archive=(await withTenant(db,f.organizationId,tx=>new SignedSignatureRepository(tx,f.organizationId).signedArchive(f.archive.id)))!,before=await money(f.organizationId);
+  for(const artifact of archive.artifacts){const query=artifact.admission.fileName,input={query,kind:"FILE",versionSelection:"ALL",includeArchived:false},result=await searchDocuments(f.ctx,input,f.deps);expect(result.items.some(item=>item.version.id===artifact.admission.version!.id&&item.document.signedArtifact?.originalVersionId===f.complete.versionId)).toBe(true);}
+  await withTenant(db,f.organizationId,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"owner:view"}});await tx.rolePermission.deleteMany({where:{organizationId:f.organizationId,roleId:f.assignment.roleId,permissionId:permission.id}});});
+  for(const artifact of archive.artifacts){const result=await searchDocuments(f.ctx,{query:artifact.admission.fileName,kind:"FILE",versionSelection:"ALL",includeArchived:false},f.deps);expect(result.items).toEqual([]);expect(result.next).toBeNull();}expect(await money(f.organizationId)).toEqual(before);
+ });
+ it("keeps language-variant template metadata behind independent held and current template view grants",async()=>{
+  const f=await fixture(false,"fr",true),input={query:"Original",kind:"TEMPLATE",versionSelection:"ALL",includeArchived:false},found=await searchDocuments(f.ctx,input,{db,env});expect(found.items.map(item=>item.version.id).sort()).toEqual(f.templates.map(t=>t.versionId).sort());
+  const held={...f.ctx,authContext:{...f.ctx.authContext,permissions:new Set([...f.ctx.authContext.permissions].filter(k=>k!=="document_template:view")),assignments:f.ctx.authContext.assignments?.map(a=>({...a,permissions:new Set([...a.permissions].filter(k=>k!=="document_template:view"))}))}};expect((await searchDocuments(held,input,{db,env})).items).toEqual([]);
+  await withTenant(db,f.organizationId,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"document_template:view"}});await tx.rolePermission.deleteMany({where:{organizationId:f.organizationId,roleId:f.assignment.roleId,permissionId:permission.id}});});expect((await searchDocuments(f.ctx,input,{db,env})).items).toEqual([]);
  });
 });

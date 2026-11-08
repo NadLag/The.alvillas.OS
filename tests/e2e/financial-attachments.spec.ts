@@ -62,13 +62,13 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Original financial recei
     await page.getByTestId("attachment-submit").click(); await expect(page.getByTestId("attachment-history-item")).toHaveCount(1); expect(forwardCount).toBe(2);
     await page.unroute("**/api/finance/attachments/upload?**");
     const originalRow = page.getByTestId("attachment-history-item").filter({ hasText: command.fileName }), originalDownload = page.waitForEvent("download"); await originalRow.getByRole("button").first().click();
-    const originalFile = await originalDownload, originalPath = await originalFile.path(); if (!originalPath) throw Error("Original receipt bytes required");
+    const originalFile = await originalDownload, originalPath = info.outputPath("downloaded-original-receipt.png"); await originalFile.saveAs(originalPath);
     expect(await readFile(originalPath)).toEqual(png); expect(originalFile.suggestedFilename()).toBe(command.fileName);
     await originalRow.getByRole("button").last().click(); await page.getByTestId("attachment-file").setInputFiles({ name: "corrected-financial-receipt.pdf", mimeType: "application/pdf", buffer: pdf });
     await page.getByTestId("attachment-reason").fill("Actual corrected financial receipt, retaining the original"); await page.getByTestId("attachment-submit").click();
     await expect(page.getByTestId("attachment-history-item")).toHaveCount(2);
     const correctedRow = page.getByTestId("attachment-history-item").filter({ hasText: "corrected-financial-receipt.pdf" }), correctedDownload = page.waitForEvent("download"); await correctedRow.getByRole("button").first().click();
-    const correctedFile = await correctedDownload, correctedPath = await correctedFile.path(); if (!correctedPath) throw Error("Corrected receipt bytes required"); expect(await readFile(correctedPath)).toEqual(pdf);
+    const correctedFile = await correctedDownload, correctedPath = info.outputPath("downloaded-corrected-receipt.pdf"); await correctedFile.saveAs(correctedPath); expect(await readFile(correctedPath)).toEqual(pdf);
     await page.getByTestId("attachment-kind").selectOption("INVOICE"); await page.getByTestId("attachment-file").setInputFiles({ name: "original-financial-invoice.pdf", mimeType: "application/pdf", buffer: pdf });
     await page.getByTestId("attachment-reason").fill("Actual original financial invoice, independently attached"); await page.getByTestId("attachment-submit").click(); await expect(page.getByTestId("attachment-history-item")).toHaveCount(3);
     const history = await page.request.post("/api/finance/attachments/history", { headers, data: { transactionId: source.journal.id } });
