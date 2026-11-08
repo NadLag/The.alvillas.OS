@@ -10,6 +10,7 @@ export const envSchema = z.object({
   ADMIN_EMAIL: z.string().email().optional().or(z.literal("")),
   ADMIN_PASSWORD: z.string().optional(),
   ENCRYPTION_KEYS: z.string().optional(),
+  ALVILLAS_PUBLIC_ORGANIZATION_ID: z.preprocess(value=>typeof value==="string"&&value.trim()===""?undefined:value,z.uuid().optional()),
   RESEND_API_KEY: z.string().optional(),
   RESEND_WEBHOOK_SECRET: z.string().optional(),
   EMAIL_FROM: z.string().email().optional().or(z.literal("")),

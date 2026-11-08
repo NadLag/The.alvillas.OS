@@ -15,7 +15,7 @@ const contact = z.object({
 
 /** Claimed acquisition details never identify or modify an existing private person or owner. */
 export const leadFieldsSchema = z.object({
-  ownerContact: text(240),
+  ownerContact: text(240).optional(),
   phone: text(80).optional(),
   email: z.email().max(320).optional(),
   location: text(1000).optional(),
@@ -29,7 +29,7 @@ export const leadFieldsSchema = z.object({
 }).strict();
 
 export const leadRequiredFieldKeys = [
-  "phone", "email", "location", "propertyTypeKey", "bedrooms", "currentRentalStatusKey", "currentOtaKeys", "objectives", "notes"
+  "ownerContact", "phone", "email", "location", "propertyTypeKey", "bedrooms", "currentRentalStatusKey", "currentOtaKeys", "objectives", "notes"
 ] as const;
 const distinct = <T,>(values: T[]) => new Set(values).size === values.length;
 const rateLimit = z.object({
@@ -49,6 +49,7 @@ export const leadCapturePolicySchema = z.object({
   }).strict()).min(1).max(1000).refine(values => distinct(values.map(value => value.key))),
   required_fields: z.array(z.enum(leadRequiredFieldKeys)).max(leadRequiredFieldKeys.length).refine(distinct),
   contact_requirement: z.enum(["PHONE", "EMAIL", "PHONE_OR_EMAIL", "PHONE_AND_EMAIL"]),
+  referral_contact_required: z.boolean(),
   property_types: catalog,
   rental_statuses: catalog,
   otas: catalog,
@@ -68,7 +69,7 @@ export const leadCapturePolicySchema = z.object({
 });
 
 export const leadCaptureInputSchema = z.object({
-  idempotencyKey: z.uuid(), channel: z.enum(leadCaptureChannels), sourceKey: configSlugSchema,
+  idempotencyKey: z.uuid().transform(value=>value.toLowerCase()), channel: z.enum(leadCaptureChannels), sourceKey: configSlugSchema,
   locale: z.enum(["en", "fr", "ar"]), fields: leadFieldsSchema,
   websiteAcknowledgement: z.object({
     approvalReference: text(1000), noticeSha256: z.string().regex(/^[a-f0-9]{64}$/u), affirmed: z.literal(true)
@@ -93,12 +94,14 @@ export function parseConfiguredLeadCapture(input: unknown, policyInput: unknown)
   const allowed = (key: string | undefined, entries: Array<{key:string}>) => key === undefined || entries.some(item => item.key === key);
   if (!allowed(value.fields.propertyTypeKey,policy.property_types) || !allowed(value.fields.currentRentalStatusKey,policy.rental_statuses) ||
     value.fields.currentOtaKeys?.some(key => !allowed(key,policy.otas))) throw new LeadValidationError();
-  if ((value.channel === "REFERRAL") !== Boolean(value.fields.referralContact)) throw new LeadValidationError();
+  if ((value.channel !== "REFERRAL" && value.fields.referralContact) ||
+    (value.channel === "REFERRAL" && policy.referral_contact_required && !value.fields.referralContact)) throw new LeadValidationError();
   const acknowledgement = value.websiteAcknowledgement;
   if (value.channel === "WEBSITE") {
     if (!policy.website_notice || !acknowledgement || acknowledgement.approvalReference !== policy.website_notice.approval_reference ||
       acknowledgement.noticeSha256 !== policy.website_notice.notice_sha256) throw new LeadValidationError();
   } else if (acknowledgement) throw new LeadValidationError();
+  if(new TextEncoder().encode(JSON.stringify(value)).byteLength>leadCaptureMaximumRequestBytes)throw new LeadValidationError();
   return value;
 }
 

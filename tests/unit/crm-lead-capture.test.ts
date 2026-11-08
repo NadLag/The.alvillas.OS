@@ -8,7 +8,7 @@ const label={en:"Assessment request",fr:"Demande d’évaluation",ar:"طلب ت�
 const policy=():LeadCapturePolicy=>({
   source:"NATIVE_PRIVATE_LEAD_CAPTURE",channels:["WEBSITE","MANUAL","REFERRAL"],
   sources:[{key:"assessment",label,channels:["WEBSITE","MANUAL","REFERRAL"]}],required_fields:["location"],
-  contact_requirement:"PHONE_OR_EMAIL",property_types:[{key:"villa",label}],rental_statuses:[{key:"available",label}],otas:[{key:"configured_ota",label}],
+  contact_requirement:"PHONE_OR_EMAIL",referral_contact_required:true,property_types:[{key:"villa",label}],rental_statuses:[{key:"available",label}],otas:[{key:"configured_ota",label}],
   processing_approval_reference:"owner-approved-processing-reference",website_notice:{approval_reference:"approved-notice-v1",notice_sha256:"a".repeat(64)},
   encryption:"APP_MANAGED_AUTHENTICATED_ENCRYPTION",history:"APPEND_ONLY_ORIGINAL_CAPTURE",rate_limit:{requests:17,window_seconds:41}
 });
@@ -28,6 +28,9 @@ describe("native private CRM acquisition contracts",()=>{
     const reversed=Object.fromEntries(Object.entries(value).reverse());
     const second=parseConfiguredLeadCapture({...reversed,fields:{...value.fields,ownerContact:"Propriétaire"}},policy());
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+  });
+  it("normalizes equivalent nonce spellings before their native UUID uniqueness boundary",()=>{
+    const value=input();expect(parseConfiguredLeadCapture({...value,idempotencyKey:value.idempotencyKey.toUpperCase()},policy())).toEqual(parseConfiguredLeadCapture(value,policy()));
   });
   it.each(["organizationId","actorId","ownerId","personId","status","assignedRepresentativeId"])("rejects caller-selected %s instead of associating a private record",field=>{
     expect(()=>parseConfiguredLeadCapture({...input(),[field]:randomUUID()},policy())).toThrow();
@@ -57,6 +60,13 @@ describe("native private CRM acquisition contracts",()=>{
     expect(()=>parseConfiguredLeadCapture({...value,fields:{...value.fields,referralContact:{name:"Référent",personId:randomUUID()}}},policy())).toThrow();
     expect(()=>parseConfiguredLeadCapture({...input(),fields:{...value.fields,referralContact:{name:"Référent"}}},policy())).toThrow();
   });
+  it("uses explicit configuration for names and referral contact requirements without inventing business defaults",()=>{
+    const value={...input(),fields:{...input().fields,ownerContact:undefined}};
+    expect(()=>parseConfiguredLeadCapture(value,policy())).not.toThrow();
+    expect(()=>parseConfiguredLeadCapture(value,{...policy(),required_fields:["ownerContact"]})).toThrow();
+    expect(()=>parseConfiguredLeadCapture({...value,channel:"REFERRAL"},{...policy(),referral_contact_required:false})).not.toThrow();
+    expect(()=>leadCapturePolicySchema.parse({...policy(),referral_contact_required:undefined})).toThrow();
+  });
   it("requires the exact approved website notice and cannot manufacture consent on internal captures",()=>{
     const value={...input(),channel:"WEBSITE" as const},ack={approvalReference:"approved-notice-v1",noticeSha256:"a".repeat(64),affirmed:true as const};
     expect(()=>parseConfiguredLeadCapture(value,policy())).toThrow();expect(parseConfiguredLeadCapture({...value,websiteAcknowledgement:ack},policy()).websiteAcknowledgement).toEqual(ack);
@@ -72,13 +82,17 @@ describe("native private CRM acquisition contracts",()=>{
     for(const fields of [{...input().fields,notes:"x".repeat(8001)},{...input().fields,ownerContact:"private\u0000value"},{...input().fields,bedrooms:0.5}])
       expect(()=>leadCaptureInputSchema.parse({...input(),fields})).toThrow();
   });
+  it("bounds canonical UTF-8 bytes for internal callers as well as the public HTTP body",()=>{
+    const value={...input(),fields:{...input().fields,notes:"م".repeat(8000),objectives:"م".repeat(8000),location:"م".repeat(1000)}};
+    expect(leadCaptureInputSchema.safeParse(value).success).toBe(true);expect(()=>parseConfiguredLeadCapture(value,policy())).toThrow();
+  });
 });
 
 describe("private lead payload encryption through the original platform AEAD",()=>{
   it("retains exact multilingual acquisition details while keeping PII absent from ciphertext",()=>{
     const value=parseConfiguredLeadCapture({...input(),fields:{...input().fields,ownerContact:"مالك خاص",notes:"Détails privés"}},policy()),identity=binding(value),cipher=encryptLeadPayload(value,identity,keys);
     expect(decryptLeadPayload(cipher,identity,keys)).toEqual(value);
-    expect(cipher.includes(Buffer.from(value.fields.ownerContact))).toBe(false);expect(cipher.includes(Buffer.from(value.fields.email!))).toBe(false);expect(cipher.includes(Buffer.from(value.fields.notes!))).toBe(false);
+    expect(cipher.includes(Buffer.from(value.fields.ownerContact!))).toBe(false);expect(cipher.includes(Buffer.from(value.fields.email!))).toBe(false);expect(cipher.includes(Buffer.from(value.fields.notes!))).toBe(false);
   });
   it.each(["organizationId","leadId","createdBy","policyId","idempotencyKey"] as const)("rejects ciphertext transplanted to another %s",field=>{
     const value=input(),identity=binding(value),cipher=encryptLeadPayload(value,identity,keys);
@@ -98,7 +112,8 @@ describe("private lead payload encryption through the original platform AEAD",()
   });
   it("requires explicit private-data keys even when identity development fallbacks are available",()=>{
     const value=input(),identity=binding(value),cipher=encryptLeadPayload(value,identity,keys);
-    for(const env of [{NODE_ENV:"test"}, {NODE_ENV:"development",AUTH_SECRET:"identity-only-secret"}, {NODE_ENV:"production",AUTH_SECRET:"identity-only-secret"}, {...keys,ENCRYPTION_KEYS:" , "}]){
+    const unavailable:NodeJS.ProcessEnv[]=[{NODE_ENV:"test"}, {NODE_ENV:"development",AUTH_SECRET:"identity-only-secret"}, {NODE_ENV:"production",AUTH_SECRET:"identity-only-secret"}, {...keys,ENCRYPTION_KEYS:" , "}];
+    for(const env of unavailable){
       expect(()=>encryptLeadPayload(value,identity,env)).toThrow(LeadConfigurationError);expect(()=>decryptLeadPayload(cipher,identity,env)).toThrow(LeadConfigurationError);
     }
   });
@@ -112,5 +127,19 @@ describe("private lead payload encryption through the original platform AEAD",()
     for(const entry of ["original:","unversioned-password","original:weak-material",keys.ENCRYPTION_KEYS+","+keys.ENCRYPTION_KEYS,"original:"+Buffer.alloc(31).toString("base64")]){
       expect(()=>encryptLeadPayload(value,identity,{...keys,ENCRYPTION_KEYS:entry})).toThrow(LeadConfigurationError);
     }
+  });
+  it("retains legacy key entries used by other modules without permitting weak new lead encryption",()=>{
+    const value=input(),identity=binding(value),legacy="identity-v0:retained-original-identity-key",withLegacy={...keys,ENCRYPTION_KEYS:keys.ENCRYPTION_KEYS+","+legacy};
+    const cipher=encryptLeadPayload(value,identity,withLegacy);expect(decryptLeadPayload(cipher,identity,withLegacy)).toEqual(value);
+    expect(decryptLeadPayload(cipher,identity,{...keys,ENCRYPTION_KEYS:legacy+","+keys.ENCRYPTION_KEYS})).toEqual(value);
+    expect(()=>encryptLeadPayload(value,identity,{...keys,ENCRYPTION_KEYS:legacy+","+keys.ENCRYPTION_KEYS})).toThrow(LeadConfigurationError);
+  });
+  it("keeps the platform's canonical v1 interpretation for an existing unversioned 256-bit key",()=>{
+    const value=input(),identity=binding(value),unversioned={...keys,ENCRYPTION_KEYS:Buffer.alloc(32,43).toString("base64")},cipher=encryptLeadPayload(value,identity,unversioned);
+    expect(decryptLeadPayload(cipher,identity,unversioned)).toEqual(value);
+  });
+  it("keeps authenticated bindings stable across equivalent native UUID capitalization",()=>{
+    const value=input(),identity=binding(value),upper={...identity,organizationId:identity.organizationId.toUpperCase(),leadId:identity.leadId.toUpperCase(),createdBy:identity.createdBy.toUpperCase(),policyId:identity.policyId.toUpperCase(),idempotencyKey:identity.idempotencyKey.toUpperCase()},cipher=encryptLeadPayload(value,upper,keys);
+    expect(decryptLeadPayload(cipher,identity,keys)).toEqual(value);
   });
 });
