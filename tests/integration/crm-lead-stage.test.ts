@@ -8,16 +8,16 @@ import {hashRateLimitKey} from "@/platform/rate-limit/postgres-rate-limiter";
 import * as auditWriter from "@/platform/audit/audit-writer";
 import {readLead} from "@/modules/crm/application/lead-capture-service";
 import {reviewLeadStage,admitLeadStage,recoverLeadStage,readLeadStageHistory} from "@/modules/crm/application/lead-stage-service";
-import {nativeLeadStageFixture,nativeLeadStagePolicy} from "./support/lead-fixture";
+import {nativeLeadFinancialGuard,nativeLeadStageFixture,nativeLeadStagePolicy} from "./support/lead-fixture";
 import {provisionIntegrationRole} from "./support/database-role";
 
-let admin:PrismaClient,db:PrismaClient,financialBefore:unknown;
+let admin:PrismaClient,db:PrismaClient,financial:Awaited<ReturnType<typeof nativeLeadFinancialGuard>>;
+const crmOrganizations:string[]=[];
 const env={NODE_ENV:"test" as const,ENCRYPTION_KEYS:"native-stage:"+randomBytes(32).toString("base64")},deps=()=>({db,env});
-const financialTuples=()=>admin.$queryRaw`SELECT 'journal' AS kind,id::text,xmin::text,md5(to_jsonb(t)::text) AS body FROM financial_transaction t UNION ALL SELECT 'posting',id::text,xmin::text,md5(to_jsonb(t)::text) FROM posting t ORDER BY kind,id`;
-beforeAll(async()=>{const url=process.env.TEST_DATABASE_URL,target=url?new URL(url):null;if(!target||!["localhost","127.0.0.1"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned native stage database required");admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url!);scoped.username=scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});financialBefore=await financialTuples();});
-afterAll(async()=>{vi.restoreAllMocks();try{if(admin)expect(await financialTuples()).toEqual(financialBefore);}finally{await db?.$disconnect();await admin?.$disconnect();}});
+beforeAll(async()=>{const url=process.env.TEST_DATABASE_URL,target=url?new URL(url):null;if(!target||!["localhost","127.0.0.1"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned native stage database required");admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url!);scoped.username=scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});financial=await nativeLeadFinancialGuard(admin,db);});
+afterAll(async()=>{vi.restoreAllMocks();try{if(financial)await financial.assertPreserved(crmOrganizations);}finally{await db?.$disconnect();await admin?.$disconnect();}});
 type Fixture=Awaited<ReturnType<typeof nativeLeadStageFixture>>;
-const fixture=(changes:Parameters<typeof nativeLeadStagePolicy>[0]={})=>nativeLeadStageFixture(admin,db,env,changes);
+const fixture=async(changes:Parameters<typeof nativeLeadStagePolicy>[0]={})=>{const result=await nativeLeadStageFixture(admin,db,env,changes);crmOrganizations.push(result.organizationId);return result;};
 const withdraw=(f:Fixture,kind:string)=>withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.assignments[kind]},data:{validTo:new Date("2020-01-02")}}));
 const original=(f:Fixture)=>withTenant(db,f.organizationId,tx=>tx.$queryRaw`SELECT id::text,xmin::text,md5(to_jsonb(t)::text) AS body FROM lead t WHERE organization_id=${f.organizationId}::uuid AND id=${f.lead.id}::uuid`);
 const counts=(f:Fixture)=>withTenant(db,f.organizationId,async tx=>({stages:await tx.leadStageRevision.count(),audits:await tx.auditLog.count({where:{action:"crm.lead_stage_recorded"}}),events:await tx.outboxEvent.count({where:{type:"crm.lead_stage_recorded"}})}));
@@ -30,7 +30,7 @@ async function command(f:Fixture,toStage:"NEW"|"CONTACTED"|"QUALIFIED"|"PROPERTY
 describe("actual immutable lead pipeline admissions",()=>{
   it("advances the first native stages while preserving the original capture and exact financial history",async()=>{
     const f=await fixture(),before=await original(f);for(const toStage of["CONTACTED","QUALIFIED","PROPERTY_ASSESSMENT"]as const)expect((await admitLeadStage(f.ctx,await command(f,toStage),deps())).toStage).toBe(toStage);
-    const result=await history(f);expect(result.stage).toBe("PROPERTY_ASSESSMENT");expect(result.stageHistory.map(row=>row.number)).toEqual([3,2,1]);expect(await readLead(f.ctx,{leadId:f.lead.id},deps())).toMatchObject({initialStage:"NEW",stage:"PROPERTY_ASSESSMENT",fields:f.input.fields});expect(await original(f)).toEqual(before);expect(await financialTuples()).toEqual(financialBefore);expect(await counts(f)).toEqual({stages:3,audits:3,events:3});
+    const result=await history(f);expect(result.stage).toBe("PROPERTY_ASSESSMENT");expect(result.stageHistory.map(row=>row.number)).toEqual([3,2,1]);expect(await readLead(f.ctx,{leadId:f.lead.id},deps())).toMatchObject({initialStage:"NEW",stage:"PROPERTY_ASSESSMENT",fields:f.input.fields});expect(await original(f)).toEqual(before);await financial.assertPreserved(crmOrganizations);expect(await counts(f)).toEqual({stages:3,audits:3,events:3});
   });
   it("appends an explicit backward correction and never overwrites an original stage or reason",async()=>{
     const f=await fixture();await admitLeadStage(f.ctx,await command(f),deps());await admitLeadStage(f.ctx,await command(f,"QUALIFIED"),deps());const before=await withTenant(db,f.organizationId,tx=>tx.$queryRaw`SELECT id::text,xmin::text,md5(to_jsonb(t)::text) AS body FROM lead_stage_revision t ORDER BY number`);await admitLeadStage(f.ctx,{...await command(f,"NEW"),reason:"Explicit reviewed acquisition correction"},deps());const rows=await history(f);expect(rows.stage).toBe("NEW");expect(rows.stageHistory[0].reason).toBe("Explicit reviewed acquisition correction");expect(await withTenant(db,f.organizationId,tx=>tx.$queryRaw`SELECT id::text,xmin::text,md5(to_jsonb(t)::text) AS body FROM lead_stage_revision t WHERE number<3 ORDER BY number`)).toEqual(before);
