@@ -1,3 +1,4 @@
+import {leadResource} from "./lead-resource";
 import {randomUUID} from "node:crypto";
 import {z} from "zod";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
@@ -20,7 +21,7 @@ import {decryptLeadPayload,requireLeadPayloadKeys} from "../domain/lead-payload"
 import {retainedLeadProfile} from "./lead-profile-snapshot";
 import {leadCaptureBinding,type LeadDependencies} from "./lead-capture-service";
 
-const resource=(organizationId:string,id:string|undefined,stage:string,createdAt:Date)=>({type:"lead",id,organizationId,status:stage,occurredAt:createdAt,dataClass:"personal" as const});
+const resource=(organizationId:string,id:string|undefined,stage:string,createdAt:Date)=>leadResource({organizationId,id,createdAt},stage);
 async function phase(actor:AccountActorContext,tx:TenantTransaction){
   const now=await new LeadRepository(tx,actor.organizationId).clock(),stored=await authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId);assertAccountAuthorization(actor,stored,now,[],new LeadAccessError());
   return{now,stored,cap:commandFingerprint({held:captureAuthorizationCap(actor.authContext),stored:captureAuthorizationCap(stored)})};
@@ -41,8 +42,8 @@ export async function listLeadWorkspace(actor:AccountActorContext,raw:unknown,de
       const candidates=await repository.candidates(input,asOf,before),batch=candidates.slice(0,100),rows=await repository.rows(batch.map(c=>c.id)),byId=new Map(rows.map(row=>[row.id,row]));
       for(const candidate of batch){
         scanned=pointer(candidate);const row=byId.get(candidate.id);if(!row)throw new LeadConflictError();const stage=row.stageRevisions[0],profile=row.profileRevisions[0];
-        if((stage?.id??null)!==candidate.stageRevisionId||(profile?.id??null)!==candidate.profileRevisionId)throw new LeadConflictError();
-        const target=resource(actor.organizationId,row.id,candidate.stage,row.createdAt);if(!allowed(actor,first,target,"view"))continue;
+        if((stage?.id??null)!==candidate.stageRevisionId||(profile?.id??null)!==candidate.profileRevisionId||(row.workEntries[0]?.id??null)!==candidate.assignmentRevisionId)throw new LeadConflictError();
+        const target=leadResource(row,candidate.stage,row.workEntries[0]??null);if(!allowed(actor,first,target,"view"))continue;
         const payload=profile?retainedLeadProfile(profile,deps.env):decryptLeadPayload(row.encryptedPayload,leadCaptureBinding(row),deps.env),snapshot=z.object({value:leadCapturePolicySchema}).parse(profile?.capturePolicySnapshot??row.policySnapshot),source=snapshot.value.sources.find(s=>s.key===candidate.sourceKey);if(!source)throw new LeadConfigurationError();
         const data={id:row.id,createdAt:row.createdAt.toISOString(),channel:row.channel,sourceKey:candidate.sourceKey,sourceLabel:source.label,locale:profile?.locale??row.locale,stage:leadStageSchema.parse(candidate.stage),stageRevisionId:candidate.stageRevisionId,profileRevisionId:candidate.profileRevisionId,profileNumber:profile?.number??0,fields:payload.fields,canEdit:allowed(actor,first,target,"edit")};
         const item=leadWorkspaceItemSchema.parse(present({...actor.authContext,visibleDataClasses:new Set(["operational"]as const)},"view",{...target,data},catalogFieldPolicy<typeof data>("lead"),first.now));matches.push({candidate,row,item});if(matches.length===21)break;
@@ -52,7 +53,7 @@ export async function listLeadWorkspace(actor:AccountActorContext,raw:unknown,de
     const published=matches.slice(0,20),nextPointer=matches.length===21?pointer(published[19].candidate):more?scanned:undefined;
     await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_workspace_read",resourceType:"lead",resourceId:null,after:{filterFingerprint:filter,count:published.length,leadIds:published.map(m=>m.row.id)},requestId:deps.requestId??randomUUID(),occurredAt:first.now});
     const final=await phase(actor,tx);if(final.cap!==first.cap)throw new LeadConflictError();const fresh=new Map((await repository.rows(matches.map(m=>m.row.id))).map(row=>[row.id,row]));
-    for(const match of matches){const row=fresh.get(match.row.id);if(!row||row.payloadSha256!==match.row.payloadSha256||(row.stageRevisions[0]?.id??null)!==match.candidate.stageRevisionId||(row.profileRevisions[0]?.id??null)!==match.candidate.profileRevisionId)throw new LeadConflictError();assertAccountAuthorization(actor,final.stored,final.now,[{action:"view",resource:resource(actor.organizationId,row.id,match.candidate.stage,row.createdAt)}],new LeadAccessError());}
+    for(const match of matches){const row=fresh.get(match.row.id);if(!row||row.payloadSha256!==match.row.payloadSha256||(row.stageRevisions[0]?.id??null)!==match.candidate.stageRevisionId||(row.profileRevisions[0]?.id??null)!==match.candidate.profileRevisionId||(row.workEntries[0]?.id??null)!==match.candidate.assignmentRevisionId)throw new LeadConflictError();assertAccountAuthorization(actor,final.stored,final.now,[{action:"view",resource:leadResource(row,match.candidate.stage,row.workEntries[0]??null)}],new LeadAccessError());}
     let next:string|null=null;if(nextPointer){requireLeadPayloadKeys(deps.env??process.env,true);next=encryptSecret(JSON.stringify({protocol:leadWorkspaceProtocol,organizationId:actor.organizationId,actorId:actor.actorId,filter,cap:first.cap,beforeId:nextPointer.id,beforeCreatedAt:nextPointer.createdAt,asOf:asOf.toISOString()}),deps.env);}
     return leadWorkspaceResultSchema.parse({items:published.map(m=>m.item),next});
   });

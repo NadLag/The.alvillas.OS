@@ -10,6 +10,13 @@ Assignment does not grant access. Require independent held and current `lead:vie
 
 The repository must enforce organization-scoped source relations, immutable rows, ordered revisions, exact policy snapshots and atomic identifier-only audit/outbox admission. Reminders reuse existing notification routing, preferences, current recipient authorization and delivery infrastructure. A recorded notification is not activity completion. Cancellation or completion retains the original reminder and its due instant; delivery receipts cannot silently alter the work history.
 
+Open reminders require an active authorized recipient. An authorized editor may
+complete or cancel an existing reminder after that recipient becomes inactive;
+the native transition still preserves its exact original recipient and due
+instant. Terminal history neither delivers a notification nor grants the former
+recipient access. The correction follows applied migration 212 in a new forward
+migration; applied SQL and prior work/financial rows stay unchanged.
+
 The current checkpoint implements domain validation, canonical commands and encryption with 50 affected unit cases. Native admission, configuration wiring, current-authority fences, notification production, localized UI and complete acceptance remain outstanding. No feature is DONE and no legal, provider or production approval is implied.
 
 Scope unchanged: all 355 features remain required.
