@@ -3,7 +3,6 @@ import type {TenantTransaction} from "@/platform/db/tenant";
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import {CoreRepository} from "@/modules/core/infrastructure/core-repository";
 import {ownerInputSchema} from "@/modules/core/domain/owner-property";
-import {createOwner} from "@/modules/core/application/core-service";
 import type {LeadCaptureInput} from "@/modules/crm/domain/lead-capture";
 import {LeadConversionSourceError} from "@/modules/crm/domain/lead-conversion";
 
@@ -13,6 +12,7 @@ export function nativeLeadOwnerInput(source:Pick<LeadCaptureInput,"fields"|"loca
  if(!result.success)throw new LeadConversionSourceError();return result.data;
 }
 export async function createNativeLeadOwner(actor:AccountActorContext,tx:TenantTransaction,source:Pick<LeadCaptureInput,"fields"|"locale">,requestId:string){
+ const {createOwner}=await import("@/modules/core/application/core-service");
  const owner=await createOwner(actor,nativeLeadOwnerInput(source),{db:{$transaction:work=>work(tx)},requestId});
  const identity=await new CoreRepository(tx,actor.organizationId).findOwnerIdentity(owner.id);if(!identity)throw new LeadConversionSourceError();return identity;
 }
