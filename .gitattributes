@@ -123,3 +123,5 @@ prisma/migrations/20261108063000_native_lead_profile_history/migration.sql text 
 /prisma/migrations/20261108103000_lead_work_terminal_recipient_history/migration.sql text eol=lf
 
 /prisma/migrations/20261108110000_lead_reminder_notification_kind/migration.sql text eol=lf
+
+/prisma/migrations/20261108130000_native_lead_document_source/migration.sql text eol=lf

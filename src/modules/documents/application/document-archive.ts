@@ -17,7 +17,7 @@ import type { DocumentObjectStore } from "../infrastructure/document-object-stor
 import { documentObjectKey } from "../domain/document-object";
 import { documentPartContract,documentUploadChunkBytes } from "../domain/document-upload-parts";
 import { documentArchivePolicyKey, documentArchivePolicySchema, retainDocumentPrivacy, retainedDocumentCategory, type DocumentTypePolicy } from "../domain/document-policy";
-import { documentUploadReviewInput, documentUploadInput, documentRecoveryInput, documentSourceReferenceSchema,
+import { documentUploadReviewInput, documentUploadInput, documentRecoveryInput, documentSourceReferenceSchema,documentSourceForeignKeys,
   DocumentAccessError, DocumentConfigurationError, DocumentConflictError,DocumentRateLimitError } from "../domain/document-command";
 import { documentItemSchema, documentVersionItemSchema, documentHistorySchema, documentUploadAdmissionSchema,documentPartReceiptSchema } from "../domain/document-read-model";
 import { documentTemplateMediaType } from "../domain/document-template-format";
@@ -109,7 +109,8 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
   if(readPhase)readPhase.check(ctx,tx,checks);else await recheckAccountAuthorization(ctx, tx, now, checks, new DocumentAccessError());
   if (generation && action === "create"&&!prospective?.newInstance) {
     if(!root?.instance)throw new DocumentAccessError();
-    const values = await new DocumentTemplateSourceRepository(tx, ctx.organizationId).templateSourceValues(native, generation.sourceKeys);
+    const locale=generation.variants.find(variant=>variant.versionId===generation.command.templateVersionId)?.locale;if(!locale)throw new DocumentConflictError();
+    const values = await new DocumentTemplateSourceRepository(tx, ctx.organizationId).templateSourceValues(native, generation.sourceKeys,locale,env);
     if (values.fingerprint !== generation.identity.sourceFingerprint || native.fingerprint !== generation.nativeSourceFingerprint || commandFingerprint(policy) !== commandFingerprint(generation.policySnapshot)||root?.revision.toString()!==(generation.documentRevision??"1")) throw new DocumentConflictError();
     const latest=await repository.latest(root.id),expected=generation.command.supersedesId??null,own=latest?generatedDocumentUploadInput.safeParse(latest.admission.input):null;
     if((latest?.id??null)!==expected&&!(own?.success&&own.data.generationInstanceId===root.instance?.id&&latest?.supersedesId===expected))throw new DocumentConflictError();
@@ -119,11 +120,11 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
     fingerprint: commandFingerprint({ source: native.fingerprint, policy, privacy, revision: root?.revision.toString() ?? null, archivedAt: root?.archivedAt ?? null, ...origins.length ? { origins } : {} }) };
 }
 export { context as documentArchiveContext, historyAction as appendDocumentHistory, json as documentJson, publicVersion as presentDocumentVersion };
-async function review(ctx: DocumentActorContext, tx: TenantTransaction, input: ReviewInput) {
+async function review(ctx: DocumentActorContext, tx: TenantTransaction, input: ReviewInput,env?:NodeJS.ProcessEnv) {
   const repository = new DocumentRepository(tx, ctx.organizationId), root = input.documentId ? await repository.document(input.documentId) : null;
   if (input.documentId && !root) throw new DocumentAccessError();
   if (root && (root.sourceKind !== input.source.kind || root.sourceId !== input.source.id || root.typeKey !== input.typeKey || root.kind !== input.kind || root.locale !== input.locale || (root.template?.key ?? null) !== input.templateKey)) throw new DocumentConflictError();
-  const current = await context(ctx, tx, input.source, "create", root ?? undefined, input), previous = root ? await repository.latest(root.id) : null;
+  const current = await context(ctx, tx, input.source, "create", root ?? undefined, input,env), previous = root ? await repository.latest(root.id) : null;
   if (!current.type?.content_types.includes(input.contentType) || input.fileSize > current.type.max_bytes || (previous?.id ?? null) !== input.supersedesId) throw new DocumentConflictError();
   if(input.parts&&!current.policy.value.upload_transport)throw new DocumentConfigurationError();
   return { ...current, root, previous, reviewFingerprint: commandFingerprint({ actorId: ctx.actorId, input, source: current.fingerprint, latest: previous?.id ?? null, cap: captureAuthorizationCap(ctx.authContext) }) };
@@ -147,26 +148,26 @@ function identity(ctx: DocumentActorContext, row: Pick<Admission, "id" | "docume
   return { organizationId: ctx.organizationId, documentId: row.documentId, admissionId: row.id, contentType: row.contentType as z.infer<typeof documentUploadInput>["contentType"], fileSize: row.fileSize, sha256: row.sha256 };
 }
 function generationInstanceOf(row:Pick<Admission,"input">){const parsed=generatedDocumentUploadInput.safeParse(row.input);return parsed.success?parsed.data.generationInstanceId:undefined;}
-async function admittedContext(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission, justAppendedVersionId?: string) {
+async function admittedContext(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission, justAppendedVersionId?: string,env?:NodeJS.ProcessEnv) {
   if (signedDocumentUploadInput.safeParse(row.input).success) throw new DocumentAccessError();
   if (row.createdBy !== ctx.actorId) throw new DocumentAccessError();
   const generated=generatedDocumentUploadInput.safeParse(row.input),root = await new DocumentRepository(tx, ctx.organizationId).document(row.documentId,generated.success?generated.data.generationInstanceId:undefined); if (!root) throw new DocumentAccessError();
   const latest = row.version ? null : await new DocumentRepository(tx,ctx.organizationId).latest(root.id);
   const superseded = !row.version && (((latest?.id ?? null) !== row.supersedesId && latest?.id !== justAppendedVersionId) || root.revision !== row.expectedRevision);
   const original = { ...ctx, authContext: restoreAuthorizationCap(row.authorizationCap) }, action = row.version || superseded ? "view" : "create";
-  const current = await context(ctx, tx, sourceOf(root), action, root), held = await context(original, tx, sourceOf(root), action, root);
+  const current = await context(ctx, tx, sourceOf(root), action, root,undefined,env), held = await context(original, tx, sourceOf(root), action, root,undefined,env);
   if (!row.version && !superseded && (row.sourceFingerprint !== current.native.fingerprint || commandFingerprint(savedPolicy.parse(row.policySnapshot)) !== commandFingerprint(current.policy))) throw new DocumentConflictError();
   if (current.fingerprint !== held.fingerprint) throw new DocumentConflictError(); return { ...current, root, superseded };
 }
-async function admissionResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission) {
-  const current = await admittedContext(ctx, tx, row);
+async function admissionResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Admission,env?:NodeJS.ProcessEnv) {
+  const current = await admittedContext(ctx, tx, row,undefined,env);
   return documentUploadAdmissionSchema.parse({ recorded: true, id: row.id, documentId: row.documentId, idempotencyKey: row.commandKey, state: row.version ? "COMPLETE" : current.superseded ? "SUPERSEDED" : "ADMITTED", complete: Boolean(row.version), version: row.version ? publicVersion(ctx, current, current.root, row.version) : null,
     expected: { fileName: row.fileName, contentType: row.contentType, fileSize: row.fileSize, sha256: row.sha256,parts:storedDocumentUploadInput.parse(row.input).parts??null } });
 }
 
 export async function reviewDocumentUpload(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx = actorContext(actor), input = documentUploadReviewInput.parse(raw);
-  return withTenant(deps.db, ctx.organizationId, async tx => { const current = await review(ctx, tx, input);
+  return withTenant(deps.db, ctx.organizationId, async tx => { const current = await review(ctx, tx, input,deps.env);
     return { reviewFingerprint: current.reviewFingerprint, privacy: current.privacy, number: (current.previous?.number ?? 0) + 1 }; });
 }
 
@@ -178,9 +179,9 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
   const rate = await withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), existing = await repository.byNonce(ctx.actorId, input.idempotencyKey);
     if (await repository.instanceByNonce(ctx.actorId, input.idempotencyKey) || await repository.signatureByNonce(ctx.actorId, input.idempotencyKey) || await repository.providerPreparationByNonce(ctx.actorId, input.idempotencyKey)) throw new DocumentConflictError();
-    if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return { kind:"recovered" as const,receipt:await admissionResult(ctx, tx, existing) }; }
+    if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return { kind:"recovered" as const,receipt:await admissionResult(ctx, tx, existing,deps.env) }; }
     if(input.contentType===documentTemplateMediaType&&!prepared)throw new DocumentConfigurationError();
-    const current = await review(ctx, tx, inputReview); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
+    const current = await review(ctx, tx, inputReview,deps.env); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
     const budget = current.policy.value.upload_admission;
     const decision = await consumeRateLimit(tx, ctx.organizationId, { key: "document-archive:" + ctx.actorId, limit: budget.max_requests, windowSeconds: budget.window_seconds, now: current.now });
     return { kind:"rate" as const,allowed: decision.allowed,resetAt:decision.resetAt };
@@ -190,15 +191,12 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);
     if (await repository.instanceByNonce(ctx.actorId, input.idempotencyKey) || await repository.signatureByNonce(ctx.actorId, input.idempotencyKey) || await repository.providerPreparationByNonce(ctx.actorId, input.idempotencyKey)) throw new DocumentConflictError();
-    const existing = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return admissionResult(ctx, tx, existing); }
+    const existing = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return admissionResult(ctx, tx, existing,deps.env); }
     if (input.documentId) await repository.lock("root:" + input.documentId);
-    const current = await review(ctx, tx, inputReview); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
+    const current = await review(ctx, tx, inputReview,deps.env); if (current.reviewFingerprint !== input.reviewFingerprint) throw new DocumentConflictError();
     let root = current.root;
     if (!root) {
-      root = await repository.appendDocument({ sourceKind: input.source.kind, sourceId: input.source.id, propertyId: input.source.kind === "PROPERTY" ? input.source.id : null,
-        ownerId: input.source.kind === "OWNER" ? input.source.id : null, reservationId: input.source.kind === "RESERVATION" ? input.source.id : null,
-        supplierId: input.source.kind === "SUPPLIER" ? input.source.id : null, guestId: input.source.kind === "GUEST" ? input.source.id : null,
-        personId: input.source.kind === "PERSON" ? input.source.id : null, transactionId: input.source.kind === "FINANCIAL_TRANSACTION" ? input.source.id : null,
+      root = await repository.appendDocument({ sourceKind: input.source.kind, sourceId: input.source.id,...documentSourceForeignKeys(input.source),
         typeKey: input.typeKey, kind: input.kind, locale: input.locale, title: input.title, privacy: current.privacy, sourceSnapshot: json(current.native.snapshot), policySnapshot: json(current.policy),
         commandKey: input.idempotencyKey, commandHash, createdBy: ctx.actorId, createdAt: current.now });
       await historyAction(ctx, tx, current, root.id, "CREATED", input.idempotencyKey, commandHash, input.reason, {}, { document: await repository.snapshot(root.id) }, deps);
@@ -217,9 +215,9 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
       storageKey: documentObjectKey(objectIdentity), payloadCipher, reason: input.reason, createdBy: ctx.actorId, createdAt: current.now });
     await historyAction(ctx, tx, current, root.id, "ADMITTED", input.idempotencyKey, commandHash, input.reason, changed ? json(before) : {},
       json({ admissionId: id, document: await repository.snapshot(root.id) }), deps);
-    const final = await context(ctx, tx, input.source, "create", await repository.document(root.id) ?? undefined, inputReview);
+    const final = await context(ctx, tx, input.source, "create", await repository.document(root.id) ?? undefined, inputReview,deps.env);
     if (current.native.fingerprint !== final.native.fingerprint || commandFingerprint(current.policy) !== commandFingerprint(final.policy)) throw new DocumentConflictError();
-    const row = await repository.admission(id); if (!row) throw new DocumentConflictError(); return admissionResult(ctx, tx, row);
+    const row = await repository.admission(id); if (!row) throw new DocumentConflictError(); return admissionResult(ctx, tx, row,deps.env);
   });
 }
 
@@ -228,7 +226,7 @@ export async function recoverDocumentUpload(actor: DocumentActorContext, raw: un
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey);
     if (await repository.instanceNonceOwner(input.idempotencyKey) || await repository.signatureNonceOwner(input.idempotencyKey) || await repository.providerPreparationNonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
-    const row = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (row) return admissionResult(ctx, tx, row);
+    const row = await repository.byNonce(ctx.actorId, input.idempotencyKey); if (row) return admissionResult(ctx, tx, row,deps.env);
     if (await repository.nonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
     const current = await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);
     if ([ctx.authContext,current].some(authority => ["document:view","document:create"].some(key => !authority.permissions.has(key)))) throw new DocumentAccessError();
@@ -241,13 +239,13 @@ export async function uploadDocumentBytes(actor: DocumentActorContext, raw: unkn
   const ctx = actorContext(actor), input = uploadReference.parse(raw);
   const captured = await withTenant(deps.db, ctx.organizationId, async tx => {
     const row = await new DocumentRepository(tx, ctx.organizationId).admission(input.admissionId); if (!row) throw new DocumentAccessError();
-    const current = await admittedContext(ctx, tx, row);
+    const current = await admittedContext(ctx, tx, row,undefined,deps.env);
     if (current.superseded) throw new DocumentConflictError();
     if (bytes.length !== row.fileSize || createHash("sha256").update(bytes).digest("hex") !== row.sha256) throw new DocumentConflictError();
     const parts=storedDocumentUploadInput.parse(row.input).parts;
     if(row.contentType===documentTemplateMediaType){const original=storedDocumentUploadInput.parse(row.input);if(!original.templateKey||!row.payloadCipher)throw new DocumentConflictError();validateDocumentTemplateBytes({...identity(ctx,row),templateKey:original.templateKey,locale:original.locale},bytes);}
     if(parts&&parts.hashes.some((hash,index)=>createHash("sha256").update(bytes.subarray(index*documentUploadChunkBytes,(index+1)*documentUploadChunkBytes)).digest("hex")!==hash))throw new DocumentConflictError();
-    return { row, ttl: current.policy.value.storage_url_seconds, result: row.version ? await admissionResult(ctx, tx, row) : null };
+    return { row, ttl: current.policy.value.storage_url_seconds, result: row.version ? await admissionResult(ctx, tx, row,deps.env) : null };
   });
   if (captured.result) return captured.result;
   if (!deps.objects) throw new DocumentConfigurationError();
@@ -255,7 +253,7 @@ export async function uploadDocumentBytes(actor: DocumentActorContext, raw: unkn
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("root:" + captured.row.documentId);
     const row = await repository.admission(input.admissionId); if (!row) throw new DocumentAccessError();
-    const current = await admittedContext(ctx, tx, row);
+    const current = await admittedContext(ctx, tx, row,undefined,deps.env);
     if (current.superseded) throw new DocumentConflictError();
     if (!row.version) {
       const previous = await repository.latest(row.documentId); if ((previous?.id ?? null) !== row.supersedesId) throw new DocumentConflictError();
@@ -263,9 +261,9 @@ export async function uploadDocumentBytes(actor: DocumentActorContext, raw: unkn
         title: originalInput.title, supersedesId: row.supersedesId, effectiveFrom: originalInput.effectiveFrom ? new Date(originalInput.effectiveFrom) : null,
         cipherSize: stored.cipherSize, cipherSha256: stored.cipherSha256, keyVersion: stored.keyVersion, createdBy: ctx.actorId, createdAt: current.now });
       await historyAction(ctx, tx, current, row.documentId, "VERSION_ADDED", row.commandKey, row.commandHash, row.reason, {}, { versionId: version.id, admissionId: row.id }, deps);
-      const final = await admittedContext(ctx, tx, row, version.id); if (current.fingerprint !== final.fingerprint) throw new DocumentConflictError();
+      const final = await admittedContext(ctx, tx, row, version.id,deps.env); if (current.fingerprint !== final.fingerprint) throw new DocumentConflictError();
     }
-    const complete = await repository.admission(row.id); if (!complete?.version) throw new DocumentConflictError(); return admissionResult(ctx, tx, complete);
+    const complete = await repository.admission(row.id); if (!complete?.version) throw new DocumentConflictError(); return admissionResult(ctx, tx, complete,deps.env);
   });
 }
 
@@ -274,7 +272,7 @@ export async function uploadDocumentPart(actor:DocumentActorContext,raw:unknown,
   const ctx=actorContext(actor),input=partReference.parse(raw);
   const captured=await withTenant(deps.db,ctx.organizationId,async tx=>{
     const repository=new DocumentRepository(tx,ctx.organizationId),row=await repository.admission(input.admissionId);if(!row)throw new DocumentAccessError();
-    const current=await admittedContext(ctx,tx,row),parts=storedDocumentUploadInput.parse(row.input).parts;if(!parts||current.superseded)throw new DocumentConflictError();
+    const current=await admittedContext(ctx,tx,row,undefined,deps.env),parts=storedDocumentUploadInput.parse(row.input).parts;if(!parts||current.superseded)throw new DocumentConflictError();
     const contract=documentPartContract(identity(ctx,row),input.index,parts);
     if(bytes.length!==contract.size||createHash("sha256").update(bytes).digest("hex")!==contract.sha256)throw new DocumentConflictError();
     const budget=current.policy.value.upload_transport;if(!budget)throw new DocumentConfigurationError();
@@ -285,10 +283,10 @@ export async function uploadDocumentPart(actor:DocumentActorContext,raw:unknown,
   if(!captured.row.version){if(!deps.objects)throw new DocumentConfigurationError();await deps.objects.putPart(identity(ctx,captured.row),input.index,captured.parts,bytes,captured.ttl);}
   return withTenant(deps.db,ctx.organizationId,async tx=>{
     const repository=new DocumentRepository(tx,ctx.organizationId),row=await repository.admission(input.admissionId);if(!row)throw new DocumentAccessError();
-    const current=await admittedContext(ctx,tx,row);if(current.superseded||current.fingerprint!==captured.fingerprint)throw new DocumentConflictError();
+    const current=await admittedContext(ctx,tx,row,undefined,deps.env);if(current.superseded||current.fingerprint!==captured.fingerprint)throw new DocumentConflictError();
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"documents.upload_part_saved",resourceType:"document",resourceId:row.documentId,
       after:{documentId:row.documentId,admissionId:row.id,index:input.index},requestId:deps.requestId??randomUUID(),occurredAt:current.now});
-    const final=await admittedContext(ctx,tx,row);if(final.superseded||current.fingerprint!==final.fingerprint)throw new DocumentConflictError();
+    const final=await admittedContext(ctx,tx,row,undefined,deps.env);if(final.superseded||current.fingerprint!==final.fingerprint)throw new DocumentConflictError();
     return documentPartReceiptSchema.parse({admissionId:row.id,idempotencyKey:row.commandKey,index:input.index,sha256:captured.sha256});
   });
 }
@@ -296,13 +294,13 @@ export async function uploadDocumentPart(actor:DocumentActorContext,raw:unknown,
 export async function completeDocumentParts(actor:DocumentActorContext,raw:unknown,deps:Dependencies){
   const ctx=actorContext(actor),input=uploadReference.parse(raw),captured=await withTenant(deps.db,ctx.organizationId,async tx=>{
     const row=await new DocumentRepository(tx,ctx.organizationId).admission(input.admissionId);if(!row)throw new DocumentAccessError();
-    const current=await admittedContext(ctx,tx,row),original=storedDocumentUploadInput.parse(row.input),parts=original.parts??null;
+    const current=await admittedContext(ctx,tx,row,undefined,deps.env),original=storedDocumentUploadInput.parse(row.input),parts=original.parts??null;
     const generated=original.kind==="INSTANCE"?generatedDocumentUploadInput.parse(original):null;
     if(current.superseded||!parts&&row.contentType!==documentTemplateMediaType&&!generated)throw new DocumentConflictError();
     if(generated&&(!row.payloadCipher||current.root.instance?.id!==generated.generationInstanceId))throw new DocumentConflictError();
     if(row.contentType===documentTemplateMediaType&&(!original.templateKey||!row.payloadCipher))throw new DocumentConflictError();
     const template=row.contentType===documentTemplateMediaType&&original.templateKey?{...identity(ctx,row),templateKey:original.templateKey,locale:original.locale}:null;
-    const result=row.version?await admissionResult(ctx,tx,row):null;if(result)return{row,parts,template,generated,ttl:current.policy.value.storage_url_seconds,result,decision:null};
+    const result=row.version?await admissionResult(ctx,tx,row,deps.env):null;if(result)return{row,parts,template,generated,ttl:current.policy.value.storage_url_seconds,result,decision:null};
     const budget=current.policy.value.upload_transport;if(!budget)throw new DocumentConfigurationError();
     const decision=await consumeRateLimit(tx,ctx.organizationId,{key:"document-parts:"+ctx.actorId,limit:budget.max_requests,windowSeconds:budget.window_seconds,now:current.now});
     return{row,parts,template,generated,ttl:current.policy.value.storage_url_seconds,result:null,decision};
@@ -363,13 +361,13 @@ export async function readDocumentTemplateDefinition(actor: DocumentActorContext
     const repository = new DocumentRepository(tx, ctx.organizationId), row = await repository.version(input.versionId);
     if (!row) throw new DocumentAccessError();
     const root = await repository.document(row.documentId); if (!root || root.kind !== "TEMPLATE" || !root.template) throw new DocumentAccessError();
-    const current = await context(ctx, tx, sourceOf(root), "export", root);
+    const current = await context(ctx, tx, sourceOf(root), "export", root,undefined,deps.env);
     if (root.archivedAt || current.native.archived || row.admission.contentType !== documentTemplateMediaType || !row.admission.payloadCipher) throw new DocumentConflictError();
     const locale = z.enum(["en", "fr", "ar"]).parse(root.locale), bytes = openDocumentTemplatePayload({ ...identity(ctx, row.admission), templateKey: root.template.key, locale }, row.admission.payloadCipher, deps.env), definition = decodeDocumentTemplate(bytes);
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "documents.template_read_for_generation", resourceType: "document", resourceId: root.id,
       after: { documentId: root.id, versionId: row.id }, requestId: deps.requestId ?? randomUUID(), occurredAt: current.now });
     const latest = await repository.document(root.id); if (!latest) throw new DocumentAccessError();
-    const final = await context(ctx, tx, sourceOf(latest), "export", latest); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError();
+    const final = await context(ctx, tx, sourceOf(latest), "export", latest,undefined,deps.env); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError();
     return { definition, versionId: row.id, documentId: root.id, sha256: row.admission.sha256, typeKey: root.typeKey, templateKey: root.template.key, locale,
       rootRevision: root.revision.toString(), sourceFingerprint: current.native.fingerprint, policyFingerprint: commandFingerprint(current.policy), privacy: current.privacy, fingerprint: current.fingerprint };
   });

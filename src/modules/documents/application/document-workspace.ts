@@ -42,15 +42,19 @@ export async function readDocumentSources(actor: DocumentActorContext, raw: unkn
     const current=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);
     if([ctx.authContext,current].some(authority=>!authority.permissions.has("document:view")))throw new DocumentAccessError();
     const repository=new DocumentRepository(tx,ctx.organizationId),rows=await repository.sourceCandidates(input.kind,input.query,after),items=[],checks:CurrentAuthorityCheck[]=[],captured=[];
+    if(input.kind==="LEAD")await repository.prepareDocumentSources(rows.slice(0,30).map(row=>({kind:input.kind,id:row.id})));
+    const sourceNow=input.kind==="LEAD"?await repository.clock():null;
     for(const row of rows.slice(0,30)){
       const source={kind:input.kind,id:row.id},native=await repository.documentSource(source);if(!native)continue;
-      const now=await repository.clock();if(![ctx.authContext,current].every(authority=>allowed(authority,native.checks,now)))continue;
+      const now=sourceNow??await repository.clock();if(![ctx.authContext,current].every(authority=>allowed(authority,native.checks,now)))continue;
+      const label=repository.documentSourceLabel(native,deps.env);if(input.kind==="LEAD"&&input.query&&row.id.toLowerCase()!==input.query.toLowerCase()&&!label.toLowerCase().includes(input.query.toLowerCase()))continue;
       checks.push(...native.checks);captured.push({source,fingerprint:native.fingerprint});
-      const visible=present({...ctx.authContext,visibleDataClasses:new Set([native.resource.dataClass??"operational"])},"view",{...native.resource,data:{source,label:row.label}},{},now);
+      const visible=present({...ctx.authContext,visibleDataClasses:new Set([native.resource.dataClass??"operational"])},"view",{...native.resource,data:{source,label}},{},now);
       items.push({source:documentSourceReferenceSchema.parse(visible.source),label:z.string().parse(visible.label)});
     }
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"documents.sources_read",resourceType:"document",resourceId:null,after:{count:items.length},requestId:deps.requestId??randomUUID(),occurredAt:await repository.clock()});
-    for(const saved of captured){const final=await repository.documentSource(saved.source);if(!final||final.fingerprint!==saved.fingerprint)throw new DocumentConflictError();checks.push(...final.checks);}
+    const finalRepository=input.kind==="LEAD"?new DocumentRepository(tx,ctx.organizationId):repository;if(input.kind==="LEAD")await finalRepository.prepareDocumentSources(captured.map(saved=>saved.source));
+    for(const saved of captured){const final=await finalRepository.documentSource(saved.source);if(!final||final.fingerprint!==saved.fingerprint)throw new DocumentConflictError();checks.push(...final.checks);}
     await recheckAccountAuthorization(ctx,tx,await repository.clock(),checks,new DocumentAccessError());
     if(!(await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId)).permissions.has("document:view"))throw new DocumentAccessError();
     return documentSourceChoicesSchema.parse({items,next:rows.length>30?cursor(ctx,filter,rows[29].id):null});
@@ -84,8 +88,8 @@ export async function readDocumentSourceWorkspace(actor: DocumentActorContext, r
     const protections=await final.repository.rootProtections(captured.map(root=>root.id));
     for(const capturedRoot of captured){const root=protections.get(capturedRoot.id);if(!root||root.revision.toString()!==capturedRoot.revision||commandFingerprint(root.privacy)!==commandFingerprint(capturedRoot.privacy))throw new DocumentConflictError();}
     for(const capturedRoot of captured.filter(root=>root.instanceFingerprint!==null)){const root=await final.repository.document(capturedRoot.id);if(!root||(await documentArchiveContext(ctx,tx,input.source,"view",root,undefined,deps.env)).fingerprint!==capturedRoot.instanceFingerprint)throw new DocumentConflictError();}
-    await recheckAccountAuthorization(ctx,tx,await base.repository.clock(),checks,new DocumentAccessError());
+    const sourceLabel=final.repository.documentSourceLabel(final.native,deps.env);await recheckAccountAuthorization(ctx,tx,await base.repository.clock(),checks,new DocumentAccessError());
     if(!(await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId)).permissions.has("document:view"))throw new DocumentAccessError();
-    return documentSourceWorkspaceSchema.parse({source:input.source,sourceLabel:final.native.label,policyFingerprint:commandFingerprint(final.policy),items,types,next:rows.length>50?cursor(ctx,filter,rows[49].id):null});
+    return documentSourceWorkspaceSchema.parse({source:input.source,sourceLabel,policyFingerprint:commandFingerprint(final.policy),items,types,next:rows.length>50?cursor(ctx,filter,rows[49].id):null});
   });
 }

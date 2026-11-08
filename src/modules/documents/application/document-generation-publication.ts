@@ -23,7 +23,7 @@ export async function publishDocumentGeneration(actor: DocumentActorContext, raw
   const ctx = documentActorContext(actor), input = reference.parse(raw);
   const captured = await withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), row = await repository.instance(input.instanceId); if (!row) throw new DocumentAccessError();
-    const receipt = await documentGenerationResult(ctx, tx, row); if (receipt.state === "SOURCE_CHANGED") throw new DocumentConflictError();
+    const receipt = await documentGenerationResult(ctx, tx, row,deps.env); if (receipt.state === "SOURCE_CHANGED") throw new DocumentConflictError();
     const snapshot = documentGenerationSnapshotSchema.parse(row.sourceSnapshot), admission = await repository.byNonce(ctx.actorId, row.commandKey);
     if (admission && (admission.documentId !== row.documentId || admission.commandHash !== row.commandHash || generatedDocumentUploadInput.parse(admission.input).generationInstanceId !== row.id)) throw new DocumentConflictError();
     return { receipt, snapshot, admissionId: admission?.id ?? null, original: receipt.state === "COMPLETE" || admission ? null : openDocumentGenerationInput(snapshot.identity, Buffer.from(snapshot.payloadCipher, "base64"), deps.env) };
@@ -39,15 +39,15 @@ export async function publishDocumentGeneration(actor: DocumentActorContext, raw
       const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + captured.snapshot.command.idempotencyKey);
       await repository.lock("root:"+captured.snapshot.identity.documentId);
       const row = await repository.instance(input.instanceId); if (!row) throw new DocumentAccessError();
-      const receipt = await documentGenerationResult(ctx, tx, row); if (receipt.state === "SOURCE_CHANGED") throw new DocumentConflictError();
+      const receipt = await documentGenerationResult(ctx, tx, row,deps.env); if (receipt.state === "SOURCE_CHANGED") throw new DocumentConflictError();
       const existing = await repository.byNonce(ctx.actorId, row.commandKey);
       if (existing) {
         if (existing.documentId !== row.documentId || existing.commandHash !== row.commandHash || generatedDocumentUploadInput.parse(existing.input).generationInstanceId !== row.id) throw new DocumentConflictError();
         return existing.id;
       }
       if (receipt.state !== "PENDING") throw new DocumentConflictError();
-      const snapshot = documentGenerationSnapshotSchema.parse(row.sourceSnapshot), root = row.document, current = await documentArchiveContext(ctx, tx, snapshot.command.source, "create", root),
-        originalActor = documentActorContext({ ...ctx, authContext: restoreAuthorizationCap(snapshot.authorizationCap) }), held = await documentArchiveContext(originalActor, tx, snapshot.command.source, "create", root);
+      const snapshot = documentGenerationSnapshotSchema.parse(row.sourceSnapshot), root = row.document, current = await documentArchiveContext(ctx, tx, snapshot.command.source, "create", root,undefined,deps.env),
+        originalActor = documentActorContext({ ...ctx, authContext: restoreAuthorizationCap(snapshot.authorizationCap) }), held = await documentArchiveContext(originalActor, tx, snapshot.command.source, "create", root,undefined,deps.env);
       if (current.fingerprint !== held.fingerprint || !current.policy.value.upload_transport) throw new DocumentConflictError();
       const id = randomUUID(), sha256 = createHash("sha256").update(bytes).digest("hex"), metadata = generatedDocumentUploadInput.parse({ documentId: root.id, source: snapshot.command.source, typeKey: root.typeKey, kind: "INSTANCE", locale: root.locale,
         title: snapshot.command.title, effectiveFrom: snapshot.command.effectiveFrom, reason: snapshot.command.reason, reviewFingerprint: snapshot.command.reviewFingerprint, idempotencyKey: snapshot.command.idempotencyKey,
@@ -59,10 +59,10 @@ export async function publishDocumentGeneration(actor: DocumentActorContext, raw
         expectedRevision: root.revision, supersedesId: metadata.supersedesId, sourceFingerprint: current.native.fingerprint, policySnapshot: documentJson(current.policy), authorizationCap: documentJson(snapshot.authorizationCap),
         reason: metadata.reason, payloadCipher: new Uint8Array(sealGeneratedDocumentPayload(identity, bytes, deps.env)), createdBy: ctx.actorId, createdAt: current.now });
       await appendDocumentHistory(ctx, tx, current, root.id, "ADMITTED", row.commandKey, row.commandHash, metadata.reason, {}, { admissionId: id }, deps);
-      const final = await documentArchiveContext(ctx, tx, snapshot.command.source, "create", root), finalHeld = await documentArchiveContext(originalActor, tx, snapshot.command.source, "create", root);
+      const final = await documentArchiveContext(ctx, tx, snapshot.command.source, "create", root,undefined,deps.env), finalHeld = await documentArchiveContext(originalActor, tx, snapshot.command.source, "create", root,undefined,deps.env);
       if (final.fingerprint !== current.fingerprint || finalHeld.fingerprint !== held.fingerprint) throw new DocumentConflictError(); return id;
     });
   }
   await completeDocumentParts(ctx, { admissionId }, deps);
-  return withTenant(deps.db, ctx.organizationId, async tx => { const row = await new DocumentRepository(tx, ctx.organizationId).instance(input.instanceId); if (!row) throw new DocumentAccessError(); return documentGenerationResult(ctx, tx, row); });
+  return withTenant(deps.db, ctx.organizationId, async tx => { const row = await new DocumentRepository(tx, ctx.organizationId).instance(input.instanceId); if (!row) throw new DocumentAccessError(); return documentGenerationResult(ctx, tx, row,deps.env); });
 }

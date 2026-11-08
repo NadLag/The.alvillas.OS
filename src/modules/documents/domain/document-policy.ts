@@ -3,7 +3,7 @@ import { privateUploadSingleRequestBytes } from "@/platform/storage/upload-proto
 import { documentTemplateMediaType } from "./document-template-format";
 
 export const documentArchivePolicyKey = "documents.archive";
-export const documentSourceKinds = ["ORGANIZATION", "PROPERTY", "OWNER", "RESERVATION", "PERSON", "FINANCIAL_TRANSACTION", "SUPPLIER", "GUEST"] as const;
+export const documentSourceKinds = ["ORGANIZATION", "PROPERTY", "OWNER", "RESERVATION", "PERSON", "FINANCIAL_TRANSACTION", "SUPPLIER", "GUEST", "LEAD"] as const;
 export const documentCategories = ["OWNER_CONTRACT", "AMENDMENT", "GUEST_AGREEMENT", "HOUSE_RULES", "INVOICE", "RECEIPT", "PROPERTY", "SUPPLIER", "STAFF", "REPORT"] as const;
 export const documentPrivacyTags = ["operational", "sensitive", "financial"] as const;
 export const documentContentTypes = ["application/pdf", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/json", "text/plain", documentTemplateMediaType] as const;
@@ -16,6 +16,7 @@ export const documentTypePolicySchema = z.object({ key: z.string().regex(/^[a-z]
 }).strict().superRefine((value, ctx) => {
   if (value.sources.includes("FINANCIAL_TRANSACTION") && !value.privacy.includes("financial")) ctx.addIssue({ code: "custom", message: "financial_source_requires_financial_privacy" });
   if (value.sources.includes("PERSON") && !value.privacy.includes("sensitive")) ctx.addIssue({ code: "custom", message: "person_source_requires_sensitive_privacy" });
+  if (value.sources.includes("LEAD") && !value.privacy.includes("sensitive")) ctx.addIssue({ code: "custom", message: "lead_source_requires_sensitive_privacy" });
   if (value.sources.some(source => source === "SUPPLIER" || source === "GUEST") && !value.privacy.includes("sensitive")) ctx.addIssue({ code: "custom", message: "party_source_requires_sensitive_privacy" });
   if ((value.category === "INVOICE" || value.category === "RECEIPT") && !value.privacy.includes("financial")) ctx.addIssue({ code: "custom", message: "financial_document_category_requires_financial_privacy" });
   if (["OWNER_CONTRACT", "GUEST_AGREEMENT", "SUPPLIER", "STAFF"].some(category => category === value.category) && !value.privacy.includes("sensitive")) ctx.addIssue({ code: "custom", message: "private_document_category_requires_sensitive_privacy" });
@@ -38,6 +39,6 @@ export function retainedDocumentCategory(policySnapshot: unknown, typeKey: strin
 
 /** A later version or configuration change can add protection, never remove it. */
 export function retainDocumentPrivacy(existing: readonly string[], required: readonly string[], source: typeof documentSourceKinds[number]) {
-  const values = z.array(z.enum(documentPrivacyTags)).parse([...existing, ...required, ...(source === "FINANCIAL_TRANSACTION" ? ["financial"] : ["PERSON", "SUPPLIER", "GUEST"].includes(source) ? ["sensitive"] : [])]);
+  const values = z.array(z.enum(documentPrivacyTags)).parse([...existing, ...required, ...(source === "FINANCIAL_TRANSACTION" ? ["financial"] : ["PERSON", "SUPPLIER", "GUEST", "LEAD"].includes(source) ? ["sensitive"] : [])]);
   return [...new Set(values)].sort();
 }

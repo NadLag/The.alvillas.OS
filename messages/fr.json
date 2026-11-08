@@ -4982,7 +4982,8 @@
     "retryExact": "Réessayer l’enregistrement original",
     "supersededRequest": "Une version plus récente est déjà archivée. Cette demande précédente reste dans l’historique.",
     "resumeUpload": "Reprendre le téléversement",
-    "chooseOriginal": "Choisissez le même fichier original. Son contenu doit correspondre à la demande enregistrée."
+    "chooseOriginal": "Choisissez le même fichier original. Son contenu doit correspondre à la demande enregistrée.",
+    "source_LEAD": "Prospects immobiliers"
   },
   "DocumentTemplates": {
     "newTitle": "Rédiger un modèle",
@@ -5454,6 +5455,7 @@
       "currentRepresentative": "Représentant actuel",
       "restrictedAccount": "Les coordonnées du compte sont restreintes",
       "inactiveRepresentative": "Le compte de ce représentant est inactif."
-    }
+    },
+    "proposalDocuments": "Documents de proposition"
   }
 }

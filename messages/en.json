@@ -4982,7 +4982,8 @@
     "retryExact": "Retry the original save",
     "supersededRequest": "A newer version is already archived. This earlier request remains in the history.",
     "resumeUpload": "Continue the upload",
-    "chooseOriginal": "Choose the same original file. Its contents must match the saved request."
+    "chooseOriginal": "Choose the same original file. Its contents must match the saved request.",
+    "source_LEAD": "Property acquisition leads"
   },
   "DocumentTemplates": {
     "newTitle": "Write a template",
@@ -5454,6 +5455,7 @@
       "currentRepresentative": "Current representative",
       "restrictedAccount": "Account details are restricted",
       "inactiveRepresentative": "This representative’s account is inactive."
-    }
+    },
+    "proposalDocuments": "Proposal documents"
   }
 }

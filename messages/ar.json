@@ -4982,7 +4982,8 @@
     "retryExact": "إعادة محاولة الحفظ الأصلي",
     "supersededRequest": "تمت أرشفة إصدار أحدث بالفعل. يبقى هذا الطلب السابق في السجل.",
     "resumeUpload": "متابعة الرفع",
-    "chooseOriginal": "اختر الملف الأصلي نفسه. يجب أن يطابق محتواه الطلب المحفوظ."
+    "chooseOriginal": "اختر الملف الأصلي نفسه. يجب أن يطابق محتواه الطلب المحفوظ.",
+    "source_LEAD": "العملاء المحتملون للعقارات"
   },
   "DocumentTemplates": {
     "newTitle": "كتابة قالب",
@@ -5454,6 +5455,7 @@
       "currentRepresentative": "الممثل الحالي",
       "restrictedAccount": "تفاصيل الحساب مقيّدة",
       "inactiveRepresentative": "حساب هذا الممثل غير نشط."
-    }
+    },
+    "proposalDocuments": "مستندات العرض"
   }
 }
