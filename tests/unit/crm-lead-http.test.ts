@@ -3,6 +3,7 @@ import {NextRequest} from "next/server";
 import {beforeEach,describe,expect,it,vi} from "vitest";
 import {LeadAccessError,LeadConfigurationError,LeadConflictError,LeadRateLimitError,LeadValidationError,leadCaptureInputSchema} from "@/modules/crm/domain/lead-capture";
 import {LeadPipelineConflictError,LeadPipelineValidationError,LeadPipelineEvidenceError} from "@/modules/crm/domain/lead-pipeline";
+import {LeadProfileConflictError} from "@/modules/crm/domain/lead-profile";
 
 const mocks=vi.hoisted(()=>({auth:vi.fn(),actor:vi.fn(),telemetry:vi.fn()}));
 vi.mock("@/platform/auth/session",()=>({auth:mocks.auth}));
@@ -17,6 +18,9 @@ const rejectedHeaders:Record<string,string>[]=[{Origin:"https://foreign.example.
 beforeEach(()=>{vi.clearAllMocks();mocks.auth.mockResolvedValue({user:{id:actorId}});mocks.actor.mockResolvedValue(actor);mocks.telemetry.mockResolvedValue(undefined);});
 
 describe("private native lead HTTP boundaries",()=>{
+  it("returns a private conflict when the reviewed profile has changed",async()=>{
+    const response=await leadHttp(request(),()=>Promise.reject(new LeadProfileConflictError()),"F-CRM-03");expect(response.status).toBe(409);expect(await response.json()).toEqual({error:"conflict"});expect(response.headers.get("cache-control")).toBe("private, no-store");expect(response.headers.get("vary")).toBe("Cookie, Origin");expect(mocks.telemetry).not.toHaveBeenCalled();
+  });
   it("requires a real current session before accepting a private command",async()=>{
     mocks.actor.mockResolvedValue(null);const work=vi.fn(),response=await leadHttp(request(),work);
     expect(response.status).toBe(401);expect(response.headers.get("cache-control")).toBe("private, no-store");expect(work).not.toHaveBeenCalled();

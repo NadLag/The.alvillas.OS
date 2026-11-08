@@ -27,6 +27,7 @@ const transitionSchema=z.object({
   if(edge.kind==="ADVANCE"?to!==from+1:to>=from)context.addIssue({code:"custom",message:"ordered_approved_lead_stage_required"});
   for(const kind of minimumEvidence[edge.to])if(!edge.evidence.includes(kind))context.addIssue({code:"custom",path:["evidence"],message:"native_lead_stage_evidence_required"});
 });
+export const leadPipelineTransitionSchema=transitionSchema;
 export const leadPipelinePolicySchema=z.object({
   source:z.literal("NATIVE_IMMUTABLE_LEAD_PIPELINE"),history:z.literal("APPEND_ONLY_STAGE_MOVEMENTS"),
   document_types:z.object({

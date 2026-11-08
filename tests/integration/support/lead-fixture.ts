@@ -10,6 +10,7 @@ import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {leadCapturePolicyKey,type LeadCaptureInput,type LeadCapturePolicy} from "@/modules/crm/domain/lead-capture";
 import {leadStages,leadPipelineEvidenceKinds,type LeadPipelinePolicy} from "@/modules/crm/domain/lead-pipeline";
 import {captureLead} from "@/modules/crm/application/lead-capture-service";
+import type {LeadProfilePolicy} from "@/modules/crm/domain/lead-profile";
 
 type FinancialTuple={kind:string;id:string;xmin:string;body:string};
 
@@ -86,4 +87,10 @@ export async function nativeLeadStageFixture(admin:PrismaClient,db:PrismaClient,
   const ctx={...base.ctx,authContext:{...await authContextForAccount(base.organizationId,base.account.id,{db}),personId:base.person.id}},input=nativeLeadInput(),lead=await captureLead(ctx,input,{db,env});
   const assignments:Record<string,string>={...base.assignments,edit:saved.editAssignmentId};
   return{...base,...saved,ctx,assignments,input,lead};
+}
+
+export async function nativeLeadProfileFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv,changes:Partial<LeadProfilePolicy>={}){
+  const base=await nativeLeadStageFixture(admin,db,env),profilePolicy:LeadProfilePolicy={source:"NATIVE_IMMUTABLE_LEAD_PROFILE",history:"APPEND_ONLY_REVIEWED_PROFILE_CORRECTIONS",admission:{requests:100,window_seconds:3600},...changes};
+  const profileRule=await withTenant(db,base.organizationId,tx=>new ConfigRuleRepository(tx,base.organizationId).createVersion({key:"crm.lead_profile",scopeType:"organization",createdBy:base.account.id,effectiveFrom:new Date("2020-01-01"),value:profilePolicy,reason:"Actual explicit native private profile correction policy"}));
+  return{...base,profilePolicy,profileRule};
 }

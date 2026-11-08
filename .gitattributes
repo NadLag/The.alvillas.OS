@@ -115,3 +115,5 @@ prisma/migrations/20261107160000_document_expiry_history/migration.sql text eol=
 prisma/migrations/20261107163000_document_expiry_notification_kind/migration.sql text eol=lf
 
 prisma/migrations/20261108043000_native_lead_stage_history/migration.sql text eol=lf
+
+prisma/migrations/20261108063000_native_lead_profile_history/migration.sql text eol=lf
