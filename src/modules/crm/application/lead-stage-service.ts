@@ -1,6 +1,8 @@
 import {randomUUID,createHash,timingSafeEqual} from "node:crypto";
 import {z,ZodError} from "zod";
-import type {Lead,LeadStageRevision} from "@prisma/client";
+import {LeadWorkRepository} from "../infrastructure/lead-work-repository";
+import {leadResource} from "./lead-resource";
+import type {LeadStageRevision} from "@prisma/client";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import {recheckAccountAuthorization} from "@/platform/authz/current-authority";
@@ -20,7 +22,6 @@ import type {LeadDependencies} from "./lead-capture-service";
 
 const protocol="ALVILLAS_NATIVE_LEAD_STAGE_V1",uuid=z.uuid().transform(value=>value.toLowerCase());
 const historyInput=z.object({leadId:uuid,before:z.number().int().positive().optional()}).strict(),recoveryInput=z.object({idempotencyKey:uuid}).strict();
-const resource=(lead:Lead,stage:string)=>({type:"lead",id:lead.id,organizationId:lead.organizationId,dataClass:"personal" as const,status:stage,occurredAt:lead.createdAt});
 const reasonBinding=(row:LeadStageRevision)=>({organizationId:row.organizationId,leadId:row.leadId,revisionId:row.id,createdBy:row.createdBy,commandKey:row.commandKey});
 const receipt=(row:LeadStageRevision,replayed:boolean)=>({id:row.id,leadId:row.leadId,number:row.number,fromStage:leadStageSchema.parse(row.fromStage),toStage:leadStageSchema.parse(row.toStage),createdAt:row.createdAt.toISOString(),replayed});
 async function settings(tx:TenantTransaction,organizationId:string,now:Date){
@@ -28,23 +29,23 @@ async function settings(tx:TenantTransaction,organizationId:string,now:Date){
 }
 async function leadContext(actor:AccountActorContext,tx:TenantTransaction,leadId:string){
   const repository=new LeadStageRepository(tx,actor.organizationId),lead=await repository.lead(leadId);if(!lead)throw new LeadAccessError();const now=await repository.clock(),current=await repository.current(lead.id),position:LeadStagePosition={stage:current?leadStageSchema.parse(current.toStage):"NEW",revisionId:current?.id??null};
-  await recheckAccountAuthorization(actor,tx,now,[{action:"view",resource:resource(lead,position.stage)}],new LeadAccessError());return{repository,lead,now,current,position};
+  const assignment=await new LeadWorkRepository(tx,actor.organizationId).currentAssignment(leadId);await recheckAccountAuthorization(actor,tx,now,[{action:"view",resource:leadResource(lead,position.stage,assignment)}],new LeadAccessError());return{repository,lead,now,current,position,assignment};
 }
 async function moveAuthority(actor:AccountActorContext,tx:TenantTransaction,base:Awaited<ReturnType<typeof leadContext>>,toStage:string){
-  await recheckAccountAuthorization(actor,tx,await base.repository.clock(),[base.position.stage,toStage].flatMap(stage=>[{action:"view" as const,resource:resource(base.lead,stage)},{action:"edit" as const,resource:resource(base.lead,stage)}]),new LeadAccessError());
+  await recheckAccountAuthorization(actor,tx,await base.repository.clock(),[base.position.stage,toStage].flatMap(stage=>[{action:"view" as const,resource:leadResource(base.lead,stage,base.assignment)},{action:"edit" as const,resource:leadResource(base.lead,stage,base.assignment)}]),new LeadAccessError());
 }
 async function draftContext(actor:AccountActorContext,tx:TenantTransaction,input:LeadStageDraft,deps:LeadDependencies){
   const base=await leadContext(actor,tx,input.leadId),configured=await settings(tx,actor.organizationId,base.now),selected=configuredLeadTransition(base.position,input,configured.policy);await moveAuthority(actor,tx,base,input.toStage);
-  const evidence=await nativeLeadStageEvidence(actor,tx,input,selected.transition.evidence,configured.policy,base.now,deps),reviewFingerprint=commandFingerprint({protocol,leadId:base.lead.id,position:base.position,input:canonicalLeadStageDraft(input),policy:configured.snapshot,evidence,authorizationCap:captureAuthorizationCap(actor.authContext)});
+  const evidence=await nativeLeadStageEvidence(actor,tx,input,selected.transition.evidence,configured.policy,base.now,deps),reviewFingerprint=commandFingerprint({protocol,leadId:base.lead.id,position:base.position,assignmentRevisionId:base.assignment?.id??null,input:canonicalLeadStageDraft(input),policy:configured.snapshot,evidence,authorizationCap:captureAuthorizationCap(actor.authContext)});
   return{...base,configured,selected,evidence,reviewFingerprint};
 }
 async function finalDraftFence(actor:AccountActorContext,tx:TenantTransaction,input:LeadStageDraft,base:Awaited<ReturnType<typeof draftContext>>,deps:LeadDependencies,recordedId?:string){
   const latest=await leadContext(actor,tx,input.leadId),configured=await settings(tx,actor.organizationId,latest.now);
-  if(latest.position.revisionId!==(recordedId??base.position.revisionId)||(!recordedId&&latest.position.stage!==base.position.stage)||commandFingerprint(configured.snapshot)!==commandFingerprint(base.configured.snapshot))throw new LeadPipelineConflictError();
+  if((latest.assignment?.id??null)!==(base.assignment?.id??null)||latest.position.revisionId!==(recordedId??base.position.revisionId)||(!recordedId&&latest.position.stage!==base.position.stage)||commandFingerprint(configured.snapshot)!==commandFingerprint(base.configured.snapshot))throw new LeadPipelineConflictError();
   await moveAuthority(actor,tx,base,input.toStage);const evidence=await nativeLeadStageEvidence(actor,tx,input,base.selected.transition.evidence,configured.policy,latest.now,deps);if(commandFingerprint(evidence)!==commandFingerprint(base.evidence))throw new LeadPipelineConflictError();
 }
 async function finalReadFence(actor:AccountActorContext,tx:TenantTransaction,base:Awaited<ReturnType<typeof leadContext>>){
-  const fresh=await leadContext(actor,tx,base.lead.id);if(commandFingerprint(fresh.position)!==commandFingerprint(base.position))throw new LeadPipelineConflictError();return fresh;
+  const fresh=await leadContext(actor,tx,base.lead.id);if(commandFingerprint(fresh.position)!==commandFingerprint(base.position)||(fresh.assignment?.id??null)!==(base.assignment?.id??null))throw new LeadPipelineConflictError();return fresh;
 }
 function retainedCommand(row:LeadStageRevision,env?:NodeJS.ProcessEnv){
   const evidence=z.array(z.object({kind:z.enum(leadPipelineEvidenceKinds),sourceId:uuid}).passthrough()).parse(row.evidence);
@@ -91,6 +92,6 @@ export async function readLeadStageHistory(actor:AccountActorContext,raw:unknown
   const input=historyInput.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{
     const base=await leadContext(actor,tx,input.leadId),rows=await base.repository.history(input.leadId,input.before),stageHistory=rows.slice(0,20).map(row=>({...receipt(row,false),kind:row.kind,reason:decryptLeadStageReason(row.reasonCipher,reasonBinding(row),deps.env)}));
     await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_stage_history_read",resourceType:"lead",resourceId:input.leadId,after:{leadId:input.leadId,count:stageHistory.length},requestId:deps.requestId??randomUUID(),occurredAt:base.now});const final=await finalReadFence(actor,tx,base),data={leadId:input.leadId,stage:final.position.stage,revisionId:final.position.revisionId,stageHistory,next:rows.length>20?rows[19].number:null};
-    return present({...actor.authContext,visibleDataClasses:new Set(["operational"] as const)},"view",{...resource(base.lead,final.position.stage),data},catalogFieldPolicy<typeof data>("lead"),final.now);
+    return present({...actor.authContext,visibleDataClasses:new Set(["operational"] as const)},"view",{...leadResource(base.lead,final.position.stage,final.assignment),data},catalogFieldPolicy<typeof data>("lead"),final.now);
   });
 }

@@ -1293,7 +1293,8 @@
       "employee_cost_emergency": "إشعار تكاليف أعمال الموظفين الطارئة",
       "receivable_reminder": "تحتاج مطالبة مالية إلى مراجعتك.",
       "ledger_integrity_failed": "فشل التحقق من سلامة دفتر الأستاذ",
-      "document_expiring": "تقترب وثيقة من تاريخ انتهاء صلاحيتها."
+      "document_expiring": "تقترب وثيقة من تاريخ انتهاء صلاحيتها.",
+      "lead_reminder": "حان موعد متابعة عميل محتمل."
     },
     "settings": {
       "eyebrow": "حسابك",
@@ -1562,7 +1563,8 @@
         "identity_recovery_delivery_requested": "استعادة الحساب",
         "other": "إشعار آخر",
         "staff_document_expiring": "وثيقة موظف تقترب من انتهاء الصلاحية.",
-        "document_expiring": "تقترب وثيقة من تاريخ انتهاء صلاحيتها."
+        "document_expiring": "تقترب وثيقة من تاريخ انتهاء صلاحيتها.",
+        "lead_reminder": "حان موعد متابعة عميل محتمل."
       }
     }
   },
@@ -5402,6 +5404,56 @@
       "native_evidence_required": "أكمل المستندات والتوقيعات المطلوبة قبل تغيير هذه المرحلة.",
       "unavailable": "البيانات غير متاحة. أعد التحميل للمحاولة مجدداً."
     },
-    "stageMovement": "من {from} إلى {to}"
+    "stageMovement": "من {from} إلى {to}",
+    "recoverWork": "استعادة النشاط أو التذكير المسجل",
+    "work": {
+      "title": "الأنشطة والتذكيرات والتعيين",
+      "kind": "نوع المتابعة",
+      "kinds": {
+        "ACTIVITY": "نشاط",
+        "REMINDER": "تذكير",
+        "ASSIGNMENT": "تعيين الممثل"
+      },
+      "representative": "الممثل",
+      "recordedAccount": "الحساب المسجل",
+      "unassigned": "دون ممثل",
+      "activityType": "نوع النشاط",
+      "recordedActivity": "نوع النشاط المسجل",
+      "occurredAt": "وقت النشاط (UTC)",
+      "reminderState": "حالة التذكير",
+      "states": {
+        "OPEN": "مفتوح",
+        "COMPLETED": "مكتمل",
+        "CANCELLED": "ملغى"
+      },
+      "dueAt": "وقت الاستحقاق (UTC)",
+      "recipient": "مستلم التذكير",
+      "summary": "الملخص",
+      "notes": "ملاحظات خاصة",
+      "correct": "تسجيل تصحيح",
+      "add": "تسجيل المتابعة",
+      "choose": "اختر خياراً",
+      "searchAccounts": "البحث عن عضو فريق مخول",
+      "search": "البحث عن الحسابات",
+      "accountAccess": "تظهر فقط الحسابات التي تملك صلاحيات مستقلة. التعيين لا يمنح صلاحية الوصول.",
+      "reason": "سبب هذا السجل",
+      "validation": "تحقق من الحساب المحدد والتواريخ والحقول المطلوبة.",
+      "utc": "تستخدم أوقات الأنشطة والتذكيرات في هذا القسم التوقيت العالمي UTC.",
+      "review": "مراجعة هذا السجل",
+      "cancel": "إلغاء التصحيح",
+      "refresh": "تحديث سجل المتابعة",
+      "history": "سجل المتابعة المحفوظ",
+      "empty": "لم تُسجل أنشطة أو تذكيرات أو تغييرات في التعيين بعد.",
+      "historyNumber": "السجل {number}",
+      "current": "الإصدار الحالي للمتابعة",
+      "retained": "إصدار سابق محفوظ",
+      "more": "السجلات السابقة",
+      "reviewTitle": "مراجعة متابعة العميل المحتمل",
+      "confirm": "تأكيد هذا السجل",
+      "recordedAt": "سُجل في {date} (UTC)",
+      "currentRepresentative": "الممثل الحالي",
+      "restrictedAccount": "تفاصيل الحساب مقيّدة",
+      "inactiveRepresentative": "حساب هذا الممثل غير نشط."
+    }
   }
 }

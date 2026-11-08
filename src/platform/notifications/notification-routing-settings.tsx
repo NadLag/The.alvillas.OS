@@ -57,13 +57,13 @@ export function NotificationRoutingSettings() {
     });
   }
   const identity = kind === "language_updated" || kind === "security_session_revoked";
-  const organizationOnly = kind === "document_expiring" || kind === "receivable_reminder" || kind === "ledger_integrity_failed";
+  const organizationOnly = kind === "lead_reminder" || kind === "document_expiring" || kind === "receivable_reminder" || kind === "ledger_integrity_failed";
   return <section className="notification-routing-settings" data-testid="notification-routing" aria-labelledby="notification-routing-title" aria-busy={pending}>
     <h2 id="notification-routing-title">{t("title")}</h2><p>{t("description")}</p>
     {offline ? <p aria-live="polite">{t("offline")}</p> : null}
     <fieldset className="notification-channel" disabled={pending || offline}>
       <legend>{t("eventScope")}</legend>
-      <label className="field"><span>{t("event")}</span><select data-testid="routing-event" value={kind} onChange={(event) => {const next=event.target.value as RoutedNotificationKind;setKind(next);if(next==="document_expiring"||next==="receivable_reminder"||next==="ledger_integrity_failed")setPropertyId("");}}>
+      <label className="field"><span>{t("event")}</span><select data-testid="routing-event" value={kind} onChange={(event) => {const next=event.target.value as RoutedNotificationKind;setKind(next);if(next==="lead_reminder"||next==="document_expiring"||next==="receivable_reminder"||next==="ledger_integrity_failed")setPropertyId("");}}>
         {routedNotificationKinds.map((value) => <option value={value} key={value}>{kinds(value)}</option>)}
       </select></label>
       <label className="field"><span>{t("scope")}</span><select data-testid="routing-scope" value={propertyId} disabled={organizationOnly} onChange={(event) => setPropertyId(event.target.value)}>

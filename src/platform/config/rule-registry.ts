@@ -6,6 +6,7 @@ import { z } from "zod";
 import {leadCapturePolicyKey,leadCapturePolicySchema} from "@/modules/crm/domain/lead-capture";
 import {leadPipelinePolicyKey,leadPipelinePolicySchema} from "@/modules/crm/domain/lead-pipeline";
 import {leadProfilePolicyKey,leadProfilePolicySchema} from "@/modules/crm/domain/lead-profile";
+import {leadWorkPolicyKey,leadWorkPolicySchema} from "@/modules/crm/domain/lead-work";
 import { documentArchivePolicyKey, documentArchivePolicySchema } from "@/modules/documents/domain/document-policy";
 import { documentSignaturePolicyKey, documentSignaturePolicySchema } from "@/modules/documents/domain/document-signature-policy";
 import { documentExpiryPolicyKey, documentExpiryPolicySchema, documentExpiryRoutingKey } from "@/modules/documents/domain/document-expiry-policy";
@@ -374,6 +375,7 @@ export const configRuleSchemas = {
   [emailPolicyKey]: emailPolicySchema,
   "notification.routing.approval_requested": notificationRoutingSchema,
   "notification.routing.approval_decided": notificationRoutingSchema,
+  "notification.routing.lead_reminder": explicitNotificationRoutingSchema,
   "notification.routing.language_updated": notificationRoutingSchema,
   "notification.routing.staff_document_expiring": notificationRoutingSchema,
   "notification.routing.task_assigned": notificationRoutingSchema,
@@ -416,6 +418,7 @@ export const configRuleSchemas = {
   [leadCapturePolicyKey]:leadCapturePolicySchema,
   [leadPipelinePolicyKey]:leadPipelinePolicySchema,
   [leadProfilePolicyKey]:leadProfilePolicySchema,
+  [leadWorkPolicyKey]:leadWorkPolicySchema,
   [documentArchivePolicyKey]: documentArchivePolicySchema,
   [documentSignaturePolicyKey]: documentSignaturePolicySchema,
   [documentExpiryPolicyKey]: documentExpiryPolicySchema,

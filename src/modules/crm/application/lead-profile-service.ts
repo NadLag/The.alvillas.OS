@@ -1,3 +1,5 @@
+import {LeadWorkRepository} from "../infrastructure/lead-work-repository";
+import {leadResource} from "./lead-resource";
 import {createHash,randomUUID,timingSafeEqual} from "node:crypto";
 import {z,ZodError} from "zod";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
@@ -21,11 +23,10 @@ import {retainedLeadProfile,leadProfileReceipt} from "./lead-profile-snapshot";
 import {leadCaptureBinding,type LeadDependencies} from "./lead-capture-service";
 
 const uuid=z.uuid().transform(value=>value.toLowerCase()),recoverInput=z.object({idempotencyKey:uuid}).strict(),historyInput=z.object({leadId:uuid,before:z.number().int().positive().max(2147483646).optional()}).strict(),protocol="NATIVE_PRIVATE_LEAD_PROFILE_V1";
-const target=(organizationId:string,id:string,createdAt:Date,stage:string)=>({type:"lead",id,organizationId,dataClass:"personal" as const,status:stage,occurredAt:createdAt});
 async function context(actor:AccountActorContext,tx:TenantTransaction,leadId:string){
   const leads=new LeadRepository(tx,actor.organizationId),lead=await leads.byId(leadId);if(!lead)throw new LeadAccessError();
-  const repository=new LeadProfileRepository(tx,actor.organizationId),current=await repository.current(leadId),position=await new LeadStageRepository(tx,actor.organizationId).position(leadId),now=await leads.clock(),resource=target(actor.organizationId,lead.id,lead.createdAt,position.stage);
-  await recheckAccountAuthorization(actor,tx,now,[{action:"view",resource}],new LeadAccessError());return{lead,repository,current,position,now,resource};
+  const repository=new LeadProfileRepository(tx,actor.organizationId),current=await repository.current(leadId),position=await new LeadStageRepository(tx,actor.organizationId).position(leadId),now=await leads.clock(),assignment=await new LeadWorkRepository(tx,actor.organizationId).currentAssignment(leadId),resource=leadResource(lead,position.stage,assignment);
+  await recheckAccountAuthorization(actor,tx,now,[{action:"view",resource}],new LeadAccessError());return{lead,repository,current,position,assignment,now,resource};
 }
 async function settings(tx:TenantTransaction,organizationId:string,now:Date){
   try{
@@ -40,15 +41,15 @@ async function editable(actor:AccountActorContext,tx:TenantTransaction,base:Awai
 async function reviewed(actor:AccountActorContext,tx:TenantTransaction,input:LeadProfileDraft){
   const base=await context(actor,tx,input.leadId);await editable(actor,tx,base);if((base.current?.id??null)!==input.previousRevisionId)throw new LeadProfileConflictError();
   const configured=await settings(tx,actor.organizationId,base.now);configuredLeadProfile(input,leadCaptureInputSchema.shape.channel.parse(base.lead.channel),configured.capturePolicy);
-  const reviewFingerprint=commandFingerprint({protocol,input:canonicalLeadProfileDraft(input),originalCapture:base.lead.payloadSha256,profileRevisionId:base.current?.id??null,position:base.position,policy:configured.snapshot,capturePolicy:configured.captureSnapshot,authorizationCap:captureAuthorizationCap(actor.authContext)});
+  const reviewFingerprint=commandFingerprint({protocol,input:canonicalLeadProfileDraft(input),originalCapture:base.lead.payloadSha256,profileRevisionId:base.current?.id??null,position:base.position,assignmentRevisionId:base.assignment?.id??null,policy:configured.snapshot,capturePolicy:configured.captureSnapshot,authorizationCap:captureAuthorizationCap(actor.authContext)});
   return{...base,configured,reviewFingerprint};
 }
 async function finalRead(actor:AccountActorContext,tx:TenantTransaction,base:Awaited<ReturnType<typeof context>>){
-  const fresh=await context(actor,tx,base.lead.id);if((fresh.current?.id??null)!==(base.current?.id??null)||commandFingerprint(fresh.position)!==commandFingerprint(base.position))throw new LeadProfileConflictError();return fresh;
+  const fresh=await context(actor,tx,base.lead.id);if((fresh.current?.id??null)!==(base.current?.id??null)||commandFingerprint(fresh.position)!==commandFingerprint(base.position)||(fresh.assignment?.id??null)!==(base.assignment?.id??null))throw new LeadProfileConflictError();return fresh;
 }
 async function finalWrite(actor:AccountActorContext,tx:TenantTransaction,base:Awaited<ReturnType<typeof reviewed>>,recordedId?:string){
   const fresh=await context(actor,tx,base.lead.id),configured=await settings(tx,actor.organizationId,fresh.now);
-  if((fresh.current?.id??null)!==(recordedId??base.current?.id??null)||commandFingerprint(fresh.position)!==commandFingerprint(base.position)||commandFingerprint(configured.snapshot)!==commandFingerprint(base.configured.snapshot)||commandFingerprint(configured.captureSnapshot)!==commandFingerprint(base.configured.captureSnapshot))throw new LeadProfileConflictError();
+  if((fresh.current?.id??null)!==(recordedId??base.current?.id??null)||commandFingerprint(fresh.position)!==commandFingerprint(base.position)||(fresh.assignment?.id??null)!==(base.assignment?.id??null)||commandFingerprint(configured.snapshot)!==commandFingerprint(base.configured.snapshot)||commandFingerprint(configured.captureSnapshot)!==commandFingerprint(base.configured.captureSnapshot))throw new LeadProfileConflictError();
   await editable(actor,tx,fresh);
 }
 export async function reviewLeadProfile(actor:AccountActorContext,raw:unknown,deps:LeadDependencies){

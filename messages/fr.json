@@ -1293,7 +1293,8 @@
       "employee_cost_emergency": "Avis de coûts urgents du personnel",
       "receivable_reminder": "Une créance nécessite votre attention.",
       "ledger_integrity_failed": "Échec du contrôle d’intégrité du grand livre",
-      "document_expiring": "Un document approche de sa date d’expiration."
+      "document_expiring": "Un document approche de sa date d’expiration.",
+      "lead_reminder": "Un suivi de prospect est à effectuer."
     },
     "settings": {
       "eyebrow": "Votre compte",
@@ -1562,7 +1563,8 @@
         "identity_recovery_delivery_requested": "Récupération du compte",
         "other": "Autre notification",
         "staff_document_expiring": "Un document du personnel arrive à expiration.",
-        "document_expiring": "Un document approche de sa date d’expiration."
+        "document_expiring": "Un document approche de sa date d’expiration.",
+        "lead_reminder": "Un suivi de prospect est à effectuer."
       }
     }
   },
@@ -5402,6 +5404,56 @@
       "native_evidence_required": "Terminez les documents et les signatures requis avant de changer cette étape.",
       "unavailable": "Les informations sont indisponibles. Rechargez pour réessayer."
     },
-    "stageMovement": "{from} → {to}"
+    "stageMovement": "{from} → {to}",
+    "recoverWork": "Retrouver l’activité ou le rappel enregistré",
+    "work": {
+      "title": "Activités, rappels et attribution",
+      "kind": "Type de suivi",
+      "kinds": {
+        "ACTIVITY": "Activité",
+        "REMINDER": "Rappel",
+        "ASSIGNMENT": "Attribution du représentant"
+      },
+      "representative": "Représentant",
+      "recordedAccount": "Compte enregistré",
+      "unassigned": "Aucun représentant",
+      "activityType": "Type d’activité",
+      "recordedActivity": "Type d’activité enregistré",
+      "occurredAt": "Date de l’activité (UTC)",
+      "reminderState": "État du rappel",
+      "states": {
+        "OPEN": "Ouvert",
+        "COMPLETED": "Terminé",
+        "CANCELLED": "Annulé"
+      },
+      "dueAt": "Échéance (UTC)",
+      "recipient": "Destinataire du rappel",
+      "summary": "Résumé",
+      "notes": "Notes privées",
+      "correct": "Enregistrer une correction",
+      "add": "Enregistrer le suivi",
+      "choose": "Choisir une option",
+      "searchAccounts": "Rechercher un membre autorisé de l’équipe",
+      "search": "Rechercher les comptes",
+      "accountAccess": "Seuls les comptes disposant d’une autorisation indépendante sont disponibles. L’attribution ne donne aucun droit d’accès.",
+      "reason": "Motif de cet enregistrement",
+      "validation": "Vérifiez le compte sélectionné, les dates et les champs obligatoires.",
+      "utc": "Les dates des activités et des rappels de cette section sont en UTC.",
+      "review": "Vérifier cet enregistrement",
+      "cancel": "Annuler la correction",
+      "refresh": "Actualiser l’historique du suivi",
+      "history": "Historique conservé du suivi",
+      "empty": "Aucune activité, aucun rappel et aucun changement d’attribution n’ont été enregistrés.",
+      "historyNumber": "Enregistrement {number}",
+      "current": "Version actuelle du suivi",
+      "retained": "Version antérieure conservée",
+      "more": "Enregistrements antérieurs",
+      "reviewTitle": "Vérifier le suivi du prospect",
+      "confirm": "Confirmer cet enregistrement",
+      "recordedAt": "Enregistré le {date} (UTC)",
+      "currentRepresentative": "Représentant actuel",
+      "restrictedAccount": "Les coordonnées du compte sont restreintes",
+      "inactiveRepresentative": "Le compte de ce représentant est inactif."
+    }
   }
 }
