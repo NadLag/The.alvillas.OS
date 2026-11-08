@@ -24,13 +24,14 @@ import {nativeLeadContractBrowserFlow,type LeadContractBrowserContext} from "./s
 import {nativeLeadDocumentBrowserTemplates,selectNativeLeadDocumentBrowserTemplates,privateNativeLeadBrowserStorage,nativeLeadBrowserFinancial} from "./support/crm-document-fixtures";
 import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
 import {forwardBrowserPostOnce} from "./support/forward-browser-post";
+import {signatureFixtureEnvironment} from "./support/signature-fixture-config";
 import en from "../../messages/en.json" with {type:"json"};
 import fr from "../../messages/fr.json" with {type:"json"};
 import ar from "../../messages/ar.json" with {type:"json"};
 
 const messages={en,fr,ar};
 async function completeOriginal({db,provider,signatureId,documentVersionId,deps,f}:LeadContractBrowserContext){
- const actor={organizationId:bootstrapOrganizationId,actorId:f.account.id,authContext:await authContextForAccount(bootstrapOrganizationId,f.account.id,{db})},secret=process.env.DOCUMENSO_WEBHOOK_SECRET??null;if(!secret)throw Error("Owned DOCUMENSO_WEBHOOK_SECRET required for actual completion acceptance");
+ const actor={organizationId:bootstrapOrganizationId,actorId:f.account.id,authContext:await authContextForAccount(bootstrapOrganizationId,f.account.id,{db})},secret=signatureFixtureEnvironment.DOCUMENSO_WEBHOOK_SECRET;if(!secret)throw Error("Owned DOCUMENSO_WEBHOOK_SECRET required for actual completion acceptance");
  const reference=async(key:string)=>withTenant(db,bootstrapOrganizationId,async tx=>({organizationId:bootstrapOrganizationId,outboxEventId:(await tx.outboxEvent.findUniqueOrThrow({where:{organizationId_idempotencyKey:{organizationId:bootstrapOrganizationId,idempotencyKey:key}}})).id}));
  async function callback(event:"DOCUMENT_OPENED"|"DOCUMENT_COMPLETED"){
   const prepared=await withTenant(db,bootstrapOrganizationId,tx=>tx.signatureProviderEvidence.findFirstOrThrow({where:{signatureId,kind:"PREPARED"}}));if(!prepared.providerRequestId)throw Error("Actual retained provider request required");const actual=await provider.provider.readSignatureRequest({requestId:prepared.providerRequestId,reference:signatureId}),bytes=new TextEncoder().encode(JSON.stringify({event,createdAt:new Date().toISOString(),payload:{envelopeId:prepared.providerRequestId,externalId:signatureId,source:"DOCUMENT",status:actual.status,completedAt:provider.state.lifecycle.completedAt??null,recipients:actual.recipients.map(recipient=>({id:recipient.id,envelopeId:prepared.providerRequestId,role:recipient.role,readStatus:recipient.readStatus,signingStatus:recipient.signingStatus,sendStatus:recipient.sendStatus,signedAt:recipient.signedAt,expiresAt:recipient.expiresAt}))}})),receipt=await receiveSignatureWebhook({organizationId:bootstrapOrganizationId,providerScopeHash:prepared.providerScopeHash},secret,bytes,deps);expect((await executeSignatureWebhookReference(await reference(signatureWebhookOutboxKey(receipt.id)),deps)).state).toBe("RECORDED");

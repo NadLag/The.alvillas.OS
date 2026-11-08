@@ -44,6 +44,7 @@ describe("config rule registry", () => {
       "agreement.responsibilities",
       "agreement.special_conditions",
       "crm.lead_capture",
+      "crm.lead_conversion",
       "crm.lead_profile",
       "crm.lead_work",
       "crm.pipeline",
