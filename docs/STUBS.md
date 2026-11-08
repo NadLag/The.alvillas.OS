@@ -1,5 +1,7 @@
 # STUBS.md - ALVILLAS OS
 
+F-CRM-02 remains unfinished: native lead document-source registration depends on F-CRM-05/06; conversion and release evidence readers depend on F-CRM-07 and F-ONB-07. Stage admission denies unavailable evidence. No caller completion flag can substitute for native sources, and no pipeline feature is DONE. Populated native preflight and admission for migrations210/211 have passed; all211 applied SQL files and financial history remain protected. Dependent producers and authenticated hosted acceptance remain required.
+
 This file lists stubs, fakes, placeholders, or fake-provider paths that appear outside tests. Features remain `IN-PROGRESS` until the real implementation replaces them.
 
 | Location | Kind | Status |
