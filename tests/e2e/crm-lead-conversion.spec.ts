@@ -23,12 +23,13 @@ import {nativeLeadDocumentBrowserTemplates,selectNativeLeadDocumentBrowserTempla
 import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
 import {forwardBrowserPostOnce} from "./support/forward-browser-post";
 import {signatureFixtureEnvironment} from "./support/signature-fixture-config";
+import {documentFixtureObjects} from "./support/document-fixture-objects";
 import en from "../../messages/en.json" with {type:"json"};
 import fr from "../../messages/fr.json" with {type:"json"};
 import ar from "../../messages/ar.json" with {type:"json"};
 
 const messages={en,fr,ar};
-async function completeOriginal({db,provider,signatureId,documentVersionId,deps:transport,f}:LeadContractBrowserContext){
+async function completeOriginal({page,db,provider,signatureId,documentVersionId,deps:transport,f}:LeadContractBrowserContext){
  const deps={...transport,env:{...process.env,...signatureFixtureEnvironment}};
  const actor={organizationId:bootstrapOrganizationId,actorId:f.account.id,authContext:await authContextForAccount(bootstrapOrganizationId,f.account.id,{db})},secret=signatureFixtureEnvironment.DOCUMENSO_WEBHOOK_SECRET;if(!secret)throw Error("Owned DOCUMENSO_WEBHOOK_SECRET required for actual completion acceptance");
  const reference=async(key:string)=>withTenant(db,bootstrapOrganizationId,async tx=>({organizationId:bootstrapOrganizationId,outboxEventId:(await tx.outboxEvent.findUniqueOrThrow({where:{organizationId_idempotencyKey:{organizationId:bootstrapOrganizationId,idempotencyKey:key}}})).id}));
@@ -38,7 +39,7 @@ async function completeOriginal({db,provider,signatureId,documentVersionId,deps:
  provider.state.lifecycle.readStatus="OPENED";await callback("DOCUMENT_OPENED");const original=await downloadDocumentVersion(actor,{versionId:documentVersionId},deps),task=getDocument({data:new Uint8Array(original.bytes),useSystemFonts:false,useWorkerFetch:false,useWasm:false,disableFontFace:true,verbosity:0}),pages=[];
  try{const pdf=await task.promise;for(let number=1;number<=pdf.numPages;number++){const page=await pdf.getPage(number),box=page.getViewport({scale:1}),text=(await page.getTextContent()).items.map(item=>"str"in item?item.str:"").join(" ");pages.push(createElement(PdfPage,{key:number,size:[box.width,box.height]},createElement(PdfText,{style:{fontSize:8}},text),createElement(PdfText,{style:{fontSize:8}},"Owned native conversion signing representation; no legal acceptance claim")));}}finally{await task.destroy();}
  provider.state.signedPdf=new Uint8Array(await renderToBuffer(createElement(PdfDocument,{},...pages)));provider.state.certificatePdf=new Uint8Array(await renderToBuffer(createElement(PdfDocument,{},createElement(PdfPage,{size:"A4"},createElement(PdfText,{},"Owned native conversion completion certificate")))));provider.state.lifecycle={status:"COMPLETED",readStatus:"OPENED",signingStatus:"SIGNED",signedAt:new Date().toISOString(),completedAt:new Date().toISOString()};await callback("DOCUMENT_COMPLETED");
- const archive=await withTenant(db,bootstrapOrganizationId,tx=>new SignedSignatureRepository(tx,bootstrapOrganizationId).signedArchiveForSignature(signatureId));if(!archive)throw Error("Actual immutable signed archive required");expect((await executeSignedArchiveReference(await reference(signedArchiveOutboxKey(archive.id)),deps)).state).toBe("COMPLETE");expect((await downloadDocumentVersion(actor,{versionId:documentVersionId},deps)).bytes).toEqual(original.bytes);return{actor,archive};
+ const archive=await withTenant(db,bootstrapOrganizationId,tx=>new SignedSignatureRepository(tx,bootstrapOrganizationId).signedArchiveForSignature(signatureId));if(!archive)throw Error("Actual immutable signed archive required");expect((await executeSignedArchiveReference(await reference(signedArchiveOutboxKey(archive.id)),{...deps,objects:documentFixtureObjects(new URL(page.url()).origin,{write:true})})).state).toBe("COMPLETE");expect((await downloadDocumentVersion(actor,{versionId:documentVersionId},deps)).bytes).toEqual(original.bytes);return{actor,archive};
 }
 
 for(const mode of["CREATE","LINK"]as const)for(const locale of["en","fr","ar"]as const)test(`Actual reviewed ${mode} conversion retains native signed Lead and original Owner in ${locale}`,async({page,context},info)=>{
