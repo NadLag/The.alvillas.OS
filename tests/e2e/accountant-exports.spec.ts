@@ -41,7 +41,7 @@ for(const locale of ["en","fr","ar"] as const)test(`Complete original accountant
   await page.getByTestId("accountant-property-choices").locator('input').fill(source.property.name);await page.getByTestId("accountant-property-selection").selectOption(source.property.id);
   for(const format of["CSV","EXCEL",...locale==="ar"?[]:["PDF"]]){
    await page.getByTestId("accountant-format").selectOption(format);await page.getByTestId("accountant-reason").fill(input.reason);
-   const event=page.waitForEvent("download");await page.getByTestId("accountant-download").click();const file=await event,path=await file.path();if(!path)throw Error("Actual downloaded accountant attachment required");const bytes=new Uint8Array(await readFile(path));
+   const event=page.waitForEvent("download");await page.getByTestId("accountant-download").click();const file=await event,path=info.outputPath("actual-accountant-"+format.toLowerCase()+".download");await file.saveAs(path);const bytes=new Uint8Array(await readFile(path));
    expect(file.suggestedFilename()).toContain("-2031-05-01-2031-05-31-MAD.");
    if(format==="CSV"){const text=new TextDecoder().decode(bytes);expect(text).toContain("9007199254740993.07");expect(text).toContain(source.property.id);expect(text).toContain("'=");}
    else if(format==="EXCEL"){const archive=unzipSync(bytes),xml=Object.entries(archive).filter(([name])=>name.endsWith(".xml")).map(([,value])=>strFromU8(value)).join("\n");expect(xml).toContain("9007199254740993.07");expect(xml).not.toMatch(/<f(?:\s|>)/u);if(locale==="ar")expect(xml).toContain('rightToLeft="1"');}
