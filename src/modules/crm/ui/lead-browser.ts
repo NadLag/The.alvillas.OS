@@ -8,7 +8,7 @@ export async function leadRequest(scope:string,path:LeadEndpoint,input:unknown,s
   try{
     const response=await fetch("/api/crm/leads/"+path,{method:"POST",credentials:"same-origin",cache:"no-store",signal,headers:{"content-type":"application/json","x-alvillas-crm-scope":scope},body:JSON.stringify(input)});
     if(response.status===401||response.status===403){await response.body?.cancel().catch(()=>undefined);throw new LeadBrowserError("forbidden");}
-    const bytes=await readBoundedResponseBytes(response,path==="workspace/options"?16777216:1048576);let value:unknown;try{value=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes));}finally{bytes.fill(0);}
+    const bytes=await readBoundedResponseBytes(response,path==="workspace/options"||path==="work/options"?16777216:1048576);let value:unknown;try{value=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes));}finally{bytes.fill(0);}
     if(!response.ok){const parsed=z.object({error:z.enum(["validation","conflict","configuration_unavailable","rate_limited","native_evidence_required"])}).safeParse(value);if(parsed.success)throw new LeadBrowserError(parsed.data.error);throw new LeadBrowserError(mutation?"uncertain":"unavailable");}
     if(!response.headers.get("content-type")?.includes("application/json"))throw new LeadBrowserError(mutation?"uncertain":"unavailable");return value;
   }catch(error){if(error instanceof LeadBrowserError)throw error;if(signal.aborted)throw error;throw new LeadBrowserError(mutation?"uncertain":"unavailable");}

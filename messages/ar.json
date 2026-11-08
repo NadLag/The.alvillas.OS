@@ -5450,7 +5450,10 @@
       "more": "السجلات السابقة",
       "reviewTitle": "مراجعة متابعة العميل المحتمل",
       "confirm": "تأكيد هذا السجل",
-      "recordedAt": "سُجل في {date} (UTC)"
+      "recordedAt": "سُجل في {date} (UTC)",
+      "currentRepresentative": "الممثل الحالي",
+      "restrictedAccount": "تفاصيل الحساب مقيّدة",
+      "inactiveRepresentative": "حساب هذا الممثل غير نشط."
     }
   }
 }

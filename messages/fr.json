@@ -5450,7 +5450,10 @@
       "more": "Enregistrements antérieurs",
       "reviewTitle": "Vérifier le suivi du prospect",
       "confirm": "Confirmer cet enregistrement",
-      "recordedAt": "Enregistré le {date} (UTC)"
+      "recordedAt": "Enregistré le {date} (UTC)",
+      "currentRepresentative": "Représentant actuel",
+      "restrictedAccount": "Les coordonnées du compte sont restreintes",
+      "inactiveRepresentative": "Le compte de ce représentant est inactif."
     }
   }
 }

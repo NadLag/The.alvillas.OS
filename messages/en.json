@@ -5450,7 +5450,10 @@
       "more": "Earlier records",
       "reviewTitle": "Review lead work",
       "confirm": "Confirm this record",
-      "recordedAt": "Recorded {date} (UTC)"
+      "recordedAt": "Recorded {date} (UTC)",
+      "currentRepresentative": "Current representative",
+      "restrictedAccount": "Account details are restricted",
+      "inactiveRepresentative": "This representative’s account is inactive."
     }
   }
 }
