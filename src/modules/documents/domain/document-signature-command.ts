@@ -6,7 +6,8 @@ export const nativeSignatureProtocol = "ALVILLAS_NATIVE_SIGNATURE_REQUEST_V1";
 export const nativeSignatureRecipientProtocol = "ALVILLAS_NATIVE_SIGNATURE_RECIPIENT_V1";
 export const nativeSignatureDraftCreated = "documents.signature.draft_created";
 const sha = z.string().regex(/^[a-f0-9]{64}$/u);
-export const signatureRecipientReferenceSchema = z.object({ kind: z.enum(["PERSON", "OWNER", "GUEST", "SUPPLIER"]), id: z.uuid() }).strict();
+export const signatureRecipientReferenceSchema = z.object({ kind: z.enum(["PERSON", "OWNER", "GUEST", "SUPPLIER", "LEAD"]), id: z.uuid() }).strict();
+export const nativeLeadContractPolicySchema=z.object({id:z.uuid(),version:z.number().int().positive(),contractTypeKeys:z.array(z.string().regex(/^[a-z][a-z0-9_]{0,119}$/u)).min(1).max(100).refine(values=>new Set(values).size===values.length)}).strict();
 export const nativeSignatureDraftSchema = z.object({ instanceId: z.uuid(), documentVersionId: z.uuid(), recipients: z.array(signatureRecipientReferenceSchema).min(1).max(100)
   .refine(values => new Set(values.map(value => value.kind + ":" + value.id)).size === values.length) }).strict();
 export const nativeSignatureCommandSchema = nativeSignatureDraftSchema.extend({ idempotencyKey: documentUploadInput.shape.idempotencyKey,
@@ -16,9 +17,10 @@ export const nativeSignatureRecipientPayloadSchema = z.object({ protocol: z.lite
   displayName: z.string().min(1).max(500), email: z.email().max(254) }).strict();
 export const nativeSignatureSnapshotSchema = z.object({ protocol: z.literal(nativeSignatureProtocol), schemaVersion: z.literal(1), command: nativeSignatureCommandSchema, commandHash: sha,
   document: z.object({ id: z.uuid(), instanceId: z.uuid(), versionId: z.uuid(), admissionId: z.uuid(), sha256: sha, byteSize: z.number().int().positive(), locale: z.enum(["en", "fr", "ar"]), source: documentSourceReferenceSchema }).strict(),
-  archiveFingerprint: sha, nativeSourceFingerprint: sha, archivePolicy: z.object({ id: z.uuid(), version: z.number().int().positive(), value: documentArchivePolicySchema }).strict(),
+  archiveFingerprint: sha, nativeSourceFingerprint: sha, archivePolicy: z.object({ id: z.uuid(), version: z.number().int().positive(), value: documentArchivePolicySchema }).strict(),leadContractPolicy:nativeLeadContractPolicySchema.optional(),
   recipients: z.array(z.object({ reference: signatureRecipientReferenceSchema, identityHash: sha, fingerprint: sha }).strict()).min(1).max(100)
 }).strict().superRefine((value, ctx) => {
+  if(value.document.source.kind==="LEAD"? !value.leadContractPolicy||!value.command.recipients.some(recipient=>recipient.kind==="LEAD"&&recipient.id.toLowerCase()===value.document.source.id.toLowerCase())||value.command.recipients.some(recipient=>recipient.kind==="LEAD"&&recipient.id.toLowerCase()!==value.document.source.id.toLowerCase()) : value.leadContractPolicy||value.command.recipients.some(recipient=>recipient.kind==="LEAD"))ctx.addIssue({code:"custom",message:"native_lead_contract_signer_required"});
   if (value.command.instanceId !== value.document.instanceId || value.command.documentVersionId !== value.document.versionId || value.recipients.length !== value.command.recipients.length ||
     value.recipients.some((recipient, index) => recipient.reference.kind !== value.command.recipients[index].kind || recipient.reference.id !== value.command.recipients[index].id)) ctx.addIssue({ code: "custom", message: "original_signature_intent_required" });
 });

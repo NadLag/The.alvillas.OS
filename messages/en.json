@@ -5081,7 +5081,8 @@
     "pending": "Recover the earlier request before creating another draft.",
     "recover": "Recover signature draft",
     "newDraft": "Start a new draft",
-    "close": "Close signature draft"
+    "close": "Close signature draft",
+    "LEAD": "Property acquisition lead"
   },
   "SignaturePreparation": {
     "title": "Prepare for signature",
@@ -5456,6 +5457,6 @@
       "restrictedAccount": "Account details are restricted",
       "inactiveRepresentative": "This representative’s account is inactive."
     },
-    "proposalDocuments": "Proposal documents"
+    "proposalDocuments": "Acquisition documents"
   }
 }

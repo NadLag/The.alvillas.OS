@@ -34,7 +34,13 @@ export async function nativeLeadDocumentSource(tx:TenantTransaction,organization
 
 /** The document boundary calls this only after authorizing the captured native resource. */
 export function nativeLeadDocumentLabel(native:NonNullable<ReturnType<typeof retainedNativeSource>>,env?:NodeJS.ProcessEnv){
- return(native.profile?retainedLeadProfile(native.profile,env):decryptLeadPayload(native.lead.encryptedPayload,leadCaptureBinding(native.lead),env)).fields.ownerContact??native.label;
+ return nativeLeadDocumentContact(native,env).displayName??native.label;
+}
+
+/** Resolve only retained native identity after the caller authorizes its captured resource. */
+export function nativeLeadDocumentContact(native:NonNullable<ReturnType<typeof retainedNativeSource>>,env?:NodeJS.ProcessEnv){
+ const fields=(native.profile?retainedLeadProfile(native.profile,env):decryptLeadPayload(native.lead.encryptedPayload,leadCaptureBinding(native.lead),env)).fields;
+ return{displayName:fields.ownerContact??null,email:fields.email??null};
 }
 
 /** Fixed approved fields; private notes, referral identities and financial values are not bindings. */

@@ -5081,7 +5081,8 @@
     "pending": "استرجع الطلب السابق قبل إنشاء مسودة أخرى.",
     "recover": "استرجاع مسودة التوقيع",
     "newDraft": "بدء مسودة جديدة",
-    "close": "إغلاق مسودة التوقيع"
+    "close": "إغلاق مسودة التوقيع",
+    "LEAD": "عميل عقاري محتمل"
   },
   "SignaturePreparation": {
     "title": "تحضير التوقيع",
@@ -5456,6 +5457,6 @@
       "restrictedAccount": "تفاصيل الحساب مقيّدة",
       "inactiveRepresentative": "حساب هذا الممثل غير نشط."
     },
-    "proposalDocuments": "مستندات العرض"
+    "proposalDocuments": "وثائق الاستحواذ"
   }
 }

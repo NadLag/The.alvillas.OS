@@ -26,6 +26,13 @@ async function extract(bytes: Uint8Array) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("actual authored document PDF rendering", () => {
+  it("retains exact uppercase clauses after successive native contact and accented French documents",async()=>{
+    const renderer=new DocumentPdfRenderer();for(const locale of["en","fr"]as const){const input=payload(locale),contact="Native owner "+randomUUID()+" LongContact".repeat(9);input.source.title=contact;input.source.blocks=[{kind:"PARAGRAPH",text:contact+" / "+(locale==="en"?"Actual assessment":"Évaluation réelle")}];await extract(await renderer.render({template:documentPdfTemplate,locale,data:input}));}
+    const marker="PRIVATE-GENERATED-CLAUSE-96c4a75ad888",input=payload();input.source.title="Agreement PWA villa";input.source.blocks=[{kind:"PARAGRAPH",text:marker+" PWA villa"}];const actual=await extract(await renderer.render({template:documentPdfTemplate,locale:"en",data:input}));expect(actual.text).toContain(marker);expect(actual.text).toContain("PWA villa");
+  });
+  it("retains exact clauses and Money in concurrent documents containing accents before uppercase text",async()=>{
+    const money=Money.of("9007199254740993.07","MAD"),documents=await Promise.all((["fr","en","fr"]as const).map(async(locale,index)=>{const input=payload(locale),marker="EXACT-RETAINED-CLAUSE-"+index;input.source.blocks=[{kind:"PARAGRAPH",text:"Évaluation réelle"},{kind:"PARAGRAPH",text:marker+" "+formatCurrency(locale,money)}];return{marker,locale,actual:await extract(await new DocumentPdfRenderer().render({template:documentPdfTemplate,locale,data:input}))};}));for(const document of documents){expect(document.actual.text).toContain(document.marker);expect(document.actual.text.replace(/\s/gu,"")).toContain(formatCurrency(document.locale,money).replace(/\s/gu,""));}expect(money.toJSON()).toEqual({amount:"9007199254740993.07",currency:"MAD"});
+  });
   it.each(["en", "fr"] as const)("renders %s original clauses and exact classified Money without remote assets, markup or recursive tokens", async locale => {
     const money = Money.of("9007199254740993.07", "MAD"), template = { schemaVersion: 1, templateKey: "original_agreement", locale, title: "Convention {{property}}", variables: [{ key: "property", kind: "TEXT" }, { key: "amount", kind: "MONEY" }], blocks: [
       { kind: "HEADING", text: "Écritures et vérification" }, { kind: "PARAGRAPH", text: "Original {{property}}\n{{amount}}" }, { kind: "BULLET", text: "Clause conservée {{property}}" }

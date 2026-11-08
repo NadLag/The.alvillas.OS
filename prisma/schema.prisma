@@ -8,6 +8,7 @@ datasource db {
 }
 
 model Lead {
+  signatureRecipients SignatureRecipient[] @relation("LeadSignatureRecipients")
   documents Document[] @relation("LeadDocuments")
   workEntries LeadWorkEntry[]
   stageRevisions LeadStageRevision[]
@@ -5377,6 +5378,7 @@ model SignatureRecipient {
   ownerId String? @map("owner_id") @db.Uuid
   guestId String? @map("guest_id") @db.Uuid
   supplierId String? @map("supplier_id") @db.Uuid
+  leadId String? @map("lead_id") @db.Uuid
   identityHash String @map("identity_hash") @db.Char(64)
   emailCipher Bytes @map("email_cipher")
   sourceSnapshot Json @map("source_snapshot")
@@ -5387,6 +5389,7 @@ model SignatureRecipient {
   owner Owner? @relation("SignatureRecipientOwner",fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   guest GuestRecord? @relation("SignatureRecipientGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   supplier Supplier? @relation("SignatureRecipientSupplier",fields:[organizationId,supplierId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  lead Lead? @relation("LeadSignatureRecipients",fields:[organizationId,leadId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"signature_recipient_org_lead_fkey")
   @@unique([organizationId,id],map:"signature_recipient_org_id_unique")
   @@unique([organizationId,signatureId,identityHash],map:"signature_recipient_identity_unique")
   @@map("signature_recipient")

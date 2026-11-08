@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslations } from "next-intl";
 import { z } from "zod";
+import type { documentSourceReferenceSchema } from "../domain/document-command";
 import { nativeSignatureChoicesSchema, nativeSignatureCommandSchema, nativeSignatureDraftSchema, nativeSignatureReceiptSchema, nativeSignatureRecoverySchema, nativeSignatureReviewSchema, signatureRecipientReferenceSchema } from "../domain/document-signature-command";
 import { clearDocumentNonce, documentRequest, DocumentBrowserError, readDocumentNonce, writeDocumentNonce, type DocumentBrowserState } from "./document-browser";
 import { DocumentSignaturePreparationPanel } from "./document-signature-preparation-panel";
@@ -14,9 +15,9 @@ type Party = Choices["items"][number];
 type Review = { draft: z.infer<typeof nativeSignatureDraftSchema>; value: z.infer<typeof nativeSignatureReviewSchema>; reason: string };
 const partyKey = (party: Party) => party.reference.kind + ":" + party.reference.id;
 
-export function DocumentSignaturePanel({ scope, version, disabled, onClose, onForbidden, onOpenArchive }: { scope: string; version: { id: string; title: string; number: number }; disabled: boolean; onClose: () => void; onForbidden: () => void; onOpenArchive: (documentId: string) => void }) {
+export function DocumentSignaturePanel({ scope, version, sourceKind, disabled, onClose, onForbidden, onOpenArchive }: { scope: string; version: { id: string; title: string; number: number }; sourceKind: z.infer<typeof documentSourceReferenceSchema>["kind"]; disabled: boolean; onClose: () => void; onForbidden: () => void; onOpenArchive: (documentId: string) => void }) {
   const t = useTranslations("DocumentSignatures"), a = useTranslations("DocumentArchive"), key = "alvillas:document-signature:" + scope;
-  const [historicalId, setHistoricalId] = useState<string | null>(null), [preparedId, setPreparedId] = useState<string | null>(null), [kind, setKind] = useState<Party["reference"]["kind"]>("OWNER"), [query, setQuery] = useState(""), [choices, setChoices] = useState<Choices | null>(null),
+  const [historicalId, setHistoricalId] = useState<string | null>(null), [preparedId, setPreparedId] = useState<string | null>(null), [kind, setKind] = useState<Party["reference"]["kind"]>(sourceKind === "LEAD" ? "LEAD" : "OWNER"), [query, setQuery] = useState(""), [choices, setChoices] = useState<Choices | null>(null),
     [selected, setSelected] = useState<Party[]>([]), [reason, setReason] = useState(""), [review, setReview] = useState<Review | null>(null),
     [state, setState] = useState<DocumentBrowserState>("ready"), [busy, setBusy] = useState(false), [pending, setPending] = useState(false), [unrecorded, setUnrecorded] = useState(false),
     [canRetry, setCanRetry] = useState(false), [receipt, setReceipt] = useState<z.infer<typeof nativeSignatureReceiptSchema> | null>(null);
@@ -76,7 +77,7 @@ export function DocumentSignaturePanel({ scope, version, disabled, onClose, onFo
       {canRetry ? <button className="secondary-button" disabled={disabled || busy} onClick={() => { void perform(async signal => { if (original.current) receive(nativeSignatureReceiptSchema.parse(await ask("admit", original.current, signal))); }); }}>{a("retryExact")}</button> : null}
       {unrecorded ? <><p>{a("unrecorded")}</p><button className="secondary-button" disabled={disabled || busy} onClick={() => { if (nonce.current) clearDocumentNonce(key, nonce.current); nonce.current = null; original.current = null; setPending(false); setCanRetry(false); setReview(null); setUnrecorded(false); }}>{t("newDraft")}</button></> : null}</div></div> : null}
     {!pending ? <form className="resource-form" onSubmit={reviewDraft} onChange={() => setReview(null)} data-testid="signature-form">
-      <label className="field"><span>{t("recipientKind")}</span><select value={kind} disabled={locked} onChange={event => { setKind(signatureRecipientReferenceSchema.shape.kind.parse(event.target.value)); setChoices(null); }}>{(["OWNER", "GUEST", "SUPPLIER", "PERSON"] as const).map(value => <option key={value} value={value}>{t(value)}</option>)}</select></label>
+      <label className="field"><span>{t("recipientKind")}</span><select value={kind} disabled={locked} data-testid="signature-recipient-kind" onChange={event => { setKind(signatureRecipientReferenceSchema.shape.kind.parse(event.target.value)); setChoices(null); }}>{(["OWNER", "GUEST", "SUPPLIER", "PERSON", ...sourceKind === "LEAD" ? ["LEAD" as const] : []] as const).map(value => <option key={value} value={value}>{t(value)}</option>)}</select></label>
       <label className="field"><span>{t("search")}</span><input value={query} maxLength={120} disabled={locked} onChange={event => { setQuery(event.target.value); setChoices(null); }} dir="auto" data-testid="signature-query" /></label>
       <button type="button" className="secondary-button" disabled={locked} onClick={() => search()} data-testid="signature-find">{t("find")}</button>
       {choices ? <><ul className="resource-list">{choices.items.map(party => <li className="resource-form" key={partyKey(party)}><span dir="auto">{party.displayName}</span><span dir="auto">{party.email}</span><button type="button" className="secondary-button" disabled={locked || selected.some(value => partyKey(value) === partyKey(party)) || selected.length >= 100} onClick={() => { setSelected(previous => [...previous, party]); setReview(null); }} data-testid="signature-add-recipient">{t("add")}</button></li>)}</ul>{!choices.items.length ? <p>{t("empty")}</p> : null}{choices.next ? <button type="button" className="secondary-button" disabled={locked} onClick={() => search(choices.next ?? undefined)}>{t("more")}</button> : null}</> : null}
