@@ -8,19 +8,19 @@ import * as auditWriter from "@/platform/audit/audit-writer";
 import {captureLead,captureWebsiteLead,readLead} from "@/modules/crm/application/lead-capture-service";
 import {leadCapturePolicyKey,type LeadCapturePolicy} from "@/modules/crm/domain/lead-capture";
 import {provisionIntegrationRole} from "./support/database-role";
-import {nativeLeadFixture,nativeLeadInput,nativeWebsiteLeadInput} from "./support/lead-fixture";
+import {appendNativeLeadFinancialSentinel,nativeLeadFinancialGuard,nativeLeadFixture,nativeLeadInput,nativeWebsiteLeadInput} from "./support/lead-fixture";
 
-let admin:PrismaClient,db:PrismaClient,financialBefore:unknown;
+let admin:PrismaClient,db:PrismaClient,financial:Awaited<ReturnType<typeof nativeLeadFinancialGuard>>;
+const crmOrganizations:string[]=[];
 const env={NODE_ENV:"test" as const,ENCRYPTION_KEYS:"native-lead:"+randomBytes(32).toString("base64")};
 const deps=()=>({db,env});
-const financialTuples=()=>admin.$queryRaw`SELECT 'journal' AS kind,id::text,xmin::text,md5(to_jsonb(t)::text) AS body FROM financial_transaction t UNION ALL SELECT 'posting',id::text,xmin::text,md5(to_jsonb(t)::text) FROM posting t ORDER BY kind,id`;
 beforeAll(async()=>{
   const url=process.env.TEST_DATABASE_URL;if(!url||!["127.0.0.1","localhost"].includes(new URL(url).hostname))throw Error("Owned native CRM database required");
-  admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url);scoped.username=scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});financialBefore=await financialTuples();
+  admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url);scoped.username=scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});financial=await nativeLeadFinancialGuard(admin,db);
 });
-afterAll(async()=>{vi.restoreAllMocks();try{if(admin)expect(await financialTuples()).toEqual(financialBefore);}finally{await db?.$disconnect();await admin?.$disconnect();}});
+afterAll(async()=>{vi.restoreAllMocks();try{if(financial)await financial.assertPreserved(crmOrganizations);}finally{await db?.$disconnect();await admin?.$disconnect();}});
 type Fixture=Awaited<ReturnType<typeof nativeLeadFixture>>;
-const fixture=(changes:Partial<LeadCapturePolicy>={})=>nativeLeadFixture(admin,db,changes);
+const fixture=async(changes:Partial<LeadCapturePolicy>={})=>{const result=await nativeLeadFixture(admin,db,changes);crmOrganizations.push(result.organizationId);return result;};
 const withdraw=(f:Fixture,kind:string)=>withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.assignments[kind]},data:{validTo:new Date("2020-01-02")}}));
 const policy=(f:Fixture,value:LeadCapturePolicy)=>withTenant(db,f.organizationId,tx=>new ConfigRuleRepository(tx,f.organizationId).createVersion({key:leadCapturePolicyKey,scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),value,reason:"Actual independently approved CRM policy replacement"}));
 const counts=(f:Fixture)=>withTenant(db,f.organizationId,async tx=>({leads:await tx.lead.count(),captures:await tx.auditLog.count({where:{action:"crm.lead_captured"}}),events:await tx.outboxEvent.count({where:{type:"crm.lead_captured"}})}));
@@ -123,6 +123,12 @@ describe("actual private native CRM acquisition capture",()=>{
     try{await expect(captureLead(f.ctx,nativeLeadInput(),{...deps(),db:observed})).rejects.toThrow("lead_command_conflict");}finally{spy.mockRestore();}expect(changed).toBe(true);expect(await counts(f)).toEqual({leads:0,captures:0,events:0});
   });
   it("fails closed on missing encryption keys and preserves original financial tuples",async()=>{
-    const f=await fixture();await expect(captureLead(f.ctx,nativeLeadInput(),{db,env:{NODE_ENV:"test"}})).rejects.toThrow("lead_configuration_unavailable");expect(await counts(f)).toEqual({leads:0,captures:0,events:0});expect(await financialTuples()).toEqual(financialBefore);
+    const f=await fixture();await expect(captureLead(f.ctx,nativeLeadInput(),{db,env:{NODE_ENV:"test"}})).rejects.toThrow("lead_configuration_unavailable");expect(await counts(f)).toEqual({leads:0,captures:0,events:0});await financial.assertPreserved(crmOrganizations);
+  });
+  it("preserves every original financial tuple while another tenant appends a real exact-Money journal",async()=>{
+    const f=await fixture(),[saved,independent]=await Promise.all([captureLead(f.ctx,nativeLeadInput(),deps()),appendNativeLeadFinancialSentinel(admin,db)]);
+    expect(saved.initialStage).toBe("NEW");expect(independent.journal.postings.map(row=>row.amount.toFixed(2))).toEqual(["9007199254740993.07","9007199254740993.07"]);
+    expect(financial.before.some(row=>row.id===independent.journal.id)).toBe(false);await financial.assertPreserved(crmOrganizations);expect(await counts(f)).toEqual({leads:1,captures:1,events:1});
+    await expect(financial.assertPreserved([...crmOrganizations,independent.organizationId])).rejects.toThrow("CRM must never create financial journals or postings");
   });
 });

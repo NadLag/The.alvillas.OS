@@ -1,10 +1,41 @@
 import {randomUUID} from "node:crypto";
+import assert from "node:assert/strict";
 import type {PrismaClient} from "@prisma/client";
+import {FinanceRepository} from "@/modules/finance/infrastructure/finance-repository";
+import {Money} from "@/platform/money/money";
 import {withTenant} from "@/platform/db/tenant";
 import {authContextForAccount} from "@/platform/authz/account-context";
 import {ensureStandardIdentitySetup} from "@/modules/identity/application/identity-service";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {leadCapturePolicyKey,type LeadCaptureInput,type LeadCapturePolicy} from "@/modules/crm/domain/lead-capture";
+
+type FinancialTuple={kind:string;id:string;xmin:string;body:string};
+
+/** A real unrelated tenant may append journals while CRM's original rows stay immutable. */
+export async function appendNativeLeadFinancialSentinel(admin:PrismaClient,db:PrismaClient){
+  const organizationId=randomUUID();await admin.organization.create({data:{id:organizationId,name:"Independent CRM financial preservation sentinel",baseCurrency:"MAD"}});
+  const journal=await withTenant(db,organizationId,async tx=>{
+    const person=await tx.person.create({data:{organizationId,displayName:"Independent financial fixture actor"}}),account=await tx.userAccount.create({data:{organizationId,personId:person.id}}),finance=new FinanceRepository(tx,organizationId);
+    const bank=await finance.ensureLedgerAccount({code:"CRM_SENTINEL_BANK",name:"Actual custody",accountType:"ASSET_LOCATION",normalSide:"DEBIT"}),claim=await finance.ensureLedgerAccount({code:"CRM_SENTINEL_CLAIM",name:"Actual ownership",accountType:"CLAIM_OWNERSHIP",normalSide:"CREDIT"}),amount=Money.of("9007199254740993.07","MAD");
+    return finance.createFinancialTransaction({reference:"CRM-SENTINEL:"+randomUUID(),description:"Immutable independent financial preservation fixture",idempotencyKey:randomUUID(),createdBy:account.id,occurredAt:await finance.clock(),postings:[{ledgerAccountId:bank.id,side:"DEBIT",amount,bucket:"OWNER_REVENUE",dimensions:{}},{ledgerAccountId:claim.id,side:"CREDIT",amount,bucket:"OWNER_REVENUE",dimensions:{}}]});
+  });
+  assert.equal(journal.postings.length,2);for(const posting of journal.postings){assert.equal(posting.amount.toFixed(2),"9007199254740993.07");assert.equal(posting.currency,"MAD");}
+  return{organizationId,journal};
+}
+
+/** Compare every original value and xmin; also reject any financial write by a CRM fixture. */
+export async function nativeLeadFinancialGuard(admin:PrismaClient,db:PrismaClient){
+  const sentinel=await appendNativeLeadFinancialSentinel(admin,db);
+  const before=await admin.$queryRaw<FinancialTuple[]>`SELECT 'journal' AS kind,id::text,xmin::text,md5(to_jsonb(t)::text) AS body FROM financial_transaction t UNION ALL SELECT 'posting',id::text,xmin::text,md5(to_jsonb(t)::text) FROM posting t ORDER BY kind,id`;
+  const journals=before.filter(row=>row.kind==="journal").map(row=>row.id),postings=before.filter(row=>row.kind==="posting").map(row=>row.id);
+  assert(before.some(row=>row.kind==="journal"&&row.id===sentinel.journal.id));assert(sentinel.journal.postings.every(posting=>postings.includes(posting.id)));
+  return{before,async assertPreserved(crmOrganizationIds:readonly string[]){
+    const current=await admin.$queryRaw<FinancialTuple[]>`SELECT 'journal' AS kind,id::text,xmin::text,md5(to_jsonb(t)::text) AS body FROM financial_transaction t WHERE id=ANY(${journals}::uuid[]) UNION ALL SELECT 'posting',id::text,xmin::text,md5(to_jsonb(t)::text) FROM posting t WHERE id=ANY(${postings}::uuid[]) ORDER BY kind,id`;
+    assert.deepStrictEqual(current,before,"Every original financial row, value and xmin must remain unchanged");
+    const [counts]=await admin.$queryRaw<Array<{journals:bigint;postings:bigint}>>`SELECT (SELECT count(*) FROM financial_transaction WHERE organization_id=ANY(${[...crmOrganizationIds]}::uuid[])) AS journals,(SELECT count(*) FROM posting WHERE organization_id=ANY(${[...crmOrganizationIds]}::uuid[])) AS postings`;
+    assert.deepStrictEqual(counts,{journals:0n,postings:0n},"CRM must never create financial journals or postings");
+  }};
+}
 
 const label={en:"Actual assessment",fr:"Évaluation réelle",ar:"تقييم فعلي"};
 export function nativeLeadPolicy(changes:Partial<LeadCapturePolicy>={}):LeadCapturePolicy{return{
