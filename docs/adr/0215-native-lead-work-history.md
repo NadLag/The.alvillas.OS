@@ -19,4 +19,6 @@ migration; applied SQL and prior work/financial rows stay unchanged.
 
 Due reminders retain identifier-only native references. Delivery resolves the current subject and independent creator/recipient grants at production, inbox and channel boundaries; completion, cancellation, reassignment or withdrawal cannot be bypassed by an old queue event. Explicit organization routing selects audiences and channels. PostgreSQL extends its existing notification-kind expression in a new forward migration, preserving every previous allowed kind and rejecting unapproved values. Full private UI, restore, browser, CI and hosted acceptance remain mandatory.
 
+Read publication re-evaluates independent team access using the current database clock, including conditional time windows, and checks representative visibility as well as account identity. Candidate names require fresh actor team access and fresh candidate lead access after the read audit. Lead conditions continue to use the native lead occurrence date; actual grant expiry remains `validTo`. No stored authorization fingerprint extends a time-limited permission.
+
 Scope unchanged: all 355 features remain required.
