@@ -12,7 +12,7 @@ export async function forwardBrowserPostOnce(request: Pick<Request, "url" | "met
       const chunks: Buffer[] = [];
       response.on("error", reject);
       response.on("aborted", () => reject(new Error("Observed command acknowledgement ended before its body completed")));
-      response.on("end", () => { try { onBody?.(Buffer.concat(chunks)); resolve(response.statusCode ?? 0); } catch (error) { reject(error); } });
+      response.on("end", () => { try { onBody?.(Buffer.concat(chunks)); resolve(response.statusCode ?? 0); } catch (error) { reject(error instanceof Error ? error : new Error("Observed acknowledgement body could not be retained")); } });
       if (onBody) response.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
       else response.resume();
     });

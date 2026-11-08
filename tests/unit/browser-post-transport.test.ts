@@ -17,7 +17,7 @@ describe("single-attempt authenticated browser fixture transport",()=>{
   try{for(const idempotencyKey of["first-original","second-original"]){const response=await postBrowserJsonOnce(browser(),"/runs",{headers:{origin},data:{idempotencyKey}});expect(await response.json()).toEqual({recorded:true});}expect(requests).toBe(2);expect(connections).toBe(2);}finally{await close(server);}
  });
  it("never repeats or replaces an unknown original command after a real reset",async()=>{
-  const observed:unknown[]=[];const server=createServer((request,_response)=>{void(async()=>{const chunks:Buffer[]=[];for await(const chunk of request as AsyncIterable<Uint8Array>)chunks.push(Buffer.from(chunk));observed.push(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);request.socket.destroy();})().catch(()=>request.socket.destroy());}),origin=await listen(server),data={idempotencyKey:"retain-this-original-nonce"};
+  const observed:unknown[]=[];const server=createServer(request=>{void(async()=>{const chunks:Buffer[]=[];for await(const chunk of request as AsyncIterable<Uint8Array>)chunks.push(Buffer.from(chunk));observed.push(JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown);request.socket.destroy();})().catch(()=>request.socket.destroy());}),origin=await listen(server),data={idempotencyKey:"retain-this-original-nonce"};
   try{await expect(postBrowserJsonOnce(browser(),"/runs",{headers:{origin},data})).rejects.toMatchObject({code:"ECONNRESET"});expect(observed).toEqual([data]);}finally{await close(server);}
  });
  it("rejects another origin before exporting any browser credentials and preserves the original status-only caller",async()=>{
