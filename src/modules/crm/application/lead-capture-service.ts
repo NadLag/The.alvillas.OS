@@ -1,6 +1,6 @@
 import {createHash,randomUUID,timingSafeEqual} from "node:crypto";
 import {z,ZodError} from "zod";
-import type {Lead,Prisma} from "@prisma/client";
+import type {Lead} from "@prisma/client";
 import {withTenant,assertOrganizationId,type TenantTransaction,type TenantTransactionRunner} from "@/platform/db/tenant";
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
@@ -86,7 +86,7 @@ async function capture(organizationInput:string,raw:unknown,actor:AccountActorCo
     const commandHash=commandFingerprint({protocol:"ALVILLAS_LEAD_CAPTURE_V1",...identity,locale:value.locale,payloadSha256});
     const row=await repository.create({id:candidateId,createdBy:caller.actorId,createdAt:now,initialStage:"NEW",channel:value.channel,sourceKey:value.sourceKey,locale:value.locale,
       commandKey:value.idempotencyKey,commandHash,encryptedPayload,payloadSha256,policyId:configured.rule.id,policyVersion:configured.rule.version,policySnapshot:configured.snapshot,
-      authorizationCap:authorizationCap as Prisma.InputJsonValue,requestId});
+      authorizationCap,requestId});
     await new OutboxRepository(tx,organizationId).append("crm.lead_captured",{leadId:row.id,channel:row.channel,sourceKey:row.sourceKey},"crm.lead.captured:"+row.id,now);
     await writeAuditEvent(tx,{organizationId,actorId:website?null:caller.actorId,action:"crm.lead_captured",resourceType:"lead",resourceId:row.id,
       after:{principalId:caller.actorId,leadId:row.id,channel:row.channel,sourceKey:row.sourceKey,commandHash,payloadSha256,policyId:row.policyId},requestId,occurredAt:now});
