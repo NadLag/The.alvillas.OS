@@ -29,6 +29,8 @@ PDF production, versioning, effective history, audit and outbox infrastructure.
 Source positions and fingerprints are checked again at admission and production.
 Proposal stage evidence must reference an actual effective PDF instance for the
 same organization and lead, with the configured proposal type. Signature and
-conversion evidence continue through their native producers.
+conversion evidence continue through their native producers. Registering the
+lead archive source keeps lead signing closed until F-CRM-06 supplies native
+recipient identity and its required provider evidence.
 
 Scope unchanged: all 355 features remain required.

@@ -5,7 +5,8 @@ import type { CurrentAuthorityCheck } from "@/platform/authz/current-authority";
 import { financialAttachmentAuthorityChecks } from "@/platform/authz/financial-attachment-resource";
 import { FinancialAttachmentSourceRepository } from "@/platform/ledger/financial-attachment-source-repository";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
-import type { documentSourceReferenceSchema } from "../domain/document-command";
+import { documentSourceReferenceSchema } from "../domain/document-command";
+import {nativeLeadDocumentSource,nativeLeadDocumentSources} from "@/platform/documents/lead-source";
 import type { z } from "zod";
 import type { signatureRecipientReferenceSchema } from "../domain/document-signature-command";
 
@@ -27,6 +28,8 @@ const documentGuestRecordReadSelect={ id: true, displayName: true, archivedAt: t
 const documentOrganizationReadSelect={ id: true, name: true } as const;
 
 export class DocumentRepository extends FinancialAttachmentSourceRepository {
+  private documentLeadReads?:Map<string,Awaited<ReturnType<typeof nativeLeadDocumentSource>>>;
+  private async documentReadLead(id:string){if(this.documentLeadReads?.has(id))return this.documentLeadReads.get(id)??null;return nativeLeadDocumentSource(this.tx,this.organizationId,id);}
   private documentSourceReads?:Map<string,DocumentSourceFacts|null>;
   private documentPropertyReads?:Map<string,Prisma.PropertyGetPayload<{select:typeof documentPropertyReadSelect}>|null>;
   private async documentReadProperty(id:string){if(this.documentPropertyReads?.has(id))return this.documentPropertyReads.get(id)??null;return this.tx.property.findFirst({where:{organizationId:this.organizationId,id},select:documentPropertyReadSelect});}
@@ -52,6 +55,7 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
     {const ids=unique.filter(ref=>ref.kind==="SUPPLIER").map(ref=>ref.id);this.documentSupplierReads=undefined;if(ids.length){const rows=await this.tx.supplier.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentSupplierReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentSupplierReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
     {const ids=unique.filter(ref=>ref.kind==="GUEST").map(ref=>ref.id);this.documentGuestRecordReads=undefined;if(ids.length){const rows=await this.tx.guestRecord.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentGuestRecordReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentGuestRecordReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
     {const ids=unique.filter(ref=>ref.kind==="ORGANIZATION").map(ref=>ref.id);this.documentOrganizationReads=undefined;if(ids.length){const rows=await this.tx.organization.findMany({where:{id:{in:ids.filter(id=>id===this.organizationId)}},select:documentOrganizationReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentOrganizationReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
+    this.documentLeadReads=await nativeLeadDocumentSources(this.tx,this.organizationId,unique.filter(reference=>reference.kind==="LEAD").map(reference=>reference.id));
     await this.prepareFinancialAttachmentSources(unique.filter(reference=>reference.kind==="FINANCIAL_TRANSACTION").map(reference=>reference.id));
     for(const reference of unique){const native=await this.documentSource(reference);this.documentSourceReads.set(reference.kind+":"+reference.id,native);}
   }
@@ -62,7 +66,10 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
     const readKey=reference.kind+":"+reference.id;if(action==="view"&&this.documentSourceReads?.has(readKey))return this.documentSourceReads.get(readKey)??null;
     const base = { organizationId: this.organizationId }, checks: CurrentAuthorityCheck[] = [];
     let resource: Resource, snapshot: unknown, label: string, archived = false;
-    if (reference.kind === "FINANCIAL_TRANSACTION") {
+    if(reference.kind==="LEAD"){
+      const native=await this.documentReadLead(reference.id);if(!native)return null;
+      resource=native.resource;snapshot=native.snapshot;label=native.label;archived=native.archived;
+    } else if (reference.kind === "FINANCIAL_TRANSACTION") {
       const native = await super.source(reference.id); if (!native) return null;
       const inherited = financialAttachmentAuthorityChecks(native.source, action); if (!inherited) return null;
       checks.push(...inherited.filter(check => check.resource.type !== "financial_attachment"), ...native.extraChecks);
@@ -172,6 +179,10 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
     if (kind === "ORGANIZATION") {
       const row = before ? null : await this.tx.organization.findFirst({ where: { id: this.organizationId, name: { contains: query, mode: "insensitive" } }, select: { id: true, name: true } });
       return row ? [{ id: row.id, label: row.name }] : [];
+    }
+    if(kind==="LEAD"){
+      if(query&&!documentSourceReferenceSchema.safeParse({kind:"LEAD",id:query}).success)return[];
+      return(await this.tx.lead.findMany({where:{...where,...(query?{AND:[{id:query}]}:{})},select:{id:true},orderBy,take})).map(row=>({id:row.id,label:row.id}));
     }
     if (kind === "PROPERTY") return (await this.tx.property.findMany({ where: { ...where, name: { contains: query, mode: "insensitive" } }, select: { id: true, name: true }, orderBy, take })).map(row => ({ id: row.id, label: row.name }));
     if (kind === "OWNER") return (await this.tx.owner.findMany({ where: { ...where, displayName: { contains: query, mode: "insensitive" } }, select: { id: true, displayName: true }, orderBy, take })).map(row => ({ id: row.id, label: row.displayName }));

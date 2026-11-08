@@ -109,7 +109,8 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
   if(readPhase)readPhase.check(ctx,tx,checks);else await recheckAccountAuthorization(ctx, tx, now, checks, new DocumentAccessError());
   if (generation && action === "create"&&!prospective?.newInstance) {
     if(!root?.instance)throw new DocumentAccessError();
-    const values = await new DocumentTemplateSourceRepository(tx, ctx.organizationId).templateSourceValues(native, generation.sourceKeys);
+    const locale=generation.variants.find(variant=>variant.versionId===generation.command.templateVersionId)?.locale;if(!locale)throw new DocumentConflictError();
+    const values = await new DocumentTemplateSourceRepository(tx, ctx.organizationId).templateSourceValues(native, generation.sourceKeys,locale,env);
     if (values.fingerprint !== generation.identity.sourceFingerprint || native.fingerprint !== generation.nativeSourceFingerprint || commandFingerprint(policy) !== commandFingerprint(generation.policySnapshot)||root?.revision.toString()!==(generation.documentRevision??"1")) throw new DocumentConflictError();
     const latest=await repository.latest(root.id),expected=generation.command.supersedesId??null,own=latest?generatedDocumentUploadInput.safeParse(latest.admission.input):null;
     if((latest?.id??null)!==expected&&!(own?.success&&own.data.generationInstanceId===root.instance?.id&&latest?.supersedesId===expected))throw new DocumentConflictError();
@@ -198,6 +199,7 @@ export async function admitDocumentUpload(actor: DocumentActorContext, raw: unkn
       root = await repository.appendDocument({ sourceKind: input.source.kind, sourceId: input.source.id, propertyId: input.source.kind === "PROPERTY" ? input.source.id : null,
         ownerId: input.source.kind === "OWNER" ? input.source.id : null, reservationId: input.source.kind === "RESERVATION" ? input.source.id : null,
         supplierId: input.source.kind === "SUPPLIER" ? input.source.id : null, guestId: input.source.kind === "GUEST" ? input.source.id : null,
+        leadId: input.source.kind === "LEAD" ? input.source.id : null,
         personId: input.source.kind === "PERSON" ? input.source.id : null, transactionId: input.source.kind === "FINANCIAL_TRANSACTION" ? input.source.id : null,
         typeKey: input.typeKey, kind: input.kind, locale: input.locale, title: input.title, privacy: current.privacy, sourceSnapshot: json(current.native.snapshot), policySnapshot: json(current.policy),
         commandKey: input.idempotencyKey, commandHash, createdBy: ctx.actorId, createdAt: current.now });

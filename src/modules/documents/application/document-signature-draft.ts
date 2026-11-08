@@ -29,8 +29,10 @@ export async function nativeSignatureContext(ctx: DocumentActorContext, tx: Tena
   const repository = new DocumentRepository(tx, ctx.organizationId), instance = await repository.instance(draft.instanceId), version = await repository.version(draft.documentVersionId);
   if (!instance || !version || version.documentId !== instance.documentId || version.admission.contentType !== "application/pdf" || !(await repository.versionMatchesInstance(version.id, instance.id))) throw new DocumentAccessError();
   const input = generatedDocumentUploadInput.safeParse(version.admission.input); if (!input.success || input.data.generationInstanceId !== instance.id) throw new DocumentAccessError();
-  const source = documentSourceReferenceSchema.parse({ kind: instance.document.sourceKind, id: instance.document.sourceId }), archive = await documentArchiveContext(ctx, tx, source, "export", instance.document),
-    parties = await Promise.all(draft.recipients.map(reference => repository.signatureRecipientSource(reference)));
+  const source = documentSourceReferenceSchema.parse({ kind: instance.document.sourceKind, id: instance.document.sourceId }), archive = await documentArchiveContext(ctx, tx, source, "export", instance.document);
+  // Lead signing requires the native recipient producer introduced by F-CRM-06.
+  if(source.kind==="LEAD")throw new DocumentConfigurationError();
+  const parties = await Promise.all(draft.recipients.map(reference => repository.signatureRecipientSource(reference)));
   if (action === "create" && (instance.document.archivedAt || archive.native.archived)) throw new DocumentAccessError();
   if (parties.some(party => !party || action !== "history" && party.archived)) throw new DocumentAccessError();
   const actual = parties.map(party => { if (!party) throw new DocumentAccessError(); return party; }), checks: CurrentAuthorityCheck[] = actual.flatMap(party => party.checks);

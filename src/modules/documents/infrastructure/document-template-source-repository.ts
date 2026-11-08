@@ -2,11 +2,13 @@ import { Money } from "@/platform/money/money";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { TemplateBindingError, type DocumentTemplateBinding } from "../domain/document-template";
 import { DocumentRepository, type DocumentSourceFacts } from "./document-repository";
+import {nativeLeadDocumentBindings} from "@/platform/documents/lead-source";
 
 /** Fixed native field names are a data contract, never caller-provided values or object paths. */
 export class DocumentTemplateSourceRepository extends DocumentRepository {
-  async templateSourceValues(native: DocumentSourceFacts, requested: readonly string[]) {
+  async templateSourceValues(native: DocumentSourceFacts, requested: readonly string[],locale?:"en"|"fr"|"ar",env?:NodeJS.ProcessEnv) {
     if (requested.length > 200 || new Set(requested).size !== requested.length) throw new TemplateBindingError();
+    if(native.reference.kind==="LEAD"){if(!locale)throw new TemplateBindingError();return nativeLeadDocumentBindings(this.tx,this.organizationId,native.reference.id,requested,locale,env);}
     const reference = native.reference, where = { organizationId: this.organizationId, id: reference.id }, values = new Map<string, DocumentTemplateBinding>();
     const sourcePrivacy = reference.kind === "FINANCIAL_TRANSACTION" ? "financial" : ["OWNER", "PERSON", "SUPPLIER", "GUEST"].includes(reference.kind) ? "sensitive" : "operational";
     const text = (key: string, value: string, privacy: "operational" | "sensitive" | "financial" = sourcePrivacy) => values.set(key, { kind: "TEXT", value, privacy: [privacy] });

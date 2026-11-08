@@ -8,6 +8,7 @@ datasource db {
 }
 
 model Lead {
+  documents Document[] @relation("LeadDocuments")
   workEntries LeadWorkEntry[]
   stageRevisions LeadStageRevision[]
   profileRevisions LeadProfileRevision[]
@@ -4946,6 +4947,7 @@ model Document {
   transactionId String? @map("transaction_id") @db.Uuid
   supplierId String? @map("supplier_id") @db.Uuid
   guestId String? @map("guest_id") @db.Uuid
+  leadId String? @map("lead_id") @db.Uuid
   typeKey String @map("type_key")
   kind String
   locale String
@@ -4968,6 +4970,7 @@ model Document {
   transaction FinancialTransaction? @relation("DocumentTransaction",fields:[organizationId,transactionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
   supplier Supplier? @relation("DocumentSupplier",fields:[organizationId,supplierId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"document_supplier_tenant_fk")
   guest GuestRecord? @relation("DocumentGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"document_guest_tenant_fk")
+  lead Lead? @relation("LeadDocuments",fields:[organizationId,leadId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"document_lead_tenant_fk")
   admissions DocumentAdmission[]
   versions DocumentVersion[]
   template DocumentTemplate?
