@@ -13,7 +13,7 @@ import {
   updatePreferredLocaleAction
 } from "@/modules/identity/application/session-actions";
 import { resolveFeatureFlag } from "@/platform/config/feature-flags";
-import { authorize } from "@/platform/authz/authorize";
+import { authorize,authorizeCollection } from "@/platform/authz/authorize";
 import { authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import {canViewServiceAllocation} from "@/platform/authz/service-allocation-resource";
 import { canViewAccountantExport } from "@/platform/authz/accountant-export-resource";
@@ -40,14 +40,15 @@ export default async function AppPage({
   }
   if (session.user.securitySetupRequired) redirect(`/${appLocale}/app/security`);
 
-  const [t, dsnT, ownerPortalFlag] = await Promise.all([
+  const [t, dsnT, ownerPortalFlag, crmT] = await Promise.all([
     getTranslations("AppShell"),
     getTranslations("DesignSystem"),
     resolveFeatureFlag({
       organizationId: session.user.organizationId,
       key: "owner_portal",
       defaultEnabled: true
-    })
+    }),
+    getTranslations("LeadWorkspace")
   ]);
 
   const reservationContext = await reservationActorContextFromSession(session);
@@ -100,6 +101,8 @@ export default async function AppPage({
             <Link className="secondary-button" data-testid="financial-attachments-link" href={`/${appLocale}/app/finance/attachments`} prefetch={false}>{(await getTranslations("FinancialAttachments"))("title")}</Link> : null}
           {reservationContext?.authContext.permissions.has("document:view") ?
             <Link className="secondary-button" data-testid="documents-link" href={`/${appLocale}/app/documents`} prefetch={false}>{(await getTranslations("DocumentArchive"))("title")}</Link> : null}
+          {reservationContext&&(["view","create"]as const).some(action=>authorizeCollection(reservationContext.authContext,action,"lead"))?
+            <Link className="secondary-button" data-testid="crm-link" href={`/${appLocale}/app/crm`} prefetch={false}>{crmT("title")}</Link>:null}
           {reservationContext && canViewAccountantExport(reservationContext.authContext, "export", new Date()) ?
             <Link className="secondary-button" data-testid="accountant-exports-link" href={`/${appLocale}/app/finance/accountant-exports`} prefetch={false}>{(await getTranslations("AccountantExports"))("title")}</Link> : null}
           {reservationContext && authorize(reservationContext.authContext, "view", { type: "financial_transaction", organizationId: session.user.organizationId, dataClass: "financial" }) ?

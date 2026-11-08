@@ -8,6 +8,8 @@ datasource db {
 }
 
 model Lead {
+  stageRevisions LeadStageRevision[]
+  profileRevisions LeadProfileRevision[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   createdBy String @map("created_by") @db.Uuid
@@ -35,6 +37,81 @@ model Lead {
   @@index([organizationId,createdAt,id])
   @@index([organizationId,sourceKey,createdAt,id])
   @@map("lead")
+}
+
+model LeadProfileRevision {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  leadId String @map("lead_id") @db.Uuid
+  previousId String? @map("previous_id") @db.Uuid
+  number Int
+  sourceKey String @map("source_key")
+  locale String
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash")
+  reviewFingerprint String @map("review_fingerprint")
+  payloadSchemaVersion Int @default(1) @map("payload_schema_version")
+  encryptedPayload Bytes @map("encrypted_payload")
+  payloadSha256 String @map("payload_sha256")
+  policyId String @map("policy_id") @db.Uuid
+  policyVersion Int @map("policy_version")
+  policySnapshot Json @map("policy_snapshot")
+  capturePolicyId String @map("capture_policy_id") @db.Uuid
+  capturePolicyVersion Int @map("capture_policy_version")
+  capturePolicySnapshot Json @map("capture_policy_snapshot")
+  authorizationCap Json @map("authorization_cap")
+  requestId String @map("request_id")
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  lead Lead @relation(fields:[organizationId,leadId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  previous LeadProfileRevision? @relation("LeadProfileHistory",fields:[organizationId,leadId,previousId],references:[organizationId,leadId,id],onDelete:Restrict,onUpdate:NoAction)
+  next LeadProfileRevision[] @relation("LeadProfileHistory")
+  creator UserAccount @relation("LeadProfileAuthor",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  policy ConfigRule @relation("LeadProfilePolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  capturePolicy ConfigRule @relation("LeadProfileCapturePolicy",fields:[organizationId,capturePolicyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id])
+  @@unique([organizationId,leadId,id])
+  @@unique([organizationId,leadId,number])
+  @@unique([organizationId,commandKey])
+  @@index([organizationId,createdAt,id])
+  @@map("lead_profile_revision")
+}
+
+model LeadStageRevision {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  leadId String @map("lead_id") @db.Uuid
+  previousId String? @map("previous_id") @db.Uuid
+  number Int
+  fromStage String @map("from_stage")
+  toStage String @map("to_stage")
+  kind String
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash")
+  reviewFingerprint String @map("review_fingerprint")
+  reasonCipher Bytes @map("reason_cipher")
+  reasonSha256 String @map("reason_sha256")
+  policyId String @map("policy_id") @db.Uuid
+  policyVersion Int @map("policy_version")
+  policySnapshot Json @map("policy_snapshot")
+  authorizationCap Json @map("authorization_cap")
+  evidence Json
+  requestId String @map("request_id")
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+  lead Lead @relation(fields:[organizationId,leadId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  previous LeadStageRevision? @relation("LeadStageHistory",fields:[organizationId,leadId,previousId],references:[organizationId,leadId,id],onDelete:Restrict,onUpdate:NoAction)
+  next LeadStageRevision[] @relation("LeadStageHistory")
+  creator UserAccount @relation("LeadStageAuthor",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  policy ConfigRule @relation("LeadPipelinePolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@unique([organizationId,id])
+  @@unique([organizationId,leadId,id])
+  @@unique([organizationId,leadId,number])
+  @@unique([organizationId,commandKey])
+  @@index([organizationId,createdAt,id])
+  @@map("lead_stage_revision")
 }
 
 model AutomationRun {
@@ -246,6 +323,8 @@ model ReceivableCollectionReversal {
 
 model Organization {
   leads Lead[]
+  leadStageRevisions LeadStageRevision[]
+  leadProfileRevisions LeadProfileRevision[]
   documentExpiryRevisions DocumentExpiryRevision[]
   documentRetentionRevisions DocumentRetentionRevision[]
   documentExpiryReminders DocumentExpiryReminder[]
@@ -655,6 +734,8 @@ model Person {
 
 model UserAccount {
   createdLeads Lead[] @relation("LeadAuthor")
+  createdLeadStages LeadStageRevision[] @relation("LeadStageAuthor")
+  createdLeadProfiles LeadProfileRevision[] @relation("LeadProfileAuthor")
   documentExpiryRevisions DocumentExpiryRevision[] @relation("DocumentExpiryAuthor")
   documentRetentionRevisions DocumentRetentionRevision[] @relation("DocumentRetentionAuthor")
   documentExpiryReminders DocumentExpiryReminder[] @relation("DocumentExpiryPrincipal")
@@ -2168,6 +2249,9 @@ model ExchangeRate {
 
 model ConfigRule {
   capturedLeads Lead[] @relation("LeadCapturePolicy")
+  leadPipelineStages LeadStageRevision[] @relation("LeadPipelinePolicy")
+  leadProfileVersions LeadProfileRevision[] @relation("LeadProfilePolicy")
+  leadProfileCaptureVersions LeadProfileRevision[] @relation("LeadProfileCapturePolicy")
   signatureProviderScopes SignatureProviderScope[] @relation("SignatureProviderScopePolicy")
   externalPaymentIntents ExternalPaymentIntent[]
   ledgerIntegrityRuns LedgerIntegrityRun[]

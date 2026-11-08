@@ -1,0 +1,13 @@
+import {z} from "zod";
+import {leadCaptureInputSchema,leadFieldsSchema,leadRequiredFieldKeys} from "./lead-capture";
+import {leadStageSchema,leadPipelineTransitionSchema} from "./lead-pipeline";
+import {configSlugSchema} from "@/platform/config/identifiers";
+import {localizedTextSchema} from "@/i18n/content";
+export const leadWorkspaceProtocol="NATIVE_PRIVATE_LEAD_WORKSPACE_V1";
+export const leadWorkspaceInputSchema=z.object({leadId:z.uuid().transform(value=>value.toLowerCase()).optional(),stage:leadStageSchema.optional(),sourceKey:configSlugSchema.optional(),cursor:z.string().min(1).max(8192).optional()}).strict();
+export type LeadWorkspaceInput=z.infer<typeof leadWorkspaceInputSchema>;
+export const leadWorkspaceCursorSchema=z.object({protocol:z.literal(leadWorkspaceProtocol),organizationId:z.uuid(),actorId:z.uuid(),filter:z.string().regex(/^[a-f0-9]{64}$/u),cap:z.string().regex(/^[a-f0-9]{64}$/u),beforeId:z.uuid(),beforeCreatedAt:z.iso.datetime(),asOf:z.iso.datetime()}).strict();
+export const leadWorkspaceItemSchema=z.object({id:z.uuid(),createdAt:z.iso.datetime(),channel:leadCaptureInputSchema.shape.channel,sourceKey:configSlugSchema,sourceLabel:localizedTextSchema,locale:leadCaptureInputSchema.shape.locale,stage:leadStageSchema,stageRevisionId:z.uuid().nullable(),profileRevisionId:z.uuid().nullable(),profileNumber:z.number().int().nonnegative(),fields:leadFieldsSchema.optional(),canEdit:z.boolean()}).strict();
+export const leadWorkspaceResultSchema=z.object({items:z.array(leadWorkspaceItemSchema).max(20),next:z.string().nullable()}).strict();
+const choice=z.object({key:configSlugSchema,label:localizedTextSchema}).strict();
+export const leadWorkspaceOptionsSchema=z.object({channels:z.array(z.enum(["MANUAL","REFERRAL"])).max(2),sources:z.array(choice.extend({channels:z.array(leadCaptureInputSchema.shape.channel).max(3)})).max(1000),requiredFields:z.array(z.enum(leadRequiredFieldKeys)),contactRequirement:z.enum(["PHONE","EMAIL","PHONE_OR_EMAIL","PHONE_AND_EMAIL"]),referralContactRequired:z.boolean(),propertyTypes:z.array(choice).max(1000),rentalStatuses:z.array(choice).max(1000),otas:z.array(choice).max(1000),transitions:z.array(leadPipelineTransitionSchema),canView:z.boolean(),canCreate:z.boolean()}).strict();

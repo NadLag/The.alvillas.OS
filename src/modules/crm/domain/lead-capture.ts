@@ -79,8 +79,9 @@ export const leadCaptureInputSchema = z.object({
 export type LeadCaptureInput = z.infer<typeof leadCaptureInputSchema>;
 export type LeadCapturePolicy = z.infer<typeof leadCapturePolicySchema>;
 
-export function parseConfiguredLeadCapture(input: unknown, policyInput: unknown): LeadCaptureInput {
-  const policy = leadCapturePolicySchema.parse(policyInput), value = leadCaptureInputSchema.parse(input);
+/** Existing private profile corrections reuse the current field rules, without inventing website consent. */
+export function parseConfiguredLeadDetails(input: unknown, policyInput: unknown) {
+  const policy = leadCapturePolicySchema.parse(policyInput), value = leadCaptureInputSchema.pick({channel:true,sourceKey:true,fields:true}).strict().parse(input);
   const source = policy.sources.find(item => item.key === value.sourceKey);
   if (!policy.channels.includes(value.channel) || !source?.channels.includes(value.channel)) throw new LeadValidationError();
   for (const field of policy.required_fields) {
@@ -96,6 +97,12 @@ export function parseConfiguredLeadCapture(input: unknown, policyInput: unknown)
     value.fields.currentOtaKeys?.some(key => !allowed(key,policy.otas))) throw new LeadValidationError();
   if ((value.channel !== "REFERRAL" && value.fields.referralContact) ||
     (value.channel === "REFERRAL" && policy.referral_contact_required && !value.fields.referralContact)) throw new LeadValidationError();
+  return value;
+}
+
+export function parseConfiguredLeadCapture(input: unknown, policyInput: unknown): LeadCaptureInput {
+  const policy = leadCapturePolicySchema.parse(policyInput), value = leadCaptureInputSchema.parse(input);
+  parseConfiguredLeadDetails({channel:value.channel,sourceKey:value.sourceKey,fields:value.fields},policy);
   const acknowledgement = value.websiteAcknowledgement;
   if (value.channel === "WEBSITE") {
     if (!policy.website_notice || !acknowledgement || acknowledgement.approvalReference !== policy.website_notice.approval_reference ||

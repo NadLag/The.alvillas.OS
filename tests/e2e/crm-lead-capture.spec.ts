@@ -2,25 +2,12 @@ import {randomUUID} from "node:crypto";
 import {PrismaClient} from "@prisma/client";
 import {test,expect,type Page} from "@playwright/test";
 import {withTenant} from "@/platform/db/tenant";
-import {ensureStandardIdentitySetup} from "@/modules/identity/application/identity-service";
-import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
-import {nativeLeadPolicy,nativeLeadInput,nativeWebsiteLeadInput} from "../integration/support/lead-fixture";
+import {nativeLeadInput,nativeWebsiteLeadInput} from "../integration/support/lead-fixture";
+import {configuredCapturePolicy} from "./support/crm-fixtures";
 import {publicLeadFixtureOrganizationId} from "./support/crm-fixture-config";
 import {e2eEmail,ensureE2EAdmin,completeE2EAdminMfa,waitForE2EAdminLoginWindow} from "./support/auth";
 
-async function configuredCapturePolicy(db:PrismaClient,organizationId:string){
-  await db.organization.upsert({where:{id:organizationId},create:{id:organizationId,name:"Actual private CRM browser tenant"},update:{}});
-  await ensureStandardIdentitySetup(organizationId,{db});
-  return withTenant(db,organizationId,async tx=>{
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${organizationId+":actual-browser-crm-policy"},0))`;
-    const rules=new ConfigRuleRepository(tx,organizationId),existing=await rules.resolve({key:"crm.lead_capture",scopes:[{scopeType:"organization",scopeId:null}],asOf:new Date()});if(existing)return existing;
-    const person=await tx.person.create({data:{organizationId,displayName:"Explicit browser public intake principal"}}),account=await tx.userAccount.create({data:{organizationId,personId:person.id}}),role=await tx.role.create({data:{organizationId,key:"public_lead_"+randomUUID(),name:"Explicit public intake configuration principal"}});
-    const permissions=await tx.permission.findMany({where:{organizationId,key:{in:["lead:create","config_rule:view","config_rule:configure"]}}});expect(permissions).toHaveLength(3);
-    await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId,roleId:role.id,permissionId:permission.id}))});await tx.roleAssignment.create({data:{organizationId,userAccountId:account.id,personId:person.id,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});
-    return rules.createVersion({key:"crm.lead_capture",scopeType:"organization",createdBy:account.id,effectiveFrom:new Date("2020-01-01"),value:nativeLeadPolicy({rate_limit:{requests:1000,window_seconds:3600}}),reason:"Explicit synthetic owner-approved processing and website notice references"});
-  });
-}
 const post=(page:Page,path:string,input:unknown)=>page.evaluate(async({path,input})=>{const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(input)});return{status:response.status,cache:response.headers.get("cache-control"),body:await response.json() as unknown};},{path,input});
 
 for(const locale of ["en","fr","ar"]as const){
