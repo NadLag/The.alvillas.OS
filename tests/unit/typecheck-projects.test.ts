@@ -5,6 +5,30 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 describe("complete compiler partition coverage", () => {
+  it("checks every unit root and ambient declaration at the existing heap across growing unit groups", () => {
+    const directory = join(process.cwd(), ".tmp"); mkdirSync(directory, { recursive: true });
+    const root = mkdtempSync(join(directory, "unit-compiler-coverage-"));
+    writeFileSync(join(root, "package.json"), '{"type":"module"}');
+    writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, target: "ES2023", types: [], skipLibCheck: true, ignoreDeprecations: "6.0" }, include: ["**/*.ts"], exclude: [".tmp"] }));
+    writeFileSync(join(root, "ambient.ts"), 'interface UnitContext { amount: string }\n');
+    mkdirSync(join(root, "tests/unit"), { recursive: true });
+    for (let index = 0; index < 193; index++) writeFileSync(join(root, "tests/unit", String(index).padStart(3, "0") + ".ts"), 'export const value: UnitContext = { amount: "9007199254740993.07" };\n');
+    const moduleUrl = pathToFileURL(join(process.cwd(), "scripts/typecheck-projects.mjs")).href;
+    const plan = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", `import {prepareTypecheckProjects} from ${JSON.stringify(moduleUrl)};console.log(JSON.stringify(prepareTypecheckProjects(${JSON.stringify(root)})));`], { encoding: "utf8", windowsHide: true })) as { unitRootCount: number; originalRoots: string[]; shared: string[]; projects: { name: string; path: string; roots: string[] }[] };
+    const units = plan.projects.filter(project => project.name === "unit" || project.name.startsWith("unit-")), primary = units.flatMap(project => project.roots.filter(file => !plan.shared.includes(file)));
+    expect(plan.unitRootCount).toBe(193); expect(units.map(project => project.name)).toEqual(["unit", "unit-2", "unit-3"]);
+    expect(primary).toHaveLength(193); expect(new Set(primary).size).toBe(193);
+    expect(new Set(plan.projects.flatMap(project => project.roots))).toEqual(new Set([...plan.originalRoots, ...plan.shared]));
+    for (const project of units) {
+      expect(project.roots.filter(file => !plan.shared.includes(file)).length).toBeLessThanOrEqual(96);
+      expect(plan.shared.every(file => project.roots.includes(file))).toBe(true);
+      const run = () => spawnSync(process.execPath, ["--max-old-space-size=2048", "node_modules/typescript/lib/tsc.js", "--noEmit", "--project", project.path], { cwd: process.cwd(), encoding: "utf8", windowsHide: true });
+      const valid = run(); expect(valid.status, valid.stdout + valid.stderr).toBe(0);
+      const source = project.roots.find(file => !plan.shared.includes(file))!, original = readFileSync(source, "utf8");
+      writeFileSync(source, 'export const value: UnitContext = { amount: 0.07 };\n');
+      const failed = run(); expect(failed.status).not.toBe(0); expect(failed.stdout).toContain("TS2322"); writeFileSync(source, original);
+    }
+  });
   it("bounds larger native groups while retaining every original root and rejecting errors in each group", () => {
     const directory = join(process.cwd(), ".tmp"); mkdirSync(directory, { recursive: true }); const root = mkdtempSync(join(directory, "compiler-bounds-"));
     writeFileSync(join(root, "package.json"), '{"type":"module"}'); writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, noEmit: true, target: "ES2023", types: [], skipLibCheck: true, ignoreDeprecations: "6.0" }, include: ["**/*.ts"], exclude: [".tmp"] }));
