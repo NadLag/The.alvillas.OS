@@ -124,6 +124,9 @@ export const walletLinkSchema = z
   })
   .strict()
   .refine((v) => v.ledgerAccountId || v.accountName);
+export function validTeamAssignmentDateRange(value:{validFrom:Date;validTo:Date|null}){
+  return !value.validTo || value.validTo > value.validFrom;
+}
 export const teamAssignmentSchema = z
   .object({
     personId: z.string().uuid(),
@@ -138,7 +141,10 @@ export const teamAssignmentSchema = z
   })
   .strict()
   .refine((v) => (v.scopeType === "organization" ? v.scopeId === null : v.scopeId !== null))
-  .refine((v) => !v.validTo || v.validTo > v.validFrom);
+  .refine(validTeamAssignmentDateRange);
+/** Reviewed assignment fields share the canonical validators and date ordering; the writer supplies scope and reason. */
+export const teamAssignmentDraftSchema=z.object(teamAssignmentSchema.shape)
+  .omit({scopeType:true,scopeId:true,reason:true}).strict().refine(validTeamAssignmentDateRange);
 export const compensationSchema = z
   .object({
     assignmentId: z.string().uuid(),

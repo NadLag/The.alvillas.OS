@@ -1,6 +1,7 @@
 import {z} from "zod";
 import {ownerInputSchema,propertyInputSchema,propertyOperatingProfileInputSchema,operatingCadenceSchema,managementAgreementDraftTermsSchema,managementAgreementInputSchema} from "@/modules/core/domain/owner-property";
 import {payoutScheduleConfigSchema,approvalThresholdsConfigSchema,commissionBasisSchema,commissionAccrualEventSchema,expenseTreatmentSchema,payoutCadenceSchema,approvalStepSchema} from "@/platform/config/rule-registry";
+import {teamAssignmentDraftSchema,teamAssignmentSchema} from "@/modules/identity/domain/team";
 export {propertyStatusSchema as onboardingPropertyStatusSchema} from "@/modules/core/domain/owner-property";
 export {managementAgreementRuleKeys as onboardingManagementAgreementRuleKeys} from "@/modules/core/domain/owner-property";
 export const onboardingOperatingCadences=operatingCadenceSchema.options;
@@ -56,3 +57,14 @@ export const onboardingManagementAgreementInputSchema=z.record(z.string(),z.unkn
 });
 
 export {managementAgreementConfigValues as nativeOnboardingManagementAgreementRuleValues} from "@/modules/core/domain/owner-property";
+
+export const onboardingTeamAssignmentReasonSchema=teamAssignmentSchema.shape.reason;
+/** Native assignment never selects an account, scope, dates or access condition by default. */
+export const onboardingTeamAssignmentInputSchema=z.record(z.string(),z.unknown()).transform((raw,context)=>{
+ try{
+  for(const key of Object.keys(teamAssignmentDraftSchema.shape))if(!Object.hasOwn(raw,key)||raw[key]===undefined)throw Error("native_onboarding_explicit_assignment_required");
+  if(typeof raw.assignedToMe!=="boolean")throw Error("native_onboarding_explicit_assignment_condition_required");
+  for(const key of["validFrom","validTo"])if(!(key==="validTo"&&raw[key]===null)&&!(raw[key] instanceof Date))z.iso.datetime({offset:true}).parse(raw[key]);
+  const value=teamAssignmentDraftSchema.parse(raw);return{personId:value.personId.toLowerCase(),roleId:value.roleId.toLowerCase(),userAccountId:value.userAccountId?.toLowerCase()??null,validFrom:value.validFrom.toISOString(),validTo:value.validTo?.toISOString()??null,assignedToMe:value.assignedToMe};
+ }catch{context.addIssue({code:"custom",message:"native_onboarding_explicit_assignment_required"});return z.NEVER;}
+});
