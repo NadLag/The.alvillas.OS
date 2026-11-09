@@ -8,6 +8,7 @@ datasource db {
 }
 
 model Lead {
+  conversions LeadConversion[]
   signatureRecipients SignatureRecipient[] @relation("LeadSignatureRecipients")
   documents Document[] @relation("LeadDocuments")
   workEntries LeadWorkEntry[]
@@ -43,6 +44,7 @@ model Lead {
 }
 
 model LeadProfileRevision {
+  conversions LeadConversion[]
   workSources LeadWorkEntry[] @relation("LeadWorkProfileSource")
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -83,6 +85,7 @@ model LeadProfileRevision {
 }
 
 model LeadStageRevision {
+  conversions LeadConversion[]
   workSources LeadWorkEntry[] @relation("LeadWorkStageSource")
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
@@ -393,6 +396,7 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  leadConversions LeadConversion[]
   leadWorkEntries LeadWorkEntry[]
   leads Lead[]
   leadStageRevisions LeadStageRevision[]
@@ -806,6 +810,7 @@ model Person {
 }
 
 model UserAccount {
+  leadConversions LeadConversion[] @relation("LeadConversionAuthor")
   createdLeadWork LeadWorkEntry[] @relation("LeadWorkAuthor")
   receivedLeadWork LeadWorkEntry[] @relation("LeadWorkRecipient")
   representedLeadWork LeadWorkEntry[] @relation("LeadWorkRepresentative")
@@ -1149,6 +1154,7 @@ model RoleAssignment {
 }
 
 model Owner {
+  leadConversions LeadConversion[]
   documents Document[] @relation("DocumentOwner")
   documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientOwner")
   guestPaymentReceiptOwners GuestPaymentReceiptOwner[]
@@ -2324,6 +2330,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  leadConversions LeadConversion[] @relation("LeadConversionPolicy")
   leadWorkVersions LeadWorkEntry[] @relation("LeadWorkPolicy")
   leadWorkCaptureVersions LeadWorkEntry[] @relation("LeadWorkCapturePolicy")
   capturedLeads Lead[] @relation("LeadCapturePolicy")
@@ -5444,6 +5451,7 @@ model DocumentAction {
 }
 
 model SignatureSignedArchive {
+  leadConversions LeadConversion[]
   id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId String @map("organization_id") @db.Uuid
   signatureId String @map("signature_id") @db.Uuid
@@ -5487,4 +5495,47 @@ model SignatureSignedArtifact {
   @@unique([organizationId,documentId],map:"signature_signed_artifact_document_unique")
   @@unique([organizationId,admissionId],map:"signature_signed_artifact_admission_unique")
   @@map("signature_signed_artifact")
+}
+
+model LeadConversion {
+  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+  organizationId String @map("organization_id") @db.Uuid
+  leadId String @map("lead_id") @db.Uuid
+  profileRevisionId String? @map("profile_revision_id") @db.Uuid
+  signedStageId String @map("signed_stage_id") @db.Uuid
+  signedArchiveId String @map("signed_archive_id") @db.Uuid
+  ownerId String @map("owner_id") @db.Uuid
+  mode String
+  sourceKey String @map("source_key")
+  locale String
+  createdBy String @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  commandKey String @map("command_key") @db.Uuid
+  commandHash String @map("command_hash")
+  reviewFingerprint String @map("review_fingerprint")
+  sourceFingerprint String @map("source_fingerprint")
+  sourceSnapshot Json @map("source_snapshot")
+  payloadSchemaVersion Int @default(1) @map("payload_schema_version")
+  encryptedPayload Bytes @map("encrypted_payload")
+  payloadSha256 String @map("payload_sha256")
+  policyId String @map("policy_id") @db.Uuid
+  policyVersion Int @map("policy_version")
+  policySnapshot Json @map("policy_snapshot")
+  authorizationCap Json @map("authorization_cap")
+  requestId String @map("request_id")
+  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"lead_conversion_org_fk")
+  lead Lead @relation(fields:[organizationId,leadId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"lead_conversion_lead_fk")
+  profile LeadProfileRevision? @relation(fields:[organizationId,leadId,profileRevisionId],references:[organizationId,leadId,id],onDelete:Restrict,onUpdate:NoAction,map:"lead_conversion_profile_fk")
+  signedStage LeadStageRevision @relation(fields:[organizationId,leadId,signedStageId],references:[organizationId,leadId,id],onDelete:Restrict,onUpdate:NoAction,map:"lead_conversion_signed_stage_fk")
+  signedArchive SignatureSignedArchive @relation(fields:[organizationId,signedArchiveId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"lead_conversion_signed_archive_fk")
+  owner Owner @relation(fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"lead_conversion_owner_fk")
+  creator UserAccount @relation("LeadConversionAuthor",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"lead_conversion_author_fk")
+  policy ConfigRule @relation("LeadConversionPolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"lead_conversion_policy_fk")
+  @@unique([organizationId,id],map:"lead_conversion_org_id_key")
+  @@unique([organizationId,leadId],map:"lead_conversion_org_lead_key")
+  @@unique([organizationId,commandKey],map:"lead_conversion_org_command_key")
+  @@index([organizationId,createdAt,id],map:"lead_conversion_org_created_idx")
+  @@index([organizationId,sourceKey,createdAt,id],map:"lead_conversion_org_source_idx")
+  @@index([organizationId,ownerId,createdAt,id],map:"lead_conversion_org_owner_idx")
+  @@map("lead_conversion")
 }

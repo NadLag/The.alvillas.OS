@@ -5457,6 +5457,25 @@
       "restrictedAccount": "Les coordonnées du compte sont restreintes",
       "inactiveRepresentative": "Le compte de ce représentant est inactif."
     },
-    "proposalDocuments": "Documents d’acquisition"
+    "proposalDocuments": "Documents d’acquisition",
+    "conversion": {
+      "title": "Conversion en propriétaire",
+      "guidance": "Créez un propriétaire à partir du contact vérifié du prospect ou sélectionnez un propriétaire existant. Corrigez les coordonnées manquantes ou incompatibles dans le prospect avant la création. Les autres informations d’acquisition restent dans l’historique du prospect.",
+      "recorded": "Ce prospect est lié à un propriétaire. Voici les coordonnées conservées lors de la conversion.",
+      "readOnly": "Vos autorisations actuelles ne permettent pas une nouvelle conversion.",
+      "requiresSignature": "Terminez la signature du contrat d’acquisition avant de convertir ce prospect.",
+      "mode": "Sélection du propriétaire",
+      "CREATE": "Créer à partir du contact du prospect",
+      "LINK": "Lier un propriétaire existant",
+      "search": "Nom ou e-mail du propriétaire",
+      "searchAction": "Rechercher des propriétaires",
+      "existingOwner": "Choisir le propriétaire existant",
+      "noOwners": "Aucun propriétaire correspondant autorisé n’est affiché.",
+      "reason": "Motif de cette conversion",
+      "review": "Vérifier la conversion",
+      "reviewTitle": "Vérifier la conversion en propriétaire",
+      "confirm": "Confirmer la conversion",
+      "recover": "Récupérer la conversion initiale"
+    }
   }
 }

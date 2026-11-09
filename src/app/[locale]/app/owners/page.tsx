@@ -46,7 +46,7 @@ export default async function OwnersPage({
   }));
 
   return (
-    <AdminShell className="resource-page" testId="owners-page">
+    <AdminShell className="resource-page owners-page" testId="owners-page">
       <ShellHeader
         actions={
         <Link className="secondary-button" href={`/${appLocale}/app`}>

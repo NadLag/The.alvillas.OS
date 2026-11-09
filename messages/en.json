@@ -5457,6 +5457,25 @@
       "restrictedAccount": "Account details are restricted",
       "inactiveRepresentative": "This representative’s account is inactive."
     },
-    "proposalDocuments": "Acquisition documents"
+    "proposalDocuments": "Acquisition documents",
+    "conversion": {
+      "title": "Owner conversion",
+      "guidance": "Create an Owner from the reviewed Lead contact, or select an existing Owner. Correct missing or incompatible contact details in the Lead before creating an Owner. Other acquisition details remain in the Lead history.",
+      "recorded": "This Lead is linked to an Owner. These are the details retained at conversion.",
+      "readOnly": "Your current permissions do not allow a new conversion.",
+      "requiresSignature": "Complete the signed acquisition contract before converting this Lead.",
+      "mode": "Owner selection",
+      "CREATE": "Create from Lead contact",
+      "LINK": "Link an existing Owner",
+      "search": "Owner name or email",
+      "searchAction": "Find Owners",
+      "existingOwner": "Choose the existing Owner",
+      "noOwners": "No authorized matching Owners are shown.",
+      "reason": "Reason for this conversion",
+      "review": "Review conversion",
+      "reviewTitle": "Review the Owner conversion",
+      "confirm": "Confirm conversion",
+      "recover": "Recover original conversion"
+    }
   }
 }

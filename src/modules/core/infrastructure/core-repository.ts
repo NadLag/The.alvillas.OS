@@ -455,6 +455,23 @@ export class CoreRepository {
     return owner ? ownerToSummary(owner) : null;
   }
 
+  /** Acquisition linking reads identity alone; payout and financial relations stay outside this query. */
+  findOwnerIdentityHead(ownerId:string,includeArchived=false){
+    return this.tx.owner.findFirst({where:{organizationId:this.organizationId,id:ownerId,...includeArchived?{}:{archivedAt:null}},select:{id:true,organizationId:true,createdAt:true,updatedAt:true,archivedAt:true}});
+  }
+
+  async lockOwnerIdentity(ownerId:string){await this.tx.$queryRaw(Prisma.sql`SELECT id FROM owner WHERE organization_id=${this.organizationId}::uuid AND id=${ownerId}::uuid AND archived_at IS NULL FOR UPDATE`);}
+
+  findOwnerIdentity(ownerId:string){
+    return this.tx.owner.findFirst({where:{organizationId:this.organizationId,id:ownerId,archivedAt:null},select:{id:true,organizationId:true,displayName:true,email:true,phone:true,preferredLocale:true,createdAt:true,updatedAt:true}});
+  }
+
+  ownerIdentityPage(query:string,after:string|undefined,asOf:Date){
+    return this.tx.owner.findMany({where:{organizationId:this.organizationId,archivedAt:null,createdAt:{lte:asOf},...after?{id:{gt:after}}:{},OR:[{displayName:{contains:query,mode:"insensitive"}},{email:{contains:query,mode:"insensitive"}}]},select:{id:true,organizationId:true,displayName:true,email:true,phone:true,preferredLocale:true,createdAt:true,updatedAt:true},orderBy:{id:"asc"},take:51});
+  }
+
+  ownerIdentityRows(ids:readonly string[]){return this.tx.owner.findMany({where:{organizationId:this.organizationId,archivedAt:null,id:{in:[...ids]}},select:{id:true,organizationId:true,displayName:true,email:true,phone:true,preferredLocale:true,createdAt:true,updatedAt:true}});}
+
   async createProperty(input: PropertyInput, actorId: string): Promise<PropertySummary> {
     const geography = await this.resolvePropertyGeography(input, actorId);
     const operatingProfile = input.operatingProfile ?? operatingProfileDefaults(input);
