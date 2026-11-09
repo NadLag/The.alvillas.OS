@@ -1310,6 +1310,17 @@ textarea:disabled {
   overflow-wrap: anywhere;
 }
 
+.lead-analytics-page fieldset { min-inline-size: 0; margin: 0; border: 0; padding: 0; }
+.lead-analytics-page legend { font-weight: var(--font-weight-semibold); padding-block-end: var(--space-3); }
+.lead-analytics-scroll { overflow: auto; max-inline-size: 100%; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.lead-analytics-scroll table { border-collapse: collapse; inline-size: 100%; min-inline-size: 36rem; }
+.lead-analytics-scroll :is(th,td,caption) { padding: var(--space-4); text-align: start; border-block-end: 1px solid var(--border); overflow-wrap: anywhere; }
+.lead-analytics-scroll caption { font-weight: var(--font-weight-semibold); }
+.lead-analytics-scroll th[scope="row"] { max-inline-size: 18rem; }
+.lead-analytics-stages { display: grid; grid-template-columns: minmax(0,1fr); gap: var(--space-3); margin: 0; }
+.lead-analytics-stages > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-3); border-block-end: 1px solid var(--border); padding-block: var(--space-3); }
+.lead-analytics-stages dd { margin-inline-start: 0; font-variant-numeric: tabular-nums; }
+
 .owners-page > *,
 .owners-page :is(.workspace-main, .workspace-side, .resource-form, .subsection-block, .form-grid, .field, .data-table, .data-table-toolbar, .data-table-view-controls, .data-table-search) {
   min-inline-size: 0;
