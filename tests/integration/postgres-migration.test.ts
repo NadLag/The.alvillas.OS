@@ -1,4 +1,5 @@
 import { provisionIntegrationRole } from "./support/database-role";
+import {financialRuleSourceChecks} from "@/platform/config/financial-rule-authority";
 import { connectReservationFeed, syncReservationFeed, importReservationCsv, changeReservation, getReservationDetail, getReservationWorkspace, reviewMissingFeedEntry, createCalendarBlock, releaseCalendarBlock, mergeReservationGuests, scheduleReservationSyncs } from "@/modules/reservations/application/reservation-management-service";
 import type { FeedTransport } from "@/modules/reservations/infrastructure/ical-transport";
 import { listAuditHistory, exportAuditHistoryCsv } from "@/modules/audit/application/audit-service";
@@ -3515,14 +3516,7 @@ describe("PostgreSQL baseline", () => {
         data: { name: `ALVILLAS Management Agreement B ${randomUUID()}`, baseCurrency: "MAD" }
       })
     ]);
-    const actorId = randomUUID();
-    const ctx: CoreActorContext = {
-      organizationId: orgA.id,
-      actorId,
-      authContext: {
-        organizationId: orgA.id,
-        userAccountId: actorId,
-        permissions: new Set([
+    const ctx: CoreActorContext = await activeReservationActor(orgA.id, new Set([
           permissionKey("owner", "view"),
           permissionKey("owner", "create"),
           permissionKey("property", "view"),
@@ -3531,10 +3525,11 @@ describe("PostgreSQL baseline", () => {
           permissionKey("config_rule", "view"),
           permissionKey("config_rule", "create"),
           permissionKey("config_rule", "configure")
-        ]),
-        scopes: [{ organizationId: orgA.id }]
-      }
-    };
+        ,
+          ...["finance.commission","finance.expense_treatment","finance.approval_thresholds","finance.payout_schedule"].flatMap(key => financialRuleSourceChecks(orgA.id,key)).map(check => check.resource.type+":"+check.action)
+        ]));
+    const actorId = ctx.actorId;
+    ctx.authContext = {...await authContextForAccount(orgA.id,ctx.actorId,{db:prisma}),personId:ctx.authContext.personId};
     const owner = await createOwner(
       ctx,
       {
@@ -3877,14 +3872,7 @@ describe("PostgreSQL baseline", () => {
         data: { name: `ALVILLAS Property Lifecycle B ${randomUUID()}`, baseCurrency: "MAD" }
       })
     ]);
-    const actorId = randomUUID();
-    const ctx: CoreActorContext = {
-      organizationId: orgA.id,
-      actorId,
-      authContext: {
-        organizationId: orgA.id,
-        userAccountId: actorId,
-        permissions: new Set([
+    const ctx: CoreActorContext = await activeReservationActor(orgA.id, new Set([
           permissionKey("owner", "view"),
           permissionKey("owner", "create"),
           permissionKey("property", "view"),
@@ -3893,10 +3881,10 @@ describe("PostgreSQL baseline", () => {
           permissionKey("config_rule", "view"),
           permissionKey("config_rule", "create"),
           permissionKey("config_rule", "configure")
-        ]),
-        scopes: [{ organizationId: orgA.id }]
-      }
-    };
+        ,
+          ...["finance.commission","finance.expense_treatment","finance.approval_thresholds","finance.payout_schedule"].flatMap(key => financialRuleSourceChecks(orgA.id,key)).map(check => check.resource.type+":"+check.action)
+        ]));
+    ctx.authContext = {...await authContextForAccount(orgA.id,ctx.actorId,{db:prisma}),personId:ctx.authContext.personId};
     const owner = await createOwner(
       ctx,
       {
