@@ -19,6 +19,8 @@ export const onboardingPropertySnapshotSchema=z.object({
  hasPool:z.boolean(),hasGarden:z.boolean(),timezone:z.string(),amenities:z.array(z.string()),photoUrls:z.array(z.string()),status:onboardingPropertyStatusSchema
 }).strict();
 export type OnboardingPropertySnapshot=z.infer<typeof onboardingPropertySnapshotSchema>;
+export const onboardingPropertyChoicesInputSchema=z.object({sessionId:onboardingIdSchema,query:z.string().trim().max(160).default(""),cursor:z.string().min(1).max(6000).optional()}).strict();
+export const onboardingPropertyChoicesSchema=z.object({properties:z.array(onboardingPropertySnapshotSchema.pick({id:true,name:true,addressLine1:true,city:true,status:true})).max(20),next:z.string().nullable()}).strict();
 
 export function canonicalOnboardingPropertyDraft(raw:unknown):OnboardingPropertyDraft{
  const value=onboardingPropertyDraftSchema.parse(raw);return{sessionId:value.sessionId,previousRevisionId:value.previousRevisionId,step:"PROPERTY",target:value.target};
