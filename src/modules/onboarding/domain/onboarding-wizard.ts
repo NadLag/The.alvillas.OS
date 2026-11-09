@@ -1,15 +1,16 @@
 import {z} from "zod";
 import {onboardingOwnerInputSchema} from "@/platform/onboarding/contracts";
 import {onboardingStepSchema,onboardingSteps} from "./onboarding-policy";
+import {onboardingIdSchema as uuid,onboardingFingerprintSchema as sha256,onboardingCommandFields} from "./onboarding-contract";
+export {onboardingIdSchema,onboardingCommandFields} from "./onboarding-contract";
 
 export const onboardingMaximumRequestBytes=65536;
-const uuid=z.uuid().transform(value=>value.toLowerCase()),sha256=z.string().regex(/^[a-f0-9]{64}$/u);
 export const onboardingOwnerTargetSchema=z.discriminatedUnion("mode",[
  z.object({mode:z.literal("CREATE"),input:onboardingOwnerInputSchema}).strict(),
  z.object({mode:z.literal("LINK"),ownerId:uuid}).strict()
 ]);
 export const onboardingDraftSchema=z.object({sessionId:uuid.nullable(),previousRevisionId:uuid.nullable(),step:z.literal("OWNER"),target:onboardingOwnerTargetSchema}).strict().refine(value=>(value.sessionId===null)===(value.previousRevisionId===null));
-export const onboardingCommandSchema=onboardingDraftSchema.safeExtend({idempotencyKey:uuid,reviewFingerprint:sha256,reason:z.string().trim().min(1).max(1000)});
+export const onboardingCommandSchema=onboardingDraftSchema.safeExtend(onboardingCommandFields);
 export type OnboardingDraft=z.infer<typeof onboardingDraftSchema>;
 export type OnboardingCommand=z.infer<typeof onboardingCommandSchema>;
 export const onboardingOwnerSchema=z.object({displayName:z.string(),email:z.string().nullable(),phone:z.string().nullable(),preferredLocale:z.enum(["en","fr","ar"])}).strict();
