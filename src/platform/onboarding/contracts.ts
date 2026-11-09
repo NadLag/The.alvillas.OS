@@ -7,6 +7,7 @@ export const onboardingOwnerInputSchema=ownerInputSchema.omit({representatives:t
 
 /** Keep Core validation and its cross-field checks; operational activation has a later native producer. */
 const nativePhysicalPropertySchema=propertyInputSchema.safeExtend({ownerId:z.uuid().transform(value=>value.toLowerCase()),status:z.literal("DRAFT")}).strict();
+export const onboardingPhysicalPropertyDefaults=Object.freeze({countryCode:propertyInputSchema.shape.countryCode.parse(undefined),timezone:propertyInputSchema.shape.timezone.parse(undefined),livingSpaces:propertyInputSchema.shape.livingSpaces.parse(undefined),parkingSpaces:propertyInputSchema.shape.parkingSpaces.parse(undefined),hasPool:propertyInputSchema.shape.hasPool.parse(undefined),hasGarden:propertyInputSchema.shape.hasGarden.parse(undefined)});
 export const onboardingPropertyInputSchema=z.record(z.string(),z.unknown()).superRefine((value,context)=>{
  for(const key of["operatingProfile","onboardingProfile"])if(Object.hasOwn(value,key))context.addIssue({code:"custom",path:[key],message:"native_onboarding_physical_input_required"});
 }).pipe(nativePhysicalPropertySchema).transform(value=>{
