@@ -1,8 +1,14 @@
+import {readDocumentSourceWorkspace,documentReadCursor,readDocumentCursor} from "@/modules/documents/application/document-workspace";
+import {DocumentAccessError,DocumentConflictError} from "@/modules/documents/domain/document-command";
+import {LeadAccessError} from "@/modules/crm/domain/lead-capture";
+import {LeadPipelineConflictError} from "@/modules/crm/domain/lead-pipeline";
+import type {LeadStageEvidenceChoicesInput,LeadStageEvidenceChoices} from "@/modules/crm/domain/lead-stage-evidence-choices";
+import {leadStageEvidenceChoicesSchema,type leadStageEvidencePrefix} from "@/modules/crm/domain/lead-stage-evidence-choices";
 import type {TenantTransaction,TenantTransactionRunner} from "@/platform/db/tenant";
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import {commandFingerprint} from "@/platform/http/command-fingerprint";
 import {readDocumentHistory} from "@/modules/documents/application/document-archive";
-import {readNativeSignatureHistory} from "@/modules/documents/application/document-signature-history";
+import {readNativeSignatureHistory,listNativeSignatures} from "@/modules/documents/application/document-signature-history";
 import {documentSourceReferenceSchema} from "@/modules/documents/domain/document-command";
 import {documentEffectiveHistoryFormat} from "@/modules/documents/domain/document-effective-version";
 import {documentEffectiveHistorySchema} from "@/modules/documents/domain/document-read-model";
@@ -58,3 +64,45 @@ export async function nativeLeadStageEvidence(actor:AccountActorContext,tx:Tenan
   }
   return requireNativeLeadStageProofs(actor.organizationId,input.leadId,required,proofs,now);
 }
+
+
+/** Reuse the registered native document/signature catalogs through the existing module bridge. */
+export async function nativeLeadStageEvidenceChoices(actor:AccountActorContext,tx:TenantTransaction,input:LeadStageEvidenceChoicesInput,draft:LeadStageDraft,prefix:ReturnType<typeof leadStageEvidencePrefix>,policy:LeadPipelinePolicy,deps:{env?:NodeJS.ProcessEnv;requestId?:string}){
+ const repository=new LeadStageRepository(tx,actor.organizationId),runner:TenantTransactionRunner={$transaction:work=>work(tx)},nativeDeps={...deps,db:runner};
+ try{
+  const result:LeadStageEvidenceChoices={protocol:"NATIVE_LEAD_STAGE_EVIDENCE_CHOICES_V1",leadId:input.leadId,previousRevisionId:input.previousRevisionId,toStage:input.toStage,...prefix,items:[],next:null,dependency:null},kind=prefix.nextKind;
+  // Canonical readers run after the selector audit/fence, in this actual transaction, and retain their source/privacy/expiry publication checks.
+  if(kind==="PROPOSAL_VERSION"||kind==="CONTRACT_VERSION"){
+   const types=policy.document_types[kind==="PROPOSAL_VERSION"?"proposal":"contract"];
+   if(input.documentId){
+    if(input.cursor)throw new LeadPipelineEvidenceError();const history=documentEffectiveHistorySchema.parse(await readDocumentHistory(actor,{documentId:input.documentId,format:documentEffectiveHistoryFormat},nativeDeps));
+    if(history.document.source.kind!=="LEAD"||history.document.source.id!==input.leadId||history.document.kind!=="INSTANCE"||history.document.archivedAt||!types.includes(history.document.typeKey)||!history.effectiveVersion)throw new LeadPipelineEvidenceError();
+    const reference={kind,sourceId:history.effectiveVersion.id},proofs=await nativeLeadStageEvidence(actor,tx,{...draft,evidenceReferences:[...prefix.selected,reference]},[...prefix.selected.map(value=>value.kind),kind],policy,await repository.clock(),deps),proof=proofs.find(value=>value.kind===kind)!;
+    result.items=[{kind:"EVIDENCE",id:reference.sourceId,evidenceKind:kind,title:history.document.title,number:history.effectiveVersion.number,occurredAt:proof.occurredAt}];
+   }else{
+    const workspace=await readDocumentSourceWorkspace(actor,{source:{kind:"LEAD",id:input.leadId},kind:"FILE",...input.cursor?{cursor:input.cursor}:{}},nativeDeps);
+    result.items=workspace.items.filter(item=>item.kind==="INSTANCE"&&!item.archivedAt&&types.includes(item.typeKey)).map(item=>({kind:"DOCUMENT"as const,id:item.id,title:item.title,locale:item.locale}));result.next=workspace.next;
+   }
+  }else if(kind==="SIGNATURE_SENT"&&!input.signatureId){
+   const contract=prefix.selected.find(reference=>reference.kind==="CONTRACT_VERSION");if(!contract)throw new LeadPipelineEvidenceError();
+   const signatures=await listNativeSignatures(actor,{documentVersionId:contract.sourceId,...input.cursor?{cursor:input.cursor}:{}},nativeDeps);
+   result.items=signatures.items.filter(item=>["SENT","VIEWED","SIGNED"].includes(item.state)).map(item=>({kind:"SIGNATURE"as const,id:item.id,state:item.state,createdAt:item.requestedAt}));result.next=signatures.next;
+  }else if(kind==="SIGNATURE_SENT"||kind==="SIGNATURE_VIEWED"){
+   const sent=prefix.selected.find(reference=>reference.kind==="SIGNATURE_SENT"),signatureId=input.signatureId??(sent?await repository.proofSignatureEvent(sent.sourceId):null)?.signatureId;if(!signatureId)throw new LeadPipelineEvidenceError();
+   const history=await readNativeSignatureHistory(actor,{signatureId,...input.cursor?{cursor:input.cursor}:{}},nativeDeps),contract=prefix.selected.find(reference=>reference.kind==="CONTRACT_VERSION");if(history.signature.documentVersionId!==contract?.sourceId||["DRAFT","DECLINED","EXPIRED"].includes(history.signature.state))throw new LeadPipelineEvidenceError();
+   const events=history.events.filter(event=>event.state===(kind==="SIGNATURE_SENT"?"SENT":"VIEWED")),providerIds=new Set((await repository.providerEvents(events.map(event=>event.id))).map(event=>event.id));
+   result.items=events.filter(event=>providerIds.has(event.id)).map(event=>({kind:"EVIDENCE"as const,id:event.id,evidenceKind:kind,occurredAt:event.observedAt}));result.next=history.next;
+  }else if(kind==="SIGNATURE_SIGNED_ARCHIVE"){
+   const sent=prefix.selected.find(reference=>reference.kind==="SIGNATURE_SENT"),signature=sent?await repository.proofSignatureEvent(sent.sourceId):null;if(!signature)throw new LeadPipelineEvidenceError();
+   const filter=commandFingerprint({operation:"NATIVE_LEAD_STAGE_SIGNED_ARCHIVES",draft}),after=readDocumentCursor(actor,filter,input.cursor),history=await readNativeSignatureHistory(actor,{signatureId:signature.signatureId},nativeDeps);if(history.signature.state!=="SIGNED")throw new LeadPipelineEvidenceError();
+   const rows=await repository.signedArchives(signature.signatureId,after);for(const row of rows.slice(0,20)){const proofs=await nativeLeadStageEvidence(actor,tx,{...draft,evidenceReferences:[...prefix.selected,{kind,sourceId:row.id}]},[...prefix.selected.map(value=>value.kind),kind],policy,await repository.clock(),deps);result.items.push({kind:"EVIDENCE",id:row.id,evidenceKind:kind,occurredAt:proofs.find(value=>value.kind===kind)!.occurredAt});}result.next=rows.length>20?documentReadCursor(actor,filter,rows[19].id):null;
+  }else if(kind==="OWNER_CONVERSION"){
+   if(input.cursor)throw new LeadPipelineEvidenceError();const conversion=await new LeadConversionRepository(tx,actor.organizationId).byLead(input.leadId);if(conversion){const proofs=await nativeLeadStageEvidence(actor,tx,{...draft,evidenceReferences:[...prefix.selected,{kind,sourceId:conversion.id}]},[...prefix.selected.map(value=>value.kind),kind],policy,await repository.clock(),deps);result.items=[{kind:"EVIDENCE",id:conversion.id,evidenceKind:kind,occurredAt:proofs.find(value=>value.kind===kind)!.occurredAt}];}
+  }else if(kind==="ONBOARDING_RELEASE")result.dependency="F-ONB-07";
+  else if(input.cursor||input.documentId||input.signatureId)throw new LeadPipelineEvidenceError();
+  return leadStageEvidenceChoicesSchema.parse(result);
+ }catch(error){return nativeLeadStageReadError(error);}
+}
+
+/** Normalize canonical source errors at the CRM read boundary without changing stage writers. */
+export function nativeLeadStageReadError(error:unknown):never{if(error instanceof DocumentAccessError)throw new LeadAccessError();if(error instanceof DocumentConflictError)throw new LeadPipelineConflictError();throw error;}
