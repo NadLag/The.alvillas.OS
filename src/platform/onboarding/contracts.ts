@@ -2,6 +2,7 @@ import {z} from "zod";
 import {ownerInputSchema,propertyInputSchema,propertyOperatingProfileInputSchema,operatingCadenceSchema,managementAgreementDraftTermsSchema,managementAgreementInputSchema} from "@/modules/core/domain/owner-property";
 import {payoutScheduleConfigSchema,approvalThresholdsConfigSchema} from "@/platform/config/rule-registry";
 export {propertyStatusSchema as onboardingPropertyStatusSchema} from "@/modules/core/domain/owner-property";
+export {managementAgreementRuleKeys as onboardingManagementAgreementRuleKeys} from "@/modules/core/domain/owner-property";
 export const onboardingOperatingCadences=operatingCadenceSchema.options;
 
 /** The wizard uses the Core Owner contract; representatives and payout setup retain their own authorization. */

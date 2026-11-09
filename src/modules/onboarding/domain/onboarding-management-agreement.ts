@@ -1,6 +1,7 @@
 import {z} from "zod";
-import {onboardingManagementAgreementInputSchema,onboardingManagementAgreementReasonSchema} from "@/platform/onboarding/contracts";
-import {onboardingIdSchema,onboardingCommandFields} from "./onboarding-contract";
+import {onboardingManagementAgreementInputSchema,onboardingManagementAgreementReasonSchema,onboardingManagementAgreementRuleKeys} from "@/platform/onboarding/contracts";
+import {onboardingIdSchema,onboardingCommandFields,onboardingOwnerSchema,onboardingFingerprintSchema} from "./onboarding-contract";
+import {onboardingPropertySnapshotSchema} from "./onboarding-property";
 
 export const onboardingManagementAgreementTargetSchema=z.discriminatedUnion("mode",[
  z.object({mode:z.literal("CREATE"),propertyId:onboardingIdSchema,input:onboardingManagementAgreementInputSchema}).strict(),
@@ -11,6 +12,9 @@ export const onboardingManagementAgreementCommandSchema=onboardingManagementAgre
 export type OnboardingManagementAgreementDraft=z.infer<typeof onboardingManagementAgreementDraftSchema>;
 export type OnboardingManagementAgreementCommand=z.infer<typeof onboardingManagementAgreementCommandSchema>;
 export type OnboardingManagementAgreementInput=z.infer<typeof onboardingManagementAgreementInputSchema>;
+export const onboardingManagementAgreementRuleSnapshotSchema=z.object({id:onboardingIdSchema,key:z.enum(onboardingManagementAgreementRuleKeys),version:z.number().int().positive(),lifecycle:z.enum(["DRAFT","ACTIVE","RETIRED"]),effectiveFrom:z.iso.datetime(),effectiveTo:z.iso.datetime().nullable(),createdAt:z.iso.datetime(),reason:z.string(),value:z.json()}).strict();
+export const onboardingManagementAgreementSnapshotSchema=z.object({id:onboardingIdSchema,propertyId:onboardingIdSchema,reference:z.string(),status:z.enum(["DRAFT","ACTIVE","ENDED"]),effectiveFrom:z.iso.datetime(),effectiveTo:z.iso.datetime().nullable(),rules:z.array(onboardingManagementAgreementRuleSnapshotSchema).length(onboardingManagementAgreementRuleKeys.length)}).strict().refine(value=>new Set(value.rules.map(rule=>rule.key)).size===onboardingManagementAgreementRuleKeys.length);
+export const onboardingManagementAgreementReviewSchema=z.object({draft:onboardingManagementAgreementDraftSchema,owner:onboardingOwnerSchema,property:onboardingPropertySnapshotSchema,agreement:onboardingManagementAgreementSnapshotSchema.nullable(),proposedTerms:onboardingManagementAgreementInputSchema.nullable(),reviewFingerprint:onboardingFingerprintSchema}).strict().refine(value=>value.draft.target.propertyId===value.property.id&&(value.draft.target.mode==="CREATE"?value.agreement===null&&JSON.stringify(value.proposedTerms)===JSON.stringify(value.draft.target.input):value.proposedTerms===null&&value.agreement?.id===value.draft.target.agreementId&&value.agreement.propertyId===value.property.id));
 export function canonicalOnboardingManagementAgreementDraft(raw:unknown):OnboardingManagementAgreementDraft{
  const value=onboardingManagementAgreementDraftSchema.parse(raw);return{sessionId:value.sessionId,previousRevisionId:value.previousRevisionId,step:"MANAGEMENT_AGREEMENT",target:value.target};
 }

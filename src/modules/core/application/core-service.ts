@@ -13,6 +13,7 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import {
   bookingChannelInputSchema,
   managementAgreementInputSchema,
+  managementAgreementRuleKeys,
   managementAgreementAmendmentInputSchema,
   ownerInputSchema,
   propertyLifecycleTransitionInputSchema,
@@ -93,15 +94,7 @@ function assertAllowed(
   }
 }
 
-const agreementConfigKeys = [
-  commissionConfigKey,
-  "finance.expense_treatment",
-  "finance.approval_thresholds",
-  "finance.payout_schedule",
-  agreementResponsibilitiesConfigKey,
-  agreementNoticeConfigKey,
-  agreementSpecialConditionsConfigKey
-] as const;
+const agreementConfigKeys = managementAgreementRuleKeys;
 
 const propertyLifecycleTransitions: Record<PropertyLifecycleStatus, readonly PropertyLifecycleStatus[]> = {
   DRAFT: ["ONBOARDING"],

@@ -1,6 +1,10 @@
 import { z } from "zod";
 import {
   approvalStepSchema,
+  commissionConfigKey,
+  agreementResponsibilitiesConfigKey,
+  agreementNoticeConfigKey,
+  agreementSpecialConditionsConfigKey,
   commissionAccrualEventSchema,
   commissionBasisSchema,
   expenseTreatmentSchema,
@@ -267,6 +271,8 @@ export const propertyOperatingProfileInputSchema = z
 export type PropertyOperatingProfileInput = z.infer<typeof propertyOperatingProfileInputSchema>;
 
 export const managementAgreementStatusSchema = z.enum(["DRAFT", "ACTIVE", "ENDED"]);
+
+export const managementAgreementRuleKeys = [commissionConfigKey,"finance.expense_treatment","finance.approval_thresholds","finance.payout_schedule",agreementResponsibilitiesConfigKey,agreementNoticeConfigKey,agreementSpecialConditionsConfigKey] as const;
 
 const managementAgreementTermFields = {
   effectiveFrom: z.coerce.date(),
