@@ -5694,6 +5694,52 @@
       "reviewTitle": "Vérifier les paramètres de fonctionnement",
       "confirm": "Enregistrer les paramètres de fonctionnement",
       "saved": "Paramètres de fonctionnement enregistrés."
+    },
+    "agreement": {
+      "guidance": "Créez un brouillon avec des conditions financières explicites ou enregistrez un accord existant. Vérifiez les conditions avant de confirmer. Cette étape ne signe et n’active aucun accord.",
+      "mode": "Action sur l’accord de gestion",
+      "modes": {
+        "CREATE": "Créer un accord en brouillon",
+        "LINK": "Enregistrer un accord existant"
+      },
+      "validation": "Vérifiez chaque choix financier, date, montant et motif.",
+      "utcInput": "Saisissez les dates et heures de l’accord en UTC. Vérifiez les instants exacts avant de confirmer ; le fuseau de votre appareil ne modifie pas ces saisies.",
+      "utcField": "{field} (UTC)",
+      "utcDisplay": "Les dates et heures de l’accord ci-dessous sont affichées en UTC.",
+      "thresholdMode": "Choix du seuil d’approbation",
+      "noThreshold": "Aucun seuil de montant",
+      "useThreshold": "Définir un seuil de montant",
+      "linesHint": "Saisissez une responsabilité ou une condition par ligne.",
+      "searchLabel": "Rechercher un accord pour ce bien",
+      "search": "Rechercher des accords",
+      "selected": "Accord sélectionné",
+      "empty": "Aucun accord disponible ne correspond à cette recherche.",
+      "review": "Vérifier les conditions de l’accord",
+      "reviewTitle": "Vérifier l’accord de gestion",
+      "confirm": "Enregistrer les conditions de l’accord",
+      "saved": "Accord de gestion enregistré.",
+      "prepare": "Préparer l’accord de gestion",
+      "change": "Vérifier à nouveau l’accord de gestion",
+      "before": "Accord avant cette étape",
+      "after": "Conditions de l’accord vérifiées",
+      "noPrevious": "Cette étape n’a remplacé aucun accord enregistré.",
+      "originalTerms": "Conditions originales enregistrées",
+      "originalGuidance": "Ces versions et valeurs ont été enregistrées avec cette étape. Développez une section pour consulter toutes ses conditions, y compris les conditions supplémentaires.",
+      "recordedAt": "Conditions enregistrées le",
+      "ruleStates": {
+        "DRAFT": "Brouillon",
+        "ACTIVE": "Actif",
+        "RETIRED": "Retiré"
+      },
+      "ruleNames": {
+        "finance_commission": "Commission",
+        "finance_expense_treatment": "Traitement des dépenses",
+        "finance_approval_thresholds": "Seuils d’approbation",
+        "finance_payout_schedule": "Calendrier de versement",
+        "agreement_responsibilities": "Responsabilités",
+        "agreement_notice": "Préavis",
+        "agreement_special_conditions": "Conditions particulières"
+      }
     }
   }
 }

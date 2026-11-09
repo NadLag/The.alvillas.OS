@@ -1,6 +1,6 @@
 import {z} from "zod";
 import {ownerInputSchema,propertyInputSchema,propertyOperatingProfileInputSchema,operatingCadenceSchema,managementAgreementDraftTermsSchema,managementAgreementInputSchema} from "@/modules/core/domain/owner-property";
-import {payoutScheduleConfigSchema,approvalThresholdsConfigSchema} from "@/platform/config/rule-registry";
+import {payoutScheduleConfigSchema,approvalThresholdsConfigSchema,commissionBasisSchema,commissionAccrualEventSchema,expenseTreatmentSchema,payoutCadenceSchema,approvalStepSchema} from "@/platform/config/rule-registry";
 export {propertyStatusSchema as onboardingPropertyStatusSchema} from "@/modules/core/domain/owner-property";
 export {managementAgreementRuleKeys as onboardingManagementAgreementRuleKeys} from "@/modules/core/domain/owner-property";
 export const onboardingOperatingCadences=operatingCadenceSchema.options;
@@ -40,6 +40,7 @@ export const onboardingOperatingProfileSnapshotSchema=z.record(z.string(),z.unkn
 });
 
 export const onboardingManagementAgreementReasonSchema=managementAgreementInputSchema.shape.reason;
+export const onboardingManagementAgreementChoices={commissionBasis:commissionBasisSchema.options,commissionAccrualEvent:commissionAccrualEventSchema.options,expenseDefaultTreatment:expenseTreatmentSchema.options,payoutCadence:payoutCadenceSchema.options,approvalRequires:approvalStepSchema.options};
 /** Every financial choice is explicit; only native admission supplies the Core lifecycle and audit reason. */
 export const onboardingManagementAgreementInputSchema=z.record(z.string(),z.unknown()).transform((raw,context)=>{
  try{

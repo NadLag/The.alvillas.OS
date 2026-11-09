@@ -13,6 +13,7 @@ export const onboardingManagementAgreementCommandSchema=onboardingManagementAgre
 export type OnboardingManagementAgreementDraft=z.infer<typeof onboardingManagementAgreementDraftSchema>;
 export type OnboardingManagementAgreementCommand=z.infer<typeof onboardingManagementAgreementCommandSchema>;
 export type OnboardingManagementAgreementInput=z.infer<typeof onboardingManagementAgreementInputSchema>;
+export const onboardingManagementAgreementOptionsSchema=z.object({revisionId:onboardingIdSchema,propertyId:onboardingIdSchema,propertyName:z.string(),modes:z.array(z.enum(["CREATE","LINK"])).min(1).max(2).refine(values=>new Set(values).size===values.length)}).strict();
 export const onboardingManagementAgreementChoicesInputSchema=onboardingPropertyChoicesInputSchema.extend({previousRevisionId:onboardingIdSchema});
 export const onboardingManagementAgreementChoicesSchema=z.object({agreements:z.array(z.object({id:onboardingIdSchema,propertyId:onboardingIdSchema,reference:z.string(),status:z.enum(["DRAFT","ACTIVE"]),effectiveFrom:z.iso.datetime(),effectiveTo:z.iso.datetime().nullable()}).strict()).max(20),next:z.string().nullable()}).strict();
 export const onboardingManagementAgreementRuleSnapshotSchema=z.object({id:onboardingIdSchema,key:z.enum(onboardingManagementAgreementRuleKeys),version:z.number().int().positive(),lifecycle:z.enum(["DRAFT","ACTIVE","RETIRED"]),effectiveFrom:z.iso.datetime(),effectiveTo:z.iso.datetime().nullable(),createdAt:z.iso.datetime(),reason:z.string(),value:z.json()}).strict();
