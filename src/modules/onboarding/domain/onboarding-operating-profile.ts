@@ -13,6 +13,7 @@ export const onboardingOperatingCommandSchema=onboardingOperatingDraftSchema.ext
 export type OnboardingOperatingDraft=z.infer<typeof onboardingOperatingDraftSchema>;
 export type OnboardingOperatingCommand=z.infer<typeof onboardingOperatingCommandSchema>;
 export type OnboardingOperatingProfile=z.infer<typeof onboardingOperatingProfileSnapshotSchema>;
+export const onboardingOperatingOptionsSchema=z.object({revisionId:onboardingIdSchema,propertyId:onboardingIdSchema,propertyName:z.string(),modes:z.array(z.enum(["LINK","UPDATE"])).min(1).max(2).refine(values=>new Set(values).size===values.length),profile:onboardingOperatingProfileSnapshotSchema.nullable()}).strict().refine(value=>!value.modes.includes("LINK")||value.profile!==null);
 export function nativeOperatingProfileSnapshot(raw:unknown):OnboardingOperatingProfile{return onboardingOperatingProfileSnapshotSchema.parse(raw);}
 export function proposedNativeOperatingProfile(input:Extract<OnboardingOperatingDraft["target"],{mode:"UPDATE"}>["input"]):OnboardingOperatingProfile{return nativeOperatingProfileSnapshot({...input,midStayCleaningRuleKey:input.midStayCleaningRuleKey??null,automationNotes:input.automationNotes??null});}
 export const onboardingOperatingRuleProjectionSchema=z.object({id:onboardingIdSchema,key:z.literal("ops.mid_stay_threshold"),version:z.number().int().positive(),nights:z.number().int().positive(),taskTemplateKey:z.string().nullable()}).strict();
