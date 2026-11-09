@@ -1,0 +1,7 @@
+# ADR 0225 — Native Operating Profile during onboarding
+
+The Operating Profile step uses the existing Core property operating profile. LINK records an unchanged actual configuration; UPDATE submits every operational choice to the canonical Core update service. Neither mode creates another property or agreement model.
+
+Updates cannot select services through implicit Core defaults. Existing Core cadence and configured mid-stay rule validation remain authoritative. Native source admission must bind the actual Owner, Property, predecessor, profile tuple and any approved referenced rule versions under current and held authorization. Both modes retain original before/after values in immutable private history. Read projections preserve original nullable fields, notes and service labels without applying update-time trimming or limits to captured history.
+
+The producer must extend the closed SQL shape and corresponding source/audit/outbox/birth guards together. Existing shared APIs remain closed for this step until native admission and recovery qualify; client flags cannot complete or activate onboarding. All222 applied migration files are immutable.
