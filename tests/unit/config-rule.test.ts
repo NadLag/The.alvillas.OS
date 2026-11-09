@@ -98,6 +98,7 @@ describe("config rule registry", () => {
       "notification.routing.task_assigned",
       "notification.routing.task_completed",
       "notification.routing.task_overdue",
+      "onboarding.wizard",
       "operations.laundry_pricing",
       "ops.checklists",
       "ops.mid_stay_threshold",

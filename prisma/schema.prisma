@@ -599,6 +599,8 @@ model Organization {
   employeeEarningRequestHourlyWitnesses EmployeeEarningRequestHourlyWitness[]
   employeeEarningRunOutcomes EmployeeEarningRunOutcome[]
   employeeEarningPercentageWitnesses EmployeeEarningRequestPercentageWitness[]
+  propertyOnboardingSessions PropertyOnboardingSession[]
+  propertyOnboardingRevisions PropertyOnboardingRevision[]
 }
 
 model Region {
@@ -937,6 +939,8 @@ model UserAccount {
   @@index([organizationId, status], map: "user_account_org_status_idx")
   @@map("user_account")
   employeeEarningRunRequests EmployeeEarningRunRequest[] @relation("EmployeeEarningRunRequester")
+  startedPropertyOnboardingSessions PropertyOnboardingSession[]
+  authoredPropertyOnboardingRevisions PropertyOnboardingRevision[]
 }
 
 model AuthCredential {
@@ -1187,6 +1191,7 @@ model Owner {
   @@index([organizationId, archivedAt], map: "owner_org_archived_idx")
   @@map("owner")
   employeeEarningPercentageWitnesses EmployeeEarningRequestPercentageWitness[]
+  onboardingRevisions PropertyOnboardingRevision[]
 }
 
 model OwnerRepresentative {
@@ -1334,6 +1339,7 @@ model Property {
   @@map("property")
   employeeEarningPercentageWitnesses EmployeeEarningRequestPercentageWitness[]
   employeePercentageRequestSources EmployeeEarningRequestWork[]
+  onboardingRevisions PropertyOnboardingRevision[]
 }
 
 model PropertyTemplateVersion {
@@ -2398,6 +2404,7 @@ model ConfigRule {
   employeeEarningRequestHourlyWitnesses EmployeeEarningRequestHourlyWitness[] @relation("EmployeeEarningWitnessConfig")
   employeeEarningPercentageRates EmployeeEarningRequestPercentageWitness[] @relation("EmployeeEarningPercentageRate")
   employeeEarningPercentagePolicies EmployeeEarningRequestPercentageWitness[] @relation("EmployeeEarningPercentagePolicy")
+  onboardingRevisions PropertyOnboardingRevision[]
 }
 
 model ReservationConfigSnapshot {
@@ -5538,4 +5545,60 @@ model LeadConversion {
   @@index([organizationId,sourceKey,createdAt,id],map:"lead_conversion_org_source_idx")
   @@index([organizationId,ownerId,createdAt,id],map:"lead_conversion_org_owner_idx")
   @@map("lead_conversion")
+}
+
+model PropertyOnboardingSession {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_session_org_fk")
+ creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_session_creator_fk")
+ revisions PropertyOnboardingRevision[]
+ @@unique([organizationId,id],map:"property_onboarding_session_org_id_key")
+ @@index([organizationId,createdAt,id],map:"property_onboarding_session_org_created_idx")
+ @@map("property_onboarding_session")
+}
+
+model PropertyOnboardingRevision {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ sessionId String @map("session_id") @db.Uuid
+ previousId String? @map("previous_id") @db.Uuid
+ number Int
+ step String
+ ownerId String @map("owner_id") @db.Uuid
+ propertyId String? @map("property_id") @db.Uuid
+ mode String
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ reviewFingerprint String @map("review_fingerprint")
+ sourceFingerprint String @map("source_fingerprint")
+ sourceSnapshot Json @map("source_snapshot")
+ payloadSchemaVersion Int @default(1) @map("payload_schema_version")
+ encryptedPayload Bytes @map("encrypted_payload")
+ payloadSha256 String @map("payload_sha256")
+ policyId String @map("policy_id") @db.Uuid
+ policyVersion Int @map("policy_version")
+ policySnapshot Json @map("policy_snapshot")
+ authorizationCap Json @map("authorization_cap")
+ requestId String @map("request_id")
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_org_fk")
+ session PropertyOnboardingSession @relation(fields:[organizationId,sessionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_session_fk")
+ previous PropertyOnboardingRevision? @relation("PropertyOnboardingPrevious",fields:[organizationId,sessionId,previousId],references:[organizationId,sessionId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_previous_fk")
+ next PropertyOnboardingRevision[] @relation("PropertyOnboardingPrevious")
+ owner Owner @relation(fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_owner_fk")
+ property Property? @relation(fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_property_fk")
+ creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_creator_fk")
+ policy ConfigRule @relation(fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_policy_fk")
+ @@unique([organizationId,id],map:"property_onboarding_revision_org_id_key")
+ @@unique([organizationId,sessionId,id],map:"property_onboarding_revision_org_session_id_key")
+ @@unique([organizationId,sessionId,number],map:"property_onboarding_revision_org_number_key")
+ @@unique([organizationId,commandKey],map:"property_onboarding_revision_org_command_key")
+ @@index([organizationId,sessionId,number(sort:Desc)],map:"property_onboarding_revision_org_history_idx")
+ @@index([organizationId,ownerId,createdAt,id],map:"property_onboarding_revision_org_owner_idx")
+ @@map("property_onboarding_revision")
 }

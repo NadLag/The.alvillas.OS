@@ -4,6 +4,7 @@ import { financialAttachmentPolicyKey, financialAttachmentPolicySchema } from "@
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
 import {leadCapturePolicyKey,leadCapturePolicySchema} from "@/modules/crm/domain/lead-capture";
+import {onboardingPolicyKey,onboardingPolicySchema} from "@/modules/onboarding/domain/onboarding-policy";
 import {leadPipelinePolicyKey,leadPipelinePolicySchema} from "@/modules/crm/domain/lead-pipeline";
 import {leadProfilePolicyKey,leadProfilePolicySchema} from "@/modules/crm/domain/lead-profile";
 import {leadWorkPolicyKey,leadWorkPolicySchema} from "@/modules/crm/domain/lead-work";
@@ -418,6 +419,7 @@ export const configRuleSchemas = {
   [receivableExportPolicyKey]:receivableExportPolicySchema,
   [financialAttachmentPolicyKey]:financialAttachmentPolicySchema,
   [leadCapturePolicyKey]:leadCapturePolicySchema,
+  [onboardingPolicyKey]:onboardingPolicySchema,
   [leadPipelinePolicyKey]:leadPipelinePolicySchema,
   [leadProfilePolicyKey]:leadProfilePolicySchema,
   [leadWorkPolicyKey]:leadWorkPolicySchema,

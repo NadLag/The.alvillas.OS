@@ -132,3 +132,5 @@ prisma/migrations/20261108063000_native_lead_profile_history/migration.sql text 
 
 /prisma/migrations/20261108193000_native_lead_owner_conversion/migration.sql text eol=lf
 /prisma/migrations/20261108193500_native_lead_conversion_stage_guard/migration.sql text eol=lf
+
+/prisma/migrations/20261109053000_native_property_onboarding_history/migration.sql text eol=lf
