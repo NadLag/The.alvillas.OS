@@ -1,7 +1,7 @@
 import type {TenantTransaction} from "@/platform/db/tenant";
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import {CoreRepository} from "@/modules/core/infrastructure/core-repository";
-import {onboardingPropertyInputSchema,parseConfiguredOnboardingPropertyProfile} from "./contracts";
+import {onboardingPropertyInputSchema,parseConfiguredOnboardingPropertyProfile,onboardingOperatingProfileInputSchema,onboardingOperatingProfileSnapshotSchema} from "./contracts";
 import {onboardingPropertySnapshotSchema} from "@/modules/onboarding/domain/onboarding-property";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {z} from "zod";
@@ -30,4 +30,15 @@ export async function createNativeOnboardingProperty(actor:AccountActorContext,t
  const created=await createProperty(actor,input,{db:{$transaction:work=>work(tx)},requestId}),profile=await new CoreRepository(tx,actor.organizationId).onboardingPropertyOperatingProfile(created.id);
  if(!profile||commandFingerprint(parseConfiguredOnboardingPropertyProfile({...profile,midStayCleaningRuleKey:profile.midStayCleaningRuleKey??undefined,automationNotes:profile.automationNotes??undefined}))!==commandFingerprint(input.operatingProfile))throw new Error("native_onboarding_property_source_changed");
  return created;
+}
+
+export async function nativeOnboardingOperatingProfile(tx:TenantTransaction,organizationId:string,propertyId:string){
+ const row=await new CoreRepository(tx,organizationId).onboardingPropertyOperatingProfile(propertyId);return row?onboardingOperatingProfileSnapshotSchema.parse(row):null;
+}
+export async function updateNativeOnboardingOperatingProfile(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,raw:unknown,requestId:string){
+ const input=onboardingOperatingProfileInputSchema.parse(raw),{updatePropertyOperatingProfile}=await import("@/modules/core/application/core-service");
+ await updatePropertyOperatingProfile(actor,propertyId,input,{db:{$transaction:work=>work(tx)},requestId});
+ const actual=await nativeOnboardingOperatingProfile(tx,actor.organizationId,propertyId),expected=onboardingOperatingProfileSnapshotSchema.parse({...input,midStayCleaningRuleKey:input.midStayCleaningRuleKey??null,automationNotes:input.automationNotes??null});
+ if(!actual||commandFingerprint(actual)!==commandFingerprint(expected))throw new Error("native_onboarding_operating_source_changed");
+ return actual;
 }
