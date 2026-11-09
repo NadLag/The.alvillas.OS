@@ -17,21 +17,26 @@ import { generatedDocumentUploadInput } from "../domain/document-generated-uploa
 import { nativeSignatureCommandSchema, nativeSignatureDraftSchema, nativeSignatureSnapshotSchema, nativeSignatureReceiptSchema, nativeSignatureRecipientProtocol, nativeSignatureProtocol, nativeSignatureDraftCreated } from "../domain/document-signature-command";
 import { nativeSignatureChoicesInput, nativeSignatureChoicesSchema } from "../domain/document-signature-command";
 import { documentReadCursor, readDocumentCursor } from "./document-workspace";
+import {nativeLeadContractPolicy} from "@/platform/documents/lead-contract-policy";
+import type {nativeLeadContractPolicySchema} from "../domain/document-signature-command";
 
 type Dependencies = { db: TenantTransactionRunner; env?: NodeJS.ProcessEnv; requestId?: string };
 type Draft = z.infer<typeof nativeSignatureDraftSchema>;
 type Signature = NonNullable<Awaited<ReturnType<DocumentRepository["signature"]>>>;
-const normalized = (draft: Draft): Draft => ({ ...draft, recipients: [...draft.recipients].sort((left, right) => (left.kind + ":" + left.id).localeCompare(right.kind + ":" + right.id)) });
+const normalized = (draft: Draft): Draft => nativeSignatureDraftSchema.parse({ ...draft, recipients: draft.recipients.map(reference=>reference.kind==="LEAD"?{...reference,id:reference.id.toLowerCase()}:reference).sort((left, right) => (left.kind + ":" + left.id).localeCompare(right.kind + ":" + right.id)) });
 export const signatureDraftOutboxKey = (actorId: string, nonce: string) => "document-signature-draft:" + actorId + ":" + nonce;
 
 /** All source, template-origin, signature and actual counterparty grants remain independent. */
-export async function nativeSignatureContext(ctx: DocumentActorContext, tx: TenantTransaction, draft: Draft, action: "view" | "create" | "history", signatureId?: string, requestedBy = ctx.actorId) {
+export async function nativeSignatureContext(ctx: DocumentActorContext, tx: TenantTransaction, draft: Draft, action: "view" | "create" | "history", signatureId?: string, requestedBy = ctx.actorId,env?:NodeJS.ProcessEnv,retainedLeadPolicy?:z.infer<typeof nativeLeadContractPolicySchema>) {
   const repository = new DocumentRepository(tx, ctx.organizationId), instance = await repository.instance(draft.instanceId), version = await repository.version(draft.documentVersionId);
   if (!instance || !version || version.documentId !== instance.documentId || version.admission.contentType !== "application/pdf" || !(await repository.versionMatchesInstance(version.id, instance.id))) throw new DocumentAccessError();
   const input = generatedDocumentUploadInput.safeParse(version.admission.input); if (!input.success || input.data.generationInstanceId !== instance.id) throw new DocumentAccessError();
-  const source = documentSourceReferenceSchema.parse({ kind: instance.document.sourceKind, id: instance.document.sourceId }), archive = await documentArchiveContext(ctx, tx, source, "export", instance.document);
-  // Lead signing requires the native recipient producer introduced by F-CRM-06.
-  if(source.kind==="LEAD")throw new DocumentConfigurationError();
+  const source = documentSourceReferenceSchema.parse({ kind: instance.document.sourceKind, id: instance.document.sourceId }), archive = await documentArchiveContext(ctx, tx, source, "export", instance.document,undefined,env);
+  const leadContractPolicy=source.kind==="LEAD"?(action==="history"?retainedLeadPolicy:await nativeLeadContractPolicy(tx,ctx.organizationId,instance.document.typeKey,archive.now)):undefined;
+  if(source.kind==="LEAD"){
+    if(action==="history"&&signatureId&&!leadContractPolicy||leadContractPolicy&&!leadContractPolicy.contractTypeKeys.includes(instance.document.typeKey))throw new DocumentConfigurationError();
+    if(draft.recipients.some(reference=>reference.kind==="LEAD"&&reference.id.toLowerCase()!==source.id.toLowerCase())||action==="create"&&!draft.recipients.some(reference=>reference.kind==="LEAD"&&reference.id.toLowerCase()===source.id.toLowerCase()))throw new DocumentAccessError();
+  }else if(draft.recipients.some(reference=>reference.kind==="LEAD"))throw new DocumentAccessError();
   const parties = await Promise.all(draft.recipients.map(reference => repository.signatureRecipientSource(reference)));
   if (action === "create" && (instance.document.archivedAt || archive.native.archived)) throw new DocumentAccessError();
   if (parties.some(party => !party || action !== "history" && party.archived)) throw new DocumentAccessError();
@@ -41,8 +46,9 @@ export async function nativeSignatureContext(ctx: DocumentActorContext, tx: Tena
     checks.push({ action: "view", resource }, ...action === "create" ? [{ action: "create" as const, resource }] : []);
   }
   await recheckAccountAuthorization(ctx, tx, await repository.clock(), checks, new DocumentAccessError());
-  return { repository, instance, version, source, archive, parties: actual, checks,
-    fingerprint: commandFingerprint({ archive: archive.fingerprint, instanceId: instance.id, versionId: version.id, sha256: version.admission.sha256, byteSize: version.admission.fileSize, parties: actual.map(party => ({ reference: party.reference, fingerprint: party.fingerprint })) }) };
+  const resolved=actual.map(party=>party.reference.kind==="LEAD"?{...party,...repository.signatureLeadContact(party,env)}:party);
+  return { repository, instance, version, source, archive, parties: resolved, checks,leadContractPolicy,
+    fingerprint: commandFingerprint({ archive: archive.fingerprint, instanceId: instance.id, versionId: version.id, sha256: version.admission.sha256, byteSize: version.admission.fileSize, parties: actual.map(party => ({ reference: party.reference, fingerprint: party.fingerprint })),...leadContractPolicy?{leadContractPolicy}:{} }) };
 }
 type Context = Awaited<ReturnType<typeof nativeSignatureContext>>;
 function partyPresentation(ctx: DocumentActorContext, current: Context) {
@@ -52,7 +58,8 @@ function partyPresentation(ctx: DocumentActorContext, current: Context) {
   });
 }
 export function presentNativeSignatureParty(ctx: DocumentActorContext, current: Context, party: Context["parties"][number], data: { displayName: string | null; email: string | null }) {
-  const visible = present({ ...ctx.authContext, visibleDataClasses: new Set() }, "export", { ...party.resource, data }, catalogFieldPolicy<typeof data>(party.resource.type), current.archive.now);
+  const leadData={ownerContact:data.displayName,email:data.email},leadVisible=party.reference.kind==="LEAD"?present({...ctx.authContext,visibleDataClasses:new Set()},"export",{...party.resource,data:leadData},catalogFieldPolicy<typeof leadData>("lead"),current.archive.now):null;
+  const visible = leadVisible?{displayName:leadVisible.ownerContact,email:leadVisible.email}:present({ ...ctx.authContext, visibleDataClasses: new Set() }, "export", { ...party.resource, data }, catalogFieldPolicy<typeof data>(party.resource.type), current.archive.now);
   if (visible.displayName !== data.displayName || visible.email !== data.email) throw new DocumentAccessError();
   const value = z.object({ displayName: z.string().min(1).max(500), email: z.email().max(254) }).safeParse(visible); if (!value.success) throw new DocumentConfigurationError(); return value.data;
 }
@@ -63,18 +70,18 @@ export async function readNativeSignatureChoices(actor: DocumentActorContext, ra
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), version = await repository.version(input.documentVersionId), generated = generatedDocumentUploadInput.safeParse(version?.admission.input);
     if (!generated.success || !generated.data.generationInstanceId) throw new DocumentAccessError();
-    const target = { instanceId: generated.data.generationInstanceId, documentVersionId: input.documentVersionId, recipients: [] }, current = await nativeSignatureContext(ctx, tx, target, "view"),
-      rows = await repository.signatureRecipientCandidates(input.kind, input.query, before), selected: Context[] = [];
+    const target = { instanceId: generated.data.generationInstanceId, documentVersionId: input.documentVersionId, recipients: [] }, current = await nativeSignatureContext(ctx, tx, target, "view", undefined, ctx.actorId, deps.env),
+      rows = input.kind==="LEAD"?(current.source.kind==="LEAD"&&!before?[{id:current.source.id}]:[]):await repository.signatureRecipientCandidates(input.kind, input.query, before), selected: Context[] = [];
     for (const row of rows.slice(0, 30)) {
-      try { const candidate = await nativeSignatureContext(ctx, tx, { ...target, recipients: [{ kind: input.kind, id: row.id }] }, "view"); partyPresentation(ctx, candidate); selected.push(candidate); }
+      try { const candidate = await nativeSignatureContext(ctx, tx, { ...target, recipients: [{ kind: input.kind, id: row.id }] }, "view", undefined, ctx.actorId, deps.env),visible=partyPresentation(ctx,candidate);if(input.kind==="LEAD"&&input.query&&row.id.toLowerCase()!==input.query.toLowerCase()&&!visible.some(party=>party.displayName.toLowerCase().includes(input.query.toLowerCase())||party.email.toLowerCase().includes(input.query.toLowerCase())))continue;selected.push(candidate); }
       catch (error) { if (!(error instanceof DocumentAccessError || error instanceof DocumentConfigurationError)) throw error; }
     }
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "documents.signature_recipients_read", resourceType: "document", resourceId: current.instance.documentId,
       after: { documentId: current.instance.documentId, versionId: input.documentVersionId, recipientCount: selected.length }, requestId: deps.requestId ?? randomUUID(), occurredAt: current.archive.now });
-    const final = await nativeSignatureContext(ctx, tx, target, "view"); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError();
+    const final = await nativeSignatureContext(ctx, tx, target, "view", undefined, ctx.actorId, deps.env); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError();
     const items = [];
     for (const candidate of selected) {
-      const retained = await nativeSignatureContext(ctx, tx, { ...target, recipients: candidate.parties.map(party => party.reference) }, "view");
+      const retained = await nativeSignatureContext(ctx, tx, { ...target, recipients: candidate.parties.map(party => party.reference) }, "view", undefined, ctx.actorId, deps.env);
       if (retained.fingerprint !== candidate.fingerprint) throw new DocumentConflictError(); items.push(...partyPresentation(ctx, retained));
     }
     await recheckAccountAuthorization(ctx, tx, await repository.clock(), [...final.archive.checks, ...selected.flatMap(candidate => candidate.checks)], new DocumentAccessError());
@@ -84,10 +91,10 @@ export async function readNativeSignatureChoices(actor: DocumentActorContext, ra
 export async function reviewNativeSignature(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx = documentActorContext(actor), draft = normalized(nativeSignatureDraftSchema.parse(raw));
   return withTenant(deps.db, ctx.organizationId, async tx => {
-    const current = await nativeSignatureContext(ctx, tx, draft, "view"); partyPresentation(ctx, current);
+    const current = await nativeSignatureContext(ctx, tx, draft, "view", undefined, ctx.actorId, deps.env);if(current.source.kind==="LEAD"&&!draft.recipients.some(reference=>reference.kind==="LEAD"&&reference.id===current.source.id))throw new DocumentAccessError();partyPresentation(ctx, current);
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "documents.signature_reviewed", resourceType: "document", resourceId: current.instance.documentId,
       after: { documentId: current.instance.documentId, instanceId: current.instance.id, versionId: current.version.id, recipientCount: draft.recipients.length }, requestId: deps.requestId ?? randomUUID(), occurredAt: current.archive.now });
-    const final = await nativeSignatureContext(ctx, tx, draft, "view"); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError();
+    const final = await nativeSignatureContext(ctx, tx, draft, "view", undefined, ctx.actorId, deps.env); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError();
     return { reviewFingerprint: reviewFingerprint(ctx, draft, final), document: { id: final.instance.documentId, instanceId: final.instance.id, versionId: final.version.id, title: final.version.title, sha256: final.version.admission.sha256, locale: final.instance.document.locale },
       recipients: partyPresentation(ctx, final), privacy: final.archive.privacy };
   });
@@ -104,11 +111,11 @@ export function assertSignatureOriginalArchive(current: Context, snapshot: z.inf
     snapshot.document.byteSize !== current.version.admission.fileSize || snapshot.document.locale !== current.instance.document.locale || commandFingerprint(snapshot.document.source) !== commandFingerprint(current.source)) throw new DocumentConflictError();
 }
 export function signatureNativeInputsChanged(current: Context, snapshot: z.infer<typeof nativeSignatureSnapshotSchema>) {
-  return current.archive.fingerprint !== snapshot.archiveFingerprint || current.archive.native.fingerprint !== snapshot.nativeSourceFingerprint || current.parties.some((party, index) => party.fingerprint !== snapshot.recipients[index]?.fingerprint);
+  return commandFingerprint(current.leadContractPolicy??null)!==commandFingerprint(snapshot.leadContractPolicy??null)||current.archive.fingerprint !== snapshot.archiveFingerprint || current.archive.native.fingerprint !== snapshot.nativeSourceFingerprint || current.parties.some((party, index) => party.fingerprint !== snapshot.recipients[index]?.fingerprint);
 }
-async function signatureResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Signature) {
+async function signatureResult(ctx: DocumentActorContext, tx: TenantTransaction, row: Signature,env?:NodeJS.ProcessEnv) {
   if (row.requestedBy !== ctx.actorId) throw new DocumentAccessError(); const { snapshot, draft, cap } = nativeSignatureOriginalDefinition(row), original = documentActorContext({ ...ctx, authContext: cap });
-  const current = await nativeSignatureContext(ctx, tx, draft, "create", row.id), held = await nativeSignatureContext(original, tx, draft, "create", row.id);
+  const current = await nativeSignatureContext(ctx, tx, draft, "create", row.id, ctx.actorId, env), held = await nativeSignatureContext(original, tx, draft, "create", row.id, original.actorId, env);
   assertSignatureOriginalArchive(current, snapshot);
   if (current.fingerprint !== held.fingerprint) throw new DocumentConflictError();
   const changed = signatureNativeInputsChanged(current, snapshot);
@@ -119,39 +126,39 @@ export async function admitNativeSignature(actor: DocumentActorContext, raw: unk
     command = { ...parsed, recipients: draft.recipients }, commandHash = commandFingerprint(command);
   const replay = await withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + command.idempotencyKey);
-    const existing = await repository.signatureByNonce(ctx.actorId, command.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return signatureResult(ctx, tx, existing); }
+    const existing = await repository.signatureByNonce(ctx.actorId, command.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return signatureResult(ctx, tx, existing, deps.env); }
     if (await repository.byNonce(ctx.actorId, command.idempotencyKey) || await repository.instanceByNonce(ctx.actorId, command.idempotencyKey) || await repository.providerPreparationByNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError(); return null;
   }); if (replay) return replay;
   const rate = await withTenant(deps.db, ctx.organizationId, async tx => {
-    const current = await nativeSignatureContext(ctx, tx, draft, "create"); partyPresentation(ctx, current); if (reviewFingerprint(ctx, draft, current) !== command.reviewFingerprint) throw new DocumentConflictError();
+    const current = await nativeSignatureContext(ctx, tx, draft, "create", undefined, ctx.actorId, deps.env); partyPresentation(ctx, current); if (reviewFingerprint(ctx, draft, current) !== command.reviewFingerprint) throw new DocumentConflictError();
     const budget = current.archive.policy.value.upload_admission; return consumeRateLimit(tx, ctx.organizationId, { key: "document-signature:" + ctx.actorId, limit: budget.max_requests, windowSeconds: budget.window_seconds, now: current.archive.now });
   }); if (!rate.allowed) throw new DocumentRateLimitError(rate.resetAt);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + command.idempotencyKey);
-    const existing = await repository.signatureByNonce(ctx.actorId, command.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return signatureResult(ctx, tx, existing); }
+    const existing = await repository.signatureByNonce(ctx.actorId, command.idempotencyKey); if (existing) { if (existing.commandHash !== commandHash) throw new DocumentConflictError(); return signatureResult(ctx, tx, existing, deps.env); }
     if (await repository.byNonce(ctx.actorId, command.idempotencyKey) || await repository.instanceByNonce(ctx.actorId, command.idempotencyKey) || await repository.providerPreparationByNonce(ctx.actorId, command.idempotencyKey)) throw new DocumentConflictError();
-    const id = randomUUID(); let current = await nativeSignatureContext(ctx, tx, draft, "create", id); await repository.lock("root:" + current.instance.documentId); current = await nativeSignatureContext(ctx, tx, draft, "create", id);
+    const id = randomUUID(); let current = await nativeSignatureContext(ctx, tx, draft, "create", id, ctx.actorId, deps.env); await repository.lock("root:" + current.instance.documentId); current = await nativeSignatureContext(ctx, tx, draft, "create", id, ctx.actorId, deps.env);
     const parties = partyPresentation(ctx, current); if (reviewFingerprint(ctx, draft, current) !== command.reviewFingerprint) throw new DocumentConflictError();
     const snapshot = nativeSignatureSnapshotSchema.parse({ protocol: nativeSignatureProtocol, schemaVersion: 1, command, commandHash, archiveFingerprint: current.archive.fingerprint, nativeSourceFingerprint: current.archive.native.fingerprint, archivePolicy: current.archive.policy,
-      document: { id: current.instance.documentId, instanceId: current.instance.id, versionId: current.version.id, admissionId: current.version.admission.id, sha256: current.version.admission.sha256, byteSize: current.version.admission.fileSize, locale: current.instance.document.locale, source: current.source },
+      document: { id: current.instance.documentId, instanceId: current.instance.id, versionId: current.version.id, admissionId: current.version.admission.id, sha256: current.version.admission.sha256, byteSize: current.version.admission.fileSize, locale: current.instance.document.locale, source: current.source },...current.leadContractPolicy?{leadContractPolicy:current.leadContractPolicy}:{},
       recipients: parties.map(({ reference, identityHash, fingerprint }) => ({ reference, identityHash, fingerprint })) });
     await repository.appendSignature({ id, instanceId: current.instance.id, documentVersionId: current.version.id, policySnapshot: documentJson(snapshot), authorizationCap: documentJson(captureAuthorizationCap(ctx.authContext)),
       sourceFingerprint: current.archive.native.fingerprint, commandKey: command.idempotencyKey, commandHash, reason: command.reason, requestedBy: ctx.actorId, requestedAt: current.archive.now });
     for (const party of parties) {
       const recipientId = randomUUID(), identity = { organizationId: ctx.organizationId, signatureId: id, recipientId, reference: party.reference, fingerprint: party.fingerprint }, cipher = sealNativeSignatureRecipient({ protocol: nativeSignatureRecipientProtocol, schemaVersion: 1, identity, displayName: party.displayName, email: party.email }, deps.env);
       await repository.appendSignatureRecipient({ id: recipientId, signatureId: id, identityHash: party.identityHash, personId: party.reference.kind === "PERSON" ? party.reference.id : null, ownerId: party.reference.kind === "OWNER" ? party.reference.id : null,
-        guestId: party.reference.kind === "GUEST" ? party.reference.id : null, supplierId: party.reference.kind === "SUPPLIER" ? party.reference.id : null, emailCipher: new Uint8Array(cipher), sourceSnapshot: documentJson({ protocol: nativeSignatureRecipientProtocol, schemaVersion: 1, identity }), createdAt: current.archive.now });
+        guestId: party.reference.kind === "GUEST" ? party.reference.id : null, supplierId: party.reference.kind === "SUPPLIER" ? party.reference.id : null,leadId:party.reference.kind==="LEAD"?party.reference.id:null, emailCipher: new Uint8Array(cipher), sourceSnapshot: documentJson({ protocol: nativeSignatureRecipientProtocol, schemaVersion: 1, identity }), createdAt: current.archive.now });
     }
     await repository.appendSignatureEvent({ signatureId: id, state: "DRAFT", evidenceHash: commandHash, occurredAt: current.archive.now, observedAt: current.archive.now });
     await appendDocumentHistory(ctx, tx, current.archive, current.instance.documentId, "SIGNATURE_CREATED", command.idempotencyKey, commandHash, command.reason, {}, { signatureId: id, instanceId: current.instance.id, versionId: current.version.id, recipientCount: parties.length }, deps);
     await new OutboxRepository(tx, ctx.organizationId).append(nativeSignatureDraftCreated, { signatureId: id }, signatureDraftOutboxKey(ctx.actorId, command.idempotencyKey), current.archive.now);
-    const final = await nativeSignatureContext(ctx, tx, draft, "create", id); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError(); const row = await repository.signature(id); if (!row) throw new DocumentConflictError(); return signatureResult(ctx, tx, row);
+    const final = await nativeSignatureContext(ctx, tx, draft, "create", id, ctx.actorId, deps.env); if (final.fingerprint !== current.fingerprint) throw new DocumentConflictError(); const row = await repository.signature(id); if (!row) throw new DocumentConflictError(); return signatureResult(ctx, tx, row, deps.env);
   });
 }
 export async function recoverNativeSignature(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx = documentActorContext(actor), input = documentRecoveryInput.parse(raw);
   return withTenant(deps.db, ctx.organizationId, async tx => {
-    const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey); const existing = await repository.signatureByNonce(ctx.actorId, input.idempotencyKey); if (existing) return signatureResult(ctx, tx, existing);
+    const repository = new DocumentRepository(tx, ctx.organizationId); await repository.lock("nonce:" + ctx.actorId + ":" + input.idempotencyKey); const existing = await repository.signatureByNonce(ctx.actorId, input.idempotencyKey); if (existing) return signatureResult(ctx, tx, existing, deps.env);
     if (await repository.signatureNonceOwner(input.idempotencyKey) || await repository.nonceOwner(input.idempotencyKey) || await repository.instanceNonceOwner(input.idempotencyKey) || await repository.providerPreparationNonceOwner(input.idempotencyKey)) throw new DocumentAccessError();
     const current = await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId); if ([current, ctx.authContext].some(cap => ["signature:view", "signature:create", "document:view"].some(key => !cap.permissions.has(key)))) throw new DocumentAccessError();
     return { recorded: false as const, id: null, idempotencyKey: input.idempotencyKey, state: null };

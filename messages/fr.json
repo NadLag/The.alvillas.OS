@@ -5081,7 +5081,8 @@
     "pending": "Récupérez la demande précédente avant de créer un autre brouillon.",
     "recover": "Récupérer le brouillon",
     "newDraft": "Commencer un nouveau brouillon",
-    "close": "Fermer le brouillon"
+    "close": "Fermer le brouillon",
+    "LEAD": "Prospect immobilier"
   },
   "SignaturePreparation": {
     "title": "Préparer la signature",
@@ -5456,6 +5457,6 @@
       "restrictedAccount": "Les coordonnées du compte sont restreintes",
       "inactiveRepresentative": "Le compte de ce représentant est inactif."
     },
-    "proposalDocuments": "Documents de proposition"
+    "proposalDocuments": "Documents d’acquisition"
   }
 }

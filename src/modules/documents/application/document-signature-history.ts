@@ -18,7 +18,7 @@ type Dependencies = { db: TenantTransactionRunner; env?: NodeJS.ProcessEnv; requ
 /** History authorizes the actual retained resources; current business values cannot replace original contacts. */
 async function retainedContext(ctx: DocumentActorContext, tx: TenantTransaction, signatureId: string, deps: Pick<Dependencies, "env">) {
   const repository = new DocumentRepository(tx, ctx.organizationId), row = await repository.signatureRecord(signatureId); if (!row) throw new DocumentAccessError();
-  const original = nativeSignatureOriginalDefinition(row), current = await nativeSignatureContext(ctx, tx, original.draft, "history", row.id, row.requestedBy); assertSignatureOriginalArchive(current, original.snapshot);
+  const original = nativeSignatureOriginalDefinition(row), current = await nativeSignatureContext(ctx, tx, original.draft, "history", row.id, row.requestedBy, deps.env, original.snapshot.leadContractPolicy); assertSignatureOriginalArchive(current, original.snapshot);
   const recipients = row.recipients.map(recipient => {
     const retained = nativeSignatureRecipientPayloadSchema.omit({ displayName: true, email: true }).parse(recipient.sourceSnapshot), descriptor = original.snapshot.recipients.find(item => item.identityHash === recipient.identityHash),
       party = current.parties.find(item => commandFingerprint(item.reference) === recipient.identityHash), identity = retained.identity;
@@ -39,11 +39,11 @@ export async function listNativeSignatures(actor: DocumentActorContext, raw: unk
   const ctx = documentActorContext(actor), input = nativeSignatureListInput.parse(raw), filter = commandFingerprint({ operation: "NATIVE_SIGNATURE_LIST", documentVersionId: input.documentVersionId }), before = readDocumentCursor(ctx, filter, input.cursor);
   return withTenant(deps.db, ctx.organizationId, async tx => {
     const repository = new DocumentRepository(tx, ctx.organizationId), version = await repository.version(input.documentVersionId), generated = generatedDocumentUploadInput.safeParse(version?.admission.input); if (!generated.success || !generated.data.generationInstanceId) throw new DocumentAccessError();
-    const draft = { instanceId: generated.data.generationInstanceId, documentVersionId: input.documentVersionId, recipients: [] }, base = await nativeSignatureContext(ctx, tx, draft, "history"), rows = await repository.signaturesForVersion(input.documentVersionId, before), selected = [];
+    const draft = { instanceId: generated.data.generationInstanceId, documentVersionId: input.documentVersionId, recipients: [] }, base = await nativeSignatureContext(ctx, tx, draft, "history", undefined, ctx.actorId, deps.env), rows = await repository.signaturesForVersion(input.documentVersionId, before), selected = [];
     for (const row of rows.slice(0, 30)) { try { selected.push(await retainedContext(ctx, tx, row.id, deps)); } catch (error) { if (!(error instanceof DocumentAccessError)) throw error; } }
     await writeAuditEvent(tx, { organizationId: ctx.organizationId, actorId: ctx.actorId, action: "documents.signature.history_listed", resourceType: "document", resourceId: base.instance.documentId,
       after: { documentId: base.instance.documentId, versionId: input.documentVersionId, count: selected.length }, requestId: deps.requestId ?? randomUUID(), occurredAt: base.archive.now });
-    if ((await nativeSignatureContext(ctx, tx, draft, "history")).fingerprint !== base.fingerprint) throw new DocumentConflictError();
+    if ((await nativeSignatureContext(ctx, tx, draft, "history", undefined, ctx.actorId, deps.env)).fingerprint !== base.fingerprint) throw new DocumentConflictError();
     const items = []; for (const retained of selected) { const final = await retainedContext(ctx, tx, retained.row.id, deps); if (final.fingerprint !== retained.fingerprint) throw new DocumentConflictError(); items.push(await summary(final)); }
     return nativeSignatureListSchema.parse({ documentVersionId: input.documentVersionId, items, next: rows.length > 30 ? documentReadCursor(ctx, filter, rows[29].id) : null });
   });

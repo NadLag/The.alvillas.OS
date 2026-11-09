@@ -8,11 +8,9 @@ import {nativeLeadDocumentSource,nativeLeadDocumentBindings} from "@/platform/do
 import {nativeLeadFixture,nativeLeadInput,nativeLeadProfileFixture,nativeLeadFinancialGuard} from "./support/lead-fixture";
 import {captureLead} from "@/modules/crm/application/lead-capture-service";
 import {provisionIntegrationRole} from "./support/database-role";
-import {authContextForAccount} from "@/platform/authz/account-context";
 import * as auditWriter from "@/platform/audit/audit-writer";
 import {resolveDocumentTemplateValues} from "@/modules/documents/application/document-template-values";
 import {readDocumentSources,readDocumentSourceWorkspace} from "@/modules/documents/application/document-workspace";
-import {documentTemplateMediaType} from "@/modules/documents/domain/document-template-format";
 import {reviewLeadProfile,admitLeadProfile} from "@/modules/crm/application/lead-profile-service";
 import {reviewLeadStage,admitLeadStage} from "@/modules/crm/application/lead-stage-service";
 import {reviewDocumentTemplate,admitDocumentTemplate} from "@/modules/documents/application/document-template-authoring";
@@ -30,6 +28,7 @@ import {getDocument} from "pdfjs-dist/legacy/build/pdf.mjs";
 import {renderOwnedProposal} from "./support/owned-proposal-renderer";
 import * as leadDocumentSources from "@/platform/documents/lead-source";
 import {transactionQueryMeter} from "./support/transaction-query-meter";
+import {nativeLeadArchiveFixture} from "./support/lead-document-fixture";
 import {searchDocuments} from "@/modules/documents/application/document-search-service";
 
 let admin:PrismaClient,db:PrismaClient,financial:Awaited<ReturnType<typeof nativeLeadFinancialGuard>>;
@@ -41,16 +40,7 @@ beforeAll(async()=>{server=createServer((request,response)=>{void(async()=>{cons
 afterAll(async()=>{vi.restoreAllMocks();try{if(financial)await financial.assertPreserved(organizations);}finally{await db?.$disconnect();await admin?.$disconnect();if(server){server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}}});
 async function fixture(){const f=await nativeLeadProfileFixture(admin,db,env);organizations.push(f.organizationId);return f;}
 const definition=(locale:"en"|"fr"|"ar"="fr")=>({schemaVersion:1,templateKey:"acquisition_proposal",locale,title:"{{lead_owner_contact}}",variables:[{key:"lead_owner_contact",kind:"TEXT"},{key:"lead_property_type",kind:"TEXT"},{key:"lead_bedrooms",kind:"INTEGER"}],blocks:[{kind:"PARAGRAPH",text:"{{lead_owner_contact}} / {{lead_property_type}} / {{lead_bedrooms}}"}]});
-async function documentFixture(){
- const f=await fixture(),grants=await withTenant(db,f.organizationId,async tx=>{
-  const result:Record<string,string>={"lead:view":f.assignments.view};
-  for(const key of["lead:export","document:view","document:create","document:edit","document:export","document_template:view","document_template:create","document_template:edit","document_template:export","document_instance:view","document_instance:create","document_instance:edit","document_instance:export","organization:view","organization:export","signature:view","signature:create","team_member:view","team_member:export","staff_document:view","staff_document:export"]){
-   const role=await tx.role.create({data:{organizationId:f.organizationId,key:"native_proposal_"+randomUUID(),name:"Independent actual proposal "+key}}),permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key}});await tx.rolePermission.create({data:{organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}});const assignment=await tx.roleAssignment.create({data:{organizationId:f.organizationId,userAccountId:f.account.id,personId:f.person.id,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});result[key]=assignment.id;
-  }
-  await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"documents.archive",scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),reason:"Explicit approved native acquisition document types",value:{source:"NATIVE_DOCUMENT_ARCHIVE",encryption:"APP_MANAGED_AEAD",history:"APPEND_ONLY",downloads:"AUTHORIZED_SERVER_PROXY",storage_url_seconds:30,upload_admission:{window_seconds:3600,max_requests:100},upload_transport:{window_seconds:3600,max_requests:100},types:[{key:"acquisition_proposal",labels:{en:"Approved acquisition proposal",fr:"Proposition approuvée",ar:"عرض معتمد"},sources:["ORGANIZATION","LEAD"],privacy:["sensitive"],content_types:["application/pdf",documentTemplateMediaType],max_bytes:1048576}]}});
-  return result;
- });return{...f,originalHeld:f.ctx,grants,ctx:{...f.ctx,authContext:{...await authContextForAccount(f.organizationId,f.account.id,{db}),personId:f.person.id}}};
-}
+async function documentFixture(){const f=await nativeLeadArchiveFixture(admin,db,env);organizations.push(f.organizationId);return f;}
 type DocumentFixture=Awaited<ReturnType<typeof documentFixture>>;
 async function proposal(f:DocumentFixture,locale:"en"|"fr"|"ar"="fr"){
  const variants=[];for(const language of["en","fr","ar"] as const){const draft={documentId:null,source:{kind:"ORGANIZATION",id:f.organizationId},typeKey:"acquisition_proposal",title:"Actual approved "+language+" acquisition proposal",supersedesId:null,effectiveFrom:null,definition:definition(language)},review=await reviewDocumentTemplate(f.ctx,draft,{db,env}),admitted=await admitDocumentTemplate(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Actual explicitly approved native proposal language"},{db,env}),completed=await completeDocumentParts(f.ctx,{admissionId:admitted.id},{db,env,objects:objects()});expect(completed.version?.id).toBeTruthy();variants.push({locale:language,versionId:completed.version!.id});}

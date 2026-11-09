@@ -6,7 +6,7 @@ import { financialAttachmentAuthorityChecks } from "@/platform/authz/financial-a
 import { FinancialAttachmentSourceRepository } from "@/platform/ledger/financial-attachment-source-repository";
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { documentSourceReferenceSchema,DocumentConflictError } from "../domain/document-command";
-import {nativeLeadDocumentSource,nativeLeadDocumentSources,nativeLeadDocumentLabel} from "@/platform/documents/lead-source";
+import {nativeLeadDocumentSource,nativeLeadDocumentSources,nativeLeadDocumentLabel,nativeLeadDocumentContact} from "@/platform/documents/lead-source";
 import type { z } from "zod";
 import type { signatureRecipientReferenceSchema } from "../domain/document-signature-command";
 
@@ -154,6 +154,10 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   appendSignatureEvent(data: Omit<Prisma.SignatureEventUncheckedCreateInput, "organizationId">) { return this.tx.signatureEvent.create({ data: { ...data, organizationId: this.organizationId } }); }
   async versionMatchesInstance(versionId: string, instanceId: string) { const [row] = await this.tx.$queryRaw<Array<{ matches: boolean }>>`SELECT app_document_version_matches_instance(${this.organizationId}::uuid,${versionId}::uuid,${instanceId}::uuid) AS matches`; return row?.matches === true; }
   async signatureRecipientSource(reference: z.infer<typeof signatureRecipientReferenceSchema>) {
+    if(reference.kind==="LEAD"){
+      const native=await this.documentReadLead(reference.id);if(!native)return null;const resource=native.resource,checks:CurrentAuthorityCheck[]=[{action:"view",resource},{action:"export",resource}];
+      return{reference,displayName:null,email:null,archived:native.archived,resource,checks,fingerprint:commandFingerprint({reference,snapshot:native.snapshot,checks})};
+    }
     const where = { organizationId: this.organizationId, id: reference.id }, select = { id: true, displayName: true, email: true, archivedAt: true, updatedAt: true } as const;
     const row = reference.kind === "PERSON" ? await this.tx.person.findFirst({ where, select }) : reference.kind === "OWNER" ? await this.tx.owner.findFirst({ where, select }) :
       reference.kind === "SUPPLIER" ? await this.tx.supplier.findFirst({ where, select }) : await this.tx.guestRecord.findFirst({ where, select: { ...select, mergedIntoId: true } });
@@ -164,7 +168,12 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
     const archived = Boolean(row.archivedAt || ("mergedIntoId" in row && row.mergedIntoId)), fingerprint = commandFingerprint({ reference, row, checks });
     return { reference, displayName: row.displayName, email: row.email, archived, resource, checks, fingerprint };
   }
+  /** Only the signature boundary calls this after authorizing the captured party facts. */
+  signatureLeadContact(party:NonNullable<Awaited<ReturnType<DocumentRepository["signatureRecipientSource"]>>>,env?:NodeJS.ProcessEnv){
+    const native=this.documentLeadReads?.get(party.reference.id);if(party.reference.kind!=="LEAD"||!native||commandFingerprint({reference:party.reference,snapshot:native.snapshot,checks:party.checks})!==party.fingerprint)throw new DocumentConflictError();return nativeLeadDocumentContact(native,env);
+  }
   signatureRecipientCandidates(kind: z.infer<typeof signatureRecipientReferenceSchema>["kind"], query: string, before?: string) {
+    if(kind==="LEAD")throw new DocumentConflictError(); // Lead choices are restricted to the document's actual source.
     const where = { organizationId: this.organizationId, archivedAt: null, displayName: { contains: query, mode: "insensitive" as const }, ...(before ? { id: { lt: before } } : {}) },
       args = { where, select: { id: true }, orderBy: { id: "desc" as const }, take: 31 };
     if (kind === "PERSON") return this.tx.person.findMany(args);

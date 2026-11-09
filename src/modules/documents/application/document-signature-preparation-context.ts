@@ -18,7 +18,7 @@ export const normalizedPreparationDraft = (draft: Draft): Draft => ({ signatureI
 export const signatureProviderScopeHash = (origin: string, teamId: number) => commandFingerprint(["DOCUMENSO", origin, teamId]);
 export async function signaturePreparationTargetContext(ctx: DocumentActorContext, tx: TenantTransaction, signatureId: string, action: "view" | "create", env: NodeJS.ProcessEnv = process.env) {
   const repository = new SignaturePreparationRepository(tx, ctx.organizationId), row = await repository.signature(signatureId); if (!row) throw new DocumentAccessError();
-  const original = nativeSignatureOriginalDefinition(row), current = await nativeSignatureContext(ctx, tx, original.draft, action, row.id, row.requestedBy);
+  const original = nativeSignatureOriginalDefinition(row), current = await nativeSignatureContext(ctx, tx, original.draft, action, row.id, row.requestedBy, env);
   assertSignatureOriginalArchive(current, original.snapshot); if (signatureNativeInputsChanged(current, original.snapshot)) throw new DocumentConflictError();
   const source = current.archive.native.resource, rule = await new ConfigRuleRepository(tx, ctx.organizationId).resolve({ key: documentSignaturePolicyKey, asOf: current.archive.now, scopes: [
     { scopeType: "organization", scopeId: null }, ...source.city ? [{ scopeType: "city", scopeId: source.city }] : [], ...source.ownerId ? [{ scopeType: "owner", scopeId: source.ownerId }] : [], ...source.propertyId ? [{ scopeType: "property", scopeId: source.propertyId }] : []] });
