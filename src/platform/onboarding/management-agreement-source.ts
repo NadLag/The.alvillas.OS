@@ -5,6 +5,7 @@ export {managementAgreementRuleKeys as onboardingManagementAgreementRuleKeys} fr
 /** Native heads contain identity/version/tuple witnesses, never private references or financial values. */
 export function nativeOnboardingManagementAgreementHeads(tx:TenantTransaction,organizationId:string,ids:readonly string[],includeArchived=false){return new CoreRepository(tx,organizationId).onboardingManagementAgreementHeads(ids,includeArchived);}
 export function nativeOnboardingManagementAgreementRuleHeads(tx:TenantTransaction,organizationId:string,agreementId:string){return new CoreRepository(tx,organizationId).onboardingManagementAgreementRuleHeads(agreementId);}
+export function nativeOnboardingManagementAgreementRuleHeadsMany(tx:TenantTransaction,organizationId:string,agreementIds:readonly string[]){return new CoreRepository(tx,organizationId).onboardingManagementAgreementRuleHeadsMany(agreementIds);}
 export function nativeOnboardingManagementAgreementChoices(tx:TenantTransaction,organizationId:string,propertyId:string,query:string,after:string|undefined,asOf:Date){return new CoreRepository(tx,organizationId).onboardingManagementAgreementPage(propertyId,query,after,asOf);}
 
 /** The application checks independent held/current financial source authority before these private reads. */

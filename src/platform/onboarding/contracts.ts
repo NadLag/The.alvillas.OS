@@ -53,3 +53,5 @@ export const onboardingManagementAgreementInputSchema=z.record(z.string(),z.unkn
   return{...value,effectiveFrom:value.effectiveFrom.toISOString(),effectiveTo:value.effectiveTo?.toISOString()??null,approvalThresholdKey:value.approvalThresholdKey??null,approvalThresholdAmount:value.approvalThresholdAmount??null,payoutHoldDays:value.payoutHoldDays!,payoutHoldbackBps:value.payoutHoldbackBps!};
  }catch{context.addIssue({code:"custom",message:"native_onboarding_explicit_agreement_terms_required"});return z.NEVER;}
 });
+
+export {managementAgreementConfigValues as nativeOnboardingManagementAgreementRuleValues} from "@/modules/core/domain/owner-property";

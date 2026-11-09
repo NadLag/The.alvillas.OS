@@ -2,8 +2,6 @@ import { headers } from "next/headers";
 import { CoreRepository } from "@/modules/core/infrastructure/core-repository";
 import {
   agreementNoticeConfigKey,
-  agreementResponsibilitiesConfigKey,
-  agreementSpecialConditionsConfigKey,
   approvalThresholdsConfigSchema,
   commissionConfigKey,
   expenseTreatmentConfigSchema,
@@ -14,6 +12,7 @@ import {
   bookingChannelInputSchema,
   managementAgreementInputSchema,
   managementAgreementRuleKeys,
+  managementAgreementConfigValues,
   managementAgreementAmendmentInputSchema,
   ownerInputSchema,
   propertyLifecycleTransitionInputSchema,
@@ -315,74 +314,7 @@ function assertLifecycleTransitionAllowed(
   }
 }
 
-function agreementRuleValues(
-  input: ManagementAgreementInput | ManagementAgreementAmendmentInput
-): Array<{ key: string; value: unknown }> {
-  const approvalThresholds = input.approvalThresholdAmount
-    ? {
-        thresholds: [
-          {
-            key: input.approvalThresholdKey ?? "owner_approval",
-            amount: input.approvalThresholdAmount,
-            currency: input.approvalThresholdCurrency,
-            requires_approval_from: input.approvalRequires
-          }
-        ]
-      }
-    : {
-        thresholds: []
-      };
-  const payoutSchedule = {
-    cadence: input.payoutCadence,
-    ...(input.payoutHoldDays === undefined ? {} : { hold_days: input.payoutHoldDays }),
-    ...(input.payoutHoldbackBps === undefined ? {} : { holdback_bps: input.payoutHoldbackBps })
-  };
-
-  return [
-    {
-      key: commissionConfigKey,
-      value: {
-        rate_bps: input.commissionRateBps,
-        basis: input.commissionBasis,
-        accrual_event: input.commissionAccrualEvent
-      }
-    },
-    {
-      key: "finance.expense_treatment",
-      value: {
-        default_treatment: input.expenseDefaultTreatment,
-        categories: {}
-      }
-    },
-    {
-      key: "finance.approval_thresholds",
-      value: approvalThresholds
-    },
-    {
-      key: "finance.payout_schedule",
-      value: payoutSchedule
-    },
-    {
-      key: agreementResponsibilitiesConfigKey,
-      value: {
-        owner: input.ownerResponsibilities,
-        alvillas: input.alvillasResponsibilities
-      }
-    },
-    {
-      key: agreementNoticeConfigKey,
-      value: {
-        notice_period_days: input.noticePeriodDays
-      }
-    },
-    {
-      key: agreementSpecialConditionsConfigKey,
-      value: {
-        conditions: input.specialConditions
-      }
-    }
-  ];
-}
+const agreementRuleValues=managementAgreementConfigValues;
 
 function validateAgreementRule(rule: { key: string; value: unknown }): void {
   if (rule.key === "finance.approval_thresholds") {

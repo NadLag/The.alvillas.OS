@@ -872,7 +872,12 @@ export class CoreRepository {
 
   /** Match the existing canonical agreement summary's latest version for each registered group. */
   onboardingManagementAgreementRuleHeads(agreementId:string){
-    return this.tx.$queryRaw<Array<{id:string;key:string;version:number;scopeType:string;scopeId:string;lifecycle:string;effectiveFrom:Date;effectiveTo:Date|null;createdBy:string|null;createdAt:Date;xmin:string;tuple:string}>>(Prisma.sql`SELECT DISTINCT ON (key) id,key,version,scope_type AS "scopeType",scope_id AS "scopeId",lifecycle,effective_from AS "effectiveFrom",effective_to AS "effectiveTo",created_by AS "createdBy",created_at AS "createdAt",xmin::text,ctid::text AS tuple FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND scope_type='agreement' AND scope_id=${agreementId}::uuid AND archived_at IS NULL AND key=ANY(${[...managementAgreementRuleKeys]}::text[]) ORDER BY key,version DESC`);
+    return this.onboardingManagementAgreementRuleHeadsMany([agreementId]);
+  }
+
+  /** One bounded metadata read for selector candidates; no private rule values. */
+  onboardingManagementAgreementRuleHeadsMany(agreementIds:readonly string[]){
+    return this.tx.$queryRaw<Array<{id:string;key:string;version:number;scopeType:string;scopeId:string;lifecycle:string;effectiveFrom:Date;effectiveTo:Date|null;createdBy:string|null;createdAt:Date;xmin:string;tuple:string}>>(Prisma.sql`SELECT DISTINCT ON (scope_id,key) id,key,version,scope_type AS "scopeType",scope_id AS "scopeId",lifecycle,effective_from AS "effectiveFrom",effective_to AS "effectiveTo",created_by AS "createdBy",created_at AS "createdAt",xmin::text,ctid::text AS tuple FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND scope_type='agreement' AND scope_id=ANY(${[...agreementIds]}::uuid[]) AND archived_at IS NULL AND key=ANY(${[...managementAgreementRuleKeys]}::text[]) ORDER BY scope_id,key,version DESC`);
   }
 
   onboardingManagementAgreementRuleRows(ids:readonly string[]){
