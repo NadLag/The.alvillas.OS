@@ -1,0 +1,19 @@
+import {randomUUID} from "node:crypto";
+import {describe,expect,it} from "vitest";
+import {canonicalOnboardingDraft,canonicalOnboardingCommand} from "@/modules/onboarding/domain/onboarding-wizard";
+import {canonicalOnboardingPropertyDraft,canonicalOnboardingPropertyCommand} from "@/modules/onboarding/domain/onboarding-property";
+import {canonicalOnboardingRecordDraft,canonicalOnboardingRecordCommand,onboardingRecordReviewSchema} from "@/modules/onboarding/domain/onboarding-record";
+import {onboardingSteps} from "@/modules/onboarding/domain/onboarding-policy";
+
+const owner=()=>({sessionId:null,previousRevisionId:null,step:"OWNER"as const,target:{mode:"CREATE"as const,input:{displayName:"  Original native Owner  ",email:"OWNER@EXAMPLE.TEST"}}});
+const property=()=>({sessionId:randomUUID(),previousRevisionId:randomUUID(),step:"PROPERTY"as const,target:{mode:"CREATE"as const,input:{ownerId:randomUUID(),name:"Original physical Property",addressLine1:"Original physical address",city:"Marrakech",propertyType:"VILLA",bedrooms:3,bathrooms:2,maxGuests:6,status:"DRAFT"}}});
+const fields=()=>({idempotencyKey:randomUUID(),reviewFingerprint:"a".repeat(64),reason:"  Actual native reviewed step  "});
+
+describe("shared native onboarding record routing",()=>{
+ it("preserves the complete existing canonical Owner draft and command serialization",()=>{const draft=owner(),command={...draft,...fields()};expect(canonicalOnboardingRecordDraft(draft)).toEqual(canonicalOnboardingDraft(draft));expect(JSON.stringify(canonicalOnboardingRecordCommand(command))).toBe(JSON.stringify(canonicalOnboardingCommand(command)));});
+ it("uses the existing Property producer contract without copied Owner or agreement input",()=>{const draft=property(),command={...draft,...fields()};expect(canonicalOnboardingRecordDraft(draft)).toEqual(canonicalOnboardingPropertyDraft(draft));expect(JSON.stringify(canonicalOnboardingRecordCommand(command))).toBe(JSON.stringify(canonicalOnboardingPropertyCommand(command)));expect(canonicalOnboardingRecordCommand(canonicalOnboardingRecordCommand(command))).toEqual(canonicalOnboardingPropertyCommand(command));});
+ it("keeps every subsequent step and activation closed until its actual native producer is registered",()=>{for(const step of onboardingSteps.slice(2)){expect(()=>canonicalOnboardingRecordDraft({...property(),step})).toThrow();expect(()=>canonicalOnboardingRecordCommand({...property(),step,...fields()})).toThrow();}});
+ it("does not substitute one native target kind for another",()=>{for(const input of[{...owner(),target:{mode:"LINK",propertyId:randomUUID()}},{...property(),target:{mode:"LINK",ownerId:randomUUID()}},{...property(),target:{mode:"CREATE",input:owner().target.input}}])expect(()=>canonicalOnboardingRecordDraft(input)).toThrow();});
+ it("rejects caller tenant, actor, readiness and financial data before dispatching a native step",()=>{for(const extra of[{organizationId:randomUUID()},{actorId:randomUUID()},{ready:true},{activated:true},{balance:"9007199254740993.07"}]){expect(()=>canonicalOnboardingRecordDraft({...owner(),...extra})).toThrow();expect(()=>canonicalOnboardingRecordCommand({...property(),...fields(),...extra})).toThrow();}});
+ it("preserves original Owner reviews and requires a physical creation preview without an invented Property identity",()=>{const originalOwner={displayName:"Original native Owner",email:null,phone:null,preferredLocale:"fr"as const},reviewFingerprint="a".repeat(64),first={draft:canonicalOnboardingDraft(owner()),owner:originalOwner,reviewFingerprint},second={draft:canonicalOnboardingPropertyDraft(property()),owner:originalOwner,property:null,reviewFingerprint};expect(onboardingRecordReviewSchema.parse(first)).toEqual(first);expect(onboardingRecordReviewSchema.parse(second)).toEqual(second);expect(onboardingRecordReviewSchema.safeParse({...second,property:{id:randomUUID(),name:"Invented source"}}).success).toBe(false);});
+});

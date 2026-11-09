@@ -477,6 +477,40 @@ export class CoreRepository {
 
   ownerIdentityRows(ids:readonly string[]){return this.tx.owner.findMany({where:{organizationId:this.organizationId,archivedAt:null,id:{in:[...ids]}},select:{id:true,organizationId:true,displayName:true,email:true,phone:true,preferredLocale:true,createdAt:true,updatedAt:true}});}
 
+  /** Source witnesses include each active ownership tuple, without loading financial relations. */
+  onboardingPropertyHeads(ids:readonly string[],includeArchived=false){
+    return this.tx.$queryRaw<Array<{
+      id:string;organizationId:string;status:string;cityId:string|null;regionId:string|null;
+      createdBy:string|null;createdAt:Date;updatedAt:Date;archivedAt:Date|null;xmin:string;tuple:string;
+      ownership:Array<{id:string;ownerId:string;isPrimary:boolean;xmin:string;tuple:string}>;
+      operatingProfile:{id:string;xmin:string;tuple:string}|null;
+    }>>(Prisma.sql`SELECT p.id,p.organization_id AS "organizationId",p.status,p.city_id AS "cityId",p.region_id AS "regionId",p.created_by AS "createdBy",p.created_at AS "createdAt",p.updated_at AS "updatedAt",p.archived_at AS "archivedAt",p.xmin::text AS xmin,p.ctid::text AS tuple,
+      COALESCE((SELECT jsonb_agg(jsonb_build_object('id',po.id,'ownerId',po.owner_id,'isPrimary',po.is_primary,'xmin',po.xmin::text,'tuple',po.ctid::text) ORDER BY po.owner_id) FROM property_owner po WHERE po.organization_id=p.organization_id AND po.property_id=p.id AND po.archived_at IS NULL),'[]'::jsonb) AS ownership,
+      (SELECT jsonb_build_object('id',op.id,'xmin',op.xmin::text,'tuple',op.ctid::text) FROM property_operating_profile op WHERE op.organization_id=p.organization_id AND op.property_id=p.id) AS "operatingProfile"
+      FROM property p WHERE p.organization_id=${this.organizationId}::uuid AND p.id=ANY(${[...ids]}::uuid[]) AND (${includeArchived}::boolean OR p.archived_at IS NULL) ORDER BY p.id`);
+  }
+
+  async lockOnboardingProperty(propertyId:string){
+    await this.tx.$queryRaw(Prisma.sql`SELECT id FROM property WHERE organization_id=${this.organizationId}::uuid AND id=${propertyId}::uuid AND archived_at IS NULL FOR UPDATE`);
+    await this.tx.$queryRaw(Prisma.sql`SELECT id FROM property_owner WHERE organization_id=${this.organizationId}::uuid AND property_id=${propertyId}::uuid AND archived_at IS NULL ORDER BY id FOR UPDATE`);
+    await this.tx.$queryRaw(Prisma.sql`SELECT id FROM property_operating_profile WHERE organization_id=${this.organizationId}::uuid AND property_id=${propertyId}::uuid FOR UPDATE`);
+  }
+
+  onboardingPropertyIdentityRows(ids:readonly string[],includeArchived=false){
+    return this.tx.property.findMany({where:{organizationId:this.organizationId,id:{in:[...ids]},...includeArchived?{}:{archivedAt:null}},select:{id:true,organizationId:true,name:true,addressLine1:true,addressLine2:true,cityId:true,regionId:true,city:true,region:true,countryCode:true,propertyType:true,bedrooms:true,bathrooms:true,livingSpaces:true,hasPool:true,hasGarden:true,parkingSpaces:true,maxGuests:true,timezone:true,amenities:true,photoUrls:true,status:true,createdAt:true,updatedAt:true,archivedAt:true}});
+  }
+
+  onboardingPropertyOperatingProfile(propertyId:string){
+    return this.tx.propertyOperatingProfile.findFirst({where:{organizationId:this.organizationId,propertyId},select:{cleaningEnabled:true,cleaningFrequency:true,inspectionEnabled:true,inspectionFrequency:true,poolServiceEnabled:true,poolServiceFrequency:true,gardenServiceEnabled:true,gardenServiceFrequency:true,laundryManaged:true,linenManaged:true,maintenanceTrackingEnabled:true,preventiveMaintenanceFrequency:true,midStayCleaningEnabled:true,midStayCleaningRuleKey:true,breakfastAvailable:true,chefAvailable:true,transfersAvailable:true,groceriesAvailable:true,wellnessAvailable:true,otherServices:true,automationNotes:true}});
+  }
+
+  onboardingPropertyPage(ownerId:string,query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`SELECT p.id FROM property p JOIN property_owner po ON po.organization_id=p.organization_id AND po.property_id=p.id
+      WHERE p.organization_id=${this.organizationId}::uuid AND po.organization_id=${this.organizationId}::uuid AND po.owner_id=${ownerId}::uuid AND po.archived_at IS NULL AND po.created_at<=${asOf}
+      AND p.archived_at IS NULL AND p.status IN ('DRAFT','ONBOARDING') AND p.created_at<=${asOf} AND p.name ILIKE ${"%"+query+"%"}
+      ${after?Prisma.sql`AND p.id>${after}::uuid`:Prisma.empty} ORDER BY p.id LIMIT 51`);
+  }
+
   async createProperty(input: PropertyInput, actorId: string): Promise<PropertySummary> {
     const geography = await this.resolvePropertyGeography(input, actorId);
     const operatingProfile = input.operatingProfile ?? operatingProfileDefaults(input);

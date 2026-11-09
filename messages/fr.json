@@ -5620,6 +5620,59 @@
       "WORKFLOWS": "Processus",
       "REVIEW": "Vérification",
       "ACTIVATE": "Activation"
+    },
+    "property": {
+      "mode": "Bien",
+      "modes": {
+        "CREATE": "Créer un bien",
+        "LINK": "Utiliser un bien existant"
+      },
+      "prepare": "Préparer le bien",
+      "change": "Choisir un autre bien",
+      "review": "Vérifier les détails du bien",
+      "reviewTitle": "Vérifier le bien",
+      "confirm": "Confirmer et enregistrer le bien",
+      "editReview": "Modifier ces détails",
+      "searchLabel": "Trouver un bien existant",
+      "search": "Rechercher des biens",
+      "selected": "Bien sélectionné",
+      "empty": "Aucun bien accessible ne correspond à cette recherche.",
+      "guidance": "Choisissez un bien enregistré pour ce propriétaire ou renseignez un nouveau bien. Il reste en brouillon jusqu’à la fin de la préparation et de la vérification.",
+      "noValue": "Non renseigné",
+      "yes": "Oui",
+      "no": "Non",
+      "amenitiesHint": "Un équipement par ligne.",
+      "photosHint": "Un lien de photo par ligne.",
+      "states": {
+        "saved": "Étape du bien enregistrée.",
+        "validation": "Vérifiez les détails du bien et indiquez un motif."
+      },
+      "fields": {
+        "name": "Nom du bien",
+        "addressLine1": "Adresse",
+        "addressLine2": "Complément d’adresse",
+        "city": "Ville",
+        "region": "Région",
+        "countryCode": "Code du pays",
+        "propertyType": "Type de bien",
+        "bedrooms": "Chambres",
+        "bathrooms": "Salles de bains",
+        "livingSpaces": "Espaces de vie",
+        "parkingSpaces": "Places de stationnement",
+        "maxGuests": "Capacité d’accueil",
+        "hasPool": "Piscine",
+        "hasGarden": "Jardin",
+        "timezone": "Fuseau horaire",
+        "amenities": "Équipements",
+        "photoUrls": "Liens des photos"
+      },
+      "statuses": {
+        "DRAFT": "Brouillon",
+        "ONBOARDING": "En préparation",
+        "ACTIVE": "En gestion",
+        "PAUSED": "En pause",
+        "OFFBOARDED": "Gestion terminée"
+      }
     }
   }
 }

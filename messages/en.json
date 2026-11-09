@@ -5620,6 +5620,59 @@
       "WORKFLOWS": "Workflows",
       "REVIEW": "Review",
       "ACTIVATE": "Activate"
+    },
+    "property": {
+      "mode": "Property",
+      "modes": {
+        "CREATE": "Create a property",
+        "LINK": "Use an existing property"
+      },
+      "prepare": "Set up property",
+      "change": "Choose a different property",
+      "review": "Review property details",
+      "reviewTitle": "Review the property",
+      "confirm": "Confirm and save property",
+      "editReview": "Change these details",
+      "searchLabel": "Find an existing property",
+      "search": "Search properties",
+      "selected": "Selected property",
+      "empty": "No available properties match this search.",
+      "guidance": "Choose a property recorded for this owner or enter a new property. It stays a draft until the remaining setup and review are complete.",
+      "noValue": "Not recorded",
+      "yes": "Yes",
+      "no": "No",
+      "amenitiesHint": "One amenity per line.",
+      "photosHint": "One photo link per line.",
+      "states": {
+        "saved": "Property step saved.",
+        "validation": "Check the property details and provide a reason."
+      },
+      "fields": {
+        "name": "Property name",
+        "addressLine1": "Address",
+        "addressLine2": "Additional address details",
+        "city": "City",
+        "region": "Region",
+        "countryCode": "Country code",
+        "propertyType": "Property type",
+        "bedrooms": "Bedrooms",
+        "bathrooms": "Bathrooms",
+        "livingSpaces": "Living spaces",
+        "parkingSpaces": "Parking spaces",
+        "maxGuests": "Guest capacity",
+        "hasPool": "Pool",
+        "hasGarden": "Garden",
+        "timezone": "Time zone",
+        "amenities": "Amenities",
+        "photoUrls": "Photo links"
+      },
+      "statuses": {
+        "DRAFT": "Draft",
+        "ONBOARDING": "Onboarding",
+        "ACTIVE": "Active",
+        "PAUSED": "Paused",
+        "OFFBOARDED": "Offboarded"
+      }
     }
   }
 }

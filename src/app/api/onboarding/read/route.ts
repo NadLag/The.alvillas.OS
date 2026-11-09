@@ -1,5 +1,5 @@
 import type {NextRequest} from "next/server";
 import {prisma} from "@/platform/db/client";
 import {onboardingHttp} from "@/modules/onboarding/ui/onboarding-http";
-import {readOnboardingSession} from "@/modules/onboarding/application/onboarding-service";
-export async function POST(request:NextRequest){return onboardingHttp(request,(actor,input,requestId)=>readOnboardingSession(actor,input,{db:prisma,requestId}));}
+import {readOnboardingRecord} from "@/modules/onboarding/application/onboarding-service";
+export async function POST(request:NextRequest){return onboardingHttp(request,(actor,input,requestId)=>readOnboardingRecord(actor,input,{db:prisma,requestId}));}

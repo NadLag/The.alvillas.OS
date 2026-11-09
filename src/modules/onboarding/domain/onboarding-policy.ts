@@ -11,6 +11,10 @@ export const onboardingPolicySchema=z.object({
  encryption:z.literal("APP_MANAGED_AUTHENTICATED_ENCRYPTION"),
  release:z.literal("NATIVE_DELIVERY_READINESS"),
  owner_modes:z.array(z.enum(["CREATE","LINK"])).min(1).max(2).refine(values=>new Set(values).size===values.length),
+ property_modes:z.array(z.enum(["CREATE","LINK"])).min(1).max(2).refine(values=>new Set(values).size===values.length).optional(),
+ property_creation_rule:z.object({key:z.literal("ops.operating_rules"),entry:z.string().trim().min(1).max(120)}).strict().optional(),
  admission:budget,reads:budget
-}).strict();
+}).strict().superRefine((value,context)=>{
+ if(value.property_modes?.includes("CREATE")&&!value.property_creation_rule)context.addIssue({code:"custom",message:"native_onboarding_property_creation_rule_required",path:["property_creation_rule"]});
+});
 export type OnboardingPolicy=z.infer<typeof onboardingPolicySchema>;

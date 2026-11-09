@@ -51,7 +51,7 @@ export default async function PropertiesPage({
   }));
 
   return (
-    <AdminShell className="resource-page" testId="properties-page">
+    <AdminShell className="resource-page properties-page" testId="properties-page">
       <ShellHeader
         actions={
         <Link className="secondary-button" href={`/${appLocale}/app`}>
