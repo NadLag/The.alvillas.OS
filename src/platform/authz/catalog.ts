@@ -19,6 +19,7 @@ export const permissionActions = [
 export const permissionResources = [
   "organization",
   "lead",
+  "onboarding",
   "identity",
   "team_member",
   "staff_compensation",

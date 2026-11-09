@@ -462,6 +462,11 @@ export class CoreRepository {
 
   async lockOwnerIdentity(ownerId:string){await this.tx.$queryRaw(Prisma.sql`SELECT id FROM owner WHERE organization_id=${this.organizationId}::uuid AND id=${ownerId}::uuid AND archived_at IS NULL FOR UPDATE`);}
 
+  async ownerIdentitySourceWitness(ownerId:string,includeArchived=false){
+    const rows=await this.tx.$queryRaw<Array<{id:string;organizationId:string;createdAt:Date;updatedAt:Date;archivedAt:Date|null;xmin:string;tuple:string}>>(Prisma.sql`SELECT o.id,o.organization_id AS "organizationId",o.created_at AS "createdAt",o.updated_at AS "updatedAt",o.archived_at AS "archivedAt",o.xmin::text AS xmin,o.ctid::text AS tuple FROM owner o WHERE o.organization_id=${this.organizationId}::uuid AND o.id=${ownerId}::uuid AND (${includeArchived}::boolean OR o.archived_at IS NULL)`);
+    return rows[0]??null;
+  }
+
   findOwnerIdentity(ownerId:string){
     return this.tx.owner.findFirst({where:{organizationId:this.organizationId,id:ownerId,archivedAt:null},select:{id:true,organizationId:true,displayName:true,email:true,phone:true,preferredLocale:true,createdAt:true,updatedAt:true}});
   }
