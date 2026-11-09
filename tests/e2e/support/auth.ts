@@ -36,20 +36,21 @@ export async function completeE2EAdminMfa(page: Page, email: string): Promise<vo
   loginAttempts.set(email.trim().toLowerCase(), { epoch, count: (previous?.epoch === epoch ? previous.count : 0) + 2 });
 }
 
-export async function enrollE2EAccountSecurity(email: string, password: string): Promise<void> {
+export async function enrollE2EAccountSecurity(email: string, password: string, suppliedPage?:Page): Promise<void> {
   const normalizedEmail = email.trim().toLowerCase();
   if (enrolledAuthenticators.has(normalizedEmail)) return;
   const origin = new URL(process.env.PLAYWRIGHT_TEST_BASE_URL ?? "http://localhost:3000");
   if (origin.protocol !== "http:" || !["localhost", "127.0.0.1"].includes(origin.hostname)) throw new Error("Security enrollment fixtures require a local test server");
-  const browser = await chromium.launch();
+  const browser = suppliedPage?null:await chromium.launch();
   try {
-    const page = await browser.newPage();
+    const page = suppliedPage??await browser!.newPage();
     page.setDefaultTimeout(30000);
     await page.goto(`${origin.origin}/en/login`);
     await page.getByTestId("login-email").fill(normalizedEmail);
     await page.getByTestId("login-password").fill(password);
     const primaryEpoch = Math.floor(Date.now() / 60000);
     await page.getByTestId("login-submit").click();
+    if(suppliedPage){await expect(page).toHaveURL(/\/en\/app$/u);await page.goto(`${origin.origin}/en/app/security`);}
     await expect(page).toHaveURL(/\/en\/app\/security/u);
     const client = await page.context().newCDPSession(page);
     await client.send("WebAuthn.enable");
@@ -68,7 +69,7 @@ export async function enrollE2EAccountSecurity(email: string, password: string):
     expect(session?.user?.id).toBeFalsy();
     enrolledAuthenticators.set(normalizedEmail, secret);
     loginAttempts.set(normalizedEmail, { epoch: primaryEpoch, count: 1 });
-  } finally { await browser.close(); }
+  } finally { if(browser)await browser.close(); }
 }
 
 export function e2eEmail(label: string, projectName: string): string {
@@ -77,7 +78,8 @@ export function e2eEmail(label: string, projectName: string): string {
     .replace(/[^a-z0-9@.-]+/gu, "-");
 }
 
-export async function ensureE2EAdmin(email: string, password: string): Promise<void> {
+export async function ensureE2EAccount(email: string, password: string, options?:{permissionKeys:readonly string[];page:Page}): Promise<void> {
+  if(options){const target=process.env.DATABASE_URL?new URL(process.env.DATABASE_URL):null;if(!target||!["localhost","127.0.0.1"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw new Error("Owned database required for a scoped browser account");}
   const prisma = new PrismaClient();
   const normalizedEmail = email.trim().toLowerCase();
   const passwordHash = await hashPassword(password);
@@ -170,7 +172,8 @@ export async function ensureE2EAdmin(email: string, password: string): Promise<v
 
       const repository = new IdentityRepository(tx, bootstrapOrganizationId);
 
-      const adminRole = await repository.findRoleByKey("admin");
+      let adminRole = await repository.findRoleByKey(options?"e2e_scoped_"+account.id:"admin");
+      if(options&&!adminRole){adminRole=await tx.role.create({data:{organizationId:bootstrapOrganizationId,key:"e2e_scoped_"+account.id,name:"Explicit scoped browser account"}});const permissions=await tx.permission.findMany({where:{organizationId:bootstrapOrganizationId,key:{in:[...options.permissionKeys]}}});expect(permissions).toHaveLength(new Set(options.permissionKeys).size);await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:bootstrapOrganizationId,roleId:adminRole!.id,permissionId:permission.id}))});}
 
       if (adminRole) {
         await repository.assignRole({
@@ -185,5 +188,7 @@ export async function ensureE2EAdmin(email: string, password: string): Promise<v
   } finally {
     await prisma.$disconnect();
   }
-  await enrollE2EAccountSecurity(normalizedEmail, password);
+  await enrollE2EAccountSecurity(normalizedEmail, password,options?.page);
 }
+
+export function ensureE2EAdmin(email:string,password:string):Promise<void>{return ensureE2EAccount(email,password);}

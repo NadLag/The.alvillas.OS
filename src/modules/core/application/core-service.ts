@@ -39,6 +39,8 @@ import { authorize, authorizeCollection } from "@/platform/authz/authorize";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import type { CoreActorContext } from "@/modules/core/application/core-access";
+import {financialRuleAccess,financialRuleSourceChecks,protectedFinancialRuleKey,recheckFinancialRuleAccess} from "@/platform/config/financial-rule-authority";
+import type {CurrentAuthorityCheck} from "@/platform/authz/current-authority";
 
 export class CoreAuthorizationError extends Error {
   constructor(message = "Core action is not authorized") {
@@ -102,6 +104,20 @@ const agreementConfigKeys = [
   agreementNoticeConfigKey,
   agreementSpecialConditionsConfigKey
 ] as const;
+
+/** Configuration permission cannot grant the underlying financial sources. */
+export function canAccessManagementAgreementFinancialRules(ctx:CoreActorContext):boolean{
+  return agreementConfigKeys.filter(key=>protectedFinancialRuleKey(key)).every(key=>financialRuleAccess(ctx.authContext,"view",new Date(),key));
+}
+
+function assertAgreementFinancialAllowed(ctx:CoreActorContext):void{
+  if(!canAccessManagementAgreementFinancialRules(ctx))throw new CoreAuthorizationError();
+}
+
+async function currentAgreementFinancialAuthority(ctx:CoreActorContext,tx:Parameters<typeof recheckFinancialRuleAccess>[1],propertyId:string,write=false){
+  const checks:CurrentAuthorityCheck[]=[{action:write?"edit":"view",resource:{type:"property",organizationId:ctx.organizationId,id:propertyId,propertyId}},...(write?["create","configure"]as const:["view"]as const).map(action=>({action,unconditional:true,resource:{type:"config_rule",organizationId:ctx.organizationId,id:"agreement:"+propertyId,propertyId,dataClass:"financial"as const}})),...agreementConfigKeys.filter(key=>key!==commissionConfigKey).flatMap(key=>financialRuleSourceChecks(ctx.organizationId,key))];
+  await recheckFinancialRuleAccess(ctx,tx,commissionConfigKey,checks,new CoreAuthorizationError());
+}
 
 const propertyLifecycleTransitions: Record<PropertyLifecycleStatus, readonly PropertyLifecycleStatus[]> = {
   DRAFT: ["ONBOARDING"],
@@ -630,8 +646,10 @@ export async function listPropertyManagementAgreements(
 ): Promise<ManagementAgreementSummary[]> {
   assertAllowed(ctx, "view", "property", propertyId);
   assertConfigAllowed(ctx, "view", propertyId);
+  assertAgreementFinancialAllowed(ctx);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    await currentAgreementFinancialAuthority(ctx,tx,propertyId);
     const repository = new CoreRepository(tx, ctx.organizationId);
     const property = await repository.findProperty(propertyId);
 
@@ -639,7 +657,10 @@ export async function listPropertyManagementAgreements(
       throw new CoreNotFoundError();
     }
 
-    return repository.listManagementAgreementsForProperty(propertyId, agreementConfigKeys);
+    const agreements=await repository.listManagementAgreementsForProperty(propertyId, agreementConfigKeys);
+    await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"owner_agreement.read",resourceType:"property",resourceId:propertyId,propertyScopeId:propertyId,after:{count:agreements.length,rules:agreementConfigKeys.map(key=>({key}))},requestId:deps.requestId??crypto.randomUUID(),occurredAt:new Date()});
+    await currentAgreementFinancialAuthority(ctx,tx,propertyId);
+    return agreements;
   });
 }
 
@@ -651,9 +672,11 @@ export async function createManagementAgreement(
   assertAllowed(ctx, "edit", "property", input.propertyId);
   assertConfigAllowed(ctx, "create", input.propertyId);
   assertConfigAllowed(ctx, "configure", input.propertyId);
+  assertAgreementFinancialAllowed(ctx);
   const meta = await auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    await currentAgreementFinancialAuthority(ctx,tx,input.propertyId,true);
     const repository = new CoreRepository(tx, ctx.organizationId);
     const property = await repository.findProperty(input.propertyId);
 
@@ -702,6 +725,7 @@ export async function createManagementAgreement(
       occurredAt: new Date()
     });
 
+    await currentAgreementFinancialAuthority(ctx,tx,input.propertyId,true);
     return created;
   });
 }
@@ -714,9 +738,11 @@ export async function amendManagementAgreement(
   assertAllowed(ctx, "edit", "property", input.propertyId);
   assertConfigAllowed(ctx, "create", input.propertyId);
   assertConfigAllowed(ctx, "configure", input.propertyId);
+  assertAgreementFinancialAllowed(ctx);
   const meta = await auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
+    await currentAgreementFinancialAuthority(ctx,tx,input.propertyId,true);
     const repository = new CoreRepository(tx, ctx.organizationId);
     const before = await repository.findManagementAgreement(input.agreementId, agreementConfigKeys);
 
@@ -763,6 +789,7 @@ export async function amendManagementAgreement(
       occurredAt: new Date()
     });
 
+    await currentAgreementFinancialAuthority(ctx,tx,input.propertyId,true);
     return after;
   });
 }

@@ -1,0 +1,9 @@
+# ADR 0228 — Canonical agreement financial-source authority
+
+A real PostgreSQL regression demonstrated that a configuration-only operator could read the financial rules of a native management agreement. Permission to configure a Property does not grant the underlying financial sources. The same distinction applies to creating or amending agreement-scoped financial rules.
+
+Core agreement reads and commands reuse the registered source groups from `financial-rule-authority`. Require every applicable financial source independently, together with the existing Property and configuration permissions. Check both the actor's held restrictions and current stored account authority before reading private values or writing rules, then check again after the audit inside the same tenant transaction. A late withdrawal rolls back the entire command and its audit. Undated configuration-history operations require unconditional configuration authority rather than inventing an amount or event timestamp.
+
+The Property page applies the same financial-source gate before loading agreement terms or rendering their forms. Authorized reads append `owner_agreement.read` metadata containing the count and registered rule keys; references, amounts and private terms stay out of that audit. Registered keys also let the existing audit presentation enforce the underlying financial-source permissions.
+
+Canonical Owner, Property, Agreement and configuration models remain the only source of business data. Financial calculations, balances, append-only history, applied migrations and existing browser assertion deadlines are unchanged. Regression coverage uses real stored role assignments and tests withdrawal at the read and write audits; browser acceptance must exercise actual authentication and current grant expiry.
