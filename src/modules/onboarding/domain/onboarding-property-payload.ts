@@ -3,10 +3,12 @@ import {encryptBytes,decryptBytes} from "@/platform/auth/secret-encryption";
 import {requirePrivatePayloadKeys} from "@/platform/auth/private-payload-keys";
 import {parseConfiguredOnboardingPropertyProfile} from "@/platform/onboarding/contracts";
 import {onboardingPayloadBindingSchema} from "./onboarding-payload";
-import {onboardingOwnerSchema,OnboardingConfigurationError} from "./onboarding-wizard";
+import {onboardingOwnerSchema,OnboardingConfigurationError,onboardingMaximumRequestBytes} from "./onboarding-wizard";
 import {canonicalOnboardingPropertyCommand,onboardingPropertySnapshotSchema,type OnboardingPropertyCommand,type OnboardingPropertySnapshot} from "./onboarding-property";
 
 const bindingSchema=onboardingPayloadBindingSchema.extend({propertyId:z.uuid().transform(value=>value.toLowerCase())}).strict();
+// The bounded command, its original physical source and configured profile share this technical envelope.
+export const onboardingMaximumPropertyPayloadBytes=onboardingMaximumRequestBytes*3;
 export type OnboardingPropertyPayloadBinding=z.infer<typeof bindingSchema>;
 const payloadSchema=z.object({command:z.unknown(),originalOwner:onboardingOwnerSchema,originalProperty:onboardingPropertySnapshotSchema,initialOperatingProfile:z.unknown()}).strict();
 type PayloadInput={command:OnboardingPropertyCommand;originalOwner:z.infer<typeof onboardingOwnerSchema>;originalProperty:OnboardingPropertySnapshot;initialOperatingProfile:unknown};
@@ -22,8 +24,8 @@ function bound(raw:unknown,binding:OnboardingPropertyPayloadBinding){
  return{command,originalOwner:value.originalOwner,originalProperty:value.originalProperty,initialOperatingProfile:parseConfiguredOnboardingPropertyProfile(value.initialOperatingProfile)};
 }
 export function encryptOnboardingPropertyPayload(raw:PayloadInput,binding:OnboardingPropertyPayloadBinding,env:NodeJS.ProcessEnv=process.env){
- requirePrivatePayloadKeys(env,true,()=>new OnboardingConfigurationError());const plain=Buffer.from(JSON.stringify(bound(raw,binding)),"utf8");try{return encryptBytes(plain,context(binding),env);}finally{plain.fill(0);}
+ requirePrivatePayloadKeys(env,true,()=>new OnboardingConfigurationError());const plain=Buffer.from(JSON.stringify(bound(raw,binding)),"utf8");try{if(plain.byteLength>onboardingMaximumPropertyPayloadBytes)throw new OnboardingConfigurationError();const cipher=encryptBytes(plain,context(binding),env);if(cipher.byteLength>onboardingMaximumPropertyPayloadBytes){cipher.fill(0);throw new OnboardingConfigurationError();}return cipher;}finally{plain.fill(0);}
 }
 export function decryptOnboardingPropertyPayload(cipher:Uint8Array,binding:OnboardingPropertyPayloadBinding,env:NodeJS.ProcessEnv=process.env){
- requirePrivatePayloadKeys(env,false,()=>new OnboardingConfigurationError());const plain=decryptBytes(cipher,context(binding),env);try{return bound(JSON.parse(plain.toString("utf8")),binding);}finally{plain.fill(0);}
+ requirePrivatePayloadKeys(env,false,()=>new OnboardingConfigurationError());if(cipher.byteLength>onboardingMaximumPropertyPayloadBytes)throw new OnboardingConfigurationError();const plain=decryptBytes(cipher,context(binding),env);try{return bound(JSON.parse(plain.toString("utf8")),binding);}finally{plain.fill(0);}
 }

@@ -7,6 +7,7 @@ import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {z} from "zod";
 import {propertyInputSchema} from "@/modules/core/domain/owner-property";
 import {commandFingerprint} from "@/platform/http/command-fingerprint";
+import {isDeepStrictEqual} from "node:util";
 
 export function nativeOnboardingPropertyHeads(tx:TenantTransaction,organizationId:string,ids:readonly string[],includeArchived=false){return new CoreRepository(tx,organizationId).onboardingPropertyHeads(ids,includeArchived);}
 export function lockNativeOnboardingProperty(tx:TenantTransaction,organizationId:string,propertyId:string){return new CoreRepository(tx,organizationId).lockOnboardingProperty(propertyId);}
@@ -19,12 +20,14 @@ export async function configuredNativeOnboardingPropertyProfile(tx:TenantTransac
  const repository=new ConfigRuleRepository(tx,organizationId),rule=await repository.resolve({key:reference.key,scopes:[{scopeType:"organization",scopeId:null}],asOf:now});
  if(!rule?.createdBy||rule.lifecycle!=="ACTIVE")throw new Error("native_onboarding_property_configuration_required");
  const witness=await repository.sourceWitness(rule.id);
- if(!witness||witness.key!==reference.key||witness.version!==rule.version||witness.scopeType!=="organization"||witness.scopeId!==null||witness.archivedAt!==null||witness.lifecycle!=="ACTIVE"||witness.createdBy!==rule.createdBy||commandFingerprint(witness.value)!==commandFingerprint(rule.parsedValue))throw new Error("native_onboarding_property_configuration_required");
+ if(!witness||witness.key!==reference.key||witness.version!==rule.version||witness.scopeType!=="organization"||witness.scopeId!==null||witness.archivedAt!==null||witness.lifecycle!=="ACTIVE"||witness.createdBy!==rule.createdBy||!isDeepStrictEqual(witness.value,rule.parsedValue))throw new Error("native_onboarding_property_configuration_required");
  const value=z.object({rules:z.record(z.string(),z.unknown())}).passthrough().parse(rule.parsedValue);
  if(!Object.hasOwn(value.rules,reference.entry))throw new Error("native_onboarding_property_configuration_required");
  return{ruleId:rule.id,version:rule.version,key:reference.key,entry:reference.entry,pin:{id:rule.id,version:rule.version,key:reference.key,entry:reference.entry,xmin:witness.xmin,tuple:witness.tuple},profile:parseConfiguredOnboardingPropertyProfile(value.rules[reference.entry])};
 }
 export async function createNativeOnboardingProperty(actor:AccountActorContext,tx:TenantTransaction,raw:unknown,requestId:string,configuredProfile:unknown){
  const input=propertyInputSchema.parse({...onboardingPropertyInputSchema.parse(raw),operatingProfile:parseConfiguredOnboardingPropertyProfile(configuredProfile)}),{createProperty}=await import("@/modules/core/application/core-service");
- return createProperty(actor,input,{db:{$transaction:work=>work(tx)},requestId});
+ const created=await createProperty(actor,input,{db:{$transaction:work=>work(tx)},requestId}),profile=await new CoreRepository(tx,actor.organizationId).onboardingPropertyOperatingProfile(created.id);
+ if(!profile||commandFingerprint(parseConfiguredOnboardingPropertyProfile({...profile,midStayCleaningRuleKey:profile.midStayCleaningRuleKey??undefined,automationNotes:profile.automationNotes??undefined}))!==commandFingerprint(input.operatingProfile))throw new Error("native_onboarding_property_source_changed");
+ return created;
 }
