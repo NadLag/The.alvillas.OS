@@ -50,5 +50,5 @@ export async function nativeOnboardingOperatingRule(tx:TenantTransaction,organiz
  if(!rule?.createdBy||rule.lifecycle!=="ACTIVE")throw new Error("native_onboarding_operating_configuration_required");
  const witness=await repository.sourceWitness(rule.id);
  if(!witness||witness.key!==key||witness.version!==rule.version||witness.scopeType!==rule.scopeType||witness.scopeId!==rule.scopeId||witness.lifecycle!=="ACTIVE"||witness.archivedAt!==null||witness.createdBy!==rule.createdBy||!isDeepStrictEqual(witness.value,rule.value))throw new Error("native_onboarding_operating_configuration_required");
- return{scopes,pin:{id:rule.id,key,version:rule.version,scopeType:rule.scopeType,scopeId:rule.scopeId,xmin:witness.xmin,tuple:witness.tuple},value:rule.parsedValue};
+ return{scopes,pin:{id:rule.id,key,version:rule.version,scopeType:rule.scopeType,scopeId:rule.scopeId,xmin:witness.xmin,tuple:witness.tuple},value:rule.value};
 }

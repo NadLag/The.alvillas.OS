@@ -23,8 +23,9 @@ import {parseConfiguredOnboardingPropertyProfile} from "@/platform/onboarding/co
 import {onboardingPropertyChoicesInputSchema,onboardingPropertyChoicesSchema,canonicalOnboardingPropertyDraft,canonicalOnboardingPropertyCommand,onboardingPropertyReviewSchema,onboardingPropertyReadSchema,type OnboardingPropertyDraft,type OnboardingPropertyCommand} from "../domain/onboarding-property";
 import {encryptOnboardingPropertyPayload,decryptOnboardingPropertyPayload} from "../domain/onboarding-property-payload";
 import {canonicalOnboardingRecordDraft,canonicalOnboardingRecordCommand,onboardingRecordSchema} from "../domain/onboarding-record";
-import {nativeOnboardingOperatingProfile,nativeOnboardingOperatingRule} from "@/platform/onboarding/property-source";
-import {canonicalOnboardingOperatingDraft,onboardingOperatingReviewSchema,proposedNativeOperatingProfile,type OnboardingOperatingDraft} from "../domain/onboarding-operating-profile";
+import {nativeOnboardingOperatingProfile,nativeOnboardingOperatingRule,updateNativeOnboardingOperatingProfile} from "@/platform/onboarding/property-source";
+import {canonicalOnboardingOperatingDraft,canonicalOnboardingOperatingCommand,onboardingOperatingReviewSchema,proposedNativeOperatingProfile,type OnboardingOperatingDraft,type OnboardingOperatingCommand} from "../domain/onboarding-operating-profile";
+import {encryptOnboardingOperatingPayload,decryptOnboardingOperatingPayload} from "../domain/onboarding-operating-payload";
 
 export type OnboardingDependencies={db:TenantTransactionRunner;env?:NodeJS.ProcessEnv;requestId?:string};
 const uuid=z.uuid().transform(value=>value.toLowerCase()),optionsInput=z.object({sessionId:uuid.optional()}).strict(),directoryInput=z.object({cursor:z.string().max(6000).optional()}).strict(),recoverInput=z.object({idempotencyKey:uuid,sessionId:uuid.optional()}).strict(),protocol="NATIVE_PRIVATE_PROPERTY_ONBOARDING_V1";
@@ -113,10 +114,15 @@ function retainedProperty(row:Row,env?:NodeJS.ProcessEnv){
  const value=decryptOnboardingPropertyPayload(row.encryptedPayload,{...binding(row),propertyId:row.propertyId},env);
  if(value.command.reviewFingerprint!==row.reviewFingerprint||value.command.previousRevisionId!==row.previousId||value.command.target.mode!==row.mode)throw new OnboardingConfigurationError();return value;
 }
-async function recoverPropertyExisting(actor:AccountActorContext,tx:TenantTransaction,row:Row,deps:OnboardingDependencies,command?:OnboardingPropertyCommand|OnboardingCommand){
- if(row.createdBy!==actor.actorId)throw new OnboardingAccessError();if(row.step!=="PROPERTY"||!row.propertyId)throw new OnboardingConflictError();
+function retainedOperating(row:Row,env?:NodeJS.ProcessEnv){
+ if(row.step!=="OPERATING_PROFILE"||!row.propertyId)throw new OnboardingConflictError();
+ const value=decryptOnboardingOperatingPayload(row.encryptedPayload,{...binding(row),propertyId:row.propertyId},env);
+ if(value.command.reviewFingerprint!==row.reviewFingerprint||value.command.previousRevisionId!==row.previousId||value.command.target.mode!==row.mode)throw new OnboardingConfigurationError();return value;
+}
+async function recoverPropertyExisting(actor:AccountActorContext,tx:TenantTransaction,row:Row,deps:OnboardingDependencies,command?:OnboardingPropertyCommand|OnboardingOperatingCommand|OnboardingCommand){
+ if(row.createdBy!==actor.actorId)throw new OnboardingAccessError();if(!["PROPERTY","OPERATING_PROFILE"].includes(row.step)||!row.propertyId)throw new OnboardingConflictError();
  const base=await sessionContext(actor,tx,row.sessionId);await authority(actor,tx,[{action:"view",resource:resource(actor.organizationId,row)}]);await ownerRead(actor,tx,row.ownerId,false,true);await propertyRead(actor,tx,row.propertyId,row.ownerId,false,true);
- if(command&&!timingSafeEqual(Buffer.from(commandFingerprint(retainedProperty(row,deps.env).command),"hex"),Buffer.from(commandFingerprint(command),"hex")))throw new OnboardingConflictError();
+ if(command&&!timingSafeEqual(Buffer.from(commandFingerprint((row.step==="PROPERTY"?retainedProperty(row,deps.env):retainedOperating(row,deps.env)).command),"hex"),Buffer.from(commandFingerprint(command),"hex")))throw new OnboardingConflictError();
  await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"onboarding.step_recovered",resourceType:"onboarding",resourceId:row.sessionId,after:{sessionId:row.sessionId,revisionId:row.id,commandHash:row.commandHash},requestId:deps.requestId??randomUUID(),occurredAt:await base.repository.clock()});
  await authority(actor,tx,[{action:"view",resource:resource(actor.organizationId,row)},{action:"view",resource:resource(actor.organizationId,base.row)}]);await ownerRead(actor,tx,row.ownerId,false,true);await propertyRead(actor,tx,row.propertyId,row.ownerId,false,true);return receipt(row,true);
 }
@@ -146,6 +152,44 @@ export async function admitOnboardingPropertyStep(actor:AccountActorContext,raw:
   if(input.target.mode==="CREATE")await authority(ctx,tx,[{action:"create",resource:propertyResource(ctx.organizationId,finalHead,row.ownerId),organizationOnly:true}]);
   let finalConfiguration=null;if(base.creationConfiguration){const reference=base.configured.policy.property_creation_rule;if(!reference)throw new OnboardingConfigurationError();finalConfiguration=await configuredNativeOnboardingPropertyProfile(tx,ctx.organizationId,reference,await repository.clock());if(commandFingerprint(finalConfiguration)!==commandFingerprint(base.creationConfiguration))throw new OnboardingConflictError();}
   const finalOwner=await nativeOnboardingOwnerWitness(tx,ctx.organizationId,row.ownerId),[finalProperty]=await nativeOnboardingPropertyHeads(tx,ctx.organizationId,[propertyId]);if(!finalOwner||!finalProperty||commandFingerprint(propertySnapshot(finalOwner,finalProperty,finalConfiguration?.pin??null))!==sourceFingerprint||commandFingerprint((await settings(tx,ctx.organizationId,await repository.clock())).snapshot)!==commandFingerprint(base.configured.snapshot))throw new OnboardingConflictError();await repository.validateBirth();return receipt(row);
+ });
+}
+export async function admitOnboardingOperatingStep(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
+ const ctx=actorContext(actor),input=canonicalOnboardingOperatingCommand(raw),draft=canonicalOnboardingOperatingDraft({sessionId:input.sessionId,previousRevisionId:input.previousRevisionId,step:input.step,target:input.target});
+ const budget=await withTenant(deps.db,ctx.organizationId,async tx=>{
+  const repository=new OnboardingRepository(tx,ctx.organizationId),existing=await repository.byNonce(input.idempotencyKey);let policy,snapshot;
+  if(existing){if(existing.createdBy!==ctx.actorId)throw new OnboardingAccessError();if(existing.step!=="OPERATING_PROFILE"||!existing.propertyId)throw new OnboardingConflictError();await sessionContext(ctx,tx,existing.sessionId);await ownerRead(ctx,tx,existing.ownerId,false,true);await propertyRead(ctx,tx,existing.propertyId,existing.ownerId,false,true);policy=retainedPolicy(existing);snapshot=existing.policySnapshot;}
+  else{const base=await operatingDraftContext(ctx,tx,draft);policy=base.configured.policy;snapshot=base.configured.snapshot;}
+  return{snapshot,decision:await consumeRateLimit(tx,ctx.organizationId,{key:"onboarding:admission:organization",limit:policy.admission.requests,windowSeconds:policy.admission.window_seconds,now:await repository.clock()})};
+ });if(!budget.decision.allowed)throw new OnboardingRateLimitError(budget.decision.resetAt);
+ return withTenant(deps.db,ctx.organizationId,async tx=>{
+  const repository=new OnboardingRepository(tx,ctx.organizationId);await repository.lockCommand(input.idempotencyKey);const existing=await repository.byNonce(input.idempotencyKey);if(existing)return recoverPropertyExisting(ctx,tx,existing,deps,input);
+  await repository.lockSession(input.sessionId);const configuration=new ConfigRuleRepository(tx,ctx.organizationId);await configuration.lockVersion(onboardingPolicyKey,"organization",null);
+  const previous=await repository.current(input.sessionId);if(!previous||previous.id!==input.previousRevisionId||previous.propertyId!==input.target.propertyId)throw new OnboardingConflictError();
+  await lockNativeOnboardingOwner(tx,ctx.organizationId,previous.ownerId);await lockNativeOnboardingProperty(tx,ctx.organizationId,input.target.propertyId);
+  const base=await operatingDraftContext(ctx,tx,draft);if(base.reviewFingerprint!==input.reviewFingerprint||commandFingerprint(base.configured.snapshot)!==commandFingerprint(budget.snapshot))throw new OnboardingConflictError();
+  // Lock every actual candidate, including scopes without a rule, before admitting its resolved version.
+  if(base.source.operatingRule)for(const scope of [...base.source.operatingRule.scopes].sort((left,right)=>`${left.scopeType}:${left.scopeId??""}`.localeCompare(`${right.scopeType}:${right.scopeId??""}`)))await configuration.lockVersion(base.source.operatingRule.pin.key,scope.scopeType,scope.scopeId);
+  if((await operatingDraftContext(ctx,tx,draft)).reviewFingerprint!==base.reviewFingerprint)throw new OnboardingConflictError();
+  const requestId=deps.requestId??randomUUID(),propertyId=input.target.propertyId;
+  const originalOperatingProfile=input.target.mode==="UPDATE"?await updateNativeOnboardingOperatingProfile(ctx,tx,propertyId,input.target.input,requestId):await nativeOnboardingOperatingProfile(tx,ctx.organizationId,propertyId);
+  if(!originalOperatingProfile||commandFingerprint(originalOperatingProfile)!==commandFingerprint(base.operatingProfile))throw new OnboardingConflictError();
+  const ownerWitness=await nativeOnboardingOwnerWitness(tx,ctx.organizationId,base.current.ownerId),[head]=await nativeOnboardingPropertyHeads(tx,ctx.organizationId,[propertyId]);
+  if(!ownerWitness||!head||commandFingerprint(sourceSnapshot(ownerWitness))!==commandFingerprint(sourceSnapshot(base.ownerWitness)))throw new OnboardingConflictError();
+  const physical=propertySnapshot(ownerWitness,head,null);
+  if(commandFingerprint({...physical.property,operatingProfile:null})!==commandFingerprint({...base.source.property.property,operatingProfile:null}))throw new OnboardingConflictError();
+  const operatingRule=await nativeOnboardingOperatingRule(tx,ctx.organizationId,propertyId,base.current.ownerId,originalOperatingProfile,await repository.clock());
+  if(commandFingerprint(operatingRule)!==commandFingerprint(base.source.operatingRule))throw new OnboardingConflictError();
+  const source={source:"CORE_PROPERTY_OPERATING_PROFILE",property:physical,profileFingerprint:commandFingerprint(originalOperatingProfile),operatingRule};
+  if(input.target.mode==="LINK"&&commandFingerprint(source)!==commandFingerprint(base.source))throw new OnboardingConflictError();
+  const id=randomUUID(),createdAt=await repository.clock(),authorizationCap=captureAuthorizationCap(ctx.authContext),sourceFingerprint=commandFingerprint(source),encryptedPayload=encryptOnboardingOperatingPayload({command:input,originalOwner:base.owner,originalProperty:base.property,previousOperatingProfile:base.previousOperatingProfile,originalOperatingProfile,operatingRule:operatingRule?{id:operatingRule.pin.id,key:operatingRule.pin.key,version:operatingRule.pin.version,value:operatingRule.value}:null},{organizationId:ctx.organizationId,sessionId:input.sessionId,revisionId:id,ownerId:base.current.ownerId,propertyId,createdBy:ctx.actorId,commandKey:input.idempotencyKey,policyId:base.configured.rule.id,policyVersion:base.configured.rule.version},deps.env),payloadSha256=createHash("sha256").update(encryptedPayload).digest("hex"),commandHash=commandFingerprint({protocol,draft,idempotencyKey:input.idempotencyKey,reviewFingerprint:input.reviewFingerprint,source,sourceFingerprint,payloadSha256,policy:base.configured.snapshot,authorizationCap});
+  const row=await repository.createRevision({id,sessionId:input.sessionId,previousId:base.current.id,number:base.current.number+1,step:"OPERATING_PROFILE",ownerId:base.current.ownerId,propertyId,mode:input.target.mode,createdBy:ctx.actorId,createdAt,commandKey:input.idempotencyKey,commandHash,reviewFingerprint:input.reviewFingerprint,sourceFingerprint,sourceSnapshot:source,encryptedPayload,payloadSha256,policyId:base.configured.rule.id,policyVersion:base.configured.rule.version,policySnapshot:base.configured.snapshot,authorizationCap,requestId});
+  await new OutboxRepository(tx,ctx.organizationId).append("onboarding.step_recorded",{sessionId:row.sessionId,revisionId:row.id,step:row.step,ownerId:row.ownerId,propertyId:row.propertyId},"onboarding.step:"+row.id,row.createdAt);
+  await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"onboarding.step_recorded",resourceType:"onboarding",resourceId:row.sessionId,after:{sessionId:row.sessionId,revisionId:row.id,previousRevisionId:row.previousId,number:row.number,step:row.step,ownerId:row.ownerId,propertyId:row.propertyId,mode:row.mode,commandHash:row.commandHash,payloadSha256:row.payloadSha256,sourceFingerprint:row.sourceFingerprint,reviewFingerprint:row.reviewFingerprint,policyId:row.policyId},requestId:row.requestId,occurredAt:row.createdAt});
+  const fresh=await sessionContext(ctx,tx,row.sessionId,"edit",true);if(fresh.row.id!==row.id)throw new OnboardingConflictError();await ownerRead(ctx,tx,row.ownerId);const finalHead=await propertyRead(ctx,tx,propertyId,row.ownerId,input.target.mode==="UPDATE"),finalOwner=await nativeOnboardingOwnerWitness(tx,ctx.organizationId,row.ownerId),finalProfile=await nativeOnboardingOperatingProfile(tx,ctx.organizationId,propertyId);
+  if(!finalOwner||!finalProfile)throw new OnboardingConflictError();const finalRule=await nativeOnboardingOperatingRule(tx,ctx.organizationId,propertyId,row.ownerId,finalProfile,await repository.clock());
+  if(commandFingerprint({source:"CORE_PROPERTY_OPERATING_PROFILE",property:propertySnapshot(finalOwner,finalHead,null),profileFingerprint:commandFingerprint(finalProfile),operatingRule:finalRule})!==sourceFingerprint||commandFingerprint((await settings(tx,ctx.organizationId,await repository.clock())).snapshot)!==commandFingerprint(base.configured.snapshot))throw new OnboardingConflictError();
+  await repository.validateBirth();return receipt(row);
  });
 }
 export async function recoverOnboardingPropertyStep(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
