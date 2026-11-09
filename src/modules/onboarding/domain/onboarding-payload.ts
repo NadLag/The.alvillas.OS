@@ -5,6 +5,7 @@ import {canonicalOnboardingCommand,onboardingOwnerSchema,OnboardingConfiguration
 
 const uuid=z.uuid().transform(value=>value.toLowerCase());
 const bindingSchema=z.object({organizationId:uuid,sessionId:uuid,revisionId:uuid,ownerId:uuid,createdBy:uuid,commandKey:uuid,policyId:uuid,policyVersion:z.number().int().positive()}).strict();
+export {bindingSchema as onboardingPayloadBindingSchema};
 export type OnboardingPayloadBinding=z.infer<typeof bindingSchema>;
 const payloadSchema=z.object({command:z.unknown(),originalOwner:onboardingOwnerSchema}).strict();
 function context(raw:OnboardingPayloadBinding){const b=bindingSchema.parse(raw);return JSON.stringify(["alvillas-private-property-onboarding-v1",b.organizationId,b.sessionId,b.revisionId,b.ownerId,b.createdBy,b.commandKey,b.policyId,b.policyVersion]);}
