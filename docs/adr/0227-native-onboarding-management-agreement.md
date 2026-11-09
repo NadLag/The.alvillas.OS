@@ -1,0 +1,11 @@
+# ADR 0227 — Native Management Agreement during onboarding
+
+The Management Agreement step reuses the canonical Core agreement and its seven versioned configuration groups. It must not create another agreement model or change the Owner, Property, balances or payout accounts. The reviewed contract separates selecting an existing agreement from explicitly entering new terms.
+
+Core supplies the shared field validation. The native input requires every financial choice, including explicit nullable end date and approval threshold, currency, approval participants, hold days, holdback, responsibilities and conditions. It must not select Core defaults or an implicit approval key. Threshold amounts remain decimal strings; integer rates remain basis points. Dates normalize to ISO instants so the original reviewed command survives JSON serialization unchanged.
+
+Native creation must pass the actual predecessor Property, the command's single Core-compatible audit reason and explicit DRAFT lifecycle to the existing Core creation service in the same transaction. It cannot activate an agreement or a Property. Existing signed-document and legal acceptance requirements remain separate dependencies; entering terms is not legal approval.
+
+The native source and publication boundaries must require independent current and held financial configuration authority alongside operational onboarding and Owner/Property access. Financial terms and complete original configuration values belong in authenticated encrypted history. Plaintext source witnesses contain only actual native identities, versions and tuple pins. Post-audit validation must reload authority and source state; later amendments or retirement must not replace recorded original terms.
+
+The contract alone does not enable the shared command routes or satisfy this producer. Actual source selection, review, durable admission, immutable original history, recovery, private APIs, localized UI and complete acceptance remain required before its ordered PR can qualify.

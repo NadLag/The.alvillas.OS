@@ -318,6 +318,15 @@ export const managementAgreementInputSchema = z
 
 export type ManagementAgreementInput = z.infer<typeof managementAgreementInputSchema>;
 
+/** Shared reviewed terms; creation supplies its actual Property, lifecycle and audit reason. */
+export const managementAgreementDraftTermsSchema = z
+  .object({ reference: managementAgreementInputSchema.shape.reference, ...managementAgreementTermFields })
+  .omit({ reason: true })
+  .refine(validManagementAgreementDateRange, {
+    message: "Agreement end date must be after the effective date",
+    path: ["effectiveTo"]
+  });
+
 export const managementAgreementAmendmentInputSchema = z
   .object({
     propertyId: z.string().uuid(),
