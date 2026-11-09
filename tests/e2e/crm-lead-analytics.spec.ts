@@ -14,6 +14,7 @@ import fr from "../../messages/fr.json" with {type:"json"};
 import ar from "../../messages/ar.json" with {type:"json"};
 
 import {forwardBrowserPostOnce} from "./support/forward-browser-post";
+import {utcDateTimeLocalValue} from "./support/date-time-local";
 const messages={en,fr,ar};
 type ObservedRead={status:()=>number;json:()=>Promise<unknown>;text:()=>Promise<string>};
 async function observeAnalyticsReadOnce(page:Page){
@@ -39,8 +40,8 @@ for(const locale of["en","fr","ar"]as const)test("Actual original acquisition an
   });
   for(const source of sources)await captureLead(actor,{...f.input,idempotencyKey:randomUUID(),channel:"MANUAL",sourceKey:source.key},{db});
   await page.getByRole("link",{name:messages[locale].LeadAnalytics.title,exact:true}).click();await expect(page.getByTestId("lead-analytics-form")).toBeVisible();
-  const from=original.createdAt.toISOString(),number=new Intl.NumberFormat(locale),copy=messages[locale].LeadAnalytics;
-  await page.getByTestId("lead-analytics-from").fill(from.replace(/Z$/u,""));
+  const from=utcDateTimeLocalValue(original.createdAt),number=new Intl.NumberFormat(locale),copy=messages[locale].LeadAnalytics;
+  expect(new Date(from+"Z").toISOString()).toBe(original.createdAt.toISOString());await page.getByTestId("lead-analytics-from").fill(from);
   const response=await observeAnalyticsReadOnce(page);await page.getByTestId("lead-analytics-run").click();
   const read=await response.completed;await response.stop();expect(read.status()).toBe(200);const report=leadAnalyticsResultSchema.parse(await read.json());
   expect(report.totals).toMatchObject({captured:"26",converted:"1"});expect(report.sources).toHaveLength(26);expect(report.totals.stages.find(stage=>stage.stage==="SIGNED")?.count).toBe("1");
@@ -56,7 +57,7 @@ for(const locale of["en","fr","ar"]as const)test("Actual original acquisition an
   expect((await new AxeBuilder({page}).include("main").analyze()).violations).toEqual([]);await page.screenshot({path:info.outputPath("actual-original-acquisition-analytics-"+locale+"-360.png"),fullPage:true});
   await context.setOffline(true);await expect(page.getByTestId("lead-analytics-private-unavailable")).toBeVisible();await expect(page.getByTestId("lead-analytics-report")).toHaveCount(0);await expect(page.getByTestId("lead-analytics-from")).toHaveCount(0);
   await context.setOffline(false);await expect(page.getByTestId("lead-analytics-form")).toBeVisible();await expect(page.getByTestId("lead-analytics-from")).toHaveValue("");await expect(page.getByTestId("lead-analytics-report")).toHaveCount(0);
-  await page.getByTestId("lead-analytics-from").fill(from.replace(/Z$/u,""));
+  await page.getByTestId("lead-analytics-from").fill(from);
   const withdrawn=await withTenant(db,bootstrapOrganizationId,async tx=>{const row=await tx.roleAssignment.findUniqueOrThrow({where:{id:f.grants["lead:export"]}});await tx.roleAssignment.update({where:{id:row.id},data:{validTo:new Date("2020-01-02")}});return row;});
   const denied=await observeAnalyticsReadOnce(page);await page.getByTestId("lead-analytics-run").click();const rejected=await denied.completed;await denied.stop();expect(rejected.status()).toBe(403);expect(await rejected.text()).not.toContain(f.owner);await expect(page.getByTestId("lead-analytics-private-unavailable")).toBeVisible();await expect(page.getByTestId("lead-analytics-report")).toHaveCount(0);
   // Restore by a new assignment; preserve the withdrawn grant and its history.
