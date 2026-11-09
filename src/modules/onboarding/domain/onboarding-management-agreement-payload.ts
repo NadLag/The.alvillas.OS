@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {isDeepStrictEqual} from "node:util";
 import {encryptBytes,decryptBytes} from "@/platform/auth/secret-encryption";
 import {requirePrivatePayloadKeys} from "@/platform/auth/private-payload-keys";
 import {commandFingerprint} from "@/platform/http/command-fingerprint";
@@ -23,8 +24,8 @@ function bound(raw:unknown,binding:OnboardingManagementAgreementPayloadBinding){
  if(command.target.mode==="LINK"){
   if(command.target.agreementId!==b.agreementId||value.previousAgreement===null||commandFingerprint(value.previousAgreement)!==commandFingerprint(agreement))throw new OnboardingConfigurationError();
  }else{
-  const input=command.target.input,expected=nativeOnboardingManagementAgreementRuleValues({...input,approvalThresholdKey:input.approvalThresholdKey??undefined,approvalThresholdAmount:input.approvalThresholdAmount??undefined});
-  if(value.previousAgreement!==null||agreement.status!=="DRAFT"||agreement.reference!==input.reference||agreement.effectiveFrom!==input.effectiveFrom||agreement.effectiveTo!==input.effectiveTo||agreement.rules.some(rule=>{const original=expected.find(item=>item.key===rule.key);return!original||rule.version!==1||rule.lifecycle!=="DRAFT"||rule.effectiveFrom!==input.effectiveFrom||rule.effectiveTo!==input.effectiveTo||rule.reason!==command.reason||commandFingerprint(rule.value)!==commandFingerprint(original.value);}))throw new OnboardingConfigurationError();
+  const input=command.target.input,expected=nativeOnboardingManagementAgreementRuleValues({...input,approvalThresholdKey:input.approvalThresholdKey??undefined,approvalThresholdAmount:input.approvalThresholdAmount??undefined}).map(rule=>({...rule,value:parseConfigRuleValue(rule.key,rule.value)}));
+  if(value.previousAgreement!==null||agreement.status!=="DRAFT"||agreement.reference!==input.reference||agreement.effectiveFrom!==input.effectiveFrom||agreement.effectiveTo!==input.effectiveTo||agreement.rules.some(rule=>{const original=expected.find(item=>item.key===rule.key);return!original||rule.version!==1||rule.lifecycle!=="DRAFT"||rule.effectiveFrom!==input.effectiveFrom||rule.effectiveTo!==input.effectiveTo||rule.reason!==command.reason||!isDeepStrictEqual(rule.value,original.value);}))throw new OnboardingConfigurationError();
  }
  return{command,originalOwner:value.originalOwner,originalProperty:value.originalProperty,previousAgreement:value.previousAgreement,originalAgreement:agreement};
 }

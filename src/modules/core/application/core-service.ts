@@ -111,20 +111,6 @@ async function currentAgreementFinancialAuthority(ctx:CoreActorContext,tx:Parame
   await recheckFinancialRuleAccess(ctx,tx,commissionConfigKey,checks,new CoreAuthorizationError());
 }
 
-/** Configuration permission cannot grant the underlying financial sources. */
-export function canAccessManagementAgreementFinancialRules(ctx:CoreActorContext):boolean{
-  return agreementConfigKeys.filter(key=>protectedFinancialRuleKey(key)).every(key=>financialRuleAccess(ctx.authContext,"view",new Date(),key));
-}
-
-function assertAgreementFinancialAllowed(ctx:CoreActorContext):void{
-  if(!canAccessManagementAgreementFinancialRules(ctx))throw new CoreAuthorizationError();
-}
-
-async function currentAgreementFinancialAuthority(ctx:CoreActorContext,tx:Parameters<typeof recheckFinancialRuleAccess>[1],propertyId:string,write=false){
-  const checks:CurrentAuthorityCheck[]=[{action:write?"edit":"view",resource:{type:"property",organizationId:ctx.organizationId,id:propertyId,propertyId}},...(write?["create","configure"]as const:["view"]as const).map(action=>({action,unconditional:true,resource:{type:"config_rule",organizationId:ctx.organizationId,id:"agreement:"+propertyId,propertyId,dataClass:"financial"as const}})),...agreementConfigKeys.filter(key=>key!==commissionConfigKey).flatMap(key=>financialRuleSourceChecks(ctx.organizationId,key))];
-  await recheckFinancialRuleAccess(ctx,tx,commissionConfigKey,checks,new CoreAuthorizationError());
-}
-
 const propertyLifecycleTransitions: Record<PropertyLifecycleStatus, readonly PropertyLifecycleStatus[]> = {
   DRAFT: ["ONBOARDING"],
   ONBOARDING: ["ACTIVE"],
