@@ -1,7 +1,7 @@
 import {z} from "zod";
 import {onboardingOwnerInputSchema} from "@/platform/onboarding/contracts";
 import {onboardingStepSchema,onboardingSteps} from "./onboarding-policy";
-import {onboardingIdSchema as uuid,onboardingFingerprintSchema as sha256,onboardingCommandFields} from "./onboarding-contract";
+import {onboardingIdSchema as uuid,onboardingFingerprintSchema as sha256,onboardingCommandFields,onboardingOwnerSchema} from "./onboarding-contract";
 export {onboardingIdSchema,onboardingCommandFields} from "./onboarding-contract";
 
 export const onboardingMaximumRequestBytes=65536;
@@ -13,7 +13,7 @@ export const onboardingDraftSchema=z.object({sessionId:uuid.nullable(),previousR
 export const onboardingCommandSchema=onboardingDraftSchema.safeExtend(onboardingCommandFields);
 export type OnboardingDraft=z.infer<typeof onboardingDraftSchema>;
 export type OnboardingCommand=z.infer<typeof onboardingCommandSchema>;
-export const onboardingOwnerSchema=z.object({displayName:z.string(),email:z.string().nullable(),phone:z.string().nullable(),preferredLocale:z.enum(["en","fr","ar"])}).strict();
+export {onboardingOwnerSchema} from "./onboarding-contract";
 export const onboardingReceiptSchema=z.object({id:uuid,sessionId:uuid,previousRevisionId:uuid.nullable(),number:z.number().int().positive(),step:onboardingStepSchema,ownerId:uuid,propertyId:uuid.nullable(),createdAt:z.iso.datetime(),replayed:z.boolean()}).strict();
 export const onboardingReviewSchema=z.object({draft:onboardingDraftSchema,owner:onboardingOwnerSchema,reviewFingerprint:sha256}).strict();
 export const onboardingReadInputSchema=z.object({sessionId:uuid,revisionId:uuid.optional(),before:z.number().int().positive().optional()}).strict();

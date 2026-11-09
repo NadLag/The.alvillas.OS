@@ -191,6 +191,11 @@ export class ConfigRuleRepository {
     await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`config:${this.organizationId}:${key}:${scopeType}:${scopeId ?? ""}`}, 0))`);
   }
 
+  async sourceWitness(id:string){
+    const rows=await this.tx.$queryRaw<Array<{id:string;key:string;version:number;scopeType:string;scopeId:string|null;lifecycle:string;createdBy:string|null;archivedAt:Date|null;value:Prisma.JsonValue;xmin:string;tuple:string}>>(Prisma.sql`SELECT id,key,version,scope_type AS "scopeType",scope_id AS "scopeId",lifecycle,created_by AS "createdBy",archived_at AS "archivedAt",value,xmin::text,ctid::text AS tuple FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid`);
+    return rows[0]??null;
+  }
+
   async resolve(input: {
     key: string;
     scopes: readonly ConfigScopeCandidate[];

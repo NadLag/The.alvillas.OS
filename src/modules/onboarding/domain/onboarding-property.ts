@@ -1,6 +1,6 @@
 import {z} from "zod";
 import {onboardingPropertyInputSchema,onboardingPropertyStatusSchema} from "@/platform/onboarding/contracts";
-import {onboardingCommandFields,onboardingIdSchema} from "./onboarding-contract";
+import {onboardingCommandFields,onboardingIdSchema,onboardingFingerprintSchema,onboardingOwnerSchema} from "./onboarding-contract";
 
 export const onboardingPropertyTargetSchema=z.discriminatedUnion("mode",[
  z.object({mode:z.literal("CREATE"),input:onboardingPropertyInputSchema}).strict(),
@@ -21,6 +21,9 @@ export const onboardingPropertySnapshotSchema=z.object({
 export type OnboardingPropertySnapshot=z.infer<typeof onboardingPropertySnapshotSchema>;
 export const onboardingPropertyChoicesInputSchema=z.object({sessionId:onboardingIdSchema,query:z.string().trim().max(160).default(""),cursor:z.string().min(1).max(6000).optional()}).strict();
 export const onboardingPropertyChoicesSchema=z.object({properties:z.array(onboardingPropertySnapshotSchema.pick({id:true,name:true,addressLine1:true,city:true,status:true})).max(20),next:z.string().nullable()}).strict();
+export const onboardingPropertyReviewSchema=z.object({draft:onboardingPropertyDraftSchema,owner:onboardingOwnerSchema,property:onboardingPropertySnapshotSchema.nullable(),reviewFingerprint:onboardingFingerprintSchema}).strict().superRefine((value,context)=>{
+ if(value.draft.target.mode==="CREATE"?value.property!==null:value.property?.id!==value.draft.target.propertyId)context.addIssue({code:"custom",message:"native_onboarding_property_review_source_required"});
+});
 
 export function canonicalOnboardingPropertyDraft(raw:unknown):OnboardingPropertyDraft{
  const value=onboardingPropertyDraftSchema.parse(raw);return{sessionId:value.sessionId,previousRevisionId:value.previousRevisionId,step:"PROPERTY",target:value.target};
