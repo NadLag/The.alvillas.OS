@@ -15,10 +15,14 @@ export type OnboardingOperatingCommand=z.infer<typeof onboardingOperatingCommand
 export type OnboardingOperatingProfile=z.infer<typeof onboardingOperatingProfileSnapshotSchema>;
 export function nativeOperatingProfileSnapshot(raw:unknown):OnboardingOperatingProfile{return onboardingOperatingProfileSnapshotSchema.parse(raw);}
 export function proposedNativeOperatingProfile(input:Extract<OnboardingOperatingDraft["target"],{mode:"UPDATE"}>["input"]):OnboardingOperatingProfile{return nativeOperatingProfileSnapshot({...input,midStayCleaningRuleKey:input.midStayCleaningRuleKey??null,automationNotes:input.automationNotes??null});}
+export const onboardingOperatingRuleProjectionSchema=z.object({id:onboardingIdSchema,key:z.literal("ops.mid_stay_threshold"),version:z.number().int().positive(),nights:z.number().int().positive(),taskTemplateKey:z.string().nullable()}).strict();
+/** Present the selected operational values; retain the complete registered rule in the encrypted payload. */
+export function nativeOperatingRuleProjection(rule:{id:string;key:string;version:number;value:unknown}|null){if(!rule)return null;const value=z.object({nights:z.number().int().positive(),task_template_key:z.string().optional()}).parse(rule.value);return onboardingOperatingRuleProjectionSchema.parse({id:rule.id,key:rule.key,version:rule.version,nights:value.nights,taskTemplateKey:value.task_template_key??null});}
 
-const originalFields={draft:onboardingOperatingDraftSchema,owner:onboardingOwnerSchema,property:onboardingPropertySnapshotSchema,previousOperatingProfile:onboardingOperatingProfileSnapshotSchema.nullable(),operatingProfile:onboardingOperatingProfileSnapshotSchema};
+const originalFields={draft:onboardingOperatingDraftSchema,owner:onboardingOwnerSchema,property:onboardingPropertySnapshotSchema,previousOperatingProfile:onboardingOperatingProfileSnapshotSchema.nullable(),operatingProfile:onboardingOperatingProfileSnapshotSchema,operatingRule:onboardingOperatingRuleProjectionSchema.nullable()};
 function originalsMatch(value:z.infer<z.ZodObject<typeof originalFields>>){
  if(value.draft.target.propertyId!==value.property.id)return false;
+ if(value.operatingProfile.midStayCleaningEnabled?(value.operatingRule===null||value.operatingRule.key!==value.operatingProfile.midStayCleaningRuleKey):value.operatingRule!==null)return false;
  // Both projections have Core's canonical field order and explicit nullable fields.
  return value.draft.target.mode==="LINK"?value.previousOperatingProfile!==null&&JSON.stringify(value.previousOperatingProfile)===JSON.stringify(value.operatingProfile):JSON.stringify(proposedNativeOperatingProfile(value.draft.target.input))===JSON.stringify(value.operatingProfile);
 }

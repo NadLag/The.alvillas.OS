@@ -6,7 +6,7 @@ import {onboardingOperatingProfileSnapshotSchema} from "@/platform/onboarding/co
 import {onboardingPayloadBindingSchema} from "./onboarding-payload";
 import {onboardingOwnerSchema,OnboardingConfigurationError,onboardingMaximumRequestBytes} from "./onboarding-wizard";
 import {onboardingPropertySnapshotSchema} from "./onboarding-property";
-import {canonicalOnboardingOperatingCommand,canonicalOnboardingOperatingDraft,onboardingOperatingReviewSchema,type OnboardingOperatingCommand} from "./onboarding-operating-profile";
+import {canonicalOnboardingOperatingCommand,canonicalOnboardingOperatingDraft,onboardingOperatingReviewSchema,nativeOperatingRuleProjection,type OnboardingOperatingCommand} from "./onboarding-operating-profile";
 
 const bindingSchema=onboardingPayloadBindingSchema.extend({propertyId:z.uuid().transform(value=>value.toLowerCase())}).strict();
 export type OnboardingOperatingPayloadBinding=z.infer<typeof bindingSchema>;
@@ -19,7 +19,7 @@ function context(raw:OnboardingOperatingPayloadBinding){const b=bindingSchema.pa
 function bound(raw:unknown,binding:OnboardingOperatingPayloadBinding){
  const value=payloadSchema.parse(raw),command=canonicalOnboardingOperatingCommand(value.command),b=bindingSchema.parse(binding);
  if(command.sessionId!==b.sessionId||command.idempotencyKey!==b.commandKey||command.target.propertyId!==b.propertyId||value.originalProperty.id!==b.propertyId||!["DRAFT","ONBOARDING"].includes(value.originalProperty.status))throw new OnboardingConfigurationError();
- onboardingOperatingReviewSchema.parse({draft:canonicalOnboardingOperatingDraft({sessionId:command.sessionId,previousRevisionId:command.previousRevisionId,step:command.step,target:command.target}),owner:value.originalOwner,property:value.originalProperty,previousOperatingProfile:value.previousOperatingProfile,operatingProfile:value.originalOperatingProfile,reviewFingerprint:command.reviewFingerprint});
+ onboardingOperatingReviewSchema.parse({draft:canonicalOnboardingOperatingDraft({sessionId:command.sessionId,previousRevisionId:command.previousRevisionId,step:command.step,target:command.target}),owner:value.originalOwner,property:value.originalProperty,previousOperatingProfile:value.previousOperatingProfile,operatingProfile:value.originalOperatingProfile,operatingRule:nativeOperatingRuleProjection(value.operatingRule),reviewFingerprint:command.reviewFingerprint});
  if(value.originalOperatingProfile.midStayCleaningEnabled){if(!value.operatingRule||value.originalOperatingProfile.midStayCleaningRuleKey!==value.operatingRule.key)throw new OnboardingConfigurationError();}else if(value.operatingRule!==null)throw new OnboardingConfigurationError();
  return{command,originalOwner:value.originalOwner,originalProperty:value.originalProperty,previousOperatingProfile:value.previousOperatingProfile,originalOperatingProfile:value.originalOperatingProfile,operatingRule:value.operatingRule};
 }

@@ -138,3 +138,4 @@ prisma/migrations/20261108063000_native_lead_profile_history/migration.sql text 
 /prisma/migrations/20261109103000_native_onboarding_property_step/migration.sql text eol=lf
 
 /prisma/migrations/20261109110000_native_onboarding_shape_rejection/migration.sql text eol=lf
+/prisma/migrations/20261109143000_native_onboarding_operating_profile_step/migration.sql text eol=lf
