@@ -5404,7 +5404,8 @@
       "configuration_unavailable": "Les paramètres des prospects doivent être configurés avant de continuer.",
       "rate_limited": "Veuillez patienter avant un nouvel enregistrement.",
       "native_evidence_required": "Terminez les documents et les signatures requis avant de changer cette étape.",
-      "unavailable": "Les informations sont indisponibles. Rechargez pour réessayer."
+      "unavailable": "Les informations sont indisponibles. Rechargez pour réessayer.",
+      "range_too_broad": "Réduisez la période de capture pour respecter les limites de rapport approuvées."
     },
     "stageMovement": "{from} → {to}",
     "recoverWork": "Retrouver l’activité ou le rappel enregistré",
@@ -5508,5 +5509,37 @@
       "changeKind": "Modifier {kind}"
     },
     "nextStage": "Étape suivante"
+  },
+  "LeadAnalytics": {
+    "title": "Analyse des acquisitions",
+    "eyebrow": "Acquisition de propriétaires",
+    "guidance": "Identifiez les sources qui aboutissent à une conversion en propriétaire.",
+    "leadWorkspace": "Espace des acquisitions",
+    "rangeGuidance": "Choisissez une période de capture en UTC. Les modifications ultérieures du contact ou de la source conservent le libellé initial. Les conversions sont observées à la date du rapport.",
+    "captureWindow": "Période de capture",
+    "fromUtc": "Capturé à partir du · UTC",
+    "untilUtc": "Capturé avant le · UTC",
+    "run": "Consulter le rapport",
+    "observeNow": "Utiliser l’heure actuelle",
+    "allSources": "Toutes les sources d’acquisition",
+    "noReport": "Choisissez une période de capture pour consulter ses résultats.",
+    "reportTitle": "Cohorte d’acquisition initiale",
+    "observedAt": "Conversions et étapes observées le {date}",
+    "actualWindow": "Capturé à partir du {from}, avant le {until}",
+    "conversionFraction": "{converted} prospects convertis sur {captured} prospects capturés",
+    "filteredSource": "Ce rapport est filtré sur la source d’acquisition sélectionnée.",
+    "empty": "Aucun prospect capturé dans cette période pour cette source.",
+    "sourcesCaption": "Sources d’acquisition initiales",
+    "source": "Source à la capture",
+    "channel": "Canal de capture",
+    "captured": "Prospects capturés",
+    "converted": "Prospects convertis",
+    "sourceFilter": "Voir la source",
+    "filterSource": "Voir les acquisitions de {source}",
+    "sourcePages": "Pages des sources d’acquisition",
+    "previous": "Précédente",
+    "next": "Suivante",
+    "page": "Page {page} sur {pages}",
+    "stagesCaption": "Étapes au moment de l’observation"
   }
 }

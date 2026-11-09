@@ -5404,7 +5404,8 @@
       "configuration_unavailable": "Lead settings need to be configured before continuing.",
       "rate_limited": "Please wait before trying another save.",
       "native_evidence_required": "Complete the required documents and signatures before changing this stage.",
-      "unavailable": "Lead details are unavailable. Reload to try again."
+      "unavailable": "Lead details are unavailable. Reload to try again.",
+      "range_too_broad": "Narrow the capture window to stay within the approved reporting limits."
     },
     "stageMovement": "{from} → {to}",
     "recoverWork": "Recover saved activity or reminder",
@@ -5508,5 +5509,37 @@
       "changeKind": "Change {kind}"
     },
     "nextStage": "Next stage"
+  },
+  "LeadAnalytics": {
+    "title": "Acquisition analytics",
+    "eyebrow": "Owner acquisition",
+    "guidance": "See which acquisition sources lead to an Owner conversion.",
+    "leadWorkspace": "Acquisition workspace",
+    "rangeGuidance": "Choose a capture window in UTC. Later contact or source changes keep their original acquisition label. Conversions are observed at the report time.",
+    "captureWindow": "Capture window",
+    "fromUtc": "Captured from · UTC",
+    "untilUtc": "Captured before · UTC",
+    "run": "View acquisition report",
+    "observeNow": "Use current time",
+    "allSources": "All acquisition sources",
+    "noReport": "Choose a capture window to view its acquisition results.",
+    "reportTitle": "Original acquisition cohort",
+    "observedAt": "Conversions and pipeline observed at {date}",
+    "actualWindow": "Captured from {from}, before {until}",
+    "conversionFraction": "{converted} of {captured} captured Leads converted",
+    "filteredSource": "This report is filtered to the selected acquisition source.",
+    "empty": "No Leads were captured in this window for this source.",
+    "sourcesCaption": "Original acquisition sources",
+    "source": "Captured source",
+    "channel": "Capture channel",
+    "captured": "Leads captured",
+    "converted": "Leads converted",
+    "sourceFilter": "View source",
+    "filterSource": "View {source} acquisitions",
+    "sourcePages": "Acquisition source pages",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page {page} of {pages}",
+    "stagesCaption": "Pipeline at observation"
   }
 }

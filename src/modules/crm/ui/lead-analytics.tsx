@@ -1,0 +1,45 @@
+"use client";
+import {useCallback,useEffect,useMemo,useRef,useState,type FormEvent} from "react";
+import {useTranslations} from "next-intl";
+import {SkeletonBlock} from "@/design-system/shells";
+import {localizedText} from "@/i18n/content";
+import type {AppLocale} from "@/i18n/routing";
+import {leadAnalyticsInputSchema,leadAnalyticsOptionsSchema,leadAnalyticsResultSchema,type LeadAnalyticsResult} from "../domain/lead-analytics";
+import {leadRequest,LeadBrowserError,type LeadBrowserState} from "./lead-browser";
+import type {z} from "zod";
+
+const inputUtc=(value:string)=>value.replace(/Z$/u,"");
+const instantUtc=(value:string)=>value+(value.length===16?":00":"")+"Z";
+const pageSize=20;
+
+export function LeadAnalytics({locale,scope}:{locale:AppLocale;scope:string}){
+ const t=useTranslations("LeadAnalytics"),shared=useTranslations("LeadWorkspace"),numbers=useMemo(()=>new Intl.NumberFormat(locale),[locale]),dates=useMemo(()=>new Intl.DateTimeFormat(locale,{dateStyle:"medium",timeStyle:"long",timeZone:"UTC"}),[locale]);
+ const[options,setOptions]=useState<z.infer<typeof leadAnalyticsOptionsSchema>|null>(null),[report,setReport]=useState<LeadAnalyticsResult|null>(null),[state,setState]=useState<LeadBrowserState>("loading"),[busy,setBusy]=useState(false),[from,setFrom]=useState(""),[until,setUntil]=useState(""),[sourceKey,setSourceKey]=useState<string|undefined>(),[page,setPage]=useState(0);
+ const alive=useRef(false),generation=useRef(0),busyRef=useRef(false),requests=useRef(new Set<AbortController>());
+ const active=useCallback((own:number)=>alive.current&&generation.current===own,[]);
+ const invalidate=useCallback(()=>{generation.current++;for(const request of requests.current)request.abort();requests.current.clear();busyRef.current=false;},[]);
+ const wipe=useCallback((status:LeadBrowserState)=>{invalidate();setBusy(false);setOptions(null);setReport(null);setFrom("");setUntil("");setSourceKey(undefined);setPage(0);setState(status);},[invalidate]);
+ const perform=useCallback(async(work:(signal:AbortSignal,own:number)=>Promise<void>)=>{if(!alive.current||busyRef.current)return;const own=generation.current,controller=new AbortController();requests.current.add(controller);busyRef.current=true;setBusy(true);try{await work(controller.signal,own);}catch(error){if(active(own)){if(error instanceof LeadBrowserError&&["validation","range_too_broad","rate_limited","conflict"].includes(error.state)){invalidate();setBusy(false);setReport(null);setPage(0);setState(error.state);}else wipe(error instanceof LeadBrowserError?error.state:"unavailable");}}finally{requests.current.delete(controller);if(active(own)){busyRef.current=false;setBusy(false);}}},[active,wipe,invalidate]);
+ const initialize=useCallback(()=>{void perform(async(signal,own)=>{const value=leadAnalyticsOptionsSchema.parse(await leadRequest(scope,"analytics/options",{},signal));if(!active(own))return;setOptions(value);setUntil(inputUtc(value.observedAt));setState("ready");});},[scope,perform,active]);
+ useEffect(()=>{alive.current=true;let disposed=false;queueMicrotask(()=>{if(disposed)return;if(!navigator.onLine){wipe("offline");return;}initialize();});
+  const refresh=()=>{if(!navigator.onLine||document.visibilityState==="hidden")return;wipe("loading");initialize();},offline=()=>wipe("offline"),pagehide=()=>wipe("ready"),hidden=()=>{if(document.visibilityState==="hidden")wipe(navigator.onLine?"ready":"offline");else refresh();};
+  window.addEventListener("offline",offline);window.addEventListener("online",refresh);window.addEventListener("focus",refresh);window.addEventListener("pagehide",pagehide);window.addEventListener("pageshow",refresh);document.addEventListener("visibilitychange",hidden);
+  return()=>{disposed=true;alive.current=false;invalidate();window.removeEventListener("offline",offline);window.removeEventListener("online",refresh);window.removeEventListener("focus",refresh);window.removeEventListener("pagehide",pagehide);window.removeEventListener("pageshow",refresh);document.removeEventListener("visibilitychange",hidden);};
+ },[initialize,wipe,invalidate]);
+ const run=(selected:string|null|undefined=sourceKey)=>{if(busyRef.current)return;let input:z.infer<typeof leadAnalyticsInputSchema>;try{input=leadAnalyticsInputSchema.parse({from:instantUtc(from),until:instantUtc(until),...selected?{sourceKey:selected}:{}});}catch{setReport(null);setState("validation");return;}setReport(null);setPage(0);setSourceKey(selected??undefined);void perform(async(signal,own)=>{const value=leadAnalyticsResultSchema.parse(await leadRequest(scope,"analytics/read",input,signal));if(JSON.stringify(value.filter)!==JSON.stringify(input))throw new LeadBrowserError("conflict");if(!active(own))return;setReport(value);setState("ready");});};
+ const submit=(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();run();};
+ const format=(value:string)=>numbers.format(BigInt(value)),date=(value:string)=>dates.format(new Date(value));
+ if(state==="offline"||state==="forbidden")return <section data-testid="lead-analytics-private-unavailable"><p role="alert">{shared("states."+state)}</p><button className="secondary-button" type="button" onClick={()=>window.location.reload()}>{shared("reload")}</button></section>;
+ const pages=report?Math.max(1,Math.ceil(report.sources.length/pageSize)):1;
+ return <div className="resource-form" data-testid="lead-analytics">
+  <p role="status" aria-live="polite" data-testid="lead-analytics-status">{shared(busy?"working":"states."+state)}</p>
+  {busy&&!options&&<SkeletonBlock/>}
+  {!options&&!busy&&<button className="secondary-button" type="button" onClick={()=>{wipe("loading");initialize();}}>{shared("reload")}</button>}
+  {options&&<form className="resource-form" onSubmit={submit} data-testid="lead-analytics-form"><p>{t("rangeGuidance")}</p><fieldset className="form-grid two" disabled={busy}><legend>{t("captureWindow")}</legend><label className="field"><span>{t("fromUtc")}</span><input type="datetime-local" step="0.001" dir="ltr" required value={from} onChange={event=>{setFrom(event.target.value);setReport(null);setPage(0);}} data-testid="lead-analytics-from"/></label><label className="field"><span>{t("untilUtc")}</span><input type="datetime-local" step="0.001" dir="ltr" required value={until} onChange={event=>{setUntil(event.target.value);setReport(null);setPage(0);}} data-testid="lead-analytics-until"/></label></fieldset><div className="form-actions"><button className="primary-button" type="submit" disabled={busy} data-testid="lead-analytics-run">{t("run")}</button><button className="secondary-button" type="button" disabled={busy} onClick={()=>{setReport(null);setPage(0);initialize();}}>{t("observeNow")}</button>{sourceKey&&<button className="secondary-button" type="button" disabled={busy} onClick={()=>run(null)} data-testid="lead-analytics-all-sources">{t("allSources")}</button>}</div></form>}
+  {!report&&options&&!busy&&<p>{t("noReport")}</p>}
+  {report&&<section className="resource-form" data-testid="lead-analytics-report"><h2>{t("reportTitle")}</h2><p>{t("observedAt",{date:date(report.observedAt)})}</p><p>{t("actualWindow",{from:date(report.filter.from),until:date(report.filter.until)})}</p><p data-testid="lead-analytics-totals">{t("conversionFraction",{converted:format(report.totals.converted),captured:format(report.totals.captured)})}</p>{sourceKey&&<p>{t("filteredSource")}</p>}
+   {!report.sources.length?<p data-testid="lead-analytics-empty">{t("empty")}</p>:<><div className="lead-analytics-scroll"><table><caption>{t("sourcesCaption")}</caption><thead><tr><th scope="col">{t("source")}</th><th scope="col">{t("channel")}</th><th scope="col">{t("captured")}</th><th scope="col">{t("converted")}</th><th scope="col"><span className="sr-only">{t("sourceFilter")}</span></th></tr></thead><tbody>{report.sources.slice(page*pageSize,(page+1)*pageSize).map(source=><tr key={JSON.stringify([source.sourceKey,source.channel,source.sourceLabel])} data-testid="lead-analytics-source-row"><th scope="row" dir="auto">{localizedText(source.sourceLabel,locale)}</th><td>{shared("channels."+source.channel)}</td><td>{format(source.captured)}</td><td>{format(source.converted)}</td><td><button className="quiet-button" type="button" disabled={busy} onClick={()=>run(source.sourceKey)} aria-label={t("filterSource",{source:localizedText(source.sourceLabel,locale)})}>{t("sourceFilter")}</button></td></tr>)}</tbody></table></div><nav className="form-actions" aria-label={t("sourcePages")}><button className="secondary-button" type="button" disabled={page===0||busy} onClick={()=>setPage(value=>value-1)}>{t("previous")}</button><span>{t("page",{page:page+1,pages})}</span><button className="secondary-button" type="button" disabled={page+1>=pages||busy} onClick={()=>setPage(value=>value+1)}>{t("next")}</button></nav></>}
+   <h3>{t("stagesCaption")}</h3><dl className="lead-analytics-stages">{report.totals.stages.map(stage=><div key={stage.stage}><dt>{shared("stages."+stage.stage)}</dt><dd>{format(stage.count)}</dd></div>)}</dl>
+  </section>}
+ </div>;
+}

@@ -24,4 +24,9 @@ describe("single-attempt authenticated browser fixture transport",()=>{
   let credentialsRead=false;const denied={context:()=>{credentialsRead=true;throw Error("Credentials must not be read");}}as unknown as Pick<Page,"context"|"evaluate">;await expect(postBrowserJsonOnce(denied,"https://outside.example.test/runs",{headers:{origin:"http://127.0.0.1:3000"},data:{}})).rejects.toThrow("Same-origin owned browser POST required");expect(credentialsRead).toBe(false);
   const server=createServer((_request,response)=>{response.writeHead(202);response.end("complete acknowledgement");}),origin=await listen(server);try{expect(await forwardBrowserPostOnce({url:()=>origin+"/observed",method:()=>"POST",allHeaders:()=>Promise.resolve({"content-type":"application/json"}),postDataBuffer:()=>Buffer.from("{}")})).toBe(202);}finally{await close(server);}
  });
+ it("retains actual private response headers and the complete streamed body on exactly one observed acknowledgement",async()=>{
+  let requests=0,callbacks=0;const server=createServer((_request,response)=>{requests++;response.writeHead(403,{"content-type":"application/json","cache-control":"private, no-store",vary:"Cookie, Origin","x-owned-proof":"retained-original"});response.write('{"error":');response.end('"forbidden"}');}),origin=await listen(server);
+  try{const status=await forwardBrowserPostOnce({url:()=>origin+"/actual-read",method:()=>"POST",allHeaders:()=>Promise.resolve({"content-type":"application/json"}),postDataBuffer:()=>Buffer.from("{}")},(body,headers)=>{callbacks++;expect(body.toString("utf8")).toBe('{"error":"forbidden"}');expect(headers).toMatchObject({"content-type":"application/json","cache-control":"private, no-store",vary:"Cookie, Origin","x-owned-proof":"retained-original"});});expect(status).toBe(403);expect(callbacks).toBe(1);expect(requests).toBe(1);}finally{await close(server);}
+ });
+
 });
