@@ -4,10 +4,10 @@ import {afterAll,afterEach,beforeAll,describe,expect,it,vi} from "vitest";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
 import {authContextForAccount} from "@/platform/authz/account-context";
 import {financialRuleAccess,financialRuleSourceChecks} from "@/platform/config/financial-rule-authority";
-import {managementAgreementRuleKeys,managementAgreementInputSchema,managementAgreementAmendmentInputSchema} from "@/modules/core/domain/owner-property";
+import {managementAgreementInputSchema,managementAgreementAmendmentInputSchema} from "@/modules/core/domain/owner-property";
 import {listPropertyManagementAgreements,createManagementAgreement,amendManagementAgreement} from "@/modules/core/application/core-service";
 import * as auditWriter from "@/platform/audit/audit-writer";
-import {nativeOnboardingManagementAgreementFixture} from "./support/onboarding-management-agreement-fixture";
+import {nativeCoreFinancialAgreementFixture as nativeOnboardingManagementAgreementFixture,coreAgreementFinancialRuleKeys as managementAgreementRuleKeys} from "./support/core-agreement-financial-fixture";
 import {nativeLeadFinancialGuard} from "./support/lead-fixture";
 import {provisionIntegrationRole} from "./support/database-role";
 
