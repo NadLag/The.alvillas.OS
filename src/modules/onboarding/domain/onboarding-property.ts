@@ -1,6 +1,7 @@
 import {z} from "zod";
-import {onboardingPropertyInputSchema,onboardingPropertyStatusSchema} from "@/platform/onboarding/contracts";
-import {onboardingCommandFields,onboardingIdSchema,onboardingFingerprintSchema,onboardingOwnerSchema} from "./onboarding-contract";
+import {onboardingPropertyInputSchema,onboardingPropertyStatusSchema,parseConfiguredOnboardingPropertyProfile} from "@/platform/onboarding/contracts";
+import {onboardingCommandFields,onboardingIdSchema,onboardingFingerprintSchema,onboardingOwnerSchema,onboardingReceiptSchema,onboardingProgressMatches} from "./onboarding-contract";
+import {onboardingStepSchema} from "./onboarding-policy";
 
 export const onboardingPropertyTargetSchema=z.discriminatedUnion("mode",[
  z.object({mode:z.literal("CREATE"),input:onboardingPropertyInputSchema}).strict(),
@@ -23,6 +24,11 @@ export const onboardingPropertyChoicesInputSchema=z.object({sessionId:onboarding
 export const onboardingPropertyChoicesSchema=z.object({properties:z.array(onboardingPropertySnapshotSchema.pick({id:true,name:true,addressLine1:true,city:true,status:true})).max(20),next:z.string().nullable()}).strict();
 export const onboardingPropertyReviewSchema=z.object({draft:onboardingPropertyDraftSchema,owner:onboardingOwnerSchema,property:onboardingPropertySnapshotSchema.nullable(),reviewFingerprint:onboardingFingerprintSchema}).strict().superRefine((value,context)=>{
  if(value.draft.target.mode==="CREATE"?value.property!==null:value.property?.id!==value.draft.target.propertyId)context.addIssue({code:"custom",message:"native_onboarding_property_review_source_required"});
+});
+export const onboardingPropertyReadSchema=z.object({sessionId:onboardingIdSchema,current:onboardingReceiptSchema,selected:onboardingReceiptSchema,draft:onboardingPropertyDraftSchema,owner:onboardingOwnerSchema,property:onboardingPropertySnapshotSchema,initialOperatingProfile:z.record(z.string(),z.unknown()).nullable(),reason:z.string(),history:z.array(onboardingReceiptSchema).max(20),next:z.number().int().positive().nullable(),completed:z.array(onboardingStepSchema),nextStep:onboardingStepSchema.nullable()}).strict().superRefine((value,context)=>{
+ if(!onboardingProgressMatches(value))context.addIssue({code:"custom",message:"native_onboarding_progress_required"});
+ if(value.selected.step!=="PROPERTY"||value.selected.propertyId!==value.property.id||value.draft.sessionId!==value.sessionId||value.draft.previousRevisionId!==value.selected.previousRevisionId||value.draft.target.mode==="LINK"&&value.draft.target.propertyId!==value.property.id||value.draft.target.mode==="CREATE"&&value.draft.target.input.ownerId!==value.selected.ownerId)context.addIssue({code:"custom",message:"native_onboarding_property_recorded_source_required"});
+ if(value.draft.target.mode==="LINK"){if(value.initialOperatingProfile!==null)context.addIssue({code:"custom",message:"native_onboarding_linked_property_configuration_required"});}else{try{parseConfiguredOnboardingPropertyProfile(value.initialOperatingProfile);}catch{context.addIssue({code:"custom",message:"native_onboarding_original_operating_configuration_required"});}}
 });
 
 export function canonicalOnboardingPropertyDraft(raw:unknown):OnboardingPropertyDraft{

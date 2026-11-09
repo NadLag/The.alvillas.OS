@@ -1,7 +1,7 @@
 import {z} from "zod";
 import {onboardingOwnerInputSchema} from "@/platform/onboarding/contracts";
 import {onboardingStepSchema,onboardingSteps} from "./onboarding-policy";
-import {onboardingIdSchema as uuid,onboardingFingerprintSchema as sha256,onboardingCommandFields,onboardingOwnerSchema} from "./onboarding-contract";
+import {onboardingIdSchema as uuid,onboardingFingerprintSchema as sha256,onboardingCommandFields,onboardingOwnerSchema,onboardingReceiptSchema,onboardingProgressMatches} from "./onboarding-contract";
 export {onboardingIdSchema,onboardingCommandFields} from "./onboarding-contract";
 
 export const onboardingMaximumRequestBytes=65536;
@@ -14,11 +14,11 @@ export const onboardingCommandSchema=onboardingDraftSchema.safeExtend(onboarding
 export type OnboardingDraft=z.infer<typeof onboardingDraftSchema>;
 export type OnboardingCommand=z.infer<typeof onboardingCommandSchema>;
 export {onboardingOwnerSchema} from "./onboarding-contract";
-export const onboardingReceiptSchema=z.object({id:uuid,sessionId:uuid,previousRevisionId:uuid.nullable(),number:z.number().int().positive(),step:onboardingStepSchema,ownerId:uuid,propertyId:uuid.nullable(),createdAt:z.iso.datetime(),replayed:z.boolean()}).strict();
+export {onboardingReceiptSchema} from "./onboarding-contract";
 export const onboardingReviewSchema=z.object({draft:onboardingDraftSchema,owner:onboardingOwnerSchema,reviewFingerprint:sha256}).strict();
 export const onboardingReadInputSchema=z.object({sessionId:uuid,revisionId:uuid.optional(),before:z.number().int().positive().optional()}).strict();
 export const onboardingReadSchema=z.object({sessionId:uuid,current:onboardingReceiptSchema,selected:onboardingReceiptSchema,draft:onboardingDraftSchema,owner:onboardingOwnerSchema,reason:z.string(),history:z.array(onboardingReceiptSchema).max(20),next:z.number().int().positive().nullable(),completed:z.array(onboardingStepSchema),nextStep:onboardingStepSchema.nullable()}).strict().superRefine((value,context)=>{
- if(value.current.sessionId!==value.sessionId||value.selected.sessionId!==value.sessionId||value.history.some(item=>item.sessionId!==value.sessionId)||value.completed.at(-1)!==value.current.step||JSON.stringify(value.completed)!==JSON.stringify(onboardingSteps.slice(0,value.completed.length))||value.nextStep!==(onboardingSteps[value.completed.length]??null))context.addIssue({code:"custom",message:"native_onboarding_progress_required"});
+ if(!onboardingProgressMatches(value))context.addIssue({code:"custom",message:"native_onboarding_progress_required"});
  if(value.draft.previousRevisionId!==value.selected.previousRevisionId||value.draft.step!==value.selected.step||(value.selected.number===1?value.draft.sessionId!==null:value.draft.sessionId!==value.sessionId)||value.draft.target.mode==="LINK"&&value.draft.target.ownerId!==value.selected.ownerId)context.addIssue({code:"custom",message:"native_onboarding_recorded_draft_required"});
 });
 export const onboardingRecoverySchema=z.object({recorded:z.boolean(),revision:onboardingReceiptSchema.nullable()}).strict().refine(value=>value.recorded===(value.revision!==null));
