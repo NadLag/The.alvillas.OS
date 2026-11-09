@@ -12,7 +12,8 @@ import {canonicalOnboardingManagementAgreementDraft} from "@/modules/onboarding/
 import {nativeOnboardingAdmission} from "./onboarding-fixture";
 import {nativeOnboardingPropertyFixture,nativeOnboardingPropertyAdmission} from "./onboarding-property-fixture";
 
-export function nativeOnboardingManagementAgreementTerms(){return{reference:"Actual native financial terms "+randomUUID(),effectiveFrom:"2026-11-09T00:00:00.000Z",effectiveTo:null,commissionRateBps:1750,commissionBasis:"NET_OF_OTA_FEES",commissionAccrualEvent:"ON_RECEIPT",expenseDefaultTreatment:"OWNER_PAID",approvalThresholdKey:"explicit_native_approval",approvalThresholdAmount:"9999999999999999.99",approvalThresholdCurrency:"MAD",approvalRequires:["owner"],payoutCadence:"MONTHLY",payoutHoldDays:4,payoutHoldbackBps:250,noticePeriodDays:45,ownerResponsibilities:["Explicit actual owner fixture responsibility"],alvillasResponsibilities:["Explicit actual company fixture responsibility"],specialConditions:["Actual owned fixture terms; no legal acceptance claim"]};}
+import {nativeOnboardingManagementAgreementTerms} from "./onboarding-management-agreement-terms";
+export {nativeOnboardingManagementAgreementTerms};
 
 export async function nativeOnboardingManagementAgreementFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv){
  const f=await nativeOnboardingPropertyFixture(admin,db,env),policy=onboardingPolicySchema.parse({...f.policy,operating_profile_modes:["LINK"],management_agreement_modes:["CREATE","LINK"]}),originalHeld={...f.ctx,authContext:f.ctx.authContext};
