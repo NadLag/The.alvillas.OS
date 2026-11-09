@@ -1,0 +1,21 @@
+"use client";
+import {useTranslations} from "next-intl";
+import type {z} from "zod";
+import type {AppLocale} from "@/i18n/routing";
+import {onboardingSteps} from "../domain/onboarding-policy";
+import type {onboardingReadSchema,onboardingReviewSchema} from "../domain/onboarding-wizard";
+
+type Review=z.infer<typeof onboardingReviewSchema>;
+export function OnboardingOwnerRecord({review,reason}:{review:Pick<Review,"draft"|"owner">;reason:string}){
+ const t=useTranslations("OnboardingWizard"),input=review.draft.target.mode==="CREATE"?review.draft.target.input:null;
+ return <div className="resource-form"><dl className="onboarding-values"><div><dt>{t("fields.displayName")}</dt><dd dir="auto">{review.owner.displayName}</dd></div>{review.owner.email&&<div><dt>{t("fields.email")}</dt><dd dir="ltr">{review.owner.email}</dd></div>}{review.owner.phone&&<div><dt>{t("fields.phone")}</dt><dd dir="ltr">{review.owner.phone}</dd></div>}<div><dt>{t("fields.preferredLocale")}</dt><dd>{t("languages."+review.owner.preferredLocale)}</dd></div>{input?.legalName&&<div><dt>{t("fields.legalName")}</dt><dd dir="auto">{input.legalName}</dd></div>}{input?.notes&&<div><dt>{t("fields.notes")}</dt><dd className="onboarding-private-text" dir="auto">{input.notes}</dd></div>}<div><dt>{t("reason")}</dt><dd className="onboarding-private-text" dir="auto">{reason}</dd></div></dl></div>;
+}
+export function OnboardingSessionRecord({value,locale,disabled,canEdit,onEdit,onHistory,onMore,onBack}:{value:z.infer<typeof onboardingReadSchema>;locale:AppLocale;disabled:boolean;canEdit:boolean;onEdit:()=>void;onHistory:(revisionId:string)=>void;onMore:()=>void;onBack:()=>void}){
+ const t=useTranslations("OnboardingWizard"),date=(when:string)=>new Intl.DateTimeFormat(locale,{dateStyle:"medium",timeStyle:"short"}).format(new Date(when)),review={draft:value.draft,owner:value.owner};
+ return <section className="resource-form" data-testid="onboarding-session"><div className="form-actions"><button type="button" className="secondary-button" disabled={disabled} onClick={onBack}>{t("back")}</button>{canEdit&&<button type="button" className="secondary-button" disabled={disabled} onClick={onEdit} data-testid="onboarding-edit-owner">{t("changeOwner")}</button>}</div>
+  <ol className="onboarding-steps" aria-label={t("stepsLabel")}>{onboardingSteps.map(step=><li key={step} aria-current={value.nextStep===step?"step":undefined}><span>{t("steps."+step)}</span><span>{t(value.completed.includes(step)?"complete":"remaining")}</span></li>)}</ol>
+  {value.nextStep&&<p>{t("nextStep",{step:t("steps."+value.nextStep)})}</p>}<p>{t("resumeGuidance")}</p>
+  <h2>{t("recordedVersion",{number:value.selected.number})}</h2><time dateTime={value.selected.createdAt}>{date(value.selected.createdAt)}</time><OnboardingOwnerRecord review={review} reason={value.reason}/>
+  <section className="resource-form" data-testid="onboarding-history"><h3>{t("history")}</h3><ul className="onboarding-list">{value.history.map(row=><li key={row.id}><button type="button" className="quiet-button" disabled={disabled} onClick={()=>onHistory(row.id)}><span>{t("historyEntry",{number:row.number})}</span><time dateTime={row.createdAt}>{date(row.createdAt)}</time></button></li>)}</ul>{value.next&&<button type="button" className="secondary-button" disabled={disabled} onClick={onMore}>{t("more")}</button>}</section><p>{t("localTime")}</p>
+ </section>;
+}

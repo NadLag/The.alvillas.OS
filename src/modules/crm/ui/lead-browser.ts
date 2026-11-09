@@ -13,6 +13,4 @@ export async function leadRequest(scope:string,path:LeadEndpoint,input:unknown,s
     if(!response.headers.get("content-type")?.includes("application/json"))throw new LeadBrowserError(mutation?"uncertain":"unavailable");return value;
   }catch(error){if(error instanceof LeadBrowserError)throw error;if(signal.aborted)throw error;throw new LeadBrowserError(mutation?"uncertain":"unavailable");}
 }
-export function readLeadNonce(key:string){try{const value=z.uuid().safeParse(sessionStorage.getItem(key));return value.success?value.data:null;}catch{return null;}}
-export function writeLeadNonce(key:string,value:string){try{sessionStorage.setItem(key,z.uuid().parse(value));}catch{/* The nonce also stays in the active operation's memory. */}}
-export function clearLeadNonce(key:string,value:string){try{if(sessionStorage.getItem(key)===value)sessionStorage.removeItem(key);}catch{/* Storage is optional. */}}
+export {readCommandNonce as readLeadNonce,writeCommandNonce as writeLeadNonce,clearCommandNonce as clearLeadNonce} from "@/platform/http/command-nonce";
