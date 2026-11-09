@@ -5476,6 +5476,37 @@
       "reviewTitle": "Review the Owner conversion",
       "confirm": "Confirm conversion",
       "recover": "Recover original conversion"
-    }
+    },
+    "evidence": {
+      "title": "Supporting records",
+      "guidance": "Choose the approved documents and signing records for this stage. Review the selection before confirming the stage change.",
+      "change": "Change selection",
+      "next": "Choose: {kind}",
+      "find": "Find supporting record",
+      "onboardingRequired": "Complete the approved onboarding and release checks before Go Live.",
+      "empty": "No eligible records are available here. Create or complete the required record, then refresh the selection.",
+      "ready": "The required records are selected. Review the stage change to validate them.",
+      "language": "Document language: {locale}",
+      "version": "Version {number}",
+      "kinds": {
+        "PROPOSAL_VERSION": "Proposal version",
+        "CONTRACT_VERSION": "Contract version",
+        "SIGNATURE_SENT": "Contract sent",
+        "SIGNATURE_VIEWED": "Contract viewed",
+        "SIGNATURE_SIGNED_ARCHIVE": "Archived signed contract",
+        "OWNER_CONVERSION": "Owner conversion",
+        "ONBOARDING_RELEASE": "Onboarding release"
+      },
+      "signatureStates": {
+        "DRAFT": "Draft",
+        "SENT": "Sent",
+        "VIEWED": "Viewed",
+        "SIGNED": "Signed",
+        "DECLINED": "Declined",
+        "EXPIRED": "Expired"
+      },
+      "changeKind": "Change {kind}"
+    },
+    "nextStage": "Next stage"
   }
 }

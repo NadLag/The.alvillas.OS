@@ -5476,6 +5476,37 @@
       "reviewTitle": "Vérifier la conversion en propriétaire",
       "confirm": "Confirmer la conversion",
       "recover": "Récupérer la conversion initiale"
-    }
+    },
+    "evidence": {
+      "title": "Pièces justificatives",
+      "guidance": "Choisissez les documents approuvés et les éléments de signature correspondant à cette étape. Vérifiez la sélection avant de confirmer le changement.",
+      "change": "Modifier la sélection",
+      "next": "À sélectionner : {kind}",
+      "find": "Rechercher une pièce justificative",
+      "onboardingRequired": "Terminez les contrôles approuvés d’intégration et de mise en service avant le lancement.",
+      "empty": "Aucune pièce admissible n’est disponible ici. Créez ou terminez la pièce requise, puis actualisez la sélection.",
+      "ready": "Les pièces requises sont sélectionnées. Vérifiez le changement d’étape pour les valider.",
+      "language": "Langue du document : {locale}",
+      "version": "Version {number}",
+      "kinds": {
+        "PROPOSAL_VERSION": "Version de la proposition",
+        "CONTRACT_VERSION": "Version du contrat",
+        "SIGNATURE_SENT": "Contrat envoyé",
+        "SIGNATURE_VIEWED": "Contrat consulté",
+        "SIGNATURE_SIGNED_ARCHIVE": "Contrat signé archivé",
+        "OWNER_CONVERSION": "Conversion en propriétaire",
+        "ONBOARDING_RELEASE": "Validation de l’intégration"
+      },
+      "signatureStates": {
+        "DRAFT": "Brouillon",
+        "SENT": "Envoyé",
+        "VIEWED": "Consulté",
+        "SIGNED": "Signé",
+        "DECLINED": "Refusé",
+        "EXPIRED": "Expiré"
+      },
+      "changeKind": "Modifier {kind}"
+    },
+    "nextStage": "Étape suivante"
   }
 }

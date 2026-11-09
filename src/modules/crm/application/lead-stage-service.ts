@@ -17,8 +17,10 @@ import {LeadAccessError,LeadConfigurationError,LeadRateLimitError} from "../doma
 import {configuredLeadTransition,canonicalLeadStageDraft,canonicalLeadStageCommand,leadPipelinePolicyKey,leadPipelinePolicySchema,leadStageSchema,leadPipelineEvidenceKinds,LeadPipelineConflictError,type LeadStageDraft,type LeadStagePosition} from "../domain/lead-pipeline";
 import {encryptLeadStageReason,decryptLeadStageReason} from "../domain/lead-stage-reason";
 import {LeadStageRepository} from "../infrastructure/lead-stage-repository";
-import {nativeLeadStageEvidence} from "@/platform/documents/lead-stage-evidence";
+import {nativeLeadStageEvidence,nativeLeadStageEvidenceChoices,nativeLeadStageReadError} from "@/platform/documents/lead-stage-evidence";
 import type {LeadDependencies} from "./lead-capture-service";
+import {leadStageEvidenceChoicesInputSchema,leadStageEvidencePrefix} from "../domain/lead-stage-evidence-choices";
+import {LeadPipelineEvidenceError} from "../domain/lead-pipeline";
 
 const protocol="ALVILLAS_NATIVE_LEAD_STAGE_V1",uuid=z.uuid().transform(value=>value.toLowerCase());
 const historyInput=z.object({leadId:uuid,before:z.number().int().positive().optional()}).strict(),recoveryInput=z.object({idempotencyKey:uuid}).strict();
@@ -94,4 +96,19 @@ export async function readLeadStageHistory(actor:AccountActorContext,raw:unknown
     await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_stage_history_read",resourceType:"lead",resourceId:input.leadId,after:{leadId:input.leadId,count:stageHistory.length},requestId:deps.requestId??randomUUID(),occurredAt:base.now});const final=await finalReadFence(actor,tx,base),data={leadId:input.leadId,stage:final.position.stage,revisionId:final.position.revisionId,stageHistory,next:rows.length>20?rows[19].number:null};
     return present({...actor.authContext,visibleDataClasses:new Set(["operational"] as const)},"view",{...leadResource(base.lead,final.position.stage,final.assignment),data},catalogFieldPolicy<typeof data>("lead"),final.now);
   });
+}
+
+/** Native catalogs select records; the existing review/admission protocol remains the sole stage writer. */
+export async function readLeadStageEvidenceChoices(actor:AccountActorContext,raw:unknown,deps:LeadDependencies){
+ const input=leadStageEvidenceChoicesInputSchema.parse(raw),draft=canonicalLeadStageDraft({leadId:input.leadId,previousRevisionId:input.previousRevisionId,toStage:input.toStage,evidenceReferences:input.evidenceReferences});
+ return withTenant(deps.db,actor.organizationId,async tx=>{
+  const base=await leadContext(actor,tx,input.leadId),configured=await settings(tx,actor.organizationId,base.now),edge=configuredLeadTransition(base.position,draft,configured.policy),prefix=leadStageEvidencePrefix(edge.transition.evidence,draft);
+  await moveAuthority(actor,tx,base,input.toStage);
+  const retained=await nativeLeadStageEvidence(actor,tx,draft,prefix.selected.map(reference=>reference.kind),configured.policy,base.now,deps);
+  if(input.documentId&&!["PROPOSAL_VERSION","CONTRACT_VERSION"].includes(prefix.nextKind??"")||input.signatureId&&prefix.nextKind!=="SIGNATURE_SENT")throw new LeadPipelineEvidenceError();
+  await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"crm.lead_stage_evidence_choices_read",resourceType:"lead",resourceId:input.leadId,after:{leadId:input.leadId,toStage:input.toStage,kind:prefix.nextKind,policyId:configured.rule.id},requestId:deps.requestId??randomUUID(),occurredAt:base.now});
+  const fresh=await finalReadFence(actor,tx,base),current=await settings(tx,actor.organizationId,fresh.now);if(commandFingerprint(current.snapshot)!==commandFingerprint(configured.snapshot))throw new LeadPipelineConflictError();await moveAuthority(actor,tx,fresh,input.toStage);
+  const checked=await nativeLeadStageEvidence(actor,tx,draft,prefix.selected.map(reference=>reference.kind),configured.policy,await base.repository.clock(),deps);if(commandFingerprint(checked)!==commandFingerprint(retained))throw new LeadPipelineConflictError();
+  return nativeLeadStageEvidenceChoices(actor,tx,input,draft,prefix,configured.policy,deps);
+ }).catch(nativeLeadStageReadError);
 }
