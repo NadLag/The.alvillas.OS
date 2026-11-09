@@ -8,6 +8,7 @@ import { coreActorContextFromSession } from "@/modules/core/application/core-acc
 import {
   CoreNotFoundError,
   CoreAuthorizationError,
+  canAccessManagementAgreementFinancialRules,
   allowedPropertyLifecycleTransitions,
   getProperty,
   listOwners,
@@ -29,6 +30,7 @@ import {
 } from "@/modules/reservations/application/reservation-service";
 import { localizedTaskTitle } from "@/modules/reservations/domain/reservation-task";
 import { authorize, authorizeCollection } from "@/platform/authz/authorize";
+import {authorizeUnconditionalSource} from "@/platform/authz/organization-authority";
 import { auth } from "@/platform/auth/session";
 import { routing, type AppLocale } from "@/i18n/routing";
 
@@ -221,7 +223,7 @@ export default async function PropertyDetailPage({
   });
   const ownerOptions = canEditOwnership ? await listOwners(ctx) : [];
   const canViewAgreements = agreementCtx
-    ? authorize(agreementCtx.authContext, "view", {
+    ? canAccessManagementAgreementFinancialRules(agreementCtx) && authorize(agreementCtx.authContext, "view", {
         type: "property",
         organizationId: agreementCtx.organizationId,
         id: property.id,
@@ -229,15 +231,15 @@ export default async function PropertyDetailPage({
         city: property.cityId,
         region: property.regionId
       }) &&
-      authorize(agreementCtx.authContext, "view", {
+      authorizeUnconditionalSource(agreementCtx.authContext, "view", {
         type: "config_rule",
         organizationId: agreementCtx.organizationId,
         id: `agreement:${property.id}`,
         propertyId: property.id
-      })
+      },new Date())
     : false;
   const canManageAgreements = agreementCtx
-    ? authorize(agreementCtx.authContext, "edit", {
+    ? canAccessManagementAgreementFinancialRules(agreementCtx) && authorize(agreementCtx.authContext, "edit", {
         type: "property",
         organizationId: agreementCtx.organizationId,
         id: property.id,
@@ -245,18 +247,18 @@ export default async function PropertyDetailPage({
         city: property.cityId,
         region: property.regionId
       }) &&
-      authorize(agreementCtx.authContext, "create", {
+      authorizeUnconditionalSource(agreementCtx.authContext, "create", {
         type: "config_rule",
         organizationId: agreementCtx.organizationId,
         id: `agreement:${property.id}`,
         propertyId: property.id
-      }) &&
-      authorize(agreementCtx.authContext, "configure", {
+      },new Date()) &&
+      authorizeUnconditionalSource(agreementCtx.authContext, "configure", {
         type: "config_rule",
         organizationId: agreementCtx.organizationId,
         id: `agreement:${property.id}`,
         propertyId: property.id
-      })
+      },new Date())
     : false;
   const managementAgreements = canViewAgreements && agreementCtx
     ? await listPropertyManagementAgreements(agreementCtx, property.id)
