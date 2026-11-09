@@ -1,9 +1,9 @@
-import { request as httpRequest } from "node:http";
+import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { Page, Request } from "@playwright/test";
 
 /** Forward the observed browser command once on a dedicated socket, then wait for its complete acknowledgement. */
-export async function forwardBrowserPostOnce(request: Pick<Request, "url" | "method" | "allHeaders" | "postDataBuffer">, onBody?: (body: Buffer) => void): Promise<number> {
+export async function forwardBrowserPostOnce(request: Pick<Request, "url" | "method" | "allHeaders" | "postDataBuffer">, onBody?: (body: Buffer, headers: Readonly<IncomingHttpHeaders>) => void): Promise<number> {
   const target = new URL(request.url());
   if (request.method() !== "POST" || !["http:", "https:"].includes(target.protocol)) throw new Error("Observed HTTP browser POST required");
   const headers = await request.allHeaders(), send = target.protocol === "https:" ? httpsRequest : httpRequest;
@@ -12,7 +12,7 @@ export async function forwardBrowserPostOnce(request: Pick<Request, "url" | "met
       const chunks: Buffer[] = [];
       response.on("error", reject);
       response.on("aborted", () => reject(new Error("Observed command acknowledgement ended before its body completed")));
-      response.on("end", () => { try { onBody?.(Buffer.concat(chunks)); resolve(response.statusCode ?? 0); } catch (error) { reject(error instanceof Error ? error : new Error("Observed acknowledgement body could not be retained")); } });
+      response.on("end", () => { try { onBody?.(Buffer.concat(chunks), response.headers); resolve(response.statusCode ?? 0); } catch (error) { reject(error instanceof Error ? error : new Error("Observed acknowledgement body could not be retained")); } });
       if (onBody) response.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
       else response.resume();
     });
