@@ -27,6 +27,11 @@ export async function nativeLeadStageEvidence(actor:AccountActorContext,tx:Tenan
   const source=documentSourceReferenceSchema.safeParse({kind:"LEAD",id:input.leadId});if(!source.success)throw new LeadPipelineEvidenceError();
   const repository=new LeadStageRepository(tx,actor.organizationId),runner:TenantTransactionRunner={$transaction:work=>work(tx)};
   const proofs:NativeLeadStageProof[]=[];
+  type SignatureEvent=NonNullable<Awaited<ReturnType<LeadStageRepository["proofSignatureEvent"]>>>;
+  const signedGroup=required.includes("SIGNATURE_SIGNED_ARCHIVE"),pendingEvents:Array<{kind:"SIGNATURE_SENT"|"SIGNATURE_VIEWED";event:SignatureEvent}>=[];
+  const appendEventProof=(kind:"SIGNATURE_SENT"|"SIGNATURE_VIEWED",event:SignatureEvent,history:Awaited<ReturnType<typeof readNativeSignatureHistory>>)=>{
+    proofs.push({kind,organizationId:actor.organizationId,leadId:input.leadId,sourceId:event.id,sourceFingerprint:commandFingerprint({signatureId:event.signatureId,documentVersionId:history.signature.documentVersionId,currentState:history.signature.state,eventId:event.id,eventState:event.state,evidenceHash:event.evidenceHash,providerEvidenceId:event.providerEvidenceId}),occurredAt:event.observedAt.toISOString()});
+  };
   let contractVersionId:string|undefined,signatureId:string|undefined,signedArchiveId:string|undefined;
   for(const kind of leadPipelineEvidenceKinds.filter(kind=>required.includes(kind))){
     const reference=references.find(value=>value.kind===kind);if(!reference)throw new LeadPipelineEvidenceError();
@@ -40,15 +45,19 @@ export async function nativeLeadStageEvidence(actor:AccountActorContext,tx:Tenan
     }else if(kind==="SIGNATURE_SENT"||kind==="SIGNATURE_VIEWED"){
       const event=await repository.proofSignatureEvent(reference.sourceId);
       if(!event?.providerEvidenceId||event.state!==(kind==="SIGNATURE_SENT"?"SENT":"VIEWED")||signatureId&&signatureId!==event.signatureId)throw new LeadPipelineEvidenceError();
+      if(signedGroup){if(!contractVersionId)throw new LeadPipelineEvidenceError();signatureId=event.signatureId;pendingEvents.push({kind,event});continue;}
       const history=await readNativeSignatureHistory(actor,{signatureId:event.signatureId},{...deps,db:runner});
       if(!contractVersionId||history.signature.documentVersionId!==contractVersionId||["DRAFT","DECLINED","EXPIRED"].includes(history.signature.state))throw new LeadPipelineEvidenceError();
       signatureId=event.signatureId;
-      proofs.push({kind,organizationId:actor.organizationId,leadId:input.leadId,sourceId:event.id,sourceFingerprint:commandFingerprint({signatureId:event.signatureId,documentVersionId:history.signature.documentVersionId,currentState:history.signature.state,eventId:event.id,eventState:event.state,evidenceHash:event.evidenceHash,providerEvidenceId:event.providerEvidenceId}),occurredAt:event.observedAt.toISOString()});
+      appendEventProof(kind,event,history);
     }else if(kind==="SIGNATURE_SIGNED_ARCHIVE"){
       const archive=await repository.proofSignedArchive(reference.sourceId);
       if(!archive||!signatureId||archive.signatureId!==signatureId||!archive.evidence[0]||!archive.artifacts.length||archive.artifacts.some(artifact=>!artifact.admission.version))throw new LeadPipelineEvidenceError();
       const history=await readNativeSignatureHistory(actor,{signatureId:archive.signatureId},{...deps,db:runner});
       if(history.signature.state!=="SIGNED"||history.signature.documentVersionId!==contractVersionId)throw new LeadPipelineEvidenceError();
+      // Publish all immutable event facts against one complete current canonical read, after their source lookups.
+      // A caller's post-audit validation invokes this function again and obtains a fresh read.
+      for(const pending of pendingEvents)appendEventProof(pending.kind,pending.event,history);
       signedArchiveId=archive.id;
       proofs.push({kind,organizationId:actor.organizationId,leadId:input.leadId,sourceId:archive.id,sourceFingerprint:commandFingerprint({signatureId:archive.signatureId,commandHash:archive.commandHash,completionEvidenceId:archive.completionEvidenceId,signedEvidence:archive.evidence[0],artifacts:[...archive.artifacts].sort((left,right)=>left.kind.localeCompare(right.kind))}),occurredAt:archive.evidence[0].observedAt.toISOString()});
     }else if(kind==="OWNER_CONVERSION"){

@@ -1,0 +1,35 @@
+import {z} from "zod";
+import {onboardingOperatingProfileInputSchema,onboardingOperatingProfileSnapshotSchema} from "@/platform/onboarding/contracts";
+import {onboardingIdSchema,onboardingFingerprintSchema,onboardingCommandFields,onboardingOwnerSchema,onboardingReceiptSchema,onboardingProgressMatches} from "./onboarding-contract";
+import {onboardingPropertySnapshotSchema} from "./onboarding-property";
+import {onboardingStepSchema} from "./onboarding-policy";
+
+export const onboardingOperatingTargetSchema=z.discriminatedUnion("mode",[
+ z.object({mode:z.literal("LINK"),propertyId:onboardingIdSchema}).strict(),
+ z.object({mode:z.literal("UPDATE"),propertyId:onboardingIdSchema,input:onboardingOperatingProfileInputSchema}).strict()
+]);
+export const onboardingOperatingDraftSchema=z.object({sessionId:onboardingIdSchema,previousRevisionId:onboardingIdSchema,step:z.literal("OPERATING_PROFILE"),target:onboardingOperatingTargetSchema}).strict();
+export const onboardingOperatingCommandSchema=onboardingOperatingDraftSchema.extend(onboardingCommandFields);
+export type OnboardingOperatingDraft=z.infer<typeof onboardingOperatingDraftSchema>;
+export type OnboardingOperatingCommand=z.infer<typeof onboardingOperatingCommandSchema>;
+export type OnboardingOperatingProfile=z.infer<typeof onboardingOperatingProfileSnapshotSchema>;
+export const onboardingOperatingOptionsSchema=z.object({revisionId:onboardingIdSchema,propertyId:onboardingIdSchema,propertyName:z.string(),modes:z.array(z.enum(["LINK","UPDATE"])).min(1).max(2).refine(values=>new Set(values).size===values.length),profile:onboardingOperatingProfileSnapshotSchema.nullable()}).strict().refine(value=>!value.modes.includes("LINK")||value.profile!==null);
+export function nativeOperatingProfileSnapshot(raw:unknown):OnboardingOperatingProfile{return onboardingOperatingProfileSnapshotSchema.parse(raw);}
+export function proposedNativeOperatingProfile(input:Extract<OnboardingOperatingDraft["target"],{mode:"UPDATE"}>["input"]):OnboardingOperatingProfile{return nativeOperatingProfileSnapshot({...input,midStayCleaningRuleKey:input.midStayCleaningRuleKey??null,automationNotes:input.automationNotes??null});}
+export const onboardingOperatingRuleProjectionSchema=z.object({id:onboardingIdSchema,key:z.literal("ops.mid_stay_threshold"),version:z.number().int().positive(),nights:z.number().int().positive(),taskTemplateKey:z.string().nullable()}).strict();
+/** Present the selected operational values; retain the complete registered rule in the encrypted payload. */
+export function nativeOperatingRuleProjection(rule:{id:string;key:string;version:number;value:unknown}|null){if(!rule)return null;const value=z.object({nights:z.number().int().positive(),task_template_key:z.string().optional()}).parse(rule.value);return onboardingOperatingRuleProjectionSchema.parse({id:rule.id,key:rule.key,version:rule.version,nights:value.nights,taskTemplateKey:value.task_template_key??null});}
+
+const originalFields={draft:onboardingOperatingDraftSchema,owner:onboardingOwnerSchema,property:onboardingPropertySnapshotSchema,previousOperatingProfile:onboardingOperatingProfileSnapshotSchema.nullable(),operatingProfile:onboardingOperatingProfileSnapshotSchema,operatingRule:onboardingOperatingRuleProjectionSchema.nullable()};
+function originalsMatch(value:z.infer<z.ZodObject<typeof originalFields>>){
+ if(value.draft.target.propertyId!==value.property.id)return false;
+ if(value.operatingProfile.midStayCleaningEnabled?(value.operatingRule===null||value.operatingRule.key!==value.operatingProfile.midStayCleaningRuleKey):value.operatingRule!==null)return false;
+ // Both projections have Core's canonical field order and explicit nullable fields.
+ return value.draft.target.mode==="LINK"?value.previousOperatingProfile!==null&&JSON.stringify(value.previousOperatingProfile)===JSON.stringify(value.operatingProfile):JSON.stringify(proposedNativeOperatingProfile(value.draft.target.input))===JSON.stringify(value.operatingProfile);
+}
+export const onboardingOperatingReviewSchema=z.object({...originalFields,reviewFingerprint:onboardingFingerprintSchema}).strict().refine(originalsMatch,{message:"native_onboarding_operating_review_source_required"});
+export const onboardingOperatingReadSchema=z.object({...originalFields,sessionId:onboardingIdSchema,current:onboardingReceiptSchema,selected:onboardingReceiptSchema,reason:z.string(),history:z.array(onboardingReceiptSchema).max(20),next:z.number().int().positive().nullable(),completed:z.array(onboardingStepSchema),nextStep:onboardingStepSchema.nullable()}).strict().superRefine((value,context)=>{
+ if(!originalsMatch(value)||!onboardingProgressMatches(value)||value.selected.step!=="OPERATING_PROFILE"||value.selected.propertyId!==value.property.id||value.draft.sessionId!==value.sessionId||value.draft.previousRevisionId!==value.selected.previousRevisionId)context.addIssue({code:"custom",message:"native_onboarding_original_operating_history_required"});
+});
+export function canonicalOnboardingOperatingDraft(raw:unknown):OnboardingOperatingDraft{const value=onboardingOperatingDraftSchema.parse(raw);return{sessionId:value.sessionId,previousRevisionId:value.previousRevisionId,step:"OPERATING_PROFILE",target:value.target};}
+export function canonicalOnboardingOperatingCommand(raw:unknown):OnboardingOperatingCommand{const value=onboardingOperatingCommandSchema.parse(raw);return{...canonicalOnboardingOperatingDraft({sessionId:value.sessionId,previousRevisionId:value.previousRevisionId,step:value.step,target:value.target}),idempotencyKey:value.idempotencyKey,reviewFingerprint:value.reviewFingerprint,reason:value.reason};}

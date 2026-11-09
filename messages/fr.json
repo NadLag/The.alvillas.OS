@@ -5673,6 +5673,27 @@
         "PAUSED": "En pause",
         "OFFBOARDED": "Gestion terminée"
       }
+    },
+    "operating": {
+      "guidance": "Choisissez le fonctionnement de ce bien, puis vérifiez tous ses paramètres avant de les enregistrer.",
+      "mode": "Action sur le profil de fonctionnement",
+      "modes": {
+        "LINK": "Conserver et enregistrer les paramètres actuels",
+        "UPDATE": "Vérifier des paramètres modifiés"
+      },
+      "choose": "Choisir une valeur",
+      "validation": "Vérifiez chaque choix, fréquence et règle configurée, puis indiquez un motif.",
+      "servicesHint": "Saisissez un service par ligne.",
+      "before": "Paramètres avant cette modification",
+      "after": "Paramètres de fonctionnement vérifiés",
+      "ruleVersion": "Version de la règle en cours de séjour",
+      "ruleNights": "Seuil du nettoyage en cours de séjour (nuits)",
+      "ruleTemplate": "Modèle de tâche en cours de séjour",
+      "prepare": "Préparer le profil de fonctionnement",
+      "change": "Vérifier à nouveau le profil de fonctionnement",
+      "reviewTitle": "Vérifier les paramètres de fonctionnement",
+      "confirm": "Enregistrer les paramètres de fonctionnement",
+      "saved": "Paramètres de fonctionnement enregistrés."
     }
   }
 }

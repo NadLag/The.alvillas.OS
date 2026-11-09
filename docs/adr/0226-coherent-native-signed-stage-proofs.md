@@ -1,0 +1,9 @@
+# ADR 0226 — Coherent native signed-stage proofs
+
+An Operating Profile acceptance journey exposed a CRM conversion review that remained pending beyond the existing five-second assertion. The retained trace does not establish its eventual response. A canonical service probe on that actual signed Lead measured 1,075 PostgreSQL query events, including repeated complete reads of the same signature history for SENT, VIEWED and SIGNED archive evidence in each validation phase.
+
+For a proof group that requires a completed signed archive, collect the immutable native event facts, check their shared signature and contract lineage, then validate them against one complete canonical signature-history read after the archive lookup. Preserve the original proof order, source fingerprints and signed-artifact requirements. Partial SENT or VIEWED groups retain their existing canonical reads. No provider or object-storage request is introduced.
+
+This groups reads within one invocation only. It does not cache across requests, audit boundaries or validation phases. The complete canonical reader retains its own current and held authorization, source, privacy, retention and audit checks; each caller's post-audit validation invokes the bridge again. The conversion transaction still withholds the review if independent signature, document or Lead authority changes during its audit.
+
+The original failed Lead's fingerprint is identical before and after the change. Its measured query count falls from 1,075 to 619; observed elapsed time falls from 1,764ms to 1,280ms. These are local diagnostic samples, not a browser latency guarantee. A real PostgreSQL regression bounds the full review transaction at 700 statements and compares complete unchanged review output. Actual post-audit authority-withdrawal tests, existing tenant/source/policy races and original financial assertions remain required. Browser assertions retain their original deadlines and zero retries.

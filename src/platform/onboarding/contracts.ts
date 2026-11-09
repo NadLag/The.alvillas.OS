@@ -1,6 +1,7 @@
 import {z} from "zod";
-import {ownerInputSchema,propertyInputSchema,propertyOperatingProfileInputSchema} from "@/modules/core/domain/owner-property";
+import {ownerInputSchema,propertyInputSchema,propertyOperatingProfileInputSchema,operatingCadenceSchema} from "@/modules/core/domain/owner-property";
 export {propertyStatusSchema as onboardingPropertyStatusSchema} from "@/modules/core/domain/owner-property";
+export const onboardingOperatingCadences=operatingCadenceSchema.options;
 
 /** The wizard uses the Core Owner contract; representatives and payout setup retain their own authorization. */
 export const onboardingOwnerInputSchema=ownerInputSchema.omit({representatives:true,payoutMethods:true}).strict();
@@ -24,3 +25,14 @@ export function parseConfiguredOnboardingPropertyProfile(raw:unknown){
  }
  return propertyOperatingProfileInputSchema.strict().parse(value);
 }
+
+/** A reviewed native update supplies every operational choice; Core defaults cannot select services. */
+export const onboardingOperatingProfileInputSchema=z.record(z.string(),z.unknown()).transform((raw,context)=>{
+ try{return parseConfiguredOnboardingPropertyProfile(raw);}catch{context.addIssue({code:"custom",message:"native_onboarding_explicit_operating_profile_required"});return z.NEVER;}
+});
+
+/** Captured Core values retain explicit nullable optional fields and never fill missing historical choices. */
+export const onboardingOperatingProfileSnapshotSchema=z.record(z.string(),z.unknown()).transform((raw,context)=>{
+ if(!Object.hasOwn(raw,"midStayCleaningRuleKey")||!Object.hasOwn(raw,"automationNotes")){context.addIssue({code:"custom",message:"native_onboarding_original_operating_profile_required"});return z.NEVER;}
+ try{const midStayCleaningRuleKey=z.string().nullable().parse(raw.midStayCleaningRuleKey),automationNotes=z.string().nullable().parse(raw.automationNotes),otherServices=z.array(z.string()).parse(raw.otherServices),value=parseConfiguredOnboardingPropertyProfile({...raw,midStayCleaningRuleKey:midStayCleaningRuleKey??undefined,automationNotes:undefined});return{...value,otherServices,midStayCleaningRuleKey,automationNotes};}catch{context.addIssue({code:"custom",message:"native_onboarding_original_operating_profile_required"});return z.NEVER;}
+});

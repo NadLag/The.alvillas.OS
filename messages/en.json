@@ -5673,6 +5673,27 @@
         "PAUSED": "Paused",
         "OFFBOARDED": "Offboarded"
       }
+    },
+    "operating": {
+      "guidance": "Choose how this property will operate, then review its full settings before recording.",
+      "mode": "Operating profile action",
+      "modes": {
+        "LINK": "Keep and record current settings",
+        "UPDATE": "Review updated settings"
+      },
+      "choose": "Choose a value",
+      "validation": "Review every choice, cadence and configured rule, then provide a reason.",
+      "servicesHint": "Enter one service per line.",
+      "before": "Settings before this change",
+      "after": "Reviewed operating settings",
+      "ruleVersion": "Mid-stay rule version",
+      "ruleNights": "Mid-stay threshold (nights)",
+      "ruleTemplate": "Mid-stay task template",
+      "prepare": "Prepare operating profile",
+      "change": "Review operating profile again",
+      "reviewTitle": "Review operating settings",
+      "confirm": "Record operating settings",
+      "saved": "Operating settings recorded."
     }
   }
 }

@@ -996,14 +996,14 @@ export class CoreRepository {
         maintenanceTrackingEnabled: input.maintenanceTrackingEnabled,
         preventiveMaintenanceFrequency: input.preventiveMaintenanceFrequency,
         midStayCleaningEnabled: input.midStayCleaningEnabled,
-        midStayCleaningRuleKey: input.midStayCleaningRuleKey,
+        midStayCleaningRuleKey: input.midStayCleaningRuleKey ?? null,
         breakfastAvailable: input.breakfastAvailable,
         chefAvailable: input.chefAvailable,
         transfersAvailable: input.transfersAvailable,
         groceriesAvailable: input.groceriesAvailable,
         wellnessAvailable: input.wellnessAvailable,
         otherServices: input.otherServices,
-        automationNotes: input.automationNotes
+        automationNotes: input.automationNotes ?? null
       },
       create: {
         organizationId: this.organizationId,
