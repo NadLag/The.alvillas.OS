@@ -25,7 +25,7 @@ export const onboardingRecoverySchema=z.object({recorded:z.boolean(),revision:on
 export const onboardingDirectorySchema=z.object({items:z.array(onboardingReceiptSchema).max(20),next:z.string().nullable()}).strict();
 export const onboardingChoicesInputSchema=z.object({sessionId:uuid.optional(),query:z.string().trim().max(160).default(""),cursor:z.string().min(1).max(6000).optional()}).strict();
 export const onboardingChoicesSchema=z.object({owners:z.array(z.object({id:uuid,displayName:z.string(),email:z.string().nullable()}).strict()).max(20),next:z.string().nullable()}).strict();
-export const onboardingOptionsSchema=z.object({canView:z.boolean(),canCreate:z.boolean(),canEdit:z.boolean(),modes:z.array(z.enum(["CREATE","LINK"])).max(2),steps:z.array(onboardingStepSchema).length(onboardingSteps.length)}).strict();
+export const onboardingOptionsSchema=z.object({canView:z.boolean(),canCreate:z.boolean(),canEdit:z.boolean(),modes:z.array(z.enum(["CREATE","LINK"])).max(2),propertyModes:z.array(z.enum(["CREATE","LINK"])).max(2).optional(),steps:z.array(onboardingStepSchema).length(onboardingSteps.length)}).strict();
 
 export function canonicalOnboardingDraft(raw:unknown):OnboardingDraft{
  const value=onboardingDraftSchema.parse(raw);return{sessionId:value.sessionId,previousRevisionId:value.previousRevisionId,step:"OWNER",target:value.target};
