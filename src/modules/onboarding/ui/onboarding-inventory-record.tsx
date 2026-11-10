@@ -2,6 +2,7 @@
 import {useLocale,useTranslations} from "next-intl";
 import type {z} from "zod";
 import {localizedText} from "@/i18n/content";
+import {formatNumber} from "@/i18n/format";
 import {safeLocale} from "@/i18n/routing";
 import type {OnboardingInventorySnapshot,onboardingInventoryReviewSchema} from "../domain/onboarding-inventory";
 import {OnboardingPropertyRecord} from "./onboarding-property-record";
@@ -13,7 +14,7 @@ function InventorySettings({settings}:{settings:Settings|null}){
  if(!settings)return <p>{t("inventory.noConfiguration")}</p>;
  if(!settings.minimums.length)return <p>{t("inventory.noItems")}</p>;
  return <ul className="onboarding-list">{settings.minimums.map(row=><li key={row.item}><h4 dir="auto">{row.name?localizedText(row.name,locale):row.item}</h4><dl className="onboarding-values">
-  <div><dt>{t("inventory.fields.item")}</dt><dd dir="ltr">{row.item}</dd></div><div><dt>{t("inventory.fields.quantity")}</dt><dd dir="ltr">{row.quantity}</dd></div><div><dt>{t("inventory.fields.unit")}</dt><dd dir="auto">{row.unit??t("property.noValue")}</dd></div><div><dt>{t("inventory.fields.category")}</dt><dd>{row.category?t("inventory.categories."+row.category):t("property.noValue")}</dd></div><div><dt>{t("inventory.fields.perStay")}</dt><dd>{row.expected_per_stay===null?t("inventory.perStay.UNSPECIFIED"):row.expected_per_stay}</dd></div>
+  <div><dt>{t("inventory.fields.item")}</dt><dd dir="ltr">{row.item}</dd></div><div><dt>{t("inventory.fields.quantity")}</dt><dd dir="ltr">{formatNumber(locale,String(row.quantity))}</dd></div><div><dt>{t("inventory.fields.unit")}</dt><dd dir="auto">{row.unit??t("property.noValue")}</dd></div><div><dt>{t("inventory.fields.category")}</dt><dd>{row.category?t("inventory.categories."+row.category):t("property.noValue")}</dd></div><div><dt>{t("inventory.fields.perStay")}</dt><dd>{row.expected_per_stay===null?t("inventory.perStay.UNSPECIFIED"):formatNumber(locale,String(row.expected_per_stay))}</dd></div>
  </dl></li>)}</ul>;
 }
 export function OnboardingInventoryRecord({review,reason}:{review:Pick<Review,"draft"|"owner"|"property"|"previousInventory">&Partial<Pick<Review,"proposedInventory"|"selectedTemplate">>&{inventory?:OnboardingInventorySnapshot};reason:string}){
