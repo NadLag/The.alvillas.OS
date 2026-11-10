@@ -38,31 +38,11 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, authorizeCollection } from "@/platform/authz/authorize";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
-import type { CoreActorContext } from "@/modules/core/application/core-access";
+import {CoreAuthorizationError,CoreNotFoundError,CoreValidationError,type CoreActorContext} from "@/modules/core/application/core-access";
+export {CoreAuthorizationError,CoreNotFoundError,CoreValidationError} from "@/modules/core/application/core-access";
 import {financialRuleAccess,financialRuleSourceChecks,protectedFinancialRuleKey,recheckFinancialRuleAccess} from "@/platform/config/financial-rule-authority";
 import {assertAccountAuthorization,type CurrentAuthorityCheck} from "@/platform/authz/current-authority";
 import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
-
-export class CoreAuthorizationError extends Error {
-  constructor(message = "Core action is not authorized") {
-    super(message);
-    this.name = "CoreAuthorizationError";
-  }
-}
-
-export class CoreNotFoundError extends Error {
-  constructor(message = "Core resource was not found") {
-    super(message);
-    this.name = "CoreNotFoundError";
-  }
-}
-
-export class CoreValidationError extends Error {
-  constructor(message = "Core input is invalid") {
-    super(message);
-    this.name = "CoreValidationError";
-  }
-}
 
 type CoreServiceDeps = {
   db?: TenantTransactionRunner;

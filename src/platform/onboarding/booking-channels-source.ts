@@ -3,7 +3,7 @@ import type {AccountActorContext} from "@/platform/authz/session-context";
 import {CoreRepository} from "@/modules/core/infrastructure/core-repository";
 import {bookingChannelInputSchema} from "@/modules/core/domain/owner-property";
 import {onboardingBookingChannelsTargetSchema,onboardingBookingChannelsSnapshotSchema} from "@/modules/onboarding/domain/onboarding-booking-channels";
-export {CoreAuthorizationError as NativeOnboardingBookingChannelAuthorizationError,CoreNotFoundError as NativeOnboardingBookingChannelNotFoundError,CoreValidationError as NativeOnboardingBookingChannelValidationError} from "@/modules/core/application/core-service";
+export {CoreAuthorizationError as NativeOnboardingBookingChannelAuthorizationError,CoreNotFoundError as NativeOnboardingBookingChannelNotFoundError,CoreValidationError as NativeOnboardingBookingChannelValidationError} from "@/modules/core/application/core-access";
 
 /** Internal metadata boundary. Parent/source authorization belongs to the native application. */
 export const nativeOnboardingBookingChannelHeads=(tx:TenantTransaction,organizationId:string,propertyId:string,selection:{ids:readonly string[]}|{sourceKeys:readonly string[]},includeArchived=false)=>new CoreRepository(tx,organizationId).onboardingBookingChannelHeads(propertyId,selection,includeArchived);

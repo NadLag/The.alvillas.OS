@@ -2,6 +2,16 @@ import type { Session } from "next-auth";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import type { AuthContext } from "@/platform/authz/authorize";
 
+export class CoreAuthorizationError extends Error {
+  constructor(message = "Core action is not authorized") {super(message);this.name="CoreAuthorizationError";}
+}
+export class CoreNotFoundError extends Error {
+  constructor(message = "Core resource was not found") {super(message);this.name="CoreNotFoundError";}
+}
+export class CoreValidationError extends Error {
+  constructor(message = "Core input is invalid") {super(message);this.name="CoreValidationError";}
+}
+
 export type CoreActorContext = {
   organizationId: string;
   actorId: string;
