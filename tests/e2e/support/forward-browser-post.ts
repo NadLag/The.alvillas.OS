@@ -28,8 +28,8 @@ export async function postBrowserJsonOnce(page: Pick<Page, "context" | "evaluate
   const serialized = JSON.stringify(options.data);
   if (typeof serialized !== "string") throw new Error("Owned JSON command required");
   const cookies = await page.context().cookies(target.href), userAgent = await page.evaluate(() => navigator.userAgent), bytes = Buffer.from(serialized);
-  let body: Buffer = Buffer.alloc(0);
+  let body: Buffer = Buffer.alloc(0), responseHeaders: Readonly<IncomingHttpHeaders> = {};
   const status = await forwardBrowserPostOnce({ url: () => target.href, method: () => "POST", allHeaders: () => Promise.resolve({ ...options.headers, origin: origin.origin, "content-type": "application/json", "content-length": String(bytes.length), "user-agent": userAgent,
-    cookie: cookies.map(cookie => cookie.name + "=" + cookie.value).join("; ") }), postDataBuffer: () => bytes }, value => { body = value; });
-  return { status: () => status, json: (): Promise<unknown> => Promise.resolve(JSON.parse(body.toString("utf8")) as unknown) };
+    cookie: cookies.map(cookie => cookie.name + "=" + cookie.value).join("; ") }), postDataBuffer: () => bytes }, (value, headers) => { body = value; responseHeaders = headers; });
+  return { status: () => status, headers: () => ({ ...responseHeaders }), text: () => Promise.resolve(body.toString("utf8")), json: (): Promise<unknown> => Promise.resolve(JSON.parse(body.toString("utf8")) as unknown) };
 }

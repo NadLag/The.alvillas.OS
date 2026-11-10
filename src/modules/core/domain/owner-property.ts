@@ -1,6 +1,10 @@
 import { z } from "zod";
 import {
   approvalStepSchema,
+  commissionConfigKey,
+  agreementResponsibilitiesConfigKey,
+  agreementNoticeConfigKey,
+  agreementSpecialConditionsConfigKey,
   commissionAccrualEventSchema,
   commissionBasisSchema,
   expenseTreatmentSchema,
@@ -268,6 +272,8 @@ export type PropertyOperatingProfileInput = z.infer<typeof propertyOperatingProf
 
 export const managementAgreementStatusSchema = z.enum(["DRAFT", "ACTIVE", "ENDED"]);
 
+export const managementAgreementRuleKeys = [commissionConfigKey,"finance.expense_treatment","finance.approval_thresholds","finance.payout_schedule",agreementResponsibilitiesConfigKey,agreementNoticeConfigKey,agreementSpecialConditionsConfigKey] as const;
+
 const managementAgreementTermFields = {
   effectiveFrom: z.coerce.date(),
   effectiveTo: optionalDate,
@@ -317,6 +323,15 @@ export const managementAgreementInputSchema = z
   });
 
 export type ManagementAgreementInput = z.infer<typeof managementAgreementInputSchema>;
+
+/** Shared reviewed terms; creation supplies its actual Property, lifecycle and audit reason. */
+export const managementAgreementDraftTermsSchema = z
+  .object({ reference: managementAgreementInputSchema.shape.reference, ...managementAgreementTermFields })
+  .omit({ reason: true })
+  .refine(validManagementAgreementDateRange, {
+    message: "Agreement end date must be after the effective date",
+    path: ["effectiveTo"]
+  });
 
 export const managementAgreementAmendmentInputSchema = z
   .object({
@@ -663,3 +678,74 @@ export type PropertySummary = {
   bookingChannels: BookingChannelSummary[];
   createdAt: Date;
 };
+
+/** The canonical Core writer and native encrypted-history validation share these exact values. */
+export function managementAgreementConfigValues(
+  input: Pick<ManagementAgreementInput,"approvalThresholdAmount"|"approvalThresholdKey"|"approvalThresholdCurrency"|"approvalRequires"|"payoutCadence"|"payoutHoldDays"|"payoutHoldbackBps"|"commissionRateBps"|"commissionBasis"|"commissionAccrualEvent"|"expenseDefaultTreatment"|"ownerResponsibilities"|"alvillasResponsibilities"|"noticePeriodDays"|"specialConditions">
+): Array<{ key: string; value: unknown }> {
+  const approvalThresholds = input.approvalThresholdAmount
+    ? {
+        thresholds: [
+          {
+            key: input.approvalThresholdKey ?? "owner_approval",
+            amount: input.approvalThresholdAmount,
+            currency: input.approvalThresholdCurrency,
+            requires_approval_from: input.approvalRequires
+          }
+        ]
+      }
+    : {
+        thresholds: []
+      };
+  const payoutSchedule = {
+    cadence: input.payoutCadence,
+    ...(input.payoutHoldDays === undefined ? {} : { hold_days: input.payoutHoldDays }),
+    ...(input.payoutHoldbackBps === undefined ? {} : { holdback_bps: input.payoutHoldbackBps })
+  };
+
+  return [
+    {
+      key: commissionConfigKey,
+      value: {
+        rate_bps: input.commissionRateBps,
+        basis: input.commissionBasis,
+        accrual_event: input.commissionAccrualEvent
+      }
+    },
+    {
+      key: "finance.expense_treatment",
+      value: {
+        default_treatment: input.expenseDefaultTreatment,
+        categories: {}
+      }
+    },
+    {
+      key: "finance.approval_thresholds",
+      value: approvalThresholds
+    },
+    {
+      key: "finance.payout_schedule",
+      value: payoutSchedule
+    },
+    {
+      key: agreementResponsibilitiesConfigKey,
+      value: {
+        owner: input.ownerResponsibilities,
+        alvillas: input.alvillasResponsibilities
+      }
+    },
+    {
+      key: agreementNoticeConfigKey,
+      value: {
+        notice_period_days: input.noticePeriodDays
+      }
+    },
+    {
+      key: agreementSpecialConditionsConfigKey,
+      value: {
+        conditions: input.specialConditions
+      }
+    }
+  ];
+}
+

@@ -5694,6 +5694,52 @@
       "reviewTitle": "Review operating settings",
       "confirm": "Record operating settings",
       "saved": "Operating settings recorded."
+    },
+    "agreement": {
+      "guidance": "Create a draft with explicit financial terms or record an existing agreement. Review the terms before saving. This step does not sign or activate an agreement.",
+      "mode": "Management agreement action",
+      "modes": {
+        "CREATE": "Create a draft agreement",
+        "LINK": "Record an existing agreement"
+      },
+      "validation": "Check every financial choice, date, amount and reason.",
+      "utcInput": "Enter agreement dates and times in UTC. Review the exact instants before saving; your device time zone does not change these entries.",
+      "utcField": "{field} (UTC)",
+      "utcDisplay": "Agreement dates and times below are shown in UTC.",
+      "thresholdMode": "Approval threshold choice",
+      "noThreshold": "No amount threshold",
+      "useThreshold": "Specify an amount threshold",
+      "linesHint": "Enter one responsibility or condition per line.",
+      "searchLabel": "Find an agreement for this property",
+      "search": "Search agreements",
+      "selected": "Selected agreement",
+      "empty": "No available agreements match this search.",
+      "review": "Review agreement terms",
+      "reviewTitle": "Review the management agreement",
+      "confirm": "Record agreement terms",
+      "saved": "Management agreement recorded.",
+      "prepare": "Prepare management agreement",
+      "change": "Review management agreement again",
+      "before": "Agreement before this step",
+      "after": "Reviewed agreement terms",
+      "noPrevious": "This step did not replace a recorded agreement.",
+      "originalTerms": "Original recorded terms",
+      "originalGuidance": "These versions and values were recorded with this step. Expand a section to inspect all of its terms, including any additional conditions.",
+      "recordedAt": "Terms recorded at",
+      "ruleStates": {
+        "DRAFT": "Draft",
+        "ACTIVE": "Active",
+        "RETIRED": "Retired"
+      },
+      "ruleNames": {
+        "finance_commission": "Commission",
+        "finance_expense_treatment": "Expense treatment",
+        "finance_approval_thresholds": "Approval thresholds",
+        "finance_payout_schedule": "Payout schedule",
+        "agreement_responsibilities": "Responsibilities",
+        "agreement_notice": "Notice period",
+        "agreement_special_conditions": "Special conditions"
+      }
     }
   }
 }

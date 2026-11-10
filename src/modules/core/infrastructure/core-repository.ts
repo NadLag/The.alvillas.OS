@@ -18,7 +18,7 @@ import type {
   PropertyOnboardingProfileSummary,
   PropertySummary
 } from "@/modules/core/domain/owner-property";
-import { defaultPropertyOperatingProfile as operatingProfileDefaults } from "@/modules/core/domain/owner-property";
+import { defaultPropertyOperatingProfile as operatingProfileDefaults,managementAgreementRuleKeys } from "@/modules/core/domain/owner-property";
 import { encryptSecret } from "@/platform/auth/secret-encryption";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
@@ -859,6 +859,42 @@ export class CoreRepository {
     });
 
     return managementAgreementToSummary(agreement, []);
+  }
+
+  /** Native identity and tuple pins precede any private agreement/configuration value read. */
+  onboardingManagementAgreementHeads(ids:readonly string[],includeArchived=false){
+    return this.tx.$queryRaw<Array<{id:string;organizationId:string;propertyId:string;status:string;effectiveFrom:Date;effectiveTo:Date|null;createdBy:string|null;createdAt:Date;archivedAt:Date|null;xmin:string;tuple:string}>>(Prisma.sql`SELECT id,organization_id AS "organizationId",property_id AS "propertyId",status,effective_from AS "effectiveFrom",effective_to AS "effectiveTo",created_by AS "createdBy",created_at AS "createdAt",archived_at AS "archivedAt",xmin::text,ctid::text AS tuple FROM management_agreement WHERE organization_id=${this.organizationId}::uuid AND id=ANY(${[...ids]}::uuid[]) AND (${includeArchived}::boolean OR archived_at IS NULL) ORDER BY id`);
+  }
+
+  onboardingManagementAgreementRows(ids:readonly string[],includeArchived=false){
+    return this.tx.managementAgreement.findMany({where:{organizationId:this.organizationId,id:{in:[...ids]},...includeArchived?{}:{archivedAt:null}},select:{id:true,organizationId:true,propertyId:true,reference:true,status:true,effectiveFrom:true,effectiveTo:true,createdBy:true,createdAt:true,archivedAt:true},orderBy:{id:"asc"}});
+  }
+
+  /** Match the existing canonical agreement summary's latest version for each registered group. */
+  onboardingManagementAgreementRuleHeads(agreementId:string){
+    return this.onboardingManagementAgreementRuleHeadsMany([agreementId]);
+  }
+
+  /** One bounded metadata read for selector candidates; no private rule values. */
+  onboardingManagementAgreementRuleHeadsMany(agreementIds:readonly string[]){
+    return this.tx.$queryRaw<Array<{id:string;key:string;version:number;scopeType:string;scopeId:string;lifecycle:string;effectiveFrom:Date;effectiveTo:Date|null;createdBy:string|null;createdAt:Date;xmin:string;tuple:string}>>(Prisma.sql`SELECT DISTINCT ON (scope_id,key) id,key,version,scope_type AS "scopeType",scope_id AS "scopeId",lifecycle,effective_from AS "effectiveFrom",effective_to AS "effectiveTo",created_by AS "createdBy",created_at AS "createdAt",xmin::text,ctid::text AS tuple FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND scope_type='agreement' AND scope_id=ANY(${[...agreementIds]}::uuid[]) AND archived_at IS NULL AND key=ANY(${[...managementAgreementRuleKeys]}::text[]) ORDER BY scope_id,key,version DESC`);
+  }
+
+  onboardingManagementAgreementRuleRows(ids:readonly string[]){
+    return this.tx.configRule.findMany({where:{organizationId:this.organizationId,id:{in:[...ids]},scopeType:"agreement",archivedAt:null,key:{in:[...managementAgreementRuleKeys]}},select:{id:true,key:true,version:true,scopeType:true,scopeId:true,lifecycle:true,effectiveFrom:true,effectiveTo:true,createdBy:true,createdAt:true,reason:true,value:true},orderBy:{key:"asc"}});
+  }
+
+  /** Historical source authority uses the actual retained metadata, without loading private values. */
+  onboardingManagementAgreementRuleWitnesses(ids:readonly string[]){
+    return this.tx.$queryRaw<Array<{id:string;key:string;version:number;scopeType:string;scopeId:string;lifecycle:string;effectiveFrom:Date;effectiveTo:Date|null;createdBy:string|null;createdAt:Date;archivedAt:Date|null;xmin:string;tuple:string}>>(Prisma.sql`SELECT id,key,version,scope_type AS "scopeType",scope_id AS "scopeId",lifecycle,effective_from AS "effectiveFrom",effective_to AS "effectiveTo",created_by AS "createdBy",created_at AS "createdAt",archived_at AS "archivedAt",xmin::text,ctid::text AS tuple FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND id=ANY(${[...ids]}::uuid[]) AND scope_type='agreement' AND key=ANY(${[...managementAgreementRuleKeys]}::text[]) ORDER BY key`);
+  }
+
+  async lockOnboardingManagementAgreement(id:string){
+    await this.tx.$executeRaw(Prisma.sql`SELECT id FROM management_agreement WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid FOR UPDATE`);
+  }
+
+  onboardingManagementAgreementPage(propertyId:string,query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`SELECT id FROM management_agreement WHERE organization_id=${this.organizationId}::uuid AND property_id=${propertyId}::uuid AND archived_at IS NULL AND status IN ('DRAFT','ACTIVE') AND created_at<=${asOf} AND reference ILIKE ${"%"+query+"%"} ${after?Prisma.sql`AND id>${after}::uuid`:Prisma.empty} ORDER BY id LIMIT 51`);
   }
 
   async listManagementAgreementsForProperty(
