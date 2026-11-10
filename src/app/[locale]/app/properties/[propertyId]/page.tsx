@@ -195,6 +195,13 @@ export default async function PropertyDetailPage({
     city: property.cityId,
     region: property.regionId
   };
+  const canEditBookingChannels = authorize(ctx.authContext, "edit", {
+    ...propertyScopedResource,
+    type: "property",
+    id: property.id,
+    status: property.status,
+    occurredAt: property.createdAt
+  });
   const canViewReservations = reservationCtx
     ? authorize(reservationCtx.authContext, "view", {
         ...propertyScopedResource,
@@ -974,7 +981,7 @@ export default async function PropertyDetailPage({
         ) : (
           <p className="field-hint">{t("properties.bookingChannels.empty")}</p>
         )}
-        {canEditOwnership ? (
+        {canEditBookingChannels ? (
           <PropertyBookingChannelForm labels={bookingChannelLabels} locale={appLocale} propertyId={property.id} />
         ) : null}
       </section>

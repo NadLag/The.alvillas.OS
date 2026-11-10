@@ -2849,7 +2849,13 @@ textarea:disabled {
 .lead-stage-editor ol { padding-inline-start: var(--space-5); }
 .lead-stage-editor li > span { overflow-wrap: anywhere; }
 /* Private property onboarding uses logical dimensions for EN, FR and RTL. */
+.onboarding-workspace-page { overflow-wrap: anywhere; }
 .onboarding-workspace-page, .onboarding-workspace-page .resource-form, .onboarding-workspace-page .field, .onboarding-workspace-page fieldset { min-inline-size: 0; }
+.onboarding-workspace-page .resource-form { grid-template-columns: minmax(0, 1fr); max-inline-size: 100%; }
+.onboarding-workspace-page :is(.primary-button, .secondary-button, .quiet-button) { min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.onboarding-workspace-page .checkbox-field { display: grid; grid-template-columns: var(--space-5) minmax(0, 1fr); gap: var(--space-3); align-items: start; min-inline-size: 0; min-block-size: var(--target-field); }
+.onboarding-workspace-page .checkbox-field > :is(span, time) { grid-column: 2; min-inline-size: 0; overflow-wrap: anywhere; }
+.onboarding-workspace-page .checkbox-field input[type="checkbox"] { inline-size: var(--space-5); block-size: var(--space-5); min-block-size: var(--space-5); }
 .onboarding-workspace-page .field { grid-template-columns: minmax(0, 1fr); }
 .onboarding-workspace-page :is(input, select, textarea) { min-inline-size: 0; max-inline-size: 100%; }
 .onboarding-workspace-page .onboarding-list, .onboarding-workspace-page .onboarding-steps { display: grid; gap: var(--space-3); padding-inline-start: 0; list-style: none; }
