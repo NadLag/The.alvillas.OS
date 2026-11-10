@@ -146,15 +146,16 @@ function visibleVersion(
     restricted: row.kind === "SERVICE_CATALOG" && !financial
   };
 }
-async function templateDisclosure(ctx: TemplateActorContext, repo: PropertyTemplateRepository, propertyId: string | null, financial: boolean) {
+async function templateDisclosure(ctx: TemplateActorContext, repo: PropertyTemplateRepository, propertyId: string | null, financial: boolean, ownerId?:string) {
   const property = propertyId ? (await repo.presentationProperties([propertyId]))[0] : undefined;
   if (propertyId && !property) throw new TemplateNotFoundError();
+  if(ownerId){const head=propertyId?await repo.authorizationProperty(propertyId):null;if(!head?.ownership.some(row=>row.ownerId===ownerId))throw new TemplateAccessError();}
   const current = financial ? await authContextForAccountInTransaction(repo.tx, ctx.organizationId, ctx.actorId) : ctx.authContext, at = new Date();
-  return { current, property, at, source: { organizationId: ctx.organizationId, propertyId, id: propertyId ?? undefined,
+  return { current, property, at, source: { organizationId: ctx.organizationId, propertyId, ownerId,id: propertyId ?? undefined,
     city: property?.cityId ?? property?.city, region: property?.regionId ?? property?.region } };
 }
-async function financialTemplateWriteAuthority(ctx: TemplateActorContext, repo: PropertyTemplateRepository, propertyId: string | null, action: "create" | "configure") {
-  const disclosure = await templateDisclosure(ctx, repo, propertyId, true), source = { ...disclosure.source, dataClass: "financial" as const };
+async function financialTemplateWriteAuthority(ctx: TemplateActorContext, repo: PropertyTemplateRepository, propertyId: string | null, action: "create" | "configure",ownerId?:string) {
+  const disclosure = await templateDisclosure(ctx, repo, propertyId, true,ownerId), source = { ...disclosure.source, dataClass: "financial" as const };
   if ([ctx.authContext, disclosure.current].some(authority =>
     !authorize(authority, action, { ...source, type: "config_rule" }, disclosure.at) ||
     !authorize(authority, "view", { ...source, type: "config_rule" }, disclosure.at) || propertyId &&
@@ -384,7 +385,7 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
       if (replay.createdBy !== ctx.actorId || !equalSetting(replay.command, input))
         throw new TemplateConflictError();
       if (replay.kind !== "SERVICE_CATALOG") return replay;
-      const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure");
+      const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure",input.ownerId);
       return presentFinancialTemplate(ctx, disclosure, replay, ["snapshot", "overrides", "command", "reason"]);
     }
     const selected = input.action === "APPLY" ? await repo.version(input.templateVersionId) : null;
@@ -416,7 +417,7 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
       ])
     ].sort();
     for (const key of ruleKeys) await config.lockVersion(key, "property", input.propertyId);
-    if (kind === "SERVICE_CATALOG") await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure");
+    if (kind === "SERVICE_CATALOG") await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure",input.ownerId);
     const before = await repo.projection(input.propertyId, ruleKeys, input.ownerId);
     const after = structuredClone(before) as TemplateValues & Record<string, unknown>;
     const base = flattenSettings(template.values),
@@ -472,7 +473,7 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
       if (equalSetting(value, before.rules?.[key])) continue;
       await writePropertyConfiguration(
         ctx,
-        { propertyId: input.propertyId, key, value, reason: input.reason },
+        { propertyId: input.propertyId, ownerId:input.ownerId,key, value, reason: input.reason },
         { tx, ...audit }
       );
     }
@@ -515,7 +516,7 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
     });
     await writeAuthority(kind);
     if (kind !== "SERVICE_CATALOG") return revision;
-    const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure");
+    const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure",input.ownerId);
     return presentFinancialTemplate(ctx, disclosure, revision, ["snapshot", "overrides", "command", "reason"]);
   });
 }

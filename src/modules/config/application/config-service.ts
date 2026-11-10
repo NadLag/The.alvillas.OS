@@ -14,10 +14,12 @@ import {
   schemaForConfigKey
 } from "@/platform/config/rule-registry";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
-import { authorize, authorizeCollection } from "@/platform/authz/authorize";
+import { authorize, authorizeCollection,type Resource } from "@/platform/authz/authorize";
+import {recheckAccountAuthorization} from "@/platform/authz/current-authority";
+import {configurationPropertyHead,configurationSourceClock} from "@/platform/config/property-source";
 import { present } from "@/platform/authz/present";
 import { prisma } from "@/platform/db/client";
-import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
+import { withTenant,type TenantTransaction,type TenantTransactionRunner } from "@/platform/db/tenant";
 import type { ConfigActorContext } from "@/modules/config/application/config-access";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
 import { notificationRoutingSchema } from "@/platform/notifications/notification-routing";
@@ -50,7 +52,9 @@ type ConfigServiceDeps = {
   db?: TenantTransactionRunner;
   requestId?: string;
   ipAddress?: string | null;
+  ownerId?:string;
 };
+type ConfigSourceScope=Pick<Resource,"propertyId"|"ownerId"|"city"|"region"|"dataClass">;
 
 type AuditMeta = {
   requestId: string;
@@ -135,18 +139,19 @@ function assertCollectionAllowed(ctx: ConfigActorContext, action: "view" | "crea
 function assertRuleAllowed(
   ctx: ConfigActorContext,
   action: "view" | "create" | "configure",
-  rule?: Pick<ConfigRuleRecord, "id" | "scopeType" | "scopeId"> & { key?: string }
+  rule?: Pick<ConfigRuleRecord, "id" | "scopeType" | "scopeId"> & { key?: string },
+  source:ConfigSourceScope={}
 ): void {
   const allowed = rule
     ? authorize(ctx.authContext, action, {
         type: "config_rule",
         organizationId: ctx.organizationId,
         id: rule.id,
-        propertyId: rule.scopeType === "property" ? rule.scopeId : undefined
+        propertyId: rule.scopeType === "property" ? rule.scopeId : undefined,...source
       })
     : authorizeCollection(ctx.authContext, action, "config_rule");
 
-  if (!allowed || (rule && !hasRuleFinancialAccess(ctx, rule.key, rule.scopeType, rule.scopeId))) {
+  if (!allowed || (rule && !hasRuleFinancialAccess(ctx, rule.key, rule.scopeType, rule.scopeId,source))) {
     throw new ConfigAuthorizationError();
   }
 }
@@ -155,7 +160,8 @@ function hasRuleFinancialAccess(
   ctx: ConfigActorContext,
   key: string | undefined,
   scopeType: string,
-  scopeId: string | null
+  scopeId: string | null,
+  source:ConfigSourceScope={}
 ): boolean {
   // Assignment compensation is changed only through the immutable Team workflow.
   if (scopeType === "role_assignment") return false;
@@ -167,8 +173,19 @@ function hasRuleFinancialAccess(
   return key !== "services.pricing" || authorizeUnconditionalSource(ctx.authContext, "view", {
     type: "financial_transaction",
     organizationId: ctx.organizationId,
-    propertyId: scopeType === "property" ? scopeId : undefined
+    propertyId: scopeType === "property" ? scopeId : undefined,...source
   }, new Date());
+}
+
+/** Price configuration keeps its canonical writer and independently rechecks current source authority. */
+async function serviceCatalogWriteAuthority(ctx:ConfigActorContext,tx:TenantTransaction,key:string,scope:{scopeType:string;scopeId:string|null},action:"create"|"configure",ownerId?:string):Promise<ConfigSourceScope>{
+ if(key!=="services.pricing")return{};
+ let source:ConfigSourceScope={dataClass:"financial"};
+ if(scope.scopeType==="property"){
+  if(!scope.scopeId||ownerId&&!uuidSchema.safeParse(ownerId).success)throw new ConfigAuthorizationError();const property=await configurationPropertyHead(tx,ctx.organizationId,scope.scopeId);
+  if(!property||ownerId&&!property.ownership.some(row=>row.ownerId===ownerId))throw new ConfigAuthorizationError();source={...source,propertyId:property.id,ownerId,city:property.cityId,region:property.regionId};
+ }
+ await recheckAccountAuthorization(ctx,tx,await configurationSourceClock(tx,ctx.organizationId),[{action,resource:{...source,type:"config_rule",organizationId:ctx.organizationId,id:key}},{action:"view",unconditional:true,resource:{...source,type:"financial_transaction",organizationId:ctx.organizationId}}],new ConfigAuthorizationError());return source;
 }
 
 async function auditMeta(deps: ConfigServiceDeps): Promise<AuditMeta> {
@@ -455,12 +472,13 @@ export async function createConfigRuleVersion(
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
 
+    const source=await serviceCatalogWriteAuthority(ctx,tx,key,scope,input.lifecycle==="DRAFT"?"create":"configure",deps.ownerId);
     assertRuleAllowed(ctx, input.lifecycle === "DRAFT" ? "create" : "configure", {
       id: key,
       key,
       scopeType: scope.scopeType,
       scopeId: scope.scopeId
-    });
+    },source);
     const checks=[{action:input.lifecycle==="DRAFT"?"create"as const:"configure"as const,resource:{type:"config_rule",organizationId:ctx.organizationId,id:key,propertyId:scope.scopeType==="property"?scope.scopeId:undefined}}];
     await recheckRecurringExpenseRuleAccess(ctx,tx,key,checks,new ConfigAuthorizationError());
 
@@ -494,6 +512,7 @@ export async function createConfigRuleVersion(
     });
 
     await recheckRecurringExpenseRuleAccess(ctx,tx,key,checks,new ConfigAuthorizationError());
+    await serviceCatalogWriteAuthority(ctx,tx,key,scope,input.lifecycle==="DRAFT"?"create":"configure",deps.ownerId);
     return created;
   });
 }

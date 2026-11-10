@@ -5,7 +5,7 @@ import type { TenantTransaction, TenantTransactionRunner } from "@/platform/db/t
 // Cross-module orchestration keeps configuration authorization, validation and audit in its existing service.
 export async function writePropertyConfiguration(
   ctx: { organizationId: string; actorId: string; personId: string; authContext: AuthContext },
-  input: { propertyId: string; key: string; value: unknown; reason: string },
+  input: { propertyId: string; ownerId?: string; key: string; value: unknown; reason: string },
   deps: { tx: TenantTransaction; requestId: string; ipAddress: string | null }
 ) {
   const db: TenantTransactionRunner = { $transaction: (work) => work(deps.tx) };
@@ -20,6 +20,6 @@ export async function writePropertyConfiguration(
       effectiveFrom: new Date(),
       reason: input.reason
     },
-    { db, requestId: deps.requestId, ipAddress: deps.ipAddress }
+    { db, requestId: deps.requestId, ipAddress: deps.ipAddress, ownerId:input.ownerId }
   );
 }

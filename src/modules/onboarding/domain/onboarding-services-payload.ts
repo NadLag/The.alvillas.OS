@@ -4,7 +4,8 @@ import {encryptBytes,decryptBytes} from "@/platform/auth/secret-encryption";
 import {requirePrivatePayloadKeys} from "@/platform/auth/private-payload-keys";
 import {canonicalOnboardingServicesSettings,projectOnboardingServicesSettings,onboardingServicesCanonicalValueSchema,onboardingServicesTemplateValuesSchema} from "@/platform/onboarding/contracts";
 import {onboardingPayloadBindingSchema} from "./onboarding-payload";
-import {onboardingOwnerSchema,OnboardingConfigurationError,onboardingMaximumRequestBytes} from "./onboarding-wizard";
+import {onboardingOwnerSchema,OnboardingConfigurationError} from "./onboarding-wizard";
+import {onboardingMaximumCatalogRecordBytes} from "@/platform/onboarding/limits";
 import {onboardingPropertySnapshotSchema} from "./onboarding-property";
 import {canonicalOnboardingServicesCommand,onboardingServicesSnapshotSchema,type OnboardingServicesCommand,type OnboardingServicesSnapshot} from "./onboarding-services";
 
@@ -12,7 +13,7 @@ const bindingSchema=onboardingPayloadBindingSchema.extend({propertyId:z.uuid().t
 export type OnboardingServicesPayloadBinding=z.infer<typeof bindingSchema>;
 // Two complete 200-item multilingual rules and two selected/bound templates must fit;
 // this encrypted-history ceiling does not increase the original HTTP request limit.
-export const onboardingMaximumServicesPayloadBytes=onboardingMaximumRequestBytes*64;
+export const onboardingMaximumServicesPayloadBytes=onboardingMaximumCatalogRecordBytes;
 const retained=z.object({propertyId:onboardingServicesSnapshotSchema.shape.propertyId,rule:onboardingServicesSnapshotSchema.shape.rule,template:onboardingServicesSnapshotSchema.shape.template,templateRevision:onboardingServicesSnapshotSchema.shape.templateRevision,value:z.unknown()}).strict();
 const payloadSchema=z.object({command:z.unknown(),originalOwner:onboardingOwnerSchema,originalProperty:onboardingPropertySnapshotSchema,previous:retained,original:retained,templates:z.array(z.object({id:z.uuid().transform(value=>value.toLowerCase()),values:z.unknown()}).strict()).max(2)}).strict();
 type Retained=z.infer<typeof retained>;
