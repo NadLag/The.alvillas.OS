@@ -540,6 +540,11 @@ export const bookingChannelInputSchema = z.object({
 
 export type BookingChannelInput = z.infer<typeof bookingChannelInputSchema>;
 
+/** Share the canonical redaction with native original-history validation. */
+export function maskedBookingChannelEndpoint(endpoint:string):string{
+  try{const url=new URL(endpoint);return `${url.protocol}//${url.host}/***`;}catch{return "*** stored";}
+}
+
 export type OwnerRepresentativeSummary = {
   id: string;
   displayName: string;
@@ -748,4 +753,3 @@ export function managementAgreementConfigValues(
     }
   ];
 }
-

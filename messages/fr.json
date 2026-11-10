@@ -5793,6 +5793,67 @@
       "noPermissions": "Aucune permission",
       "archived": "Affectation archivée",
       "open": "Configurer l’équipe"
+    },
+    "channels": {
+      "guidance": "Associez des canaux de réservation existants ou vérifiez leur configuration complète avant de l’enregistrer.",
+      "minimum": "Canaux requis : {count}",
+      "validation": "Choisissez un mode autorisé, sélectionnez les canaux requis et complétez chaque configuration et le motif.",
+      "mode": "Configuration des canaux",
+      "chooseMode": "Choisir comment configurer les canaux",
+      "modes": {
+        "LINK": "Associer des canaux existants",
+        "CONFIGURE": "Configurer les canaux"
+      },
+      "chooseValue": "Choisir une valeur",
+      "selectedCount": "Canaux sélectionnés : {count}",
+      "selectedChannel": "Canal sélectionné",
+      "searchLabel": "Rechercher les canaux de cette propriété",
+      "search": "Rechercher des canaux",
+      "empty": "Aucun canal correspondant n’est disponible pour cette propriété.",
+      "noChannels": "Aucun canal dans cette sélection.",
+      "channelNumber": "Canal {number}",
+      "add": "Ajouter un canal",
+      "remove": "Retirer",
+      "yes": "Oui",
+      "no": "Non",
+      "none": "Non configuré",
+      "fields": {
+        "sourceKey": "Clé du canal",
+        "displayName": "Nom du canal",
+        "externalListingId": "Identifiant externe de l’annonce",
+        "listingUrl": "URL publique de l’annonce",
+        "syncMode": "Méthode de synchronisation",
+        "importEnabled": "Autoriser les imports",
+        "exportEnabled": "Autoriser les exports",
+        "status": "Statut du canal",
+        "syncEndpoint": "URL privée de synchronisation"
+      },
+      "syncModes": {
+        "MANUAL": "Manuel",
+        "ICAL": "Calendrier iCal",
+        "API": "Intégration API",
+        "CSV": "Import CSV",
+        "CHANNEL_MANAGER": "Gestionnaire de canaux"
+      },
+      "statuses": {
+        "ACTIVE": "Actif",
+        "PAUSED": "En pause",
+        "DISCONNECTED": "Déconnecté"
+      },
+      "endpointHint": "Laissez ce champ vide pour conserver une URL existante. Saisissez une nouvelle URL pour la remplacer. Les URL privées sont exclues des réponses de vérification et d’historique.",
+      "endpointSubmitted": "Remplacement transmis",
+      "endpointRetained": "Aucun remplacement transmis",
+      "connectionHint": "La vérification de la connexion fait partie de la liste de préparation à la mise en service.",
+      "before": "Avant cette modification",
+      "proposed": "Configuration vérifiée",
+      "recorded": "Configuration initialement enregistrée",
+      "review": "Vérifier les canaux",
+      "reviewTitle": "Vérifier les canaux de réservation",
+      "confirm": "Enregistrer les canaux vérifiés",
+      "saved": "Configuration des canaux de réservation enregistrée.",
+      "open": "Ouvrir la configuration des canaux",
+      "prepare": "Configurer les canaux de réservation",
+      "change": "Modifier les canaux"
     }
   }
 }

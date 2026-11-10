@@ -1,10 +1,23 @@
 import {z} from "zod";
-import {ownerInputSchema,propertyInputSchema,propertyOperatingProfileInputSchema,operatingCadenceSchema,managementAgreementDraftTermsSchema,managementAgreementInputSchema} from "@/modules/core/domain/owner-property";
+import {ownerInputSchema,propertyInputSchema,propertyOperatingProfileInputSchema,operatingCadenceSchema,managementAgreementDraftTermsSchema,managementAgreementInputSchema,bookingChannelInputSchema,bookingChannelSyncModeSchema,bookingChannelStatusSchema} from "@/modules/core/domain/owner-property";
 import {payoutScheduleConfigSchema,approvalThresholdsConfigSchema,commissionBasisSchema,commissionAccrualEventSchema,expenseTreatmentSchema,payoutCadenceSchema,approvalStepSchema} from "@/platform/config/rule-registry";
 import {teamAssignmentDraftSchema,teamAssignmentSchema} from "@/modules/identity/domain/team";
 export {propertyStatusSchema as onboardingPropertyStatusSchema} from "@/modules/core/domain/owner-property";
 export {managementAgreementRuleKeys as onboardingManagementAgreementRuleKeys} from "@/modules/core/domain/owner-property";
+export {maskedBookingChannelEndpoint as maskedNativeOnboardingChannelEndpoint} from "@/modules/core/domain/owner-property";
 export const onboardingOperatingCadences=operatingCadenceSchema.options;
+export {bookingChannelSyncModeSchema as onboardingBookingChannelSyncModeSchema,bookingChannelStatusSchema as onboardingBookingChannelStatusSchema};
+
+/** Explicit native configuration reuses Core validation; null endpoint means retain the existing encrypted endpoint. */
+const nativeChannelSchema=bookingChannelInputSchema.omit({propertyId:true}).safeExtend({syncMode:bookingChannelSyncModeSchema,importEnabled:z.boolean(),exportEnabled:z.boolean(),status:bookingChannelStatusSchema}).strict();
+const nativeChannelFields=["sourceKey","displayName","externalListingId","listingUrl","syncMode","importEnabled","exportEnabled","syncEndpointUrl","status"]as const;
+export const onboardingBookingChannelInputSchema=z.record(z.string(),z.unknown()).transform((raw,context)=>{
+ try{for(const key of nativeChannelFields)if(!Object.hasOwn(raw,key)||raw[key]===undefined)throw Error("native_onboarding_explicit_channel_required");const values={...raw};for(const key of["externalListingId","listingUrl","syncEndpointUrl"]as const)if(values[key]===null)values[key]=undefined;const value=nativeChannelSchema.parse(values);for(const url of[value.listingUrl,value.syncEndpointUrl])if(url&&!["http:","https:"].includes(new URL(url).protocol))throw Error("native_onboarding_http_channel_url_required");return{sourceKey:value.sourceKey,displayName:value.displayName,externalListingId:value.externalListingId??null,listingUrl:value.listingUrl??null,syncMode:value.syncMode,importEnabled:value.importEnabled,exportEnabled:value.exportEnabled,syncEndpointUrl:value.syncEndpointUrl??null,status:value.status};}catch{context.addIssue({code:"custom",message:"native_onboarding_explicit_channel_required"});return z.NEVER;}
+});
+/** Public original drafts reuse every Core constraint while rejecting any submitted credential. */
+export const onboardingBookingChannelSafeInputSchema=z.record(z.string(),z.unknown()).transform((raw,context)=>{
+ try{const{hasSubmittedSyncEndpoint,...configuration}=raw;if(typeof hasSubmittedSyncEndpoint!=="boolean"||Object.hasOwn(configuration,"syncEndpointUrl"))throw Error("native_onboarding_safe_channel_required");const{syncEndpointUrl,...value}=onboardingBookingChannelInputSchema.parse({...configuration,syncEndpointUrl:null});void syncEndpointUrl;return{...value,hasSubmittedSyncEndpoint};}catch{context.addIssue({code:"custom",message:"native_onboarding_safe_channel_required"});return z.NEVER;}
+});
 
 /** The wizard uses the Core Owner contract; representatives and payout setup retain their own authorization. */
 export const onboardingOwnerInputSchema=ownerInputSchema.omit({representatives:true,payoutMethods:true}).strict();

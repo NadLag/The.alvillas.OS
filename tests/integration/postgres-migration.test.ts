@@ -3307,23 +3307,13 @@ describe("PostgreSQL baseline", () => {
         data: { name: `ALVILLAS Booking Channel B ${randomUUID()}`, baseCurrency: "MAD" }
       })
     ]);
-    const actorId = randomUUID();
-    const ctx: CoreActorContext = {
-      organizationId: orgA.id,
-      actorId,
-      authContext: {
-        organizationId: orgA.id,
-        userAccountId: actorId,
-        permissions: new Set([
-          permissionKey("owner", "view"),
-          permissionKey("owner", "create"),
-          permissionKey("property", "view"),
-          permissionKey("property", "create"),
-          permissionKey("property", "edit")
-        ]),
-        scopes: [{ organizationId: orgA.id }]
-      }
-    };
+    const ctx: CoreActorContext = await activeReservationActor(orgA.id, new Set([
+      permissionKey("owner", "view"),
+      permissionKey("owner", "create"),
+      permissionKey("property", "view"),
+      permissionKey("property", "create"),
+      permissionKey("property", "edit")
+    ]));
     const owner = await createOwner(
       ctx,
       {

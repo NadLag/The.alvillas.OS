@@ -38,30 +38,11 @@ import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { authorize, authorizeCollection } from "@/platform/authz/authorize";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
-import type { CoreActorContext } from "@/modules/core/application/core-access";
+import {CoreAuthorizationError,CoreNotFoundError,CoreValidationError,type CoreActorContext} from "@/modules/core/application/core-access";
+export {CoreAuthorizationError,CoreNotFoundError,CoreValidationError} from "@/modules/core/application/core-access";
 import {financialRuleAccess,financialRuleSourceChecks,protectedFinancialRuleKey,recheckFinancialRuleAccess} from "@/platform/config/financial-rule-authority";
-import type {CurrentAuthorityCheck} from "@/platform/authz/current-authority";
-
-export class CoreAuthorizationError extends Error {
-  constructor(message = "Core action is not authorized") {
-    super(message);
-    this.name = "CoreAuthorizationError";
-  }
-}
-
-export class CoreNotFoundError extends Error {
-  constructor(message = "Core resource was not found") {
-    super(message);
-    this.name = "CoreNotFoundError";
-  }
-}
-
-export class CoreValidationError extends Error {
-  constructor(message = "Core input is invalid") {
-    super(message);
-    this.name = "CoreValidationError";
-  }
-}
+import {assertAccountAuthorization,type CurrentAuthorityCheck} from "@/platform/authz/current-authority";
+import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
 
 type CoreServiceDeps = {
   db?: TenantTransactionRunner;
@@ -527,17 +508,19 @@ export async function upsertPropertyBookingChannel(
   input: BookingChannelInput,
   deps: CoreServiceDeps = {}
 ): Promise<BookingChannelSummary> {
-  assertAllowed(ctx, "edit", "property", input.propertyId);
+  if(ctx.organizationId!==ctx.authContext.organizationId||ctx.actorId!==ctx.authContext.userAccountId||!ctx.authContext.permissions.has("property:edit"))throw new CoreAuthorizationError();
   const meta = await auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new CoreRepository(tx, ctx.organizationId);
-    const property = await repository.findProperty(input.propertyId);
-
-    if (!property) {
-      throw new CoreNotFoundError();
-    }
-
+    const check=async()=>{
+      const[property]=await repository.onboardingPropertyHeads([input.propertyId]);if(!property)throw new CoreNotFoundError();
+      const stored=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId),now=await repository.clock();
+      assertAccountAuthorization(ctx,stored,now,[{action:"edit",resource:{type:"property",organizationId:ctx.organizationId,id:property.id,propertyId:property.id,city:property.cityId??undefined,region:property.regionId??undefined,status:property.status,occurredAt:property.createdAt}}],new CoreAuthorizationError());
+    };
+    await check();
+    await repository.lockOnboardingProperty(input.propertyId);
+    await check();
     const before = await repository.findBookingChannel(input.propertyId, input.sourceKey);
     const channel = await repository.upsertBookingChannel(input, ctx.actorId);
 
@@ -560,6 +543,7 @@ export async function upsertPropertyBookingChannel(
       occurredAt: new Date()
     });
 
+    await check();
     return channel;
   });
 }
