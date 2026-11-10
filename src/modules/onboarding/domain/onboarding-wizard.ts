@@ -6,7 +6,7 @@ import {onboardingManagementAgreementOptionsSchema} from "./onboarding-managemen
 import {onboardingIdSchema as uuid,onboardingFingerprintSchema as sha256,onboardingCommandFields,onboardingOwnerSchema,onboardingReceiptSchema,onboardingProgressMatches,onboardingTeamOptionsSchema,onboardingBookingChannelsOptionsSchema,onboardingInventoryOptionsSchema} from "./onboarding-contract";
 export {onboardingIdSchema,onboardingCommandFields} from "./onboarding-contract";
 
-export const onboardingMaximumRequestBytes=65536;
+export {onboardingMaximumRequestBytes} from "@/platform/onboarding/limits";
 export const onboardingOwnerTargetSchema=z.discriminatedUnion("mode",[
  z.object({mode:z.literal("CREATE"),input:onboardingOwnerInputSchema}).strict(),
  z.object({mode:z.literal("LINK"),ownerId:uuid}).strict()
