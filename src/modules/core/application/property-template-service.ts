@@ -37,10 +37,10 @@ import {
   type SettingMap
 } from "../domain/property-template";
 import { propertyOperatingProfileInputSchema } from "../domain/owner-property";
-import {TemplateAccessError,TemplateConflictError,TemplateNotFoundError,type CoreActorContext} from "./core-access";
-export {TemplateAccessError,TemplateConflictError,TemplateNotFoundError} from "./core-access";
+import { TemplateAccessError, TemplateConflictError, TemplateNotFoundError, type CoreActorContext } from "./core-access";
 import { updatePropertyOperatingProfile } from "./core-service";
 
+export { TemplateAccessError, TemplateConflictError, TemplateNotFoundError } from "./core-access";
 export type TemplateActorContext = CoreActorContext & { personId: string };
 type Deps = { db?: TenantTransactionRunner; requestId?: string; ipAddress?: string | null };
 export async function templateActorFromSession(
@@ -65,15 +65,18 @@ function allowed(
   ctx: TemplateActorContext,
   action: "view" | "create" | "configure",
   propertyId: string | null,
-  kind?: string
+  kind?: string,
+  property?: NonNullable<Awaited<ReturnType<PropertyTemplateRepository["authorizationProperty"]>>>,
+  ownerId?: string
 ) {
-  const resource = { organizationId: ctx.organizationId, propertyId };
+  const resource = { organizationId: ctx.organizationId, propertyId, ownerId,
+    city: property?.cityId ?? undefined, region: property?.regionId ?? undefined };
   if (
     !authorize(ctx.authContext, action, { ...resource, type: "config_rule" }) ||
     (propertyId &&
       !authorize(ctx.authContext, action === "view" ? "view" : "edit", {
         ...resource,
-        type: "property"
+        type: "property", id: propertyId ?? undefined, status: property?.status, occurredAt: property?.createdAt
       }))
   )
     throw new TemplateAccessError();
@@ -321,9 +324,20 @@ export async function propertyTemplateState(
   z.enum(templateKinds).parse(kind);
   z.number().int().min(1).max(10000).parse(page);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async (tx) => {
-    const repo = new PropertyTemplateRepository(tx, ctx.organizationId),
-      binding = await repo.binding(propertyId, kind);
-    const current = await repo.projection(propertyId, templateRuleKeys(kind));
+    const repo = new PropertyTemplateRepository(tx, ctx.organizationId);
+    const property = await repo.authorizationProperty(propertyId);
+    if (!property) throw new TemplateNotFoundError();
+    const disclosure = await templateDisclosure(ctx, repo, propertyId, true);
+    allowed(ctx, "view", propertyId, kind, property);
+    allowed({ ...ctx, authContext: disclosure.current }, "view", propertyId, kind, property);
+    const source = { ...disclosure.source, dataClass: kind === "SERVICE_CATALOG" ? "financial" as const : "operational" as const };
+    if (kind === "SERVICE_CATALOG" && [ctx.authContext, disclosure.current].some(authority =>
+      !authorizeUnconditionalSource(authority, "view", { ...source, type: "financial_transaction" }, disclosure.at))) throw new TemplateAccessError();
+    const binding = await repo.binding(propertyId, kind);
+    const boundCommand = binding ? templateChangeSchema.parse(binding.command) : null;
+    const ownerId = boundCommand?.ownerId;
+    if (ownerId && !property.ownership.some(row => row.ownerId === ownerId)) throw new TemplateConflictError();
+    const current = await repo.projection(propertyId, templateRuleKeys(kind), ownerId);
     const base = binding ? flattenSettings(binding.templateVersion.values) : {};
     const fields = Object.entries(base).map(([path, inherited]) => ({
       path,
@@ -332,12 +346,12 @@ export async function propertyTemplateState(
       overridden: !equalSetting(readSetting(current, path), inherited)
     }));
     const history = await repo.history(propertyId, kind, page), latest = binding ? await repo.latest(binding.templateVersion.key) : null;
-    const disclosure = await templateDisclosure(ctx, repo, propertyId, kind === "SERVICE_CATALOG"), source = { ...disclosure.source, dataClass: "financial" as const };
     if ([ctx.authContext, disclosure.current].some(authority => !authorize(authority, "view", { ...source, type: "config_rule" }, disclosure.at) ||
       !authorize(authority, "view", { ...source, type: "property" }, disclosure.at) || kind === "SERVICE_CATALOG" &&
       !authorizeUnconditionalSource(authority, "view", { ...source, type: "financial_transaction" }, disclosure.at))) throw new TemplateAccessError();
     const result = {
       binding,
+      ...(ownerId ? { ownerId } : {}),
       fields,
       latest,
       history: history.slice(0, 20),
@@ -349,13 +363,24 @@ export async function propertyTemplateState(
 export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unknown, deps: Deps = {}) {
   const input = templateChangeSchema.parse(raw),
     audit = await meta(deps);
-  allowed(ctx, "configure", input.propertyId);
+  if (ctx.organizationId !== ctx.authContext.organizationId || ctx.actorId !== ctx.authContext.userAccountId)
+    throw new TemplateAccessError();
   return withTenant(deps.db ?? prisma, ctx.organizationId, async (tx) => {
     const repo = new PropertyTemplateRepository(tx, ctx.organizationId);
     await repo.lockProperty(input.propertyId);
+    const writeAuthority = async (kind?: string) => {
+      const property = await repo.authorizationProperty(input.propertyId);
+      if (!property) throw new TemplateNotFoundError();
+      if (input.ownerId && !property.ownership.some(row => row.ownerId === input.ownerId)) throw new TemplateAccessError();
+      const current = await authContextForAccountInTransaction(tx, ctx.organizationId, ctx.actorId);
+      allowed(ctx, "configure", input.propertyId, kind, property, input.ownerId);
+      allowed({ ...ctx, authContext: current }, "configure", input.propertyId, kind, property, input.ownerId);
+      return property;
+    };
+    await writeAuthority();
     const replay = await repo.operation(input.operationId);
     if (replay) {
-      allowed(ctx, "configure", input.propertyId, replay.kind);
+      await writeAuthority(replay.kind);
       if (replay.createdBy !== ctx.actorId || !equalSetting(replay.command, input))
         throw new TemplateConflictError();
       if (replay.kind !== "SERVICE_CATALOG") return replay;
@@ -367,9 +392,11 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
     const kind = selected
       ? z.enum(templateKinds).parse(selected.kind)
       : (input as Exclude<typeof input, { action: "APPLY" }>).kind;
-    allowed(ctx, "configure", input.propertyId, kind);
+    await writeAuthority(kind);
     const binding = await repo.binding(input.propertyId, kind);
     if ((binding?.revision ?? 0) !== input.expectedRevision) throw new TemplateConflictError();
+    if (input.action !== "APPLY" && binding && templateChangeSchema.parse(binding.command).ownerId !== input.ownerId)
+      throw new TemplateConflictError();
     const template = selected ?? binding?.templateVersion;
     if (!template) throw new TemplateNotFoundError();
     await repo.lock(template.key);
@@ -390,7 +417,7 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
     ].sort();
     for (const key of ruleKeys) await config.lockVersion(key, "property", input.propertyId);
     if (kind === "SERVICE_CATALOG") await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure");
-    const before = await repo.projection(input.propertyId, ruleKeys);
+    const before = await repo.projection(input.propertyId, ruleKeys, input.ownerId);
     const after = structuredClone(before) as TemplateValues & Record<string, unknown>;
     const base = flattenSettings(template.values),
       oldBase = binding ? flattenSettings(binding.templateVersion.values) : {};
@@ -486,6 +513,7 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
       reason: input.reason,
       occurredAt: new Date()
     });
+    await writeAuthority(kind);
     if (kind !== "SERVICE_CATALOG") return revision;
     const disclosure = await financialTemplateWriteAuthority(ctx, repo, input.propertyId, "configure");
     return presentFinancialTemplate(ctx, disclosure, revision, ["snapshot", "overrides", "command", "reason"]);
