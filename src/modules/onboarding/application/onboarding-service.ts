@@ -32,6 +32,9 @@ import {encryptOnboardingManagementAgreementPayload,decryptOnboardingManagementA
 import {parseConfigRuleValue} from "@/platform/config/rule-registry";
 import {financialRuleSourceChecks} from "@/platform/config/financial-rule-authority";
 import {authorizeCollection} from "@/platform/authz/authorize";
+import {canonicalOnboardingTeamDraft,onboardingTeamReviewSchema,type OnboardingTeamDraft} from "../domain/onboarding-team";
+import {readOnboardingTeamSources} from "./onboarding-team-source";
+import {canAssignNativeOnboardingTeamRoles} from "@/platform/onboarding/team-source";
 
 export type OnboardingDependencies={db:TenantTransactionRunner;env?:NodeJS.ProcessEnv;requestId?:string};
 const uuid=z.uuid().transform(value=>value.toLowerCase()),optionsInput=z.object({sessionId:uuid.optional()}).strict(),directoryInput=z.object({cursor:z.string().max(6000).optional()}).strict(),recoverInput=z.object({idempotencyKey:uuid,sessionId:uuid.optional()}).strict(),protocol="NATIVE_PRIVATE_PROPERTY_ONBOARDING_V1";
@@ -459,4 +462,25 @@ async function managementAgreementOptions(actor:AccountActorContext,tx:TenantTra
   if(!modes.length)return null;const[physical]=await nativeOnboardingPropertyRows(tx,actor.organizationId,[row.propertyId]);if(!physical)throw new OnboardingAccessError();
   const data=onboardingManagementAgreementOptionsSchema.parse({revisionId:row.id,propertyId:row.propertyId,propertyName:physical.name,modes});return{data,fingerprint:commandFingerprint({revisionId:row.id,parent:propertySnapshot(owner,property,null),choices,rules,modes,policy:configured.snapshot,authorizationCap:captureAuthorizationCap(actor.authContext)})};
  }catch(error){if(error instanceof OnboardingAccessError||error instanceof OnboardingConfigurationError||error instanceof z.ZodError)return null;throw error;}
+}
+
+async function teamDraftContext(actor:AccountActorContext,tx:TenantTransaction,draft:OnboardingTeamDraft){
+ const base=await sessionContext(actor,tx,draft.sessionId,"edit",true),current=base.row;
+ if(current.id!==draft.previousRevisionId||!current.propertyId||current.propertyId!==draft.target.propertyId||!["MANAGEMENT_AGREEMENT","TEAM"].includes(current.step))throw new OnboardingConflictError();
+ const configured=await settings(tx,actor.organizationId,await base.repository.clock()),teamPolicy=configured.policy.team,count=draft.target.mode==="LINK"?draft.target.assignmentIds.length:draft.target.assignments.length;
+ if(!teamPolicy?.modes.includes(draft.target.mode)||count<teamPolicy.minimum_assignments)throw new OnboardingConfigurationError();
+ await ownerRead(actor,tx,current.ownerId);const ownerBefore=await nativeOnboardingOwnerWitness(tx,actor.organizationId,current.ownerId),propertyBefore=await propertyRead(actor,tx,current.propertyId,current.ownerId);
+ if(!ownerBefore||!["DRAFT","ONBOARDING"].includes(propertyBefore.status))throw new OnboardingAccessError();
+ const team=await readOnboardingTeamSources(actor,tx,current.propertyId,draft.target);
+ if(draft.target.mode==="ASSIGN"&&(team.selection.accounts.some(account=>account.status!=="ACTIVE")||!await canAssignNativeOnboardingTeamRoles(actor,tx,current.propertyId,team.selection.roles,await base.repository.clock())))throw new OnboardingAccessError();
+ const owner=await nativeOnboardingOwnerIdentity(tx,actor.organizationId,current.ownerId),[property]=await nativeOnboardingPropertyRows(tx,actor.organizationId,[current.propertyId]),ownerAfter=await nativeOnboardingOwnerWitness(tx,actor.organizationId,current.ownerId),propertyAfter=await propertyRead(actor,tx,current.propertyId,current.ownerId);
+ if(!owner||!property||!ownerAfter||commandFingerprint(propertySnapshot(ownerBefore,propertyBefore,null))!==commandFingerprint(propertySnapshot(ownerAfter,propertyAfter,null)))throw new OnboardingConflictError();
+ const source={source:draft.target.mode==="ASSIGN"?"CORE_PROPERTY_TEAM_NEW_ASSIGNMENTS":"CORE_PROPERTY_TEAM",parent:propertySnapshot(ownerAfter,propertyAfter,null),...team.pins,...draft.target.mode==="ASSIGN"?{inputFingerprint:commandFingerprint(draft.target.assignments)}:{}},reviewFingerprint=commandFingerprint({protocol,draft,source,teamSourceFingerprint:team.sourceFingerprint,policy:configured.snapshot,authorizationCap:captureAuthorizationCap(actor.authContext)});
+ return{...base,current,configured,owner:nativeOwnerIdentityProjection(owner),property:nativeOnboardingPropertyProjection(property),team:team.snapshot,selection:team.selection,source,reviewFingerprint};
+}
+
+/** Operational Team review uses predecessor metadata and never decrypts the Management financial envelope. */
+export async function reviewOnboardingTeamStep(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
+ const ctx=actorContext(actor),draft=canonicalOnboardingTeamDraft(raw);await spendRead(ctx,deps,draft.sessionId);
+ return withTenant(deps.db,ctx.organizationId,async tx=>{const base=await teamDraftContext(ctx,tx,draft);await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"onboarding.step_reviewed",resourceType:"onboarding",resourceId:draft.sessionId,propertyScopeId:base.current.propertyId,after:{step:draft.step,mode:draft.target.mode,reviewFingerprint:base.reviewFingerprint,sourceFingerprint:commandFingerprint(base.source)},requestId:deps.requestId??randomUUID(),occurredAt:await base.repository.clock()});const fresh=await teamDraftContext(ctx,tx,draft);if(fresh.reviewFingerprint!==base.reviewFingerprint)throw new OnboardingConflictError();return onboardingTeamReviewSchema.parse(present({...ctx.authContext,visibleDataClasses:new Set(["personal"]as const)},"export",{...resource(ctx.organizationId,base.current),data:{draft,owner:base.owner,property:base.property,team:base.team,selection:base.selection,reviewFingerprint:base.reviewFingerprint}},{},await base.repository.clock()));});
 }

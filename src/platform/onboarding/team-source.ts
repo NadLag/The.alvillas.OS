@@ -34,3 +34,11 @@ export async function createNativeOnboardingTeamAssignments(actor:AccountActorCo
  for(const assignment of input.assignments){const result=await assignTeamRole(ctx,{...assignment,scopeType:"property",scopeId:input.propertyId,reason:canonicalReason},{db:{$transaction:work=>work(tx)},requestId,propertyScopeId:input.propertyId});if(!result.created)throw Error("native_onboarding_team_existing_assignment_conflict");ids.push(result.id);}
  return ids;
 }
+
+/** Source values must already be authorized; reuse the canonical delegation ceiling without admitting a role. */
+export async function canAssignNativeOnboardingTeamRoles(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,roles:readonly{id:string;permissionKeys:readonly string[]}[],now:Date){
+ const repository=new TeamRepository(tx,actor.organizationId),scope=await repository.assignmentScope("property",propertyId),[account]=await repository.onboardingTeamAccountHeads([actor.actorId]);
+ if(!scope||!account?.personId||account.status!=="ACTIVE"||actor.authContext.personId!==undefined&&actor.authContext.personId!==account.personId)return false;
+ const {assertCurrentScopedPermissionGrantAllowed}=await import("@/modules/identity/application/identity-service"),{IdentityAuthorizationError}=await import("@/modules/identity/application/identity-access");
+ try{for(const role of roles)await assertCurrentScopedPermissionGrantAllowed({...actor,personId:account.personId},tx,role.permissionKeys,role.id,{type:"role",id:role.id,organizationId:actor.organizationId,...scope},now);return true;}catch(error){if(error instanceof IdentityAuthorizationError)return false;throw error;}
+}
