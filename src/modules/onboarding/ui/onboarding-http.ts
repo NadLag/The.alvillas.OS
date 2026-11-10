@@ -6,6 +6,7 @@ import {isSameOriginContentType} from "@/platform/http/same-origin";
 import {readBoundedJsonRequest} from "@/platform/http/read-exact-response";
 import {captureException} from "@/platform/observability/sentry";
 import {NativeOnboardingTeamAuthorizationError,NativeOnboardingTeamConflictError,NativeOnboardingTeamNotFoundError} from "@/platform/onboarding/team-source";
+import {NativeOnboardingBookingChannelAuthorizationError,NativeOnboardingBookingChannelNotFoundError,NativeOnboardingBookingChannelValidationError} from "@/platform/onboarding/booking-channels-source";
 import {onboardingMaximumRequestBytes,OnboardingAccessError,OnboardingConflictError,OnboardingConfigurationError,OnboardingRateLimitError} from "../domain/onboarding-wizard";
 
 const headers={"Cache-Control":"private, no-store",Vary:"Cookie, Origin"};
@@ -18,8 +19,8 @@ export async function onboardingHttp(request:NextRequest,work:(actor:AccountActo
   if(request.nextUrl.search)return failure("validation",400);let input:unknown;try{input=await readBoundedJsonRequest(request,onboardingMaximumRequestBytes);}catch{return failure("validation",400);}
   return NextResponse.json(await work(actor,input,requestId),{headers});
  }catch(error){
-  if(error instanceof OnboardingAccessError||error instanceof NativeOnboardingTeamAuthorizationError||error instanceof NativeOnboardingTeamNotFoundError)return failure("forbidden",403);
-  if(error instanceof ZodError)return failure("validation",400);
+  if(error instanceof OnboardingAccessError||error instanceof NativeOnboardingTeamAuthorizationError||error instanceof NativeOnboardingTeamNotFoundError||error instanceof NativeOnboardingBookingChannelAuthorizationError||error instanceof NativeOnboardingBookingChannelNotFoundError)return failure("forbidden",403);
+  if(error instanceof ZodError||error instanceof NativeOnboardingBookingChannelValidationError)return failure("validation",400);
   if(error instanceof OnboardingConflictError||error instanceof NativeOnboardingTeamConflictError)return failure("conflict",409);
   if(error instanceof OnboardingConfigurationError)return failure("configuration_unavailable",503);
   if(error instanceof OnboardingRateLimitError){const response=failure("rate_limited",429);response.headers.set("Retry-After",String(Math.max(1,Math.ceil((error.resetAt.getTime()-Date.now())/1000))));return response;}

@@ -18,7 +18,7 @@ import type {
   PropertyOnboardingProfileSummary,
   PropertySummary
 } from "@/modules/core/domain/owner-property";
-import { defaultPropertyOperatingProfile as operatingProfileDefaults,managementAgreementRuleKeys } from "@/modules/core/domain/owner-property";
+import { defaultPropertyOperatingProfile as operatingProfileDefaults,managementAgreementRuleKeys,maskedBookingChannelEndpoint as maskedSyncEndpoint } from "@/modules/core/domain/owner-property";
 import { encryptSecret } from "@/platform/auth/secret-encryption";
 import type { TenantTransaction } from "@/platform/db/tenant";
 
@@ -67,6 +67,7 @@ type PropertyWithOwners = Prisma.PropertyGetPayload<{
   };
 }>;
 type BookingChannelRecord = Prisma.BookingChannelGetPayload<Record<string, never>>;
+type OnboardingBookingChannelRow={id:string;propertyId:string;sourceKey:string;displayName:string;externalListingId:string|null;listingUrl:string|null;syncMode:string;importEnabled:boolean;exportEnabled:boolean;maskedSyncEndpoint:string|null;hasSyncEndpoint:boolean;status:string;archivedAt:Date|null;createdBy:string|null;createdAt:Date};
 type ManagementAgreementRecord = Prisma.ManagementAgreementGetPayload<{
   select: {
     id: true;
@@ -84,15 +85,6 @@ function maskedPayoutAccount(details: string): string {
   const tail = compact.slice(-4).toUpperCase();
 
   return tail ? `**** ${tail}` : "**** stored";
-}
-
-function maskedSyncEndpoint(endpoint: string): string {
-  try {
-    const url = new URL(endpoint);
-    return `${url.protocol}//${url.host}/***`;
-  } catch {
-    return "*** stored";
-  }
 }
 
 function representativeToSummary(
@@ -477,6 +469,8 @@ export class CoreRepository {
 
   ownerIdentityRows(ids:readonly string[]){return this.tx.owner.findMany({where:{organizationId:this.organizationId,archivedAt:null,id:{in:[...ids]}},select:{id:true,organizationId:true,displayName:true,email:true,phone:true,preferredLocale:true,createdAt:true,updatedAt:true}});}
 
+  async clock(){const[row]=await this.tx.$queryRaw<Array<{now:Date}>>(Prisma.sql`SELECT clock_timestamp() AS now`);return row.now;}
+
   /** Source witnesses include each active ownership tuple, without loading financial relations. */
   onboardingPropertyHeads(ids:readonly string[],includeArchived=false){
     return this.tx.$queryRaw<Array<{
@@ -753,6 +747,22 @@ export class CoreRepository {
     });
 
     return this.findProperty(propertyId);
+  }
+
+  /** Metadata-only witnesses; credentials and private channel values are deliberately absent. */
+  onboardingBookingChannelHeads(propertyId:string,selection:{ids:readonly string[]}|{sourceKeys:readonly string[]},includeArchived=false){
+    const values="ids"in selection?selection.ids:selection.sourceKeys;
+    if(!values.length)return Promise.resolve([] as Array<{id:string;propertyId:string;archivedAt:Date|null;rowVersion:string;tuple:string}>);
+    return this.tx.$queryRaw<Array<{id:string;propertyId:string;archivedAt:Date|null;rowVersion:string;tuple:string}>>(Prisma.sql`SELECT c.id,c.property_id AS "propertyId",c.archived_at AS "archivedAt",c.xmin::text AS "rowVersion",c.ctid::text AS tuple FROM booking_channel c WHERE c.organization_id=${this.organizationId}::uuid AND c.property_id=${propertyId}::uuid AND ${"ids"in selection?Prisma.sql`c.id=ANY(${[...values]}::uuid[])`:Prisma.sql`c.source_key=ANY(${[...values]}::text[])`} AND (${includeArchived}::boolean OR c.archived_at IS NULL) ORDER BY c.id`);
+  }
+
+  /** Request only after actual Property authority; stored endpoint ciphertext is never selected. */
+  onboardingBookingChannelRows(propertyId:string,ids:readonly string[],includeArchived=false):Promise<OnboardingBookingChannelRow[]>{
+    return this.tx.$queryRaw<Array<{id:string;propertyId:string;sourceKey:string;displayName:string;externalListingId:string|null;listingUrl:string|null;syncMode:string;importEnabled:boolean;exportEnabled:boolean;maskedSyncEndpoint:string|null;hasSyncEndpoint:boolean;status:string;archivedAt:Date|null;createdBy:string|null;createdAt:Date}>>(Prisma.sql`SELECT c.id,c.property_id AS "propertyId",c.source_key AS "sourceKey",c.display_name AS "displayName",c.external_listing_id AS "externalListingId",c.listing_url AS "listingUrl",c.sync_mode AS "syncMode",c.import_enabled AS "importEnabled",c.export_enabled AS "exportEnabled",c.masked_sync_endpoint AS "maskedSyncEndpoint",(c.sync_endpoint_encrypted IS NOT NULL) AS "hasSyncEndpoint",c.status,c.archived_at AS "archivedAt",c.created_by AS "createdBy",c.created_at AS "createdAt" FROM booking_channel c WHERE c.organization_id=${this.organizationId}::uuid AND c.property_id=${propertyId}::uuid AND c.id=ANY(${[...ids]}::uuid[]) AND (${includeArchived}::boolean OR c.archived_at IS NULL) ORDER BY c.id`);
+  }
+
+  onboardingBookingChannelPage(propertyId:string,query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`SELECT c.id FROM booking_channel c WHERE c.organization_id=${this.organizationId}::uuid AND c.property_id=${propertyId}::uuid AND c.archived_at IS NULL AND c.created_at<=${asOf} AND (c.display_name ILIKE ${"%"+query+"%"} OR c.source_key ILIKE ${"%"+query+"%"}) ${after?Prisma.sql`AND c.id>${after}::uuid`:Prisma.empty} ORDER BY c.id LIMIT 51`);
   }
 
   async findBookingChannel(

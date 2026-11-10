@@ -5793,6 +5793,67 @@
       "noPermissions": "No permissions",
       "archived": "Archived assignment",
       "open": "Set up the team"
+    },
+    "channels": {
+      "guidance": "Link existing booking channels or review their complete configuration before saving.",
+      "minimum": "Required channels: {count}",
+      "validation": "Choose an approved mode, select the required channels and complete each configuration and reason.",
+      "mode": "Channel setup",
+      "chooseMode": "Choose how to set up channels",
+      "modes": {
+        "LINK": "Link existing channels",
+        "CONFIGURE": "Configure channels"
+      },
+      "chooseValue": "Choose a value",
+      "selectedCount": "Selected channels: {count}",
+      "selectedChannel": "Selected channel",
+      "searchLabel": "Search this property’s channels",
+      "search": "Find channels",
+      "empty": "No matching channels are available for this property.",
+      "noChannels": "No channels in this selection.",
+      "channelNumber": "Channel {number}",
+      "add": "Add a channel",
+      "remove": "Remove",
+      "yes": "Yes",
+      "no": "No",
+      "none": "Not configured",
+      "fields": {
+        "sourceKey": "Channel key",
+        "displayName": "Channel name",
+        "externalListingId": "External listing ID",
+        "listingUrl": "Public listing URL",
+        "syncMode": "Synchronization method",
+        "importEnabled": "Allow imports",
+        "exportEnabled": "Allow exports",
+        "status": "Channel status",
+        "syncEndpoint": "Private synchronization URL"
+      },
+      "syncModes": {
+        "MANUAL": "Manual",
+        "ICAL": "iCal calendar",
+        "API": "API integration",
+        "CSV": "CSV import",
+        "CHANNEL_MANAGER": "Channel manager"
+      },
+      "statuses": {
+        "ACTIVE": "Active",
+        "PAUSED": "Paused",
+        "DISCONNECTED": "Disconnected"
+      },
+      "endpointHint": "Leave blank to retain an existing URL. Enter a replacement to change it. Private URLs are omitted from review and history responses.",
+      "endpointSubmitted": "Replacement submitted",
+      "endpointRetained": "No replacement submitted",
+      "connectionHint": "Connection verification remains part of the go-live checklist.",
+      "before": "Before this change",
+      "proposed": "Reviewed configuration",
+      "recorded": "Original recorded configuration",
+      "review": "Review channels",
+      "reviewTitle": "Review booking channels",
+      "confirm": "Save reviewed channels",
+      "saved": "Booking channel configuration saved.",
+      "open": "Open channel setup",
+      "prepare": "Set up booking channels",
+      "change": "Change channels"
     }
   }
 }
