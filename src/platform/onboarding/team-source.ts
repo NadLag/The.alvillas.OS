@@ -22,6 +22,10 @@ export function nativeOnboardingTeamSourcePins(assignments:readonly OnboardingTe
  return{assignments:assignments.map(row=>({...pin(row),personId:row.personId,roleId:row.roleId,userAccountId:row.userAccountId,scopeType:row.scopeType,scopeId:row.scopeId})),people:people.map(pin),accounts:accounts.map(row=>({...pin(row),personId:row.personId})),roles:roles.map(row=>({...pin(row),permissionsHash:row.permissionsHash,permissionCount:row.permissionCount}))};
 }
 
+export async function lockNativeOnboardingTeamPeople(tx:TenantTransaction,organizationId:string,ids:readonly string[]){
+ const repository=new TeamRepository(tx,organizationId);for(const id of[...new Set(ids)].sort())await repository.lock(id);
+}
+
 /** Internal admission adapter: authorize the selected sources first, then keep every canonical write in the caller's transaction. */
 export async function createNativeOnboardingTeamAssignments(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,raw:unknown,reason:string,requestId:string){
  if(actor.organizationId!==actor.authContext.organizationId||actor.actorId!==actor.authContext.userAccountId)throw Error("native_onboarding_team_actor_required");
@@ -29,7 +33,7 @@ export async function createNativeOnboardingTeamAssignments(actor:AccountActorCo
  if(input.mode!=="ASSIGN")throw Error("native_onboarding_team_assignment_required");
  if(!account?.personId||account.status!=="ACTIVE"||actor.authContext.personId!==undefined&&actor.authContext.personId!==account.personId)throw Error("native_onboarding_team_actor_required");
  // Different Properties can share people. Acquire the complete batch in one stable order.
- for(const id of[...new Set(input.assignments.map(row=>row.personId))].sort())await repository.lock(id);
+ await lockNativeOnboardingTeamPeople(tx,actor.organizationId,input.assignments.map(row=>row.personId));
  const {assignTeamRole}=await import("@/modules/identity/application/team-service"),ctx={...actor,personId:account.personId},ids:string[]=[];
  for(const assignment of input.assignments){const result=await assignTeamRole(ctx,{...assignment,scopeType:"property",scopeId:input.propertyId,reason:canonicalReason},{db:{$transaction:work=>work(tx)},requestId,propertyScopeId:input.propertyId});if(!result.created)throw Error("native_onboarding_team_existing_assignment_conflict");ids.push(result.id);}
  return ids;
