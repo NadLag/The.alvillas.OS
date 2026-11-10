@@ -388,6 +388,19 @@ export class TeamRepository {
         return false;
     }
   }
+  assignmentPerson(id:string){
+    return this.tx.person.findFirst({where:{id,organizationId:this.organizationId},select:{id:true,archivedAt:true,userAccounts:{where:{organizationId:this.organizationId},select:{id:true,status:true}},roleAssignments:{where:{organizationId:this.organizationId},select:{roleId:true,scopeType:true,scopeId:true,validFrom:true,validTo:true,archivedAt:true}}}});
+  }
+  async assignmentScope(type:string,id:string|null):Promise<Pick<Resource,"propertyId"|"city"|"region"|"jobId">|null>{
+    if(type==="organization")return id===null?{}:null;
+    if(!id)return null;const where={id,organizationId:this.organizationId,archivedAt:null};
+    if(type==="region")return await this.tx.region.findFirst({where,select:{id:true}})?{region:id}:null;
+    if(type==="city"){const city=await this.tx.city.findFirst({where,select:{id:true,regionId:true}});return city?{city:city.id,region:city.regionId}:null;}
+    const task=type==="job"?await this.tx.operationTask.findFirst({where,select:{id:true,propertyId:true}}):null;
+    if(type!=="property"&&!task)return null;
+    const property=await this.tx.property.findFirst({where:{id:task?.propertyId??id,organizationId:this.organizationId,archivedAt:null},select:{id:true,cityId:true,regionId:true}});
+    return property?{propertyId:property.id,city:property.cityId,region:property.regionId,...task?{jobId:task.id}:{}}:null;
+  }
   assignment(id: string) {
     return this.tx.roleAssignment.findFirst({
       where: { id, organizationId: this.organizationId },

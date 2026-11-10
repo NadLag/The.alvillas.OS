@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
-import { recheckAccountAuthorization } from "@/platform/authz/current-authority";
-import { authContextsForAccountsInTransaction } from "@/platform/authz/account-context";
+import { recheckAccountAuthorization,assertAccountAuthorization } from "@/platform/authz/current-authority";
+import { authContextsForAccountsInTransaction,authContextForAccountInTransaction } from "@/platform/authz/account-context";
+import {authorizeUnconditionalSource} from "@/platform/authz/organization-authority";
 import { identityResource } from "../domain/identity";
 import { publishNotification } from "@/platform/notifications/notification-service";
 import {
@@ -320,7 +321,8 @@ export function assertPermissionGrantAllowed(
   ctx: IdentityActorContext,
   permissionKeys: readonly string[],
   roleId?: string,
-  grantResource?: Resource
+  grantResource?: Resource,
+  now=new Date()
 ): void {
   const overrideResource =
     grantResource ?? {
@@ -332,7 +334,7 @@ export function assertPermissionGrantAllowed(
     ...overrideResource,
     type: "role",
     id: roleId
-  });
+  },now);
 
   if (canOverride) {
     return;
@@ -343,10 +345,11 @@ export function assertPermissionGrantAllowed(
       const { resourceType, action } = permissionParts(permissionKey);
 
       if (
-        !authorize(ctx.authContext, action, {
+        !authorizeUnconditionalSource(ctx.authContext, action, {
           ...grantResource,
-          type: resourceType
-        })
+          type: resourceType,
+          id:undefined
+        },now)
       ) {
         throw new IdentityAuthorizationError("Cannot grant a permission the actor does not hold at this scope");
       }
@@ -358,6 +361,12 @@ export function assertPermissionGrantAllowed(
       throw new IdentityAuthorizationError("Cannot grant a permission the actor does not hold");
     }
   }
+}
+
+/** Reuse the canonical grant ceiling under both the held cap and current stored authority. */
+export async function assertCurrentScopedPermissionGrantAllowed(ctx:IdentityActorContext,tx:TenantTransaction,permissionKeys:readonly string[],roleId:string,grantResource:Resource,now:Date){
+ const current=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);assertAccountAuthorization(ctx,current,now,[{action:"assign",resource:grantResource}],new IdentityAuthorizationError());
+ assertPermissionGrantAllowed(ctx,permissionKeys,roleId,grantResource,now);assertPermissionGrantAllowed({...ctx,authContext:{...current,personId:ctx.authContext.personId}},permissionKeys,roleId,grantResource,now);
 }
 
 function assignmentConditions(input: RoleAssignmentInput): Prisma.InputJsonObject | null {
@@ -909,7 +918,6 @@ export async function assignRoleToAccount(
 ): Promise<{ id: string; created: boolean }> {
   const assignmentResource = scopedRoleAssignmentResource(ctx.organizationId, input);
 
-  assertAuthorizationAllowed(ctx, "assign", assignmentResource);
   const meta = auditMeta(deps);
 
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
@@ -917,13 +925,17 @@ export async function assignRoleToAccount(
     await ensureStandardIdentitySetup(ctx.organizationId, { db: { $transaction: (callback) => callback(tx) } });
 
     try {
+      const team=new TeamRepository(tx,ctx.organizationId),scope=await team.assignmentScope(input.scopeType,input.scopeId??null);
+      if(["organization","region","city","property","job"].includes(input.scopeType)&&!scope)throw new IdentityNotFoundError("Assignment scope was not found");
+      const scopedResource={...assignmentResource,...scope};assertAuthorizationAllowed(ctx,"assign",scopedResource);
       const role = await repository.findRoleSummaryById(input.roleId);
 
       if (!role) {
         throw new IdentityNotFoundError("Role was not found");
       }
 
-      assertPermissionGrantAllowed(ctx, role.permissionKeys, role.id, assignmentResource);
+      const recheck=async()=>{const currentRole=await repository.findRoleSummaryById(input.roleId),currentScope=await team.assignmentScope(input.scopeType,input.scopeId??null);if(!currentRole||JSON.stringify(currentRole.permissionKeys)!==JSON.stringify(role.permissionKeys)||JSON.stringify(currentScope)!==JSON.stringify(scope))throw new IdentityAuthorizationError();await assertCurrentScopedPermissionGrantAllowed(ctx,tx,currentRole.permissionKeys,currentRole.id,{...assignmentResource,...currentScope},await team.clock());};
+      await recheck();
 
       const assignment = await repository.assignRoleToAccount({
         userAccountId: input.userAccountId,
@@ -961,6 +973,7 @@ export async function assignRoleToAccount(
         });
       }
 
+      await recheck();
       return assignment;
     } catch (error) {
       if (error instanceof Error && error.message === "Account was not found") {

@@ -7,7 +7,7 @@ import {
   type IdentityActorContext
 } from "./identity-access";
 import {
-  assertPermissionGrantAllowed,
+  assertCurrentScopedPermissionGrantAllowed,
   createPersonProfile,
   updatePersonProfile,
   ensureStandardIdentitySetup
@@ -72,6 +72,7 @@ export function assignmentResource(
     scopeType: string;
     scopeId: string | null;
     personId?: string;
+    roleId?: string;
     cityId?: string | null;
     regionId?: string | null;
   },
@@ -79,7 +80,7 @@ export function assignmentResource(
 ): Resource {
   return {
     type,
-    id: assignment.personId ?? assignment.id,
+    id: type==="role"?assignment.roleId:assignment.personId ?? assignment.id,
     organizationId,
     region: assignment.regionId,
     city: assignment.cityId,
@@ -497,18 +498,17 @@ export async function ownFieldWallet(ctx: IdentityActorContext, input: unknown, 
 
 export async function assignTeamRole(ctx: IdentityActorContext, input: unknown, deps: Deps = {}) {
   const value = teamAssignmentSchema.parse(input);
-  const resource = assignmentResource(ctx.organizationId, value, "role");
-  allowed(ctx, "assign", resource);
   return withTenant(deps.db ?? prisma, ctx.organizationId, async (tx) => {
     const repository = new TeamRepository(tx, ctx.organizationId);
     await repository.lock(value.personId);
-    const person = await repository.person(value.personId);
-    if (!person || person.archivedAt || !(await repository.scopeExists(value.scopeType, value.scopeId)))
+    const person = await repository.assignmentPerson(value.personId),scope=await repository.assignmentScope(value.scopeType,value.scopeId);
+    if (!person || person.archivedAt || !scope)
       throw new TeamNotFoundError();
+    const resource={...assignmentResource(ctx.organizationId,value,"role"),...scope};allowed(ctx,"assign",resource);
     const identity = new IdentityRepository(tx, ctx.organizationId);
     const role = await identity.findRoleSummaryById(value.roleId);
     if (!role) throw new TeamNotFoundError();
-    assertPermissionGrantAllowed(ctx, role.permissionKeys, role.id, resource);
+    await assertCurrentScopedPermissionGrantAllowed(ctx,tx,role.permissionKeys,role.id,resource,await repository.clock());
     if (
       person.roleAssignments.some(
         (a) =>
@@ -535,6 +535,13 @@ export async function assignTeamRole(ctx: IdentityActorContext, input: unknown, 
       (value.userAccountId === undefined && activeAccounts.length > 1)
     )
       throw new TeamConflictError("Select an active staff account for this person");
+    const recheck=async()=>{
+      const currentPerson=await repository.assignmentPerson(value.personId),currentScope=await repository.assignmentScope(value.scopeType,value.scopeId),currentRole=await identity.findRoleSummaryById(value.roleId);
+      if(!currentPerson||currentPerson.archivedAt||!currentScope||JSON.stringify(currentScope)!==JSON.stringify(scope)||!currentRole||JSON.stringify(currentRole.permissionKeys)!==JSON.stringify(role.permissionKeys))throw new IdentityAuthorizationError();
+      const currentAccounts=currentPerson.userAccounts.filter(row=>row.status==="ACTIVE"),currentAccount=value.userAccountId===null?undefined:value.userAccountId?currentAccounts.find(row=>row.id===value.userAccountId):currentAccounts.length===1?currentAccounts[0]:undefined;
+      if((value.userAccountId&&!currentAccount)||(value.userAccountId===undefined&&currentAccounts.length>1)||currentAccount?.id!==account?.id)throw new IdentityAuthorizationError();
+      await assertCurrentScopedPermissionGrantAllowed(ctx,tx,currentRole.permissionKeys,currentRole.id,{...assignmentResource(ctx.organizationId,value,"role"),...currentScope},await repository.clock());
+    };
     const assignment = await identity.assignRole({
       ...value,
       userAccountId: account?.id,
@@ -542,6 +549,7 @@ export async function assignTeamRole(ctx: IdentityActorContext, input: unknown, 
       conditions: value.assignedToMe ? { assignedToMe: true } : undefined
     });
     await teamAudit(repository, ctx, "assignment.create", assignment.id, value, value.reason, deps);
+    await recheck();
     return assignment;
   });
 }
