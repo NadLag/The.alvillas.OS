@@ -5740,6 +5740,59 @@
         "agreement_notice": "Préavis",
         "agreement_special_conditions": "Conditions particulières"
       }
+    },
+    "team": {
+      "guidance": "Choisissez les personnes et les rôles réels pour cette propriété. L’accès au compte et les dates de chaque affectation sont des choix explicites.",
+      "minimum": "Affectations requises : {count}.",
+      "validation": "Choisissez les personnes, les rôles, une option de compte et des dates UTC valides, puis indiquez un motif.",
+      "mode": "Configuration de l’équipe",
+      "modes": {
+        "LINK": "Utiliser les affectations existantes",
+        "ASSIGN": "Créer les affectations vérifiées"
+      },
+      "selectedCount": "Affectations sélectionnées : {count}",
+      "findAssignments": "Rechercher les affectations existantes",
+      "clearAssignments": "Effacer la sélection",
+      "assignmentNumber": "Affectation {number}",
+      "person": "Personne",
+      "findPerson": "Choisir une personne",
+      "role": "Rôle",
+      "findRole": "Choisir un rôle",
+      "account": "Accès au compte",
+      "chooseAccount": "Choisir l’accès au compte",
+      "noAccount": "Sans accès au compte",
+      "selectedAccount": "Compte autorisé sélectionné",
+      "findAccount": "Choisir un compte existant",
+      "validFrom": "Valide à partir du (UTC)",
+      "validTo": "Valide jusqu’au (UTC)",
+      "noEndHint": "Laissez vide pour une durée sans date de fin.",
+      "assignedToMe": "Limiter cette affectation au travail attribué à cette personne",
+      "remove": "Retirer l’affectation",
+      "add": "Ajouter une affectation",
+      "pickers": {
+        "PEOPLE": "Choisir les personnes réelles",
+        "ROLES": "Choisir un rôle autorisé",
+        "ACCOUNTS": "Choisir le compte existant de cette personne",
+        "ASSIGNMENTS": "Choisir les affectations existantes de la propriété"
+      },
+      "searchLabel": "Rechercher parmi les choix disponibles",
+      "search": "Rechercher",
+      "cannotAssign": "En dehors de votre autorité de délégation",
+      "empty": "Aucun choix autorisé ne correspond à cette recherche.",
+      "closePicker": "Fermer les choix",
+      "review": "Vérifier les affectations",
+      "reviewTitle": "Vérifier l’équipe de la propriété",
+      "confirm": "Enregistrer ces affectations",
+      "saved": "Affectations de l’équipe enregistrées.",
+      "prepare": "Configurer l’équipe",
+      "change": "Vérifier la configuration de l’équipe",
+      "emptyTeam": "Aucune affectation n’a été sélectionnée.",
+      "noEnd": "Sans date de fin",
+      "conditions": "Conditions d’accès",
+      "permissions": "Permissions du rôle",
+      "noPermissions": "Aucune permission",
+      "archived": "Affectation archivée",
+      "open": "Configurer l’équipe"
     }
   }
 }

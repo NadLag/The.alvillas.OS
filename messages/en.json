@@ -5740,6 +5740,59 @@
         "agreement_notice": "Notice period",
         "agreement_special_conditions": "Special conditions"
       }
+    },
+    "team": {
+      "guidance": "Choose actual staff and roles for this property. Account access and each assignment date are explicit choices.",
+      "minimum": "Required assignments: {count}.",
+      "validation": "Choose the required staff, roles, account option and valid UTC dates, then enter a reason.",
+      "mode": "Team setup",
+      "modes": {
+        "LINK": "Use existing assignments",
+        "ASSIGN": "Create reviewed assignments"
+      },
+      "selectedCount": "Selected assignments: {count}",
+      "findAssignments": "Find existing assignments",
+      "clearAssignments": "Clear selected assignments",
+      "assignmentNumber": "Assignment {number}",
+      "person": "Person",
+      "findPerson": "Choose a person",
+      "role": "Role",
+      "findRole": "Choose a role",
+      "account": "Account access",
+      "chooseAccount": "Choose account access",
+      "noAccount": "No account access",
+      "selectedAccount": "Selected authorized account",
+      "findAccount": "Choose an existing account",
+      "validFrom": "Valid from (UTC)",
+      "validTo": "Valid until (UTC)",
+      "noEndHint": "Leave blank for no end date.",
+      "assignedToMe": "Limit this assignment to work assigned to this person",
+      "remove": "Remove assignment",
+      "add": "Add assignment",
+      "pickers": {
+        "PEOPLE": "Choose actual staff",
+        "ROLES": "Choose an authorized role",
+        "ACCOUNTS": "Choose this person’s existing account",
+        "ASSIGNMENTS": "Choose existing property assignments"
+      },
+      "searchLabel": "Search available choices",
+      "search": "Search",
+      "cannotAssign": "Outside your delegation authority",
+      "empty": "No authorized choices match this search.",
+      "closePicker": "Close choices",
+      "review": "Review team assignments",
+      "reviewTitle": "Review the property team",
+      "confirm": "Save these team assignments",
+      "saved": "Team assignments saved.",
+      "prepare": "Set up the team",
+      "change": "Review the team setup",
+      "emptyTeam": "No team assignments were selected.",
+      "noEnd": "No end date",
+      "conditions": "Access conditions",
+      "permissions": "Role permissions",
+      "noPermissions": "No permissions",
+      "archived": "Archived assignment",
+      "open": "Set up the team"
     }
   }
 }

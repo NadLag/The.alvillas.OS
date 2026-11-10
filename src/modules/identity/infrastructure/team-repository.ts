@@ -85,6 +85,34 @@ export class TeamRepository {
         AND a.scope_type='property' AND a.scope_id=${propertyId}::uuid AND a.archived_at IS NULL AND a.created_at<=${asOf}
         ${after?Prisma.sql`AND a.id>${after}::uuid`:Prisma.empty} ORDER BY a.id LIMIT 51`);
   }
+  async onboardingTeamAssignmentChoices(propertyId:string,query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      SELECT a.id FROM role_assignment a
+      JOIN person p ON p.organization_id=a.organization_id AND p.id=a.person_id AND p.archived_at IS NULL
+      JOIN role r ON r.organization_id=a.organization_id AND r.id=a.role_id AND r.archived_at IS NULL
+      WHERE a.organization_id=${this.organizationId}::uuid AND a.scope_type='property' AND a.scope_id=${propertyId}::uuid
+        AND a.archived_at IS NULL AND a.created_at<=${asOf}
+        AND (${query}='' OR position(lower(${query}) in lower(p.display_name))>0 OR position(lower(${query}) in lower(r.name))>0)
+        ${after?Prisma.sql`AND a.id>${after}::uuid`:Prisma.empty} ORDER BY a.id LIMIT 51`);
+  }
+  async onboardingTeamPersonChoices(query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      SELECT p.id FROM person p WHERE p.organization_id=${this.organizationId}::uuid AND p.archived_at IS NULL AND p.created_at<=${asOf}
+        AND (${query}='' OR position(lower(${query}) in lower(p.display_name))>0)
+        ${after?Prisma.sql`AND p.id>${after}::uuid`:Prisma.empty} ORDER BY p.id LIMIT 51`);
+  }
+  async onboardingTeamRoleChoices(query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      SELECT r.id FROM role r WHERE r.organization_id=${this.organizationId}::uuid AND r.archived_at IS NULL AND r.created_at<=${asOf}
+        AND (${query}='' OR position(lower(${query}) in lower(r.name))>0 OR position(lower(${query}) in lower(r.key))>0)
+        ${after?Prisma.sql`AND r.id>${after}::uuid`:Prisma.empty} ORDER BY r.id LIMIT 51`);
+  }
+  async onboardingTeamAccountChoices(personId:string,query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      SELECT a.id FROM user_account a WHERE a.organization_id=${this.organizationId}::uuid AND a.person_id=${personId}::uuid AND a.status='ACTIVE' AND a.created_at<=${asOf}
+        AND (${query}='' OR position(lower(${query}) in lower(coalesce(a.email,'')))>0)
+        ${after?Prisma.sql`AND a.id>${after}::uuid`:Prisma.empty} ORDER BY a.id LIMIT 51`);
+  }
   async onboardingTeamPersonScopes(ids:readonly string[],asOf:Date):Promise<OnboardingTeamPersonScope[]>{
     if(!ids.length)return[];
     return this.tx.$queryRaw<OnboardingTeamPersonScope[]>(Prisma.sql`

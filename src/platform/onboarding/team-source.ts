@@ -3,6 +3,10 @@ import {TeamRepository,type OnboardingTeamAssignmentHead,type OnboardingTeamPers
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import {onboardingTeamTargetSchema} from "@/modules/onboarding/domain/onboarding-team";
 import {onboardingTeamAssignmentReasonSchema} from "./contracts";
+import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
+import {assertAccountAuthorization} from "@/platform/authz/current-authority";
+export {IdentityAuthorizationError as NativeOnboardingTeamAuthorizationError} from "@/modules/identity/application/identity-access";
+export {TeamConflictError as NativeOnboardingTeamConflictError,TeamNotFoundError as NativeOnboardingTeamNotFoundError} from "@/modules/identity/application/team-service";
 
 /** Internal source metadata only; the application authorizes actual rows before requesting private values. */
 export const nativeOnboardingTeamAssignmentHeads=(tx:TenantTransaction,organizationId:string,ids:readonly string[],includeArchived=false)=>new TeamRepository(tx,organizationId).onboardingTeamAssignmentHeads(ids,includeArchived);
@@ -11,6 +15,10 @@ export const nativeOnboardingTeamAccountHeads=(tx:TenantTransaction,organization
 export const nativeOnboardingTeamRoleHeads=(tx:TenantTransaction,organizationId:string,ids:readonly string[],includeArchived=false)=>new TeamRepository(tx,organizationId).onboardingTeamRoleHeads(ids,includeArchived);
 export const nativeOnboardingTeamAssignmentPage=(tx:TenantTransaction,organizationId:string,propertyId:string,after:string|undefined,asOf:Date)=>new TeamRepository(tx,organizationId).onboardingTeamAssignmentPage(propertyId,after,asOf);
 export const nativeOnboardingTeamPersonScopes=(tx:TenantTransaction,organizationId:string,ids:readonly string[],asOf:Date)=>new TeamRepository(tx,organizationId).onboardingTeamPersonScopes(ids,asOf);
+export const nativeOnboardingTeamAssignmentChoices=(tx:TenantTransaction,organizationId:string,propertyId:string,query:string,after:string|undefined,asOf:Date)=>new TeamRepository(tx,organizationId).onboardingTeamAssignmentChoices(propertyId,query,after,asOf);
+export const nativeOnboardingTeamPersonChoices=(tx:TenantTransaction,organizationId:string,query:string,after:string|undefined,asOf:Date)=>new TeamRepository(tx,organizationId).onboardingTeamPersonChoices(query,after,asOf);
+export const nativeOnboardingTeamRoleChoices=(tx:TenantTransaction,organizationId:string,query:string,after:string|undefined,asOf:Date)=>new TeamRepository(tx,organizationId).onboardingTeamRoleChoices(query,after,asOf);
+export const nativeOnboardingTeamAccountChoices=(tx:TenantTransaction,organizationId:string,personId:string,query:string,after:string|undefined,asOf:Date)=>new TeamRepository(tx,organizationId).onboardingTeamAccountChoices(personId,query,after,asOf);
 /** Private source values: call only after independent current and held row authority. */
 export const nativeOnboardingTeamAssignmentRows=(tx:TenantTransaction,organizationId:string,ids:readonly string[],includeArchived=false)=>new TeamRepository(tx,organizationId).onboardingTeamAssignmentRows(ids,includeArchived);
 export const nativeOnboardingTeamPersonRows=(tx:TenantTransaction,organizationId:string,ids:readonly string[],includeArchived=false)=>new TeamRepository(tx,organizationId).onboardingTeamPersonRows(ids,includeArchived);
@@ -41,8 +49,14 @@ export async function createNativeOnboardingTeamAssignments(actor:AccountActorCo
 
 /** Source values must already be authorized; reuse the canonical delegation ceiling without admitting a role. */
 export async function canAssignNativeOnboardingTeamRoles(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,roles:readonly{id:string;permissionKeys:readonly string[]}[],now:Date){
+ const decisions=await nativeOnboardingTeamRoleGrantDecisions(actor,tx,propertyId,roles,now);return decisions!==null&&roles.every(role=>decisions.get(role.id)===true);
+}
+
+/** One current snapshot supplies a bounded role selector; every ceiling still uses the canonical grant checker. */
+export async function nativeOnboardingTeamRoleGrantDecisions(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,roles:readonly{id:string;permissionKeys:readonly string[]}[],now:Date){
  const repository=new TeamRepository(tx,actor.organizationId),scope=await repository.assignmentScope("property",propertyId),[account]=await repository.onboardingTeamAccountHeads([actor.actorId]);
- if(!scope||!account?.personId||account.status!=="ACTIVE"||actor.authContext.personId!==undefined&&actor.authContext.personId!==account.personId)return false;
- const {assertCurrentScopedPermissionGrantAllowed}=await import("@/modules/identity/application/identity-service"),{IdentityAuthorizationError}=await import("@/modules/identity/application/identity-access");
- try{for(const role of roles)await assertCurrentScopedPermissionGrantAllowed({...actor,personId:account.personId},tx,role.permissionKeys,role.id,{type:"role",id:role.id,organizationId:actor.organizationId,...scope},now);return true;}catch(error){if(error instanceof IdentityAuthorizationError)return false;throw error;}
+ if(actor.organizationId!==actor.authContext.organizationId||actor.actorId!==actor.authContext.userAccountId||!scope||!account?.personId||account.status!=="ACTIVE"||actor.authContext.personId!==undefined&&actor.authContext.personId!==account.personId)return null;
+ const stored=await authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId),{assertPermissionGrantAllowed}=await import("@/modules/identity/application/identity-service"),{IdentityAuthorizationError}=await import("@/modules/identity/application/identity-access"),ctx={...actor,personId:account.personId},decisions=new Map<string,boolean>();
+ for(const role of roles){const resource={type:"role",id:role.id,organizationId:actor.organizationId,...scope};try{assertAccountAuthorization(actor,stored,now,[{action:"assign",resource}],new IdentityAuthorizationError());assertPermissionGrantAllowed(ctx,role.permissionKeys,role.id,resource,now);assertPermissionGrantAllowed({...ctx,authContext:{...stored,personId:actor.authContext.personId}},role.permissionKeys,role.id,resource,now);decisions.set(role.id,true);}catch(error){if(error instanceof IdentityAuthorizationError)decisions.set(role.id,false);else throw error;}}
+ return decisions;
 }
