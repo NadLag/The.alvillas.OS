@@ -107,6 +107,9 @@ async function fixture() {
       }
     });
     const role = await tx.role.findFirstOrThrow({ where: { organizationId: org, key: "field_staff" } });
+    // Assignment tests use real stored operational delegation. Financial grants remain separate.
+    const delegationPermissions=await tx.permission.findMany({where:{organizationId:org,key:{in:["role:assign","task:view","task:edit"]}}}),delegator=await tx.role.create({data:{organizationId:org,key:"actual_team_assignment_delegator",name:"Actual operational Team delegator",rolePermissions:{create:delegationPermissions.map(permission=>({organizationId:org,permissionId:permission.id}))}}});
+    await tx.roleAssignment.create({data:{organizationId:org,roleId:delegator.id,personId:person.id,userAccountId:account.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});
     await new ConfigRuleRepository(tx, org).createVersion({
       key: "staff.management_policy",
       scopeType: "organization",

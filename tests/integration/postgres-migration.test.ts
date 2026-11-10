@@ -4869,6 +4869,11 @@ describe("PostgreSQL baseline", () => {
       permissionKey("task", "view"),
       permissionKey("task", "edit")
     ]);
+    // Persist only the administrative action at this actual Property; co-host data scopes stay intact.
+    await withTenant(prisma as unknown as TenantTransactionRunner,orgA.id,async tx=>{
+      const permissions=await tx.permission.findMany({where:{organizationId:orgA.id,key:{in:[permissionKey("role","assign"),permissionKey("role","override")]}}}),role=await tx.role.create({data:{organizationId:orgA.id,key:"actual_property_delegator_"+randomUUID(),name:"Actual Property role delegation",rolePermissions:{create:permissions.map(permission=>({organizationId:orgA.id,permissionId:permission.id}))}}});
+      expect(permissions).toHaveLength(2);await tx.roleAssignment.create({data:{organizationId:orgA.id,roleId:role.id,personId:fixture.person.id,userAccountId:fixture.account.id,scopeType:"property",scopeId:fixture.assignedProperty.id,validFrom:new Date("2020-01-01")}});
+    });
     const adminIdentityCtx = {
       organizationId: orgA.id,
       actorId: fixture.account.id,
@@ -5062,12 +5067,12 @@ describe("PostgreSQL baseline", () => {
     ]);
     const propertyScopedAssigner = {
       organizationId: orgA.id,
-      actorId: fixture.customAccount.id,
-      personId: fixture.customPerson.id,
+      actorId: fixture.account.id,
+      personId: fixture.person.id,
       authContext: {
         organizationId: orgA.id,
-        userAccountId: fixture.customAccount.id,
-        personId: fixture.customPerson.id,
+        userAccountId: fixture.account.id,
+        personId: fixture.person.id,
         permissions: propertyScopedAssignerPermissions,
         scopes: [{ organizationId: orgA.id, scopeType: "property" as const, scopeId: fixture.assignedProperty.id }],
         assignments: [
