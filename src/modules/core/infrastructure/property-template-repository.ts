@@ -40,6 +40,10 @@ export class PropertyTemplateRepository {
     const pattern="%"+query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";
     return this.tx.$queryRaw<Array<{id:string;propertyId:string|null;status:string;createdBy:string;createdAt:Date}>>(Prisma.sql`SELECT t.id,t.property_id AS "propertyId",t.status,t.created_by AS "createdBy",t.created_at AS "createdAt" FROM property_template_version t WHERE t.organization_id=${this.organizationId}::uuid AND t.kind='INVENTORY' AND(t.property_id IS NULL OR t.property_id=${propertyId}::uuid) AND t.status='ACTIVE' AND t.created_at<=${asOf} AND NOT EXISTS(SELECT 1 FROM property_template_version v WHERE v.organization_id=t.organization_id AND v.key=t.key AND v.version>t.version AND v.created_at<=${asOf}) ${after?Prisma.sql`AND t.id>${after}::uuid`:Prisma.empty} AND(${query}='' OR t.key ILIKE ${pattern} OR t.name->>'en' ILIKE ${pattern} OR t.name->>'fr' ILIKE ${pattern} OR t.name->>'ar' ILIKE ${pattern}) ORDER BY t.id LIMIT 51`);
   }
+  nativeInventoryTemplateChoiceRows(ids:readonly string[]) {
+    if(!ids.length)return Promise.resolve([]);
+    return this.tx.$queryRaw<Array<{id:string;key:string;version:number;name:Prisma.JsonValue;itemCount:number}>>(Prisma.sql`SELECT t.id,t.key,t.version,t.name,jsonb_array_length(t.values->'rules'->'inventory.minimums'->'minimums')::int AS "itemCount" FROM property_template_version t WHERE t.organization_id=${this.organizationId}::uuid AND t.kind='INVENTORY' AND t.id IN(${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY t.id`);
+  }
   lock(key: string) {
     return this.tx.$executeRaw(
       Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`template:${this.organizationId}:${key}`}, 0))`

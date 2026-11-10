@@ -1,8 +1,10 @@
 import {z} from "zod";
-import {inventoryMinimumsSchema,inventoryMaximumItems,inventoryCategorySchema} from "@/platform/config/inventory-policy";
+import {inventoryMinimumsSchema,inventoryMaximumItems,inventoryCategorySchema,inventoryMinimumsKey} from "@/platform/config/inventory-policy";
 import {localizedTextSchema} from "@/i18n/content";
 
 export {inventoryMaximumItems as onboardingInventoryMaximumItems,inventoryMinimumsKey as onboardingInventoryRuleKey} from "@/platform/config/inventory-policy";
+export const onboardingInventoryCanonicalValueSchema=inventoryMinimumsSchema;
+export const onboardingInventoryTemplateValuesSchema=z.object({rules:z.object({[inventoryMinimumsKey]:inventoryMinimumsSchema}).strict()}).strict();
 const inventoryEntry=inventoryMinimumsSchema.shape.minimums.element;
 /** Every custom item supplies its actual labels, category, unit and optional per-stay choice. */
 export const onboardingInventoryItemInputSchema=inventoryEntry.extend({quantity:inventoryEntry.shape.quantity.max(Number.MAX_SAFE_INTEGER),name:localizedTextSchema.strict(),unit:inventoryEntry.shape.unit.unwrap(),category:inventoryCategorySchema,expected_per_stay:inventoryEntry.shape.expected_per_stay.unwrap().max(Number.MAX_SAFE_INTEGER).nullable()}).strict();
