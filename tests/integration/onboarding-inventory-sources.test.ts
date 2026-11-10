@@ -25,7 +25,7 @@ afterEach(()=>vi.restoreAllMocks());afterAll(async()=>{try{if(financial)await fi
 async function fixture(){const f=await nativeOnboardingInventoryFixture(admin,db,env);organizations.push(f.organizationId);return f;}
 type Fixture=NativeOnboardingInventoryFixture;
 const read=(f:Fixture,target:unknown=f.inventoryTarget)=>withTenant(db,f.organizationId,tx=>readOnboardingInventorySources(f.ctx,tx,f.book.propertyId!,f.book.ownerId,target));
-const write=(f:Fixture,target:unknown=f.inventoryTarget,operationId=randomUUID())=>withTenant(db,f.organizationId,tx=>configureNativeOnboardingInventory(f.ctx,tx,f.book.propertyId!,target,"Actual original reviewed canonical Inventory setup","owned-trace-"+randomUUID(),operationId));
+const write=(f:Fixture,target:unknown=f.inventoryTarget,operationId=randomUUID())=>withTenant(db,f.organizationId,tx=>configureNativeOnboardingInventory(f.ctx,tx,f.book.propertyId!,f.book.ownerId,target,"Actual original reviewed canonical Inventory setup","owned-trace-"+randomUUID(),operationId));
 const withdraw=(f:Fixture,key:string)=>withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants[key]},data:{archivedAt:new Date()}}));
 const effects=(f:Fixture)=>withTenant(db,f.organizationId,async tx=>({rules:await tx.configRule.count({where:{key:"inventory.minimums"}}),revisions:await tx.propertyTemplateRevision.count({where:{kind:"INVENTORY"}}),audits:await tx.auditLog.count(),items:await tx.inventoryItem.count(),locations:await tx.inventoryLocation.count(),movements:await tx.inventoryMovement.count(),stocktakes:await tx.inventoryStocktake.count(),native:await tx.propertyOnboardingRevision.count()}));
 

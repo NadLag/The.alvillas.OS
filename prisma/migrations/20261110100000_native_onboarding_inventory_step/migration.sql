@@ -155,6 +155,7 @@ BEGIN
   prior_revision:=coalesce((manifest#>>'{before,binding,revision}')::int,0);selected_template:=latest_binding.template_version_id;
   IF latest_binding.revision<>prior_revision+1 OR latest_binding.action<>'APPLY' OR latest_binding.created_by IS DISTINCT FROM NEW.created_by OR latest_binding.operation_id IS DISTINCT FROM NEW.command_key
    OR latest_binding.command->>'action' IS DISTINCT FROM 'APPLY' OR latest_binding.command->>'propertyId' IS DISTINCT FROM NEW.property_id::text
+   OR latest_binding.command->>'ownerId' IS DISTINCT FROM NEW.owner_id::text
    OR latest_binding.command->>'templateVersionId' IS DISTINCT FROM selected_template::text OR(latest_binding.command->>'expectedRevision')::int IS DISTINCT FROM prior_revision
    OR NOT EXISTS(SELECT 1 FROM property_template_version t WHERE t.organization_id=NEW.organization_id AND t.id=selected_template AND t.status='ACTIVE'
     AND(SELECT status FROM property_template_version v WHERE v.organization_id=t.organization_id AND v.key=t.key ORDER BY version DESC LIMIT 1)='ACTIVE')

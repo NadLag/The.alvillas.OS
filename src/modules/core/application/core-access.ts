@@ -16,10 +16,6 @@ export class CoreValidationError extends Error {
   constructor(message = "Core input is invalid") {super(message);this.name="CoreValidationError";}
 }
 
-export class TemplateAccessError extends Error {}
-export class TemplateConflictError extends Error {}
-export class TemplateNotFoundError extends Error {}
-
 export type CoreActorContext = {
   organizationId: string;
   actorId: string;

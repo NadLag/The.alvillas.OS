@@ -354,8 +354,8 @@ export async function readOnboardingProperties(actor:AccountActorContext,raw:unk
  });
 }
 
-export async function reviewOnboardingRecordStep(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){const ctx=actorContext(actor),draft=canonicalOnboardingRecordDraft(raw);return draft.step==="OWNER"?reviewOnboardingStep(ctx,draft,deps):draft.step==="PROPERTY"?reviewOnboardingPropertyStep(ctx,draft,deps):draft.step==="OPERATING_PROFILE"?reviewOnboardingOperatingStep(ctx,draft,deps):draft.step==="TEAM"?reviewOnboardingTeamStep(ctx,draft,deps):draft.step==="BOOKING_CHANNELS"?reviewOnboardingBookingChannelsStep(ctx,draft,deps):reviewOnboardingManagementAgreementStep(ctx,draft,deps);}
-export async function admitOnboardingRecordStep(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){const ctx=actorContext(actor),command=canonicalOnboardingRecordCommand(raw);return command.step==="OWNER"?admitOnboardingStep(ctx,command,deps):command.step==="PROPERTY"?admitOnboardingPropertyStep(ctx,command,deps):command.step==="OPERATING_PROFILE"?admitOnboardingOperatingStep(ctx,command,deps):command.step==="TEAM"?admitOnboardingTeamStep(ctx,command,deps):command.step==="BOOKING_CHANNELS"?admitOnboardingBookingChannelsStep(ctx,command,deps):admitOnboardingManagementAgreementStep(ctx,command,deps);}
+export async function reviewOnboardingRecordStep(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){const ctx=actorContext(actor),draft=canonicalOnboardingRecordDraft(raw);return draft.step==="OWNER"?reviewOnboardingStep(ctx,draft,deps):draft.step==="PROPERTY"?reviewOnboardingPropertyStep(ctx,draft,deps):draft.step==="OPERATING_PROFILE"?reviewOnboardingOperatingStep(ctx,draft,deps):draft.step==="TEAM"?reviewOnboardingTeamStep(ctx,draft,deps):draft.step==="BOOKING_CHANNELS"?reviewOnboardingBookingChannelsStep(ctx,draft,deps):draft.step==="INVENTORY"?reviewOnboardingInventoryStep(ctx,draft,deps):reviewOnboardingManagementAgreementStep(ctx,draft,deps);}
+export async function admitOnboardingRecordStep(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){const ctx=actorContext(actor),command=canonicalOnboardingRecordCommand(raw);return command.step==="OWNER"?admitOnboardingStep(ctx,command,deps):command.step==="PROPERTY"?admitOnboardingPropertyStep(ctx,command,deps):command.step==="OPERATING_PROFILE"?admitOnboardingOperatingStep(ctx,command,deps):command.step==="TEAM"?admitOnboardingTeamStep(ctx,command,deps):command.step==="BOOKING_CHANNELS"?admitOnboardingBookingChannelsStep(ctx,command,deps):command.step==="INVENTORY"?admitOnboardingInventoryStep(ctx,command,deps):admitOnboardingManagementAgreementStep(ctx,command,deps);}
 
 function managementFinancialChecks(organizationId:string,propertyId:string,ownerId:string,heads:Awaited<ReturnType<typeof nativeOnboardingManagementAgreementRuleHeads>>,create=false):CurrentAuthorityCheck[]{
  const sources=heads.length?heads:onboardingManagementAgreementRuleKeys.map(key=>({id:"agreement:"+propertyId,key,lifecycle:"DRAFT",createdAt:undefined}));
@@ -676,7 +676,7 @@ async function inventoryDraftContext(actor:AccountActorContext,tx:TenantTransact
  return{...base,current,configured,owner:nativeOwnerIdentityProjection(owner),property:nativeOnboardingPropertyProjection(property),inventory,source,reviewFingerprint};
 }
 
-/** Shared INVENTORY admission stays closed until the additive native producer is qualified. */
+/** Inventory uses the qualified canonical producer and additive native admission guard. */
 export async function reviewOnboardingInventoryStep(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
  const ctx=actorContext(actor),draft=canonicalOnboardingInventoryDraft(raw);await spendRead(ctx,deps,draft.sessionId);
  return withTenant(deps.db,ctx.organizationId,async tx=>{
@@ -724,7 +724,7 @@ export async function admitOnboardingInventoryStep(actor:AccountActorContext,raw
   await lockNativeOnboardingOwner(tx,ctx.organizationId,previous.ownerId);await lockNativeOnboardingProperty(tx,ctx.organizationId,input.target.propertyId);
   const base=await inventoryDraftContext(ctx,tx,draft);if(base.reviewFingerprint!==input.reviewFingerprint||commandFingerprint(base.configured.snapshot)!==commandFingerprint(budget.snapshot))throw new OnboardingConflictError();
   const requestId=deps.requestId??randomUUID(),propertyId=input.target.propertyId;
-  await configureNativeOnboardingInventory(ctx,tx,propertyId,input.target,input.reason,requestId,input.idempotencyKey);
+  await configureNativeOnboardingInventory(ctx,tx,propertyId,base.current.ownerId,input.target,input.reason,requestId,input.idempotencyKey);
   const postTarget=input.target.mode==="TEMPLATE"?{...input.target,expectedRevision:input.target.expectedRevision+1}:input.target,actual=await readOnboardingInventorySources(ctx,tx,propertyId,base.current.ownerId,postTarget),owner=await nativeOnboardingOwnerWitness(tx,ctx.organizationId,base.current.ownerId),property=await propertyRead(ctx,tx,propertyId,base.current.ownerId,true);
   if(!owner||!actual.previous.rule||commandFingerprint(actual.previous.settings)!==commandFingerprint(base.inventory.proposed)||commandFingerprint(propertySnapshot(owner,property,null))!==commandFingerprint(base.source.parent))throw new OnboardingConflictError();
   const pins=onboardingInventorySourcePins(base.inventory,actual),source={source:"CORE_PROPERTY_INVENTORY",parent:propertySnapshot(owner,property,null),inventory:pins,inputFingerprint:commandFingerprint(input.target)},recordedSources=await authorizeRecordedOnboardingInventorySources(ctx,tx,propertyId,base.current.ownerId,pins),templates=new Map<string,{id:string;values:unknown}>();

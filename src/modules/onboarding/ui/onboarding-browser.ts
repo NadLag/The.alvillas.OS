@@ -3,7 +3,7 @@ import {readBoundedResponseBytes} from "@/platform/http/read-exact-response";
 export {readCommandNonce,writeCommandNonce,clearCommandNonce} from "@/platform/http/command-nonce";
 
 export type OnboardingBrowserState="loading"|"ready"|"saved"|"uncertain"|"forbidden"|"offline"|"validation"|"conflict"|"configuration_unavailable"|"rate_limited"|"unavailable";
-export type OnboardingEndpoint="options"|"directory"|"owners"|"properties"|"agreements"|"team"|"channels"|"review"|"admit"|"recover"|"read";
+export type OnboardingEndpoint="options"|"directory"|"owners"|"properties"|"agreements"|"team"|"channels"|"inventory"|"review"|"admit"|"recover"|"read";
 export class OnboardingBrowserError extends Error{constructor(readonly state:OnboardingBrowserState){super(state);}}
 export async function onboardingRequest(scope:string,path:OnboardingEndpoint,input:unknown,signal:AbortSignal):Promise<unknown>{
  const mutation=path==="admit";

@@ -5902,7 +5902,13 @@
       "template": "Inventory template",
       "templateRevision": "Template application revision {revision}",
       "noTemplate": "No inventory template was bound.",
-      "noItems": "This configuration has no required items."
+      "noItems": "This configuration has no required items.",
+      "prepare": "Prepare inventory",
+      "change": "Change inventory",
+      "open": "Open inventory setup",
+      "saved": "Inventory settings recorded.",
+      "reviewTitle": "Review inventory settings",
+      "confirm": "Record reviewed inventory"
     }
   }
 }

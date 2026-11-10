@@ -15,7 +15,7 @@ type Input=z.infer<typeof onboardingInventoryChoicesInputSchema>;
 type Custom=Extract<OnboardingInventoryDraft["target"],{mode:"CUSTOM"}>["settings"]["minimums"][number];
 type Row={key:number;item:string;quantity:string;en:string;fr:string;ar:string;unit:string;category:Custom["category"]|"";perStay:""|"UNSPECIFIED"|"EXPLICIT";perStayQuantity:string};
 type Selected={id:string;name:Choices["templates"][number]["name"]};
-type Props={sessionId:string;options:Options;disabled:boolean;initialDraft?:OnboardingInventoryDraft;initialSelection?:OnboardingInventorySnapshot;initialReason?:string;loadChoices:(input:Input,receive:(value:Choices)=>void)=>void;onReview:(draft:OnboardingInventoryDraft,reason:string)=>void;onCancel:()=>void};
+type Props={sessionId:string;options:Options;disabled:boolean;initialDraft?:OnboardingInventoryDraft;initialSelection?:Pick<OnboardingInventorySnapshot,"template">;initialReason?:string;loadChoices:(input:Input,receive:(value:Choices)=>void)=>void;onReview:(draft:OnboardingInventoryDraft,reason:string)=>void;onCancel:()=>void};
 const emptyRow=(key:number):Row=>({key,item:"",quantity:"",en:"",fr:"",ar:"",unit:"",category:"",perStay:"",perStayQuantity:""});
 const categories=["CONSUMABLE","LINEN","EQUIPMENT"]as const;
 function exactCount(raw:string){if(!/^\d+$/u.test(raw.trim()))throw Error("explicit_inventory_integer_required");const value=Number(raw);if(!Number.isSafeInteger(value)||value<0)throw Error("exact_inventory_integer_required");return value;}

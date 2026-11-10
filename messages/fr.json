@@ -5902,7 +5902,13 @@
       "template": "Modèle d’inventaire",
       "templateRevision": "Révision d’application du modèle {revision}",
       "noTemplate": "Aucun modèle d’inventaire lié.",
-      "noItems": "Cette configuration ne contient aucun article requis."
+      "noItems": "Cette configuration ne contient aucun article requis.",
+      "prepare": "Préparer l’inventaire",
+      "change": "Modifier l’inventaire",
+      "open": "Ouvrir la configuration de l’inventaire",
+      "saved": "Configuration de l’inventaire enregistrée.",
+      "reviewTitle": "Vérifier la configuration de l’inventaire",
+      "confirm": "Enregistrer l’inventaire vérifié"
     }
   }
 }
