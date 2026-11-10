@@ -6,6 +6,12 @@ import initialPolicy from "@/platform/config/defaults/staff-management.json" wit
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { teamPolicyKey } from "../domain/team";
 
+export type OnboardingTeamAssignmentHead={id:string;personId:string;roleId:string;userAccountId:string|null;scopeType:string;scopeId:string|null;validFrom:Date;validTo:Date|null;archivedAt:Date|null;createdBy:string|null;createdAt:Date;rowVersion:string;tuple:string};
+export type OnboardingTeamPersonHead={id:string;archivedAt:Date|null;rowVersion:string;tuple:string};
+export type OnboardingTeamAccountHead={id:string;personId:string|null;status:string;rowVersion:string;tuple:string};
+export type OnboardingTeamRoleHead={id:string;archivedAt:Date|null;rowVersion:string;tuple:string;permissionsHash:string;permissionCount:number;permissionsValid:boolean};
+export type OnboardingTeamPersonScope={personId:string;assignmentId:string;scopeType:string;scopeId:string|null;propertyId:string|null;city:string|null;region:string|null;jobId:string|null;rowVersion:string;tuple:string};
+
 export class TeamRepository {
   constructor(
     readonly tx: TenantTransaction,
@@ -33,6 +39,107 @@ export class TeamRepository {
   }
   async flushGuards() {
     await this.tx.$executeRaw(Prisma.sql`SET CONSTRAINTS ALL IMMEDIATE`);
+  }
+  async onboardingTeamAssignmentHeads(ids:readonly string[],includeArchived=false):Promise<OnboardingTeamAssignmentHead[]>{
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<OnboardingTeamAssignmentHead[]>(Prisma.sql`
+      SELECT a.id,a.person_id AS "personId",a.role_id AS "roleId",a.user_account_id AS "userAccountId",
+        a.scope_type AS "scopeType",a.scope_id AS "scopeId",a.valid_from AS "validFrom",a.valid_to AS "validTo",
+        a.archived_at AS "archivedAt",a.created_by AS "createdBy",a.created_at AS "createdAt",a.xmin::text AS "rowVersion",a.ctid::text AS tuple
+      FROM role_assignment a WHERE a.organization_id=${this.organizationId}::uuid
+        AND a.id IN (${Prisma.join([...new Set(ids)].map(id=>Prisma.sql`${id}::uuid`))})
+        ${includeArchived?Prisma.empty:Prisma.sql`AND a.archived_at IS NULL`} ORDER BY a.id`);
+  }
+  async onboardingTeamPersonHeads(ids:readonly string[],includeArchived=false):Promise<OnboardingTeamPersonHead[]>{
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<OnboardingTeamPersonHead[]>(Prisma.sql`
+      SELECT p.id,p.archived_at AS "archivedAt",p.xmin::text AS "rowVersion",p.ctid::text AS tuple
+      FROM person p WHERE p.organization_id=${this.organizationId}::uuid
+        AND p.id IN (${Prisma.join([...new Set(ids)].map(id=>Prisma.sql`${id}::uuid`))})
+        ${includeArchived?Prisma.empty:Prisma.sql`AND p.archived_at IS NULL`} ORDER BY p.id`);
+  }
+  async onboardingTeamAccountHeads(ids:readonly string[]):Promise<OnboardingTeamAccountHead[]>{
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<OnboardingTeamAccountHead[]>(Prisma.sql`
+      SELECT a.id,a.person_id AS "personId",a.status::text AS status,a.xmin::text AS "rowVersion",a.ctid::text AS tuple
+      FROM user_account a WHERE a.organization_id=${this.organizationId}::uuid
+        AND a.id IN (${Prisma.join([...new Set(ids)].map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY a.id`);
+  }
+  async onboardingTeamRoleHeads(ids:readonly string[],includeArchived=false):Promise<OnboardingTeamRoleHead[]>{
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<OnboardingTeamRoleHead[]>(Prisma.sql`
+      SELECT r.id,r.archived_at AS "archivedAt",r.xmin::text AS "rowVersion",r.ctid::text AS tuple,
+        coalesce(witness.signature,md5('')) AS "permissionsHash",coalesce(witness.total,0)::int AS "permissionCount",coalesce(witness.valid,true) AS "permissionsValid"
+      FROM role r LEFT JOIN LATERAL (
+        SELECT md5(string_agg(rp.permission_id::text||':'||rp.xmin::text||':'||rp.ctid::text||':'||coalesce(p.key,'MISSING')||':'||coalesce(p.resource,'MISSING')||':'||coalesce(p.action,'MISSING')||':'||coalesce(p.xmin::text,'MISSING')||':'||coalesce(p.ctid::text,'MISSING'),'|' ORDER BY rp.permission_id)) AS signature,count(*)::int AS total,bool_and(p.id IS NOT NULL) AS valid
+        FROM role_permission rp LEFT JOIN permission p ON p.organization_id=rp.organization_id AND p.id=rp.permission_id
+        WHERE rp.organization_id=r.organization_id AND rp.role_id=r.id
+      ) witness ON true
+      WHERE r.organization_id=${this.organizationId}::uuid
+        AND r.id IN (${Prisma.join([...new Set(ids)].map(id=>Prisma.sql`${id}::uuid`))})
+        ${includeArchived?Prisma.empty:Prisma.sql`AND r.archived_at IS NULL`} ORDER BY r.id`);
+  }
+  async onboardingTeamAssignmentPage(propertyId:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      SELECT a.id FROM role_assignment a WHERE a.organization_id=${this.organizationId}::uuid
+        AND a.scope_type='property' AND a.scope_id=${propertyId}::uuid AND a.archived_at IS NULL AND a.created_at<=${asOf}
+        ${after?Prisma.sql`AND a.id>${after}::uuid`:Prisma.empty} ORDER BY a.id LIMIT 51`);
+  }
+  async onboardingTeamAssignmentChoices(propertyId:string,query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      SELECT a.id FROM role_assignment a
+      JOIN person p ON p.organization_id=a.organization_id AND p.id=a.person_id AND p.archived_at IS NULL
+      JOIN role r ON r.organization_id=a.organization_id AND r.id=a.role_id AND r.archived_at IS NULL
+      WHERE a.organization_id=${this.organizationId}::uuid AND a.scope_type='property' AND a.scope_id=${propertyId}::uuid
+        AND a.archived_at IS NULL AND a.created_at<=${asOf}
+        AND (${query}='' OR position(lower(${query}) in lower(p.display_name))>0 OR position(lower(${query}) in lower(r.name))>0)
+        ${after?Prisma.sql`AND a.id>${after}::uuid`:Prisma.empty} ORDER BY a.id LIMIT 51`);
+  }
+  async onboardingTeamPersonChoices(query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      SELECT p.id FROM person p WHERE p.organization_id=${this.organizationId}::uuid AND p.archived_at IS NULL AND p.created_at<=${asOf}
+        AND (${query}='' OR position(lower(${query}) in lower(p.display_name))>0)
+        ${after?Prisma.sql`AND p.id>${after}::uuid`:Prisma.empty} ORDER BY p.id LIMIT 51`);
+  }
+  async onboardingTeamRoleChoices(query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      SELECT r.id FROM role r WHERE r.organization_id=${this.organizationId}::uuid AND r.archived_at IS NULL AND r.created_at<=${asOf}
+        AND (${query}='' OR position(lower(${query}) in lower(r.name))>0 OR position(lower(${query}) in lower(r.key))>0)
+        ${after?Prisma.sql`AND r.id>${after}::uuid`:Prisma.empty} ORDER BY r.id LIMIT 51`);
+  }
+  async onboardingTeamAccountChoices(personId:string,query:string,after:string|undefined,asOf:Date){
+    return this.tx.$queryRaw<Array<{id:string}>>(Prisma.sql`
+      SELECT a.id FROM user_account a WHERE a.organization_id=${this.organizationId}::uuid AND a.person_id=${personId}::uuid AND a.status='ACTIVE' AND a.created_at<=${asOf}
+        AND (${query}='' OR position(lower(${query}) in lower(coalesce(a.email,'')))>0)
+        ${after?Prisma.sql`AND a.id>${after}::uuid`:Prisma.empty} ORDER BY a.id LIMIT 51`);
+  }
+  async onboardingTeamPersonScopes(ids:readonly string[],asOf:Date):Promise<OnboardingTeamPersonScope[]>{
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<OnboardingTeamPersonScope[]>(Prisma.sql`
+      SELECT a.person_id AS "personId",a.id AS "assignmentId",a.scope_type AS "scopeType",a.scope_id AS "scopeId",
+        p.id AS "propertyId",coalesce(p.city_id,c.id) AS city,coalesce(p.region_id,c.region_id,r.id) AS region,t.id AS "jobId",a.xmin::text AS "rowVersion",a.ctid::text AS tuple
+      FROM role_assignment a
+      LEFT JOIN operation_task t ON a.scope_type='job' AND t.organization_id=a.organization_id AND t.id=a.scope_id AND t.archived_at IS NULL
+      LEFT JOIN property p ON a.scope_type IN ('property','job') AND p.organization_id=a.organization_id AND p.id=CASE WHEN a.scope_type='job' THEN t.property_id ELSE a.scope_id END AND p.archived_at IS NULL
+      LEFT JOIN city c ON a.scope_type='city' AND c.organization_id=a.organization_id AND c.id=a.scope_id AND c.archived_at IS NULL
+      LEFT JOIN region r ON a.scope_type='region' AND r.organization_id=a.organization_id AND r.id=a.scope_id AND r.archived_at IS NULL
+      WHERE a.organization_id=${this.organizationId}::uuid AND a.person_id IN (${Prisma.join([...new Set(ids)].map(id=>Prisma.sql`${id}::uuid`))})
+        AND a.archived_at IS NULL AND a.valid_from<=${asOf} AND (a.valid_to IS NULL OR a.valid_to>${asOf})
+        AND ((a.scope_type='organization' AND a.scope_id IS NULL) OR p.id IS NOT NULL OR c.id IS NOT NULL OR r.id IS NOT NULL)
+      ORDER BY a.person_id,a.id`);
+  }
+  onboardingTeamAssignmentRows(ids:readonly string[],includeArchived=false){
+    return this.tx.roleAssignment.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]},...includeArchived?{}:{archivedAt:null}},select:{id:true,personId:true,roleId:true,userAccountId:true,scopeType:true,scopeId:true,conditions:true,validFrom:true,validTo:true,archivedAt:true,createdBy:true,createdAt:true},orderBy:{id:"asc"}});
+  }
+  onboardingTeamPersonRows(ids:readonly string[],includeArchived=false){
+    return this.tx.person.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]},...includeArchived?{}:{archivedAt:null}},select:{id:true,displayName:true,archivedAt:true},orderBy:{id:"asc"}});
+  }
+  onboardingTeamAccountRows(ids:readonly string[]){
+    return this.tx.userAccount.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]}},select:{id:true,personId:true,email:true,status:true},orderBy:{id:"asc"}});
+  }
+  async onboardingTeamRoleRows(ids:readonly string[],includeArchived=false){
+    const roles=await this.tx.role.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]},...includeArchived?{}:{archivedAt:null}},select:{id:true,key:true,name:true,archivedAt:true,rolePermissions:{where:{organizationId:this.organizationId},select:{permission:{select:{organizationId:true,key:true}}}}},orderBy:{id:"asc"}});
+    return roles.map(({rolePermissions,...role})=>{if(rolePermissions.some(row=>row.permission.organizationId!==this.organizationId))throw Error("native_onboarding_invalid_role_permission_source");return{...role,permissionKeys:rolePermissions.map(row=>row.permission.key).sort()};});
   }
   compensationFor(assignments: string[]) {
     return this.tx.teamCompensation.findMany({
