@@ -10,6 +10,7 @@ export type OnboardingTeamAssignmentHead={id:string;personId:string;roleId:strin
 export type OnboardingTeamPersonHead={id:string;archivedAt:Date|null;rowVersion:string;tuple:string};
 export type OnboardingTeamAccountHead={id:string;personId:string|null;status:string;rowVersion:string;tuple:string};
 export type OnboardingTeamRoleHead={id:string;archivedAt:Date|null;rowVersion:string;tuple:string;permissionsHash:string;permissionCount:number;permissionsValid:boolean};
+export type OnboardingTeamPersonScope={personId:string;assignmentId:string;scopeType:string;scopeId:string|null;propertyId:string|null;city:string|null;region:string|null;jobId:string|null;rowVersion:string;tuple:string};
 
 export class TeamRepository {
   constructor(
@@ -83,6 +84,21 @@ export class TeamRepository {
       SELECT a.id FROM role_assignment a WHERE a.organization_id=${this.organizationId}::uuid
         AND a.scope_type='property' AND a.scope_id=${propertyId}::uuid AND a.archived_at IS NULL AND a.created_at<=${asOf}
         ${after?Prisma.sql`AND a.id>${after}::uuid`:Prisma.empty} ORDER BY a.id LIMIT 51`);
+  }
+  async onboardingTeamPersonScopes(ids:readonly string[],asOf:Date):Promise<OnboardingTeamPersonScope[]>{
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<OnboardingTeamPersonScope[]>(Prisma.sql`
+      SELECT a.person_id AS "personId",a.id AS "assignmentId",a.scope_type AS "scopeType",a.scope_id AS "scopeId",
+        p.id AS "propertyId",coalesce(p.city_id,c.id) AS city,coalesce(p.region_id,c.region_id,r.id) AS region,t.id AS "jobId",a.xmin::text AS "rowVersion",a.ctid::text AS tuple
+      FROM role_assignment a
+      LEFT JOIN operation_task t ON a.scope_type='job' AND t.organization_id=a.organization_id AND t.id=a.scope_id AND t.archived_at IS NULL
+      LEFT JOIN property p ON a.scope_type IN ('property','job') AND p.organization_id=a.organization_id AND p.id=CASE WHEN a.scope_type='job' THEN t.property_id ELSE a.scope_id END AND p.archived_at IS NULL
+      LEFT JOIN city c ON a.scope_type='city' AND c.organization_id=a.organization_id AND c.id=a.scope_id AND c.archived_at IS NULL
+      LEFT JOIN region r ON a.scope_type='region' AND r.organization_id=a.organization_id AND r.id=a.scope_id AND r.archived_at IS NULL
+      WHERE a.organization_id=${this.organizationId}::uuid AND a.person_id IN (${Prisma.join([...new Set(ids)].map(id=>Prisma.sql`${id}::uuid`))})
+        AND a.archived_at IS NULL AND a.valid_from<=${asOf} AND (a.valid_to IS NULL OR a.valid_to>${asOf})
+        AND ((a.scope_type='organization' AND a.scope_id IS NULL) OR p.id IS NOT NULL OR c.id IS NOT NULL OR r.id IS NOT NULL)
+      ORDER BY a.person_id,a.id`);
   }
   onboardingTeamAssignmentRows(ids:readonly string[],includeArchived=false){
     return this.tx.roleAssignment.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]},...includeArchived?{}:{archivedAt:null}},select:{id:true,personId:true,roleId:true,userAccountId:true,scopeType:true,scopeId:true,conditions:true,validFrom:true,validTo:true,archivedAt:true,createdBy:true,createdAt:true},orderBy:{id:"asc"}});

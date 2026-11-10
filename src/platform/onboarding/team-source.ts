@@ -10,6 +10,7 @@ export const nativeOnboardingTeamPersonHeads=(tx:TenantTransaction,organizationI
 export const nativeOnboardingTeamAccountHeads=(tx:TenantTransaction,organizationId:string,ids:readonly string[])=>new TeamRepository(tx,organizationId).onboardingTeamAccountHeads(ids);
 export const nativeOnboardingTeamRoleHeads=(tx:TenantTransaction,organizationId:string,ids:readonly string[],includeArchived=false)=>new TeamRepository(tx,organizationId).onboardingTeamRoleHeads(ids,includeArchived);
 export const nativeOnboardingTeamAssignmentPage=(tx:TenantTransaction,organizationId:string,propertyId:string,after:string|undefined,asOf:Date)=>new TeamRepository(tx,organizationId).onboardingTeamAssignmentPage(propertyId,after,asOf);
+export const nativeOnboardingTeamPersonScopes=(tx:TenantTransaction,organizationId:string,ids:readonly string[],asOf:Date)=>new TeamRepository(tx,organizationId).onboardingTeamPersonScopes(ids,asOf);
 /** Private source values: call only after independent current and held row authority. */
 export const nativeOnboardingTeamAssignmentRows=(tx:TenantTransaction,organizationId:string,ids:readonly string[],includeArchived=false)=>new TeamRepository(tx,organizationId).onboardingTeamAssignmentRows(ids,includeArchived);
 export const nativeOnboardingTeamPersonRows=(tx:TenantTransaction,organizationId:string,ids:readonly string[],includeArchived=false)=>new TeamRepository(tx,organizationId).onboardingTeamPersonRows(ids,includeArchived);
