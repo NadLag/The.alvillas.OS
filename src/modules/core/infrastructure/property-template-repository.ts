@@ -20,6 +20,26 @@ export class PropertyTemplateRepository {
     readonly tx: TenantTransaction,
     readonly organizationId: string
   ) {}
+
+  /** Native Inventory selects identities and authority metadata before any names, values or reasons. */
+  nativeInventoryTemplateHeads(ids:readonly string[]) {
+    if(ids.length===0)return Promise.resolve([] as Array<{id:string;key:string;version:number;propertyId:string|null;status:string;createdBy:string;createdAt:Date;rowVersion:string;tuple:string;latestId:string;latestStatus:string}>);
+    return this.tx.$queryRaw<Array<{id:string;key:string;version:number;propertyId:string|null;status:string;createdBy:string;createdAt:Date;rowVersion:string;tuple:string;latestId:string;latestStatus:string}>>(Prisma.sql`SELECT t.id,t.key,t.version,t.property_id AS "propertyId",t.status,t.created_by AS "createdBy",t.created_at AS "createdAt",t.xmin::text AS "rowVersion",t.ctid::text AS tuple,latest.id AS "latestId",latest.status AS "latestStatus" FROM property_template_version t JOIN LATERAL(SELECT id,status FROM property_template_version v WHERE v.organization_id=t.organization_id AND v.key=t.key ORDER BY version DESC LIMIT 1)latest ON true WHERE t.organization_id=${this.organizationId}::uuid AND t.kind='INVENTORY' AND t.id IN(${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY t.id`);
+  }
+
+  nativeInventoryTemplateRows(ids:readonly string[]) {
+    return this.tx.propertyTemplateVersion.findMany({where:{organizationId:this.organizationId,kind:"INVENTORY",id:{in:[...ids]}},select:{id:true,key:true,version:true,propertyId:true,status:true,name:true,values:true,createdBy:true,createdAt:true},orderBy:{id:"asc"}});
+  }
+
+  async nativeInventoryBindingHead(propertyId:string) {
+    const rows=await this.tx.$queryRaw<Array<{id:string;revision:number;templateVersionId:string;createdBy:string;createdAt:Date;rowVersion:string;tuple:string}>>(Prisma.sql`SELECT id,revision,template_version_id AS "templateVersionId",created_by AS "createdBy",created_at AS "createdAt",xmin::text AS "rowVersion",ctid::text AS tuple FROM property_template_revision WHERE organization_id=${this.organizationId}::uuid AND property_id=${propertyId}::uuid AND kind='INVENTORY' ORDER BY revision DESC LIMIT 1`);
+    return rows[0]??null;
+  }
+
+  nativeInventoryTemplatePage(propertyId:string,query:string,after:string|undefined,asOf:Date) {
+    const pattern="%"+query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";
+    return this.tx.$queryRaw<Array<{id:string;propertyId:string|null;status:string;createdBy:string;createdAt:Date}>>(Prisma.sql`SELECT t.id,t.property_id AS "propertyId",t.status,t.created_by AS "createdBy",t.created_at AS "createdAt" FROM property_template_version t WHERE t.organization_id=${this.organizationId}::uuid AND t.kind='INVENTORY' AND(t.property_id IS NULL OR t.property_id=${propertyId}::uuid) AND t.status='ACTIVE' AND t.created_at<=${asOf} AND NOT EXISTS(SELECT 1 FROM property_template_version v WHERE v.organization_id=t.organization_id AND v.key=t.key AND v.version>t.version AND v.created_at<=${asOf}) ${after?Prisma.sql`AND t.id>${after}::uuid`:Prisma.empty} AND(${query}='' OR t.key ILIKE ${pattern} OR t.name->>'en' ILIKE ${pattern} OR t.name->>'fr' ILIKE ${pattern} OR t.name->>'ar' ILIKE ${pattern}) ORDER BY t.id LIMIT 51`);
+  }
   lock(key: string) {
     return this.tx.$executeRaw(
       Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`template:${this.organizationId}:${key}`}, 0))`

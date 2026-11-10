@@ -37,12 +37,10 @@ import {
   type SettingMap
 } from "../domain/property-template";
 import { propertyOperatingProfileInputSchema } from "../domain/owner-property";
-import type { CoreActorContext } from "./core-access";
+import {TemplateAccessError,TemplateConflictError,TemplateNotFoundError,type CoreActorContext} from "./core-access";
+export {TemplateAccessError,TemplateConflictError,TemplateNotFoundError} from "./core-access";
 import { updatePropertyOperatingProfile } from "./core-service";
 
-export class TemplateAccessError extends Error {}
-export class TemplateConflictError extends Error {}
-export class TemplateNotFoundError extends Error {}
 export type TemplateActorContext = CoreActorContext & { personId: string };
 type Deps = { db?: TenantTransactionRunner; requestId?: string; ipAddress?: string | null };
 export async function templateActorFromSession(

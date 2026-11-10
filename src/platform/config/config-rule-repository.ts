@@ -155,7 +155,7 @@ export function sortConfigRulesForResolution<T extends Pick<ConfigRuleRecord, "s
   });
 }
 
-export function resolveConfigCandidates(rules: Array<Omit<ConfigRuleRecord, "lifecycle"> & { lifecycle: string }>): ResolvedConfigRule | null {
+function selectConfigCandidate<T extends Pick<ConfigRuleRecord,"scopeType"|"scopeId"|"effectiveFrom"|"version">&{lifecycle:string}>(rules:readonly T[]):(T&{lifecycle:ConfigRuleLifecycle})|null {
     const retiredScopes = new Set<string>();
 
     for (const rule of sortConfigRulesForResolution(rules)) {
@@ -171,14 +171,15 @@ export function resolveConfigCandidates(rules: Array<Omit<ConfigRuleRecord, "lif
         continue;
       }
 
-      return {
-        ...rule,
-        lifecycle,
-        parsedValue: parseConfigRuleValue(rule.key, rule.value)
-      };
+      return {...rule,lifecycle};
     }
 
     return null;
+}
+
+export function resolveConfigCandidates(rules: Array<Omit<ConfigRuleRecord, "lifecycle"> & { lifecycle: string }>): ResolvedConfigRule | null {
+  const selected=selectConfigCandidate(rules);
+  return selected?{...selected,parsedValue:parseConfigRuleValue(selected.key,selected.value)}:null;
 }
 
 export class ConfigRuleRepository {
@@ -186,6 +187,19 @@ export class ConfigRuleRepository {
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
   ) {}
+
+  private resolutionWhere(input:{key:string;scopes:readonly ConfigScopeCandidate[];asOf?:Date}):Prisma.ConfigRuleWhereInput|null {
+    const scopes=normalizedScopes(input.scopes),asOf=input.asOf??new Date();
+    if(scopes.length===0)return null;
+    return {organizationId:this.organizationId,key:input.key,archivedAt:null,lifecycle:{in:["ACTIVE","RETIRED"]},effectiveFrom:{lte:asOf},OR:[{effectiveTo:null},{effectiveTo:{gt:asOf}}],AND:[{OR:scopes.map(scopeFilter)}]};
+  }
+
+  /** Use the sole canonical precedence/retirement selector without loading private values or reasons. */
+  async resolveMetadata(input:{key:string;scopes:readonly ConfigScopeCandidate[];asOf?:Date}) {
+    const where=this.resolutionWhere(input);if(!where)return null;
+    const rows=await this.tx.configRule.findMany({where,select:{id:true,key:true,scopeType:true,scopeId:true,effectiveFrom:true,effectiveTo:true,version:true,lifecycle:true,createdBy:true,createdAt:true}});
+    return selectConfigCandidate(rows);
+  }
 
   async lockVersion(key: string, scopeType: string, scopeId?: string | null): Promise<void> {
     await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`config:${this.organizationId}:${key}:${scopeType}:${scopeId ?? ""}`}, 0))`);
@@ -196,45 +210,20 @@ export class ConfigRuleRepository {
     return rows[0]??null;
   }
 
+  async sourceMetadataWitness(id:string){
+    const rows=await this.tx.$queryRaw<Array<{id:string;key:string;version:number;scopeType:string;scopeId:string|null;lifecycle:string;createdBy:string|null;createdAt:Date;effectiveFrom:Date;effectiveTo:Date|null;archivedAt:Date|null;xmin:string;tuple:string}>>(Prisma.sql`SELECT id,key,version,scope_type AS "scopeType",scope_id AS "scopeId",lifecycle,created_by AS "createdBy",created_at AS "createdAt",effective_from AS "effectiveFrom",effective_to AS "effectiveTo",archived_at AS "archivedAt",xmin::text,ctid::text AS tuple FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid`);
+    return rows[0]??null;
+  }
+
   async resolve(input: {
     key: string;
     scopes: readonly ConfigScopeCandidate[];
     asOf?: Date;
   }): Promise<ResolvedConfigRule | null> {
-    const asOf = input.asOf ?? new Date();
-    const scopes = normalizedScopes(input.scopes);
-
-    if (scopes.length === 0) {
-      return null;
-    }
-
+    const where=this.resolutionWhere(input);
+    if(!where)return null;
     const rules = await this.tx.configRule.findMany({
-      where: {
-        organizationId: this.organizationId,
-        key: input.key,
-        archivedAt: null,
-        lifecycle: {
-          in: ["ACTIVE", "RETIRED"]
-        },
-        effectiveFrom: {
-          lte: asOf
-        },
-        OR: [
-          {
-            effectiveTo: null
-          },
-          {
-            effectiveTo: {
-              gt: asOf
-            }
-          }
-        ],
-        AND: [
-          {
-            OR: scopes.map(scopeFilter)
-          }
-        ]
-      },
+      where,
       select: {
         id: true,
         key: true,

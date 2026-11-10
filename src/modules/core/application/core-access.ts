@@ -2,6 +2,10 @@ import type { Session } from "next-auth";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import type { AuthContext } from "@/platform/authz/authorize";
 
+export class TemplateAccessError extends Error {}
+export class TemplateConflictError extends Error {}
+export class TemplateNotFoundError extends Error {}
+
 export type CoreActorContext = {
   organizationId: string;
   actorId: string;
