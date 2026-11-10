@@ -1,6 +1,7 @@
 import { Prisma, type PropertyTemplateVersion } from "@prisma/client";
 import { authorize, type AuthContext } from "@/platform/authz/authorize";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
+import { ReservationConfigScopeRepository } from "@/platform/config/reservation-scope-repository";
 import { type TenantTransaction } from "@/platform/db/tenant";
 import { CoreRepository } from "./core-repository";
 import {
@@ -20,6 +21,10 @@ export class PropertyTemplateRepository {
     readonly tx: TenantTransaction,
     readonly organizationId: string
   ) {}
+  async authorizationProperty(propertyId: string) {
+    const [property] = await new CoreRepository(this.tx, this.organizationId).onboardingPropertyHeads([propertyId]);
+    return property ?? null;
+  }
   lock(key: string) {
     return this.tx.$executeRaw(
       Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`template:${this.organizationId}:${key}`}, 0))`
@@ -186,18 +191,18 @@ export class PropertyTemplateRepository {
         AND (name->>'en' ILIKE ${`%${input.search}%`} OR name->>'fr' ILIKE ${`%${input.search}%`} OR key ILIKE ${`%${input.search}%`})
       ORDER BY "createdAt" DESC, id DESC LIMIT 25 OFFSET ${(input.page - 1) * 24}`);
   }
-  async projection(propertyId: string, ruleKeys: readonly string[]): Promise<TemplateValues> {
+  async projection(propertyId: string, ruleKeys: readonly string[], ownerId?: string): Promise<TemplateValues> {
     const property = await new CoreRepository(this.tx, this.organizationId).findProperty(propertyId);
     if (!property) throw new Error("Property not found");
     const rules: Record<string, unknown> = {};
     const config = new ConfigRuleRepository(this.tx, this.organizationId);
+    const asOf = new Date();
+    const scopes = await new ReservationConfigScopeRepository(this.tx, this.organizationId).scopes({ propertyId, ownerId, asOf });
     for (const key of ruleKeys) {
       const rule = await config.resolve({
         key,
-        scopes: [
-          { scopeType: "property", scopeId: propertyId },
-          { scopeType: "organization", scopeId: null }
-        ]
+        scopes,
+        asOf
       });
       if (rule) rules[key] = rule.parsedValue;
     }

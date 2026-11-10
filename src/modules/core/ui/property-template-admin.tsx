@@ -298,6 +298,7 @@ export function TemplateApplication({
   const payload = {
     action: mode,
     propertyId,
+    ...(state.ownerId ? { ownerId: state.ownerId } : {}),
     kind,
     templateVersionId: selected?.id,
     expectedRevision: state.binding?.revision ?? 0,
