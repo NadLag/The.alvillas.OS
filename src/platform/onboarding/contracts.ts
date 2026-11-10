@@ -16,9 +16,25 @@ export const onboardingInventorySettingsProjectionSchema=z.object({minimums:z.ar
 /** Original public history exposes only registered operational fields, while its envelope retains the complete rule. */
 export function projectOnboardingInventorySettings(raw:unknown){const value=inventoryMinimumsSchema.parse(raw);return onboardingInventorySettingsProjectionSchema.parse({minimums:value.minimums.map(row=>({item:row.item,quantity:row.quantity,name:row.name??null,unit:row.unit??null,category:row.category??null,expected_per_stay:row.expected_per_stay??null}))});}
 import {ownerInputSchema,propertyInputSchema,propertyOperatingProfileInputSchema,operatingCadenceSchema,managementAgreementDraftTermsSchema,managementAgreementInputSchema,bookingChannelInputSchema,bookingChannelSyncModeSchema,bookingChannelStatusSchema} from "@/modules/core/domain/owner-property";
-import {payoutScheduleConfigSchema,approvalThresholdsConfigSchema,commissionBasisSchema,commissionAccrualEventSchema,expenseTreatmentSchema,payoutCadenceSchema,approvalStepSchema} from "@/platform/config/rule-registry";
+import {payoutScheduleConfigSchema,approvalThresholdsConfigSchema,commissionBasisSchema,commissionAccrualEventSchema,expenseTreatmentSchema,payoutCadenceSchema,approvalStepSchema,servicePricingSchema} from "@/platform/config/rule-registry";
+import {Money} from "@/platform/money/money";
+import {serviceCatalogMaximumItems,serviceCatalogRuleKey} from "@/platform/config/service-catalog-policy";
 import {teamAssignmentDraftSchema,teamAssignmentSchema} from "@/modules/identity/domain/team";
 export {propertyStatusSchema as onboardingPropertyStatusSchema} from "@/modules/core/domain/owner-property";
+export {serviceCatalogMaximumItems as onboardingServicesMaximumItems,serviceCatalogRuleKey as onboardingServicesRuleKey} from "@/platform/config/service-catalog-policy";
+export const onboardingServicesCanonicalValueSchema=servicePricingSchema;
+const serviceEntry=servicePricingSchema.shape.services.element;
+/** Configuration choices are explicit. A quote may retain a known currency without inventing an amount. */
+export const onboardingServiceInputSchema=serviceEntry.extend({name:localizedTextSchema.strict(),description:localizedTextSchema.strict().nullable(),available:z.boolean(),amount:serviceEntry.shape.amount.unwrap().nullable(),currency:serviceEntry.shape.currency.unwrap().nullable()}).strict().superRefine((value,context)=>{
+ if(value.pricing_model!=="CUSTOM"&&(value.amount===null||value.currency===null)||value.amount!==null&&value.currency===null)context.addIssue({code:"custom",message:"native_onboarding_service_money_required"});
+});
+export const onboardingServicesSettingsSchema=z.object({services:z.array(onboardingServiceInputSchema).max(serviceCatalogMaximumItems).refine(rows=>new Set(rows.map(row=>row.key)).size===rows.length)}).strict();
+export function canonicalOnboardingServicesSettings(raw:unknown){const value=onboardingServicesSettingsSchema.parse(raw);return servicePricingSchema.parse({services:value.services.map(({amount,currency,description,...row})=>({...row,...description===null?{}:{description},...amount===null?{}:Money.of(amount,currency!).toJSON(),...amount===null&&currency!==null?{currency}:{}}))});}
+const serviceProjectionEntry=z.object({key:serviceEntry.shape.key,name:localizedTextSchema.strict().nullable(),description:localizedTextSchema.strict().nullable(),available:z.boolean().nullable(),pricing_model:serviceEntry.shape.pricing_model,amount:serviceEntry.shape.amount.unwrap().nullable(),currency:serviceEntry.shape.currency.unwrap().nullable()}).strict();
+export const onboardingServicesSettingsProjectionSchema=z.object({services:z.array(serviceProjectionEntry).max(serviceCatalogMaximumItems).refine(rows=>new Set(rows.map(row=>row.key)).size===rows.length)}).strict();
+/** Public history includes registered catalog fields only; complete original values stay in their encrypted envelope. */
+export function projectOnboardingServicesSettings(raw:unknown){const value=servicePricingSchema.parse(raw);return onboardingServicesSettingsProjectionSchema.parse({services:value.services.map(row=>({key:row.key,name:row.name??null,description:row.description??null,available:row.available??null,pricing_model:row.pricing_model,amount:row.amount??null,currency:row.currency??null}))});}
+export const onboardingServicesTemplateValuesSchema=z.object({rules:z.object({[serviceCatalogRuleKey]:servicePricingSchema}).strict()}).strict();
 export {managementAgreementRuleKeys as onboardingManagementAgreementRuleKeys} from "@/modules/core/domain/owner-property";
 export {maskedBookingChannelEndpoint as maskedNativeOnboardingChannelEndpoint} from "@/modules/core/domain/owner-property";
 export const onboardingOperatingCadences=operatingCadenceSchema.options;

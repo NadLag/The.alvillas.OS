@@ -34,6 +34,7 @@ import { reservationSyncPolicyKey, reservationSyncPolicySchema } from "@/modules
 import { fieldDevicePolicyKey, fieldDevicePolicySchema } from "./field-device-policy";
 import { fieldUploadLifecycleKey, fieldUploadLifecycleSchema } from "./field-upload-lifecycle-policy";
 import { configSlugSchema } from "./identifiers";
+import {serviceCatalogMaximumItems,servicePricingModelSchema} from "./service-catalog-policy";
 import { inventoryMinimumsSchema } from "./inventory-policy";
 import { accountingPeriodPolicyKey, accountingPeriodPolicySchema } from "@/modules/finance/domain/accounting-period";
 import { employeeMonthlyEarningsPolicyKey,employeeMonthlyEarningsPolicySchema } from "@/modules/finance/domain/employee-monthly-earnings";
@@ -320,12 +321,12 @@ export const servicePricingSchema = z
           name: localizedTextSchema.optional(),
           description: localizedTextSchema.optional(),
           available: z.boolean().optional(),
-          pricing_model: z.enum(["FIXED", "PER_GUEST", "PER_DAY", "CUSTOM"]),
+          pricing_model: servicePricingModelSchema,
           amount: moneyAmountSchema.optional(),
           currency: currencySchema.optional()
         })
         .passthrough()
-    ).max(200).refine(v => new Set(v.map(i => i.key)).size === v.length, "Service keys must be unique")
+    ).max(serviceCatalogMaximumItems).refine(v => new Set(v.map(i => i.key)).size === v.length, "Service keys must be unique")
   })
   .passthrough();
 
