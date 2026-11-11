@@ -8,7 +8,7 @@ import { present, maskedValue, type FieldPolicy } from "@/platform/authz/present
 import { authorizeUnconditionalSource, authorizeOrganizationSource } from "@/platform/authz/organization-authority";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
-import { writePropertyConfiguration } from "@/platform/config/property-configuration";
+import { writePropertyConfiguration,PropertyConfigurationAuthorizationError } from "@/platform/config/property-configuration";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import {
@@ -449,11 +449,11 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
     }
     for (const [key, value] of Object.entries(after.rules ?? {})) {
       if (equalSetting(value, before.rules?.[key])) continue;
-      await writePropertyConfiguration(
+      try{await writePropertyConfiguration(
         ctx,
         { propertyId: input.propertyId, ownerId:input.ownerId,key, value, reason: input.reason },
         { tx, ...audit }
-      );
+      );}catch(error){if(error instanceof PropertyConfigurationAuthorizationError)throw new TemplateAccessError();throw error;}
     }
     const snapshot: Record<string, unknown> = {},
       overrides: SettingMap = {};
