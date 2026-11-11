@@ -106,6 +106,7 @@ export const templateChangeSchema = z.discriminatedUnion("action", [
     action: z.literal("APPLY"),
     templateVersionId: z.uuid(),
     propertyId: z.uuid(),
+    ownerId: z.uuid().optional(),
     expectedRevision: z.number().int().nonnegative(),
     operationId: z.uuid(),
     reason: z.string().trim().min(6).max(500)
@@ -117,6 +118,7 @@ export const templateChangeSchema = z.discriminatedUnion("action", [
       .record(z.string().min(1).max(600), z.unknown())
       .refine((v) => Object.keys(v).length > 0 && Object.keys(v).length <= 500),
     propertyId: z.uuid(),
+    ownerId: z.uuid().optional(),
     expectedRevision: z.number().int().positive(),
     operationId: z.uuid(),
     reason: z.string().trim().min(6).max(500)
@@ -126,6 +128,7 @@ export const templateChangeSchema = z.discriminatedUnion("action", [
     kind: templateKindSchema,
     paths: z.array(z.string().min(1).max(600)).min(1).max(500),
     propertyId: z.uuid(),
+    ownerId: z.uuid().optional(),
     expectedRevision: z.number().int().positive(),
     operationId: z.uuid(),
     reason: z.string().trim().min(6).max(500)
