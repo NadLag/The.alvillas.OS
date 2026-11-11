@@ -1,0 +1,9 @@
+# Durable onboarding activation
+
+F-ONB-04 accepts a reviewed activation intent before running background work. The existing native Review remains the current tenth revision while work is pending or blocked. The eleventh native ACTIVATE revision records the successful operational transition, with the matching activation run, canonical lifecycle audit and outbox event in the same transaction. A request receipt cannot claim operational completion.
+
+The approved `onboarding.wizard` rule explicitly enables background mode, configures retries and orders all five required effects: workflows, documents, email, tasks and owner notification. Documents precede their email; workflow creation precedes its tasks; notification follows email and tasks. Missing policy or dependent capability blocks execution. No seed configuration, empty adapter or accepted queue request substitutes for the relevant actual effect evidence.
+
+Reuse the existing outbox dispatcher and Inngest reference-only transport. A durable run captures its creator, original authorization cap, Review identity, approved policy and complete current-source fingerprint before external work. Every effect restores held authority, checks current stored authority and source identities, uses a stable operation identity and retains append-only outcome evidence. Lost acknowledgements recover the original intent and effects. Exhaustion preserves the original request for authorized recovery.
+
+Canonical Core lifecycle rules and fresh complete-source validation remain required for the final transition. Owner-package generation, bilingual delivery and go-live evidence use F-ONB-05 through F-ONB-07 and the existing document, notification and provider interfaces. Provider restrictions remain enforced. Financial rows and balances are outside activation writes. Production migrations and promotion require the owner's separate authorization.
