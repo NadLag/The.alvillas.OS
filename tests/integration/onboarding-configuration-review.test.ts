@@ -1,4 +1,4 @@
-import {randomBytes,randomUUID} from "node:crypto";
+import {randomBytes} from "node:crypto";
 import {PrismaClient} from "@prisma/client";
 import {afterAll,afterEach,beforeAll,describe,expect,it,vi} from "vitest";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
@@ -7,21 +7,18 @@ import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {OnboardingRepository} from "@/modules/onboarding/infrastructure/onboarding-repository";
 import * as ownerSource from "@/platform/onboarding/owner-source";
 import * as audit from "@/platform/audit/audit-writer";
-import {reviewOnboardingWorkflowsStep,admitOnboardingWorkflowsStep,reviewOnboardingConfiguration,readOnboardingWorkflowsSession} from "@/modules/onboarding/application/onboarding-service";
+import {reviewOnboardingConfiguration,readOnboardingWorkflowsSession} from "@/modules/onboarding/application/onboarding-service";
 import {OnboardingAccessError,OnboardingConflictError,OnboardingConfigurationError} from "@/modules/onboarding/domain/onboarding-wizard";
-import {onboardingPolicyKey,onboardingPolicySchema} from "@/modules/onboarding/domain/onboarding-policy";
-import {nativeOnboardingWorkflowsFixture,nativeWorkflowsTemplate} from "./support/onboarding-workflows-fixture";
+import {onboardingPolicyKey} from "@/modules/onboarding/domain/onboarding-policy";
+import {nativeOnboardingConfigurationFixture} from "./support/onboarding-configuration-fixture";
 import {nativeLeadFinancialGuard} from "./support/lead-fixture";
 import {provisionIntegrationRole} from "./support/database-role";
 
 let admin:PrismaClient,db:PrismaClient,financial:Awaited<ReturnType<typeof nativeLeadFinancialGuard>>;
 const organizations:string[]=[],env:NodeJS.ProcessEnv={NODE_ENV:"test",ENCRYPTION_KEYS:"native-whole-review:"+randomBytes(32).toString("base64")};
-beforeAll(async()=>{const value=process.env.TEST_DATABASE_URL,url=value?new URL(value):null;if(!url||!["localhost","127.0.0.1"].includes(url.hostname)||!(url.pathname.startsWith("/alvillas_automation_crm_proposal_onboarding230_")||process.env.GITHUB_ACTIONS==="true"&&url.pathname==="/alvillas_os"))throw Error("Owned migrated230 whole-configuration Review database required");admin=new PrismaClient({datasourceUrl:value});await provisionIntegrationRole(admin,"alvillas_ops_tests");url.username=url.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:url.toString()});financial=await nativeLeadFinancialGuard(admin,db);});
+beforeAll(async()=>{const value=process.env.TEST_DATABASE_URL,url=value?new URL(value):null;if(!url||!["localhost","127.0.0.1"].includes(url.hostname)||!((url.pathname.startsWith("/alvillas_automation_crm_proposal_onboarding230_")||url.pathname.startsWith("/alvillas_automation_crm_proposal_onboarding231_"))||process.env.GITHUB_ACTIONS==="true"&&url.pathname==="/alvillas_os"))throw Error("Owned migrated230 whole-configuration Review database required");admin=new PrismaClient({datasourceUrl:value});await provisionIntegrationRole(admin,"alvillas_ops_tests");url.username=url.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:url.toString()});financial=await nativeLeadFinancialGuard(admin,db);});
 afterEach(()=>vi.restoreAllMocks());afterAll(async()=>{try{if(financial)await financial.assertPreserved(organizations);}finally{await db?.$disconnect();await admin?.$disconnect();}});
-async function fixture(){
- const f=await nativeOnboardingWorkflowsFixture(admin,db,env);organizations.push(f.organizationId);const template=await nativeWorkflowsTemplate(f,db),draft={sessionId:f.services.sessionId,previousRevisionId:f.services.id,step:"WORKFLOWS"as const,target:{mode:"TEMPLATE"as const,propertyId:f.services.propertyId!,templateVersionId:template.id,expectedRevision:0,overrides:{}}},review=await reviewOnboardingWorkflowsStep(f.ctx,draft,f.deps),workflows=await admitOnboardingWorkflowsStep(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Actual ninth canonical predecessor for whole configuration Review"},f.deps),policy=onboardingPolicySchema.parse({...f.policy,review:{modes:["VALIDATE"],required_owner_fields:["displayName"],required_property_fields:["name"]}});
- await withTenant(db,f.organizationId,tx=>new ConfigRuleRepository(tx,f.organizationId).createVersion({key:onboardingPolicyKey,scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),value:policy,reason:"Explicit approved whole configuration completeness requirements"}));return{...f,workflows,policy,configurationDraft:{sessionId:workflows.sessionId,previousRevisionId:workflows.id,step:"REVIEW"as const,target:{mode:"VALIDATE"as const,propertyId:workflows.propertyId!}}};
-}
+async function fixture(){const f=await nativeOnboardingConfigurationFixture(admin,db,env);organizations.push(f.organizationId);return f;}
 type Fixture=Awaited<ReturnType<typeof fixture>>;
 const read=(f:Fixture)=>reviewOnboardingConfiguration(f.ctx,f.configurationDraft,f.deps);
 const withdraw=(f:Fixture,key:string)=>withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants[key]},data:{archivedAt:new Date()}}));

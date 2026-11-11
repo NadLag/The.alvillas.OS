@@ -424,7 +424,7 @@ export function schemaForConfigKey(key: string): z.ZodType | null {
     return featureFlagConfigSchema;
   }
 
-  return configRuleSchemas[key as keyof typeof configRuleSchemas] ?? null;
+  return Object.hasOwn(configRuleSchemas,key)?configRuleSchemas[key as keyof typeof configRuleSchemas]:null;
 }
 
 export function parseConfigRuleValue(key: string, value: unknown): unknown {
