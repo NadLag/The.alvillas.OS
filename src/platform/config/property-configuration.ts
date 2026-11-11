@@ -1,4 +1,5 @@
 import { createConfigRuleVersion } from "@/modules/config/application/config-service";
+export {ConfigAuthorizationError as PropertyConfigurationAuthorizationError} from "@/modules/config/application/config-service";
 import type { AuthContext } from "@/platform/authz/authorize";
 import type { TenantTransaction, TenantTransactionRunner } from "@/platform/db/tenant";
 
