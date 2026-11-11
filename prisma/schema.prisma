@@ -601,6 +601,8 @@ model Organization {
   employeeEarningPercentageWitnesses EmployeeEarningRequestPercentageWitness[]
   propertyOnboardingSessions PropertyOnboardingSession[]
   propertyOnboardingRevisions PropertyOnboardingRevision[]
+  propertyOnboardingActivations PropertyOnboardingActivationRequest[]
+  propertyOnboardingActivationEvents PropertyOnboardingActivationEvent[]
 }
 
 model Region {
@@ -941,6 +943,8 @@ model UserAccount {
   employeeEarningRunRequests EmployeeEarningRunRequest[] @relation("EmployeeEarningRunRequester")
   startedPropertyOnboardingSessions PropertyOnboardingSession[]
   authoredPropertyOnboardingRevisions PropertyOnboardingRevision[]
+  requestedPropertyActivations PropertyOnboardingActivationRequest[]
+  propertyActivationEvents PropertyOnboardingActivationEvent[]
 }
 
 model AuthCredential {
@@ -1192,6 +1196,7 @@ model Owner {
   @@map("owner")
   employeeEarningPercentageWitnesses EmployeeEarningRequestPercentageWitness[]
   onboardingRevisions PropertyOnboardingRevision[]
+  onboardingActivations PropertyOnboardingActivationRequest[]
 }
 
 model OwnerRepresentative {
@@ -1340,6 +1345,7 @@ model Property {
   employeeEarningPercentageWitnesses EmployeeEarningRequestPercentageWitness[]
   employeePercentageRequestSources EmployeeEarningRequestWork[]
   onboardingRevisions PropertyOnboardingRevision[]
+  onboardingActivations PropertyOnboardingActivationRequest[]
 }
 
 model PropertyTemplateVersion {
@@ -2405,6 +2411,7 @@ model ConfigRule {
   employeeEarningPercentageRates EmployeeEarningRequestPercentageWitness[] @relation("EmployeeEarningPercentageRate")
   employeeEarningPercentagePolicies EmployeeEarningRequestPercentageWitness[] @relation("EmployeeEarningPercentagePolicy")
   onboardingRevisions PropertyOnboardingRevision[]
+  onboardingActivations PropertyOnboardingActivationRequest[]
 }
 
 model ReservationConfigSnapshot {
@@ -5556,6 +5563,7 @@ model PropertyOnboardingSession {
  organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_session_org_fk")
  creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_session_creator_fk")
  revisions PropertyOnboardingRevision[]
+ activations PropertyOnboardingActivationRequest[]
  @@unique([organizationId,id],map:"property_onboarding_session_org_id_key")
  @@index([organizationId,createdAt,id],map:"property_onboarding_session_org_created_idx")
  @@map("property_onboarding_session")
@@ -5590,6 +5598,7 @@ model PropertyOnboardingRevision {
  session PropertyOnboardingSession @relation(fields:[organizationId,sessionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_session_fk")
  previous PropertyOnboardingRevision? @relation("PropertyOnboardingPrevious",fields:[organizationId,sessionId,previousId],references:[organizationId,sessionId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_previous_fk")
  next PropertyOnboardingRevision[] @relation("PropertyOnboardingPrevious")
+ activationRequests PropertyOnboardingActivationRequest[] @relation("PropertyOnboardingActivationReview")
  owner Owner @relation(fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_owner_fk")
  property Property? @relation(fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_property_fk")
  creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"property_onboarding_revision_creator_fk")
@@ -5601,4 +5610,70 @@ model PropertyOnboardingRevision {
  @@index([organizationId,sessionId,number(sort:Desc)],map:"property_onboarding_revision_org_history_idx")
  @@index([organizationId,ownerId,createdAt,id],map:"property_onboarding_revision_org_owner_idx")
  @@map("property_onboarding_revision")
+}
+
+model PropertyOnboardingActivationRequest {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ sessionId String @map("session_id") @db.Uuid
+ reviewRevisionId String @map("review_revision_id") @db.Uuid
+ ownerId String @map("owner_id") @db.Uuid
+ propertyId String @map("property_id") @db.Uuid
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ reviewFingerprint String @map("review_fingerprint")
+ sourceFingerprint String @map("source_fingerprint")
+ sourceSnapshot Json @map("source_snapshot")
+ encryptedPayload Bytes @map("encrypted_payload")
+ payloadSha256 String @map("payload_sha256")
+ payloadSchemaVersion Int @default(1) @map("payload_schema_version")
+ policyId String @map("policy_id") @db.Uuid
+ policyVersion Int @map("policy_version")
+ policySnapshot Json @map("policy_snapshot")
+ authorizationCap Json @map("authorization_cap")
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_org_fk")
+ session PropertyOnboardingSession @relation(fields:[organizationId,sessionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_session_fk")
+ review PropertyOnboardingRevision @relation("PropertyOnboardingActivationReview",fields:[organizationId,sessionId,reviewRevisionId],references:[organizationId,sessionId,id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_review_fk")
+ owner Owner @relation(fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_owner_fk")
+ property Property @relation(fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_property_fk")
+ creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_creator_fk")
+ policy ConfigRule @relation(fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_policy_fk")
+ events PropertyOnboardingActivationEvent[]
+ @@unique([organizationId,id],map:"onboarding_activation_org_id_key")
+ @@unique([organizationId,commandKey],map:"onboarding_activation_org_nonce_key")
+ @@unique([organizationId,reviewRevisionId],map:"onboarding_activation_org_review_key")
+ @@index([organizationId,sessionId,createdAt,id],map:"onboarding_activation_session_history_idx")
+ @@index([organizationId,createdBy,createdAt,id],map:"onboarding_activation_creator_history_idx")
+ @@map("property_onboarding_activation_request")
+}
+
+model PropertyOnboardingActivationEvent {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ activationId String @map("activation_id") @db.Uuid
+ previousId String? @map("previous_id") @db.Uuid
+ sequence Int
+ type String
+ effectKind String? @map("effect_kind")
+ attempt Int?
+ result Json?
+ resultFingerprint String? @map("result_fingerprint")
+ failureCode String? @map("failure_code")
+ nextAttemptAt DateTime? @map("next_attempt_at") @db.Timestamptz(6)
+ actorId String? @map("actor_id") @db.Uuid
+ occurredAt DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_event_org_fk")
+ activation PropertyOnboardingActivationRequest @relation(fields:[organizationId,activationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_event_request_fk")
+ previous PropertyOnboardingActivationEvent? @relation("PropertyOnboardingActivationPrevious",fields:[organizationId,activationId,previousId],references:[organizationId,activationId,id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_event_previous_fk")
+ next PropertyOnboardingActivationEvent[] @relation("PropertyOnboardingActivationPrevious")
+ actor UserAccount? @relation(fields:[organizationId,actorId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"onboarding_activation_event_actor_fk")
+ @@unique([organizationId,id],map:"onboarding_activation_event_org_id_key")
+ @@unique([organizationId,activationId,id],map:"onboarding_activation_event_org_run_id_key")
+ @@unique([organizationId,activationId,sequence],map:"onboarding_activation_event_sequence_key")
+ @@index([organizationId,activationId,sequence(sort:Desc)],map:"onboarding_activation_event_history_idx")
+ @@map("property_onboarding_activation_event")
 }
