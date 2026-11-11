@@ -9,7 +9,7 @@ import {OnboardingPropertyRecord} from "./onboarding-property-record";
 
 type Settings=NonNullable<OnboardingServicesSnapshot["settings"]>;
 type Review=z.infer<typeof onboardingServicesReviewSchema>;
-function ServicesSettings({settings}:{settings:Settings|null}){
+export function ServicesSettings({settings}:{settings:Settings|null}){
  const t=useTranslations("OnboardingWizard"),locale=safeLocale(useLocale());
  if(!settings)return <p>{t("services.noConfiguration")}</p>;
  if(!settings.services.length)return <p>{t("services.noItems")}</p>;

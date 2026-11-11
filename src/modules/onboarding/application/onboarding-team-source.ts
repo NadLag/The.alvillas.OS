@@ -9,6 +9,9 @@ import {nativeOnboardingTeamAssignmentHeads,nativeOnboardingTeamPersonHeads,nati
 import {onboardingTeamTargetSchema,onboardingTeamSnapshotSchema,onboardingTeamSourcePinsSchema,type OnboardingTeamSourcePins} from "../domain/onboarding-team";
 import {OnboardingAccessError,OnboardingConflictError} from "../domain/onboarding-wizard";
 import {OnboardingRepository} from "../infrastructure/onboarding-repository";
+import {onboardingConfigurationTeamSchema} from "../domain/onboarding-configuration";
+import {onboardingTeamMaximumAssignments} from "../domain/onboarding-policy";
+import {nativeOnboardingTeamAssignmentPage} from "@/platform/onboarding/team-source";
 import type {OnboardingTeamChoicesInput} from "../domain/onboarding-team-choices";
 
 /** A fresh native snapshot supplies both held/stored source checks; it never supplies private labels or values. */
@@ -32,18 +35,18 @@ const roleSourceCheck=(organizationId:string,id:string):CurrentAuthorityCheck=>(
 const accountSourceCheck=(organizationId:string,account:{id:string;personId:string|null}):CurrentAuthorityCheck=>({action:"view",resource:{type:"identity",organizationId,id:account.id,assignedPersonId:account.personId}});
 
 /** One metadata-only boundary supplies current source reads and original-record history authority. */
-async function teamSourceMetadata(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,raw:unknown,recorded?:OnboardingTeamSourcePins){
- const target=onboardingTeamTargetSchema.parse(raw);if(target.propertyId!==propertyId)throw new OnboardingAccessError();const context=await onboardingTeamSourceContext(actor,tx,propertyId,Boolean(recorded)),{organizationId,now,stored,actualActor,property}=context;
- const assignments=target.mode==="LINK"?await nativeOnboardingTeamAssignmentHeads(tx,organizationId,target.assignmentIds,Boolean(recorded)):[];
+export async function onboardingTeamSourceMetadata(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,raw:unknown,recorded?:OnboardingTeamSourcePins,currentReview=false){
+ const target=onboardingTeamTargetSchema.parse(raw);if(target.propertyId!==propertyId)throw new OnboardingAccessError();const context=await onboardingTeamSourceContext(actor,tx,propertyId,Boolean(recorded)||currentReview),{organizationId,now,stored,actualActor,property}=context;
+ const assignments=target.mode==="LINK"?await nativeOnboardingTeamAssignmentHeads(tx,organizationId,target.assignmentIds,Boolean(recorded)||currentReview):[];
  if(target.mode==="LINK"&&(assignments.length!==target.assignmentIds.length||assignments.some(row=>row.scopeType!=="property"||row.scopeId!==propertyId)))throw new OnboardingAccessError();
  if(recorded&&assignments.some(row=>{const original=recorded.assignments.find(pin=>pin.id===row.id);return!original||row.personId!==original.personId||row.roleId!==original.roleId||row.userAccountId!==original.userAccountId||row.scopeId!==original.scopeId;}))throw new OnboardingAccessError();
  const selected=target.mode==="LINK"?assignments:target.assignments,personIds=[...new Set(selected.map(row=>row.personId))],roleIds=[...new Set(selected.map(row=>row.roleId))],accountIds=[...new Set(selected.flatMap(row=>row.userAccountId?[row.userAccountId]:[]))];
- const people=await nativeOnboardingTeamPersonHeads(tx,organizationId,personIds,Boolean(recorded)),roles=await nativeOnboardingTeamRoleHeads(tx,organizationId,roleIds,Boolean(recorded)),accounts=await nativeOnboardingTeamAccountHeads(tx,organizationId,accountIds),scopes=await nativeOnboardingTeamPersonScopes(tx,organizationId,personIds,now);
+ const people=await nativeOnboardingTeamPersonHeads(tx,organizationId,personIds,Boolean(recorded)||currentReview),roles=await nativeOnboardingTeamRoleHeads(tx,organizationId,roleIds,Boolean(recorded)||currentReview),accounts=await nativeOnboardingTeamAccountHeads(tx,organizationId,accountIds),scopes=await nativeOnboardingTeamPersonScopes(tx,organizationId,personIds,now);
  if(people.length!==personIds.length||roles.length!==roleIds.length||accounts.length!==accountIds.length||roles.some(row=>!row.permissionsValid)||selected.some(row=>row.userAccountId!==null&&accounts.find(account=>account.id===row.userAccountId)?.personId!==row.personId))throw new OnboardingAccessError();
  const checks:CurrentAuthorityCheck[]=roles.map(row=>roleSourceCheck(organizationId,row.id));
  for(const account of accounts)checks.push(accountSourceCheck(organizationId,account));
  // Only actual memberships supply geography. An original recorded assignment may prove historical membership after archival.
- for(const personId of personIds)checks.push(personSourceCheck(actor,context,personId,scopes,recorded?assignments:[]));
+ for(const personId of personIds)checks.push(personSourceCheck(actor,context,personId,scopes,recorded||currentReview?assignments:[]));
  for(const row of assignments)checks.push({action:"view",resource:{...teamResource(organizationId,row.personId),propertyId,city:property.cityId,region:property.regionId,occurredAt:row.createdAt}});
  assertAccountAuthorization(actor,stored,now,checks,new OnboardingAccessError());
  const pins=nativeOnboardingTeamSourcePins(assignments,people,accounts,roles),sourceFingerprint=commandFingerprint({pins,scopes,property,actualActor});
@@ -51,8 +54,8 @@ async function teamSourceMetadata(actor:AccountActorContext,tx:TenantTransaction
 }
 
 /** Internal source boundary. Parent-session/Owner authority and private read audit belong to the calling native admission/read. */
-export async function readOnboardingTeamSources(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,raw:unknown){
- const before=await teamSourceMetadata(actor,tx,propertyId,raw),{target,assignments,people,roles,accounts,personIds,roleIds,accountIds,pins,sourceFingerprint}=before,organizationId=actor.organizationId,assignmentRows=await nativeOnboardingTeamAssignmentRows(tx,organizationId,assignments.map(row=>row.id)),personRows=await nativeOnboardingTeamPersonRows(tx,organizationId,personIds),roleRows=await nativeOnboardingTeamRoleRows(tx,organizationId,roleIds),accountRows=await nativeOnboardingTeamAccountRows(tx,organizationId,accountIds),after=await teamSourceMetadata(actor,tx,propertyId,raw);
+export async function readOnboardingTeamSources(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,raw:unknown,currentReview=false){
+ const before=await onboardingTeamSourceMetadata(actor,tx,propertyId,raw,undefined,currentReview),{target,assignments,people,roles,accounts,personIds,roleIds,accountIds,pins,sourceFingerprint}=before,organizationId=actor.organizationId,assignmentRows=await nativeOnboardingTeamAssignmentRows(tx,organizationId,assignments.map(row=>row.id),currentReview),personRows=await nativeOnboardingTeamPersonRows(tx,organizationId,personIds,currentReview),roleRows=await nativeOnboardingTeamRoleRows(tx,organizationId,roleIds,currentReview),accountRows=await nativeOnboardingTeamAccountRows(tx,organizationId,accountIds),after=await onboardingTeamSourceMetadata(actor,tx,propertyId,raw,undefined,currentReview);
  if(sourceFingerprint!==after.sourceFingerprint||assignmentRows.length!==assignments.length||personRows.length!==people.length||roleRows.length!==roles.length||accountRows.length!==accounts.length)throw new OnboardingConflictError();
  const privateSelection={people:personRows.map(row=>({...row,archivedAt:row.archivedAt?.toISOString()??null})),roles:roleRows.map(row=>({...row,archivedAt:row.archivedAt?.toISOString()??null})),accounts:accountRows};
  const snapshot=target.mode==="LINK"?onboardingTeamSnapshotSchema.parse({propertyId,assignments:assignmentRows.map(row=>({...row,validFrom:row.validFrom.toISOString(),validTo:row.validTo?.toISOString()??null,createdAt:row.createdAt.toISOString(),archivedAt:row.archivedAt?.toISOString()??null})),...privateSelection}):null;
@@ -61,7 +64,7 @@ export async function readOnboardingTeamSources(actor:AccountActorContext,tx:Ten
 
 /** Authorize original identities without loading replacement names, conditions, account values or role permissions. */
 export async function authorizeRecordedOnboardingTeamSources(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,raw:unknown){
- const pins=onboardingTeamSourcePinsSchema.parse(raw);if(pins.assignments.some(row=>row.scopeId!==propertyId))throw new OnboardingAccessError();const value=await teamSourceMetadata(actor,tx,propertyId,{mode:"LINK",propertyId,assignmentIds:pins.assignments.map(row=>row.id)},pins);return{fingerprint:value.sourceFingerprint};
+ const pins=onboardingTeamSourcePinsSchema.parse(raw);if(pins.assignments.some(row=>row.scopeId!==propertyId))throw new OnboardingAccessError();const value=await onboardingTeamSourceMetadata(actor,tx,propertyId,{mode:"LINK",propertyId,assignmentIds:pins.assignments.map(row=>row.id)},pins);return{fingerprint:value.sourceFingerprint};
 }
 
 /** Bound candidate metadata to one page; private values are requested separately only for these permitted identities. */
@@ -77,4 +80,13 @@ export async function onboardingTeamChoiceWitness(actor:AccountActorContext,tx:T
   return permits(()=>[roleSourceCheck(organizationId,role.id),...account?[accountSourceCheck(organizationId,account)]:[],personSourceCheck(actor,context,person.id,scopes),{action:"view",resource:{...teamResource(organizationId,person.id),propertyId:property.id,city:property.cityId,region:property.regionId,occurredAt:row.createdAt}}]);
  });
  return{permitted,assignments,people,roles,accounts,scopes,fingerprint:commandFingerprint({kind,ids,personId,assignments,people,roles,accounts,scopes,property,actualActor:context.actualActor})};
+}
+
+/** Enumerate the complete current roster; a native command batch is not a whole-Property limit. */
+export async function onboardingCurrentTeamMetadata(actor:AccountActorContext,tx:TenantTransaction,propertyId:string){
+ const context=await onboardingTeamSourceContext(actor,tx,propertyId),ids:string[]=[];let after:string|undefined;for(;;){const page=await nativeOnboardingTeamAssignmentPage(tx,actor.organizationId,propertyId,after,context.now),selected=page.slice(0,50);ids.push(...selected.map(row=>row.id));if(page.length<=50)break;after=selected.at(-1)!.id;}
+ const targets:unknown[]=[],fingerprints:string[]=[],pins:OnboardingTeamSourcePins[]=[];for(let index=0;index<ids.length;index+=onboardingTeamMaximumAssignments){const target={mode:"LINK",propertyId,assignmentIds:ids.slice(index,index+onboardingTeamMaximumAssignments)},value=await onboardingTeamSourceMetadata(actor,tx,propertyId,target,undefined,true);targets.push(target);fingerprints.push(value.sourceFingerprint);pins.push(onboardingTeamSourcePinsSchema.parse(value.pins));}return{targets,pins,fingerprint:commandFingerprint({property:context.property,actualActor:context.actualActor,ids,fingerprints})};
+}
+export async function readCurrentOnboardingTeamSources(actor:AccountActorContext,tx:TenantTransaction,propertyId:string){
+ const before=await onboardingCurrentTeamMetadata(actor,tx,propertyId),snapshots=[];for(const target of before.targets){const value=await readOnboardingTeamSources(actor,tx,propertyId,target,true);if(!value.snapshot)throw new OnboardingConflictError();snapshots.push(value.snapshot);}const after=await onboardingCurrentTeamMetadata(actor,tx,propertyId);if(before.fingerprint!==after.fingerprint)throw new OnboardingConflictError();const unique=<T extends{id:string}>(rows:T[])=>[...new Map(rows.map(row=>[row.id,row])).values()];return{snapshot:onboardingConfigurationTeamSchema.parse({propertyId,assignments:snapshots.flatMap(row=>row.assignments),people:unique(snapshots.flatMap(row=>row.people)),accounts:unique(snapshots.flatMap(row=>row.accounts)),roles:unique(snapshots.flatMap(row=>row.roles))}),fingerprint:before.fingerprint};
 }

@@ -38,7 +38,7 @@ const sourceGroups:Readonly<Record<string,readonly string[]>>={
 function financialSources(key: string): readonly string[] | undefined {
  if (Object.hasOwn(sourceGroups,key)) return sourceGroups[key];
  if (key === "finance.receivables" || key.startsWith("finance.receivable_")) return ["receivable","financial_transaction","staff_compensation"];
- if (key.startsWith("staff.compensation_")) return ["staff_compensation","employee_payable","financial_transaction"];
+ if (key==="staff.compensation"||key.startsWith("staff.compensation_")) return ["staff_compensation","employee_payable","financial_transaction"];
  // Retained definitions and future financial keys remain private until their precise sources are registered.
  if (key.startsWith("finance.")) return [...propertyFinanceFinancialSources,"bank_statement","company_expense","receivable","financial_attachment"];
  return undefined;

@@ -36,6 +36,8 @@ export async function createNativeOnboardingProperty(actor:AccountActorContext,t
 export async function nativeOnboardingOperatingProfile(tx:TenantTransaction,organizationId:string,propertyId:string){
  const row=await new CoreRepository(tx,organizationId).onboardingPropertyOperatingProfile(propertyId);return row?onboardingOperatingProfileSnapshotSchema.parse(row):null;
 }
+/** Selection pointers and a tuple witness precede any dependent configuration values. */
+export const nativeOnboardingOperatingProfileHead=(tx:TenantTransaction,organizationId:string,propertyId:string)=>new CoreRepository(tx,organizationId).onboardingOperatingProfileHead(propertyId);
 export async function updateNativeOnboardingOperatingProfile(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,raw:unknown,requestId:string){
  const input=onboardingOperatingProfileInputSchema.parse(raw),{updatePropertyOperatingProfile}=await import("@/modules/core/application/core-service");
  await updatePropertyOperatingProfile(actor,propertyId,input,{db:{$transaction:work=>work(tx)},requestId});

@@ -1,0 +1,14 @@
+import {randomUUID} from "node:crypto";
+import type {PrismaClient} from "@prisma/client";
+import {withTenant} from "@/platform/db/tenant";
+import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
+import {writePropertyConfiguration} from "@/platform/config/property-configuration";
+import {reviewOnboardingWorkflowsStep,admitOnboardingWorkflowsStep} from "@/modules/onboarding/application/onboarding-service";
+import {onboardingPolicyKey,onboardingPolicySchema} from "@/modules/onboarding/domain/onboarding-policy";
+import {nativeOnboardingWorkflowsFixture,nativeWorkflowsTemplate} from "./onboarding-workflows-fixture";
+
+/** Nine genuine admissions supply current native facts. No configuration or progress is manufactured by a seed. */
+export async function nativeOnboardingConfigurationFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv){
+ const f=await nativeOnboardingWorkflowsFixture(admin,db,env),template=await nativeWorkflowsTemplate(f,db),draft={sessionId:f.services.sessionId,previousRevisionId:f.services.id,step:"WORKFLOWS"as const,target:{mode:"TEMPLATE"as const,propertyId:f.services.propertyId!,templateVersionId:template.id,expectedRevision:0,overrides:{}}},review=await reviewOnboardingWorkflowsStep(f.ctx,draft,f.deps),workflows=await admitOnboardingWorkflowsStep(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Actual ninth canonical predecessor for whole configuration Review"},f.deps),policy=onboardingPolicySchema.parse({...f.policy,review:{modes:["VALIDATE"],required_owner_fields:["displayName"],required_property_fields:["name"]}});
+ await withTenant(db,f.organizationId,async tx=>{await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:onboardingPolicyKey,scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),value:policy,reason:"Explicit approved whole configuration completeness requirements"});await writePropertyConfiguration({...f.ctx,personId:f.person.id},{propertyId:workflows.propertyId!,ownerId:workflows.ownerId,key:"ops.mid_stay_threshold",value:{nights:4,task_template_key:"arrival"},reason:"Explicit actual dependency of the selected standard workflow"},{tx,requestId:randomUUID(),ipAddress:null});});return{...f,workflows,policy,configurationDraft:{sessionId:workflows.sessionId,previousRevisionId:workflows.id,step:"REVIEW"as const,target:{mode:"VALIDATE"as const,propertyId:workflows.propertyId!}}};
+}

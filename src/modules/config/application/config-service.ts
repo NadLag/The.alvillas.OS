@@ -1,3 +1,4 @@
+import {configRuleKeyInputSchema} from "@/platform/config/key-contract";
 import { headers } from "next/headers";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
@@ -69,7 +70,7 @@ export const configEffectiveDateSchema = z.preprocess(
 );
 
 export const configRuleInputSchema = z.object({
-  key: z.string().trim().min(1).max(160),
+  key: configRuleKeyInputSchema,
   customFeatureFlagKey: z.string().trim().max(120).optional(),
   scopeType: z.enum(["organization", "property"]),
   scopeId: z.string().trim().optional(),

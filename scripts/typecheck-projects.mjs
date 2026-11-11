@@ -57,7 +57,9 @@ export function prepareTypecheckProjects(projectRoot = process.cwd()) {
 export async function runTypecheckProjects(plan, projects = plan.projects, onResult) {
   const megabyte = 1024 * 1024, reserve = 1024 * megabyte, free = () => process.availableMemory?.() ?? freemem();
   const isNative = project => project.name.startsWith("postgres-");
-  const heap = project => isNative(project) ? 6144 : project.name === "application" ? 3072 : 2048;
+  // Browser acceptance imports the same complete application contracts. Keep its
+  // roots intact and give that group the application's existing heap allowance.
+  const heap = project => isNative(project) ? 6144 : ["application", "browser-and-tools"].includes(project.name) ? 3072 : 2048;
   const run = project => new Promise(resolve => {
     const started = Date.now(); let settled = false;
     const finished = exitCode => { if(settled)return;settled=true;onResult?.({name:project.name,exitCode,roots:project.roots.length,elapsedMs:Date.now()-started});resolve(exitCode); };
