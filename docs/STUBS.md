@@ -57,3 +57,6 @@ F-CRM-02 native selection implementation and local acceptance are qualified (ADR
 
 
 F-ONB-02 services qualification dbccdd9e: the recorded CI failures have targeted local corrections and original compiler/build coverage. The feature remains IN-PROGRESS while new exact-head CI and provider-restricted hosted acceptance remain pending. All355 approved IDs remain required.
+
+
+F-ONB-02 inventory qualification 9ddb3602: the recorded CI failures have targeted local corrections and original compiler/build coverage. The feature remains IN-PROGRESS while new exact-head CI and provider-restricted hosted acceptance remain pending. All355 approved IDs remain required.
