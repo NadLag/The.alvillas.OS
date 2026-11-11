@@ -15,6 +15,7 @@ export const nativeOnboardingWorkflowsTemplateHeads=(tx:TenantTransaction,organi
 export const nativeOnboardingWorkflowsTemplateRows=async(tx:TenantTransaction,organizationId:string,ids:readonly string[])=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplateRows(ids,"WORKFLOW");
 export const nativeOnboardingWorkflowsBindingHead=(tx:TenantTransaction,organizationId:string,propertyId:string)=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryBindingHead(propertyId,"WORKFLOW");
 export const nativeOnboardingWorkflowsTemplatePage=(tx:TenantTransaction,organizationId:string,propertyId:string,query:string,after:string|undefined,asOf:Date)=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplatePage(propertyId,query,after,asOf,"WORKFLOW");
+export const nativeOnboardingWorkflowsCommandRows=(tx:TenantTransaction,organizationId:string,propertyId:string,ids:readonly string[])=>new PropertyTemplateRepository(tx,organizationId).nativeWorkflowCommandRows(propertyId,ids);
 
 /** Canonical inheritance runs first; explicit property changes then use the same keyed settings paths. */
 export function previewNativeOnboardingWorkflowsTemplate(current:TemplateValues,selected:unknown,previousTemplate:unknown,rawOverrides:unknown){
@@ -34,10 +35,11 @@ export async function configureNativeOnboardingWorkflows(actor:AccountActorConte
   assertAccountAuthorization(actor,current,now,[{action:"view",resource:{...scope,type:"property",id:propertyId}},{action:"edit",resource:{...scope,type:"property",id:propertyId}},...onboardingWorkflowsRuleKeys.map(key=>({action:"configure"as const,resource:{...scope,type:"config_rule",id:key,status:"ACTIVE",occurredAt:now}})),...onboardingWorkflowsSourceRuleKeys.flatMap(key=>(["view","export"]as const).map(action=>({action,resource:{...scope,type:"config_rule",id:key,status:"ACTIVE",occurredAt:now}})))],new TemplateAccessError());
   const[template]=await nativeOnboardingWorkflowsTemplateHeads(tx,actor.organizationId,[target.templateVersionId]);if(!template||template.status!=="ACTIVE"||template.latestStatus!=="ACTIVE"||template.propertyId!==null&&template.propertyId!==propertyId)throw new TemplateAccessError();assertAccountAuthorization(actor,current,now,(["view","export"]as const).map(action=>({action,resource:{...scope,type:"config_rule",id:template.id,status:template.status,occurredAt:template.createdAt}})),new TemplateAccessError());return{...actor,personId:account.personId};
  };
- const ctx=await check();let applied;
+ const ctx=await check(),commands:string[]=[];let applied;
  try{
   const{changePropertyTemplate}=await import("@/modules/core/application/property-template-service");applied=await changePropertyTemplate(ctx,{action:"APPLY",propertyId,ownerId,templateVersionId:target.templateVersionId,expectedRevision:target.expectedRevision,operationId,reason},{db:{$transaction:work=>work(tx)},requestId});
-  if(Object.keys(target.overrides).length)applied=await changePropertyTemplate(ctx,{action:"OVERRIDE",kind:"WORKFLOW",propertyId,ownerId,values:target.overrides,expectedRevision:target.expectedRevision+1,operationId:randomUUID(),reason},{db:{$transaction:work=>work(tx)},requestId});
+  commands.push(applied.id);
+  if(Object.keys(target.overrides).length){applied=await changePropertyTemplate(ctx,{action:"OVERRIDE",kind:"WORKFLOW",propertyId,ownerId,values:target.overrides,expectedRevision:target.expectedRevision+1,operationId:randomUUID(),reason},{db:{$transaction:work=>work(tx)},requestId});commands.push(applied.id);}
  }catch(error){const{ConfigAuthorizationError}=await import("@/modules/config/application/config-service");if(error instanceof ConfigAuthorizationError)throw new TemplateAccessError();throw error;}
- const final=await check();if(final.personId!==ctx.personId)throw new TemplateAccessError();return applied;
+ const final=await check();if(final.personId!==ctx.personId)throw new TemplateAccessError();return{...applied,nativeCommands:await nativeOnboardingWorkflowsCommandRows(tx,actor.organizationId,propertyId,commands)};
 }
