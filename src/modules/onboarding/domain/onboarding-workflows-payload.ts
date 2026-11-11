@@ -3,7 +3,7 @@ import {isDeepStrictEqual} from "node:util";
 import {encryptBytes,decryptBytes} from "@/platform/auth/secret-encryption";
 import {requirePrivatePayloadKeys} from "@/platform/auth/private-payload-keys";
 import {onboardingMaximumWorkflowRecordBytes} from "@/platform/onboarding/limits";
-import {onboardingWorkflowsCanonicalValuesSchema,onboardingWorkflowsTemplateValuesSchema,projectOnboardingWorkflowsSettings} from "@/platform/onboarding/workflows-contracts";
+import {onboardingWorkflowsCanonicalValuesSchema,canonicalOnboardingWorkflowsRuleValues,onboardingWorkflowsTemplateValuesSchema,projectOnboardingWorkflowsSettings} from "@/platform/onboarding/workflows-contracts";
 import {previewNativeOnboardingWorkflowsTemplate} from "@/platform/onboarding/workflows-source";
 import {onboardingPayloadBindingSchema} from "./onboarding-payload";
 import {onboardingOwnerSchema,OnboardingConfigurationError} from "./onboarding-wizard";
@@ -28,7 +28,7 @@ function bound(raw:unknown,binding:OnboardingWorkflowsPayloadBinding){
  for(const row of value.templates)if(!onboardingWorkflowsTemplateValuesSchema.safeParse(row.values).success)throw new OnboardingConfigurationError();
  const previousTemplateId=previousWorkflows.template?.id,selected=value.templates.find(row=>row.id===command.target.templateVersionId),previousTemplate=previousTemplateId?value.templates.find(row=>row.id===previousTemplateId):null;if(!selected||previousWorkflows.template&&!previousTemplate)throw new OnboardingConfigurationError();
  const previousValues=onboardingWorkflowsCanonicalValuesSchema.parse(value.previous.values),beforeRaw=z.record(z.string(),z.unknown()).parse(value.previous.values),afterRaw=z.record(z.string(),z.unknown()).parse(value.original.values),current={rules:Object.fromEntries(Object.entries(previousValues).filter(([,rule])=>rule!==null))},preview=previewNativeOnboardingWorkflowsTemplate(current,selected.values,previousTemplate?.values??null,command.target.overrides),proposed=projectOnboardingWorkflowsSettings(Object.fromEntries(onboardingWorkflowsSourceRuleKeys.map(key=>[key,preview.rules?.[key]??null])));
- const expectedValues=onboardingWorkflowsCanonicalValuesSchema.parse(Object.fromEntries(onboardingWorkflowsSourceRuleKeys.map(key=>[key,preview.rules?.[key]??null])));
+ const expectedValues=canonicalOnboardingWorkflowsRuleValues(Object.fromEntries(onboardingWorkflowsSourceRuleKeys.map(key=>[key,preview.rules?.[key]??null])));
  if(!isDeepStrictEqual(proposed,originalWorkflows.settings)||!isDeepStrictEqual(previousWorkflows.rules["ops.checklists"],originalWorkflows.rules["ops.checklists"])||!isDeepStrictEqual(beforeRaw["ops.checklists"],afterRaw["ops.checklists"]))throw new OnboardingConfigurationError();
  for(const key of onboardingWorkflowsSourceRuleKeys){const before=previousWorkflows.rules[key],after=originalWorkflows.rules[key];if(before&&after&&before.id===after.id&&(!isDeepStrictEqual(before,after)||!isDeepStrictEqual(beforeRaw[key],afterRaw[key])))throw new OnboardingConfigurationError();if(before?.id!==after?.id&&after&&(after.scopeType!=="property"||after.scopeId!==b.propertyId||after.createdBy!==b.createdBy||!isDeepStrictEqual(afterRaw[key],expectedValues[key])))throw new OnboardingConfigurationError();}
  for(const[index,row]of value.canonicalCommands.entries()){
