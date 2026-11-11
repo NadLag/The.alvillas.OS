@@ -141,7 +141,9 @@ export function presentAuditHistoryRow(
       { before: { dataClass: "financial" }, after: { dataClass: "financial" }, reason: { dataClass: "financial" } }) as AuditHistoryRow;
   }
   const financialRules=[...new Set([row.before,row.after].flatMap(financialRuleKeysIn))];
-  if(["config_rule","property_template","property_template_revision"].includes(row.resourceType)&&financialRules.length){
+  // Staff-only historical settings use the existing scoped compensation check
+  // below. Mixed rule history still requires every actual financial source.
+  if(["config_rule","property_template","property_template_revision"].includes(row.resourceType)&&financialRules.some(key=>key!=="staff.compensation")){
     const allowed=financialRules.every(key=>financialRuleAccess(ctx.authContext,action,new Date(),key));
     return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["financial"]:[])},action,
       {type:auditLogResource,organizationId:ctx.organizationId,data:row},
