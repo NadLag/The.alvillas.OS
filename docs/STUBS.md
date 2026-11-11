@@ -60,3 +60,6 @@ F-ONB-02 services qualification dbccdd9e: the recorded CI failures have targeted
 
 
 F-ONB-02 inventory qualification 9ddb3602: the recorded CI failures have targeted local corrections and original compiler/build coverage. The feature remains IN-PROGRESS while new exact-head CI and provider-restricted hosted acceptance remain pending. All355 approved IDs remain required.
+
+
+| F-ONB-02 native Workflows qualification | Actual standard application plus canonical property overrides, shared routes/private EN/FR/AR UI, original history/creator recovery,79 native identities,28651-unit full verification,12 zero-retry production browsers and populated197-table/230-migration forced-RLS restore qualify locally. Remaining acceptance is mandatory exact-head CI, merged dependencies and provider-restricted staging; whole Review/Activate remain separate approved features. | Property stays DRAFT/ONBOARDING; no operational tasks, financial postings or provider connectivity is inferred. All355 approved IDs remain required; no DONE promotion. |

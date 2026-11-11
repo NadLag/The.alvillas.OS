@@ -35,6 +35,7 @@ import { fieldDevicePolicyKey, fieldDevicePolicySchema } from "./field-device-po
 import { fieldUploadLifecycleKey, fieldUploadLifecycleSchema } from "./field-upload-lifecycle-policy";
 import { configSlugSchema } from "./identifiers";
 import {serviceCatalogMaximumItems,servicePricingModelSchema} from "./service-catalog-policy";
+import {workflowCatalogSchema} from "./workflow-policy";
 import { inventoryMinimumsSchema } from "./inventory-policy";
 import { accountingPeriodPolicyKey, accountingPeriodPolicySchema } from "@/modules/finance/domain/accounting-period";
 import { employeeMonthlyEarningsPolicyKey,employeeMonthlyEarningsPolicySchema } from "@/modules/finance/domain/employee-monthly-earnings";
@@ -272,46 +273,6 @@ const laundryPricingSchema = z
   .passthrough();
 
 
-const workflowConditionSchema: z.ZodType = z.lazy(() =>
-  z
-    .object({
-      all: z.array(workflowConditionSchema).optional(),
-      any: z.array(workflowConditionSchema).optional(),
-      not: workflowConditionSchema.optional(),
-      path: z.string().trim().min(1).max(160).optional(),
-      op: z.enum(["=", "!=", ">", ">=", "<", "<=", "in", "not_in", "exists", "between"]).optional(),
-      value: z.unknown().optional()
-    })
-    .refine(
-      (value) =>
-        Boolean(value.all?.length || value.any?.length || value.not || (value.path && value.op)),
-      "Workflow condition needs a combinator or path/operator"
-    )
-);
-
-const workflowSchema = z
-  .object({
-    workflows: z.array(
-      z
-        .object({
-          key: configSlugSchema,
-          version: z.number().int().min(1).optional(),
-          trigger: z.string().trim().min(1).max(120).regex(/^[A-Za-z][A-Za-z0-9_.-]*$/u),
-          conditions: workflowConditionSchema.optional(),
-          actions: z.array(
-            z
-              .object({
-                type: configSlugSchema
-              })
-              .passthrough()
-          ).min(1),
-          idempotency_key: z.string().trim().min(1).max(180).optional()
-        })
-        .passthrough()
-    ).max(100).refine(v => new Set(v.map(w => w.key)).size === v.length, "Workflow keys must be unique")
-  })
-  .passthrough();
-
 export const servicePricingSchema = z
   .object({
     services: z.array(
@@ -435,7 +396,7 @@ export const configRuleSchemas = {
   [receivableReminderPolicyKey]:receivableReminderPolicySchema,
   "operations.laundry_pricing": laundryPricingSchema,
   "inventory.minimums": inventoryMinimumsSchema,
-  "ops.workflows": workflowSchema,
+  "ops.workflows": workflowCatalogSchema,
   "ops.task_policy": operationPolicySchema,
   "ops.recurring_tasks": recurringTasksSchema,
   "ops.checklists": checklistCatalogSchema,

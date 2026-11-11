@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { localizedTextSchema } from "@/i18n/content";
 import { propertyOperatingProfileInputSchema, propertyInputSchema } from "./owner-property";
-import { configRuleSchemas, parseConfigRuleValue } from "@/platform/config/rule-registry";
+import { configRuleSchemas, parseConfigRuleValue, reservationTaskConfigSchema, checklistCatalogSchema } from "@/platform/config/rule-registry";
 import { Money } from "@/platform/money/money";
 
 export const templateKinds = [
@@ -69,6 +69,16 @@ export type TemplateValues = {
   operating?: Record<string, unknown>;
   rules?: Record<string, unknown>;
 };
+/** Preview and application share the same cross-rule dependencies. */
+export function validateTemplateDependencies(kind:TemplateKind,values:TemplateValues){
+ if(kind==="PROPERTY"&&values.operating?.midStayCleaningEnabled){
+  const key=z.literal("ops.mid_stay_threshold").parse(values.operating.midStayCleaningRuleKey);parseConfigRuleValue(key,values.rules?.[key]);
+ }
+ if(["WORKFLOW","CHECKLIST"].includes(kind)&&values.rules?.["ops.reservation_task_templates"]){
+  const tasks=reservationTaskConfigSchema.parse(values.rules["ops.reservation_task_templates"]).tasks,references=tasks.map(task=>task.checklistTemplateKey).filter((key):key is string=>Boolean(key));
+  if(references.length){const catalog=checklistCatalogSchema.parse(values.rules["ops.checklists"]);for(const reference of references)z.string().refine(key=>catalog.checklists.some(checklist=>checklist.key===key)).parse(reference);}
+ }
+}
 const templateValuesSchema = z
   .object({
     property: propertySettingsSchema.optional(),

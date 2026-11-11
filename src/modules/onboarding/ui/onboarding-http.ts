@@ -18,7 +18,12 @@ export async function onboardingHttp(request:NextRequest,work:(actor:AccountActo
   const actor=await accountActorContextFromSession(await auth());if(!actor)return failure("unauthorized",401);
   if(!isSameOriginContentType(request,"application/json")||request.headers.get("x-alvillas-onboarding-scope")!==actor.organizationId+"."+actor.actorId)return failure("forbidden",403);
   if(request.nextUrl.search)return failure("validation",400);let input:unknown;try{input=await readBoundedJsonRequest(request,onboardingMaximumRequestBytes);}catch{return failure("validation",400);}
-  return NextResponse.json(await work(actor,input,requestId),{headers});
+  const value=await work(actor,input,requestId),response=NextResponse.json(value,{headers});
+  if(["/api/onboarding/read","/api/onboarding/review"].includes(request.nextUrl.pathname)){
+   const step=value!==null&&typeof value==="object"&&"draft"in value&&value.draft!==null&&typeof value.draft==="object"&&"step"in value.draft?value.draft.step:null;
+   if(step==="WORKFLOWS")response.headers.set("x-alvillas-onboarding-record-step","WORKFLOWS");
+  }
+  return response;
  }catch(error){
   if(error instanceof OnboardingAccessError||error instanceof NativeOnboardingTeamAuthorizationError||error instanceof NativeOnboardingTeamNotFoundError||error instanceof NativeOnboardingBookingChannelAuthorizationError||error instanceof NativeOnboardingBookingChannelNotFoundError||error instanceof NativeOnboardingInventoryAuthorizationError||error instanceof NativeOnboardingInventoryNotFoundError)return failure("forbidden",403);
   if(error instanceof ZodError||error instanceof NativeOnboardingBookingChannelValidationError)return failure("validation",400);
