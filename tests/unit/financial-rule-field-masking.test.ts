@@ -13,6 +13,11 @@ const row: AuditHistoryRow = { id, actorId: id, resourceId: id, resourceType: "c
 const actor = (keys: string[]) => ({ ...base, authContext: { ...base.authContext, permissions: new Set([...base.authContext.permissions, ...keys]) } });
 const serviceRow: AuditHistoryRow = { ...row, after: { key: "services.pricing", value: { amount: "123.45", currency: "MAD" } }, reason: "Private original service cost123.45 MAD" };
 describe("complete financial rule field classification", () => {
+  it.each(["view","export"]as const)("requires every source for mixed compensation history in %s",action=>{
+    const mixed={...serviceRow,after:{rules:{"staff.compensation":{amount:"123.45",currency:"MAD"},"finance.commission":{rate_bps:1000,basis:"ACCOMMODATION_REVENUE"}}}},sources=["staff_compensation","employee_payable","financial_transaction","company_ledger"],keys=sources.flatMap(type=>action==="export"?[type+":view",type+":export"]:[type+":view"]);
+    for(const key of keys)expect(presentAuditHistoryRow(actor(keys.filter(value=>value!==key)),mixed,action)).toMatchObject({after:maskedValue,reason:maskedValue});
+    expect(presentAuditHistoryRow(actor(keys),mixed,action)).toMatchObject({after:mixed.after,reason:mixed.reason});
+  });
   it("protects registered and retained legacy financial definitions without classifying unrelated operating settings", () => {
     for (const key of ["finance.commission", "finance.ota_fee", "finance.bank_statements", "finance.legacy_retired_rate", "staff.compensation_monthly_earnings"]) expect(protectedFinancialRuleKey(key)).toBe(true);
     for (const key of ["ops.recurring_tasks", "staff.management_policy", "feature_flag.finance_label"]) expect(protectedFinancialRuleKey(key)).toBe(false);
