@@ -12,7 +12,7 @@ import {onboardingWorkflowsTargetSchema,onboardingWorkflowsRuleKeys,onboardingWo
 
 export {TemplateAccessError as NativeOnboardingWorkflowsAuthorizationError,TemplateConflictError as NativeOnboardingWorkflowsConflictError,TemplateNotFoundError as NativeOnboardingWorkflowsNotFoundError} from "@/modules/core/application/core-access";
 export const nativeOnboardingWorkflowsTemplateHeads=(tx:TenantTransaction,organizationId:string,ids:readonly string[])=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplateHeads(ids,"WORKFLOW");
-export const nativeOnboardingWorkflowsTemplateRows=(tx:TenantTransaction,organizationId:string,ids:readonly string[])=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplateRows(ids,"WORKFLOW");
+export const nativeOnboardingWorkflowsTemplateRows=async(tx:TenantTransaction,organizationId:string,ids:readonly string[])=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplateRows(ids,"WORKFLOW");
 export const nativeOnboardingWorkflowsBindingHead=(tx:TenantTransaction,organizationId:string,propertyId:string)=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryBindingHead(propertyId,"WORKFLOW");
 export const nativeOnboardingWorkflowsTemplatePage=(tx:TenantTransaction,organizationId:string,propertyId:string,query:string,after:string|undefined,asOf:Date)=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplatePage(propertyId,query,after,asOf,"WORKFLOW");
 
