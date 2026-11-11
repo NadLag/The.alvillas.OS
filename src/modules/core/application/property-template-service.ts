@@ -9,11 +9,6 @@ import { authorizeUnconditionalSource, authorizeOrganizationSource } from "@/pla
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { writePropertyConfiguration } from "@/platform/config/property-configuration";
-import {
-  reservationTaskConfigSchema,
-  checklistCatalogSchema,
-  parseConfigRuleValue
-} from "@/platform/config/rule-registry";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import {
@@ -31,6 +26,7 @@ import {
   templateSaveSchema,
   templateRuleKeys,
   validateProjectedRules,
+  validateTemplateDependencies,
   writeSetting,
   type TemplateKind,
   type TemplateValues,
@@ -440,25 +436,7 @@ export async function changePropertyTemplate(ctx: TemplateActorContext, raw: unk
     propertyTemplateProjectionSchema.parse(after.property);
     propertyOperatingProfileInputSchema.parse(after.operating);
     validateProjectedRules(after);
-    if (kind === "PROPERTY" && after.operating?.midStayCleaningEnabled) {
-      const key = z.literal("ops.mid_stay_threshold").parse(after.operating.midStayCleaningRuleKey);
-      parseConfigRuleValue(key, after.rules?.[key]);
-    }
-    if (["WORKFLOW", "CHECKLIST"].includes(kind) && after.rules?.["ops.reservation_task_templates"]) {
-      const tasks = reservationTaskConfigSchema.parse(
-        after.rules["ops.reservation_task_templates"]
-      ).tasks;
-      const references = tasks
-        .map((task) => task.checklistTemplateKey)
-        .filter((key): key is string => Boolean(key));
-      if (references.length) {
-        const catalog = checklistCatalogSchema.parse(after.rules["ops.checklists"]);
-        for (const reference of references)
-          z.string()
-            .refine((key) => catalog.checklists.some((checklist) => checklist.key === key))
-            .parse(reference);
-      }
-    }
+    validateTemplateDependencies(kind,after);
     await repo.persistPropertyFields(input.propertyId, before, after);
     const transactionDb: TenantTransactionRunner = { $transaction: (work) => work(tx) };
     if (!equalSetting(before.operating, after.operating)) {

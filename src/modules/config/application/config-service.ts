@@ -177,15 +177,15 @@ function hasRuleFinancialAccess(
   }, new Date());
 }
 
-/** Price configuration keeps its canonical writer and independently rechecks current source authority. */
-async function serviceCatalogWriteAuthority(ctx:ConfigActorContext,tx:TenantTransaction,key:string,scope:{scopeType:string;scopeId:string|null},action:"create"|"configure",ownerId?:string):Promise<ConfigSourceScope>{
- if(key!=="services.pricing")return{};
- let source:ConfigSourceScope={dataClass:"financial"};
+/** Canonical template rules carry their actual Property/Owner context through each current-authority check. */
+async function propertyTemplateRuleWriteAuthority(ctx:ConfigActorContext,tx:TenantTransaction,key:string,scope:{scopeType:string;scopeId:string|null},action:"create"|"configure",ownerId?:string):Promise<ConfigSourceScope>{
+ if(!["services.pricing","inventory.minimums","ops.workflows","ops.reservation_task_templates","ops.checklists","ops.mid_stay_threshold"].includes(key))return{};
+ let source:ConfigSourceScope={dataClass:key==="services.pricing"?"financial":"operational"};
  if(scope.scopeType==="property"){
   if(!scope.scopeId||ownerId&&!uuidSchema.safeParse(ownerId).success)throw new ConfigAuthorizationError();const property=await configurationPropertyHead(tx,ctx.organizationId,scope.scopeId);
   if(!property||ownerId&&!property.ownership.some(row=>row.ownerId===ownerId))throw new ConfigAuthorizationError();source={...source,propertyId:property.id,ownerId,city:property.cityId,region:property.regionId};
  }
- await recheckAccountAuthorization(ctx,tx,await configurationSourceClock(tx,ctx.organizationId),[{action,resource:{...source,type:"config_rule",organizationId:ctx.organizationId,id:key}},{action:"view",unconditional:true,resource:{...source,type:"financial_transaction",organizationId:ctx.organizationId}}],new ConfigAuthorizationError());return source;
+ await recheckAccountAuthorization(ctx,tx,await configurationSourceClock(tx,ctx.organizationId),[{action,resource:{...source,type:"config_rule",organizationId:ctx.organizationId,id:key}},...key==="services.pricing"?[{action:"view"as const,unconditional:true,resource:{...source,type:"financial_transaction",organizationId:ctx.organizationId}}]:[]],new ConfigAuthorizationError());return source;
 }
 
 async function auditMeta(deps: ConfigServiceDeps): Promise<AuditMeta> {
@@ -472,7 +472,7 @@ export async function createConfigRuleVersion(
   return withTenant(db(deps), ctx.organizationId, async (tx) => {
     const repository = new ConfigRuleRepository(tx, ctx.organizationId);
 
-    const source=await serviceCatalogWriteAuthority(ctx,tx,key,scope,input.lifecycle==="DRAFT"?"create":"configure",deps.ownerId);
+    const source=await propertyTemplateRuleWriteAuthority(ctx,tx,key,scope,input.lifecycle==="DRAFT"?"create":"configure",deps.ownerId);
     assertRuleAllowed(ctx, input.lifecycle === "DRAFT" ? "create" : "configure", {
       id: key,
       key,
@@ -512,7 +512,7 @@ export async function createConfigRuleVersion(
     });
 
     await recheckRecurringExpenseRuleAccess(ctx,tx,key,checks,new ConfigAuthorizationError());
-    await serviceCatalogWriteAuthority(ctx,tx,key,scope,input.lifecycle==="DRAFT"?"create":"configure",deps.ownerId);
+    await propertyTemplateRuleWriteAuthority(ctx,tx,key,scope,input.lifecycle==="DRAFT"?"create":"configure",deps.ownerId);
     return created;
   });
 }
