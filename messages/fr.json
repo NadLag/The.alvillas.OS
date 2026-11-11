@@ -5854,6 +5854,61 @@
       "open": "Ouvrir la configuration des canaux",
       "prepare": "Configurer les canaux de réservation",
       "change": "Modifier les canaux"
+    },
+    "inventory": {
+      "guidance": "Vérifiez les quantités de matériel et de fournitures de cette propriété.",
+      "minimum": "Articles configurés requis : au moins {count}.",
+      "validation": "Choisissez une méthode et remplissez tous les champs obligatoires. Les quantités doivent être entières et le motif doit contenir de 6 à 500 caractères.",
+      "mode": "Configuration de l’inventaire",
+      "chooseMode": "Choisir une méthode de configuration",
+      "chooseValue": "Choisir une valeur",
+      "modes": {
+        "TEMPLATE": "Utiliser un modèle d’inventaire de propriété",
+        "CUSTOM": "Saisir une configuration personnalisée"
+      },
+      "selectedTemplate": "Modèle sélectionné : {name}",
+      "searchLabel": "Rechercher un modèle d’inventaire",
+      "search": "Rechercher des modèles",
+      "templateVersion": "Version {version} · Articles : {count}",
+      "empty": "Aucun modèle d’inventaire autorisé ne correspond à cette recherche.",
+      "itemNumber": "Article {number}",
+      "fields": {
+        "item": "Clé de l’article",
+        "nameEN": "Nom de l’article en anglais",
+        "nameFR": "Nom de l’article en français",
+        "nameAR": "Nom de l’article en arabe (facultatif)",
+        "unit": "Unité",
+        "quantity": "Quantité requise",
+        "category": "Catégorie",
+        "perStay": "Quantité par séjour",
+        "perStayQuantity": "Quantité prévue par séjour"
+      },
+      "categories": {
+        "CONSUMABLE": "Consommable",
+        "LINEN": "Linge",
+        "EQUIPMENT": "Équipement"
+      },
+      "perStay": {
+        "UNSPECIFIED": "Laisser la quantité par séjour non précisée",
+        "EXPLICIT": "Définir une quantité explicite par séjour"
+      },
+      "remove": "Retirer l’article",
+      "add": "Ajouter un article",
+      "review": "Vérifier l’inventaire",
+      "previous": "Inventaire précédemment applicable",
+      "proposed": "Inventaire proposé",
+      "original": "Inventaire enregistré à l’origine",
+      "noConfiguration": "Aucune configuration d’inventaire enregistrée.",
+      "template": "Modèle d’inventaire",
+      "templateRevision": "Révision d’application du modèle {revision}",
+      "noTemplate": "Aucun modèle d’inventaire lié.",
+      "noItems": "Cette configuration ne contient aucun article requis.",
+      "prepare": "Préparer l’inventaire",
+      "change": "Modifier l’inventaire",
+      "open": "Ouvrir la configuration de l’inventaire",
+      "saved": "Configuration de l’inventaire enregistrée.",
+      "reviewTitle": "Vérifier la configuration de l’inventaire",
+      "confirm": "Enregistrer l’inventaire vérifié"
     }
   }
 }

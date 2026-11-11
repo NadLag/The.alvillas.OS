@@ -5854,6 +5854,61 @@
       "open": "Open channel setup",
       "prepare": "Set up booking channels",
       "change": "Change channels"
+    },
+    "inventory": {
+      "guidance": "Review the equipment and supply quantities for this property.",
+      "minimum": "Required configured items: at least {count}.",
+      "validation": "Choose a setup method and complete every required field. Quantities must be whole numbers, and the reason must contain 6–500 characters.",
+      "mode": "Inventory setup",
+      "chooseMode": "Choose a setup method",
+      "chooseValue": "Choose a value",
+      "modes": {
+        "TEMPLATE": "Use a property inventory template",
+        "CUSTOM": "Enter custom inventory settings"
+      },
+      "selectedTemplate": "Selected template: {name}",
+      "searchLabel": "Find an inventory template",
+      "search": "Search templates",
+      "templateVersion": "Version {version} · Items: {count}",
+      "empty": "No authorized inventory templates match this search.",
+      "itemNumber": "Item {number}",
+      "fields": {
+        "item": "Item key",
+        "nameEN": "Item name in English",
+        "nameFR": "Item name in French",
+        "nameAR": "Item name in Arabic (optional)",
+        "unit": "Unit",
+        "quantity": "Required quantity",
+        "category": "Category",
+        "perStay": "Per-stay quantity",
+        "perStayQuantity": "Quantity expected per stay"
+      },
+      "categories": {
+        "CONSUMABLE": "Consumable",
+        "LINEN": "Linen",
+        "EQUIPMENT": "Equipment"
+      },
+      "perStay": {
+        "UNSPECIFIED": "Leave the per-stay quantity unspecified",
+        "EXPLICIT": "Set an explicit per-stay quantity"
+      },
+      "remove": "Remove item",
+      "add": "Add item",
+      "review": "Review inventory",
+      "previous": "Previously effective inventory",
+      "proposed": "Proposed inventory",
+      "original": "Original recorded inventory",
+      "noConfiguration": "No inventory configuration was recorded.",
+      "template": "Inventory template",
+      "templateRevision": "Template application revision {revision}",
+      "noTemplate": "No inventory template was bound.",
+      "noItems": "This configuration has no required items.",
+      "prepare": "Prepare inventory",
+      "change": "Change inventory",
+      "open": "Open inventory setup",
+      "saved": "Inventory settings recorded.",
+      "reviewTitle": "Review inventory settings",
+      "confirm": "Record reviewed inventory"
     }
   }
 }

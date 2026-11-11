@@ -5760,6 +5760,14 @@ describe("PostgreSQL baseline", () => {
       ]
     });
 
+    await ensureStandardIdentitySetup(orgA.id, { db: prisma });
+    await withTenant(prisma, orgA.id, async tx => {
+      const permissions = await tx.permission.findMany({ where: { organizationId: orgA.id, key: { in: [...configCtx.authContext.permissions] } } });
+      expect(permissions).toHaveLength(configCtx.authContext.permissions.size);
+      const role = await tx.role.create({ data: { organizationId: orgA.id, key: "actual_operational_configuration_writer", name: "Actual operational configuration writer",
+        rolePermissions: { create: permissions.map(permission => ({ organizationId: orgA.id, permissionId: permission.id })) } } });
+      await tx.roleAssignment.create({ data: { organizationId: orgA.id, personId, userAccountId: actorId, roleId: role.id, scopeType: "organization", validFrom: new Date("2020-01-01") } });
+    });
     const orgRuleV1 = await createConfigRuleVersion(
       configCtx,
       {
