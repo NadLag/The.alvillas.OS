@@ -10,6 +10,7 @@ import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {ReservationConfigScopeRepository} from "@/platform/config/reservation-scope-repository";
 import {onboardingWorkflowsTargetSchema,onboardingWorkflowsSourceRuleKeys} from "../domain/onboarding-workflows";
 import {onboardingWorkflowsSnapshotSchema,onboardingWorkflowsTemplateSchema,onboardingWorkflowsSourcePinsSchema} from "../domain/onboarding-workflows-state";
+import {onboardingWorkflowsOverrideFields} from "../domain/onboarding-workflows-fields";
 import {OnboardingAccessError,OnboardingConflictError,OnboardingConfigurationError} from "../domain/onboarding-wizard";
 import {OnboardingRepository} from "../infrastructure/onboarding-repository";
 
@@ -43,7 +44,7 @@ export async function readOnboardingWorkflowsSources(actor:AccountActorContext,t
  for(const{key,value}of values)rawValues[key]=value?.value??null;for(const{key,row}of before.rules)if(row)ruleMetadata[key]={id:row.id,key:row.key,version:row.version,scopeType:row.scopeType,scopeId:row.scopeId,lifecycle:row.lifecycle,createdBy:row.createdBy,createdAt:row.createdAt.toISOString()};
  try{
   const previous=onboardingWorkflowsSnapshotSchema.parse({propertyId,rules:ruleMetadata,settings:projectOnboardingWorkflowsSettings(rawValues),template:bound?projection(bound):null,templateRevision:before.binding?.revision??null}),current={rules:Object.fromEntries(Object.entries(rawValues).filter(([,value])=>value!==null))},proposed=previewNativeOnboardingWorkflowsTemplate(current,selected.values,bound?.values??null,before.target.overrides),proposedValues=Object.fromEntries(onboardingWorkflowsSourceRuleKeys.map(key=>[key,proposed.rules?.[key]??null]));
-  return{previous,proposed:projectOnboardingWorkflowsSettings(proposedValues),selectedTemplate:projection(selected),source:{property:before.property,scopes:before.scopes,rules:before.rules,binding:before.binding,templates:before.templates},originalRuleValues:rawValues,originalTemplateValues:rows.map(row=>({id:row.id,values:row.values})),fingerprint:before.fingerprint};
+  return{previous,proposed:projectOnboardingWorkflowsSettings(proposedValues),overrideFields:onboardingWorkflowsOverrideFields(selected.values,proposed,Object.keys(before.target.overrides).length?previewNativeOnboardingWorkflowsTemplate(current,selected.values,bound?.values??null,{}):proposed),selectedTemplate:projection(selected),source:{property:before.property,scopes:before.scopes,rules:before.rules,binding:before.binding,templates:before.templates},originalRuleValues:rawValues,originalTemplateValues:rows.map(row=>({id:row.id,values:row.values})),fingerprint:before.fingerprint};
  }catch{throw new OnboardingConfigurationError();}
 }
 /** The native caller supplies the actual canonical command witnesses after their shared transaction. */

@@ -1,3 +1,6 @@
+import {onboardingWorkflowsOptionsSchema,onboardingWorkflowsChoicesInputSchema,onboardingWorkflowsChoicesSchema} from "../domain/onboarding-workflows-state";
+import {onboardingWorkflowsSourceContext,onboardingWorkflowsTemplateChoiceWitness} from "./onboarding-workflows-source";
+import {nativeOnboardingWorkflowsBindingHead,nativeOnboardingWorkflowsTemplatePage,nativeOnboardingWorkflowsTemplateChoiceRows} from "@/platform/onboarding/workflows-source";
 import {canonicalOnboardingWorkflowsDraft,canonicalOnboardingWorkflowsCommand,onboardingWorkflowsRuleKeys,onboardingWorkflowsSourceRuleKeys,type OnboardingWorkflowsDraft,type OnboardingWorkflowsCommand} from "../domain/onboarding-workflows";
 import {onboardingWorkflowsReviewSchema,onboardingWorkflowsReadSchema,onboardingWorkflowsSourcePinsSchema} from "../domain/onboarding-workflows-state";
 import {readOnboardingWorkflowsSources,authorizeRecordedOnboardingWorkflowsSources,onboardingWorkflowsSourcePins} from "./onboarding-workflows-source";
@@ -956,7 +959,7 @@ export async function reviewOnboardingWorkflowsStep(actor:AccountActorContext,ra
   const base=await workflowsDraftContext(ctx,tx,draft);
   await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"onboarding.step_reviewed",resourceType:"onboarding",resourceId:draft.sessionId,propertyScopeId:base.current.propertyId,after:{step:draft.step,mode:draft.target.mode,reviewFingerprint:base.reviewFingerprint,sourceFingerprint:commandFingerprint(base.source)},requestId:deps.requestId??randomUUID(),occurredAt:await base.repository.clock()});
   const fresh=await workflowsDraftContext(ctx,tx,draft);if(fresh.reviewFingerprint!==base.reviewFingerprint)throw new OnboardingConflictError();
-  return onboardingWorkflowsReviewSchema.parse(present({...ctx.authContext,visibleDataClasses:new Set(["personal"]as const)},"export",{...resource(ctx.organizationId,base.current),data:{draft,owner:base.owner,property:base.property,previousWorkflows:base.workflows.previous,proposedWorkflows:base.workflows.proposed,selectedTemplate:base.workflows.selectedTemplate,reviewFingerprint:base.reviewFingerprint}},{},await base.repository.clock()));
+  return onboardingWorkflowsReviewSchema.parse(present({...ctx.authContext,visibleDataClasses:new Set(["personal"]as const)},"export",{...resource(ctx.organizationId,base.current),data:{draft,owner:base.owner,property:base.property,previousWorkflows:base.workflows.previous,proposedWorkflows:base.workflows.proposed,overrideFields:base.workflows.overrideFields,selectedTemplate:base.workflows.selectedTemplate,reviewFingerprint:base.reviewFingerprint}},{},await base.repository.clock()));
  });
 }
 
@@ -1023,5 +1026,35 @@ async function readWorkflowsRecordInside(ctx:AccountActorContext,tx:TenantTransa
  const final=await sessionContext(ctx,tx,input.sessionId,"view",true),fresh=await workflowsRecordedAuthority(ctx,tx,selected);if(final.row.id!==base.row.id||fresh.fingerprint!==original.fingerprint)throw new OnboardingConflictError();const position=onboardingSteps.findIndex(step=>step===final.row.step);if(position<0)throw new OnboardingConfigurationError();
  const data=onboardingWorkflowsReadSchema.parse({sessionId:input.sessionId,current:receipt(final.row),selected:receipt(selected),draft:canonicalOnboardingWorkflowsDraft({sessionId:payload.command.sessionId,previousRevisionId:payload.command.previousRevisionId,step:payload.command.step,target:payload.command.target}),owner:payload.originalOwner,property:payload.originalProperty,previousWorkflows:payload.previousWorkflows,workflows:payload.originalWorkflows,reason:payload.command.reason,history,next:rows.length>20?rows[19].number:null,completed:onboardingSteps.slice(0,position+1),nextStep:onboardingSteps[position+1]??null});
  return onboardingWorkflowsReadSchema.parse(present({...ctx.authContext,visibleDataClasses:new Set(["personal"]as const)},"export",{...resource(ctx.organizationId,selected),data},{},await base.repository.clock()));
+}
+
+
+async function workflowsSelectionContext(actor:AccountActorContext,tx:TenantTransaction,current:Row){
+ if(!current.propertyId||!["SERVICES","WORKFLOWS"].includes(current.step))throw new OnboardingConflictError();
+ const context=await onboardingWorkflowsSourceContext(actor,tx,current.propertyId,current.ownerId),owner=await nativeOnboardingOwnerWitness(tx,actor.organizationId,current.ownerId);if(!owner||!context.property.ownership.some(value=>value.ownerId===current.ownerId)||!["DRAFT","ONBOARDING"].includes(context.property.status))throw new OnboardingAccessError();
+ const checks:CurrentAuthorityCheck[]=[{action:"view",resource:resource(actor.organizationId,current)},{action:"edit",resource:resource(actor.organizationId,current)},{action:"export",resource:{...resource(actor.organizationId,current),dataClass:"personal"}},{action:"view",resource:ownerResource(actor.organizationId,owner)},{action:"edit",resource:propertyResource(actor.organizationId,context.property,current.ownerId)},...onboardingWorkflowsRuleKeys.map(key=>({action:"configure"as const,resource:{...context.scope,type:"config_rule",id:key,status:"ACTIVE",occurredAt:context.now}}))];
+ assertAccountAuthorization(actor,context.stored,context.now,checks,new OnboardingAccessError());
+ const repository=new OnboardingRepository(tx,actor.organizationId);if((await repository.current(current.sessionId))?.id!==current.id)throw new OnboardingConflictError();const configured=await settings(tx,actor.organizationId,context.now);if(!configured.policy.workflows)throw new OnboardingConfigurationError();
+ const binding=await nativeOnboardingWorkflowsBindingHead(tx,actor.organizationId,current.propertyId);
+ return{context,owner,configured,binding,fingerprint:commandFingerprint({revisionId:current.id,parent:propertySnapshot(owner,context.property,null),binding,policy:configured.snapshot,authorizationCap:captureAuthorizationCap(actor.authContext)})};
+}
+async function workflowsOptions(actor:AccountActorContext,tx:TenantTransaction,row:Row){
+ if(!row.propertyId||!["SERVICES","WORKFLOWS"].includes(row.step))return null;
+ try{const base=await workflowsSelectionContext(actor,tx,row),[property]=await nativeOnboardingPropertyRows(tx,actor.organizationId,[row.propertyId]);if(!property)throw new OnboardingAccessError();return{data:onboardingWorkflowsOptionsSchema.parse({revisionId:row.id,propertyId:row.propertyId,propertyName:property.name,modes:base.configured.policy.workflows!.modes,minimumWorkflows:base.configured.policy.workflows!.minimum_workflows,minimumTasks:base.configured.policy.workflows!.minimum_tasks,expectedTemplateRevision:base.binding?.revision??0}),fingerprint:base.fingerprint};}
+ catch(error){if(error instanceof OnboardingAccessError||error instanceof OnboardingConfigurationError||error instanceof z.ZodError)return null;throw error;}
+}
+
+export async function readOnboardingWorkflowsOptions(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){const ctx=actorContext(actor),input=z.object({sessionId:uuid}).strict().parse(raw);await spendRead(ctx,deps,input.sessionId);return withTenant(deps.db,ctx.organizationId,async tx=>{const base=await sessionContext(ctx,tx,input.sessionId,"edit",true),prepared=await workflowsOptions(ctx,tx,base.row);if(!prepared)throw new OnboardingAccessError();await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"onboarding.options_read",resourceType:"onboarding",resourceId:input.sessionId,after:{step:"WORKFLOWS"},requestId:deps.requestId??randomUUID(),occurredAt:await base.repository.clock()});const final=await workflowsOptions(ctx,tx,base.row);if(!final)throw new OnboardingAccessError();if(final.fingerprint!==prepared.fingerprint)throw new OnboardingConflictError();return final.data;});}
+export async function readOnboardingWorkflowsTemplateChoices(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
+ const ctx=actorContext(actor),input=onboardingWorkflowsChoicesInputSchema.parse(raw);await spendRead(ctx,deps,input.sessionId);
+ return withTenant(deps.db,ctx.organizationId,async tx=>{
+  const repository=new OnboardingRepository(tx,ctx.organizationId),current=await repository.current(input.sessionId);if(!current)throw new OnboardingAccessError();if(current.id!==input.previousRevisionId)throw new OnboardingConflictError();const base=await workflowsSelectionContext(ctx,tx,current);if(!base.configured.policy.workflows!.modes.includes("TEMPLATE"))throw new OnboardingConfigurationError();
+  const filter=commandFingerprint({protocol,operation:"WORKFLOWS_TEMPLATE_CHOICES",query:input.query,sessionId:current.sessionId,revisionId:current.id,source:base.fingerprint}),before=readCursor(ctx,filter,input.cursor);if(before?.beforeAt)throw new OnboardingConflictError();const asOf=before?new Date(before.asOf):base.context.now;
+  const page=await nativeOnboardingWorkflowsTemplatePage(tx,ctx.organizationId,current.propertyId!,input.query,before?.beforeId,asOf),scanned=page.slice(0,50),ids=scanned.map(row=>row.id),witness=await onboardingWorkflowsTemplateChoiceWitness(ctx,tx,base.context,ids),selected=witness.permitted.slice(0,20),rows=await nativeOnboardingWorkflowsTemplateChoiceRows(tx,ctx.organizationId,selected);if(rows.length!==selected.length)throw new OnboardingConflictError();
+  const byId=new Map(rows.map(row=>[row.id,row])),last=selected.length===20?selected[19]:scanned.at(-1)?.id,hasMore=Boolean(last)&&(page.length>50||scanned.some(row=>row.id>last!)),next=hasMore?cursor(ctx,filter,asOf,last!):null;
+  await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"onboarding.workflows_template_choices_read",resourceType:"onboarding",resourceId:current.sessionId,propertyScopeId:current.propertyId,after:{count:selected.length},requestId:deps.requestId??randomUUID(),occurredAt:await repository.clock()});
+  const fresh=await workflowsSelectionContext(ctx,tx,current),final=await onboardingWorkflowsTemplateChoiceWitness(ctx,tx,fresh.context,ids);if(fresh.fingerprint!==base.fingerprint||final.fingerprint!==witness.fingerprint||selected.some(id=>!final.permitted.includes(id)))throw new OnboardingConflictError();
+  return onboardingWorkflowsChoicesSchema.parse({templates:selected.map(id=>byId.get(id)!),next});
+ });
 }
 

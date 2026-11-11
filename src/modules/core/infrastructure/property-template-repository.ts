@@ -104,6 +104,10 @@ export class PropertyTemplateRepository {
     if(!ids.length)return Promise.resolve([]);
     return this.tx.$queryRaw<Array<{id:string;propertyId:string;kind:string;revision:number;templateVersionId:string;action:string;operationId:string;createdBy:string;command:Prisma.JsonValue;reason:string;rowVersion:string;tuple:string}>>(Prisma.sql`SELECT id,property_id AS "propertyId",kind,revision,template_version_id AS "templateVersionId",action,operation_id AS "operationId",created_by AS "createdBy",command,reason,xmin::text AS "rowVersion",ctid::text AS tuple FROM property_template_revision WHERE organization_id=${this.organizationId}::uuid AND property_id=${propertyId}::uuid AND kind='WORKFLOW' AND id IN(${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY revision`);
   }
+  nativeWorkflowTemplateChoiceRows(ids:readonly string[]) {
+    if(!ids.length)return Promise.resolve([]);
+    return this.tx.$queryRaw<Array<{id:string;key:string;version:number;name:Prisma.JsonValue;workflowCount:number;taskCount:number}>>(Prisma.sql`SELECT id,key,version,name,coalesce(jsonb_array_length(values->'rules'->'ops.workflows'->'workflows'),0)::int AS "workflowCount",coalesce(jsonb_array_length(values->'rules'->'ops.reservation_task_templates'->'tasks'),0)::int AS "taskCount" FROM property_template_version WHERE organization_id=${this.organizationId}::uuid AND kind='WORKFLOW' AND id IN(${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))}) ORDER BY id`);
+  }
   history(propertyId: string, kind: TemplateKind, page: number) {
     return this.tx.propertyTemplateRevision.findMany({
       where: { organizationId: this.organizationId, propertyId, kind },

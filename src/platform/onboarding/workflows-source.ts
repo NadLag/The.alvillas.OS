@@ -6,9 +6,10 @@ import {assertAccountAuthorization} from "@/platform/authz/current-authority";
 import {CoreRepository} from "@/modules/core/infrastructure/core-repository";
 import {PropertyTemplateRepository} from "@/modules/core/infrastructure/property-template-repository";
 import {TeamRepository} from "@/modules/identity/infrastructure/team-repository";
-import {flattenSettings,inheritedChanges,writeSetting,validateTemplateValues,validateProjectedRules,validateTemplateDependencies,type TemplateValues} from "@/modules/core/domain/property-template";
+import {flattenSettings,inheritedChanges,writeSetting,pathSegments,validateTemplateValues,validateProjectedRules,validateTemplateDependencies,type TemplateValues} from "@/modules/core/domain/property-template";
 import {TemplateAccessError,TemplateConflictError} from "@/modules/core/application/core-access";
 import {onboardingWorkflowsTargetSchema,onboardingWorkflowsRuleKeys,onboardingWorkflowsSourceRuleKeys,onboardingWorkflowsOverridesSchema} from "@/modules/onboarding/domain/onboarding-workflows";
+import {automationActionSchema} from "@/platform/automation/rule";
 
 export {TemplateAccessError as NativeOnboardingWorkflowsAuthorizationError,TemplateConflictError as NativeOnboardingWorkflowsConflictError,TemplateNotFoundError as NativeOnboardingWorkflowsNotFoundError} from "@/modules/core/application/core-access";
 export const nativeOnboardingWorkflowsTemplateHeads=(tx:TenantTransaction,organizationId:string,ids:readonly string[])=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplateHeads(ids,"WORKFLOW");
@@ -16,13 +17,17 @@ export const nativeOnboardingWorkflowsTemplateRows=async(tx:TenantTransaction,or
 export const nativeOnboardingWorkflowsBindingHead=(tx:TenantTransaction,organizationId:string,propertyId:string)=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryBindingHead(propertyId,"WORKFLOW");
 export const nativeOnboardingWorkflowsTemplatePage=(tx:TenantTransaction,organizationId:string,propertyId:string,query:string,after:string|undefined,asOf:Date)=>new PropertyTemplateRepository(tx,organizationId).nativeInventoryTemplatePage(propertyId,query,after,asOf,"WORKFLOW");
 export const nativeOnboardingWorkflowsCommandRows=(tx:TenantTransaction,organizationId:string,propertyId:string,ids:readonly string[])=>new PropertyTemplateRepository(tx,organizationId).nativeWorkflowCommandRows(propertyId,ids);
+export const nativeOnboardingWorkflowsTemplateChoiceRows=(tx:TenantTransaction,organizationId:string,ids:readonly string[])=>new PropertyTemplateRepository(tx,organizationId).nativeWorkflowTemplateChoiceRows(ids);
 
 /** Canonical inheritance runs first; explicit property changes then use the same keyed settings paths. */
 export function previewNativeOnboardingWorkflowsTemplate(current:TemplateValues,selected:unknown,previousTemplate:unknown,rawOverrides:unknown){
  const after=structuredClone(current),base=flattenSettings(validateTemplateValues("WORKFLOW",selected as TemplateValues)),oldBase=previousTemplate===null?{}:flattenSettings(validateTemplateValues("WORKFLOW",previousTemplate as TemplateValues)),overrides=onboardingWorkflowsOverridesSchema.parse(rawOverrides);
  for(const[path,value]of Object.entries(inheritedChanges(current,oldBase,base)))writeSetting(after,path,value);
  for(const[path,value]of Object.entries(overrides)){if(!Object.hasOwn(base,path))throw new TemplateConflictError();writeSetting(after,path,value);}
- validateProjectedRules(after);validateTemplateDependencies("WORKFLOW",after);return after;
+ validateProjectedRules(after);validateTemplateDependencies("WORKFLOW",after);
+ const catalog=after.rules?.["ops.workflows"] as {workflows:Array<{key:string;actions:Array<{key?:string}>}>}|undefined;
+ for(const path of Object.keys(overrides)){const parts=pathSegments(path);if(parts[1]!=="ops.workflows"||parts[4]!=="actions")continue;const workflow=catalog?.workflows.find(row=>row.key===parts[3].slice(5));if(!workflow)throw new TemplateConflictError();if(parts.length===5)for(const action of workflow.actions)automationActionSchema.parse(action);else automationActionSchema.parse(workflow.actions.find(row=>row.key===parts[5].slice(5)));}
+ return after;
 }
 
 /** Both immutable canonical commands stay inside the native admission transaction. No runtime workflow executes here. */

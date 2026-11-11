@@ -34,6 +34,9 @@ export const onboardingWorkflowsOverridesSchema=z.record(z.string().min(1).max(6
     else if(leaf==="op")ruleConditionSchema.parse({path:"condition.value",op:value});
     else operandValue.parse(value);
    }else if(field==="actions"&&segments.length===5)z.array(automationActionSchema).min(1).parse(value);
+   else if(field==="actions"&&segments.length===7&&segments[5].startsWith("@key:")&&segments[6]!=="key"){
+    const fieldName=segments[6],allowed=automationActionSchema.options.some(option=>{const candidate:unknown=Reflect.get(option.shape,fieldName);return candidate instanceof z.ZodType&&candidate.safeParse(value).success;});if(!allowed)throw Error("native_onboarding_workflow_action_field_required");
+   }
    else throw Error("native_onboarding_workflow_path_required");
   }else throw Error("native_onboarding_workflow_path_required");
  }catch{context.addIssue({code:"custom",path:[path],message:"native_onboarding_workflow_path_required"});}
