@@ -1,3 +1,11 @@
+import {validateOnboardingConfiguration} from "../domain/onboarding-configuration";
+import {onboardingConfigurationDraftSchema,onboardingConfigurationReviewSchema,type OnboardingConfigurationDraft} from "../domain/onboarding-configuration-review";
+import {nativeOnboardingOperatingProfileHead} from "@/platform/onboarding/property-source";
+import {onboardingCurrentTeamMetadata,readCurrentOnboardingTeamSources} from "./onboarding-team-source";
+import {onboardingCurrentBookingChannelsMetadata,readCurrentOnboardingBookingChannelSources} from "./onboarding-booking-channels-source";
+import {onboardingInventorySourceMetadata,readCurrentOnboardingInventorySources} from "./onboarding-inventory-source";
+import {onboardingServicesSourceMetadata,readCurrentOnboardingServicesSources} from "./onboarding-services-source";
+import {onboardingWorkflowsSourceMetadata,readCurrentOnboardingWorkflowsSources} from "./onboarding-workflows-source";
 import {onboardingWorkflowsOptionsSchema,onboardingWorkflowsChoicesInputSchema,onboardingWorkflowsChoicesSchema} from "../domain/onboarding-workflows-state";
 import {onboardingWorkflowsSourceContext,onboardingWorkflowsTemplateChoiceWitness} from "./onboarding-workflows-source";
 import {nativeOnboardingWorkflowsBindingHead,nativeOnboardingWorkflowsTemplatePage,nativeOnboardingWorkflowsTemplateChoiceRows} from "@/platform/onboarding/workflows-source";
@@ -403,10 +411,10 @@ export async function readOnboardingManagementAgreements(actor:AccountActorConte
  });
 }
 
-async function managementAgreementPrivateSource(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,ownerId:string,agreementId:string){
- const[head]=await nativeOnboardingManagementAgreementHeads(tx,actor.organizationId,[agreementId]);if(!head||head.propertyId!==propertyId||!["DRAFT","ACTIVE"].includes(head.status))throw new OnboardingAccessError();
+async function managementAgreementPrivateSource(actor:AccountActorContext,tx:TenantTransaction,propertyId:string,ownerId:string,agreementId:string,wholeReview=false){
+ const[head]=await nativeOnboardingManagementAgreementHeads(tx,actor.organizationId,[agreementId]);if(!head||head.propertyId!==propertyId||!(wholeReview?["DRAFT","ACTIVE","ENDED"]:["DRAFT","ACTIVE"]).includes(head.status))throw new OnboardingAccessError();
  const ruleHeads=await nativeOnboardingManagementAgreementRuleHeads(tx,actor.organizationId,head.id);
- if(ruleHeads.length!==onboardingManagementAgreementRuleKeys.length||ruleHeads.some(row=>row.scopeId!==head.id||row.scopeType!=="agreement"||!row.createdBy||!["DRAFT","ACTIVE"].includes(row.lifecycle)))throw new OnboardingConfigurationError();
+ if(ruleHeads.length!==onboardingManagementAgreementRuleKeys.length||ruleHeads.some(row=>row.scopeId!==head.id||row.scopeType!=="agreement"||!row.createdBy||!(wholeReview?["DRAFT","ACTIVE","RETIRED"]:["DRAFT","ACTIVE"]).includes(row.lifecycle)))throw new OnboardingConfigurationError();
  await authority(actor,tx,managementFinancialChecks(actor.organizationId,head.propertyId,ownerId,ruleHeads));
  const[identity]=await nativeOnboardingManagementAgreementRows(tx,actor.organizationId,[head.id]),rules=await nativeOnboardingManagementAgreementRuleRows(tx,actor.organizationId,ruleHeads.map(row=>row.id));
  if(!identity||rules.length!==ruleHeads.length||rules.some(row=>{const pin=ruleHeads.find(pin=>pin.id===row.id);return!pin||row.scopeId!==head.id||row.version!==pin.version||row.lifecycle!==pin.lifecycle||row.key!==pin.key;}))throw new OnboardingConflictError();
@@ -440,7 +448,7 @@ export async function reviewOnboardingManagementAgreementStep(actor:AccountActor
 }
 
 const managementRecordedSourceSchema=z.object({agreement:z.object({id:uuid,propertyId:uuid}).passthrough(),rules:z.array(z.object({id:uuid,key:z.enum(onboardingManagementAgreementRuleKeys),version:z.number().int().positive(),scopeType:z.literal("agreement"),scopeId:uuid}).passthrough()).length(onboardingManagementAgreementRuleKeys.length)}).passthrough();
-function managementRecordedSource(row:Row){
+function managementRecordedSource(row:Pick<Row,"step"|"propertyId"|"sourceSnapshot">){
  if(row.step!=="MANAGEMENT_AGREEMENT"||!row.propertyId)throw new OnboardingConflictError();
  const parsed=managementRecordedSourceSchema.safeParse(row.sourceSnapshot);if(!parsed.success||parsed.data.agreement.propertyId!==row.propertyId||parsed.data.rules.some(rule=>rule.scopeId!==parsed.data.agreement.id)||new Set(parsed.data.rules.map(rule=>rule.key)).size!==onboardingManagementAgreementRuleKeys.length)throw new OnboardingConfigurationError();return parsed.data;
 }
@@ -1060,3 +1068,39 @@ export async function readOnboardingWorkflowsTemplateChoices(actor:AccountActorC
  });
 }
 
+
+/** Every family is authorized from native metadata before any complete configuration values are requested. */
+async function configurationSourceMetadata(actor:AccountActorContext,tx:TenantTransaction,draft:OnboardingConfigurationDraft){
+ const base=await sessionContext(actor,tx,draft.sessionId,"edit",true),{repository,row:current}=base;
+ if(current.id!==draft.previousRevisionId||current.propertyId!==draft.target.propertyId||!["WORKFLOWS","REVIEW"].includes(current.step))throw new OnboardingConflictError();
+ const configured=await settings(tx,actor.organizationId,await repository.clock());if(!configured.policy.review?.modes.includes(draft.target.mode))throw new OnboardingConfigurationError();
+ await ownerRead(actor,tx,current.ownerId);const owner=await nativeOnboardingOwnerWitness(tx,actor.organizationId,current.ownerId),property=await propertyRead(actor,tx,draft.target.propertyId,current.ownerId);if(!owner)throw new OnboardingAccessError();
+ const required=["OWNER","PROPERTY","OPERATING_PROFILE","MANAGEMENT_AGREEMENT","TEAM","BOOKING_CHANNELS","INVENTORY","SERVICES","WORKFLOWS"],ancestry=(await repository.configurationStepHeads(current.sessionId,current.number)).filter(row=>required.includes(row.step));
+ if(required.some(step=>!ancestry.some(row=>row.step===step))||ancestry.some(row=>row.ownerId!==current.ownerId||row.step!=="OWNER"&&row.propertyId!==current.propertyId))throw new OnboardingConflictError();
+ const agreementRevision=ancestry.find(row=>row.step==="MANAGEMENT_AGREEMENT")!,agreementId=managementRecordedSource(agreementRevision).agreement.id,[agreementHead]=await nativeOnboardingManagementAgreementHeads(tx,actor.organizationId,[agreementId]),agreementRules=agreementHead?await nativeOnboardingManagementAgreementRuleHeads(tx,actor.organizationId,agreementId):[];
+ if(agreementHead&&agreementHead.propertyId!==current.propertyId)throw new OnboardingAccessError();await authority(actor,tx,managementFinancialChecks(actor.organizationId,property.id,current.ownerId,agreementRules));
+ const operatingProfileHead=await nativeOnboardingOperatingProfileHead(tx,actor.organizationId,property.id),configuration=new ConfigRuleRepository(tx,actor.organizationId),now=await repository.clock();let operatingRule:Awaited<ReturnType<ConfigRuleRepository["sourceMetadataWitness"]>>|null=null;
+ if(operatingProfileHead?.midStayCleaningEnabled&&operatingProfileHead.midStayCleaningRuleKey==="ops.mid_stay_threshold"){
+  const scopes=await new ReservationConfigScopeRepository(tx,actor.organizationId).scopes({propertyId:property.id,ownerId:current.ownerId,asOf:now}),selected=await configuration.resolveMetadata({key:"ops.mid_stay_threshold",scopes,asOf:now});operatingRule=selected?await configuration.sourceMetadataWitness(selected.id):null;
+  const scope={organizationId:actor.organizationId,propertyId:property.id,ownerId:current.ownerId,city:property.cityId,region:property.regionId};await authority(actor,tx,(["view","export"]as const).flatMap(action=>[{action,resource:{...scope,type:"config_rule",id:"ops.mid_stay_threshold",status:"ACTIVE",occurredAt:now}},...operatingRule?[{action,resource:{...scope,type:"config_rule",id:operatingRule.id,status:operatingRule.lifecycle,occurredAt:operatingRule.createdAt}}]:[]]));
+ }
+ const team=await onboardingCurrentTeamMetadata(actor,tx,property.id),channels=await onboardingCurrentBookingChannelsMetadata(actor,tx,property.id),inventory=await onboardingInventorySourceMetadata(actor,tx,property.id,current.ownerId,null),services=await onboardingServicesSourceMetadata(actor,tx,property.id,current.ownerId,null),workflows=await onboardingWorkflowsSourceMetadata(actor,tx,property.id,current.ownerId,null);
+ const source={source:"CORE_ONBOARDING_COMPLETE_CONFIGURATION",parent:propertySnapshot(owner,property,null),ancestry,agreement:agreementHead??null,agreementRules,operatingProfileHead,operatingRule,team:{pins:team.pins,fingerprint:team.fingerprint},bookingChannels:{pins:channels.heads,fingerprint:channels.fingerprint},inventory:{rule:inventory.rule,binding:inventory.binding,templates:inventory.templates,scopes:inventory.scopes,fingerprint:inventory.fingerprint},services:{rule:services.rule,binding:services.binding,templates:services.templates,scopes:services.scopes,fingerprint:services.fingerprint},workflows:{rules:workflows.rules,binding:workflows.binding,templates:workflows.templates,scopes:workflows.scopes,fingerprint:workflows.fingerprint}};
+ return{repository,current,configured,owner,property,agreementId,agreementHead,agreementRules,source,fingerprint:commandFingerprint(source)};
+}
+async function configurationValues<T>(read:()=>Promise<T>):Promise<T|null>{try{return await read();}catch(error){if(error instanceof z.ZodError||error instanceof OnboardingConfigurationError)return null;throw error;}}
+async function configurationDraftContext(actor:AccountActorContext,tx:TenantTransaction,draft:OnboardingConfigurationDraft){
+ const base=await configurationSourceMetadata(actor,tx,draft),{current,property}=base,identity=await nativeOnboardingOwnerIdentity(tx,actor.organizationId,current.ownerId),[physical]=await nativeOnboardingPropertyRows(tx,actor.organizationId,[property.id]);if(!identity||!physical)throw new OnboardingConflictError();
+ let operatingProfile=null,operatingRule=null;try{operatingProfile=await nativeOnboardingOperatingProfile(tx,actor.organizationId,property.id);if(operatingProfile)operatingRule=await nativeOnboardingOperatingRule(tx,actor.organizationId,property.id,current.ownerId,operatingProfile,await base.repository.clock());}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof Error&&error.message.startsWith("native_onboarding_")))throw error;}
+ let agreement=null,agreementInvalid=false;if(base.agreementHead&&base.agreementRules.length===onboardingManagementAgreementRuleKeys.length){try{agreement=(await managementAgreementPrivateSource(actor,tx,property.id,current.ownerId,base.agreementId,true)).agreement;}catch(error){if(!(error instanceof OnboardingConfigurationError))throw error;agreementInvalid=true;}}
+ const team=await configurationValues(()=>readCurrentOnboardingTeamSources(actor,tx,property.id)),bookingChannels=await configurationValues(()=>readCurrentOnboardingBookingChannelSources(actor,tx,property.id)),inventory=await configurationValues(()=>readCurrentOnboardingInventorySources(actor,tx,property.id,current.ownerId)),services=await configurationValues(()=>readCurrentOnboardingServicesSources(actor,tx,property.id,current.ownerId)),workflows=await configurationValues(()=>readCurrentOnboardingWorkflowsSources(actor,tx,property.id,current.ownerId)),after=await configurationSourceMetadata(actor,tx,draft);
+ if(base.fingerprint!==after.fingerprint||commandFingerprint(base.configured.snapshot)!==commandFingerprint(after.configured.snapshot))throw new OnboardingConflictError();
+ const validation=validateOnboardingConfiguration({sessionId:current.sessionId,ownerId:current.ownerId,propertyId:property.id,owner:nativeOwnerIdentityProjection(identity),property:nativeOnboardingPropertyProjection(physical),operatingProfile,operatingRule:nativeOperatingRuleProjection(operatingRule?{...operatingRule.pin,value:operatingRule.value}:null),agreement:agreementInvalid?{invalidSource:true}:agreement,team:team?.snapshot??{invalidSource:true},bookingChannels:bookingChannels?.snapshot??{invalidSource:true},inventory:inventory?.snapshot??{invalidSource:true},services:services?.snapshot??{invalidSource:true},workflows:workflows?.snapshot??{invalidSource:true}},after.configured.policy,await base.repository.clock()),reviewFingerprint=commandFingerprint({protocol,draft,source:after.source,validation,policy:after.configured.snapshot,authorizationCap:captureAuthorizationCap(actor.authContext)});
+ return{...after,validation,reviewFingerprint,originalSources:inventory&&services&&workflows?{inventory:{ruleValue:inventory.originalRuleValue,templates:inventory.originalTemplateValues},services:{ruleValue:services.originalRuleValue,templates:services.originalTemplateValues},workflows:{ruleValues:workflows.originalRuleValues,templates:workflows.originalTemplateValues},operatingRule:operatingRule?.value??null}:null};
+}
+export async function reviewOnboardingConfiguration(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
+ const ctx=actorContext(actor),draft=onboardingConfigurationDraftSchema.parse(raw);await spendRead(ctx,deps,draft.sessionId);return withTenant(deps.db,ctx.organizationId,async tx=>{
+  const base=await configurationDraftContext(ctx,tx,draft);await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"onboarding.step_reviewed",resourceType:"onboarding",resourceId:draft.sessionId,propertyScopeId:base.property.id,after:{step:"REVIEW",reviewFingerprint:base.reviewFingerprint,sourceFingerprint:base.fingerprint,ready:base.validation.ready,issueCount:base.validation.issues.length},requestId:deps.requestId??randomUUID(),occurredAt:await base.repository.clock()});
+  const final=await configurationDraftContext(ctx,tx,draft);if(base.reviewFingerprint!==final.reviewFingerprint)throw new OnboardingConflictError();return onboardingConfigurationReviewSchema.parse(present({...ctx.authContext,visibleDataClasses:new Set(["personal","financial"]as const)},"export",{...resource(ctx.organizationId,final.current),data:{draft,validation:final.validation,reviewFingerprint:final.reviewFingerprint}},{},await final.repository.clock()));
+ });
+}

@@ -484,6 +484,10 @@ export class CoreRepository {
       FROM property p WHERE p.organization_id=${this.organizationId}::uuid AND p.id=ANY(${[...ids]}::uuid[]) AND (${includeArchived}::boolean OR p.archived_at IS NULL) ORDER BY p.id`);
   }
 
+  async onboardingOperatingProfileHead(propertyId:string){
+    const rows=await this.tx.$queryRaw<Array<{id:string;midStayCleaningEnabled:boolean;midStayCleaningRuleKey:string|null;xmin:string;tuple:string}>>(Prisma.sql`SELECT id,mid_stay_cleaning_enabled AS "midStayCleaningEnabled",mid_stay_cleaning_rule_key AS "midStayCleaningRuleKey",xmin::text,ctid::text AS tuple FROM property_operating_profile WHERE organization_id=${this.organizationId}::uuid AND property_id=${propertyId}::uuid`);return rows[0]??null;
+  }
+
   async lockOnboardingProperty(propertyId:string){
     await this.tx.$queryRaw(Prisma.sql`SELECT id FROM property WHERE organization_id=${this.organizationId}::uuid AND id=${propertyId}::uuid AND archived_at IS NULL FOR UPDATE`);
     await this.tx.$queryRaw(Prisma.sql`SELECT id FROM property_owner WHERE organization_id=${this.organizationId}::uuid AND property_id=${propertyId}::uuid AND archived_at IS NULL ORDER BY id FOR UPDATE`);
