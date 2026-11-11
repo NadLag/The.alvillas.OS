@@ -1,0 +1,39 @@
+import {z} from "zod";
+import {isDeepStrictEqual} from "node:util";
+import {encryptBytes,decryptBytes} from "@/platform/auth/secret-encryption";
+import {requirePrivatePayloadKeys} from "@/platform/auth/private-payload-keys";
+import {canonicalOnboardingServicesSettings,projectOnboardingServicesSettings,onboardingServicesCanonicalValueSchema,onboardingServicesTemplateValuesSchema} from "@/platform/onboarding/contracts";
+import {onboardingPayloadBindingSchema} from "./onboarding-payload";
+import {onboardingOwnerSchema,OnboardingConfigurationError} from "./onboarding-wizard";
+import {onboardingMaximumCatalogRecordBytes} from "@/platform/onboarding/limits";
+import {onboardingPropertySnapshotSchema} from "./onboarding-property";
+import {canonicalOnboardingServicesCommand,onboardingServicesSnapshotSchema,type OnboardingServicesCommand,type OnboardingServicesSnapshot} from "./onboarding-services";
+
+const bindingSchema=onboardingPayloadBindingSchema.extend({propertyId:z.uuid().transform(value=>value.toLowerCase())}).strict();
+export type OnboardingServicesPayloadBinding=z.infer<typeof bindingSchema>;
+// Two complete 200-item multilingual rules and two selected/bound templates must fit;
+// this encrypted-history ceiling does not increase the original HTTP request limit.
+export const onboardingMaximumServicesPayloadBytes=onboardingMaximumCatalogRecordBytes;
+const retained=z.object({propertyId:onboardingServicesSnapshotSchema.shape.propertyId,rule:onboardingServicesSnapshotSchema.shape.rule,template:onboardingServicesSnapshotSchema.shape.template,templateRevision:onboardingServicesSnapshotSchema.shape.templateRevision,value:z.unknown()}).strict();
+const payloadSchema=z.object({command:z.unknown(),originalOwner:onboardingOwnerSchema,originalProperty:onboardingPropertySnapshotSchema,previous:retained,original:retained,templates:z.array(z.object({id:z.uuid().transform(value=>value.toLowerCase()),values:z.unknown()}).strict()).max(2)}).strict();
+type Retained=z.infer<typeof retained>;
+type Input={command:OnboardingServicesCommand;originalOwner:z.infer<typeof onboardingOwnerSchema>;originalProperty:z.infer<typeof onboardingPropertySnapshotSchema>;previousServices:OnboardingServicesSnapshot;originalServices:OnboardingServicesSnapshot;previousRuleValue:unknown;originalRuleValue:unknown;templates:Array<{id:string;values:unknown}>};
+function context(raw:OnboardingServicesPayloadBinding){const b=bindingSchema.parse(raw);return JSON.stringify(["alvillas-private-property-onboarding-services-v1",b.organizationId,b.sessionId,b.revisionId,b.ownerId,b.propertyId,b.createdBy,b.commandKey,b.policyId,b.policyVersion]);}
+function snapshot(value:Retained){if(value.rule===null){if(value.value!==null)throw new OnboardingConfigurationError();}else if(!onboardingServicesCanonicalValueSchema.safeParse(value.value).success)throw new OnboardingConfigurationError();return onboardingServicesSnapshotSchema.parse({propertyId:value.propertyId,rule:value.rule,template:value.template,templateRevision:value.templateRevision,settings:value.rule===null?null:projectOnboardingServicesSettings(value.value)});}
+function retain(value:OnboardingServicesSnapshot,raw:unknown){const metadata={propertyId:value.propertyId,rule:value.rule,template:value.template,templateRevision:value.templateRevision,value:raw};if(!isDeepStrictEqual(snapshot(metadata),onboardingServicesSnapshotSchema.parse(value)))throw new OnboardingConfigurationError();return metadata;}
+function bound(raw:unknown,binding:OnboardingServicesPayloadBinding){
+ const value=payloadSchema.parse(raw),command=canonicalOnboardingServicesCommand(value.command),b=bindingSchema.parse(binding),previousServices=snapshot(value.previous),originalServices=snapshot(value.original),ids=new Set(value.templates.map(row=>row.id)),needed=new Set([previousServices.template?.id,originalServices.template?.id,...command.target.mode==="TEMPLATE"?[command.target.templateVersionId]:[]].filter((id):id is string=>id!==undefined));
+ if(command.sessionId!==b.sessionId||command.idempotencyKey!==b.commandKey||command.target.propertyId!==b.propertyId||value.originalProperty.id!==b.propertyId||!["DRAFT","ONBOARDING"].includes(value.originalProperty.status)||previousServices.propertyId!==b.propertyId||originalServices.propertyId!==b.propertyId||!originalServices.rule||!originalServices.settings||ids.size!==value.templates.length||ids.size!==needed.size||[...needed].some(id=>!ids.has(id)))throw new OnboardingConfigurationError();
+ for(const row of value.templates)if(!onboardingServicesTemplateValuesSchema.safeParse(row.values).success)throw new OnboardingConfigurationError();
+ if(command.target.mode==="CUSTOM"){
+  if(originalServices.rule.scopeType!=="property"||originalServices.rule.scopeId!==b.propertyId||originalServices.rule.createdBy!==b.createdBy||!isDeepStrictEqual(value.original.value,canonicalOnboardingServicesSettings(command.target.settings))||!isDeepStrictEqual(previousServices.template,originalServices.template)||previousServices.templateRevision!==originalServices.templateRevision)throw new OnboardingConfigurationError();
+ }else if(command.target.mode==="TEMPLATE"){if(originalServices.template?.id!==command.target.templateVersionId||command.target.expectedRevision!==(previousServices.templateRevision??0)||originalServices.templateRevision!==command.target.expectedRevision+1)throw new OnboardingConfigurationError();}
+ else if(previousServices.rule?.id!==command.target.ruleId||!isDeepStrictEqual(previousServices,originalServices)||!isDeepStrictEqual(value.previous.value,value.original.value))throw new OnboardingConfigurationError();
+ if(previousServices.rule?.id===originalServices.rule.id&&(!isDeepStrictEqual(previousServices.rule,originalServices.rule)||!isDeepStrictEqual(value.previous.value,value.original.value)))throw new OnboardingConfigurationError();
+ return{command,originalOwner:value.originalOwner,originalProperty:value.originalProperty,previousServices,originalServices,previousRuleValue:value.previous.value,originalRuleValue:value.original.value,templates:value.templates};
+}
+function storage(value:Input){return{command:value.command,originalOwner:value.originalOwner,originalProperty:value.originalProperty,previous:retain(value.previousServices,value.previousRuleValue),original:retain(value.originalServices,value.originalRuleValue),templates:value.templates};}
+export function encryptOnboardingServicesPayload(input:Input,binding:OnboardingServicesPayloadBinding,env:NodeJS.ProcessEnv=process.env){requirePrivatePayloadKeys(env,true,()=>new OnboardingConfigurationError());const raw=storage(input);bound(raw,binding);const bytes=Buffer.from(JSON.stringify(raw),"utf8");try{if(bytes.length>onboardingMaximumServicesPayloadBytes)throw new OnboardingConfigurationError();const cipher=encryptBytes(bytes,context(binding),env);if(cipher.byteLength>onboardingMaximumServicesPayloadBytes){cipher.fill(0);throw new OnboardingConfigurationError();}return cipher;}finally{bytes.fill(0);}}
+export function decryptOnboardingServicesPayload(cipher:Uint8Array,binding:OnboardingServicesPayloadBinding,env:NodeJS.ProcessEnv=process.env){requirePrivatePayloadKeys(env,false,()=>new OnboardingConfigurationError());if(cipher.byteLength>onboardingMaximumServicesPayloadBytes)throw new OnboardingConfigurationError();const bytes=decryptBytes(cipher,context(binding),env);try{return bound(JSON.parse(bytes.toString("utf8")),binding);}finally{bytes.fill(0);}}
+/** Complete raw rules and template values remain encrypted; public history contains only registered catalog fields. */
+export function presentOnboardingServicesPayload(value:ReturnType<typeof decryptOnboardingServicesPayload>){return{command:value.command,originalOwner:value.originalOwner,originalProperty:value.originalProperty,previousServices:value.previousServices,originalServices:value.originalServices};}
