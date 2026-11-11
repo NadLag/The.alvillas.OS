@@ -21,7 +21,7 @@ export async function onboardingHttp(request:NextRequest,work:(actor:AccountActo
   const value=await work(actor,input,requestId),response=NextResponse.json(value,{headers});
   if(["/api/onboarding/read","/api/onboarding/review"].includes(request.nextUrl.pathname)){
    const step=value!==null&&typeof value==="object"&&"draft"in value&&value.draft!==null&&typeof value.draft==="object"&&"step"in value.draft?value.draft.step:null;
-   if(step==="WORKFLOWS")response.headers.set("x-alvillas-onboarding-record-step","WORKFLOWS");
+   if(step==="WORKFLOWS"||step==="REVIEW")response.headers.set("x-alvillas-onboarding-record-step",step);
   }
   return response;
  }catch(error){

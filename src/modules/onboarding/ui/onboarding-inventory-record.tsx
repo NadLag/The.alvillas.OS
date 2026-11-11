@@ -9,7 +9,7 @@ import {OnboardingPropertyRecord} from "./onboarding-property-record";
 
 type Settings=NonNullable<OnboardingInventorySnapshot["settings"]>;
 type Review=z.infer<typeof onboardingInventoryReviewSchema>;
-function InventorySettings({settings}:{settings:Settings|null}){
+export function InventorySettings({settings}:{settings:Settings|null}){
  const t=useTranslations("OnboardingWizard"),locale=safeLocale(useLocale());
  if(!settings)return <p>{t("inventory.noConfiguration")}</p>;
  if(!settings.minimums.length)return <p>{t("inventory.noItems")}</p>;
