@@ -3,8 +3,11 @@ import { paymentMethodPolicyKey, paymentMethodPolicySchema } from "@/modules/fin
 import { financialAttachmentPolicyKey, financialAttachmentPolicySchema } from "@/modules/finance/domain/financial-attachment-policy";
 import { emailPolicyKey, emailPolicySchema } from "@/platform/notifications/delivery";
 import { z } from "zod";
+import {commissionConfigKey,agreementNoticeConfigKey,agreementResponsibilitiesConfigKey,agreementSpecialConditionsConfigKey} from "./management-agreement-keys";
+export {commissionConfigKey,agreementNoticeConfigKey,agreementResponsibilitiesConfigKey,agreementSpecialConditionsConfigKey} from "./management-agreement-keys";
 import {leadCapturePolicyKey,leadCapturePolicySchema} from "@/modules/crm/domain/lead-capture";
 import {onboardingPolicyKey,onboardingPolicySchema} from "@/modules/onboarding/domain/onboarding-policy";
+import {onboardingOwnerPackagePolicyKey,onboardingOwnerPackagePolicySchema,onboardingOwnerPackageContentKey,onboardingOwnerPackageContentSchema} from "@/modules/onboarding/domain/onboarding-owner-package-policy";
 import {leadPipelinePolicyKey,leadPipelinePolicySchema} from "@/modules/crm/domain/lead-pipeline";
 import {leadProfilePolicyKey,leadProfilePolicySchema} from "@/modules/crm/domain/lead-profile";
 import {leadWorkPolicyKey,leadWorkPolicySchema} from "@/modules/crm/domain/lead-work";
@@ -105,10 +108,6 @@ export const checklistCatalogSchema = z.object({
   }).strict()).min(1).max(100)
 }).refine(v => new Set(v.checklists.map(c => c.key)).size === v.checklists.length, "Checklist keys must be unique");
 
-export const commissionConfigKey = "finance.commission";
-export const agreementNoticeConfigKey = "agreement.notice";
-export const agreementResponsibilitiesConfigKey = "agreement.responsibilities";
-export const agreementSpecialConditionsConfigKey = "agreement.special_conditions";
 export const reservationTaskTemplatesConfigKey = "ops.reservation_task_templates";
 
 export const commissionBasisSchema = z.enum([
@@ -382,6 +381,8 @@ export const configRuleSchemas = {
   [financialAttachmentPolicyKey]:financialAttachmentPolicySchema,
   [leadCapturePolicyKey]:leadCapturePolicySchema,
   [onboardingPolicyKey]:onboardingPolicySchema,
+  [onboardingOwnerPackagePolicyKey]:onboardingOwnerPackagePolicySchema,
+  [onboardingOwnerPackageContentKey]:onboardingOwnerPackageContentSchema,
   [leadPipelinePolicyKey]:leadPipelinePolicySchema,
   [leadProfilePolicyKey]:leadProfilePolicySchema,
   [leadWorkPolicyKey]:leadWorkPolicySchema,
