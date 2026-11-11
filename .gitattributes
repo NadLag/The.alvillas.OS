@@ -152,3 +152,4 @@ prisma/migrations/20261108063000_native_lead_profile_history/migration.sql text 
 
 # Preserve migration 235's exact admitted bytes across Windows and CI.
 /prisma/migrations/20261111180000_native_onboarding_activation_requests/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/prisma/migrations/20261111180500_native_onboarding_activation_tenant_policy_names/migration.sql text eol=lf
