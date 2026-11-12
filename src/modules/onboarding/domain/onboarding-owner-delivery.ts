@@ -8,8 +8,13 @@ import {OnboardingConfigurationError} from "./onboarding-wizard";
 
 const locale=z.enum(["en","fr","ar"]),id=onboardingIdSchema;
 export const onboardingOwnerDeliveryProtocol="NATIVE_OWNER_PACKAGE_EMAIL_V1";
+export const onboardingOwnerDeliveryRequested="onboarding.owner_package.delivery_requested";
 export const onboardingOwnerDeliveryDraftSchema=z.object({packageId:id}).strict();
 export const onboardingOwnerDeliveryCommandSchema=onboardingOwnerDeliveryDraftSchema.extend({idempotencyKey:id,reviewFingerprint:onboardingFingerprintSchema,reason:ownerPackageDocumentReasonSchema});
+export const onboardingOwnerDeliveryRecoverySchema=onboardingOwnerDeliveryDraftSchema.extend({idempotencyKey:id});
+export const onboardingOwnerDeliveryReceiptSchema=z.object({recorded:z.literal(true),id,packageId:id,idempotencyKey:id,requestedAt:z.iso.datetime(),locale:z.enum(["en","fr","ar"]),deliveryRecordId:id.nullable(),state:z.enum(["PENDING","ACCEPTED","DELIVERED","FAILED","BOUNCED","COMPLAINED","SUPPRESSED"]),acceptedAt:z.iso.datetime().nullable(),deliveredAt:z.iso.datetime().nullable(),replayed:z.boolean()}).strict().superRefine((value,context)=>{
+ if(["ACCEPTED","DELIVERED"].includes(value.state)&&(!value.deliveryRecordId||!value.acceptedAt)||value.state==="DELIVERED"&&!value.deliveredAt)context.addIssue({code:"custom",message:"actual_canonical_owner_email_acceptance_and_verified_delivery_required"});
+});
 export const onboardingOwnerDeliverySourceSchema=z.object({
  protocol:z.literal(onboardingOwnerDeliveryProtocol),organizationId:id,packageId:id,sessionId:id,reviewRevisionId:id,ownerId:id,propertyId:id,nativePackageFingerprint:onboardingFingerprintSchema,
  ownerName:z.string().min(1),ownerEmail:z.string().email(),ownerLocale:locale,propertyName:z.string().min(1),policy:onboardingOwnerDeliveryPolicySchema,
