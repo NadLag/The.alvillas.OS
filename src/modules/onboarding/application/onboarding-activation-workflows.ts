@@ -1,4 +1,5 @@
 import {nativeOnboardingActivationWorkflowSource,recheckOnboardingActivationWorkflowSource} from "./onboarding-activation-workflow-source";
+import {onboardingMaximumConfigurationRecordBytes} from "@/platform/onboarding/limits";
 import {authorizeCollection} from "@/platform/authz/authorize";
 import {withTenant} from "@/platform/db/tenant";
 import {recheckAccountAuthorization} from "@/platform/authz/current-authority";
