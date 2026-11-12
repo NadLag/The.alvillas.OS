@@ -1208,6 +1208,11 @@ export async function admitOnboardingActivation(actor:AccountActorContext,raw:un
 export async function recoverOnboardingActivation(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
  const ctx=actorContext(actor),input=recoverInput.parse(raw);await spendRead(ctx,deps,input.sessionId);return withTenant(deps.db,ctx.organizationId,async tx=>{const native=new OnboardingRepository(tx,ctx.organizationId),runs=new OnboardingActivationRepository(tx,ctx.organizationId);await native.lockCommand(input.idempotencyKey);const row=await runs.byNonce(input.idempotencyKey);if(!row)return{recorded:false as const,activation:null};if(input.sessionId&&row.sessionId!==input.sessionId)throw new OnboardingAccessError();return{recorded:true as const,activation:await recoverActivationExisting(ctx,tx,row,deps)};});
 }
+/** Readiness consumes the actual protected run and native operational revision, never a client completion claim. */
+export async function nativeOnboardingActivationEvidence(actor:AccountActorContext,tx:TenantTransaction,input:{sessionId:string;reviewRevisionId:string},deps:OnboardingDependencies){
+ const ctx=actorContext(actor),row=await new OnboardingActivationRepository(tx,ctx.organizationId).currentForSession(input.sessionId);if(!row)return null;if(row.reviewRevisionId!==input.reviewRevisionId)throw new OnboardingConflictError();
+ for(const principal of[ctx,{...ctx,authContext:restoreAuthorizationCap(row.authorizationCap)}])await activationRecordedContext(principal,tx,row);retainedActivation(row,deps);const result=await activationReceipt(tx,row,true),[property]=await nativeOnboardingPropertyHeads(tx,ctx.organizationId,[row.propertyId],true);return{receipt:result,operational:result.state==="COMPLETE"&&property?.status==="ACTIVE"&&!property.archivedAt};
+}
 function retainedConfiguration(row:Row,env?:NodeJS.ProcessEnv){const value=decryptOnboardingConfigurationPayload(row.encryptedPayload,configurationBinding(row),env);if(value.command.reviewFingerprint!==row.reviewFingerprint||!isDeepStrictEqual(value.policySnapshot,row.policySnapshot))throw new OnboardingConfigurationError();return value;}
 async function configurationRecordedAuthority(actor:AccountActorContext,tx:TenantTransaction,row:Row){
  if(jsonbFingerprint(row.sourceSnapshot)!==row.sourceFingerprint)throw new OnboardingConfigurationError();
