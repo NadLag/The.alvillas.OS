@@ -1214,9 +1214,13 @@ export async function nativeOnboardingActivationEvidence(actor:AccountActorConte
  for(const principal of[ctx,{...ctx,authContext:restoreAuthorizationCap(row.authorizationCap)}])await activationRecordedContext(principal,tx,row);retainedActivation(row,deps);const result=await activationReceipt(tx,row,true),[property]=await nativeOnboardingPropertyHeads(tx,ctx.organizationId,[row.propertyId],true);return{receipt:result,operational:result.state==="COMPLETE"&&property?.status==="ACTIVE"&&!property.archivedAt};
 }
 /** Internal worker composition restores the original creator cap and rechecks actual current approval/configuration. */
-export async function nativeOnboardingActivationAccess(organizationId:string,tx:TenantTransaction,activationId:string){
+export async function nativeOnboardingActivationReference(organizationId:string,tx:TenantTransaction,activationId:string){
  const runs=new OnboardingActivationRepository(tx,organizationId),row=await runs.byId(activationId);if(!row)throw new OnboardingAccessError();const cap=restoreAuthorizationCap(row.authorizationCap);if(cap.organizationId!==organizationId||cap.userAccountId!==row.createdBy)throw new OnboardingAccessError();const actor=actorContext({organizationId,actorId:row.createdBy,authContext:cap}),event=await new OutboxRepository(tx,organizationId).byIdempotencyKey("onboarding.activation:"+row.id),head=await runs.head(row.id);
- if(!event||event.type!==onboardingActivationRequested||event.occurredAt.getTime()!==row.createdAt.getTime()||!isDeepStrictEqual(event.payload,{sessionId:row.sessionId,activationId:row.id,reviewRevisionId:row.reviewRevisionId,propertyId:row.propertyId})||!head||["FAILED","ACTIVATED"].includes(head.type))throw new OnboardingConflictError();
+ if(!event||event.type!==onboardingActivationRequested||event.occurredAt.getTime()!==row.createdAt.getTime()||!isDeepStrictEqual(event.payload,{sessionId:row.sessionId,activationId:row.id,reviewRevisionId:row.reviewRevisionId,propertyId:row.propertyId})||!head)throw new OnboardingConflictError();
+ return{row,actor,event,head};
+}
+export async function nativeOnboardingActivationAccess(organizationId:string,tx:TenantTransaction,activationId:string){
+ const {row,actor,event,head}=await nativeOnboardingActivationReference(organizationId,tx,activationId);if(["FAILED","ACTIVATED"].includes(head.type))throw new OnboardingConflictError();
  const recorded=await activationRecordedContext(actor,tx,row),[property]=await nativeOnboardingPropertyHeads(tx,organizationId,[row.propertyId],true);if(!property)throw new OnboardingAccessError();const current=await authority(actor,tx,[{action:"approve",resource:resource(organizationId,recorded.review)},{action:"edit",resource:resource(organizationId,recorded.review)},{action:"edit",resource:propertyResource(organizationId,property,row.ownerId)}]);return{row,actor,event,property,current};
 }
 /** Private activation payloads are read only after the original and current metadata authority checks. */
