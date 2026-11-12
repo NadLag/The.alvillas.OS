@@ -2,6 +2,8 @@ import type { OutboxEvent as PrismaOutboxEvent } from "@prisma/client";
 import type { OutboxHandlers } from "@/platform/events/outbox-dispatcher";
 import type { EmailProvider } from "@/platform/providers";
 import { deliverEmail } from "@/platform/notifications/email-delivery-service";
+import {onboardingOwnerEmailEvent} from "./onboarding-owner-email";
+import type {DocumentObjectStore} from "@/modules/documents/infrastructure/document-object-store";
 import { notificationChannelEventType } from "@/platform/notifications/notification-channel-service";
 import { deliverNotificationEvent } from "@/platform/notifications/notification-service";
 import { notificationEventType } from "@/platform/notifications/notification";
@@ -87,7 +89,7 @@ export function createInngestOutboxHandlers(
   env: InngestEnv = process.env,
   transport: InngestTransport = fetch,
   emailProvider?: EmailProvider,
-  deps: { db?: TenantTransactionRunner; now?: Date } = {}
+  deps: { db?: TenantTransactionRunner; now?: Date;objects?:DocumentObjectStore } = {}
 ): OutboxHandlers {
   const handler = (event: PrismaOutboxEvent) => createInngestOutboxHandler(env, transport)(event);
   const identityDelivery = async (event: PrismaOutboxEvent) => {
@@ -108,6 +110,7 @@ export function createInngestOutboxHandlers(
     [notificationEventType]: async (event) => { await deliverNotificationEvent(event, { db: deps.db }); },
     "identity.invitation.delivery_requested": identityDelivery,
     "identity.recovery.delivery_requested": identityDelivery,
+    [onboardingOwnerEmailEvent]: async event=>{await deliverEmail(event,{db:deps.db,env,now:deps.now,provider:emailProvider,objects:deps.objects});},
     "*": async (event) => {
       await handler(event);
     }

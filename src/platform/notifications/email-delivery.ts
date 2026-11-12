@@ -1,4 +1,5 @@
 import { EmailRequestError } from "@/platform/providers/real";
+import {EmailAttachmentValidationError} from "@/platform/providers/email-attachments";
 export {recipientKey} from "./email-recipient";
 
 export function emailIdempotencyKey(event: { type: string; organizationId: string; id: string }) {
@@ -6,6 +7,7 @@ export function emailIdempotencyKey(event: { type: string; organizationId: strin
 }
 
 export function emailFailure(error: unknown) {
+  if(error instanceof EmailAttachmentValidationError)return{status:null,retryable:false,code:"provider_rejected",retryAfterMs:0};
   const status = error instanceof EmailRequestError ? error.status : null;
   const conflict = error instanceof EmailRequestError && error.code === "invalid_idempotent_request";
   return { status, retryable: !conflict && (status === null || status === 408 || status === 409 || status === 429 || status >= 500),

@@ -14,8 +14,12 @@ import { NotificationRepository } from "./notification-repository";
 import { channelPayloadSchema, resolveNotificationChannel } from "./notification-channel-service";
 import { emailFailure, recipientKey, emailIdempotencyKey } from "./email-delivery";
 import { deliveryAudit } from "./delivery-service";
+import {onboardingOwnerEmailEvent} from "@/platform/events/onboarding-owner-email";
+import type {DocumentObjectStore} from "@/modules/documents/infrastructure/document-object-store";
+import type {OnboardingOwnerEmailCapture} from "./onboarding-owner-email-source";
+import type * as NativeOwnerEmailSourceModule from "./onboarding-owner-email-source";
 
-export async function deliverEmail(event: OutboxEvent, deps: { db?: TenantTransactionRunner; now?: Date; env?: Record<string, string | undefined>; provider?: EmailProvider } = {}) {
+export async function deliverEmail(event: OutboxEvent, deps: { db?: TenantTransactionRunner; now?: Date; env?: Record<string, string | undefined>; provider?: EmailProvider;objects?:DocumentObjectStore } = {}) {
   const db = deps.db ?? prisma; const env = deps.env ?? process.env; const now = deps.now ?? new Date();
   const id = await withTenant(db, event.organizationId, async (tx) => {
     const repository = new DeliveryRepository(tx, event.organizationId); const stored = await repository.event(event.id);
@@ -23,10 +27,13 @@ export async function deliverEmail(event: OutboxEvent, deps: { db?: TenantTransa
     const payload = stored.payload as Record<string, unknown>;
     const accountId = payload.recipientId ?? payload.userAccountId;
     if (accountId !== undefined && !z.uuid().safeParse(accountId).success) throw new Error("email_recipient_invalid");
-    if (!["notification.channel.requested", "identity.invitation.delivery_requested", "identity.recovery.delivery_requested"].includes(stored.type) || payload.channel !== "email") throw new Error("email_event_invalid");
+    if (!["notification.channel.requested", "identity.invitation.delivery_requested", "identity.recovery.delivery_requested",onboardingOwnerEmailEvent].includes(stored.type) || payload.channel !== "email") throw new Error("email_event_invalid");
     return (await repository.ensure(event.id, accountId as string | undefined ?? null, typeof payload.kind === "string" ? payload.kind : stored.type)).id;
   });
   if (!id) return;
+  const native=event.type===onboardingOwnerEmailEvent,nativeEnv:NodeJS.ProcessEnv={...env,NODE_ENV:env.NODE_ENV==="production"?"production":env.NODE_ENV==="test"?"test":env.NODE_ENV==="development"?"development":process.env.NODE_ENV},encryptionEnv=native?nativeEnv:process.env;
+  let nativeSource:typeof NativeOwnerEmailSourceModule|undefined,nativeCapture:OnboardingOwnerEmailCapture|undefined,nativeFailure:ReturnType<typeof NativeOwnerEmailSourceModule.onboardingOwnerEmailFailure>|undefined;
+  if(native){nativeSource=await import("./onboarding-owner-email-source");try{nativeCapture=await nativeSource.captureOnboardingOwnerEmail(event,{db,env:nativeEnv,objects:deps.objects});}catch(error){nativeFailure=nativeSource.onboardingOwnerEmailFailure(error);}}
   for (const prepare of [true, false]) await withTenant(db, event.organizationId, async (tx) => {
     const repository = new DeliveryRepository(tx, event.organizationId); const row = await repository.lock(id);
     if (!row || row.status !== "PENDING" || (row.nextAttemptAt && row.nextAttemptAt > now)) return;
@@ -43,7 +50,12 @@ export async function deliverEmail(event: OutboxEvent, deps: { db?: TenantTransa
     if (!row.preparedAt && stored.attemptCount > 0 && now.getTime() >= stored.occurredAt.getTime() + policy.retryWindowHours * 3600000) { await stop("FAILED", "idempotency_window_expired"); return; }
     const notifications = new NotificationRepository(tx, event.organizationId);
     let email: Parameters<EmailProvider["send"]>[0];
-    if (stored.type === "notification.channel.requested") {
+    if(stored.type===onboardingOwnerEmailEvent){
+      if(nativeFailure){await stop(nativeFailure.status,nativeFailure.code);return;}
+      if(!nativeSource||!nativeCapture){await stop("FAILED","provider_not_configured");return;}
+      try{email=await nativeSource.validateOnboardingOwnerEmail(tx,stored,nativeCapture,{db,env:nativeEnv,objects:deps.objects});}
+      catch(error){const failure=nativeSource.onboardingOwnerEmailFailure(error);await stop(failure.status,failure.code);return;}
+    }else if (stored.type === "notification.channel.requested") {
       const payload = channelPayloadSchema.parse(stored.payload); const context = await resolveNotificationChannel(notifications, payload);
       if (!context.allowed || !context.candidate?.email || !context.destination) { await stop("SUPPRESSED", "preferences_or_access_changed"); return; }
       const origin = new URL(env.APP_URL ?? "http://localhost:3000");
@@ -72,9 +84,9 @@ export async function deliverEmail(event: OutboxEvent, deps: { db?: TenantTransa
     await repository.lockRecipient(key);
     if (await repository.suppressed(key)) { await stop("SUPPRESSED", "recipient_suppressed"); return; }
     const request = JSON.stringify({ email, sender: env.EMAIL_FROM ?? null });
-    if (row.payloadEncrypted && decryptSecret(row.payloadEncrypted) !== request) { await stop("SUPPRESSED", "content_or_recipient_changed"); return; }
+    if (row.payloadEncrypted && decryptSecret(row.payloadEncrypted,encryptionEnv) !== request) { await stop("SUPPRESSED", "content_or_recipient_changed"); return; }
     if (prepare) {
-      if (!row.payloadEncrypted) await repository.update(id, { payloadEncrypted: encryptSecret(request), recipientKey: key, preparedAt: now });
+      if (!row.payloadEncrypted) await repository.update(id, { payloadEncrypted: encryptSecret(request,encryptionEnv), recipientKey: key, preparedAt: now });
       return;
     }
     if (!row.payloadEncrypted) throw new Error("email_request_not_prepared");
@@ -103,7 +115,7 @@ export async function deliverEmail(event: OutboxEvent, deps: { db?: TenantTransa
       await repository.log(id, `attempt:${attempt}`, { outcome: "ACCEPTED", attempt, providerStatus: 200, occurredAt: now });
       await deliveryAudit(tx, event.organizationId, id, "accepted", { attempt, providerStatus: 200 });
     }
-  });
+  },native?{timeout:120000}:undefined);
   const row = await withTenant(db, event.organizationId, tx => new DeliveryRepository(tx, event.organizationId).lock(id));
   if (row?.status === "PENDING") throw new OutboxRetryError("email_delivery_retry", row.nextAttemptAt);
   if (row?.status === "FAILED") throw new OutboxRetryError("email_delivery_failed", null, true);

@@ -81,6 +81,7 @@ export async function recordDeliveryReceipt(receipt: DigestReceipt, deps: Deps =
   return withTenant(deps.db ?? prisma, organizationId, async (tx) => {
     const repository = new DeliveryRepository(tx, organizationId); const row = await repository.lock(id);
     if (!row || !["email", "digest"].includes(row.channel)) return false;
+    if((row.kind==="onboarding.owner_package")!==(receipt.data.tags.template==="onboarding_owner_package"))return false;
     if (!row.providerId) return row.status !== "PENDING";
     if (row.providerId !== receipt.data.email_id) return true;
     const key = `webhook:${receipt.eventId ?? `${receipt.type}:${receipt.created_at}`}`;
