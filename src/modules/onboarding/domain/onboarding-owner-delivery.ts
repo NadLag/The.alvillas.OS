@@ -1,5 +1,6 @@
 import {z} from "zod";
 import {ownerPackageDocumentReasonSchema} from "@/platform/documents/owner-package-contract";
+export {onboardingOwnerEmailEvent as onboardingOwnerDeliveryRequested} from "@/platform/events/onboarding-owner-email";
 import {onboardingIdSchema,onboardingFingerprintSchema} from "./onboarding-primitives";
 import {onboardingOwnerPackageReceiptSchema} from "./onboarding-owner-package-run";
 import {onboardingOwnerDeliveryPolicySchema,type OnboardingOwnerDeliveryPolicy} from "./onboarding-owner-delivery-policy";
@@ -8,7 +9,6 @@ import {OnboardingConfigurationError} from "./onboarding-wizard";
 
 const locale=z.enum(["en","fr","ar"]),id=onboardingIdSchema;
 export const onboardingOwnerDeliveryProtocol="NATIVE_OWNER_PACKAGE_EMAIL_V1";
-export const onboardingOwnerDeliveryRequested="onboarding.owner_package.delivery_requested";
 export const onboardingOwnerDeliveryDraftSchema=z.object({packageId:id}).strict();
 export const onboardingOwnerDeliveryCommandSchema=onboardingOwnerDeliveryDraftSchema.extend({idempotencyKey:id,reviewFingerprint:onboardingFingerprintSchema,reason:ownerPackageDocumentReasonSchema});
 export const onboardingOwnerDeliveryRecoverySchema=onboardingOwnerDeliveryDraftSchema.extend({idempotencyKey:id});

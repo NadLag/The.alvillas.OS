@@ -16,7 +16,7 @@ import {onboardingOwnerPackageSourceSchema} from "../domain/onboarding-owner-pac
 import {onboardingOwnerDeliveryDraftSchema,buildOnboardingOwnerDeliverySource,onboardingOwnerDeliveryProtocol} from "../domain/onboarding-owner-delivery";
 import {onboardingOwnerDeliveryPolicyKey,onboardingOwnerDeliveryPolicySchema} from "../domain/onboarding-owner-delivery-policy";
 import {OnboardingAccessError,OnboardingConflictError,OnboardingConfigurationError} from "../domain/onboarding-wizard";
-import {recoverOnboardingOwnerPackage} from "./onboarding-owner-package-service";
+import {nativeOnboardingOwnerPackageOriginal} from "./onboarding-owner-package-service";
 import {nativeOnboardingOwnerPackageSource} from "./onboarding-owner-package-source";
 import {nativeOnboardingOwnerPackageHistoryAuthority} from "./onboarding-service";
 
@@ -27,9 +27,9 @@ export async function prepareOnboardingOwnerDelivery(actor:AccountActorContext,r
   const row=await new OnboardingOwnerPackageRepository(tx,ctx.organizationId).packageById(input.packageId);if(!row||row.createdBy!==ctx.actorId)throw new OnboardingAccessError();
   await nativeOnboardingOwnerPackageHistoryAuthority(ctx,tx,{sessionId:row.sessionId,reviewRevisionId:row.reviewRevisionId});return row;
  });
- const recovered=await recoverOnboardingOwnerPackage(ctx,{sessionId:parent.sessionId,idempotencyKey:parent.commandKey},deps);
- if(!recovered.recorded||!recovered.package||recovered.package.state!=="COMPLETE")throw new OnboardingConflictError();
- const original=onboardingOwnerPackageSourceSchema.parse(parent.sourceSnapshot),receipt=recovered.package;
+ const recovered=await withTenant(deps.db,ctx.organizationId,tx=>nativeOnboardingOwnerPackageOriginal(ctx,tx,parent.id,deps));
+ if(recovered.receipt.state!=="COMPLETE")throw new OnboardingConflictError();
+ const original=onboardingOwnerPackageSourceSchema.parse(parent.sourceSnapshot),receipt=recovered.receipt;
  return withTenant(deps.db,ctx.organizationId,async tx=>{
   const native=await nativeOnboardingOwnerPackageSource(ctx,tx,{sessionId:parent.sessionId,revisionId:parent.reviewRevisionId},deps);
   if(native.fingerprint!==original.nativePackageFingerprint)throw new OnboardingConflictError();

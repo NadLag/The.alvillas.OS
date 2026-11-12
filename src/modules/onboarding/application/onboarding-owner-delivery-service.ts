@@ -20,7 +20,7 @@ import {encryptOnboardingOwnerDeliveryOriginal,decryptOnboardingOwnerDeliveryOri
 import {OnboardingAccessError,OnboardingConflictError,OnboardingConfigurationError} from "../domain/onboarding-wizard";
 import {prepareOnboardingOwnerDelivery} from "./onboarding-owner-delivery-preparation";
 import {nativeOnboardingOwnerPackageHistoryAuthority,spendNativeOnboardingRead} from "./onboarding-service";
-import {recoverOnboardingOwnerPackage} from "./onboarding-owner-package-service";
+import {nativeOnboardingOwnerPackageOriginal} from "./onboarding-owner-package-service";
 
 type Dependencies={db:TenantTransactionRunner;env?:NodeJS.ProcessEnv;requestId?:string};
 type Row=NonNullable<Awaited<ReturnType<OnboardingOwnerDeliveryRepository["byId"]>>>;
@@ -36,8 +36,8 @@ function emailPlan(original:ReturnType<typeof onboardingOwnerDeliveryOriginalSch
 async function originalContext(ctx:AccountActorContext,tx:TenantTransaction,row:Row,deps:Dependencies){
  if(row.createdBy!==ctx.actorId)throw new OnboardingAccessError();const held={...ctx,authContext:restoreAuthorizationCap(row.authorizationCap)},database:TenantTransactionRunner={$transaction:work=>work(tx)},local={...deps,db:database};
  for(const actor of[ctx,held]){const source=await nativeOnboardingOwnerPackageHistoryAuthority(actor,tx,{sessionId:row.package.sessionId,reviewRevisionId:row.package.reviewRevisionId});if(source.ownerId!==row.ownerId||source.propertyId!==row.propertyId)throw new OnboardingConflictError();}
- const parent=await packageContext(ctx,tx,row.packageId),recovered=await recoverOnboardingOwnerPackage(ctx,{sessionId:parent.sessionId,idempotencyKey:parent.commandKey},local);if(!recovered.recorded||!recovered.package||recovered.package.state!=="COMPLETE")throw new OnboardingConflictError();
- const actualPlan=await readOwnerDeliveryDocumentPlan(ctx,tx,recovered.package,deps.env),heldPlan=await readOwnerDeliveryDocumentPlan(held,tx,recovered.package,deps.env),plan=onboardingOwnerDeliveryDocumentPlanSchema.parse(row.documentPlan);
+ const parent=await packageContext(ctx,tx,row.packageId),recovered=await nativeOnboardingOwnerPackageOriginal(ctx,tx,parent.id,local);if(recovered.receipt.state!=="COMPLETE")throw new OnboardingConflictError();
+ const actualPlan=await readOwnerDeliveryDocumentPlan(ctx,tx,recovered.receipt,deps.env),heldPlan=await readOwnerDeliveryDocumentPlan(held,tx,recovered.receipt,deps.env),plan=onboardingOwnerDeliveryDocumentPlanSchema.parse(row.documentPlan);
  if(!isDeepStrictEqual(actualPlan,plan)||!isDeepStrictEqual(heldPlan,plan))throw new OnboardingConflictError();
  const original=decryptOnboardingOwnerDeliveryOriginal(row.encryptedPayload,binding(row),deps.env);
  if(!isDeepStrictEqual(original.metadata,row.sourceSnapshot)||!isDeepStrictEqual(original.documentPlan,plan)||!isDeepStrictEqual(original.policySnapshot,row.policySnapshot)||!isDeepStrictEqual(original.authorizationCap,row.authorizationCap)||!isDeepStrictEqual(emailPlan(original),row.emailPlan)||original.command.reviewFingerprint!==row.reviewFingerprint||digest(row.encryptedPayload)!==row.payloadSha256||row.commandHash!==commandFingerprint({protocol:onboardingOwnerDeliveryProtocol,command:original.command,metadata:original.metadata,documentPlan:original.documentPlan,emailPlan:row.emailPlan,policySnapshot:original.policySnapshot,authorizationCap:original.authorizationCap,payloadSha256:row.payloadSha256}))throw new OnboardingConfigurationError();
@@ -46,8 +46,11 @@ async function originalContext(ctx:AccountActorContext,tx:TenantTransaction,row:
 }
 function receipt(row:Row,delivery:Awaited<ReturnType<typeof originalContext>>["delivery"],replayed:boolean){return onboardingOwnerDeliveryReceiptSchema.parse({recorded:true,id:row.id,packageId:row.packageId,idempotencyKey:row.commandKey,requestedAt:row.createdAt.toISOString(),locale:row.locale,deliveryRecordId:delivery?.id??null,state:delivery?.status??"PENDING",acceptedAt:delivery?.acceptedAt?.toISOString()??null,deliveredAt:delivery?.deliveredAt?.toISOString()??null,replayed});}
 
+/** Internal worker contract; the original creator, current and held scope and original archived exports precede decryption. */
+export async function nativeOnboardingOwnerDeliveryOriginal(actor:AccountActorContext,tx:TenantTransaction,id:string,deps:Dependencies){return withOwnerPackageDocuments(async()=>{const ctx=ownerPackageDocumentActor(actor),row=await new OnboardingOwnerDeliveryRepository(tx,ctx.organizationId).byId(id);if(!row)throw new OnboardingAccessError();const saved=await originalContext(ctx,tx,row,deps);return{row,...saved};});}
+
 export async function reviewOnboardingOwnerDelivery(actor:AccountActorContext,raw:unknown,deps:Dependencies){return withOwnerPackageDocuments(async()=>{
- const ctx=ownerPackageDocumentActor(actor),input=onboardingOwnerDeliveryDraftSchema.parse(raw),prepared=await prepareOnboardingOwnerDelivery(ctx,input,deps);
+ const ctx=ownerPackageDocumentActor(actor),input=onboardingOwnerDeliveryDraftSchema.parse(raw),parent=await withTenant(deps.db,ctx.organizationId,tx=>packageContext(ctx,tx,input.packageId));await spendNativeOnboardingRead(ctx,deps,parent.sessionId);const prepared=await prepareOnboardingOwnerDelivery(ctx,input,deps);
  await withTenant(deps.db,ctx.organizationId,async tx=>{await packageContext(ctx,tx,input.packageId);await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"onboarding.owner_delivery_reviewed",resourceType:"onboarding",resourceId:prepared.source.sessionId,propertyScopeId:prepared.source.propertyId,after:{packageId:input.packageId,reviewFingerprint:prepared.reviewFingerprint,locales:prepared.source.policy.locales,locale:prepared.source.ownerLocale},requestId:deps.requestId??randomUUID(),occurredAt:await new OnboardingRepository(tx,ctx.organizationId).clock()});});
  return{packageId:input.packageId,reviewFingerprint:prepared.reviewFingerprint,locales:prepared.source.policy.locales,locale:prepared.source.ownerLocale};
 });}

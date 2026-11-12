@@ -6,6 +6,7 @@ export class OnboardingOwnerDeliveryRepository{
  constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
  byId(id:string){return this.tx.ownerOnboardingDelivery.findFirst({where:{organizationId:this.organizationId,id},include:context});}
  byNonce(commandKey:string){return this.tx.ownerOnboardingDelivery.findFirst({where:{organizationId:this.organizationId,commandKey},include:context});}
+ byEmailEvent(outboxEventId:string){return this.tx.ownerOnboardingDelivery.findFirst({where:{organizationId:this.organizationId,outboxEventId},include:context});}
  create(input:Omit<Prisma.OwnerOnboardingDeliveryUncheckedCreateInput,"organizationId">){return this.tx.ownerOnboardingDelivery.create({data:{...input,organizationId:this.organizationId},include:context});}
  async validateBirth(){await this.tx.$executeRaw(Prisma.sql`SET CONSTRAINTS owner_delivery_birth_guard IMMEDIATE`);}
 }

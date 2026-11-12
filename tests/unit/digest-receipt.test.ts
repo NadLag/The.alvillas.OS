@@ -27,6 +27,16 @@ describe("signed Resend digest receipts", () => {
       const body = JSON.stringify({ ...receipt, data: { ...receipt.data, tags } }); expect(verifyDigestReceipt(body, signed(body), secret)).toBeNull();
     }
   });
+  it("verifies native owner-package receipts through the existing signed HTTP boundary and strips private content", async () => {
+    vi.stubEnv("RESEND_WEBHOOK_SECRET", secret);
+    const body=JSON.stringify({...receipt,data:{...receipt.data,tags:{...receipt.data.tags,template:"onboarding_owner_package"}}});
+    expect(verifyDigestReceipt(body,signed(body),secret)?.data.tags.template).toBe("onboarding_owner_package");
+    const response=await POST(new Request("https://os.example.test/api/webhooks/resend",{method:"POST",body,headers:signed(body)}));
+    expect(response.status).toBe(200);
+    expect(recordDigestReceipt).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({tags:expect.objectContaining({template:"onboarding_owner_package"})})}));
+    expect(JSON.stringify(vi.mocked(recordDigestReceipt).mock.calls)).not.toContain("PRIVATE");
+    expect(JSON.stringify(vi.mocked(recordDigestReceipt).mock.calls)).not.toContain("private-recipient");
+  });
   it("denies unsigned execution, acknowledges verified receipts and asks the provider to retry storage races", async () => {
     vi.stubEnv("RESEND_WEBHOOK_SECRET", secret); const body = JSON.stringify(receipt);
     expect((await POST(new Request("https://os.example.test/api/webhooks/resend", { method: "POST", body }))).status).toBe(401);
