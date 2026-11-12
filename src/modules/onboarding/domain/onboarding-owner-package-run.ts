@@ -11,7 +11,7 @@ const locale=z.enum(onboardingOwnerPackageLocales),sha=onboardingFingerprintSche
 export const onboardingOwnerPackageDraftSchema=z.object({sessionId:id,reviewRevisionId:id}).strict();
 export const onboardingOwnerPackageCommandSchema=onboardingOwnerPackageDraftSchema.extend({idempotencyKey:id,reviewFingerprint:sha,reason:documentUploadInput.shape.reason});
 export type OnboardingOwnerPackageCommand=z.infer<typeof onboardingOwnerPackageCommandSchema>;
-export const onboardingOwnerPackageSourceSchema=z.object({source:z.literal(onboardingOwnerPackageProtocol),organizationId:id,sessionId:id,reviewRevisionId:id,ownerId:id,propertyId:id,reviewSourceFingerprint:sha,nativePackageFingerprint:sha,contentId:id,contentVersion:z.number().int().positive()}).strict();
+export const onboardingOwnerPackageSourceSchema=z.object({source:z.literal(onboardingOwnerPackageProtocol),organizationId:id,sessionId:id,reviewRevisionId:id,ownerId:id,propertyId:id,agreementId:id,reviewSourceFingerprint:sha,nativePackageFingerprint:sha,contentId:id,contentVersion:z.number().int().positive()}).strict();
 export const onboardingOwnerPackagePlanItemSchema=z.object({locale,instanceId:id,documentId:id,templateVersionId:id,templateSha256:sha,commandKeyFingerprint:sha,sourceFingerprint:sha,reviewFingerprint:sha}).strict();
 export const onboardingOwnerPackagePlanSchema=z.array(onboardingOwnerPackagePlanItemSchema).min(2).max(3).superRefine((rows,context)=>{
  for(const key of["locale","instanceId","documentId","templateVersionId","commandKeyFingerprint"]as const)if(new Set(rows.map(row=>row[key])).size!==rows.length)context.addIssue({code:"custom",message:"distinct_native_owner_package_documents_required",path:[key]});
