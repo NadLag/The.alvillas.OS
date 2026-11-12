@@ -11,7 +11,7 @@ import {prepareDocumentGeneration} from "@/modules/documents/application/documen
 import {admitDocumentGeneration,documentGenerationResult} from "@/modules/documents/application/document-generation-admission";
 import {publishDocumentGeneration} from "@/modules/documents/application/document-generation-publication";
 import {DocumentRepository} from "@/modules/documents/infrastructure/document-repository";
-import {documentGenerationSnapshotSchema,documentGenerationDraftSchema} from "@/modules/documents/domain/document-generation";
+import {documentGenerationSnapshotSchema,type documentGenerationDraftSchema} from "@/modules/documents/domain/document-generation";
 import {DocumentAccessError,DocumentConflictError,DocumentConfigurationError,DocumentRateLimitError} from "@/modules/documents/domain/document-command";
 import {OnboardingRepository} from "../infrastructure/onboarding-repository";
 import {OnboardingActivationRepository} from "../infrastructure/onboarding-activation-repository";

@@ -5,12 +5,14 @@ import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
 import {authContextForAccount} from "@/platform/authz/account-context";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import * as audit from "@/platform/audit/audit-writer";
+import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {DocumentRepository} from "@/modules/documents/infrastructure/document-repository";
 import {executeDocumentGenerationReference} from "@/modules/documents/application/document-generation-worker";
 import {downloadDocumentVersion} from "@/modules/documents/application/document-archive";
 import {admitOnboardingOwnerPackage,completeOnboardingOwnerPackage,recoverOnboardingOwnerPackage,reviewOnboardingOwnerPackage} from "@/modules/onboarding/application/onboarding-owner-package-service";
 import {OnboardingAccessError,OnboardingConflictError} from "@/modules/onboarding/domain/onboarding-wizard";
 import {onboardingOwnerPackagePolicyKey} from "@/modules/onboarding/domain/onboarding-owner-package-policy";
+import {OnboardingOwnerPackageRepository} from "@/modules/onboarding/infrastructure/onboarding-owner-package-repository";
 import {nativeOnboardingOwnerPackageFixture} from "./support/onboarding-owner-package-fixture";
 import {nativeDocumentObjectFixture} from "./support/document-object-store-fixture";
 import {nativeLeadFinancialGuard} from "./support/lead-fixture";
@@ -93,12 +95,33 @@ describe("atomic genuine owner package and canonical document workers",()=>{
   expect(await recovery(f,input.idempotencyKey)).toEqual({recorded:false,package:null});
  });
  it("rolls back a native Property correction while materializing a real child",async()=>{
-  const f=await fixture(),input=await command(f),append=Object.getOwnPropertyDescriptor(DocumentRepository.prototype,"appendInstance")!.value as DocumentRepository["appendInstance"];
+  const f=await fixture(),input=await command(f),instance=Object.getOwnPropertyDescriptor(DocumentRepository.prototype,"instance")!.value as DocumentRepository["instance"];
   let injected=false;
-  vi.spyOn(DocumentRepository.prototype,"appendInstance").mockImplementation(async function(this:DocumentRepository,data){const row=await append.call(this,data);if(!injected){injected=true;await(this as unknown as {tx:TenantTransaction}).tx.property.update({where:{id:f.review.propertyId!},data:{name:"Rejected actual concurrent native source correction"}});}return row;});
+  vi.spyOn(DocumentRepository.prototype,"instance").mockImplementation(async function(this:DocumentRepository,id){const row=await instance.call(this,id);if(row&&!injected){injected=true;await(this as unknown as {tx:TenantTransaction}).tx.property.update({where:{id:f.review.propertyId!},data:{name:"Rejected actual concurrent native source correction"}});}return row;});
   await expect(admitOnboardingOwnerPackage(f.ctx,input,f.deps)).rejects.toBeInstanceOf(OnboardingConflictError);expect(injected).toBe(true);
   expect(await counts(f)).toEqual({packages:0,items:0,instances:0,events:0});
   expect((await withTenant(db,f.organizationId,tx=>tx.property.findUniqueOrThrow({where:{id:f.review.propertyId!}}))).name).toBe(f.original.validation.facts.property!.name);
+ });
+ it.each(["MISSING_ITEM","MISSING_AUDIT","MISSING_WORKER"]as const)("rejects %s at the actual deferred package SQL boundary",async mode=>{
+  const f=await fixture(),input=await command(f);
+  if(mode==="MISSING_ITEM"){
+   const create=Object.getOwnPropertyDescriptor(OnboardingOwnerPackageRepository.prototype,"createPackageItem")!.value as OnboardingOwnerPackageRepository["createPackageItem"];
+   vi.spyOn(OnboardingOwnerPackageRepository.prototype,"createPackageItem").mockImplementation(function(this:OnboardingOwnerPackageRepository,data){
+    if(data.locale!=="fr")return create.call(this,data);
+    return(this as unknown as {tx:TenantTransaction}).tx.ownerOnboardingPackageItem.findFirstOrThrow({where:{packageId:data.packageId,locale:"en"}});
+   });
+  }else if(mode==="MISSING_AUDIT"){
+   const write=audit.writeAuditEvent;
+   vi.spyOn(audit,"writeAuditEvent").mockImplementation((tx,event)=>event.action==="onboarding.owner_package_requested"?Promise.resolve():write(tx,event));
+  }else{
+   const append=Object.getOwnPropertyDescriptor(OutboxRepository.prototype,"append")!.value as OutboxRepository["append"];let instances=0;
+   vi.spyOn(OutboxRepository.prototype,"append").mockImplementation(function(this:OutboxRepository,type,payload,key,at){
+    if(type!=="documents.instance.requested"||++instances!==2)return append.call(this,type,payload,key,at);
+    return(this as unknown as {tx:TenantTransaction}).tx.outboxEvent.findFirstOrThrow({where:{type:"documents.instance.requested"}});
+   });
+  }
+  await expect(admitOnboardingOwnerPackage(f.ctx,input,f.deps)).rejects.toThrow(mode==="MISSING_ITEM"?"owner package requires all actual language admissions in the same transaction":mode==="MISSING_AUDIT"?"owner package requires its exact atomic private audit":"owner package requires both canonical document worker outboxes");
+  expect(await counts(f)).toEqual({packages:0,items:0,instances:0,events:0});
  });
  it("preserves a completed original and reports SOURCE_CHANGED when the remaining native child becomes stale",async()=>{
   const f=await fixture(),input=await command(f),pending=await admitOnboardingOwnerPackage(f.ctx,input,f.deps),event=await withTenant(db,f.organizationId,tx=>tx.outboxEvent.findFirstOrThrow({where:{type:"documents.instance.requested",payload:{path:["instanceId"],equals:pending.documents[0].instanceId}}}));
@@ -120,7 +143,7 @@ describe("atomic genuine owner package and canonical document workers",()=>{
  });
  it.each(["parent_update","parent_delete","item_update","item_delete"]as const)("rejects %s on committed native package lineage",async mode=>{
   const f=await fixture(),input=await command(f),pending=await admitOnboardingOwnerPackage(f.ctx,input,f.deps);
-  await expect(withTenant(db,f.organizationId,tx=>mode==="parent_update"?tx.ownerOnboardingPackage.update({where:{id:pending.packageId},data:{requestId:randomUUID()}}):mode==="parent_delete"?tx.ownerOnboardingPackage.delete({where:{id:pending.packageId}}):mode==="item_update"?tx.ownerOnboardingPackageItem.updateMany({where:{packageId:pending.packageId},data:{locale:"ar"}}):tx.ownerOnboardingPackageItem.deleteMany({where:{packageId:pending.packageId}}))).rejects.toThrow(/append.only/);
+  await expect(withTenant(db,f.organizationId,async tx=>{await(mode==="parent_update"?tx.ownerOnboardingPackage.update({where:{id:pending.packageId},data:{requestId:randomUUID()}}):mode==="parent_delete"?tx.ownerOnboardingPackage.delete({where:{id:pending.packageId}}):mode==="item_update"?tx.ownerOnboardingPackageItem.updateMany({where:{packageId:pending.packageId},data:{locale:"ar"}}):tx.ownerOnboardingPackageItem.deleteMany({where:{packageId:pending.packageId}}));})).rejects.toThrow(/append.only/);
   expect(await counts(f)).toEqual({packages:1,items:2,instances:2,events:2});
  });
 });
