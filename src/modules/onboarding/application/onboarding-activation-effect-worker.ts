@@ -30,6 +30,7 @@ async function reserve(organizationId:string,activationId:string,deps:Dependenci
  if(onboardingActivationDependencies[effect].some(kind=>!completed.has(kind)))throw new OnboardingConflictError();const phase=phases.find(phase=>phase.effectKind===effect);
  if(phase?.nextAttemptAt&&phase.nextAttemptAt>now)return{run,policy,effect,attempt:phase.attempt,state:"WAITING",nextAttemptAt:phase.nextAttemptAt.toISOString()};
  if(phase?.type==="STARTED")return{run,policy,effect,attempt:phase.attempt!,state:"STARTED",nextAttemptAt:null};
+ if(phase?.type==="BLOCKED"&&phase.attempt!>=policy.retry.max_attempts)return{run,policy,effect,attempt:phase.attempt,state:"BLOCKED",nextAttemptAt:null};
  const attempt=(phase?.attempt??0)+1;await append(tx,run,{type:"STARTED",effectKind:effect,attempt},deps.requestId??randomUUID());return{run,policy,effect,attempt,state:"STARTED",nextAttemptAt:null};
 },{timeout:120000});}
 async function perform(organizationId:string,activationId:string,effect:Effect,deps:Dependencies):Promise<OnboardingActivationEffectEvidence|null>{
