@@ -5,6 +5,7 @@ import { formatCurrency, formatDate } from "@/i18n/format";
 import { Money } from "@/platform/money/money";
 import { documentPrivacyTags } from "./document-policy";
 import { documentTemplateMaximumBytes } from "./document-template-format";
+import {documentMaximumRenderedBytes,type DocumentRenderInputProfile} from "./document-render-limits";
 export { documentTemplateMediaType } from "./document-template-format";
 
 const key = z.string().regex(/^[a-z][a-z0-9_]{0,79}$/u).refine(value => !["constructor", "prototype"].includes(value));
@@ -64,7 +65,7 @@ export function decodeDocumentTemplate(bytes: Uint8Array): DocumentTemplateDefin
 }
 
 /** Native application resolvers supply classified values after source authorization. No caller-supplied values or locale fallback. */
-export function renderDocumentTemplate(raw: unknown, supplied: ReadonlyMap<string, DocumentTemplateBinding>) {
+export function renderDocumentTemplate(raw: unknown, supplied: ReadonlyMap<string, DocumentTemplateBinding>,options:{inputProfile?:DocumentRenderInputProfile}={}) {
   const definition = documentTemplateDefinitionSchema.parse(raw), values = new Map<string, string>(), classification = new Set<(typeof documentPrivacyTags)[number]>();
   if (supplied.size !== definition.variables.length || [...supplied.keys()].some(name => !definition.variables.some(item => item.key === name))) throw new TemplateBindingError();
   for (const declared of definition.variables) {
@@ -78,7 +79,8 @@ export function renderDocumentTemplate(raw: unknown, supplied: ReadonlyMap<strin
     else formatted = value.value;
     values.set(declared.key, formatted);
   }
-  let remainingBytes = documentTemplateMaximumBytes;
+  if(options.inputProfile&&(!classification.has("financial")||!classification.has("sensitive")))throw new TemplateBindingError();
+  let remainingBytes = documentMaximumRenderedBytes(options.inputProfile);
   const encoder = new TextEncoder(), interpolate = (value: string) => {
     const pieces: string[] = []; let cursor = 0;
     const append = (piece: string) => { remainingBytes -= encoder.encode(piece).length; if (remainingBytes < 0) throw new TemplateBindingError(); pieces.push(piece); };
@@ -88,7 +90,7 @@ export function renderDocumentTemplate(raw: unknown, supplied: ReadonlyMap<strin
     }
     append(value.slice(cursor)); return pieces.join("");
   };
-  return { templateKey: definition.templateKey, locale: definition.locale, title: interpolate(definition.title),
+  return { ...options.inputProfile?{inputProfile:options.inputProfile}:{},templateKey: definition.templateKey, locale: definition.locale, title: interpolate(definition.title),
     blocks: definition.blocks.map(item => ({ ...item, text: interpolate(item.text) })), privacy: [...classification].sort() };
 }
 export function selectDocumentTemplateVariant(raw: unknown, locale: AppLocale) {
