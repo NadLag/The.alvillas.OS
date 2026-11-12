@@ -17,6 +17,7 @@ import { paymentCaptureIntent, verifiedPayPalCapture, verifiedPayPalCaptureEvide
 import { paymentRefundIntent, paymentRefundLookup, verifiedPayPalRefundResult, PaymentRefundEvidenceError } from "./payment-refund";
 import { z } from "zod";
 import { readBoundedResponseBytes } from "@/platform/http/read-exact-response";
+import {validateEmailPdfAttachments,requireEmailAttachmentTransportSize} from "./email-attachments";
 import { captureSignatureRequest, signatureMaximumEvidenceBytes, signatureMaximumPdfBytes, signatureTransportTimeoutMs, signatureRequestIdSchema, signatureRecipientRoleSchema, signatureProviderStatusSchema, signatureDownloadInputSchema, signatureCertificateInputSchema, signatureRequestHasCompletedActions, signatureExpirationSchema, signatureEmailSettingsSchema, signatureRequestObservationSchema,
   SignatureProviderError, SignatureProviderConfigurationError, type SignatureRequestInput, type SignatureRequestReceipt, type SignatureRequestObservation, type SignatureRequestDownloadInput, type SignatureRequestDownload, type SignatureCertificateDownloadInput, type SignatureCertificateDownload } from "./signature-request";
 
@@ -98,9 +99,24 @@ export class ResendEmailProvider implements EmailProvider {
     // Resend tag values permit ASCII letters, numbers, underscores and dashes.
     const templateTag = input.template.replaceAll(".", "_");
     if (!/^[A-Za-z0-9_-]{1,256}$/u.test(templateTag)) throw new Error("Invalid email template tag");
-    const content = { to: input.to, subject: input.subject, html: input.html, text: input.text, locale: input.locale, template: input.template };
+    const attachments=validateEmailPdfAttachments(input.attachments);
+    const content = { to: input.to, subject: input.subject, html: input.html, text: input.text, locale: input.locale, template: input.template,...attachments?{attachments}:{} };
     const idempotencyKey = input.idempotencyKey ?? `email:${createHash("sha256").update(JSON.stringify(content)).digest("hex")}`;
     if (!/^[\x21-\x7e]{1,256}$/u.test(idempotencyKey)) throw new Error("Invalid email idempotency key");
+    const requestBody=JSON.stringify({
+        from: this.from,
+        to: [input.to],
+        subject: input.subject,
+        html: input.html,
+        text: input.text,
+        ...attachments?{attachments:attachments.map(({filename,content})=>({filename,content}))}:{},
+        tags: [
+          { name: "template", value: templateTag },
+          { name: "locale", value: input.locale },
+          ...(input.deliveryReference ? [{ name: "organization_id", value: input.deliveryReference.organizationId }, { name: "delivery_id", value: input.deliveryReference.deliveryId }] : [])
+        ]
+      });
+    requireEmailAttachmentTransportSize(requestBody,attachments!==undefined);
     const response = await this.transport("https://api.resend.com/emails", {
       method: "POST",
       signal: AbortSignal.timeout(10000),
@@ -109,18 +125,7 @@ export class ResendEmailProvider implements EmailProvider {
         Authorization: `Bearer ${this.apiKey}`,
         "Idempotency-Key": idempotencyKey
       },
-      body: JSON.stringify({
-        from: this.from,
-        to: [input.to],
-        subject: input.subject,
-        html: input.html,
-        text: input.text,
-        tags: [
-          { name: "template", value: templateTag },
-          { name: "locale", value: input.locale },
-          ...(input.deliveryReference ? [{ name: "organization_id", value: input.deliveryReference.organizationId }, { name: "delivery_id", value: input.deliveryReference.deliveryId }] : [])
-        ]
-      })
+      body:requestBody
     }).catch(() => { throw new Error("Resend email transport failed"); });
     // Provider response bodies can contain recipients, codes or credentials.
     // Persist only a stable status in the existing outbox error channel.
