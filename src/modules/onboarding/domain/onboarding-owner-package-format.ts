@@ -2,7 +2,7 @@ import Decimal from "decimal.js";
 import en from "../../../../messages/en.json" with {type:"json"};
 import fr from "../../../../messages/fr.json" with {type:"json"};
 import ar from "../../../../messages/ar.json" with {type:"json"};
-import {formatCurrencyAmount,formatDate} from "@/i18n/format";
+import {formatCurrencyAmount,formatDate,formatNumber} from "@/i18n/format";
 import type {AppLocale} from "@/i18n/routing";
 import type {Condition,Operand} from "@/platform/automation/rule";
 import {OnboardingConfigurationError} from "./onboarding-wizard";
@@ -17,7 +17,7 @@ export function formatOnboardingOwnerPackage(report:OnboardingOwnerPackage,local
  const scalar=(value:string|number|boolean|null|undefined):string=>value===null||value===undefined?t("unset"):typeof value==="boolean"?t(value?"yes":"no"):typeof value==="number"?Number.isSafeInteger(value)?new Intl.NumberFormat(locale).format(BigInt(value)):new Decimal(value).toFixed():value;
  const field=(key:keyof typeof labels,value:string|number|boolean|null|undefined)=>t(key)+": "+scalar(value),list=(values:readonly string[])=>values.length?values.map(value=>"• "+value).join("\n"):t("empty"),group=(key:keyof typeof labels,values:readonly string[])=>t(key)+"\n"+list(values);
  const enumValue=(values:object,key:string)=>Object.hasOwn(values,key)?(values as Record<string,string>)[key]:key;
- const percentage=(bps:number|undefined)=>bps===undefined?t("unset"):new Decimal(bps).div(100).toFixed()+"%",money=(amount:string|null|undefined,currency:string|null|undefined)=>amount===null||amount===undefined?t("unset"):currency?formatCurrencyAmount(locale,amount,currency):(()=>{throw new OnboardingConfigurationError();})();
+ const percentage=(bps:number|undefined)=>bps===undefined?t("unset"):formatNumber(locale,new Decimal(bps).div(10000),{style:"percent",maximumFractionDigits:2}),money=(amount:string|null|undefined,currency:string|null|undefined)=>amount===null||amount===undefined?t("unset"):currency?formatCurrencyAmount(locale,amount,currency):(()=>{throw new OnboardingConfigurationError();})();
  const lines=(values:{en:string[];fr:string[];ar?:string[]}|null)=>{if(values===null)return[t("unset")];const result=values[locale];if(!result)throw new OnboardingConfigurationError();return result;};
  const operand=(value:Operand|undefined):string=>value===undefined?t("unset"):Array.isArray(value)?"["+value.map(operand).join("; ")+"]":value!==null&&typeof value==="object"?"field"in value?value.field:value.config+(value.path?" / "+value.path:""):scalar(value);
  const condition=(value:Condition):string=>"all"in value?"("+value.all.map(condition).join(" ∧ ")+")":"any"in value?"("+value.any.map(condition).join(" ∨ ")+")":"not"in value?"¬("+condition(value.not)+")":value.path+" "+value.op+" "+operand(value.value);
