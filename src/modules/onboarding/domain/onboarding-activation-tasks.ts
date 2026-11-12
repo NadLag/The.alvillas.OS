@@ -3,7 +3,7 @@ import {calendarDateAt} from "@/i18n/format";
 import {configSlugSchema} from "@/platform/config/identifiers";
 import {workflowCatalogSchema} from "@/platform/config/workflow-policy";
 import {operationIdentity} from "@/platform/idempotency/operation-identity";
-import {createTaskSchema} from "@/modules/reservations/domain/operation-task";
+import {createTaskSchema} from "@/platform/onboarding/task-contracts";
 import {onboardingIdSchema} from "./onboarding-primitives";
 import {OnboardingConfigurationError} from "./onboarding-wizard";
 
