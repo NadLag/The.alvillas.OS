@@ -1,6 +1,6 @@
 import type {NativeOnboardingFixtureIdentity} from "./onboarding-fixture";
 import {randomUUID} from "node:crypto";
-import type {PrismaClient} from "@prisma/client";
+import type {Prisma,PrismaClient} from "@prisma/client";
 import {withTenant} from "@/platform/db/tenant";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {savePropertyTemplate} from "@/modules/core/application/property-template-service";
@@ -14,5 +14,6 @@ export async function nativeOnboardingWorkflowsFixture(admin:PrismaClient,db:Pri
  await withTenant(db,f.organizationId,tx=>new ConfigRuleRepository(tx,f.organizationId).createVersion({key:onboardingPolicyKey,scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),value:policy,reason:"Explicit required standard Workflow and task configuration"}));return{...f,services,policy};
 }
 export type NativeOnboardingWorkflowsFixture=Awaited<ReturnType<typeof nativeOnboardingWorkflowsFixture>>;
+export type NativeWorkflowFixtureConfiguration={values?:unknown;configuration?:ReadonlyArray<{key:string;value:Prisma.InputJsonValue}>};
 export const nativeWorkflowsTemplateValues=()=>({rules:{"ops.reservation_task_templates":{tasks:[{key:"arrival",type:"INSPECTION",title:{en:"Actual arrival inspection",fr:"Inspection réelle avant arrivée"},due:"CHECK_IN",dueOffsetDays:0,priority:"NORMAL",checklist:[]}]},"ops.workflows":{workflows:[{key:"arrival",trigger:"ReservationConfirmed",conditions:{path:"reservation.nights",op:">=",value:{config:"ops.mid_stay_threshold"}},actions:[{type:"create_task",task_type:"INSPECTION"}]}]}}});
-export const nativeWorkflowsTemplate=(f:NativeOnboardingWorkflowsFixture,db:PrismaClient,propertyId:string|null=null)=>withTenant(db,f.organizationId,tx=>savePropertyTemplate({...f.ctx,personId:f.person.id},{key:"native_workflows_"+randomUUID(),kind:"WORKFLOW",propertyId,name:{en:"Original standard Workflows",fr:"Flux de travail standard originaux"},values:nativeWorkflowsTemplateValues(),status:"ACTIVE",expectedVersion:0,reason:"Actual independently configured reusable standard Workflows"},{db:{$transaction:work=>work(tx)},requestId:randomUUID()}));
+export const nativeWorkflowsTemplate=(f:NativeOnboardingWorkflowsFixture,db:PrismaClient,propertyId:string|null=null,values:unknown=nativeWorkflowsTemplateValues())=>withTenant(db,f.organizationId,tx=>savePropertyTemplate({...f.ctx,personId:f.person.id},{key:"native_workflows_"+randomUUID(),kind:"WORKFLOW",propertyId,name:{en:"Original standard Workflows",fr:"Flux de travail standard originaux"},values,status:"ACTIVE",expectedVersion:0,reason:"Actual independently configured reusable standard Workflows"},{db:{$transaction:work=>work(tx)},requestId:randomUUID()}));

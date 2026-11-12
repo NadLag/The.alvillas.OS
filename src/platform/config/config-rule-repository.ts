@@ -204,6 +204,8 @@ export class ConfigRuleRepository {
   async lockVersion(key: string, scopeType: string, scopeId?: string | null): Promise<void> {
     await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${`config:${this.organizationId}:${key}:${scopeType}:${scopeId ?? ""}`}, 0))`);
   }
+  /** Metadata-only exact-scope history includes drafts/retirement, so callers cannot silently recreate an existing definition. */
+  latestScopeMetadata(key:string,scopeType:string,scopeId:string|null){return this.tx.configRule.findFirst({where:{organizationId:this.organizationId,key,scopeType,scopeId},orderBy:{version:"desc"},select:{id:true,key:true,scopeType:true,scopeId:true,version:true,lifecycle:true,createdBy:true,createdAt:true,effectiveFrom:true,effectiveTo:true,archivedAt:true}});}
 
   async sourceValueBytes(id:string){
     const rows=await this.tx.$queryRaw<Array<{bytes:number}>>(Prisma.sql`SELECT octet_length(value::text) AS bytes FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid`);return rows[0]?.bytes??null;
