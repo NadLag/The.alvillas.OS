@@ -6212,6 +6212,7 @@
     "approvals": "Owner approvals",
     "documents": "Owner documents",
     "reports": "Owner reports",
-    "midStayNights": "Configured mid-stay threshold in nights"
+    "midStayNights": "Configured mid-stay threshold in nights",
+    "archiveTitle": "Owner onboarding package"
   }
 }

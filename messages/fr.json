@@ -6212,6 +6212,7 @@
     "approvals": "Approbations propriétaire",
     "documents": "Documents propriétaire",
     "reports": "Rapports propriétaire",
-    "midStayNights": "Seuil de milieu de séjour configuré en nuits"
+    "midStayNights": "Seuil de milieu de séjour configuré en nuits",
+    "archiveTitle": "Dossier d’accueil du propriétaire"
   }
 }

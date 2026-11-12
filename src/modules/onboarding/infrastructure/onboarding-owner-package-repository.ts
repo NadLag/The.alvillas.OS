@@ -4,6 +4,12 @@ import type {TenantTransaction} from "@/platform/db/tenant";
 export type OnboardingOwnerAccessWitness={id:string;ownerId:string;accountId:string;accountStatus:string;personId:string|null;personArchivedAt:Date|null;accessVersion:string;accessTuple:string;accountVersion:string;accountTuple:string;personVersion:string|null;personTuple:string|null;ownershipId:string;ownershipVersion:string;ownershipTuple:string};
 export class OnboardingOwnerPackageRepository{
  constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
+ packageById(id:string){return this.tx.ownerOnboardingPackage.findFirst({where:{organizationId:this.organizationId,id}});}
+ packageByNonce(commandKey:string){return this.tx.ownerOnboardingPackage.findFirst({where:{organizationId:this.organizationId,commandKey}});}
+ packageItems(packageId:string){return this.tx.ownerOnboardingPackageItem.findMany({where:{organizationId:this.organizationId,packageId},orderBy:{locale:"asc"},take:4});}
+ createPackage(input:Omit<Prisma.OwnerOnboardingPackageUncheckedCreateInput,"organizationId">){return this.tx.ownerOnboardingPackage.create({data:{...input,organizationId:this.organizationId}});}
+ createPackageItem(input:Omit<Prisma.OwnerOnboardingPackageItemUncheckedCreateInput,"organizationId">){return this.tx.ownerOnboardingPackageItem.create({data:{...input,organizationId:this.organizationId}});}
+ async validatePackageBirth(){await this.tx.$executeRaw(Prisma.sql`SET CONSTRAINTS owner_package_birth_guard,owner_package_item_birth_guard IMMEDIATE`);}
  /** Complete tenant-bound account/access/ownership metadata; no contact fields or synthetic grants. */
  async ownerAccessWitnesses(ownerId:string,propertyId:string){return this.tx.$queryRaw<OnboardingOwnerAccessWitness[]>(Prisma.sql`
   SELECT a.id,a.owner_id AS "ownerId",a.user_account_id AS "accountId",u.status::text AS "accountStatus",u.person_id AS "personId",p.archived_at AS "personArchivedAt",

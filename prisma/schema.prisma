@@ -603,6 +603,8 @@ model Organization {
   propertyOnboardingRevisions PropertyOnboardingRevision[]
   propertyOnboardingActivations PropertyOnboardingActivationRequest[]
   propertyOnboardingActivationEvents PropertyOnboardingActivationEvent[]
+ ownerPackages OwnerOnboardingPackage[]
+ ownerPackageItems OwnerOnboardingPackageItem[]
 }
 
 model Region {
@@ -945,6 +947,7 @@ model UserAccount {
   authoredPropertyOnboardingRevisions PropertyOnboardingRevision[]
   requestedPropertyActivations PropertyOnboardingActivationRequest[]
   propertyActivationEvents PropertyOnboardingActivationEvent[]
+ requestedOwnerPackages OwnerOnboardingPackage[]
 }
 
 model AuthCredential {
@@ -1197,6 +1200,7 @@ model Owner {
   employeeEarningPercentageWitnesses EmployeeEarningRequestPercentageWitness[]
   onboardingRevisions PropertyOnboardingRevision[]
   onboardingActivations PropertyOnboardingActivationRequest[]
+ onboardingPackages OwnerOnboardingPackage[]
 }
 
 model OwnerRepresentative {
@@ -1346,6 +1350,7 @@ model Property {
   employeePercentageRequestSources EmployeeEarningRequestWork[]
   onboardingRevisions PropertyOnboardingRevision[]
   onboardingActivations PropertyOnboardingActivationRequest[]
+ onboardingPackages OwnerOnboardingPackage[]
 }
 
 model PropertyTemplateVersion {
@@ -2412,6 +2417,8 @@ model ConfigRule {
   employeeEarningPercentagePolicies EmployeeEarningRequestPercentageWitness[] @relation("EmployeeEarningPercentagePolicy")
   onboardingRevisions PropertyOnboardingRevision[]
   onboardingActivations PropertyOnboardingActivationRequest[]
+ ownerPackagePolicies OwnerOnboardingPackage[] @relation("OwnerPackagePolicy")
+ ownerPackageContents OwnerOnboardingPackage[] @relation("OwnerPackageContent")
 }
 
 model ReservationConfigSnapshot {
@@ -5200,6 +5207,7 @@ model DocumentInstance {
   @@index([organizationId,documentId,createdAt,id],map:"document_instance_history_idx")
   @@unique([organizationId,createdBy,commandKey],map:"document_instance_command_unique")
   @@map("document_instance")
+ ownerPackageItems OwnerOnboardingPackageItem[]
 }
 
 model Signature {
@@ -5570,6 +5578,7 @@ model PropertyOnboardingSession {
  @@unique([organizationId,id],map:"property_onboarding_session_org_id_key")
  @@index([organizationId,createdAt,id],map:"property_onboarding_session_org_created_idx")
  @@map("property_onboarding_session")
+ ownerPackages OwnerOnboardingPackage[]
 }
 
 model PropertyOnboardingRevision {
@@ -5614,6 +5623,7 @@ model PropertyOnboardingRevision {
  @@index([organizationId,sessionId,number(sort:Desc)],map:"property_onboarding_revision_org_history_idx")
  @@index([organizationId,ownerId,createdAt,id],map:"property_onboarding_revision_org_owner_idx")
  @@map("property_onboarding_revision")
+ ownerPackages OwnerOnboardingPackage[] @relation("OwnerPackageReview")
 }
 
 model PropertyOnboardingActivationRequest {
@@ -5680,4 +5690,63 @@ model PropertyOnboardingActivationEvent {
  @@unique([organizationId,activationId,sequence],map:"onboarding_activation_event_sequence_key")
  @@index([organizationId,activationId,sequence(sort:Desc)],map:"onboarding_activation_event_history_idx")
  @@map("property_onboarding_activation_event")
+}
+
+
+model OwnerOnboardingPackage {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ sessionId String @map("session_id") @db.Uuid
+ reviewRevisionId String @map("review_revision_id") @db.Uuid
+ ownerId String @map("owner_id") @db.Uuid
+ propertyId String @map("property_id") @db.Uuid
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ reviewFingerprint String @map("review_fingerprint")
+ sourceFingerprint String @map("source_fingerprint")
+ sourceSnapshot Json @map("source_snapshot")
+ documentPlan Json @map("document_plan")
+ encryptedPayload Bytes @map("encrypted_payload")
+ payloadSha256 String @map("payload_sha256")
+ payloadSchemaVersion Int @default(1) @map("payload_schema_version")
+ policyId String @map("policy_id") @db.Uuid
+ policyVersion Int @map("policy_version")
+ contentId String @map("content_id") @db.Uuid
+ contentVersion Int @map("content_version")
+ policySnapshot Json @map("policy_snapshot")
+ authorizationCap Json @map("authorization_cap")
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_org_fk")
+ session PropertyOnboardingSession @relation(fields:[organizationId,sessionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_session_fk")
+ review PropertyOnboardingRevision @relation("OwnerPackageReview",fields:[organizationId,sessionId,reviewRevisionId],references:[organizationId,sessionId,id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_review_fk")
+ owner Owner @relation(fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_owner_fk")
+ property Property @relation(fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_property_fk")
+ creator UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_creator_fk")
+ policy ConfigRule @relation("OwnerPackagePolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_policy_fk")
+ content ConfigRule @relation("OwnerPackageContent",fields:[organizationId,contentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_content_fk")
+ items OwnerOnboardingPackageItem[]
+ @@unique([organizationId,id],map:"owner_package_org_id_key")
+ @@unique([organizationId,commandKey],map:"owner_package_org_nonce_key")
+ @@index([organizationId,sessionId,createdAt,id],map:"owner_package_session_history_idx")
+ @@index([organizationId,propertyId,createdAt,id],map:"owner_package_property_history_idx")
+ @@index([organizationId,createdBy,createdAt,id],map:"owner_package_creator_history_idx")
+ @@map("owner_onboarding_package")
+}
+
+model OwnerOnboardingPackageItem {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ packageId String @map("package_id") @db.Uuid
+ locale String
+ instanceId String @map("instance_id") @db.Uuid
+ createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_item_org_fk")
+ package OwnerOnboardingPackage @relation(fields:[organizationId,packageId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_item_package_fk")
+ instance DocumentInstance @relation(fields:[organizationId,instanceId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"owner_package_item_instance_fk")
+ @@unique([organizationId,id],map:"owner_package_item_org_id_key")
+ @@unique([organizationId,packageId,locale],map:"owner_package_item_locale_key")
+ @@unique([organizationId,instanceId],map:"owner_package_item_instance_key")
+ @@map("owner_onboarding_package_item")
 }

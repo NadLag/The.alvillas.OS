@@ -1131,6 +1131,11 @@ export async function reviewOnboardingConfiguration(actor:AccountActorContext,ra
 
 function configurationBinding(row:Row){if(row.step!=="REVIEW"||!row.propertyId||!row.previousId)throw new OnboardingConflictError();return{...binding(row),propertyId:row.propertyId,previousRevisionId:row.previousId,sourceFingerprint:row.sourceFingerprint,validatedAt:row.createdAt.toISOString()};}
 /** Internal document source: callers select native identities, never report values or completion flags. */
+export async function nativeOnboardingOwnerPackageHistoryAuthority(actor:AccountActorContext,tx:TenantTransaction,raw:unknown){
+ const ctx=actorContext(actor),input=z.object({sessionId:uuid,reviewRevisionId:uuid.optional()}).strict().parse(raw),base=await sessionContext(ctx,tx,input.sessionId,"view",true),row=input.reviewRevisionId?await base.repository.byId(input.reviewRevisionId):base.row;
+ if(!row||row.sessionId!==input.sessionId||input.reviewRevisionId&&row.step!=="REVIEW")throw new OnboardingAccessError();
+ await authority(ctx,tx,[{action:"view",resource:resource(ctx.organizationId,row)},{action:"export",resource:{...resource(ctx.organizationId,row),dataClass:"personal"}}]);return{sessionId:row.sessionId,revisionId:row.id,ownerId:row.ownerId,propertyId:row.propertyId,now:await base.repository.clock()};
+}
 export async function nativeOnboardingOwnerPackageReviewSource(actor:AccountActorContext,tx:TenantTransaction,raw:unknown,deps:Pick<OnboardingDependencies,"env">){
  const ctx=actorContext(actor),input=z.object({sessionId:uuid,revisionId:uuid}).strict().parse(raw),base=await sessionContext(ctx,tx,input.sessionId,"edit",true),row=base.row;
  if(row.id!==input.revisionId||row.step!=="REVIEW"||!row.propertyId)throw new OnboardingConflictError();
