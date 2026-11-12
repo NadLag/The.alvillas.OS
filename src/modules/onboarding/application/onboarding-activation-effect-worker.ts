@@ -1,8 +1,6 @@
 import {appendNativeOnboardingActivationEvent as append} from "./onboarding-activation-events";
 import {randomUUID} from "node:crypto";
 import {withTenant} from "@/platform/db/tenant";
-import {writeAuditEvent} from "@/platform/audit/audit-writer";
-import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
 import {onboardingActivationPolicySchema,type OnboardingActivationPolicy,onboardingActivationDependencies} from "../domain/onboarding-activation-policy";
 import {onboardingActivationEffectEvidenceSchema,onboardingActivationEffectProtocol,type OnboardingActivationEffectEvidence} from "../domain/onboarding-activation-effect-evidence";
 import {OnboardingAccessError,OnboardingConfigurationError,OnboardingConflictError,OnboardingRateLimitError} from "../domain/onboarding-wizard";
@@ -16,7 +14,6 @@ import {advanceActivationOwnerEmailEvidence} from "./onboarding-activation-email
 
 type Effect=OnboardingActivationPolicy["effects"][number];
 type Dependencies=Parameters<typeof admitActivationOwnerPackage>[2];
-type Reference=Awaited<ReturnType<typeof nativeOnboardingActivationReference>>;
 const waitUntil=(now:Date,policy:OnboardingActivationPolicy)=>new Date(now.getTime()+policy.retry.backoff_seconds*1000).toISOString();
 async function reserve(organizationId:string,activationId:string,deps:Dependencies){return withTenant(deps.db,organizationId,async tx=>{
  const repository=new OnboardingActivationRepository(tx,organizationId);await repository.lock(activationId);const run=await nativeOnboardingActivationReference(organizationId,tx,activationId),policy=onboardingActivationPolicySchema.parse((run.row.policySnapshot as {value:{activation:unknown}}).value.activation),now=await new OnboardingRepository(tx,organizationId).clock();
