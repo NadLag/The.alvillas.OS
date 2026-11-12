@@ -114,7 +114,7 @@ END $$;
 CREATE TRIGGER onboarding_activation_proven_effect_guard BEFORE INSERT ON property_onboarding_activation_event FOR EACH ROW EXECUTE FUNCTION app_guard_onboarding_proven_effect();
 
 -- The existing native guard is replaced below only to preserve its ISO millisecond protocol at completion.
-CREATE OR REPLACE FUNCTION app_guard_onboarding_activation_event() RETURNS trigger LANGUAGE plpgsql SET search_path=public,pg_temp AS $
+CREATE OR REPLACE FUNCTION app_guard_onboarding_activation_event() RETURNS trigger LANGUAGE plpgsql SET search_path=public,pg_temp AS $$
 DECLARE request property_onboarding_activation_request%ROWTYPE;head property_onboarding_activation_event%ROWTYPE;phase property_onboarding_activation_event%ROWTYPE;dependency TEXT;maximum INTEGER;activated property_onboarding_revision%ROWTYPE;request_xmin TEXT;activated_xmin TEXT;
 BEGIN
  PERFORM pg_advisory_xact_lock(hashtextextended(NEW.organization_id::text||':onboarding:activation:'||NEW.activation_id::text,0));
@@ -152,6 +152,6 @@ BEGIN
   ELSIF NEW.type='RETRY_SCHEDULED' AND (NEW.attempt>=maximum OR NEW.next_attempt_at<>NEW.occurred_at+make_interval(secs=>(request.policy_snapshot->'value'->'activation'->'retry'->>'backoff_seconds')::int)) THEN RAISE EXCEPTION 'activation retry requires its approved backoff and remaining attempts'; END IF;
  END IF;
  RETURN NEW;
-END $;
+END $$;
 
 COMMIT;
