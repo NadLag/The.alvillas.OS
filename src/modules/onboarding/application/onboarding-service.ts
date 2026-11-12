@@ -1,4 +1,9 @@
 import {readOnboardingConfigurationReferences,authorizeRecordedOnboardingConfigurationReferences} from "./onboarding-configuration-reference-source";
+import type {PropertyOnboardingActivationRequest} from "@prisma/client";
+import {OnboardingActivationRepository} from "../infrastructure/onboarding-activation-repository";
+import {onboardingActivationDraftSchema,onboardingActivationCommandSchema,onboardingActivationReceiptSchema,type OnboardingActivationCommand} from "../domain/onboarding-activation";
+import {onboardingActivationEffects} from "../domain/onboarding-activation-policy";
+import {onboardingActivationSourceSchema,onboardingActivationRequested,encryptOnboardingActivationPayload,decryptOnboardingActivationPayload} from "../domain/onboarding-activation-payload";
 import {onboardingWorkflowReferenceKeys} from "../domain/onboarding-configuration-references";
 import {isDeepStrictEqual} from "node:util";
 import {onboardingConfigurationOptionsSchema} from "../domain/onboarding-contract";
@@ -1125,6 +1130,69 @@ export async function reviewOnboardingConfiguration(actor:AccountActorContext,ra
 }
 
 function configurationBinding(row:Row){if(row.step!=="REVIEW"||!row.propertyId||!row.previousId)throw new OnboardingConflictError();return{...binding(row),propertyId:row.propertyId,previousRevisionId:row.previousId,sourceFingerprint:row.sourceFingerprint,validatedAt:row.createdAt.toISOString()};}
+async function activationDraftContext(actor:AccountActorContext,tx:TenantTransaction,draft:z.infer<typeof onboardingActivationDraftSchema>,deps:OnboardingDependencies){
+ const base=await configurationDraftContext(actor,tx,{sessionId:draft.sessionId,previousRevisionId:draft.previousRevisionId,step:"REVIEW",target:{mode:"VALIDATE",propertyId:draft.target.propertyId}}),review=base.current;
+ if(review.step!=="REVIEW"||!base.configured.policy.activation?.modes.includes(draft.target.mode))throw new OnboardingConfigurationError();
+ await authority(actor,tx,[{action:"approve",resource:resource(actor.organizationId,review)},{action:"edit",resource:propertyResource(actor.organizationId,base.property,review.ownerId)}]);
+ await configurationRecordedAuthority(actor,tx,review);const original=retainedConfiguration(review,deps.env);
+ if(!base.validation.ready||!original.validation.ready||jsonbFingerprint(JSON.parse(JSON.stringify(base.source)))!==review.sourceFingerprint||!isDeepStrictEqual(base.configured.snapshot,review.policySnapshot))throw new OnboardingConflictError();
+ const source=onboardingActivationSourceSchema.parse({source:"CORE_ONBOARDING_VALIDATED_ACTIVATION",reviewRevisionId:review.id,reviewSourceFingerprint:review.sourceFingerprint,reviewPayloadSha256:review.payloadSha256}),sourceFingerprint=jsonbFingerprint(source),reviewFingerprint=commandFingerprint({protocol,flow:"ACTIVATION",draft,source,policy:base.configured.snapshot,authorizationCap:captureAuthorizationCap(actor.authContext)});
+ return{...base,review,source,sourceFingerprint,reviewFingerprint};
+}
+export async function reviewOnboardingActivation(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
+ const ctx=actorContext(actor),draft=onboardingActivationDraftSchema.parse(raw);await spendRead(ctx,deps,draft.sessionId);return withTenant(deps.db,ctx.organizationId,async tx=>{
+  const base=await activationDraftContext(ctx,tx,draft,deps);await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"onboarding.activation_reviewed",resourceType:"onboarding",resourceId:draft.sessionId,propertyScopeId:draft.target.propertyId,after:{reviewRevisionId:base.review.id,reviewFingerprint:base.reviewFingerprint,sourceFingerprint:base.sourceFingerprint},requestId:deps.requestId??randomUUID(),occurredAt:await base.repository.clock()});
+  const final=await activationDraftContext(ctx,tx,draft,deps);if(final.reviewFingerprint!==base.reviewFingerprint)throw new OnboardingConflictError();return{draft,reviewFingerprint:final.reviewFingerprint};
+ });
+}
+function activationBinding(row:PropertyOnboardingActivationRequest){return{organizationId:row.organizationId,sessionId:row.sessionId,activationId:row.id,reviewRevisionId:row.reviewRevisionId,ownerId:row.ownerId,propertyId:row.propertyId,createdBy:row.createdBy,commandKey:row.commandKey,policyId:row.policyId,policyVersion:row.policyVersion,sourceFingerprint:row.sourceFingerprint,authorizationFingerprint:jsonbFingerprint(row.authorizationCap),requestedAt:row.createdAt.toISOString()};}
+function retainedActivation(row:PropertyOnboardingActivationRequest,deps:OnboardingDependencies){
+ if(createHash("sha256").update(row.encryptedPayload).digest("hex")!==row.payloadSha256||jsonbFingerprint(row.sourceSnapshot)!==row.sourceFingerprint)throw new OnboardingConfigurationError();
+ const value=decryptOnboardingActivationPayload(row.encryptedPayload,activationBinding(row),deps.env);if(value.command.reviewFingerprint!==row.reviewFingerprint||!isDeepStrictEqual(value.source,row.sourceSnapshot)||!isDeepStrictEqual(value.policySnapshot,row.policySnapshot))throw new OnboardingConfigurationError();return value;
+}
+async function activationRecordedContext(actor:AccountActorContext,tx:TenantTransaction,row:PropertyOnboardingActivationRequest){
+ if(row.createdBy!==actor.actorId||jsonbFingerprint(row.sourceSnapshot)!==row.sourceFingerprint)throw new OnboardingAccessError();
+ const base=await sessionContext(actor,tx,row.sessionId,"view",true),review=await base.repository.byId(row.reviewRevisionId);if(!review||review.sessionId!==row.sessionId||review.propertyId!==row.propertyId||review.ownerId!==row.ownerId)throw new OnboardingAccessError();
+ const original=await configurationRecordedAuthority(actor,tx,review),source=onboardingActivationSourceSchema.parse(row.sourceSnapshot);if(source.reviewRevisionId!==review.id||source.reviewSourceFingerprint!==review.sourceFingerprint||source.reviewPayloadSha256!==review.payloadSha256)throw new OnboardingConfigurationError();return{base,review,fingerprint:original.fingerprint};
+}
+async function activationReceipt(tx:TenantTransaction,row:PropertyOnboardingActivationRequest,replayed=false){
+ const repository=new OnboardingActivationRepository(tx,row.organizationId),head=await repository.head(row.id),phases=await repository.phaseHeads(row.id);if(!head)throw new OnboardingConfigurationError();
+ const completed=onboardingActivationEffects.filter(kind=>phases.some(phase=>phase.effectKind===kind&&phase.type==="SUCCEEDED"));let activationRevisionId:string|null=null,activatedAt:string|null=null;
+ if(head.type==="ACTIVATED"){
+  const result=z.object({revisionId:uuid,activatedAt:z.iso.datetime()}).strict().parse(head.result),native=await new OnboardingRepository(tx,row.organizationId).byId(result.revisionId);
+  if(!native||native.step!=="ACTIVATE"||native.mode!=="BACKGROUND"||native.sessionId!==row.sessionId||native.previousId!==row.reviewRevisionId||native.propertyId!==row.propertyId||native.createdAt.toISOString()!==result.activatedAt||jsonbFingerprint(head.result)!==head.resultFingerprint)throw new OnboardingConfigurationError();activationRevisionId=native.id;activatedAt=result.activatedAt;
+ }
+ const state=head.type==="ACTIVATED"?"COMPLETE":head.type==="FAILED"?"FAILED":head.type==="BLOCKED"?"BLOCKED":head.type==="REQUESTED"?"PENDING":"RUNNING";
+ return onboardingActivationReceiptSchema.parse({recorded:true,runId:row.id,sessionId:row.sessionId,sourceRevisionId:row.reviewRevisionId,propertyId:row.propertyId,idempotencyKey:row.commandKey,requestedAt:row.createdAt.toISOString(),state,completed,activationRevisionId,activatedAt,replayed});
+}
+async function recoverActivationExisting(actor:AccountActorContext,tx:TenantTransaction,row:PropertyOnboardingActivationRequest,deps:OnboardingDependencies,command?:OnboardingActivationCommand){
+ const original=await activationRecordedContext(actor,tx,row);if(command&&commandFingerprint(retainedActivation(row,deps).command)!==commandFingerprint(command))throw new OnboardingConflictError();
+ const before=await activationReceipt(tx,row,true);await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"onboarding.activation_recovered",resourceType:"onboarding",resourceId:row.sessionId,propertyScopeId:row.propertyId,after:{activationId:row.id,sessionId:row.sessionId,reviewRevisionId:row.reviewRevisionId,commandHash:row.commandHash},requestId:deps.requestId??randomUUID(),occurredAt:await original.base.repository.clock()});
+ const final=await activationRecordedContext(actor,tx,row),after=await activationReceipt(tx,row,true);if(original.base.row.id!==final.base.row.id||original.fingerprint!==final.fingerprint||!isDeepStrictEqual(before,after))throw new OnboardingConflictError();return after;
+}
+export async function admitOnboardingActivation(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
+ const ctx=actorContext(actor),input=onboardingActivationCommandSchema.parse(raw),draft=onboardingActivationDraftSchema.parse({sessionId:input.sessionId,previousRevisionId:input.previousRevisionId,step:input.step,target:input.target});
+ const budget=await withTenant(deps.db,ctx.organizationId,async tx=>{
+  const native=new OnboardingRepository(tx,ctx.organizationId),runs=new OnboardingActivationRepository(tx,ctx.organizationId);await native.lockCommand(input.idempotencyKey);const existing=await runs.byNonce(input.idempotencyKey);let snapshot,policy;
+  if(existing){await activationRecordedContext(ctx,tx,existing);const retained=z.object({id:uuid,version:z.number().int().positive(),value:onboardingPolicySchema}).strict().parse(existing.policySnapshot);if(retained.id!==existing.policyId||retained.version!==existing.policyVersion)throw new OnboardingConfigurationError();snapshot=retained;policy=retained.value;}
+  else{const base=await activationDraftContext(ctx,tx,draft,deps);snapshot=base.configured.snapshot;policy=base.configured.policy;}
+  return{snapshot,decision:await consumeRateLimit(tx,ctx.organizationId,{key:"onboarding:admission:organization",limit:policy.admission.requests,windowSeconds:policy.admission.window_seconds,now:await native.clock()})};
+ });if(!budget.decision.allowed)throw new OnboardingRateLimitError(budget.decision.resetAt);
+ return withTenant(deps.db,ctx.organizationId,async tx=>{
+  const native=new OnboardingRepository(tx,ctx.organizationId),runs=new OnboardingActivationRepository(tx,ctx.organizationId);await native.lockCommand(input.idempotencyKey);const existing=await runs.byNonce(input.idempotencyKey);if(existing)return recoverActivationExisting(ctx,tx,existing,deps,input);
+  if(await native.byNonce(input.idempotencyKey))throw new OnboardingConflictError();await native.lockSession(input.sessionId);await new ConfigRuleRepository(tx,ctx.organizationId).lockVersion(onboardingPolicyKey,"organization",null);const previous=await native.current(input.sessionId);if(!previous||previous.id!==input.previousRevisionId||previous.step!=="REVIEW")throw new OnboardingConflictError();await lockNativeOnboardingOwner(tx,ctx.organizationId,previous.ownerId);await lockNativeOnboardingProperty(tx,ctx.organizationId,input.target.propertyId);
+  const base=await activationDraftContext(ctx,tx,draft,deps);if(base.reviewFingerprint!==input.reviewFingerprint||!isDeepStrictEqual(base.configured.snapshot,budget.snapshot)||await runs.currentForSession(input.sessionId))throw new OnboardingConflictError();
+  const id=randomUUID(),createdAt=await native.clock(),requestId=deps.requestId??randomUUID(),authorizationCap=captureAuthorizationCap(ctx.authContext),payloadBinding={organizationId:ctx.organizationId,sessionId:input.sessionId,activationId:id,reviewRevisionId:base.review.id,ownerId:base.review.ownerId,propertyId:input.target.propertyId,createdBy:ctx.actorId,commandKey:input.idempotencyKey,policyId:base.configured.rule.id,policyVersion:base.configured.rule.version,sourceFingerprint:base.sourceFingerprint,authorizationFingerprint:jsonbFingerprint(authorizationCap),requestedAt:createdAt.toISOString()},encryptedPayload=encryptOnboardingActivationPayload({command:input,source:base.source,policySnapshot:base.configured.snapshot,authorizationCap},payloadBinding,deps.env),payloadSha256=createHash("sha256").update(encryptedPayload).digest("hex"),commandHash=commandFingerprint({protocol,flow:"ACTIVATION",command:input,source:base.source,payloadSha256,policy:base.configured.snapshot,authorizationCap});
+  const row=await runs.create({id,sessionId:input.sessionId,reviewRevisionId:base.review.id,ownerId:base.review.ownerId,propertyId:input.target.propertyId,commandKey:input.idempotencyKey,commandHash,reviewFingerprint:input.reviewFingerprint,sourceFingerprint:base.sourceFingerprint,sourceSnapshot:base.source,encryptedPayload,payloadSha256,policyId:base.configured.rule.id,policyVersion:base.configured.rule.version,policySnapshot:base.configured.snapshot,authorizationCap,createdBy:ctx.actorId,createdAt,requestId});
+  await runs.append({activationId:row.id,previousId:null,sequence:1,type:"REQUESTED",actorId:ctx.actorId,occurredAt:createdAt,requestId});
+  await new OutboxRepository(tx,ctx.organizationId).append(onboardingActivationRequested,{sessionId:row.sessionId,activationId:row.id,reviewRevisionId:row.reviewRevisionId,propertyId:row.propertyId},"onboarding.activation:"+row.id,row.createdAt);
+  await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:onboardingActivationRequested,resourceType:"onboarding",resourceId:row.sessionId,propertyScopeId:row.propertyId,after:{activationId:row.id,sessionId:row.sessionId,reviewRevisionId:row.reviewRevisionId,propertyId:row.propertyId,commandHash:row.commandHash,payloadSha256:row.payloadSha256,sourceFingerprint:row.sourceFingerprint,reviewFingerprint:row.reviewFingerprint,policyId:row.policyId},requestId,occurredAt:createdAt});
+  const final=await activationDraftContext(ctx,tx,draft,deps);if(final.reviewFingerprint!==base.reviewFingerprint)throw new OnboardingConflictError();await runs.validateBirth();return activationReceipt(tx,row);
+ });
+}
+export async function recoverOnboardingActivation(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
+ const ctx=actorContext(actor),input=recoverInput.parse(raw);await spendRead(ctx,deps,input.sessionId);return withTenant(deps.db,ctx.organizationId,async tx=>{const native=new OnboardingRepository(tx,ctx.organizationId),runs=new OnboardingActivationRepository(tx,ctx.organizationId);await native.lockCommand(input.idempotencyKey);const row=await runs.byNonce(input.idempotencyKey);if(!row)return{recorded:false as const,activation:null};if(input.sessionId&&row.sessionId!==input.sessionId)throw new OnboardingAccessError();return{recorded:true as const,activation:await recoverActivationExisting(ctx,tx,row,deps)};});
+}
 function retainedConfiguration(row:Row,env?:NodeJS.ProcessEnv){const value=decryptOnboardingConfigurationPayload(row.encryptedPayload,configurationBinding(row),env);if(value.command.reviewFingerprint!==row.reviewFingerprint||!isDeepStrictEqual(value.policySnapshot,row.policySnapshot))throw new OnboardingConfigurationError();return value;}
 async function configurationRecordedAuthority(actor:AccountActorContext,tx:TenantTransaction,row:Row){
  if(jsonbFingerprint(row.sourceSnapshot)!==row.sourceFingerprint)throw new OnboardingConfigurationError();

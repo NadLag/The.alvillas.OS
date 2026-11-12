@@ -3,6 +3,7 @@ import {inventoryMaximumItems} from "@/platform/config/inventory-policy";
 import {serviceCatalogMaximumItems} from "@/platform/config/service-catalog-policy";
 import {workflowCatalogMaximumItems} from "@/platform/config/workflow-policy";
 import {onboardingReviewPolicySchema} from "./onboarding-review-policy";
+import {onboardingActivationPolicySchema} from "./onboarding-activation-policy";
 
 export const onboardingPolicyKey="onboarding.wizard";
 export const onboardingSteps=["OWNER","PROPERTY","OPERATING_PROFILE","MANAGEMENT_AGREEMENT","TEAM","BOOKING_CHANNELS","INVENTORY","SERVICES","WORKFLOWS","REVIEW","ACTIVATE"] as const;
@@ -33,6 +34,7 @@ export const onboardingPolicySchema=z.object({
  services:onboardingServicesPolicySchema.optional(),
  workflows:onboardingWorkflowsPolicySchema.optional(),
  review:onboardingReviewPolicySchema.optional(),
+ activation:onboardingActivationPolicySchema.optional(),
  admission:budget,reads:budget
 }).strict().superRefine((value,context)=>{
  if(value.property_modes?.includes("CREATE")&&!value.property_creation_rule)context.addIssue({code:"custom",message:"native_onboarding_property_creation_rule_required",path:["property_creation_rule"]});
