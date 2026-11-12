@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
+import {operationIdentity as identity} from "@/platform/idempotency/operation-identity";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import Decimal from "decimal.js";
@@ -77,10 +78,6 @@ function resource(
 function requireProperty(ctx: Context) {
   if (!ctx.property) throw new Error("automation_property_required");
   return ctx.property;
-}
-function identity(key: string) {
-  const h = createHash("sha256").update(key).digest("hex");
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 function text(value: unknown): string {
   if (typeof value !== "string" || !value)
