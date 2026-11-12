@@ -2,6 +2,7 @@ import type { NormalizedReservationAdapter } from "./reservation-types";
 import type { AppLocale } from "@/i18n/routing";
 import type { SignatureRequestInput, SignatureRequestObservation, SignatureRequestReceipt, SignatureRequestDownloadInput, SignatureRequestDownload, SignatureCertificateDownloadInput, SignatureCertificateDownload } from "./signature-request";
 import type { BrowserPushSubscription } from "@/platform/notifications/web-push";
+import type {EmailPdfAttachment} from "./email-attachments";
 
 export interface EmailProvider {
   send(input: {
@@ -13,6 +14,7 @@ export interface EmailProvider {
     template: string;
     idempotencyKey?: string;
     deliveryReference?: { organizationId: string; deliveryId: string };
+    attachments?: readonly EmailPdfAttachment[];
   }): Promise<{ id: string }>;
 }
 

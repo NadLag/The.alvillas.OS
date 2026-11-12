@@ -1,13 +1,10 @@
-import { createHash } from "node:crypto";
 import { EmailRequestError } from "@/platform/providers/real";
+export {recipientKey} from "./email-recipient";
 
 export function emailIdempotencyKey(event: { type: string; organizationId: string; id: string }) {
   return `${event.type.startsWith("identity.") ? "identity-email" : "notification"}:${event.organizationId}:${event.id}`;
 }
 
-export function recipientKey(organizationId: string, address: string): string {
-  return createHash("sha256").update(`${organizationId}:${address.trim().toLowerCase()}`).digest("hex");
-}
 export function emailFailure(error: unknown) {
   const status = error instanceof EmailRequestError ? error.status : null;
   const conflict = error instanceof EmailRequestError && error.code === "invalid_idempotent_request";

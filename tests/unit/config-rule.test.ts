@@ -99,6 +99,7 @@ describe("config rule registry", () => {
       "notification.routing.task_assigned",
       "notification.routing.task_completed",
       "notification.routing.task_overdue",
+      "onboarding.owner_delivery",
       "onboarding.owner_package",
       "onboarding.wizard",
       "operations.laundry_pricing",

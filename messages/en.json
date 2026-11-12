@@ -1260,6 +1260,12 @@
       "code": "Recovery code",
       "expires": "Valid until {date}.",
       "footer": "Keep this code private. Contact your supervisor if you did not request recovery."
+    },
+    "ownerPackage": {
+      "subject": "Your property configuration documents: {property}",
+      "greeting": "Hello {owner},",
+      "body": "Your property configuration documents are attached in English and French.",
+      "footer": "ALVILLAS"
     }
   },
   "Notifications": {

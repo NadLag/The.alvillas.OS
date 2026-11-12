@@ -1,0 +1,17 @@
+import {z} from "zod";
+import {encryptBytes,decryptBytes} from "@/platform/auth/secret-encryption";
+import {requirePrivatePayloadKeys} from "@/platform/auth/private-payload-keys";
+import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
+import {onboardingIdSchema,onboardingFingerprintSchema} from "./onboarding-primitives";
+import {onboardingOwnerDeliveryOriginalSchema,type OnboardingOwnerDeliveryOriginal} from "./onboarding-owner-delivery-original";
+import {OnboardingConfigurationError} from "./onboarding-wizard";
+
+const id=onboardingIdSchema,sha=onboardingFingerprintSchema;
+export const onboardingOwnerDeliveryBindingSchema=z.object({organizationId:id,deliveryId:id,packageId:id,ownerId:id,propertyId:id,createdBy:id,commandKey:id,outboxEventId:id,policyId:id,policyVersion:z.number().int().positive(),sourceFingerprint:sha,recipientKey:sha,locale:z.enum(["en","fr","ar"]),authorizationFingerprint:sha,requestedAt:z.iso.datetime()}).strict();
+export type OnboardingOwnerDeliveryBinding=z.infer<typeof onboardingOwnerDeliveryBindingSchema>;
+// The private original stores email text and immutable attachment identities; PDF bytes remain in the canonical archive.
+export const onboardingOwnerDeliveryMaximumPayloadBytes=1024*1024;
+function context(raw:OnboardingOwnerDeliveryBinding){const b=onboardingOwnerDeliveryBindingSchema.parse(raw);return JSON.stringify(["alvillas-private-owner-package-email-v1",b.organizationId,b.deliveryId,b.packageId,b.ownerId,b.propertyId,b.createdBy,b.commandKey,b.outboxEventId,b.policyId,b.policyVersion,b.sourceFingerprint,b.recipientKey,b.locale,b.authorizationFingerprint,b.requestedAt]);}
+function bound(raw:unknown,rawBinding:OnboardingOwnerDeliveryBinding){const value=onboardingOwnerDeliveryOriginalSchema.parse(raw),b=onboardingOwnerDeliveryBindingSchema.parse(rawBinding),metadata=value.metadata;if(metadata.organizationId!==b.organizationId||metadata.packageId!==b.packageId||metadata.ownerId!==b.ownerId||metadata.propertyId!==b.propertyId||metadata.recipientKey!==b.recipientKey||metadata.ownerLocale!==b.locale||jsonbFingerprint(metadata)!==b.sourceFingerprint||value.command.idempotencyKey!==b.commandKey||value.policySnapshot.id!==b.policyId||value.policySnapshot.version!==b.policyVersion||value.authorizationCap.userAccountId!==b.createdBy||jsonbFingerprint(value.authorizationCap)!==b.authorizationFingerprint)throw new OnboardingConfigurationError();return value;}
+export function encryptOnboardingOwnerDeliveryOriginal(raw:OnboardingOwnerDeliveryOriginal,binding:OnboardingOwnerDeliveryBinding,env:NodeJS.ProcessEnv=process.env){requirePrivatePayloadKeys(env,true,()=>new OnboardingConfigurationError());const bytes=Buffer.from(JSON.stringify(bound(raw,binding)),"utf8");try{if(bytes.length>onboardingOwnerDeliveryMaximumPayloadBytes)throw new OnboardingConfigurationError();const cipher=encryptBytes(bytes,context(binding),env);if(cipher.length>onboardingOwnerDeliveryMaximumPayloadBytes){cipher.fill(0);throw new OnboardingConfigurationError();}return cipher;}finally{bytes.fill(0);}}
+export function decryptOnboardingOwnerDeliveryOriginal(cipher:Uint8Array,binding:OnboardingOwnerDeliveryBinding,env:NodeJS.ProcessEnv=process.env){requirePrivatePayloadKeys(env,false,()=>new OnboardingConfigurationError());if(cipher.length>onboardingOwnerDeliveryMaximumPayloadBytes)throw new OnboardingConfigurationError();const bytes=decryptBytes(cipher,context(binding),env);try{return bound(JSON.parse(bytes.toString("utf8")),binding);}finally{bytes.fill(0);}}

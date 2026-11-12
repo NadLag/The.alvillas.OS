@@ -605,6 +605,7 @@ model Organization {
   propertyOnboardingActivationEvents PropertyOnboardingActivationEvent[]
  ownerPackages OwnerOnboardingPackage[]
  ownerPackageItems OwnerOnboardingPackageItem[]
+  onboardingOwnerDeliveries OwnerOnboardingDelivery[]
 }
 
 model Region {
@@ -948,6 +949,7 @@ model UserAccount {
   requestedPropertyActivations PropertyOnboardingActivationRequest[]
   propertyActivationEvents PropertyOnboardingActivationEvent[]
  requestedOwnerPackages OwnerOnboardingPackage[]
+  onboardingOwnerDeliveries OwnerOnboardingDelivery[]
 }
 
 model AuthCredential {
@@ -1201,6 +1203,7 @@ model Owner {
   onboardingRevisions PropertyOnboardingRevision[]
   onboardingActivations PropertyOnboardingActivationRequest[]
  onboardingPackages OwnerOnboardingPackage[]
+  onboardingEmailDeliveries OwnerOnboardingDelivery[]
 }
 
 model OwnerRepresentative {
@@ -1351,6 +1354,7 @@ model Property {
   onboardingRevisions PropertyOnboardingRevision[]
   onboardingActivations PropertyOnboardingActivationRequest[]
  onboardingPackages OwnerOnboardingPackage[]
+  onboardingOwnerDeliveries OwnerOnboardingDelivery[]
 }
 
 model PropertyTemplateVersion {
@@ -2419,6 +2423,7 @@ model ConfigRule {
   onboardingActivations PropertyOnboardingActivationRequest[]
  ownerPackagePolicies OwnerOnboardingPackage[] @relation("OwnerPackagePolicy")
  ownerPackageContents OwnerOnboardingPackage[] @relation("OwnerPackageContent")
+  onboardingOwnerDeliveries OwnerOnboardingDelivery[] @relation("OwnerDeliveryPolicy")
 }
 
 model ReservationConfigSnapshot {
@@ -2596,6 +2601,7 @@ model OutboxEvent {
   @@index([organizationId, status, occurredAt], map: "outbox_event_org_status_occurred_idx")
   @@index([organizationId, status, nextAttemptAt, occurredAt], map: "outbox_event_org_status_retry_idx")
   @@map("outbox_event")
+  onboardingOwnerDeliveries OwnerOnboardingDelivery[]
 }
 
 model PushSubscription {
@@ -5733,6 +5739,7 @@ model OwnerOnboardingPackage {
  @@index([organizationId,propertyId,createdAt,id],map:"owner_package_property_history_idx")
  @@index([organizationId,createdBy,createdAt,id],map:"owner_package_creator_history_idx")
  @@map("owner_onboarding_package")
+  deliveries OwnerOnboardingDelivery[]
 }
 
 model OwnerOnboardingPackageItem {
@@ -5749,4 +5756,46 @@ model OwnerOnboardingPackageItem {
  @@unique([organizationId,packageId,locale],map:"owner_package_item_locale_key")
  @@unique([organizationId,instanceId],map:"owner_package_item_instance_key")
  @@map("owner_onboarding_package_item")
+}
+
+model OwnerOnboardingDelivery {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ packageId String @map("package_id") @db.Uuid
+ ownerId String @map("owner_id") @db.Uuid
+ propertyId String @map("property_id") @db.Uuid
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ reviewFingerprint String @map("review_fingerprint")
+ sourceFingerprint String @map("source_fingerprint")
+ sourceSnapshot Json @map("source_snapshot")
+ documentPlan Json @map("document_plan")
+ emailPlan Json @map("email_plan")
+ locale String @db.Char(2)
+ recipientKey String @map("recipient_key")
+ encryptedPayload Bytes @map("encrypted_payload")
+ payloadSha256 String @map("payload_sha256")
+ payloadSchema Int @default(1) @map("payload_schema")
+ policyId String @map("policy_id") @db.Uuid
+ policyVersion Int @map("policy_version")
+ policySnapshot Json @map("policy_snapshot")
+ authorizationCap Json @map("authorization_cap")
+ outboxEventId String @map("outbox_event_id") @db.Uuid
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ package OwnerOnboardingPackage @relation(fields:[organizationId,packageId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ owner Owner @relation(fields:[organizationId,ownerId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ property Property @relation(fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ actor UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ policy ConfigRule @relation("OwnerDeliveryPolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ outbox OutboxEvent @relation(fields:[organizationId,outboxEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ @@unique([organizationId,id],map:"owner_delivery_org_id_key")
+ @@unique([organizationId,commandKey],map:"owner_delivery_nonce_key")
+ @@unique([organizationId,outboxEventId],map:"owner_delivery_outbox_key")
+ @@index([organizationId,packageId,createdAt,id],map:"owner_delivery_package_history_idx")
+ @@index([organizationId,propertyId,createdAt,id],map:"owner_delivery_property_history_idx")
+ @@index([organizationId,createdBy,createdAt,id],map:"owner_delivery_creator_history_idx")
+ @@map("owner_onboarding_delivery")
 }

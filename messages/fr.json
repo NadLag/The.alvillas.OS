@@ -1260,6 +1260,12 @@
       "code": "Code de r?cup?ration",
       "expires": "Valable jusqu?au {date}.",
       "footer": "Gardez ce code confidentiel. Contactez votre responsable si vous n?avez pas demand? cette r?cup?ration."
+    },
+    "ownerPackage": {
+      "subject": "Les documents de configuration de votre propriété : {property}",
+      "greeting": "Bonjour {owner},",
+      "body": "Les documents de configuration de votre propriété sont joints en français et en anglais.",
+      "footer": "ALVILLAS"
     }
   },
   "Notifications": {
