@@ -1,0 +1,17 @@
+import {z} from "zod";
+import {encryptBytes,decryptBytes} from "@/platform/auth/secret-encryption";
+import {requirePrivatePayloadKeys} from "@/platform/auth/private-payload-keys";
+import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
+import {onboardingIdSchema,onboardingFingerprintSchema} from "./onboarding-primitives";
+import {onboardingOwnerPackageOriginalSchema,type OnboardingOwnerPackageOriginal} from "./onboarding-owner-package-run";
+import {OnboardingConfigurationError} from "./onboarding-wizard";
+
+const id=onboardingIdSchema,sha=onboardingFingerprintSchema;
+export const onboardingOwnerPackageBindingSchema=z.object({organizationId:id,packageId:id,sessionId:id,reviewRevisionId:id,ownerId:id,propertyId:id,createdBy:id,commandKey:id,policyId:id,policyVersion:z.number().int().positive(),contentId:id,contentVersion:z.number().int().positive(),sourceFingerprint:sha,authorizationFingerprint:sha,requestedAt:z.iso.datetime()}).strict();
+export type OnboardingOwnerPackageBinding=z.infer<typeof onboardingOwnerPackageBindingSchema>;
+// Original commands and at most three immutable identity plans contain no report bodies.
+export const onboardingOwnerPackageMaximumPayloadBytes=1024*1024;
+function context(raw:OnboardingOwnerPackageBinding){const b=onboardingOwnerPackageBindingSchema.parse(raw);return JSON.stringify(["alvillas-private-paired-owner-package-v1",b.organizationId,b.packageId,b.sessionId,b.reviewRevisionId,b.ownerId,b.propertyId,b.createdBy,b.commandKey,b.policyId,b.policyVersion,b.contentId,b.contentVersion,b.sourceFingerprint,b.authorizationFingerprint,b.requestedAt]);}
+function bound(raw:unknown,rawBinding:OnboardingOwnerPackageBinding){const value=onboardingOwnerPackageOriginalSchema.parse(raw),b=onboardingOwnerPackageBindingSchema.parse(rawBinding),s=value.source;if(s.organizationId!==b.organizationId||s.sessionId!==b.sessionId||s.reviewRevisionId!==b.reviewRevisionId||s.ownerId!==b.ownerId||s.propertyId!==b.propertyId||s.contentId!==b.contentId||s.contentVersion!==b.contentVersion||jsonbFingerprint(s)!==b.sourceFingerprint||value.command.idempotencyKey!==b.commandKey||value.policySnapshot.id!==b.policyId||value.policySnapshot.version!==b.policyVersion||value.authorizationCap.userAccountId!==b.createdBy||jsonbFingerprint(value.authorizationCap)!==b.authorizationFingerprint)throw new OnboardingConfigurationError();return value;}
+export function encryptOnboardingOwnerPackageOriginal(raw:OnboardingOwnerPackageOriginal,binding:OnboardingOwnerPackageBinding,env:NodeJS.ProcessEnv=process.env){requirePrivatePayloadKeys(env,true,()=>new OnboardingConfigurationError());const bytes=Buffer.from(JSON.stringify(bound(raw,binding)),"utf8");try{if(bytes.length>onboardingOwnerPackageMaximumPayloadBytes)throw new OnboardingConfigurationError();const cipher=encryptBytes(bytes,context(binding),env);if(cipher.length>onboardingOwnerPackageMaximumPayloadBytes){cipher.fill(0);throw new OnboardingConfigurationError();}return cipher;}finally{bytes.fill(0);}}
+export function decryptOnboardingOwnerPackageOriginal(cipher:Uint8Array,binding:OnboardingOwnerPackageBinding,env:NodeJS.ProcessEnv=process.env){requirePrivatePayloadKeys(env,false,()=>new OnboardingConfigurationError());if(cipher.length>onboardingOwnerPackageMaximumPayloadBytes)throw new OnboardingConfigurationError();const bytes=decryptBytes(cipher,context(binding),env);try{return bound(JSON.parse(bytes.toString("utf8")),binding);}finally{bytes.fill(0);}}

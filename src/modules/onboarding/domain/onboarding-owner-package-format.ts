@@ -44,3 +44,5 @@ export function ownerPackageTextBindings(sections:ReturnType<typeof formatOnboar
  for(const[base,text]of Object.entries(sections)){const keys=requested.filter(key=>key===base||key.startsWith(base+"_")).sort((left,right)=>Number(left.slice(base.length+1)||1)-Number(right.slice(base.length+1)||1));if(!keys.length||keys.some((key,index)=>key!==(index?base+"_"+(index+1):base)))throw new OnboardingConfigurationError();const points=Array.from(text);if(keys.length>points.length)throw new OnboardingConfigurationError();let offset=0;for(const[key,index]of keys.map((key,index)=>[key,index]as const)){const take=Math.ceil((points.length-offset)/(keys.length-index)),value=points.slice(offset,offset+take).join("");if(value.length>20000||!value.trim())throw new OnboardingConfigurationError();result.set(key,value);offset+=take;}}
  if(result.size!==requested.length)throw new OnboardingConfigurationError();return result;
 }
+
+export function onboardingOwnerPackageArchiveTitle(locale:AppLocale){return{en,fr,ar}[locale].OwnerOnboardingPackage.archiveTitle;}
