@@ -1,6 +1,6 @@
 import {z} from "zod";
 import {authorizationCapSchema} from "@/platform/authz/authorization-cap";
-import {documentUploadInput} from "@/modules/documents/domain/document-command";
+import {ownerPackageDocumentReasonSchema} from "@/platform/documents/owner-package-contract";
 import {onboardingIdSchema,onboardingFingerprintSchema} from "./onboarding-primitives";
 import {onboardingOwnerPackagePolicySchema} from "./onboarding-owner-package-policy";
 
@@ -9,7 +9,7 @@ export const onboardingOwnerPackageProtocol="NATIVE_ONBOARDING_OWNER_PACKAGE_V1"
 export const onboardingOwnerPackageLocales=["en","fr","ar"]as const;
 const locale=z.enum(onboardingOwnerPackageLocales),sha=onboardingFingerprintSchema,id=onboardingIdSchema;
 export const onboardingOwnerPackageDraftSchema=z.object({sessionId:id,reviewRevisionId:id}).strict();
-export const onboardingOwnerPackageCommandSchema=onboardingOwnerPackageDraftSchema.extend({idempotencyKey:id,reviewFingerprint:sha,reason:documentUploadInput.shape.reason});
+export const onboardingOwnerPackageCommandSchema=onboardingOwnerPackageDraftSchema.extend({idempotencyKey:id,reviewFingerprint:sha,reason:ownerPackageDocumentReasonSchema});
 export type OnboardingOwnerPackageCommand=z.infer<typeof onboardingOwnerPackageCommandSchema>;
 export const onboardingOwnerPackageSourceSchema=z.object({source:z.literal(onboardingOwnerPackageProtocol),organizationId:id,sessionId:id,reviewRevisionId:id,ownerId:id,propertyId:id,agreementId:id,reviewSourceFingerprint:sha,nativePackageFingerprint:sha,contentId:id,contentVersion:z.number().int().positive()}).strict();
 export const onboardingOwnerPackagePlanItemSchema=z.object({locale,instanceId:id,documentId:id,templateVersionId:id,templateSha256:sha,commandKeyFingerprint:sha,sourceFingerprint:sha,reviewFingerprint:sha}).strict();
