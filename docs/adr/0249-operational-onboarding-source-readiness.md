@@ -1,0 +1,7 @@
+# Readiness after the actual operational transition
+
+The actual Native Activate revision changes its property's physical source tuple. This expected self transition must not make an otherwise unchanged completed onboarding appear stale. The completion's authenticated encrypted original therefore retains the full post-transition metadata fingerprint and the protected recorded-source fingerprint captured in the same transaction. It does not retain a parallel mutable configuration or declare a queued effect complete.
+
+Readiness first validates the actual immutable run, completed native revision and operational property under current and captured source authority. It then authenticates the original intent, completion envelope, authorization cap, canonical effect references, command fingerprint and the retained post-transition witnesses. Current metadata is compared with those exact witnesses, using the original approved Review as the authoritative ancestry. A later configuration, permission, source or physical correction keeps historical completion and delivery intact while reporting changed current configuration.
+
+Earlier completion envelopes remain readable without invented witness values. A missing post-transition witness cannot establish current operational readiness. Native history is not rewritten. Provider restrictions, authorization, financial integrity and the 355-feature scope remain unchanged. Native UI, job integration, mandatory CI and restricted hosted acceptance remain required.
