@@ -1,5 +1,6 @@
+import {appendNativeOnboardingActivationEvent as append} from "./onboarding-activation-events";
 import {randomUUID} from "node:crypto";
-import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
+import {withTenant} from "@/platform/db/tenant";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
 import {onboardingActivationPolicySchema,type OnboardingActivationPolicy,onboardingActivationDependencies} from "../domain/onboarding-activation-policy";
@@ -17,14 +18,10 @@ type Effect=OnboardingActivationPolicy["effects"][number];
 type Dependencies=Parameters<typeof admitActivationOwnerPackage>[2];
 type Reference=Awaited<ReturnType<typeof nativeOnboardingActivationReference>>;
 const waitUntil=(now:Date,policy:OnboardingActivationPolicy)=>new Date(now.getTime()+policy.retry.backoff_seconds*1000).toISOString();
-async function append(tx:TenantTransaction,run:Reference,details:{type:string;effectKind:Effect;attempt:number;result?:OnboardingActivationEffectEvidence;failureCode?:string;retryAfterSeconds?:number},requestId:string){
- const repository=new OnboardingActivationRepository(tx,run.row.organizationId),head=await repository.head(run.row.id),now=await new OnboardingRepository(tx,run.row.organizationId).clock();if(!head)throw new OnboardingConfigurationError();
- const event=await repository.append({activationId:run.row.id,previousId:head.id,sequence:head.sequence+1,type:details.type,effectKind:details.effectKind,attempt:details.attempt,...details.result?{result:details.result,resultFingerprint:jsonbFingerprint(details.result)}:{},...details.failureCode?{failureCode:details.failureCode}:{},...details.retryAfterSeconds!==undefined?{nextAttemptAt:new Date(now.getTime()+details.retryAfterSeconds*1000)}:{},actorId:run.row.createdBy,occurredAt:now,requestId});
- await writeAuditEvent(tx,{organizationId:run.row.organizationId,actorId:run.row.createdBy,action:"onboarding.activation_event",resourceType:"onboarding",resourceId:run.row.sessionId,propertyScopeId:run.row.propertyId,after:{activationId:run.row.id,eventId:event.id,sequence:event.sequence,type:event.type,effectKind:event.effectKind,attempt:event.attempt,resultFingerprint:event.resultFingerprint,failureCode:event.failureCode},requestId,occurredAt:event.occurredAt});await repository.validateBirth();return event;
-}
 async function reserve(organizationId:string,activationId:string,deps:Dependencies){return withTenant(deps.db,organizationId,async tx=>{
  const repository=new OnboardingActivationRepository(tx,organizationId);await repository.lock(activationId);const run=await nativeOnboardingActivationReference(organizationId,tx,activationId),policy=onboardingActivationPolicySchema.parse((run.row.policySnapshot as {value:{activation:unknown}}).value.activation),now=await new OnboardingRepository(tx,organizationId).clock();
  if(run.head.type==="ACTIVATED"||run.head.type==="FAILED")return{run,policy,effect:null,attempt:null,state:run.head.type,nextAttemptAt:null};
+ if((await repository.currentForSession(run.row.sessionId))?.id!==activationId)return{run,policy,effect:null,attempt:null,state:"SUPERSEDED",nextAttemptAt:null};
  const phases=await repository.phaseHeads(activationId),completed=new Set(phases.filter(phase=>phase.type==="SUCCEEDED").map(phase=>phase.effectKind)),effect=policy.effects.find(kind=>!completed.has(kind));
  if(!effect)return{run,policy,effect:null,attempt:null,state:"EFFECTS_COMPLETE",nextAttemptAt:null};
  if(onboardingActivationDependencies[effect].some(kind=>!completed.has(kind)))throw new OnboardingConflictError();const phase=phases.find(phase=>phase.effectKind===effect);
