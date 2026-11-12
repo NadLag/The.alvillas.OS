@@ -1,16 +1,19 @@
 import { z } from "zod";
 import { documentPrivacyTags } from "./document-policy";
 import { documentTemplateMaximumBytes } from "./document-template-format";
+import {onboardingReportRenderProfile,onboardingReportMaximumRenderedBytes} from "./document-render-limits";
 
 const text = (maximum: number) => z.string().min(1).max(maximum).refine(value => value.trim().length > 0 && !/\p{Cc}/u.test(value.replaceAll("\t", "").replaceAll("\r", "").replaceAll("\n", "")));
 export const documentPdfTemplate = "documents.authored-instance.v1";
-export const renderedDocumentSchema = z.object({
+const renderedDocumentFields = z.object({
   templateKey: z.string().regex(/^[a-z][a-z0-9_]{0,119}$/u), locale: z.enum(["en", "fr", "ar"]),
   title: text(documentTemplateMaximumBytes),
   blocks: z.array(z.object({ kind: z.enum(["HEADING", "PARAGRAPH", "BULLET"]), text: text(documentTemplateMaximumBytes) }).strict()).nonempty().max(200),
   privacy: z.array(z.enum(documentPrivacyTags)).max(3).refine(values => new Set(values).size === values.length)
-}).strict().refine(value => new TextEncoder().encode(JSON.stringify(value)).length <= documentTemplateMaximumBytes);
-export const documentPdfInputSchema = z.object({ source: renderedDocumentSchema, provenance: z.object({
+}).strict();
+export const renderedDocumentSchema=renderedDocumentFields.refine(value=>new TextEncoder().encode(JSON.stringify(value)).length<=documentTemplateMaximumBytes);
+const onboardingRenderedDocumentSchema=renderedDocumentFields.extend({inputProfile:z.literal(onboardingReportRenderProfile),title:text(onboardingReportMaximumRenderedBytes),blocks:z.array(z.object({kind:z.enum(["HEADING","PARAGRAPH","BULLET"]),text:text(onboardingReportMaximumRenderedBytes)}).strict()).nonempty().max(200)}).strict().refine(value=>value.privacy.includes("financial")&&value.privacy.includes("sensitive")&&new TextEncoder().encode(JSON.stringify(value)).length<=onboardingReportMaximumRenderedBytes);
+export const documentPdfInputSchema = z.object({ source: z.union([renderedDocumentSchema,onboardingRenderedDocumentSchema]), provenance: z.object({
   templateVersionId: z.uuid(), templateSha256: z.string().regex(/^[a-f0-9]{64}$/u), sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/u)
 }).strict(), maximumBytes: z.number().int().min(1).max(10 * 1024 * 1024) }).strict();
 export class DocumentPdfConfigurationError extends Error { constructor() { super("document_pdf_unavailable"); } }

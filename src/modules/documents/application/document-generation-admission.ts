@@ -72,7 +72,7 @@ export async function admitDocumentGeneration(actor: DocumentActorContext, raw: 
       await appendDocumentHistory(ctx, tx, current, root.id, "CREATED", command.idempotencyKey, commandHash, command.reason, {}, { document: await repository.snapshot(root.id) }, deps);
     }
     const bytes = encodeDocumentGenerationInput(prepared.renderInput),identity = { organizationId: ctx.organizationId, documentId, instanceId: id,
-      templateVersionId: prepared.selected.versionId, templateSha256: prepared.selected.sha256, sourceFingerprint: prepared.sourceFingerprint, sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.length },
+      templateVersionId: prepared.selected.versionId, templateSha256: prepared.selected.sha256, sourceFingerprint: prepared.sourceFingerprint, sha256: createHash("sha256").update(bytes).digest("hex"), byteSize: bytes.length,..."inputProfile"in prepared.renderInput.source?{inputProfile:prepared.renderInput.source.inputProfile}:{} },
       snapshot = documentGenerationSnapshotSchema.parse({ protocol: documentGenerationProtocol, schemaVersion: 1, identity, command, commandHash, nativeSourceFingerprint: prepared.nativeSourceFingerprint,
         policySnapshot: current.policy, authorizationCap: captureAuthorizationCap(ctx.authContext), variants: prepared.variants, contractFingerprint: prepared.contractFingerprint,documentRevision:root.revision.toString(),
         sourceKeys: prepared.selected.definition.variables.map(variable => variable.key), payloadCipher: sealDocumentGenerationInput(identity, bytes, deps.env).toString("base64") });

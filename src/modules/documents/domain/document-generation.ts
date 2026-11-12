@@ -4,10 +4,12 @@ import { documentArchivePolicySchema } from "./document-policy";
 import { documentSourceReferenceSchema, documentUploadReviewInput, documentUploadInput } from "./document-command";
 import { documentTemplateMaximumBytes } from "./document-template-format";
 import { documentTemplateVariableKeySchema } from "./document-template";
+import {onboardingReportRenderProfile,onboardingReportMaximumRenderedBytes,documentMaximumRenderedBytes} from "./document-render-limits";
 
 export const documentGenerationRequested = "documents.instance.requested";
 export const documentGenerationProtocol = "ALVILLAS_GENERATED_DOCUMENT_V1";
 export const documentGenerationMaximumInputBytes = documentTemplateMaximumBytes + 16384;
+export const documentGenerationMaximumOwnerReportInputBytes=onboardingReportMaximumRenderedBytes+16384;
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
 export const documentGenerationDraftSchema = z.object({
   templateVersionId: z.uuid(), variantVersionIds: z.array(z.uuid()).min(2).max(3).refine(values => new Set(values).size === values.length),
@@ -22,8 +24,8 @@ export const documentGenerationCommandSchema = documentGenerationDraftSchema.saf
 });
 export const documentGenerationIdentitySchema = z.object({
   organizationId: z.uuid(), documentId: z.uuid(), instanceId: z.uuid(), templateVersionId: z.uuid(), templateSha256: sha256,
-  sourceFingerprint: sha256, sha256, byteSize: z.number().int().min(1).max(documentGenerationMaximumInputBytes)
-}).strict();
+  sourceFingerprint: sha256, sha256, byteSize: z.number().int().min(1).max(documentGenerationMaximumOwnerReportInputBytes),inputProfile:z.literal(onboardingReportRenderProfile).optional()
+}).strict().refine(value=>value.byteSize<=documentMaximumRenderedBytes(value.inputProfile)+16384);
 export type DocumentGenerationIdentity = z.infer<typeof documentGenerationIdentitySchema>;
 const variant = z.object({ versionId: z.uuid(), documentId: z.uuid(), fingerprint: sha256, sha256, locale: z.enum(["en", "fr", "ar"]) }).strict();
 /** Private immutable instance snapshot. Public requests can supply only the draft/command above. */
@@ -33,8 +35,9 @@ export const documentGenerationSnapshotSchema = z.object({
   policySnapshot: z.object({ id: z.uuid(), version: z.number().int().positive(), value: documentArchivePolicySchema }).strict(),
   authorizationCap: authorizationCapSchema, variants: z.array(variant).min(2).max(3), contractFingerprint: sha256,
   sourceKeys: z.array(documentTemplateVariableKeySchema).max(200).refine(values => new Set(values).size === values.length),
-  payloadCipher: z.base64().max(Math.ceil((documentGenerationMaximumInputBytes + 256) / 3) * 4),documentRevision:z.string().regex(/^[1-9]\d*$/u).optional()
+  payloadCipher: z.base64().max(Math.ceil((documentGenerationMaximumOwnerReportInputBytes + 256) / 3) * 4),documentRevision:z.string().regex(/^[1-9]\d*$/u).optional()
 }).strict().superRefine((value, ctx) => {
+  if(value.identity.inputProfile&&value.command.source.kind!=="ONBOARDING")ctx.addIssue({code:"custom",message:"native_onboarding_report_source_required"});
   if (value.authorizationCap.organizationId !== value.identity.organizationId || value.command.templateVersionId !== value.identity.templateVersionId)
     ctx.addIssue({ code: "custom", message: "original_generation_identity_required" });
   if(value.command.documentId&&value.command.documentId!==value.identity.documentId)ctx.addIssue({code:"custom",message:"original_generation_document_required"});
