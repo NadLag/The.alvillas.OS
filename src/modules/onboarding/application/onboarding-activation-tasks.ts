@@ -1,3 +1,4 @@
+import {randomUUID} from "node:crypto";
 import {withTenant} from "@/platform/db/tenant";
 import {authorizeCollection} from "@/platform/authz/authorize";
 import {recheckAccountAuthorization} from "@/platform/authz/current-authority";
@@ -16,7 +17,8 @@ export async function materializeOnboardingActivationTasks(organizationId:string
  const authorizeDestination=async()=>recheckAccountAuthorization(access.actor,tx,await native.clock(),(["create","view"]as const).map(action=>({action,resource})),new OnboardingAccessError());
  await authorizeDestination();await native.lockSession(access.row.sessionId);
  const source=await nativeOnboardingActivationWorkflowSource(organizationId,tx,activationId,deps),plan=compileOnboardingActivationTasks({organizationId,propertyId:source.run.row.propertyId,activationId:source.run.row.id,requestedAt:source.run.row.createdAt},source.original.value),tasks=[];
- for(const item of plan){await authorizeDestination();const task=await createOnboardingTask({...source.run.actor,personId:source.run.actor.authContext.personId!},item.command,{db:{$transaction:work=>work(tx)},requestId:deps.requestId});if(task.organizationId!==organizationId||task.propertyId!==source.run.row.propertyId)throw new OnboardingConflictError();await authorizeDestination();tasks.push({key:item.key,taskId:task.id,version:task.version,state:task.state,commandKey:item.command.idempotencyKey});}
+ const requestId=deps.requestId??randomUUID();
+ for(const item of plan){await authorizeDestination();const task=await createOnboardingTask({...source.run.actor,personId:source.run.actor.authContext.personId!},item.command,{db:{$transaction:work=>work(tx)},requestId});if(task.organizationId!==organizationId||task.propertyId!==source.run.row.propertyId)throw new OnboardingConflictError();await authorizeDestination();tasks.push({key:item.key,taskId:task.id,version:task.version,state:task.state,commandKey:item.command.idempotencyKey});}
  await recheckOnboardingActivationWorkflowSource(organizationId,tx,activationId,source,deps);await authorizeDestination();
  return{activationId:source.run.row.id,propertyId:source.run.row.propertyId,sourceRuleId:source.source.id,sourceFingerprint:jsonbFingerprint(source.original.value),tasks};
 },{timeout:120000});}
