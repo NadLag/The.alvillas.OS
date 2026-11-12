@@ -143,7 +143,7 @@ describe("atomic genuine owner package and canonical document workers",()=>{
  });
  it.each(["parent_update","parent_delete","item_update","item_delete"]as const)("rejects %s on committed native package lineage",async mode=>{
   const f=await fixture(),input=await command(f),pending=await admitOnboardingOwnerPackage(f.ctx,input,f.deps);
-  await expect(withTenant(db,f.organizationId,async tx=>{await(mode==="parent_update"?tx.ownerOnboardingPackage.update({where:{id:pending.packageId},data:{requestId:randomUUID()}}):mode==="parent_delete"?tx.ownerOnboardingPackage.delete({where:{id:pending.packageId}}):mode==="item_update"?tx.ownerOnboardingPackageItem.updateMany({where:{packageId:pending.packageId},data:{locale:"ar"}}):tx.ownerOnboardingPackageItem.deleteMany({where:{packageId:pending.packageId}}));})).rejects.toThrow(/append.only/);
+  await expect(withTenant(db,f.organizationId,async tx=>{await(mode==="parent_update"?tx.ownerOnboardingPackage.update({where:{id:pending.packageId},data:{requestId:randomUUID()}}):mode==="parent_delete"?tx.ownerOnboardingPackage.delete({where:{id:pending.packageId}}):mode==="item_update"?tx.ownerOnboardingPackageItem.updateMany({where:{packageId:pending.packageId},data:{locale:"ar"}}):tx.ownerOnboardingPackageItem.deleteMany({where:{packageId:pending.packageId}}));})).rejects.toThrow("native_onboarding_history_immutable");
   expect(await counts(f)).toEqual({packages:1,items:2,instances:2,events:2});
  });
 });
