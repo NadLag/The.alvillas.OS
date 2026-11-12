@@ -24,6 +24,7 @@ export class DeliveryRepository {
   }
   update(id: string, data: Prisma.NotificationDeliveryUpdateManyMutationInput) { return this.tx.notificationDelivery.updateMany({ where: { organizationId: this.organizationId, id }, data }); }
   event(id: string) { return this.tx.outboxEvent.findFirst({ where: { organizationId: this.organizationId, id } }); }
+  byEmailEvent(eventId:string){return this.tx.notificationDelivery.findFirst({where:{organizationId:this.organizationId,eventId,deliveryKey:"email",channel:"email"}});}
   account(id: string) { return this.tx.userAccount.findFirst({ where: { organizationId: this.organizationId, id }, select: { id: true, status: true, email: true, person: { select: { archivedAt: true } } } }); }
   invitation(id: string, personId: string) { return this.tx.invitation.findFirst({ where: { organizationId: this.organizationId, id, personId }, include: { person: true } }); }
   suppressed(key: string) { return this.tx.notificationEmailSuppression.findUnique({ where: { organizationId_recipientKey: { organizationId: this.organizationId, recipientKey: key } } }); }

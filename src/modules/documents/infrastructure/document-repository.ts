@@ -125,6 +125,7 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   }
   async document(id: string,instanceId?:string) { const row=await this.tx.document.findFirst({ where: { organizationId: this.organizationId, id }, include: instanceId?{...rootInclude,instances:{where:{id:instanceId},take:1}}:rootInclude });return row?rootView(row):null; }
   version(id: string) { return this.tx.documentVersion.findFirst({ where: { organizationId: this.organizationId, id }, include: versionInclude }); }
+  originalVersionMetadata(id:string){return this.tx.documentVersion.findFirst({where:{organizationId:this.organizationId,id},select:{id:true,documentId:true,admissionId:true,cipherSha256:true,admission:{select:{contentType:true,fileSize:true,sha256:true}}}});}
   latest(documentId: string) { return this.tx.documentVersion.findFirst({ where: { organizationId: this.organizationId, documentId }, orderBy: { number: "desc" }, include: versionInclude }); }
   effectiveVersion(documentId:string,at:Date){return this.tx.documentVersion.findFirst({where:{organizationId:this.organizationId,documentId,createdAt:{lte:at},OR:[{effectiveFrom:null},{effectiveFrom:{lte:at}}]},orderBy:{number:"desc"},select:{id:true,number:true,effectiveFrom:true,createdAt:true}});}
   admission(id: string) { return this.tx.documentAdmission.findFirst({ where: { organizationId: this.organizationId, id }, include: { version: { include: versionInclude } } }); }

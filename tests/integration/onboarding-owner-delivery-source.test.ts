@@ -5,6 +5,7 @@ import {afterAll,beforeAll,describe,expect,it} from "vitest";
 import {withTenant} from "@/platform/db/tenant";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {ResendEmailProvider,type HttpTransport} from "@/platform/providers/real";
+import {readOwnerDeliveryDocumentPlan} from "@/platform/documents/owner-delivery-documents";
 import {downloadDocumentVersion} from "@/modules/documents/application/document-archive";
 import {reviewOnboardingOwnerPackage,admitOnboardingOwnerPackage,completeOnboardingOwnerPackage} from "@/modules/onboarding/application/onboarding-owner-package-service";
 import {prepareOnboardingOwnerDelivery} from "@/modules/onboarding/application/onboarding-owner-delivery-preparation";
@@ -31,8 +32,9 @@ describe("genuine owner delivery preparation and original PDF transport",()=>{
   const f=await fixture(),prepared=await prepareOnboardingOwnerDelivery(f.ctx,{packageId:f.complete.packageId},f.deps);
   expect(prepared.emails.variants.map(row=>row.locale)).toEqual(["en","fr"]);expect(prepared.emails.selected.locale).toBe(f.original.validation.facts.owner!.preferredLocale);expect(prepared.emails.selected.to).toBe(f.original.validation.facts.owner!.email);
   expect(prepared.source.reviewRevisionId).toBe(f.review.id);expect(prepared.source.documents.map(row=>row.versionId)).toEqual(f.complete.documents.map(row=>row.versionId));
+  const plan=await withTenant(db,f.organizationId,tx=>readOwnerDeliveryDocumentPlan(f.ctx,tx,prepared.package,env));expect(plan.map(row=>row.versionId)).toEqual(f.complete.documents.map(row=>row.versionId));
   for(const mail of prepared.emails.variants)expect(mail.subject).toContain(f.original.validation.facts.property!.name);
-  const attachments=[];for(const document of f.complete.documents){const file=await downloadDocumentVersion(f.ctx,{versionId:document.versionId},{...f.deps,objects:storage.objects});expect(Buffer.from(file.bytes).subarray(0,5).toString()).toBe("%PDF-");attachments.push({filename:"owner-package-"+document.locale+".pdf",content:Buffer.from(file.bytes).toString("base64"),contentType:"application/pdf"as const});}
+  const attachments=[];for(const document of f.complete.documents){const file=await downloadDocumentVersion(f.ctx,{versionId:document.versionId},{...f.deps,objects:storage.objects});expect(Buffer.from(file.bytes).subarray(0,5).toString()).toBe("%PDF-");expect(plan.find(row=>row.versionId===document.versionId)).toMatchObject({sha256:createHash("sha256").update(file.bytes).digest("hex"),byteSize:file.bytes.length,contentType:"application/pdf"});attachments.push({filename:"owner-package-"+document.locale+".pdf",content:Buffer.from(file.bytes).toString("base64"),contentType:"application/pdf"as const});}
   const requests:Array<{to:string[];subject:string;attachments:Array<{filename:string;content:string}>}>=[],server=createServer((request,response)=>{void(async()=>{expect(request.method).toBe("POST");expect(request.url).toBe("/emails");const chunks:Buffer[]=[];for await(const chunk of request as AsyncIterable<Uint8Array>)chunks.push(Buffer.from(chunk));requests.push(JSON.parse(Buffer.concat(chunks).toString("utf8"))as typeof requests[number]);response.writeHead(200,{"content-type":"application/json"}).end(JSON.stringify({id:"actual-owned-loopback-email-acceptance"}));})().catch(()=>response.destroy());});
   await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));const address=server.address();if(!address||typeof address==="string")throw Error("Owned loopback address required");
   try{
