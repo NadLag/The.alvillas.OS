@@ -1,5 +1,7 @@
 import type { Session } from "next-auth";
-import { permissionKey, type AuthContext } from "@/platform/authz/authorize";
+import { type AuthContext } from "@/platform/authz/authorize";
+import {ownerPortalPermissions} from "@/platform/owner-portal/capabilities";
+export {ownerPortalConfiguredCapabilities} from "@/platform/owner-portal/capabilities";
 import { prisma } from "@/platform/db/client";
 import { withTenant, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { OwnerPortalRepository } from "@/modules/owner-portal/infrastructure/owner-portal-repository";
@@ -16,12 +18,6 @@ export type OwnerPortalActorContext = {
 type OwnerPortalAccessDeps = {
   db?: TenantTransactionRunner;
 };
-
-const ownerPortalPermissions = new Set([
-  permissionKey("owner_portal", "view"),
-  permissionKey("owner_portal_property", "view"),
-  permissionKey("owner_statement", "view")
-]);
 
 function db(deps: OwnerPortalAccessDeps): TenantTransactionRunner {
   return deps.db ?? prisma;

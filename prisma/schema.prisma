@@ -4970,6 +4970,7 @@ model Document {
   supplierId String? @map("supplier_id") @db.Uuid
   guestId String? @map("guest_id") @db.Uuid
   leadId String? @map("lead_id") @db.Uuid
+  onboardingRevisionId String? @map("onboarding_revision_id") @db.Uuid
   typeKey String @map("type_key")
   kind String
   locale String
@@ -4993,6 +4994,7 @@ model Document {
   supplier Supplier? @relation("DocumentSupplier",fields:[organizationId,supplierId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"document_supplier_tenant_fk")
   guest GuestRecord? @relation("DocumentGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"document_guest_tenant_fk")
   lead Lead? @relation("LeadDocuments",fields:[organizationId,leadId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"document_lead_tenant_fk")
+  onboardingReview PropertyOnboardingRevision? @relation("DocumentOnboardingReview",fields:[organizationId,onboardingRevisionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"document_onboarding_review_fk")
   admissions DocumentAdmission[]
   versions DocumentVersion[]
   template DocumentTemplate?
@@ -5001,6 +5003,7 @@ model Document {
   @@unique([organizationId,id],map:"document_org_id_unique")
   @@unique([organizationId,createdBy,commandKey],map:"document_command_unique")
   @@index([organizationId,sourceKind,sourceId,id],map:"document_source_page_idx")
+  @@index([organizationId,onboardingRevisionId,id],map:"document_org_onboarding_review_idx")
   @@map("document")
 }
 
@@ -5570,6 +5573,7 @@ model PropertyOnboardingSession {
 }
 
 model PropertyOnboardingRevision {
+ documents Document[] @relation("DocumentOnboardingReview")
  id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
  organizationId String @map("organization_id") @db.Uuid
  sessionId String @map("session_id") @db.Uuid

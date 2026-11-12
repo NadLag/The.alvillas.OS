@@ -7,6 +7,7 @@ import { FinancialAttachmentSourceRepository } from "@/platform/ledger/financial
 import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { documentSourceReferenceSchema,DocumentConflictError } from "../domain/document-command";
 import {nativeLeadDocumentSource,nativeLeadDocumentSources,nativeLeadDocumentLabel,nativeLeadDocumentContact} from "@/platform/documents/lead-source";
+import {nativeOnboardingDocumentSource,nativeOnboardingDocumentSources,nativeOnboardingDocumentChoices,type OnboardingDocumentSourceHead} from "@/platform/documents/onboarding-source";
 import type { z } from "zod";
 import type { signatureRecipientReferenceSchema } from "../domain/document-signature-command";
 
@@ -28,6 +29,8 @@ const documentGuestRecordReadSelect={ id: true, displayName: true, archivedAt: t
 const documentOrganizationReadSelect={ id: true, name: true } as const;
 
 export class DocumentRepository extends FinancialAttachmentSourceRepository {
+  private documentOnboardingReads?:Map<string,OnboardingDocumentSourceHead|null>;
+  private async documentReadOnboarding(id:string){if(this.documentOnboardingReads?.has(id))return this.documentOnboardingReads.get(id)??null;const row=(await nativeOnboardingDocumentSources(this.tx,this.organizationId,[id])).get(id)??null;(this.documentOnboardingReads??=new Map()).set(id,row);return row;}
   private documentLeadReads?:Map<string,Awaited<ReturnType<typeof nativeLeadDocumentSource>>>;
   private async documentReadLead(id:string){if(this.documentLeadReads?.has(id))return this.documentLeadReads.get(id)??null;const native=await nativeLeadDocumentSource(this.tx,this.organizationId,id);(this.documentLeadReads??=new Map()).set(id,native);return native;}
   /** Reveal a human label only after the caller checks the corresponding captured source. */
@@ -53,6 +56,7 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   /** Materialize one bounded view snapshot using the same source checks and fingerprints. */
   async prepareDocumentSources(references:readonly Source[]){
     const unique=[...new Map(references.map(ref=>[ref.kind+":"+ref.id,ref])).values()];if(unique.length>100)throw Error("Bounded native document source read required");this.documentSourceReads=new Map();
+    {const ids=unique.filter(ref=>ref.kind==="ONBOARDING").map(ref=>ref.id),rows=ids.length?await nativeOnboardingDocumentSources(this.tx,this.organizationId,ids):new Map<string,OnboardingDocumentSourceHead>();this.documentOnboardingReads=new Map(ids.map(id=>[id,rows.get(id)??null]));}
     {const ids=unique.filter(ref=>ref.kind==="PROPERTY").map(ref=>ref.id);this.documentPropertyReads=undefined;if(ids.length){const rows=await this.tx.property.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentPropertyReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentPropertyReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
     {const ids=unique.filter(ref=>ref.kind==="RESERVATION").map(ref=>ref.id);this.documentReservationReads=undefined;if(ids.length){const rows=await this.tx.reservation.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentReservationReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentReservationReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
     {const ids=unique.filter(ref=>ref.kind==="OWNER").map(ref=>ref.id);this.documentOwnerReads=undefined;if(ids.length){const rows=await this.tx.owner.findMany({where:{organizationId:this.organizationId,id:{in:ids}},select:documentOwnerReadSelect}),byId=new Map(rows.map(row=>[row.id,row]));this.documentOwnerReads=new Map(ids.map(id=>[id,byId.get(id)??null]));}}
@@ -71,7 +75,9 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
     const readKey=reference.kind+":"+reference.id;if(action==="view"&&this.documentSourceReads?.has(readKey))return this.documentSourceReads.get(readKey)??null;
     const base = { organizationId: this.organizationId }, checks: CurrentAuthorityCheck[] = [];
     let resource: Resource, snapshot: unknown, label: string, archived = false;
-    if(reference.kind==="LEAD"){
+    if(reference.kind==="ONBOARDING"){
+      const head=await this.documentReadOnboarding(reference.id);if(!head)return null;const native=nativeOnboardingDocumentSource(head);resource=native.resource;snapshot=native.snapshot;label=native.label;archived=native.archived;checks.push(...native.checks);
+    } else if(reference.kind==="LEAD"){
       const native=await this.documentReadLead(reference.id);if(!native)return null;
       resource=native.resource;snapshot=native.snapshot;label=native.label;archived=native.archived;
     } else if (reference.kind === "FINANCIAL_TRANSACTION") {
@@ -190,6 +196,7 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
   async rootProtections(ids: string[]) { const rows = await this.tx.document.findMany({ where: { organizationId: this.organizationId, id: { in: ids } }, select: { id: true, privacy: true, revision: true } }); return new Map(rows.map(row => [row.id,row])); }
   async sourceCandidates(kind: Source["kind"], query: string, before?: string) {
     const where = { organizationId: this.organizationId, ...(before ? { id: { lt: before } } : {}) }, orderBy = { id: "desc" as const }, take = 31;
+    if(kind==="ONBOARDING")return nativeOnboardingDocumentChoices(this.tx,this.organizationId,query,before,take);
     if (kind === "ORGANIZATION") {
       const row = before ? null : await this.tx.organization.findFirst({ where: { id: this.organizationId, name: { contains: query, mode: "insensitive" } }, select: { id: true, name: true } });
       return row ? [{ id: row.id, label: row.name }] : [];

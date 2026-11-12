@@ -53,8 +53,9 @@ export function documentAuthorityChecks(native: DocumentSourceFacts, privacy: re
     if (root?.kind === "TEMPLATE") checks.push({ action: "view", resource: { ...resource, type: "document_template" } }, ...(action === "view" ? [] : [{ action, resource: { ...resource, type: "document_template" } }]));
     if (root?.kind === "INSTANCE") checks.push({ action: "view", resource: { ...resource, type: "document_instance" } }, ...(action === "view" ? [] : [{ action, resource: { ...resource, type: "document_instance" } }]));
     if (dataClass === "financial" && native.reference.kind !== "FINANCIAL_TRANSACTION") {
-      const type = native.reference.kind === "PERSON" ? "staff_compensation" : source.propertyId ? "property_finance" : source.ownerId ? "owner_statement" : "company_ledger";
-      const financial = { ...source, type, dataClass: "financial" as const };
+      if(native.reference.kind==="ONBOARDING"&&!source.propertyId)throw new DocumentAccessError();
+      const type = native.reference.kind === "ONBOARDING" ? "owner_statement" : native.reference.kind === "PERSON" ? "staff_compensation" : source.propertyId ? "property_finance" : source.ownerId ? "owner_statement" : "company_ledger";
+      const financial = { ...source, type, ...native.reference.kind==="ONBOARDING"?{id:source.propertyId??undefined}: {}, dataClass: "financial" as const };
       checks.push({ action: "view", resource: financial, organizationOnly: !source.propertyId && !source.ownerId },
         ...(action === "export" ? [{ action, resource: financial, organizationOnly: !source.propertyId && !source.ownerId }] : []));
     }
@@ -110,7 +111,7 @@ async function context(ctx: DocumentActorContext, tx: TenantTransaction, referen
   if (generation && action === "create"&&!prospective?.newInstance) {
     if(!root?.instance)throw new DocumentAccessError();
     const locale=generation.variants.find(variant=>variant.versionId===generation.command.templateVersionId)?.locale;if(!locale)throw new DocumentConflictError();
-    const values = await new DocumentTemplateSourceRepository(tx, ctx.organizationId).templateSourceValues(native, generation.sourceKeys,locale,env);
+    const values = await new DocumentTemplateSourceRepository(tx, ctx.organizationId).templateSourceValues(native, generation.sourceKeys,locale,env,ctx);
     if (values.fingerprint !== generation.identity.sourceFingerprint || native.fingerprint !== generation.nativeSourceFingerprint || commandFingerprint(policy) !== commandFingerprint(generation.policySnapshot)||root?.revision.toString()!==(generation.documentRevision??"1")) throw new DocumentConflictError();
     const latest=await repository.latest(root.id),expected=generation.command.supersedesId??null,own=latest?generatedDocumentUploadInput.safeParse(latest.admission.input):null;
     if((latest?.id??null)!==expected&&!(own?.success&&own.data.generationInstanceId===root.instance?.id&&latest?.supersedesId===expected))throw new DocumentConflictError();

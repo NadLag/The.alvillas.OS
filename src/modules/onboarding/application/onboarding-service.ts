@@ -1130,6 +1130,15 @@ export async function reviewOnboardingConfiguration(actor:AccountActorContext,ra
 }
 
 function configurationBinding(row:Row){if(row.step!=="REVIEW"||!row.propertyId||!row.previousId)throw new OnboardingConflictError();return{...binding(row),propertyId:row.propertyId,previousRevisionId:row.previousId,sourceFingerprint:row.sourceFingerprint,validatedAt:row.createdAt.toISOString()};}
+/** Internal document source: callers select native identities, never report values or completion flags. */
+export async function nativeOnboardingOwnerPackageReviewSource(actor:AccountActorContext,tx:TenantTransaction,raw:unknown,deps:Pick<OnboardingDependencies,"env">){
+ const ctx=actorContext(actor),input=z.object({sessionId:uuid,revisionId:uuid}).strict().parse(raw),base=await sessionContext(ctx,tx,input.sessionId,"edit",true),row=base.row;
+ if(row.id!==input.revisionId||row.step!=="REVIEW"||!row.propertyId)throw new OnboardingConflictError();
+ const recorded=await configurationRecordedAuthority(ctx,tx,row),fresh=await configurationDraftContext(ctx,tx,{sessionId:row.sessionId,previousRevisionId:row.id,step:"REVIEW",target:{mode:"VALIDATE",propertyId:row.propertyId}});
+ if(!fresh.validation.ready||jsonbFingerprint(JSON.parse(JSON.stringify(fresh.source)))!==row.sourceFingerprint||!isDeepStrictEqual(fresh.configured.snapshot,row.policySnapshot))throw new OnboardingConflictError();
+ const original=retainedConfiguration(row,deps.env);if(!original.validation.ready)throw new OnboardingConfigurationError();
+ return{review:{organizationId:ctx.organizationId,sessionId:row.sessionId,revisionId:row.id,ownerId:row.ownerId,propertyId:row.propertyId,sourceFingerprint:row.sourceFingerprint,createdAt:row.createdAt.toISOString()},validation:original.validation,fingerprint:commandFingerprint({reviewId:row.id,source:row.sourceFingerprint,current:recorded.fingerprint,configuration:fresh.fingerprint,policy:fresh.configured.snapshot})};
+}
 async function activationDraftContext(actor:AccountActorContext,tx:TenantTransaction,draft:z.infer<typeof onboardingActivationDraftSchema>,deps:OnboardingDependencies){
  const base=await configurationDraftContext(actor,tx,{sessionId:draft.sessionId,previousRevisionId:draft.previousRevisionId,step:"REVIEW",target:{mode:"VALIDATE",propertyId:draft.target.propertyId}}),review=base.current;
  if(review.step!=="REVIEW"||!base.configured.policy.activation?.modes.includes(draft.target.mode))throw new OnboardingConfigurationError();

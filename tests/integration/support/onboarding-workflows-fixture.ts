@@ -1,3 +1,4 @@
+import type {NativeOnboardingFixtureIdentity} from "./onboarding-fixture";
 import {randomUUID} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
 import {withTenant} from "@/platform/db/tenant";
@@ -8,8 +9,8 @@ import {onboardingPolicyKey,onboardingPolicySchema} from "@/modules/onboarding/d
 import {nativeOnboardingServicesFixture} from "./onboarding-services-fixture";
 
 /** Eight genuine canonical admissions; the standard workflow template is separate from operational activation. */
-export async function nativeOnboardingWorkflowsFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv){
- const f=await nativeOnboardingServicesFixture(admin,db,env),draft={sessionId:f.inventory.sessionId,previousRevisionId:f.inventory.id,step:"SERVICES"as const,target:f.servicesTarget},review=await reviewOnboardingServicesStep(f.ctx,draft,f.deps),services=await admitOnboardingServicesStep(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Actual Services predecessor for native standard Workflows"},f.deps),policy=onboardingPolicySchema.parse({...f.policy,workflows:{modes:["TEMPLATE"],minimum_workflows:1,minimum_tasks:1}});
+export async function nativeOnboardingWorkflowsFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv,identity?:NativeOnboardingFixtureIdentity){
+ const f=await nativeOnboardingServicesFixture(admin,db,env,identity),draft={sessionId:f.inventory.sessionId,previousRevisionId:f.inventory.id,step:"SERVICES"as const,target:f.servicesTarget},review=await reviewOnboardingServicesStep(f.ctx,draft,f.deps),services=await admitOnboardingServicesStep(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Actual Services predecessor for native standard Workflows"},f.deps),policy=onboardingPolicySchema.parse({...f.policy,workflows:{modes:["TEMPLATE"],minimum_workflows:1,minimum_tasks:1}});
  await withTenant(db,f.organizationId,tx=>new ConfigRuleRepository(tx,f.organizationId).createVersion({key:onboardingPolicyKey,scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),value:policy,reason:"Explicit required standard Workflow and task configuration"}));return{...f,services,policy};
 }
 export type NativeOnboardingWorkflowsFixture=Awaited<ReturnType<typeof nativeOnboardingWorkflowsFixture>>;

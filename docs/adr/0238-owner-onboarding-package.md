@@ -1,0 +1,11 @@
+# Owner package from native configuration
+
+F-ONB-05 generates the six required sections from an actual immutable whole Review, its seven agreement rules and the owner's native portal access. Templates use independently approved English and French versions of the same document family; an explicitly configured Arabic version remains available to the existing renderer contract. Generation and immutable history reuse the existing document pipeline, encryption, provider interfaces and source checks.
+
+Business descriptions and approved legal translations live in configuration. The package content rule is financial, independently protects all source groups used by the agreement and pins every actual agreement rule ID, version and value fingerprint. Missing or stale wording blocks generation. The implementation does not translate legal terms, invent services, substitute a newer agreement or grant owner access. Additional services require explicit configured availability and bilingual labels; operating services are derived from their actual operating profile switches.
+
+Shared agreement keys and onboarding identity primitives live in independent contracts. Existing exports forward to those same definitions, so registering package configuration cannot create a cycle through the Core schemas or the configuration registry.
+
+Document acceptance, delivery and activation remain separate facts. A queued generation or email request cannot stand in for the actual document, delivery or native operational transition. F-ONB-06 and F-ONB-07 supply delivery and readiness evidence; provider-restricted hosted acceptance remains required.
+
+The document source kind `ONBOARDING` identifies an actual immutable Review through a tenant-composite foreign key. Document discovery reads only native ownership metadata; generation resolves the fully authorized package source separately. Both sensitive and financial classification are mandatory and cannot be removed by later configuration. The package's financial document scope is the actual owner's statement for that property; creating its content still requires every independent agreement source. Existing document encryption, template provenance, generation receipts and immutable original archive remain authoritative.

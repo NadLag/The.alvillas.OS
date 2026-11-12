@@ -1,11 +1,11 @@
 import {z} from "zod";
+import {onboardingIdSchema,onboardingFingerprintSchema} from "./onboarding-primitives";
+export {onboardingIdSchema,onboardingFingerprintSchema} from "./onboarding-primitives";
 import {onboardingStepSchema,onboardingSteps} from "./onboarding-policy";
 import {onboardingTeamMaximumAssignments,onboardingBookingChannelsMaximum} from "./onboarding-policy";
 import {onboardingInventoryMaximumItems} from "@/platform/onboarding/contracts";
 export const onboardingOwnerSchema=z.object({displayName:z.string(),email:z.string().nullable(),phone:z.string().nullable(),preferredLocale:z.enum(["en","fr","ar"])}).strict();
 
-export const onboardingIdSchema=z.uuid().transform(value=>value.toLowerCase());
-export const onboardingFingerprintSchema=z.string().regex(/^[a-f0-9]{64}$/u);
 export const onboardingCommandFields={idempotencyKey:onboardingIdSchema,reviewFingerprint:onboardingFingerprintSchema,reason:z.string().trim().min(1).max(1000)};
 export const onboardingConfigurationOptionsSchema=z.object({revisionId:onboardingIdSchema,propertyId:onboardingIdSchema,modes:z.array(z.literal("VALIDATE")).length(1)}).strict();
 export const onboardingTeamOptionsSchema=z.object({revisionId:onboardingIdSchema,propertyId:onboardingIdSchema,propertyName:z.string(),modes:z.array(z.enum(["LINK","ASSIGN"])).min(1).max(2).refine(values=>new Set(values).size===values.length),minimumAssignments:z.number().int().min(0).max(onboardingTeamMaximumAssignments)}).strict();

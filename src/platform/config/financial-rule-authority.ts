@@ -24,6 +24,7 @@ const sourceGroups:Readonly<Record<string,readonly string[]>>={
  "finance.expense_allocation":["expense","financial_transaction"],
  "finance.approval_thresholds":["expense","financial_transaction"],
  "finance.payout_schedule":["owner_statement","financial_transaction"],
+ "finance.onboarding_package_content":["financial_transaction","company_ledger","expense","owner_statement"],
  "finance.accounting_periods":["financial_transaction"],
  "finance.company_expenses":["company_expense","financial_transaction","staff_compensation"],
  [financialAttachmentPolicyKey]:["financial_attachment","financial_transaction"],

@@ -3,11 +3,14 @@ import { commandFingerprint } from "@/platform/http/command-fingerprint";
 import { TemplateBindingError, type DocumentTemplateBinding } from "../domain/document-template";
 import { DocumentRepository, type DocumentSourceFacts } from "./document-repository";
 import {nativeLeadDocumentBindings} from "@/platform/documents/lead-source";
+import {nativeOnboardingDocumentBindings} from "@/platform/documents/onboarding-bindings";
+import type {AccountActorContext} from "@/platform/authz/session-context";
 
 /** Fixed native field names are a data contract, never caller-provided values or object paths. */
 export class DocumentTemplateSourceRepository extends DocumentRepository {
-  async templateSourceValues(native: DocumentSourceFacts, requested: readonly string[],locale?:"en"|"fr"|"ar",env?:NodeJS.ProcessEnv) {
+  async templateSourceValues(native: DocumentSourceFacts, requested: readonly string[],locale?:"en"|"fr"|"ar",env?:NodeJS.ProcessEnv,actor?:AccountActorContext) {
     if (requested.length > 200 || new Set(requested).size !== requested.length) throw new TemplateBindingError();
+    if(native.reference.kind==="ONBOARDING"){if(!locale||!actor)throw new TemplateBindingError();return nativeOnboardingDocumentBindings(this.tx,this.organizationId,native.reference.id,requested,locale,env,actor);}
     if(native.reference.kind==="LEAD"){if(!locale)throw new TemplateBindingError();return nativeLeadDocumentBindings(this.tx,this.organizationId,native.reference.id,requested,locale,env);}
     const reference = native.reference, where = { organizationId: this.organizationId, id: reference.id }, values = new Map<string, DocumentTemplateBinding>();
     const sourcePrivacy = reference.kind === "FINANCIAL_TRANSACTION" ? "financial" : ["OWNER", "PERSON", "SUPPLIER", "GUEST"].includes(reference.kind) ? "sensitive" : "operational";

@@ -1,3 +1,4 @@
+import type {NativeOnboardingFixtureIdentity} from "./onboarding-fixture";
 import {randomUUID} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
 import {withTenant} from "@/platform/db/tenant";
@@ -10,8 +11,8 @@ import {nativeOnboardingInventoryFixture} from "./onboarding-inventory-fixture";
 
 export function nativeService(){return{key:"airport_transfer",name:{en:"Original airport transfer",fr:"Transfert aéroport original",ar:"نقل أصلي من المطار"},description:null,available:false,pricing_model:"FIXED"as const,amount:"0.00",currency:"MAD"};}
 /** Seven actual admitted canonical predecessors; services never come from seeded wizard progress. */
-export async function nativeOnboardingServicesFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv){
- const f=await nativeOnboardingInventoryFixture(admin,db,env),inventoryDraft={sessionId:f.book.sessionId,previousRevisionId:f.book.id,step:"INVENTORY",target:f.inventoryTarget},review=await reviewOnboardingInventoryStep(f.ctx,inventoryDraft,f.deps),inventory=await admitOnboardingInventoryStep(f.ctx,{...inventoryDraft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Actual Inventory predecessor for original Services acceptance"},f.deps),policy=onboardingPolicySchema.parse({...f.policy,services:{modes:["LINK","TEMPLATE","CUSTOM"],minimum_services:1}});
+export async function nativeOnboardingServicesFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv,identity?:NativeOnboardingFixtureIdentity){
+ const f=await nativeOnboardingInventoryFixture(admin,db,env,identity),inventoryDraft={sessionId:f.book.sessionId,previousRevisionId:f.book.id,step:"INVENTORY",target:f.inventoryTarget},review=await reviewOnboardingInventoryStep(f.ctx,inventoryDraft,f.deps),inventory=await admitOnboardingInventoryStep(f.ctx,{...inventoryDraft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Actual Inventory predecessor for original Services acceptance"},f.deps),policy=onboardingPolicySchema.parse({...f.policy,services:{modes:["LINK","TEMPLATE","CUSTOM"],minimum_services:1}});
  await withTenant(db,f.organizationId,tx=>new ConfigRuleRepository(tx,f.organizationId).createVersion({key:onboardingPolicyKey,scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),value:policy,reason:"Explicit approved native Services modes and required count"}));
  return{...f,inventory,policy,servicesTarget:{mode:"CUSTOM"as const,propertyId:inventory.propertyId!,settings:{services:[nativeService()]}}};
 }
