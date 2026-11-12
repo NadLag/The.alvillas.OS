@@ -1,3 +1,4 @@
+import type {NativeOnboardingFixtureIdentity} from "./onboarding-fixture";
 import {randomUUID} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
 import {withTenant} from "@/platform/db/tenant";
@@ -8,8 +9,8 @@ import {reviewOnboardingConfiguration,admitOnboardingConfiguration} from "@/modu
 import {nativeOnboardingConfigurationFixture} from "./onboarding-configuration-fixture";
 
 /** Ten actual native records precede an independently authorized background intent. */
-export async function nativeOnboardingActivationFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv,enabled=true){
- const f=await nativeOnboardingConfigurationFixture(admin,db,env),policy=onboardingPolicySchema.parse({...f.policy,...enabled?{activation:{modes:["BACKGROUND"],effects:["WORKFLOWS","DOCUMENTS","EMAIL","TASKS","NOTIFICATION"],retry:{max_attempts:3,backoff_seconds:30}}}:{}});
+export async function nativeOnboardingActivationFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv,enabled=true,identity?:NativeOnboardingFixtureIdentity){
+ const f=await nativeOnboardingConfigurationFixture(admin,db,env,identity),policy=onboardingPolicySchema.parse({...f.policy,...enabled?{activation:{modes:["BACKGROUND"],effects:["WORKFLOWS","DOCUMENTS","EMAIL","TASKS","NOTIFICATION"],retry:{max_attempts:3,backoff_seconds:30}}}:{}});
  await withTenant(db,f.organizationId,async tx=>{
   await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:onboardingPolicyKey,scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),value:policy,reason:"Explicit reviewed activation effects and configured retry policy"});
   const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"onboarding:approve"}}),role=await tx.role.create({data:{organizationId:f.organizationId,key:"native_activation_"+randomUUID(),name:"Explicit independent property activation approval",rolePermissions:{create:{organizationId:f.organizationId,permissionId:permission.id}}}});

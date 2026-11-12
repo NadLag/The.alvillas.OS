@@ -4,7 +4,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { PrismaClient } from "@prisma/client";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
-import { withTenant } from "@/platform/db/tenant";
+import { withTenant, type TenantTransactionOptions } from "@/platform/db/tenant";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { Money } from "@/platform/money/money";
@@ -240,7 +240,7 @@ describe("explicit reviewed native signature identity recovery", () => {
     const f = await identityRecoveryFixture(), { reference } = await admittedIdentity(f), calls = f.http.calls.length; await withTenant(db, f.organizationId, tx => tx.roleAssignment.update({ where: { id: f.assignment.id }, data: { validTo: new Date("2020-01-02") } })); await expect(executeSignatureIdentityRecoveryReference(reference, f.deps)).rejects.toThrow("document_unavailable"); expect(f.http.calls).toHaveLength(calls); expect(await withTenant(db, f.organizationId, tx => tx.signatureProviderEvidence.count({ where: { identityRecoveryId: { not: null } } }))).toBe(0);
   });
   it("recovers a lost binding acknowledgement and historical keys without treating the pending callback as complete", async () => {
-    const f = await identityRecoveryFixture(true), { command, receipt, reference } = await admittedIdentity(f); let lost = false; const acknowledge = { $transaction: async (work: Parameters<typeof withTenant>[2]) => { const result = await db.$transaction(work); const bound = await withTenant(db, f.organizationId, tx => tx.signatureProviderEvidence.count({ where: { identityRecoveryId: receipt.id } })); if (!lost && bound) { lost = true; throw Error("Owned committed identity binding acknowledgement lost"); } return result; } } as unknown as typeof db;
+    const f = await identityRecoveryFixture(true), { command, receipt, reference } = await admittedIdentity(f); let lost = false; const acknowledge = { $transaction: async (work: Parameters<typeof withTenant>[2], options?:TenantTransactionOptions) => { const result = await db.$transaction(work,options); const bound = await withTenant(db, f.organizationId, tx => tx.signatureProviderEvidence.count({ where: { identityRecoveryId: receipt.id } })); if (!lost && bound) { lost = true; throw Error("Owned committed identity binding acknowledgement lost"); } return result; } } as unknown as typeof db;
     await expect(executeSignatureIdentityRecoveryReference(reference, { ...f.deps, db: acknowledge })).rejects.toThrow("Owned committed identity binding acknowledgement lost"); expect(lost).toBe(true); expect((await recoverSignatureIdentityRecovery(f.ctx, { idempotencyKey: command.idempotencyKey }, f.deps)).state).toBe("UNCERTAIN");
     const rotated = { ...f.deps, env: { ...f.deps.env, ENCRYPTION_KEYS: "rotated-identity:" + randomBytes(32).toString("base64") + "," + f.deps.env.ENCRYPTION_KEYS } }; expect((await reconcileSignatureIdentityRecovery(f.ctx, { recoveryId: receipt.id }, rotated)).state).toBe("BOUND_ADVANCED"); expect(await withTenant(db, f.organizationId, tx => tx.signatureProviderEvidence.count({ where: { identityRecoveryId: receipt.id } }))).toBe(1); expect(f.http.calls.filter(call => call.method === "POST")).toHaveLength(2); expect(await withTenant(db, f.organizationId, tx => tx.signatureEvent.count({ where: { state: "SENT" } }))).toBe(1);
   });

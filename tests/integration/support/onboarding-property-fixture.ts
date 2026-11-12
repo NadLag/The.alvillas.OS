@@ -1,3 +1,4 @@
+import type {NativeOnboardingFixtureIdentity} from "./onboarding-fixture";
 import {randomUUID} from "node:crypto";
 import type {PrismaClient} from "@prisma/client";
 import {withTenant} from "@/platform/db/tenant";
@@ -10,8 +11,8 @@ import {canonicalOnboardingPropertyDraft,canonicalOnboardingPropertyCommand,type
 
 export const nativeOnboardingPropertyRule={key:"ops.operating_rules"as const,entry:"initial_property_profile"};
 export function nativeOnboardingPropertyProfile(){return{cleaningEnabled:false,cleaningFrequency:"NONE",inspectionEnabled:true,inspectionFrequency:"CHECKOUT",poolServiceEnabled:true,poolServiceFrequency:"ON_DEMAND",gardenServiceEnabled:false,gardenServiceFrequency:"NONE",laundryManaged:false,linenManaged:false,maintenanceTrackingEnabled:true,preventiveMaintenanceFrequency:"MONTHLY",midStayCleaningEnabled:false,breakfastAvailable:false,chefAvailable:true,transfersAvailable:false,groceriesAvailable:true,wellnessAvailable:false,otherServices:["Actual configured optional service"]};}
-export async function nativeOnboardingPropertyFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv){
- const f=await nativeOnboardingFixture(admin,db,env,{property_modes:["CREATE","LINK"],property_creation_rule:nativeOnboardingPropertyRule});
+export async function nativeOnboardingPropertyFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv,identity?:NativeOnboardingFixtureIdentity){
+ const f=await nativeOnboardingFixture(admin,db,env,{property_modes:["CREATE","LINK"],property_creation_rule:nativeOnboardingPropertyRule},identity);
  await withTenant(db,f.organizationId,async tx=>{for(const key of["property:view","property:create","property:edit"]){const role=await tx.role.create({data:{organizationId:f.organizationId,key:"native_property_step_"+randomUUID(),name:"Independent "+key}}),permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key}});await tx.rolePermission.create({data:{organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}});f.grants[key]=(await tx.roleAssignment.create({data:{organizationId:f.organizationId,roleId:role.id,userAccountId:f.account.id,personId:f.person.id,scopeType:"organization",validFrom:new Date("2020-01-01")}})).id;}await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:nativeOnboardingPropertyRule.key,scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),value:{rules:{[nativeOnboardingPropertyRule.entry]:nativeOnboardingPropertyProfile()}},reason:"Actual explicitly configured native onboarding Property choices"});});
  f.ctx.authContext={...await authContextForAccount(f.organizationId,f.account.id,{db}),personId:f.person.id};return f;
 }

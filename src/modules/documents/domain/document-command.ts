@@ -10,7 +10,7 @@ export function documentSourceForeignKeys(source:z.infer<typeof documentSourceRe
   return{propertyId:reference.kind==="PROPERTY"?reference.id:null,ownerId:reference.kind==="OWNER"?reference.id:null,
     reservationId:reference.kind==="RESERVATION"?reference.id:null,personId:reference.kind==="PERSON"?reference.id:null,
     transactionId:reference.kind==="FINANCIAL_TRANSACTION"?reference.id:null,supplierId:reference.kind==="SUPPLIER"?reference.id:null,
-    guestId:reference.kind==="GUEST"?reference.id:null,leadId:reference.kind==="LEAD"?reference.id:null};
+    guestId:reference.kind==="GUEST"?reference.id:null,leadId:reference.kind==="LEAD"?reference.id:null,onboardingRevisionId:reference.kind==="ONBOARDING"?reference.id:null};
 }
 export const documentFileNameSchema = z.string().min(1).max(240).refine(value => value === value.trim() && !/[\\/\p{Cc}\u202a-\u202e\u2066-\u2069]/u.test(value), "invalid_document_file_name");
 export const documentUploadReviewInput = z.object({ documentId: z.uuid().nullable(), source: documentSourceReferenceSchema,

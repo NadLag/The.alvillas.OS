@@ -36,24 +36,35 @@ function before(ctx: DocumentActorContext, filter: string, raw?: string) {
 }
 export { cursor as documentReadCursor, before as readDocumentCursor };
 
+async function authorizedOnboardingCandidates(ctx:DocumentActorContext,stored:AuthContext,repository:DocumentRepository,query:string,initialBefore:string|undefined){
+  const rows:Array<{id:string;label:string}>=[],evidence:Array<{source:{kind:"ONBOARDING";id:string};fingerprint:string}>=[];let position=initialBefore;
+  while(rows.length<31){const batch=await repository.sourceCandidates("ONBOARDING",query,position);if(!batch.length)break;await repository.prepareDocumentSources(batch.slice(0,30).map(row=>({kind:"ONBOARDING",id:row.id})));const now=await repository.clock();
+    for(const row of batch.slice(0,30)){const source={kind:"ONBOARDING"as const,id:row.id},native=await repository.documentSource(source);if(!native||![ctx.authContext,stored].every(authority=>allowed(authority,native.checks,now)))continue;rows.push(row);evidence.push({source,fingerprint:native.fingerprint});if(rows.length===31)break;}
+    if(batch.length<=30)break;position=batch[29].id;
+  }
+  return{rows,evidence};
+}
+
 export async function readDocumentSources(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx=actorContext(actor),input=candidatesInput.parse(raw),filter=commandFingerprint({operation:"SOURCES",kind:input.kind,query:input.query}),after=before(ctx,filter,input.cursor);
   return withTenant(deps.db,ctx.organizationId,async tx=>{
     const current=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId);
     if([ctx.authContext,current].some(authority=>!authority.permissions.has("document:view")))throw new DocumentAccessError();
-    const repository=new DocumentRepository(tx,ctx.organizationId),rows=await repository.sourceCandidates(input.kind,input.query,after),items=[],checks:CurrentAuthorityCheck[]=[],captured=[];
-    if(input.kind==="LEAD")await repository.prepareDocumentSources(rows.slice(0,30).map(row=>({kind:input.kind,id:row.id})));
-    const sourceNow=input.kind==="LEAD"?await repository.clock():null;
+    const repository=new DocumentRepository(tx,ctx.organizationId),picked=input.kind==="ONBOARDING"?await authorizedOnboardingCandidates(ctx,current,repository,input.query,after):null,rows=picked?.rows??await repository.sourceCandidates(input.kind,input.query,after),items=[],checks:CurrentAuthorityCheck[]=[],captured=[];
+    const nativeBatch=input.kind==="LEAD"||input.kind==="ONBOARDING";
+    if(nativeBatch)await repository.prepareDocumentSources(rows.slice(0,30).map(row=>({kind:input.kind,id:row.id})));
+    const sourceNow=nativeBatch?await repository.clock():null;
+    if(picked)for(const saved of picked.evidence){const native=await repository.documentSource(saved.source);if(!native||native.fingerprint!==saved.fingerprint)throw new DocumentConflictError();if(![ctx.authContext,current].every(authority=>allowed(authority,native.checks,sourceNow!)))throw new DocumentAccessError();checks.push(...native.checks);captured.push(saved);}
     for(const row of rows.slice(0,30)){
       const source={kind:input.kind,id:row.id},native=await repository.documentSource(source);if(!native)continue;
       const now=sourceNow??await repository.clock();if(![ctx.authContext,current].every(authority=>allowed(authority,native.checks,now)))continue;
       const label=repository.documentSourceLabel(native,deps.env);if(input.kind==="LEAD"&&input.query&&row.id.toLowerCase()!==input.query.toLowerCase()&&!label.toLowerCase().includes(input.query.toLowerCase()))continue;
-      checks.push(...native.checks);captured.push({source,fingerprint:native.fingerprint});
+      if(!picked){checks.push(...native.checks);captured.push({source,fingerprint:native.fingerprint});}
       const visible=present({...ctx.authContext,visibleDataClasses:new Set([native.resource.dataClass??"operational"])},"view",{...native.resource,data:{source,label}},{},now);
       items.push({source:documentSourceReferenceSchema.parse(visible.source),label:z.string().parse(visible.label)});
     }
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"documents.sources_read",resourceType:"document",resourceId:null,after:{count:items.length},requestId:deps.requestId??randomUUID(),occurredAt:await repository.clock()});
-    const finalRepository=input.kind==="LEAD"?new DocumentRepository(tx,ctx.organizationId):repository;if(input.kind==="LEAD")await finalRepository.prepareDocumentSources(captured.map(saved=>saved.source));
+    const finalRepository=nativeBatch?new DocumentRepository(tx,ctx.organizationId):repository;if(nativeBatch)await finalRepository.prepareDocumentSources(captured.map(saved=>saved.source));
     for(const saved of captured){const final=await finalRepository.documentSource(saved.source);if(!final||final.fingerprint!==saved.fingerprint)throw new DocumentConflictError();checks.push(...final.checks);}
     await recheckAccountAuthorization(ctx,tx,await repository.clock(),checks,new DocumentAccessError());
     if(!(await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId)).permissions.has("document:view"))throw new DocumentAccessError();
