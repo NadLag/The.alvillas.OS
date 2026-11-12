@@ -8,7 +8,8 @@ import {nativeOnboardingActivationOriginal} from "./onboarding-service";
 import {reviewOnboardingOwnerPackage,admitOnboardingOwnerPackage,completeOnboardingOwnerPackage,nativeOnboardingOwnerPackageOriginal} from "./onboarding-owner-package-service";
 import {reviewOnboardingOwnerDelivery,admitOnboardingOwnerDelivery,nativeOnboardingOwnerDeliveryOriginal} from "./onboarding-owner-delivery-service";
 
-type Dependencies=Parameters<typeof completeOnboardingOwnerPackage>[2];
+type CompletionDependencies=Parameters<typeof completeOnboardingOwnerPackage>[2];
+type Dependencies=Omit<CompletionDependencies,"objects">&Partial<Pick<CompletionDependencies,"objects">>;
 const packageReason=(id:string)=>"onboarding.activation.documents:"+id,emailReason=(id:string)=>"onboarding.activation.email:"+id;
 const context=(organizationId:string,activationId:string,deps:Dependencies)=>withTenant(deps.db,organizationId,tx=>nativeOnboardingActivationOriginal(organizationId,tx,activationId,deps),{timeout:120000});
 
@@ -18,7 +19,7 @@ export async function admitActivationOwnerPackage(organizationId:string,activati
  if(existing){await context(organizationId,activationId,deps);return existing;}const reviewed=await reviewOnboardingOwnerPackage(run.actor,draft,deps),receipt=await admitOnboardingOwnerPackage(run.actor,{...draft,idempotencyKey:run.row.id,reviewFingerprint:reviewed.reviewFingerprint,reason:packageReason(run.row.id)},deps);await context(organizationId,activationId,deps);return receipt;
 }
 /** Canonical document workers perform all actual rendering/archive I/O; this returns their genuine paired receipt. */
-export async function completeActivationOwnerPackage(organizationId:string,activationId:string,deps:Dependencies){
+export async function completeActivationOwnerPackage(organizationId:string,activationId:string,deps:CompletionDependencies){
  const pending=await admitActivationOwnerPackage(organizationId,activationId,deps),run=await context(organizationId,activationId,deps),receipt=await completeOnboardingOwnerPackage(run.actor,{packageId:pending.packageId},deps);await context(organizationId,activationId,deps);return receipt;
 }
 /** Admission queues the existing canonical email worker. It does not call a provider or claim delivery. */
