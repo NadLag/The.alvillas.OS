@@ -160,3 +160,5 @@ prisma/migrations/20261112100000_native_owner_report_render_capacity/migration.s
 prisma/migrations/20261112110000_atomic_owner_package_documents/migration.sql text eol=lf
 
 /prisma/migrations/20261112120000_native_owner_package_delivery/migration.sql text eol=lf
+
+prisma/migrations/20261112130000_native_activation_effect_evidence/migration.sql text eol=lf
