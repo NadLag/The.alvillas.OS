@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Webhook } from "svix";
-import { verifyDigestReceipt } from "@/platform/email/digest-receipt";
+import { digestReceiptSchema, verifyDigestReceipt } from "@/platform/email/digest-receipt";
 import { POST } from "@/app/api/webhooks/resend/route";
 import { recordDigestReceipt } from "@/platform/notifications/digest-service";
 
@@ -33,7 +33,8 @@ describe("signed Resend digest receipts", () => {
     expect(verifyDigestReceipt(body,signed(body),secret)?.data.tags.template).toBe("onboarding_owner_package");
     const response=await POST(new Request("https://os.example.test/api/webhooks/resend",{method:"POST",body,headers:signed(body)}));
     expect(response.status).toBe(200);
-    expect(recordDigestReceipt).toHaveBeenCalledWith(expect.objectContaining({data:expect.objectContaining({tags:expect.objectContaining({template:"onboarding_owner_package"})})}));
+    expect(recordDigestReceipt).toHaveBeenCalledOnce();
+    expect(digestReceiptSchema.parse(vi.mocked(recordDigestReceipt).mock.calls[0][0]).data.tags.template).toBe("onboarding_owner_package");
     expect(JSON.stringify(vi.mocked(recordDigestReceipt).mock.calls)).not.toContain("PRIVATE");
     expect(JSON.stringify(vi.mocked(recordDigestReceipt).mock.calls)).not.toContain("private-recipient");
   });
