@@ -6126,6 +6126,48 @@
         "WORKFLOW_REFERENCE_INVALID": "Un workflow fait référence à une configuration invalide.",
         "WORKFLOW_TASK_REFERENCE_MISSING": "Une configuration référencée pointe vers un modèle de tâche absent."
       }
+    },
+    "activation": {
+      "title": "Activation de la propriété",
+      "guidance": "Vérifiez la configuration approuvée, lancez l’activation et suivez les résultats réels avant la mise en service.",
+      "loaded": "Les informations d’activation sont à jour.",
+      "open": "Ouvrir l’activation",
+      "review": "Vérifier l’activation",
+      "confirmTitle": "Confirmer l’activation de la propriété",
+      "confirmGuidance": "Lancez les opérations approuvées. La propriété sera active après vérification de tous les résultats requis.",
+      "confirm": "Lancer l’activation",
+      "uncertain": "La réponse d’activation a été interrompue. Retrouvez la demande initiale avant toute autre action.",
+      "recover": "Retrouver la demande initiale",
+      "notRecorded": "Aucune activation n’a été enregistrée pour la demande conservée. Vérifiez la configuration actuelle avant de recommencer.",
+      "refresh": "Actualiser la progression",
+      "historical": "Il s’agit d’une demande d’activation antérieure. Ses résultats ne confirment pas la disponibilité de la configuration actuelle.",
+      "ready": "Prête pour la mise en service",
+      "notReady": "Des vérifications restent à effectuer",
+      "configurationChanged": "La configuration a changé depuis son approbation. Vérifiez la configuration actuelle avant la mise en service.",
+      "unavailableReview": "Terminez la vérification de la configuration et contrôlez vos droits d’approbation pour lancer l’activation.",
+      "states": {
+        "PENDING": "Activation en attente",
+        "RUNNING": "Activation en cours",
+        "BLOCKED": "L’activation nécessite une intervention",
+        "COMPLETE": "Propriété activée",
+        "FAILED": "L’activation n’a pas pu aboutir"
+      },
+      "effects": {
+        "WORKFLOWS": "Processus opérationnels",
+        "DOCUMENTS": "Documents propriétaire en français et en anglais",
+        "EMAIL": "Courriel au propriétaire",
+        "TASKS": "Tâches opérationnelles",
+        "NOTIFICATION": "Confirmation de livraison"
+      },
+      "checks": {
+        "configuration": "Configuration approuvée à jour",
+        "documents": "Documents propriétaire terminés",
+        "email": "Courriel au propriétaire livré",
+        "workflows": "Processus opérationnels préparés",
+        "tasks": "Tâches opérationnelles préparées",
+        "notification": "Livraison confirmée",
+        "activation": "Propriété activée"
+      }
     }
   },
   "OwnerOnboardingPackage": {
