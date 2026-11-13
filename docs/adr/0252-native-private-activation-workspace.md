@@ -1,0 +1,9 @@
+# Private native activation workspace
+
+Activation has its own authenticated workspace entry, selected by the existing onboarding session identifier. The existing service resolves the current native review and original activation reference through repositories. It checks held and current permissions for both the current property and the original tracked property, then repeats the metadata selection and authorization after its read audit. Navigation metadata grants no authority to execute work or inspect financial content.
+
+Review, confirmation, admission, recovery and tracking use the original native application services through the existing private HTTP boundary. The browser submits the actual reviewed draft and fingerprint once. It accepts an admission receipt only when the original nonce, session, source review and property match. A lost reply retains only its UUID in session storage under the authenticated organization, account and session. Recovery reads that original nonce; it never resends admission automatically.
+
+Every status and checklist value comes from the canonical protected status reader. Earlier activation history cannot borrow readiness from a later configuration. Property activation and readiness remain separate facts when configuration changes after activation. Existing signed background jobs, document workers, provider acknowledgements, delivery receipts, financial permissions and operational completion gates remain authoritative.
+
+The workspace clears private values and aborts obsolete reads on offline, hidden-page, page-exit and scope changes. Request generations suppress late replies. EN, FR and Arabic use the existing message files and design system. No private drafts, financial values, provider credentials or derived completion claims are persisted by the browser. Provider restrictions and all355 approved feature requirements remain unchanged.
