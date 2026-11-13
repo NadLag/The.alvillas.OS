@@ -1,4 +1,5 @@
 import { selectPaymentAccount } from "./support/payment-account-picker";
+import { forwardBrowserGetOnce } from "./support/forward-browser-post";
 import { randomInt,randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
 import { expect,test } from "@playwright/test";
@@ -72,7 +73,7 @@ for(const locale of ["en","fr","ar"] as const)test(`Native advances, approved ex
       expect(await tx.auditLog.count({where:{action:"finance.transfer.posted",resourceId:advance.id}})).toBe(1);expect(await tx.expense.count({where:{id:{in:expenses},state:"POSTED"}})).toBe(2);expect(await tx.auditLog.count({where:{actorId:user.id,action:{in:["finance.transfer.posted","expense.posted"]}}})).toBe(0);return movements.map(row=>row.id);
     });
     const release=new Promise<void>(resolve=>{releaseWorkPull=resolve});let scopeResetObserved=false;
-    await page.route("**/api/sync/pull?**",async route=>{const response=await route.fetch();if(response.status()===409){scopeResetObserved=true;await release}await route.fulfill({response})});
+    await page.route("**/api/sync/pull?**",async route=>{const response=await forwardBrowserGetOnce(route.request());if(response.status===409){scopeResetObserved=true;await release}await route.fulfill(response)});
     await page.goto(`/${locale}/app/field/wallet`);await expect(page.getByTestId("field-wallet")).toBeVisible();await expect(page.getByTestId("field-wallet-movement")).toHaveCount(5);
     const response=await page.request.get("/api/field/wallet"),text=await response.text();expect(response.status()).toBe(200);expect(response.headers()["cache-control"]).toBe("private, no-store");
     const model=fieldWalletSnapshotSchema.parse(JSON.parse(text));expect(model.balances).toContainEqual({currency:"MAD",amount:"450.00"});expect(new Set(model.movements.map(row=>row.id))).toEqual(new Set(proof));expect(text).not.toContain(bank.id);expect(text).not.toContain(bankName);expect(model.compensationVisible).toBe(false);
