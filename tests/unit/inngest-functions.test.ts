@@ -96,7 +96,7 @@ describe("Inngest signed outbox dispatcher", () => {
     expect((await GET(new NextRequest("http://localhost:3000/api/inngest"), {})).status).toBe(401);
     const discovery = await GET(new NextRequest("http://localhost:3000/api/inngest", { headers: signature("") }), {});
     expect(discovery.status).toBe(200);
-    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(16);
+    const body = await discovery.json() as { function_count: number }; expect(body.function_count).toBe(17);
     expect(JSON.stringify(body)).not.toContain(process.env.INNGEST_SIGNING_KEY!);
     const execution = await POST(new NextRequest("http://localhost:3000/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { method: "POST", body: "{}" }), {});
     expect(execution.status).toBe(401);

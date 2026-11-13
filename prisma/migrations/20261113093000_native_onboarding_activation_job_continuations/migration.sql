@@ -33,7 +33,9 @@ BEGIN
   IF parent.id<>original.id THEN RAISE EXCEPTION 'native activation continuation requires its original source';END IF;
  ELSIF parent.type='onboarding.activation_continue_requested' THEN
   IF (parent.payload->>'activationId')::uuid IS DISTINCT FROM request.id THEN RAISE EXCEPTION 'native activation continuation cannot cross native intents';END IF;
+  IF parent.payload->>'notBefore' IS NOT NULL AND NEW.occurred_at<(parent.payload->>'notBefore')::timestamptz THEN RAISE EXCEPTION 'native activation continuation cannot skip its parent due time';END IF;
  ELSE RAISE EXCEPTION 'native activation continuation requires its actual source chain';END IF;
+ IF parent.next_attempt_at IS NOT NULL AND NEW.occurred_at<parent.next_attempt_at THEN RAISE EXCEPTION 'native activation continuation cannot skip its parent transport delay';END IF;
  backoff:=(request.policy_snapshot#>>'{value,activation,retry,backoff_seconds}')::int;
  IF backoff IS NULL OR backoff NOT BETWEEN 1 AND 3600 THEN RAISE EXCEPTION 'native activation continuation requires its original retry policy';END IF;
  minimum:=NULL;
