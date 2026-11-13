@@ -1,3 +1,4 @@
+import type {TenantTransactionRunner} from "@/platform/db/tenant";
 type QueryLogEvent = {query:string};
 
 /** Prisma's native query log callback may arrive after the query promise resolves. */
@@ -26,8 +27,18 @@ export function transactionQueryMeter(subscribe:(listener:(event:QueryLogEvent)=
       // Keep counting every actual statement, including the terminal COMMIT.
       // The existing test deadline still bounds a missing native log receipt.
       await receipt;
-      if(sample.begins!==expected||sample.commits!==expected||sample.outsideStatement)throw new Error((expected===1?"One complete native transaction":expected+" complete native transactions")+" required for query measurement");
+      if(sample.begins!==expected||sample.commits!==expected||sample.outsideStatement)throw new Error((expected===1?"One complete native transaction":expected+" complete native transactions")+" required for query measurement "+JSON.stringify({begins:sample.begins,commits:sample.commits,outsideStatement:sample.outsideStatement,queries:sample.queries,connectionProbes:sample.connectionProbes}));
       return{result,queries:sample.queries,connectionProbes:sample.connectionProbes,elapsedMs};
     }finally{active=null;}
   };
+}
+
+/** Use a dedicated observed client only through this runner; await each COMMIT receipt before the next transaction. */
+export function transactionQueryRunner(db:TenantTransactionRunner,subscribe:(listener:(event:QueryLogEvent)=>void)=>void){
+ const measure=transactionQueryMeter(subscribe);
+ return async function collect<T>(work:(runner:TenantTransactionRunner)=>Promise<T>){
+  const samples:Array<{queries:number;connectionProbes:number}>=[];let open=true;
+  const runner:TenantTransactionRunner={$transaction:async(fn,options)=>{if(!open)throw Error("Native query collection already completed");const sample=await measure(()=>db.$transaction(fn,options));samples.push(sample);return sample.result;}};
+  const started=performance.now();try{const result=await work(runner);return{result,transactions:samples.length,queries:samples.reduce((total,row)=>total+row.queries,0),connectionProbes:samples.reduce((total,row)=>total+row.connectionProbes,0),elapsedMs:performance.now()-started};}finally{open=false;}
+ };
 }
