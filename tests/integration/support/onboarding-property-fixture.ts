@@ -8,7 +8,6 @@ import {configuredNativeOnboardingPropertyProfile,createNativeOnboardingProperty
 import {nativeOnboardingFixture,type NativeOnboardingFixture} from "./onboarding-fixture";
 import {reviewOnboardingPropertyStep,admitOnboardingPropertyStep} from "@/modules/onboarding/application/onboarding-service";
 import {canonicalOnboardingPropertyDraft,canonicalOnboardingPropertyCommand,type OnboardingPropertyDraft} from "@/modules/onboarding/domain/onboarding-property";
-import {createProperty} from "@/modules/core/application/core-service";
 import {propertyInputSchema} from "@/modules/core/domain/owner-property";
 
 export const nativeOnboardingPropertyRule={key:"ops.operating_rules"as const,entry:"initial_property_profile"};
@@ -22,6 +21,6 @@ export async function existingNativeOnboardingProperty(f:NativeOnboardingFixture
  return withTenant(db,f.organizationId,async tx=>{const configured=await configuredNativeOnboardingPropertyProfile(tx,f.organizationId,nativeOnboardingPropertyRule,new Date());return createNativeOnboardingProperty(f.ctx,tx,{ownerId,name,addressLine1:"Actual private Property address",city:"Marrakech",propertyType:"VILLA",bedrooms:3,bathrooms:2,maxGuests:6,status:"DRAFT"},randomUUID(),configured.profile);});
 }
 export async function nativeOnboardingPropertyAdmission(f:NativeOnboardingFixture,db:PrismaClient,previous:{id:string;sessionId:string;ownerId:string},target?:OnboardingPropertyDraft["target"]){
- if(!target&&f.canonicalPropertyInput){const configured=await withTenant(db,f.organizationId,tx=>configuredNativeOnboardingPropertyProfile(tx,f.organizationId,nativeOnboardingPropertyRule,new Date())),property=await createProperty(f.ctx,propertyInputSchema.parse({...f.canonicalPropertyInput,ownerId:previous.ownerId,operatingProfile:configured.profile,status:"DRAFT"}),{db,requestId:randomUUID()});target={mode:"LINK",propertyId:property.id};}
+ if(!target&&f.canonicalPropertyInput){const {createProperty}=await import("@/modules/core/application/core-service"),configured=await withTenant(db,f.organizationId,tx=>configuredNativeOnboardingPropertyProfile(tx,f.organizationId,nativeOnboardingPropertyRule,new Date())),property=await createProperty(f.ctx,propertyInputSchema.parse({...f.canonicalPropertyInput,ownerId:previous.ownerId,operatingProfile:configured.profile,status:"DRAFT"}),{db,requestId:randomUUID()});target={mode:"LINK",propertyId:property.id};}
  const draft=canonicalOnboardingPropertyDraft({sessionId:previous.sessionId,previousRevisionId:previous.id,step:"PROPERTY",target:target??{mode:"CREATE",input:{ownerId:previous.ownerId,name:"Original native historical Property",addressLine1:"Original native historical address",city:"Marrakech",propertyType:"VILLA",bedrooms:3,bathrooms:2,maxGuests:6,status:"DRAFT"}}}),review=await reviewOnboardingPropertyStep(f.ctx,draft,{db,env:f.env}),command=canonicalOnboardingPropertyCommand({...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Actual reviewed original Property history"}),receipt=await admitOnboardingPropertyStep(f.ctx,command,{db,env:f.env});return{draft,review,command,receipt};
 }
