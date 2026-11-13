@@ -2,13 +2,13 @@ import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { Page, Request } from "@playwright/test";
 
-/** Forward the observed browser command once on a dedicated socket, then wait for its complete acknowledgement. */
-export async function forwardBrowserPostOnce(request: Pick<Request, "url" | "method" | "allHeaders" | "postDataBuffer">, onBody?: (body: Buffer, headers: Readonly<IncomingHttpHeaders>) => void): Promise<number> {
+type ObservedRequest=Pick<Request,"url"|"method"|"allHeaders">&Partial<Pick<Request,"postDataBuffer">>;
+async function forwardObservedRequestOnce(request:ObservedRequest,method:"GET"|"POST",onBody?: (body: Buffer, headers: Readonly<IncomingHttpHeaders>) => void): Promise<number> {
   const target = new URL(request.url());
-  if (request.method() !== "POST" || !["http:", "https:"].includes(target.protocol)) throw new Error("Observed HTTP browser POST required");
+  if (request.method() !== method || !["http:", "https:"].includes(target.protocol)) throw new Error("Observed HTTP browser "+method+" required");
   const headers = await request.allHeaders(), send = target.protocol === "https:" ? httpsRequest : httpRequest;
   return new Promise((resolve, reject) => {
-    const outgoing = send(target, { method: "POST", headers: { ...headers, connection: "close" }, agent: false, signal: AbortSignal.timeout(30000) }, response => {
+    const outgoing = send(target, { method, headers: { ...headers, connection: "close" }, agent: false, signal: AbortSignal.timeout(30000) }, response => {
       const chunks: Buffer[] = [];
       response.on("error", reject);
       response.on("aborted", () => reject(new Error("Observed command acknowledgement ended before its body completed")));
@@ -16,8 +16,19 @@ export async function forwardBrowserPostOnce(request: Pick<Request, "url" | "met
       if (onBody) response.on("data", (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
       else response.resume();
     });
-    outgoing.on("error", reject); outgoing.end(request.postDataBuffer() ?? undefined);
+    outgoing.on("error", reject); outgoing.end(method==="POST"?request.postDataBuffer?.()??undefined:undefined);
   });
+}
+
+/** Forward the observed browser command once on a dedicated socket, then wait for its complete acknowledgement. */
+export function forwardBrowserPostOnce(request:Pick<Request,"url"|"method"|"allHeaders"|"postDataBuffer">,onBody?: (body:Buffer,headers:Readonly<IncomingHttpHeaders>)=>void){return forwardObservedRequestOnce(request,"POST",onBody);}
+
+/** Preserve the original private GET and complete response on a fresh socket, without a retry. */
+export async function forwardBrowserGetOnce(request:Pick<Request,"url"|"method"|"allHeaders">){
+ let body:Buffer=Buffer.alloc(0),responseHeaders:Readonly<IncomingHttpHeaders>={};
+ const status=await forwardObservedRequestOnce(request,"GET",(value,headers)=>{body=value;responseHeaders=headers;});
+ const headers:Record<string,string>={};for(const[name,value]of Object.entries(responseHeaders))if(value!==undefined)headers[name]=Array.isArray(value)?value.join(name.toLowerCase()==="set-cookie"?"\n":", "):value;
+ return{status,headers,body};
 }
 
 /** Use the authenticated browser cookies once; an unknown POST outcome is never retried. */
