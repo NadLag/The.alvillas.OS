@@ -1,12 +1,17 @@
 import {describe,expect,it} from "vitest";
 import {transactionQueryMeter} from "../integration/support/transaction-query-meter";
 
-function fixture(){
+function fixture(transactions=1){
   let listener!:(event:{query:string})=>void;
-  const measure=transactionQueryMeter(receive=>{listener=receive;});
+  const measure=transactionQueryMeter(receive=>{listener=receive;},{transactions});
   return{measure,emit:(query:string)=>listener({query})};
 }
 describe("complete native transaction query evidence",()=>{
+  it("waits for both sequential native transaction receipts and retains all their statements",async()=>{const f=fixture(2);let finished=false;const pending=f.measure(()=>{f.emit("BEGIN");f.emit("SELECT read_budget");f.emit("COMMIT");f.emit("SELECT 1");f.emit("BEGIN");f.emit("SELECT private_sources");return Promise.resolve("actual choices");}).then(value=>{finished=true;return value;});await Promise.resolve();expect(finished).toBe(false);f.emit("SELECT final_scope");f.emit("COMMIT");const result=await pending;expect(result.queries).toBe(7);expect(result.connectionProbes).toBe(1);expect(result.result).toBe("actual choices");});
+  it("does not move a delayed second COMMIT into the next selector page",async()=>{const f=fixture(2),first=f.measure(()=>{for(const sql of["BEGIN","SELECT budget","COMMIT","BEGIN","SELECT first_page"])f.emit(sql);return Promise.resolve(1);});await Promise.resolve();f.emit("COMMIT");expect((await first).queries).toBe(6);const second=await f.measure(()=>{for(const sql of["SELECT 1","BEGIN","SELECT budget","COMMIT","BEGIN","SELECT next_page","COMMIT"])f.emit(sql);return Promise.resolve(2);});expect(second.queries).toBe(6);expect(second.connectionProbes).toBe(1);});
+  it("counts a SELECT1 application statement inside either transaction",async()=>{const f=fixture(2),result=await f.measure(()=>{for(const sql of["BEGIN","SELECT 1","COMMIT","BEGIN","SELECT 1","COMMIT"])f.emit(sql);return Promise.resolve(true);});expect(result.queries).toBe(6);expect(result.connectionProbes).toBe(0);});
+  it("rejects an unaccounted business query between native transactions",async()=>{const f=fixture(2);await expect(f.measure(()=>{for(const sql of["BEGIN","SELECT budget","COMMIT","SELECT leaked_source","BEGIN","SELECT sources","COMMIT"])f.emit(sql);return Promise.resolve(true);})).rejects.toThrow("2 complete native transactions");});
+  it("refuses a nonpositive or fractional expected transaction count",()=>{for(const value of[0,-1,1.5])expect(()=>fixture(value)).toThrow("positive native transaction count");});
   it("retains an exact pool health probe separately from every statement of the complete transaction",async()=>{
     const f=fixture(),first=await f.measure(()=>{f.emit("SELECT 1");f.emit("BEGIN");f.emit("SELECT actual_source");f.emit("COMMIT");return Promise.resolve(true);}),second=await f.measure(()=>{f.emit("BEGIN");f.emit("SELECT actual_source");f.emit("COMMIT");return Promise.resolve(true);});
     expect(first.queries).toBe(3);expect(second.queries).toBe(first.queries);expect(first.connectionProbes).toBe(1);expect(second.connectionProbes).toBe(0);expect(first.queries+first.connectionProbes).toBe(4);
