@@ -18,7 +18,7 @@ BEGIN
   RETURN NEW;
  END IF;
  IF NEW.type<>'onboarding.activation_continue_requested' THEN RETURN NEW;END IF;
- IF coalesce(jsonb_typeof(NEW.payload)<>'object' OR (SELECT count(*) FROM jsonb_object_keys(NEW.payload))<>4 OR NOT(NEW.payload ?& ARRAY['activationId','sourceOutboxEventId','activationHeadId','notBefore']) OR NEW.status<>'PENDING' OR NEW.processed_at IS NOT NULL OR NEW.attempt_count<>0 OR NEW.last_error IS NOT NULL OR NOT isfinite(NEW.occurred_at),true) THEN RAISE EXCEPTION 'native activation continuation requires its closed queued reference';END IF;
+ IF coalesce(jsonb_typeof(NEW.payload)<>'object' OR (SELECT count(*) FROM jsonb_object_keys(NEW.payload))<>4 OR NOT(NEW.payload ?& ARRAY['activationId','sourceOutboxEventId','activationHeadId','notBefore']) OR NEW.status<>'PENDING' OR NEW.processed_at IS NOT NULL OR NEW.attempt_count<>0 OR NEW.last_error IS NOT NULL OR NOT isfinite(NEW.occurred_at) OR NEW.occurred_at<transaction_timestamp() OR NEW.occurred_at>clock_timestamp(),true) THEN RAISE EXCEPTION 'native activation continuation requires its closed queued reference';END IF;
  activation:=(NEW.payload->>'activationId')::uuid;
  PERFORM pg_advisory_xact_lock(hashtextextended(NEW.organization_id::text||':onboarding:activation-execution:'||activation::text,0));
  SELECT * INTO request FROM property_onboarding_activation_request WHERE organization_id=NEW.organization_id AND id=activation;
