@@ -16,7 +16,7 @@ describe("native activation status references",()=>{
   [email],
   [{...documents,result:email.result}],
   [{...documents,result:{...documents.result,ready:true}}]
- ])("rejects malformed, duplicate, misbound or dependency-free evidence: %j",phases=>{expect(()=>onboardingActivationReadinessReferences(activationId,phases)).toThrow(OnboardingConfigurationError);});
+ ].map(phases=>({phases})))("rejects malformed, duplicate, misbound or dependency-free evidence: %j",({phases})=>{expect(()=>onboardingActivationReadinessReferences(activationId,phases)).toThrow(OnboardingConfigurationError);});
  it("requires an original session and nonce without accepting a client checklist or actor",()=>{const input={sessionId:randomUUID(),idempotencyKey:randomUUID()};expect(onboardingActivationStatusInputSchema.parse(input)).toEqual(input);expect(onboardingActivationStatusInputSchema.safeParse({...input,ready:true,organizationId:randomUUID()}).success).toBe(false);});
  it("requires an absent activation to have no fabricated readiness",()=>{expect(onboardingActivationStatusSchema.parse({recorded:false,current:false,activation:null,readiness:null})).toEqual({recorded:false,current:false,activation:null,readiness:null});expect(onboardingActivationStatusSchema.safeParse({recorded:false,current:false,activation:null,readiness:{ready:true}}).success).toBe(false);expect(onboardingActivationStatusSchema.safeParse({recorded:false,current:true,activation:null,readiness:null}).success).toBe(false);});
 });
