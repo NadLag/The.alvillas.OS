@@ -10,10 +10,12 @@ export class OnboardingActivationRepository{
  eventById(activationId:string,id:string){return this.tx.propertyOnboardingActivationEvent.findFirst({where:{organizationId:this.organizationId,activationId,id}});}
  recoveryPage(afterId?:string){return this.tx.$queryRaw<Array<{activationId:string;outboxEventId:string}>>(Prisma.sql`
   SELECT r.id AS "activationId",source.id AS "outboxEventId" FROM property_onboarding_activation_request r
+  JOIN outbox_event original ON original.organization_id=r.organization_id AND original.idempotency_key='onboarding.activation:'||r.id::text AND original.type='onboarding.activation_requested' AND original.status<>'FAILED'
   JOIN LATERAL(SELECT type FROM property_onboarding_activation_event WHERE organization_id=r.organization_id AND activation_id=r.id ORDER BY sequence DESC LIMIT 1) head ON true
   JOIN outbox_event source ON source.organization_id=r.organization_id AND(source.idempotency_key='onboarding.activation:'||r.id::text OR(source.type='onboarding.activation_continue_requested' AND source.payload->>'activationId'=r.id::text))
   WHERE r.organization_id=${this.organizationId}::uuid AND head.type NOT IN('ACTIVATED','FAILED','BLOCKED') AND source.status='DISPATCHED'
   AND r.id=(SELECT latest.id FROM property_onboarding_activation_request latest WHERE latest.organization_id=r.organization_id AND latest.session_id=r.session_id ORDER BY latest.created_at DESC,latest.id DESC LIMIT 1)
+  AND(source.type<>'onboarding.activation_continue_requested' OR EXISTS(SELECT 1 FROM outbox_event parent WHERE parent.organization_id=r.organization_id AND parent.id=(source.payload->>'sourceOutboxEventId')::uuid AND parent.status<>'FAILED'))
   AND NOT EXISTS(SELECT 1 FROM outbox_event child WHERE child.organization_id=r.organization_id AND child.idempotency_key='onboarding.activation.continue:'||source.id::text)
   ${afterId?Prisma.sql`AND r.id>${afterId}::uuid`:Prisma.empty} ORDER BY r.id LIMIT 100`);}
  byId(id:string){return this.tx.propertyOnboardingActivationRequest.findFirst({where:{organizationId:this.organizationId,id}});}

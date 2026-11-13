@@ -10,8 +10,8 @@ import {nativeOnboardingConfigurationFixture} from "./onboarding-configuration-f
 import type {NativeWorkflowFixtureConfiguration} from "./onboarding-workflows-fixture";
 
 /** Ten actual native records precede an independently authorized background intent. */
-export async function nativeOnboardingActivationFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv,enabled=true,identity?:NativeOnboardingFixtureIdentity,workflowConfiguration?:NativeWorkflowFixtureConfiguration){
- const f=await nativeOnboardingConfigurationFixture(admin,db,env,identity,workflowConfiguration),policy=onboardingPolicySchema.parse({...f.policy,...enabled?{activation:{modes:["BACKGROUND"],effects:["WORKFLOWS","DOCUMENTS","EMAIL","TASKS","NOTIFICATION"],retry:{max_attempts:3,backoff_seconds:30}}}:{}});
+export async function nativeOnboardingActivationFixture(admin:PrismaClient,db:PrismaClient,env:NodeJS.ProcessEnv,enabled=true,identity?:NativeOnboardingFixtureIdentity,workflowConfiguration?:NativeWorkflowFixtureConfiguration,activationRetry:{max_attempts:number;backoff_seconds:number}={max_attempts:3,backoff_seconds:30}){
+ const f=await nativeOnboardingConfigurationFixture(admin,db,env,identity,workflowConfiguration),policy=onboardingPolicySchema.parse({...f.policy,...enabled?{activation:{modes:["BACKGROUND"],effects:["WORKFLOWS","DOCUMENTS","EMAIL","TASKS","NOTIFICATION"],retry:activationRetry}}:{}});
  await withTenant(db,f.organizationId,async tx=>{
   await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:onboardingPolicyKey,scopeType:"organization",createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),value:policy,reason:"Explicit reviewed activation effects and configured retry policy"});
   const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"onboarding:approve"}}),role=await tx.role.create({data:{organizationId:f.organizationId,key:"native_activation_"+randomUUID(),name:"Explicit independent property activation approval",rolePermissions:{create:{organizationId:f.organizationId,permissionId:permission.id}}}});
