@@ -1,0 +1,11 @@
+# Native activation consumes actual canonical effect milestones
+
+Native effect outcomes contain references to actual canonical artifacts. The phase payload contains no owner address, message HTML, PDF bytes or parallel copy of business configuration. Workflow and Tasks outcomes retain their actual source identity and distinct canonical artifacts. Document outcomes refer to the actual paired package. The dependency producer and additive database guards must verify these references; parsing a payload alone cannot complete a native phase.
+
+The locked specification requires background email and owner notification. These use two real milestones of the same canonical owner message: provider acceptance for Email, and the verified delivered event for owner Notification. An accepted outbox request proves neither milestone. Delivery tracking remains distinct from acceptance. This avoids sending the owner another copy of the same package or requiring a new account to receive it. Failed, bounced, complained or suppressed messages block their outstanding milestones.
+
+The owner adapter already checks the original activation creator, captured and current permissions, complete current sources, original package, original message identity and canonical delivery state. Milestone advancement reuses that adapter and its stable nonce. It never calls a provider independently or creates a second notification implementation.
+
+The internal producer records dependency-ordered outcomes only after actual canonical proof. PostgreSQL independently validates every reference and metadata hash. Admission, rendering and provider workers remain canonical and separate. Pending child work retains its started attempt, so slow genuine delivery consumes no failed attempts. Transient execution failures use the original explicit backoff and bounded retry count; authority, source and configuration failures retain blocked history. A blocked phase at its configured bound stays blocked without writing an invalid extra attempt. Concurrent workers and a lost post-commit acknowledgement reuse canonical nonces and the same phase head.
+
+Completing the five effects does not activate the property. Protected native completion, job dispatch and the private multilingual UI remain required before F-ONB-04 can satisfy acceptance. All 355 approved features remain required.

@@ -11,7 +11,7 @@ import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { FinanceRepository } from "@/modules/finance/infrastructure/finance-repository";
 import { Money } from "@/platform/money/money";
 import { openFieldFixture } from "./support/field-fixture";
-import { forwardBrowserPostOnce } from "./support/forward-browser-post";
+import { forwardBrowserPostOnce, postBrowserJsonOnce } from "./support/forward-browser-post";
 import { acknowledgementBarrier } from "./support/acknowledgement-barrier";
 import { authContextForAccount } from "@/platform/authz/account-context";
 import { createSupplier } from "@/modules/finance/application/supplier-service";
@@ -98,12 +98,12 @@ for (const locale of ["en", "fr", "ar"] as const) {
         SELECT t.id::text,t.xmin::text,md5(to_jsonb(t)::text) AS body FROM financial_transaction t WHERE t.organization_id=${f.organizationId}::uuid AND t.id=${source.id}::uuid
         UNION ALL SELECT p.id::text,p.xmin::text,md5(to_jsonb(p)::text) FROM posting p WHERE p.organization_id=${f.organizationId}::uuid AND p.transaction_id=${source.id}::uuid ORDER BY id`), before = await moneyRows();
       for (const endpoint of ["review", "admit", "recover", "history", "upload", "download", "sources", "read", "part", "complete"]) {
-        const denied = await anonymous.request.post("/api/documents/" + endpoint, { headers, data: {} });
+        const denied = await anonymous.request.post("/api/documents/" + endpoint, { headers:{origin:headers.Origin}, data: {} });
         expect(denied.status()).toBe(401); expect(denied.headers()["cache-control"]).toBe("private, no-store");
       }
-      expect((await page.request.post("/api/documents/sources", { headers: { Origin: "https://foreign.example.test" }, data: { kind: "PROPERTY" } })).status()).toBe(403);
-      expect((await page.request.post("/api/documents/sources?forged=1", { headers, data: { kind: "PROPERTY" } })).status()).toBe(400);
-      expect((await page.request.post("/api/documents/sources", { headers: { ...headers, "x-alvillas-document-scope": f.organizationId + "." + randomUUID() }, data: { kind: "PROPERTY" } })).status()).toBe(403);
+      expect((await postBrowserJsonOnce(page,"/api/documents/sources", { targetOrigin:headers.Origin,headers: { origin: "https://foreign.example.test" }, data: { kind: "PROPERTY" } })).status()).toBe(403);
+      expect((await postBrowserJsonOnce(page,"/api/documents/sources?forged=1", { headers:{origin:headers.Origin}, data: { kind: "PROPERTY" } })).status()).toBe(400);
+      expect((await postBrowserJsonOnce(page,"/api/documents/sources", { headers: { origin:headers.Origin, "x-alvillas-document-scope": f.organizationId + "." + randomUUID() }, data: { kind: "PROPERTY" } })).status()).toBe(403);
       await page.goto(`/${locale}/app/documents`); await chooseSource(page, "FINANCIAL_TRANSACTION", source.reference);
       const pdf = await originalPdf(), file = { name: "إثبات-original.pdf", mimeType: "application/pdf", buffer: pdf }, reason = "Original private ledger source evidence", title = "Private immutable financial original";
       await fillFile(page, file, title, reason);
@@ -151,10 +151,10 @@ for (const locale of ["en", "fr", "ar"] as const) {
       expect((await withTenant(f.db,f.organizationId,tx=>tx.documentVersion.findFirstOrThrow({where:{documentId:originalAdmission.documentId,number:2}}))).effectiveFrom?.toISOString()).toBe(scheduledIso);
       await downloadFile(page, correction.name, correction.buffer); await downloadFile(page, file.name, pdf);
       expect(await originalRows()).toEqual(originalBefore); expect(await moneyRows()).toEqual(before);
-      const history = await page.request.post("/api/documents/history", { headers, data: { documentId: originalAdmission.documentId } }); expect(history.status()).toBe(200);
+      const history = await postBrowserJsonOnce(page,"/api/documents/history", { headers:{origin:headers.Origin}, data: { documentId: originalAdmission.documentId } }); expect(history.status()).toBe(200);
       const records = await history.json() as { versions: { id: string; number: number; supersedesId: string | null; supersededById: string | null }[] };
       expect(records.versions.map(row => row.number)).toEqual([2, 1]); expect(records.versions[0].supersedesId).toBe(records.versions[1].id); expect(records.versions[1].supersededById).toBe(records.versions[0].id);
-      const download = await page.request.post("/api/documents/download", { headers, data: { versionId: records.versions[1].id } }); expect(download.status()).toBe(200); expect(await download.body()).toEqual(pdf);
+      const download = await postBrowserJsonOnce(page,"/api/documents/download", { headers:{origin:headers.Origin}, data: { versionId: records.versions[1].id } }); expect(download.status()).toBe(200); expect(await download.body()).toEqual(pdf);
       expect(download.headers()["cache-control"]).toBe("private, no-store"); expect(download.headers()["content-security-policy"]).toBe("sandbox"); expect(download.headers()["x-content-type-options"]).toBe("nosniff");
       expect(exposedStorageLinks).toBe(0); await privatePresentation(page, pageErrors); await page.screenshot({ path: info.outputPath("document-financial-archive.png"), fullPage: true });
       await page.context().setOffline(true); await page.evaluate(() => window.dispatchEvent(new Event("offline")));
@@ -164,7 +164,7 @@ for (const locale of ["en", "fr", "ar"] as const) {
       await page.goto(`/${locale}/app/documents`); await chooseSource(page, "FINANCIAL_TRANSACTION", source.reference);
       await page.getByTestId("document-item").click(); await expect(page.getByTestId("document-version")).toHaveCount(2);
       await withTenant(f.db, f.organizationId, tx => tx.roleAssignment.updateMany({ where: { userAccountId: fixture.actorId, archivedAt: null }, data: { archivedAt: new Date() } }));
-      const denied = await page.request.post("/api/documents/download", { headers, data: { versionId: records.versions[1].id } }); expect(denied.status()).toBe(403); expect(denied.headers()["content-disposition"]).toBeUndefined();
+      const denied = await postBrowserJsonOnce(page,"/api/documents/download", { headers:{origin:headers.Origin}, data: { versionId: records.versions[1].id } }); expect(denied.status()).toBe(403); expect(denied.headers()["content-disposition"]).toBeUndefined();
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
       await expect(page.getByTestId("document-private-unavailable")).toBeVisible(); await expect(page.getByTestId("document-version")).toHaveCount(0); await expect(page.getByTestId("document-file-editor")).toHaveCount(0);
       expect(await moneyRows()).toEqual(before); expect(await originalRows()).toEqual(originalBefore);
