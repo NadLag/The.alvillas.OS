@@ -12,11 +12,13 @@ export async function readOnboardingActivationStatus(actor:AccountActorContext,r
  const input=onboardingActivationStatusInputSchema.parse(raw);
  return withTenant(deps.db,actor.organizationId,async tx=>{
   const shared:Dependencies={...deps,db:{$transaction:work=>work(tx)}},recovered=await recoverOnboardingActivation(actor,input,shared);
-  if(!recovered.recorded||!recovered.activation)return onboardingActivationStatusSchema.parse({recorded:false,activation:null,readiness:null});
-  const activation=recovered.activation,phases=await new OnboardingActivationRepository(tx,actor.organizationId).phaseHeads(activation.runId),references=onboardingActivationReadinessReferences(activation.runId,phases);
-  if(!references.packageId)return onboardingActivationStatusSchema.parse({recorded:true,activation,readiness:null});
+  if(!recovered.recorded||!recovered.activation)return onboardingActivationStatusSchema.parse({recorded:false,current:false,activation:null,readiness:null});
+  const activation=recovered.activation,repository=new OnboardingActivationRepository(tx,actor.organizationId),current=(await repository.currentForSession(input.sessionId))?.id===activation.runId;
+  if(!current)return onboardingActivationStatusSchema.parse({recorded:true,current:false,activation,readiness:null});
+  const phases=await repository.phaseHeads(activation.runId),references=onboardingActivationReadinessReferences(activation.runId,phases);
+  if(!references.packageId)return onboardingActivationStatusSchema.parse({recorded:true,current:true,activation,readiness:null});
   const readiness=await readOnboardingReadiness(actor,{sessionId:input.sessionId,reviewRevisionId:activation.sourceRevisionId,packageId:references.packageId,...references.ownerDeliveryId?{ownerDeliveryId:references.ownerDeliveryId}:{}},shared);
   if(readiness.activation?.runId!==activation.runId)throw new OnboardingConflictError();
-  return onboardingActivationStatusSchema.parse({recorded:true,activation:readiness.activation,readiness});
+  return onboardingActivationStatusSchema.parse({recorded:true,current:true,activation:readiness.activation,readiness});
  },{timeout:120000});
 }
