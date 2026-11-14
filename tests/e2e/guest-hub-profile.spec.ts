@@ -9,7 +9,7 @@ import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {guestHubStaffReceiptSchema} from "@/modules/guest-hub/domain/guest-hub-contract";
 import {guestHubProfileGrantCommandSchema,guestHubProfileSubmitSchema} from "@/modules/guest-hub/domain/guest-hub-profile-contract";
 import {guestHubProfilePolicyKey,guestHubProfilePolicySchema} from "@/modules/guest-hub/domain/guest-hub-profile-policy";
-import {prepareNativeGuestHubBrowserFixture} from "./support/guest-hub-fixture";
+import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace,nativeGuestHubResponse,retainNativeGuestHubResponses} from "./support/guest-hub-fixture";
 import {e2eEmail,ensureE2EAccount,waitForE2EAdminLoginWindow,completeE2EAdminMfa} from "./support/auth";
 import {nativeLeadBrowserFinancial,privateNativeLeadBrowserStorage} from "./support/crm-document-fixtures";
 import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
@@ -19,7 +19,7 @@ import fr from "../../messages/fr.json" with {type:"json"};
 import ar from "../../messages/ar.json" with {type:"json"};
 
 const messages={en,fr,ar};
-function response(page:Page,path:string){return page.waitForResponse(value=>new URL(value.url()).pathname==="/api/guest-hub/"+path&&value.request().method()==="POST",{timeout:30000});}
+const response=nativeGuestHubResponse;
 async function privateStorage(page:Page,values:string[]){const stored=await privateNativeLeadBrowserStorage(page);for(const value of values)expect(stored.includes(value)).toBe(false);}
 async function lostReply(page:Page,path:string,parseNonce:(raw:unknown)=>string,button:string){
  const accepted=acknowledgementBarrier();let nonce:string|undefined,sends=0;
@@ -30,6 +30,7 @@ async function lostReply(page:Page,path:string,parseNonce:(raw:unknown)=>string,
 for(const locale of["en","fr","ar"]as const)test("Actual granted native profile preserves contacts and original acknowledgements in "+locale,async({page,browser},info)=>{
  test.setTimeout(600000);const target=process.env.DATABASE_URL?new URL(process.env.DATABASE_URL):null;if(!target||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname==="/alvillas_automation_guest246_profile_20261114"||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated246 native profile browser database required");
  const db=new PrismaClient(),email=e2eEmail("native-profile-"+locale+"-"+randomUUID(),info.project.name),password=process.env.ADMIN_PASSWORD??"correct horse battery staple",p=messages[locale].GuestProfile,m=messages[locale].GuestProfileManagement,errors:string[]=[],visitor=await browser.newContext({baseURL:info.project.use.baseURL,viewport:info.project.name==="field-mobile"?{width:360,height:800}:{width:1280,height:900}});
+ await retainNativeGuestHubResponses(page.context());await retainNativeGuestHubResponses(visitor);
  page.on("pageerror",error=>errors.push(error.name));page.setDefaultTimeout(30000);
  try{
   expect((await db.$queryRaw<Array<{count:number}>>`SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`)[0].count).toBeGreaterThanOrEqual(246);
@@ -37,7 +38,7 @@ for(const locale of["en","fr","ar"]as const)test("Actual granted native profile 
   await page.goto("/en/login");await waitForE2EAdminLoginWindow(page,email);await page.getByTestId("login-email").fill(email);await page.getByTestId("login-password").fill(password);await page.getByTestId("login-submit").click();await Promise.all([page.waitForURL(/\/en\/app/u,{timeout:30000}),completeE2EAdminMfa(page,email)]);
   const financial=await nativeLeadBrowserFinancial(db),fixture=await prepareNativeGuestHubBrowserFixture({organizationId:bootstrapOrganizationId,accountId:account.id,personId:account.personId,guestLocale:locale,profile:true,output:info.outputPath("native-profile-fixture.private.json")}),origin=new URL(page.url()).origin,scope=fixture.organizationId+"."+account.id,reason="Explicit owned native profile authority "+locale+" "+randomUUID();
   if(info.project.name==="field-mobile")await page.setViewportSize({width:360,height:800});
-  await page.goto(`/${locale}/app/reservations/${fixture.reservation.id}/guest-access`);const issueForm=page.getByTestId("guest-link-form");await expect(issueForm).toBeVisible();await issueForm.getByRole("textbox").fill(reason);let replied=response(page,"issue/review");await page.getByTestId("guest-link-review").click();expect((await replied).status()).toBe(200);replied=response(page,"issue/admit");await page.getByTestId("guest-link-confirm").click();const issued=guestHubStaffReceiptSchema.parse(await(await replied).json());if(!issued.token)throw Error("Actual original capability required for the native profile browser");const token=issued.token,path="links/"+issued.id+"/profile/",profileKey="alvillas:guest-profile:"+issued.id,grantKey="alvillas:guest-profile-grant:"+scope+":"+issued.id+":GRANTED";
+  await openNativeGuestHubWorkspace(page,fixture.reservation.id,()=>page.goto(`/${locale}/app/reservations/${fixture.reservation.id}/guest-access`));const issueForm=page.getByTestId("guest-link-form");await expect(issueForm).toBeVisible();await issueForm.getByRole("textbox").fill(reason);let replied=response(page,"issue/review");await page.getByTestId("guest-link-review").click();expect((await replied).status()).toBe(200);replied=response(page,"issue/admit");await page.getByTestId("guest-link-confirm").click();const issued=guestHubStaffReceiptSchema.parse(await(await replied).json());if(!issued.token)throw Error("Actual original capability required for the native profile browser");const token=issued.token,path="links/"+issued.id+"/profile/",profileKey="alvillas:guest-profile:"+issued.id,grantKey="alvillas:guest-profile-grant:"+scope+":"+issued.id+":GRANTED";
   const sourceBefore=await withTenant(db,fixture.organizationId,async tx=>({link:await tx.guestHubLink.findUniqueOrThrow({where:{id:issued.id}}),reservation:await tx.reservation.findUniqueOrThrow({where:{id:fixture.reservation.id}})}));
   replied=response(page,"profile/grant/status");await page.getByTestId("guest-profile-grant-open").click();expect((await replied).status()).toBe(200);const manager=page.getByTestId("guest-profile-grant-manager");await expect(manager).toContainText(m.loaded);expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   const grantReview=async()=>{await page.getByTestId("guest-profile-grant-reason").fill(reason);const reply=response(page,"profile/grant/review");await page.getByTestId("guest-profile-grant-review").click();expect((await reply).status()).toBe(200);await expect(page.getByTestId("guest-profile-grant-review-record")).toContainText(reason);};await grantReview();
