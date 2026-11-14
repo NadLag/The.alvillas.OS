@@ -83,6 +83,7 @@ describe("config rule registry", () => {
       "finance.transaction_attachments",
       "guest_hub.links",
       "guest_hub.presentation",
+      "guest_hub.profile",
       "guest_hub.verification",
       "identity.pin_lockout",
       "inventory.minimums",
