@@ -1,7 +1,7 @@
 import {randomBytes,randomUUID} from "node:crypto";
 import {PrismaClient} from "@prisma/client";
 import {beforeAll,afterAll,describe,it,expect} from "vitest";
-import {withTenant} from "@/platform/db/tenant";
+import {withTenant,type TenantTransactionRunner,type TenantTransaction} from "@/platform/db/tenant";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {reviewGuestHubIssue,issueGuestHubLink,reviewGuestHubRevocation,revokeGuestHubLink} from "@/modules/guest-hub/application/guest-hub-service";
 import {visitGuestHubLink} from "@/modules/guest-hub/application/guest-hub-visit";
@@ -35,7 +35,8 @@ describe("actual scoped multilingual Guest Hub home source",()=>{
  it("closes a real in-flight media-policy withdrawal before returning data or committing an opened audit",async()=>{
   await presentation(["https://photos.example.test"]);const before=await withTenant(db,f.organizationId,tx=>tx.auditLog.count({where:{action:"guest_hub.link_opened",resourceId:issued.id}}));let changed=false;
   const racing=db.$extends({query:{configRule:{async findMany({args,query}){const rows=await query(args);if(args.where?.key===guestHubPresentationPolicyKey&&!changed){changed=true;await presentation([]);}return rows;}}}});
-  await expect(visitGuestHubLink({token:issued.token},{...deps(),db:racing})).rejects.toBeInstanceOf(GuestHubInvalidLinkError);expect(changed).toBe(true);expect(await withTenant(db,f.organizationId,tx=>tx.auditLog.count({where:{action:"guest_hub.link_opened",resourceId:issued.id}}))).toBe(before);expect((await visit()).home.photoUrl).toBeNull();
+  const checked:TenantTransactionRunner={$transaction:(work,options)=>racing.$transaction(tx=>work(tx as unknown as TenantTransaction),options)};
+  await expect(visitGuestHubLink({token:issued.token},{...deps(),db:checked})).rejects.toBeInstanceOf(GuestHubInvalidLinkError);expect(changed).toBe(true);expect(await withTenant(db,f.organizationId,tx=>tx.auditLog.count({where:{action:"guest_hub.link_opened",resourceId:issued.id}}))).toBe(before);expect((await visit()).home.photoUrl).toBeNull();
  });
  it("rejects caller-provided home facts and a foreign path before exposing either property's native metadata",async()=>{await expect(visitGuestHubLink({token:issued.token,home:{propertyName:"Forged property",photoUrl:publicPhoto}},deps())).rejects.toBeInstanceOf(GuestHubInvalidLinkError);await expect(visitGuestHubLink({token:issued.token},{...deps(),expectedLinkId:randomUUID()})).rejects.toBeInstanceOf(GuestHubInvalidLinkError);});
  it("withholds the entire home after actual final native revocation and retains the original immutable row",async()=>{const before=await withTenant(db,f.organizationId,tx=>tx.guestHubLink.findUniqueOrThrow({where:{id:issued.id}})),review=await reviewGuestHubRevocation(f.ctx,{linkId:issued.id},{db,env});await revokeGuestHubLink(f.ctx,{linkId:issued.id,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Final owned stay-home revocation"},{db,env});await expect(visit()).rejects.toBeInstanceOf(GuestHubInvalidLinkError);expect(await withTenant(db,f.organizationId,tx=>tx.guestHubLink.findUniqueOrThrow({where:{id:issued.id}}))).toEqual(before);});
