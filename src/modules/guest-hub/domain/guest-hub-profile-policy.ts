@@ -1,13 +1,13 @@
 import {z} from "zod";
-import {localizedTextSchema} from "@/i18n/content";
 import {optionalGuestPhoneSchema} from "@/platform/notifications/whatsapp";
+import {guestHubFormNoticeSchema,guestHubFormReferenceSchema,retainsGuestHubFormPurpose,intersectGuestHubFormFields} from "./guest-hub-form-policy";
 
 export const guestHubProfilePolicyKey="guest_hub.profile";
 export const guestHubProfileFieldSchema=z.enum(["displayName","email","phone","preferredLocale"]);
 export type GuestHubProfileField=z.infer<typeof guestHubProfileFieldSchema>;
-const text=z.string().trim().min(1).max(1000).refine(value=>!/[\p{Cc}]/u.test(value));
+const text=guestHubFormReferenceSchema;
 const fields=z.array(guestHubProfileFieldSchema).min(1).max(4).refine(value=>new Set(value).size===value.length);
-export const guestHubProfileNoticeSchema=z.object({reference:text,title:localizedTextSchema.strict(),paragraphs:z.array(localizedTextSchema.strict()).min(1).max(30)}).strict();
+export const guestHubProfileNoticeSchema=guestHubFormNoticeSchema;
 export const guestHubProfilePolicySchema=z.object({
  source:z.literal("NATIVE_RESERVATION_GUEST_PROFILE"),history:z.literal("APPEND_ONLY_RESERVATION_PROFILE"),enabled:z.boolean(),
  processing_approval_reference:text.nullable(),notice:guestHubProfileNoticeSchema.nullable(),require_acknowledgement:z.boolean(),
@@ -28,10 +28,9 @@ export class GuestHubProfileConfigurationError extends Error{constructor(){super
 /** A new policy cannot silently broaden a previously granted form or repurpose its notice. */
 export function effectiveGuestHubProfilePolicy(captured:GuestHubProfilePolicy,current:GuestHubProfilePolicy){
  const original=guestHubProfilePolicySchema.parse(captured),latest=guestHubProfilePolicySchema.parse(current);
- if(!original.enabled||!latest.enabled||!original.processing_approval_reference||original.processing_approval_reference!==latest.processing_approval_reference||!original.notice||JSON.stringify(original.notice)!==JSON.stringify(latest.notice))throw new GuestHubProfileAccessError();
- const allowed=original.allowed_fields.filter(field=>latest.allowed_fields.includes(field)),required=[...new Set([...original.required_fields,...latest.required_fields])];
- if(!allowed.length||required.some(field=>!allowed.includes(field)))throw new GuestHubProfileAccessError();
- return{allowed,required,notice:latest.notice,requireAcknowledgement:original.require_acknowledgement||latest.require_acknowledgement,limits:[original.submissions,latest.submissions]};
+ if(!retainsGuestHubFormPurpose(original,latest)||!latest.notice)throw new GuestHubProfileAccessError();
+ const fields=intersectGuestHubFormFields(original,latest);if(!fields)throw new GuestHubProfileAccessError();
+ return{...fields,notice:latest.notice,requireAcknowledgement:original.require_acknowledgement||latest.require_acknowledgement,limits:[original.submissions,latest.submissions]};
 }
 export function validateGuestHubProfileValues(raw:unknown,policy:ReturnType<typeof effectiveGuestHubProfilePolicy>,acknowledged:boolean){
  const value=guestHubProfileValuesSchema.parse(raw);if(Object.keys(value).some(field=>!policy.allowed.includes(guestHubProfileFieldSchema.parse(field)))||policy.required.some(field=>value[field]==null)||policy.requireAcknowledgement&&!acknowledged)throw new GuestHubProfileAccessError();return value;
