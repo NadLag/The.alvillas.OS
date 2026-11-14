@@ -46,7 +46,7 @@ function visitorAuthority(row:GuestHubLink):AuthContext{
 export type GuestHubCapabilityContext={tx:TenantTransaction;actual:Awaited<ReturnType<typeof actualSource>>;authority:AuthContext;resource:ReturnType<typeof guestHubResource>};
 
 /** Every native Guest Hub flow enters through the same verified, budgeted capability boundary. */
-export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDependencies,work:(context:GuestHubCapabilityContext)=>Promise<T>){
+export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDependencies,work:(context:GuestHubCapabilityContext)=>Promise<T>,additionalBudget?:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">)=>Promise<boolean>){
  // No unverified token byte selects a tenant, policy, quota or native record.
  await consumeVerificationBudget(deps);
  let token:string,claims:GuestHubCapabilityClaims;
@@ -55,7 +55,8 @@ export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDe
   const budget=await withTenant(deps.db,claims.organizationId,async tx=>{
    const actual=await actualSource(tx,claims,token),policy=actual.settings.policy.reads;
    const link=await consumeRateLimit(tx,claims.organizationId,{key:"guest-hub:read:"+actual.row.id,limit:policy.requests,windowSeconds:policy.window_seconds,now:actual.now});
-   return{allowed:link.allowed,active:actual.state==="ACTIVE"};
+   const extra=link.allowed&&actual.state==="ACTIVE"&&additionalBudget?await additionalBudget({tx,actual}):true;
+   return{allowed:link.allowed&&extra,active:actual.state==="ACTIVE"};
   });if(!budget.allowed)throw new GuestHubRateLimitError();if(!budget.active)throw new GuestHubInvalidLinkError();
   return await withTenant(deps.db,claims.organizationId,async tx=>{
    const repository=new GuestHubRepository(tx,claims.organizationId);await repository.lockLink(claims.linkId);await repository.lockSources(claims.reservationId);
