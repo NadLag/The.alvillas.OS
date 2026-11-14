@@ -7,7 +7,7 @@ import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {guestHubIssueCommandSchema,guestHubRevokeCommandSchema,guestHubRecoveryResultSchema,guestHubPublicViewSchema} from "@/modules/guest-hub/domain/guest-hub-contract";
 import {guestHubLinkPolicyKey} from "@/modules/guest-hub/domain/guest-hub-policy";
-import {prepareNativeGuestHubBrowserFixture} from "./support/guest-hub-fixture";
+import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace} from "./support/guest-hub-fixture";
 import {e2eEmail,ensureE2EAccount,waitForE2EAdminLoginWindow,completeE2EAdminMfa} from "./support/auth";
 import {nativeLeadBrowserFinancial,privateNativeLeadBrowserStorage} from "./support/crm-document-fixtures";
 import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
@@ -31,7 +31,7 @@ for(const locale of["en","fr","ar"]as const)test("Actual scoped Guest Hub links 
   await page.goto("/en/login");await waitForE2EAdminLoginWindow(page,email);await page.getByTestId("login-email").fill(email);await page.getByTestId("login-password").fill(password);await page.getByTestId("login-submit").click();await Promise.all([page.waitForURL(/\/en\/app/u,{timeout:30000}),completeE2EAdminMfa(page,email)]);
   const financial=await nativeLeadBrowserFinancial(db),fixture=await prepareNativeGuestHubBrowserFixture({organizationId:bootstrapOrganizationId,accountId:account.id,personId:account.personId,guestLocale:locale,output:info.outputPath("native-guest-hub-fixture.private.json")}),origin=new URL(page.url()).origin,scope=fixture.organizationId+"."+account.id,nonceRoot="alvillas:guest-hub:"+scope+":"+fixture.reservation.id,issueKey=nonceRoot+":issue",reason="Explicit native Guest Hub access "+locale+" "+randomUUID();
   if(info.project.name==="field-mobile")await page.setViewportSize({width:360,height:800});
-  await page.goto(`/${locale}/app/reservations/${fixture.reservation.id}`);await page.getByTestId("reservation-guest-access").click();
+  await openNativeGuestHubWorkspace(page,fixture.reservation.id,async()=>{await page.goto(`/${locale}/app/reservations/${fixture.reservation.id}`);await page.getByTestId("reservation-guest-access").click();});
   const panel=page.getByTestId("guest-link-manager"),form=page.getByTestId("guest-link-form"),history=page.getByTestId("guest-link-history");await expect(form).toBeVisible();await expect(history).toContainText(t.empty);expect(await page.evaluate(()=>document.documentElement.dir)).toBe(locale==="ar"?"rtl":"ltr");
   await form.getByRole("textbox").fill(reason);let reviewed=response(page,"issue/review");await page.getByTestId("guest-link-review").click();expect((await reviewed).status()).toBe(200);await expect(page.getByTestId("guest-link-review-record")).toContainText(reason);
   let nonce:string|null=null;
