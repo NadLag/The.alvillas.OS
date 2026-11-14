@@ -1,6 +1,6 @@
 import {Temporal} from "temporal-polyfill";
 import {localClockInstant,localClockLabel} from "@/platform/time/local-instant";
-import {guestHubStayDetailsValuesSchema,guestHubStayDetailsFieldSchema,GuestHubStayDetailsValidationError,GuestHubStayDetailsConfigurationError,type GuestHubStayDetailsValues,effectiveGuestHubStayDetailsPolicy,type GuestHubStayDetailsIssue,type GuestHubStayDetailsField} from "./guest-hub-stay-details-policy";
+import {guestHubStayDetailsValuesSchema,guestHubStayDetailsFieldSchema,GuestHubStayDetailsValidationError,GuestHubStayDetailsConfigurationError,type GuestHubStayDetailsValues,type effectiveGuestHubStayDetailsPolicy,type GuestHubStayDetailsIssue,type GuestHubStayDetailsField} from "./guest-hub-stay-details-policy";
 
 export type GuestHubStayCalendar={checkIn:string;checkOut:string;timezone:string};
 type EffectivePolicy=ReturnType<typeof effectiveGuestHubStayDetailsPolicy>;
