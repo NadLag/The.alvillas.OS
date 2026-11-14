@@ -10,7 +10,7 @@ import {guestHubStaffReceiptSchema} from "@/modules/guest-hub/domain/guest-hub-c
 import {guestHubFormGrantCommandSchema} from "@/modules/guest-hub/domain/guest-hub-form-grant-contract";
 import {guestHubStayDetailsSubmitSchema} from "@/modules/guest-hub/domain/guest-hub-stay-details-contract";
 import {guestHubStayDetailsPolicyKey,guestHubStayDetailsPolicySchema} from "@/modules/guest-hub/domain/guest-hub-stay-details-policy";
-import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace} from "./support/guest-hub-fixture";
+import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace,nativeGuestHubResponse,retainNativeGuestHubResponses} from "./support/guest-hub-fixture";
 import {e2eEmail,ensureE2EAccount,waitForE2EAdminLoginWindow,completeE2EAdminMfa} from "./support/auth";
 import {nativeLeadBrowserFinancial,privateNativeLeadBrowserStorage} from "./support/crm-document-fixtures";
 import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
@@ -20,13 +20,14 @@ import fr from "../../messages/fr.json" with {type:"json"};
 import ar from "../../messages/ar.json" with {type:"json"};
 
 const messages={en,fr,ar};
-function response(page:Page,path:string){return page.waitForResponse(value=>new URL(value.url()).pathname==="/api/guest-hub/"+path&&value.request().method()==="POST",{timeout:30000});}
+const response=nativeGuestHubResponse;
 async function privateStorage(page:Page,values:string[]){const stored=await privateNativeLeadBrowserStorage(page);for(const value of values)expect(stored.includes(value)).toBe(false);}
 async function lostReply(page:Page,path:string,parseNonce:(raw:unknown)=>string,button:string){const accepted=acknowledgementBarrier();let nonce:string|undefined,sends=0;await page.route("**/api/guest-hub/"+path,async route=>{try{nonce=parseNonce(route.request().postDataJSON());sends++;expect(await forwardBrowserPostOnce(route.request())).toBe(200);await route.abort();accepted.resolve();}catch(error){accepted.reject(error);throw error;}});const attempted=page.waitForRequest(value=>new URL(value.url()).pathname==="/api/guest-hub/"+path&&value.method()==="POST",{timeout:30000});await page.getByTestId(button).click();await attempted;await accepted.promise;await page.unroute("**/api/guest-hub/"+path);expect(sends).toBe(1);return z.uuid().parse(nonce);}
 
 for(const locale of["en","fr","ar"]as const)test("Actual native arrival and departure plans preserve original authority and acknowledgements in "+locale,async({page,browser},info)=>{
  test.setTimeout(600000);const target=process.env.DATABASE_URL?new URL(process.env.DATABASE_URL):null;if(!target||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname==="/alvillas_automation_guest248_arrival_20261114"||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated248 native stay-details browser database required");
  const db=new PrismaClient(),email=e2eEmail("native-stay-details-"+locale+"-"+randomUUID(),info.project.name),password=process.env.ADMIN_PASSWORD??"correct horse battery staple",p=messages[locale].GuestStayDetails,m=messages[locale].GuestStayDetailsManagement,errors:string[]=[],visitor=await browser.newContext({baseURL:info.project.use.baseURL,viewport:info.project.name==="field-mobile"?{width:360,height:800}:{width:1280,height:900}});page.on("pageerror",error=>errors.push(error.name));page.setDefaultTimeout(30000);
+ await retainNativeGuestHubResponses(page.context());await retainNativeGuestHubResponses(visitor);
  try{
   expect((await db.$queryRaw<Array<{count:number}>>`SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`)[0].count).toBeGreaterThanOrEqual(248);await ensureE2EAccount(email,password,{permissionKeys:[],page});const account=await withTenant(db,bootstrapOrganizationId,tx=>tx.userAccount.findUniqueOrThrow({where:{organizationId_email:{organizationId:bootstrapOrganizationId,email}}}));
   await page.goto("/en/login");await waitForE2EAdminLoginWindow(page,email);await page.getByTestId("login-email").fill(email);await page.getByTestId("login-password").fill(password);await page.getByTestId("login-submit").click();await Promise.all([page.waitForURL(/\/en\/app/u,{timeout:30000}),completeE2EAdminMfa(page,email)]);
