@@ -82,9 +82,9 @@ export async function recoverGuestHubLink(actor:AccountActorContext,raw:unknown,
   const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);const original=await repository.byNonce(input.idempotencyKey);
   if(!original){if(!input.reservationId)throw new GuestHubAccessError();const source=await sourceFor(repository,input.reservationId);await requireGuestHubStaffAuthority(actor,tx,source,"create",await repository.clock());return guestHubRecoveryResultSchema.parse({recorded:false,reservationId:source.reservationId,idempotencyKey:input.idempotencyKey});}
   if(original.createdBy!==actor.actorId)throw new GuestHubAccessError();if(input.reservationId&&input.reservationId!==original.reservationId)throw new GuestHubConflictError();await repository.lockLink(original.id);await repository.lockSources(original.reservationId);
-  const receipt=guestHubRecoveryResultSchema.parse({...await privateReceipt(actor,tx,original,true,deps),recorded:true,idempotencyKey:input.idempotencyKey});
+  const receipt=await privateReceipt(actor,tx,original,true,deps);
   await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"guest_hub.link_recovered",resourceType:"guest_hub",resourceId:original.id,propertyScopeId:original.propertyId,after:{linkId:original.id,reservationId:original.reservationId,state:receipt.state},requestId:deps.requestId??randomUUID(),occurredAt:await repository.clock()});
-  return receipt;
+  return guestHubRecoveryResultSchema.parse({...receipt,recorded:true,idempotencyKey:input.idempotencyKey});
  });
 }
 
