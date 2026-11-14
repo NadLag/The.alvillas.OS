@@ -13,7 +13,7 @@ import {guestHubIssueDraftSchema,guestHubIssueCommandSchema,guestHubRevokeDraftS
 import {issueGuestHubCapability} from "../domain/guest-hub-capability";
 import {encryptGuestHubPayload,decryptGuestHubPayload} from "../domain/guest-hub-payload";
 import {configuredGuestHubExpiry,GuestHubAccessError,GuestHubConflictError,GuestHubConfigurationError,GuestHubRateLimitError} from "../domain/guest-hub-policy";
-import {requireGuestHubStaffAuthority,guestHubResource} from "./guest-hub-access";
+import {requireGuestHubStaffAuthority,guestHubResource,guestHubLinkTarget} from "./guest-hub-access";
 import {guestHubSettings,guestHubSourceSnapshot,guestHubOriginalBinding,currentGuestHubState} from "./guest-hub-source";
 
 export type GuestHubDependencies={db:TenantTransactionRunner;env?:NodeJS.ProcessEnv;requestId?:string};
@@ -25,23 +25,23 @@ function expiry(source:GuestHubNativeSource,settings:Settings,now:Date){
  return expiresAt;
 }
 async function sourceFor(repository:GuestHubRepository,reservationId:string){const source=await repository.source(reservationId);if(!source)throw new GuestHubAccessError();return source;}
-async function issueFence(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,expected:Settings,linkId?:string){
+async function issueFence(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,expected:Settings,row:GuestHubLink){
  const repository=new GuestHubRepository(tx,actor.organizationId),now=await repository.clock(),current=await sourceFor(repository,source.reservationId),settings=await guestHubSettings(tx,actor.organizationId,current,now);
  if(jsonbFingerprint(guestHubSourceSnapshot(actor.organizationId,current))!==jsonbFingerprint(guestHubSourceSnapshot(actor.organizationId,source))||settings.fingerprint!==expected.fingerprint)throw new GuestHubConflictError();
- await requireGuestHubStaffAuthority(actor,tx,current,"create",now,linkId);expiry(current,settings,now);
+ await requireGuestHubStaffAuthority(actor,tx,current,"create",now,await guestHubLinkTarget(repository,row,current));expiry(current,settings,now);
 }
 async function privateReceipt(actor:AccountActorContext,tx:TenantTransaction,row:GuestHubLink,replayed:boolean,deps:GuestHubDependencies){
  if(row.createdBy!==actor.actorId)throw new GuestHubAccessError();
  const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockSources(row.reservationId);
- const source=await sourceFor(repository,row.reservationId),now=await repository.clock();if(source.propertyId!==row.propertyId)throw new GuestHubAccessError();
- await requireGuestHubStaffAuthority(actor,tx,source,"create",now,row.id);
+ const source=await sourceFor(repository,row.reservationId),now=await repository.clock(),target=await guestHubLinkTarget(repository,row,source);
+ await requireGuestHubStaffAuthority(actor,tx,source,"create",now,target);
  const settings=await guestHubSettings(tx,actor.organizationId,source,now),revoked=!!await repository.revocation(row.id),state=currentGuestHubState(row,source,settings,revoked,now);
  const token=state==="ACTIVE"?decryptGuestHubPayload(row.encryptedPayload,guestHubOriginalBinding(row),deps.env).token:undefined;
  const finalNow=await repository.clock(),finalSource=await sourceFor(repository,row.reservationId),finalSettings=await guestHubSettings(tx,actor.organizationId,finalSource,finalNow);
- await requireGuestHubStaffAuthority(actor,tx,finalSource,"create",finalNow,row.id);
+ await requireGuestHubStaffAuthority(actor,tx,finalSource,"create",finalNow,await guestHubLinkTarget(repository,row,finalSource));
  if(finalSettings.fingerprint!==settings.fingerprint||jsonbFingerprint(guestHubSourceSnapshot(actor.organizationId,finalSource))!==jsonbFingerprint(guestHubSourceSnapshot(actor.organizationId,source))||currentGuestHubState(row,finalSource,finalSettings,!!await repository.revocation(row.id),finalNow)!==state)throw new GuestHubConflictError();
  const data={id:row.id,reservationId:row.reservationId,propertyId:row.propertyId,createdAt:row.createdAt.toISOString(),expiresAt:row.expiresAt.toISOString(),state,replayed,...token?{token}:{}};
- return guestHubStaffReceiptSchema.parse(present({...actor.authContext,visibleDataClasses:new Set()},"view",{...guestHubResource(actor.organizationId,source,row.id),data},catalogFieldPolicy("guest_hub"),finalNow));
+ return guestHubStaffReceiptSchema.parse(present({...actor.authContext,visibleDataClasses:new Set()},"view",{...guestHubResource(actor.organizationId,source,target),data},catalogFieldPolicy("guest_hub"),finalNow));
 }
 
 export async function reviewGuestHubIssue(actor:AccountActorContext,raw:unknown,deps:GuestHubDependencies){
@@ -55,7 +55,8 @@ export async function issueGuestHubLink(actor:AccountActorContext,raw:unknown,de
  const allowed=await withTenant(deps.db,actor.organizationId,async tx=>{
   const repository=new GuestHubRepository(tx,actor.organizationId),original=await repository.byNonce(input.idempotencyKey);
   if(original&&original.createdBy!==actor.actorId)throw new GuestHubAccessError();
-  const source=await sourceFor(repository,input.reservationId),now=await repository.clock();await requireGuestHubStaffAuthority(actor,tx,source,"create",now,original?.id);
+  if(original&&original.reservationId!==input.reservationId)throw new GuestHubConflictError();
+  const source=await sourceFor(repository,input.reservationId),now=await repository.clock();await requireGuestHubStaffAuthority(actor,tx,source,"create",now,original?await guestHubLinkTarget(repository,original,source):undefined);
   const settings=await guestHubSettings(tx,actor.organizationId,source,now),budget=settings.policy.issuance;
   const organization=await consumeRateLimit(tx,actor.organizationId,{key:"guest-hub:issue:organization",limit:budget.requests,windowSeconds:budget.window_seconds,now}),issuer=await consumeRateLimit(tx,actor.organizationId,{key:"guest-hub:issue:"+actor.actorId,limit:budget.requests,windowSeconds:budget.window_seconds,now});return organization.allowed&&issuer.allowed;
  });if(!allowed)throw new GuestHubRateLimitError();
@@ -72,7 +73,7 @@ export async function issueGuestHubLink(actor:AccountActorContext,raw:unknown,de
   const event=await new OutboxRepository(tx,actor.organizationId).append("guest_hub.link_issued",{linkId:id,reservationId:source.reservationId},"guest-hub-issued:"+actor.actorId+":"+input.idempotencyKey,now);
   const row=await repository.create({id,reservationId:source.reservationId,propertyId:source.propertyId,guestId:source.guestId,commandKey:input.idempotencyKey,commandHash,reviewFingerprint:input.reviewFingerprint,sourceFingerprint,sourceSnapshot,tokenHash:issued.tokenHash,encryptedPayload,payloadSha256,payloadSchema:1,policyId:settings.rule.id,policyVersion:settings.rule.version,policyFingerprint:settings.fingerprint,policySnapshot:settings.snapshot,authorizationCap:captureAuthorizationCap(actor.authContext),outboxEventId:event.id,createdBy:actor.actorId,createdAt:now,expiresAt,requestId});
   await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"guest_hub.link_issued",resourceType:"guest_hub",resourceId:id,propertyScopeId:source.propertyId,after:{linkId:id,reservationId:source.reservationId,commandHash,payloadSha256,sourceFingerprint,outboxEventId:event.id},reason:input.reason,requestId,occurredAt:now});
-  await issueFence(actor,tx,source,settings,id);await repository.validateBirth();return privateReceipt(actor,tx,row,false,deps);
+  await issueFence(actor,tx,source,settings,row);await repository.validateBirth();return privateReceipt(actor,tx,row,false,deps);
  });
 }
 
@@ -82,18 +83,18 @@ export async function recoverGuestHubLink(actor:AccountActorContext,raw:unknown,
 
 function revokeFingerprint(actor:AccountActorContext,row:GuestHubLink,revocationId:string|null){return jsonbFingerprint({kind:"GUEST_HUB_REVOKE_V1",organizationId:actor.organizationId,actorId:actor.actorId,linkId:row.id,payloadSha256:row.payloadSha256,revocationId});}
 export async function reviewGuestHubRevocation(actor:AccountActorContext,raw:unknown,deps:GuestHubDependencies){
- const input=guestHubRevokeDraftSchema.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{const repository=new GuestHubRepository(tx,actor.organizationId),row=await repository.byId(input.linkId);if(!row)throw new GuestHubAccessError();const source=await sourceFor(repository,row.reservationId),now=await repository.clock();await requireGuestHubStaffAuthority(actor,tx,source,"void",now,row.id);const revoked=await repository.revocation(row.id);return{linkId:row.id,reservationId:row.reservationId,revoked:!!revoked,reviewFingerprint:revokeFingerprint(actor,row,revoked?.id??null)};});
+ const input=guestHubRevokeDraftSchema.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{const repository=new GuestHubRepository(tx,actor.organizationId),row=await repository.byId(input.linkId);if(!row)throw new GuestHubAccessError();const source=await sourceFor(repository,row.reservationId),now=await repository.clock();await requireGuestHubStaffAuthority(actor,tx,source,"void",now,await guestHubLinkTarget(repository,row,source));const revoked=await repository.revocation(row.id);return{linkId:row.id,reservationId:row.reservationId,revoked:!!revoked,reviewFingerprint:revokeFingerprint(actor,row,revoked?.id??null)};});
 }
 export async function revokeGuestHubLink(actor:AccountActorContext,raw:unknown,deps:GuestHubDependencies){
  const input=guestHubRevokeCommandSchema.parse(raw),commandHash=commandFingerprint(input);
  return withTenant(deps.db,actor.organizationId,async tx=>{
   const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);await repository.lockLink(input.linkId);
-  const row=await repository.byId(input.linkId);if(!row)throw new GuestHubAccessError();const source=await sourceFor(repository,row.reservationId),now=await repository.clock();await requireGuestHubStaffAuthority(actor,tx,source,"void",now,row.id);
+  const row=await repository.byId(input.linkId);if(!row)throw new GuestHubAccessError();const source=await sourceFor(repository,row.reservationId),now=await repository.clock();await requireGuestHubStaffAuthority(actor,tx,source,"void",now,await guestHubLinkTarget(repository,row,source));
   const original=await repository.revocationByNonce(input.idempotencyKey);if(original){if(original.createdBy!==actor.actorId)throw new GuestHubAccessError();if(original.linkId!==row.id||original.commandHash!==commandHash)throw new GuestHubConflictError();return{id:original.id,linkId:row.id,createdAt:original.createdAt.toISOString(),replayed:true};}
   const revoked=await repository.revocation(row.id);if(revoked||input.reviewFingerprint!==revokeFingerprint(actor,row,null))throw new GuestHubConflictError();
   const id=randomUUID(),requestId=deps.requestId??randomUUID(),event=await new OutboxRepository(tx,actor.organizationId).append("guest_hub.link_revoked",{linkId:row.id,revocationId:id},"guest-hub-revoked:"+actor.actorId+":"+input.idempotencyKey,now);
   const saved=await repository.revoke({id,linkId:row.id,commandKey:input.idempotencyKey,commandHash,reviewFingerprint:input.reviewFingerprint,reason:input.reason,outboxEventId:event.id,authorizationCap:captureAuthorizationCap(actor.authContext),createdBy:actor.actorId,createdAt:now,requestId});
   await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"guest_hub.link_revoked",resourceType:"guest_hub",resourceId:row.id,propertyScopeId:source.propertyId,after:{linkId:row.id,revocationId:id,commandHash,outboxEventId:event.id},reason:input.reason,requestId,occurredAt:now});
-  await requireGuestHubStaffAuthority(actor,tx,source,"void",await repository.clock(),row.id);await repository.validateBirth();return{id:saved.id,linkId:row.id,createdAt:saved.createdAt.toISOString(),replayed:false};
+  await requireGuestHubStaffAuthority(actor,tx,source,"void",await repository.clock(),await guestHubLinkTarget(repository,row,source));await repository.validateBirth();return{id:saved.id,linkId:row.id,createdAt:saved.createdAt.toISOString(),replayed:false};
  });
 }

@@ -23,6 +23,7 @@ export class GuestHubRepository{
   await this.tx.$queryRaw(Prisma.sql`SELECT r.id FROM reservation r JOIN property p ON p.organization_id=r.organization_id AND p.id=r.property_id JOIN guest g ON g.organization_id=r.organization_id AND g.id=r.guest_id WHERE r.organization_id=${this.organizationId}::uuid AND r.id=${reservationId}::uuid FOR SHARE OF r,p,g`);
  }
  async lockPolicy(policyId:string){await this.tx.$queryRaw(Prisma.sql`SELECT id FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND id=${policyId}::uuid FOR SHARE`);}
+ async propertyDimensions(propertyId:string){const rows=await this.tx.$queryRaw<Array<{id:string;city:string;cityId:string|null;region:string;regionId:string|null}>>(Prisma.sql`SELECT id,city,city_id AS "cityId",region,region_id AS "regionId" FROM property WHERE organization_id=${this.organizationId}::uuid AND id=${propertyId}::uuid FOR SHARE`);return rows[0]??null;}
  byId(id:string){return this.tx.guestHubLink.findFirst({where:{organizationId:this.organizationId,id}});}
  byNonce(commandKey:string){return this.tx.guestHubLink.findFirst({where:{organizationId:this.organizationId,commandKey}});}
  revocation(linkId:string){return this.tx.guestHubLinkRevocation.findFirst({where:{organizationId:this.organizationId,linkId}});}
