@@ -43,7 +43,7 @@ export function GuestHubManager({locale,scope,reservationId}:{locale:AppLocale;s
  },[active]);
  const refresh=useCallback(()=>{void perform(async(signal,own)=>{setReview(null);await load(signal,own);});},[perform,load]);
  useEffect(()=>{
-  const selected=restorePending();pendingRef.current=selected;setPending(selected);refresh();const focus=()=>{if(document.visibilityState==="visible"&&!busyRef.current){setFallback(null);setMetadata(null);setState("loading");refresh();}},visibility=()=>{if(document.visibilityState==="hidden"){invalidate();setFallback(null);setMetadata(null);setReview(null);setState("loading");setBusy(false);}else focus();},offline=()=>{invalidate();setFallback(null);setMetadata(null);setReview(null);setState("offline");setBusy(false);};
+  pendingRef.current=restorePending();refresh();const focus=()=>{if(document.visibilityState==="visible"&&!busyRef.current){setFallback(null);setMetadata(null);setState("loading");refresh();}},visibility=()=>{if(document.visibilityState==="hidden"){invalidate();setFallback(null);setMetadata(null);setReview(null);setState("loading");setBusy(false);}else focus();},offline=()=>{invalidate();setFallback(null);setMetadata(null);setReview(null);setState("offline");setBusy(false);};
   window.addEventListener("focus",focus);window.addEventListener("online",focus);window.addEventListener("offline",offline);document.addEventListener("visibilitychange",visibility);return()=>{invalidate();window.removeEventListener("focus",focus);window.removeEventListener("online",focus);window.removeEventListener("offline",offline);document.removeEventListener("visibilitychange",visibility);};
  },[refresh,restorePending,invalidate]);
  const persist=(selected:Pending)=>{
