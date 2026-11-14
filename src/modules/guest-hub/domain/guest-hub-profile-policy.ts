@@ -1,6 +1,6 @@
 import {z} from "zod";
 import {optionalGuestPhoneSchema} from "@/platform/notifications/whatsapp";
-import {guestHubFormNoticeSchema,guestHubFormReferenceSchema,retainsGuestHubFormPurpose,intersectGuestHubFormFields} from "./guest-hub-form-policy";
+import {guestHubFormBudgetSchema,guestHubFormNoticeSchema,guestHubFormReferenceSchema,retainsGuestHubFormPurpose,intersectGuestHubFormFields} from "./guest-hub-form-policy";
 
 export const guestHubProfilePolicyKey="guest_hub.profile";
 export const guestHubProfileFieldSchema=z.enum(["displayName","email","phone","preferredLocale"]);
@@ -12,7 +12,7 @@ export const guestHubProfilePolicySchema=z.object({
  source:z.literal("NATIVE_RESERVATION_GUEST_PROFILE"),history:z.literal("APPEND_ONLY_RESERVATION_PROFILE"),enabled:z.boolean(),
  processing_approval_reference:text.nullable(),notice:guestHubProfileNoticeSchema.nullable(),require_acknowledgement:z.boolean(),
  allowed_fields:fields,required_fields:z.array(guestHubProfileFieldSchema).max(4).refine(value=>new Set(value).size===value.length),
- submissions:z.object({requests:z.number().int().positive().max(2147483647),window_seconds:z.number().int().positive().max(2147483647)}).strict()
+ submissions:guestHubFormBudgetSchema
 }).strict().superRefine((value,context)=>{
  if(value.enabled&&(!value.processing_approval_reference||!value.notice))context.addIssue({code:"custom",path:["processing_approval_reference"],message:"explicit_guest_profile_processing_and_notice_required"});
  if(value.required_fields.some(field=>!value.allowed_fields.includes(field)))context.addIssue({code:"custom",path:["required_fields"],message:"required_profile_fields_must_be_explicitly_allowed"});

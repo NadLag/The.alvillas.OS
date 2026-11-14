@@ -1,0 +1,9 @@
+# Private Guest Hub identity document capture
+
+F-GST-05 uses the existing encrypted document archive. It does not establish a legal basis for collecting identity documents. Collection requires an explicitly enabled, scoped `guest_hub.identity_documents` rule with processing and retention approval references, an approved multilingual notice, document type mappings, allowed and required sides, retention tags, byte and capture limits, and independent admission and upload budgets. No approval, legal wording, document requirement or retention period is seeded as a production default.
+
+An original signed form grant intersects the captured and current policies. Later rules can narrow collection. They cannot add document kinds, sides or content types to an existing grant, increase its limits, change its canonical document type, or repurpose its processing notice or retention decision. Changed purposes and retention mappings require a fresh grant. Newly required kinds or sides that were never granted close the existing collection path.
+
+Canonical document versions remain the source of encrypted files and their retention metadata. Native capture records will bind those versions to the actual organization, reservation, guest, private link, signed form grant and captured policy. Guest collection must use the existing tenant, authorization, capability, audit, outbox and document storage boundaries. Original file names, identity numbers, extracted document text and public storage URLs are not part of the collection contract. Browser recovery retains scoped random command identifiers; file bytes remain transient. Collection does not modify operational check-in or financial identity.
+
+Legal approval, retention and disposition decisions, real provider enablement, restricted hosted acceptance and production changes remain owner-reserved. This decision supplies no automatic document-disposition workflow.

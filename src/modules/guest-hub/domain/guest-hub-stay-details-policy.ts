@@ -1,12 +1,12 @@
 import {z} from "zod";
-import {guestHubFormNoticeSchema,guestHubFormReferenceSchema,retainsGuestHubFormPurpose,intersectGuestHubFormFields} from "./guest-hub-form-policy";
+import {guestHubFormBudgetSchema,guestHubFormNoticeSchema,guestHubFormReferenceSchema,retainsGuestHubFormPurpose,intersectGuestHubFormFields} from "./guest-hub-form-policy";
 
 export const guestHubStayDetailsPolicyKey="guest_hub.stay_details";
 export const guestHubStayDetailsFieldSchema=z.enum(["arrival","departure","arrivalMethod","arrivalReference","departureMethod","departureReference"]);
 export type GuestHubStayDetailsField=z.infer<typeof guestHubStayDetailsFieldSchema>;
 export const guestHubStayTravelMethodSchema=z.enum(["AIR","RAIL","ROAD","SEA","OTHER"]);
 const integer=z.number().int().min(-2147483648).max(2147483647),window=z.object({earliest_day_offset:integer,latest_day_offset:integer}).strict().refine(value=>value.earliest_day_offset<=value.latest_day_offset),fields=z.array(guestHubStayDetailsFieldSchema).max(6).refine(value=>new Set(value).size===value.length);
-export const guestHubStayDetailsPolicySchema=z.object({source:z.literal("NATIVE_RESERVATION_GUEST_STAY_DETAILS"),history:z.literal("APPEND_ONLY_RESERVATION_STAY_DETAILS"),enabled:z.boolean(),processing_approval_reference:guestHubFormReferenceSchema.nullable(),notice:guestHubFormNoticeSchema.nullable(),require_acknowledgement:z.boolean(),allowed_fields:fields.min(1),required_fields:fields,allowed_methods:z.array(guestHubStayTravelMethodSchema).min(1).max(5).refine(value=>new Set(value).size===value.length),date_windows:z.object({arrival:window,departure:window}).strict(),submissions:z.object({requests:z.number().int().positive().max(2147483647),window_seconds:z.number().int().positive().max(2147483647)}).strict()}).strict().superRefine((value,context)=>{
+export const guestHubStayDetailsPolicySchema=z.object({source:z.literal("NATIVE_RESERVATION_GUEST_STAY_DETAILS"),history:z.literal("APPEND_ONLY_RESERVATION_STAY_DETAILS"),enabled:z.boolean(),processing_approval_reference:guestHubFormReferenceSchema.nullable(),notice:guestHubFormNoticeSchema.nullable(),require_acknowledgement:z.boolean(),allowed_fields:fields.min(1),required_fields:fields,allowed_methods:z.array(guestHubStayTravelMethodSchema).min(1).max(5).refine(value=>new Set(value).size===value.length),date_windows:z.object({arrival:window,departure:window}).strict(),submissions:guestHubFormBudgetSchema}).strict().superRefine((value,context)=>{
  if(value.enabled&&(!value.processing_approval_reference||!value.notice))context.addIssue({code:"custom",path:["processing_approval_reference"],message:"explicit_stay_details_processing_and_notice_required"});
  if(value.required_fields.some(field=>!value.allowed_fields.includes(field)))context.addIssue({code:"custom",path:["required_fields"],message:"required_stay_fields_must_be_explicitly_allowed"});
 });
