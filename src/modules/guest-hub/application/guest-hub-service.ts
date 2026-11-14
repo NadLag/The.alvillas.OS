@@ -82,7 +82,9 @@ export async function recoverGuestHubLink(actor:AccountActorContext,raw:unknown,
   const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);const original=await repository.byNonce(input.idempotencyKey);
   if(!original){if(!input.reservationId)throw new GuestHubAccessError();const source=await sourceFor(repository,input.reservationId);await requireGuestHubStaffAuthority(actor,tx,source,"create",await repository.clock());return guestHubRecoveryResultSchema.parse({recorded:false,reservationId:source.reservationId,idempotencyKey:input.idempotencyKey});}
   if(original.createdBy!==actor.actorId)throw new GuestHubAccessError();if(input.reservationId&&input.reservationId!==original.reservationId)throw new GuestHubConflictError();await repository.lockLink(original.id);await repository.lockSources(original.reservationId);
-  return guestHubRecoveryResultSchema.parse({...await privateReceipt(actor,tx,original,true,deps),recorded:true,idempotencyKey:input.idempotencyKey});
+  const receipt=guestHubRecoveryResultSchema.parse({...await privateReceipt(actor,tx,original,true,deps),recorded:true,idempotencyKey:input.idempotencyKey});
+  await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"guest_hub.link_recovered",resourceType:"guest_hub",resourceId:original.id,propertyScopeId:original.propertyId,after:{linkId:original.id,reservationId:original.reservationId,state:receipt.state},requestId:deps.requestId??randomUUID(),occurredAt:await repository.clock()});
+  return receipt;
  });
 }
 
@@ -91,7 +93,9 @@ export async function recoverGuestHubRevocation(actor:AccountActorContext,raw:un
   const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);await repository.lockLink(input.linkId);
   const row=await repository.byId(input.linkId);if(!row)throw new GuestHubAccessError();const source=await sourceFor(repository,row.reservationId);await requireGuestHubStaffAuthority(actor,tx,source,"void",await repository.clock(),await guestHubLinkTarget(repository,row,source));
   const original=await repository.revocationByNonce(input.idempotencyKey);if(!original)return guestHubRevocationRecoveryResultSchema.parse({recorded:false,linkId:row.id,idempotencyKey:input.idempotencyKey,alreadyRevoked:!!await repository.revocation(row.id)});
-  if(original.createdBy!==actor.actorId)throw new GuestHubAccessError();if(original.linkId!==row.id)throw new GuestHubConflictError();return guestHubRevocationRecoveryResultSchema.parse({recorded:true,id:original.id,linkId:row.id,idempotencyKey:input.idempotencyKey,createdAt:original.createdAt.toISOString()});
+  if(original.createdBy!==actor.actorId)throw new GuestHubAccessError();if(original.linkId!==row.id)throw new GuestHubConflictError();
+  await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"guest_hub.revocation_recovered",resourceType:"guest_hub",resourceId:row.id,propertyScopeId:row.propertyId,after:{linkId:row.id,reservationId:row.reservationId,revocationId:original.id},requestId:deps.requestId??randomUUID(),occurredAt:await repository.clock()});
+  return guestHubRevocationRecoveryResultSchema.parse({recorded:true,id:original.id,linkId:row.id,idempotencyKey:input.idempotencyKey,createdAt:original.createdAt.toISOString()});
  });
 }
 
