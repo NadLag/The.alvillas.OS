@@ -14,7 +14,7 @@ type Review={kind:"issue";value:z.infer<typeof guestHubIssueReviewSchema>;reason
 class NonceStorageError extends Error{}
 
 export function GuestHubManager({locale,scope,reservationId}:{locale:AppLocale;scope:string;reservationId:string}){
- const t=useTranslations("GuestLinkManagement"),[metadata,setMetadata]=useState<Workspace|null>(null),[state,setState]=useState<GuestHubBrowserState|"storage_unavailable">("loading"),[busy,setBusy]=useState(false),[pending,setPending]=useState<Pending|null>(null),[unrecorded,setUnrecorded]=useState(false),[review,setReview]=useState<Review|null>(null),[reason,setReason]=useState(""),[revokeId,setRevokeId]=useState<string|null>(null),[notice,setNotice]=useState<string|null>(null),[fallback,setFallback]=useState<string|null>(null);
+ const t=useTranslations("GuestLinkManagement"),[metadata,setMetadata]=useState<Workspace|null>(null),[state,setState]=useState<GuestHubBrowserState|"storage_unavailable">("loading"),[busy,setBusy]=useState(true),[pending,setPending]=useState<Pending|null>(null),[unrecorded,setUnrecorded]=useState(false),[review,setReview]=useState<Review|null>(null),[reason,setReason]=useState(""),[revokeId,setRevokeId]=useState<string|null>(null),[notice,setNotice]=useState<string|null>(null),[fallback,setFallback]=useState<string|null>(null);
  const controller=useRef<AbortController|null>(null),epoch=useRef(0),busyRef=useRef(false),pendingRef=useRef<Pending|null>(null),nonceKey="alvillas:guest-hub:"+scope+":"+reservationId,issueKey=nonceKey+":issue",revokePointer=nonceKey+":revoke-link";
  const active=useCallback((own:number)=>own===epoch.current&&!controller.current?.signal.aborted,[]);
  const invalidate=useCallback(()=>{controller.current?.abort();epoch.current++;busyRef.current=false;},[]);
@@ -36,16 +36,18 @@ export function GuestHubManager({locale,scope,reservationId}:{locale:AppLocale;s
   }
   if(value.reservationId!==reservationId)throw new GuestHubBrowserError("unavailable");if(active(own)){setMetadata(value);setState("ready");}
  },[reservationId,scope,active,restorePending,clearPending]);
+ const fail=useCallback((error:unknown,own:number)=>{if(!active(own))return;const next=error instanceof NonceStorageError?"storage_unavailable":error instanceof GuestHubBrowserError?error.state:"unavailable";setState(next);if(next==="forbidden"){setMetadata(null);setReview(null);setReason("");setRevokeId(null);}},[active]);
  const perform=useCallback(async(work:(signal:AbortSignal,own:number)=>Promise<void>)=>{
   if(busyRef.current)return;busyRef.current=true;setBusy(true);setFallback(null);setNotice(null);controller.current?.abort();const selected=new AbortController();controller.current=selected;const own=++epoch.current;
-  try{await work(selected.signal,own);}catch(error){if(!active(own))return;const next=error instanceof NonceStorageError?"storage_unavailable":error instanceof GuestHubBrowserError?error.state:"unavailable";setState(next);if(next==="forbidden"){setMetadata(null);setReview(null);setReason("");setRevokeId(null);}}
+  try{await work(selected.signal,own);}catch(error){fail(error,own);}
   finally{if(active(own)){busyRef.current=false;setBusy(false);}}
- },[active]);
+ },[active,fail]);
  const refresh=useCallback(()=>{void perform(async(signal,own)=>{setReview(null);await load(signal,own);});},[perform,load]);
  useEffect(()=>{
-  pendingRef.current=restorePending();refresh();const focus=()=>{if(document.visibilityState==="visible"&&!busyRef.current){setFallback(null);setMetadata(null);setState("loading");refresh();}},visibility=()=>{if(document.visibilityState==="hidden"){invalidate();setFallback(null);setMetadata(null);setReview(null);setState("loading");setBusy(false);}else focus();},offline=()=>{invalidate();setFallback(null);setMetadata(null);setReview(null);setState("offline");setBusy(false);};
+  pendingRef.current=restorePending();const initial=new AbortController();controller.current=initial;const own=++epoch.current;busyRef.current=true;void load(initial.signal,own).catch(error=>fail(error,own)).finally(()=>{if(active(own)){busyRef.current=false;setBusy(false);}});
+  const focus=()=>{if(document.visibilityState==="visible"&&!busyRef.current){setFallback(null);setMetadata(null);setState("loading");refresh();}},visibility=()=>{if(document.visibilityState==="hidden"){invalidate();setFallback(null);setMetadata(null);setReview(null);setState("loading");setBusy(false);}else focus();},offline=()=>{invalidate();setFallback(null);setMetadata(null);setReview(null);setState("offline");setBusy(false);};
   window.addEventListener("focus",focus);window.addEventListener("online",focus);window.addEventListener("offline",offline);document.addEventListener("visibilitychange",visibility);return()=>{invalidate();window.removeEventListener("focus",focus);window.removeEventListener("online",focus);window.removeEventListener("offline",offline);document.removeEventListener("visibilitychange",visibility);};
- },[refresh,restorePending,invalidate]);
+ },[refresh,restorePending,invalidate,load,fail,active]);
  const persist=(selected:Pending)=>{
   if(selected.kind==="issue"){writeCommandNonce(issueKey,selected.nonce);if(readCommandNonce(issueKey)!==selected.nonce)throw new NonceStorageError();}
   else{writeCommandNonce(nonceKey+":revoke:"+selected.linkId,selected.nonce);writeCommandNonce(revokePointer,selected.linkId);if(readCommandNonce(nonceKey+":revoke:"+selected.linkId)!==selected.nonce||readCommandNonce(revokePointer)!==selected.linkId)throw new NonceStorageError();}

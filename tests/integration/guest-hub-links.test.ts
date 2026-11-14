@@ -4,6 +4,7 @@ import {afterAll,beforeAll,describe,expect,it} from "vitest";
 import {withTenant} from "@/platform/db/tenant";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
+import {hashRateLimitKey} from "@/platform/rate-limit/postgres-rate-limiter";
 import {ReservationRepository} from "@/modules/reservations/infrastructure/reservation-repository";
 import {reviewGuestHubIssue,issueGuestHubLink,recoverGuestHubLink,reviewGuestHubRevocation,revokeGuestHubLink,recoverGuestHubRevocation} from "@/modules/guest-hub/application/guest-hub-service";
 import {visitGuestHubLink} from "@/modules/guest-hub/application/guest-hub-visit";
@@ -61,6 +62,17 @@ describe("actual native Guest Hub capability lifecycle",()=>{
  });
  it("commits denied public-read budgets and never treats a new attempt as another issuance",async()=>{
   const limited=await nativeGuestHubFixture(admin,db,{reads:{requests:1,window_seconds:3600}});organizations.push(limited.organizationId);const issued=await issueGuestHubLink(limited.ctx,await originalCommand(limited),deps());await expect(visitGuestHubLink({token:issued.token},visitDeps(limited))).resolves.toMatchObject({id:issued.id,state:"ACTIVE"});for(let index=0;index<2;index++)await expect(visitGuestHubLink({token:issued.token},visitDeps(limited))).rejects.toBeInstanceOf(GuestHubRateLimitError);await withTenant(db,limited.organizationId,async tx=>{expect((await tx.rateLimitBucket.findMany({where:{count:{gte:3}}})).length).toBeGreaterThanOrEqual(2);expect(await tx.guestHubLink.count()).toBe(1);expect(await tx.auditLog.count({where:{action:"guest_hub.link_opened"}})).toBe(1);});
+ },120000);
+ it("keeps configured issuer quotas stable across versions and independent across properties and original guest links",async()=>{
+  const identity={organizationId:f.organizationId,accountId:f.account.id,personId:f.person.id},policy={issuance:{requests:2,window_seconds:3600},reads:{requests:1,window_seconds:3600}},first=await nativeGuestHubFixture(admin,db,policy,identity),second=await nativeGuestHubFixture(admin,db,policy,identity);
+  const a=await issueGuestHubLink(first.ctx,await originalCommand(first),deps()),b=await issueGuestHubLink(first.ctx,await originalCommand(first),deps());
+  await expect(issueGuestHubLink(first.ctx,await originalCommand(first),deps())).rejects.toBeInstanceOf(GuestHubRateLimitError);
+  await withTenant(db,first.organizationId,tx=>new ConfigRuleRepository(tx,first.organizationId).createVersion({key:guestHubLinkPolicyKey,scopeType:"property",scopeId:first.property.id,createdBy:first.account.id,effectiveFrom:new Date("2020-01-01"),value:first.policy,reason:"A new configuration version must retain the selected property issuer quota"}));
+  await expect(issueGuestHubLink(first.ctx,await originalCommand(first),deps())).rejects.toBeInstanceOf(GuestHubRateLimitError);
+  const c=await issueGuestHubLink(second.ctx,await originalCommand(second),deps());expect(c.propertyId).toBe(second.property.id);
+  await expect(visitGuestHubLink({token:a.token},visitDeps(first))).resolves.toMatchObject({id:a.id});await expect(visitGuestHubLink({token:a.token},visitDeps(first))).rejects.toBeInstanceOf(GuestHubRateLimitError);
+  await expect(visitGuestHubLink({token:b.token},visitDeps(first))).resolves.toMatchObject({id:b.id});await expect(visitGuestHubLink({token:c.token},visitDeps(second))).resolves.toMatchObject({id:c.id});
+  await withTenant(db,f.organizationId,async tx=>{expect(await tx.guestHubLink.count({where:{reservationId:first.reservation.id}})).toBe(2);expect(await tx.guestHubLink.count({where:{reservationId:second.reservation.id}})).toBe(1);for(const[property,count]of[[first.property.id,4],[second.property.id,1]]as const){const bucket=await tx.rateLimitBucket.findFirstOrThrow({where:{keyHash:hashRateLimitKey("guest-hub:issue:property:"+property+":"+f.account.id)},orderBy:{windowStart:"desc"}});expect(bucket.count).toBe(count);}});
  },120000);
  it("fails closed without real private keys and refuses public authority or expiry overrides",async()=>{
   await expect(recoverGuestHubLink(f.ctx,{idempotencyKey:command.idempotencyKey},{db,env:{NODE_ENV:"test"}})).rejects.toBeInstanceOf(GuestHubConfigurationError);await expect(visitGuestHubLink({token:saved.token},{...visitDeps(),env:{NODE_ENV:"test"}})).rejects.toBeInstanceOf(GuestHubInvalidLinkError);await expect(visitGuestHubLink({token:saved.token,organizationId:foreign.organizationId,expiresAt:"2099-01-01T00:00:00Z",permissions:["owner:view"]},visitDeps())).rejects.toBeInstanceOf(GuestHubInvalidLinkError);
