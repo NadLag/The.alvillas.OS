@@ -10,7 +10,8 @@ import {guestHubProfileViewSchema,guestHubProfileReviewSchema,guestHubProfileRec
 import {guestHubProfileValuesSchema,type GuestHubProfileValues} from "../domain/guest-hub-profile-policy";
 import {guestHubRequest,GuestHubBrowserError,type GuestHubBrowserState} from "./guest-hub-browser";
 
-type View=z.infer<typeof guestHubProfileViewSchema>,Review=z.infer<typeof guestHubProfileReviewSchema>;
+type View=z.infer<typeof guestHubProfileViewSchema>;
+type Review=z.infer<typeof guestHubProfileReviewSchema>;
 class ProfileNonceStorageError extends Error{}
 function GuestHubProfileForm({locale,linkId,onClose}:{locale:AppLocale;linkId:string;onClose:()=>void}){
  const t=useTranslations("GuestProfile"),access=useTranslations("GuestAccess"),[view,setView]=useState<View|null>(null),[values,setValues]=useState<GuestHubProfileValues>({}),[acknowledged,setAcknowledged]=useState(false),[review,setReview]=useState<Review|null>(null),[state,setState]=useState<GuestHubBrowserState|"storage_unavailable">("loading"),[busy,setBusy]=useState(true),[pending,setPending]=useState(false),[unrecorded,setUnrecorded]=useState(false),[notice,setNotice]=useState<"saved"|"recovered"|null>(null);

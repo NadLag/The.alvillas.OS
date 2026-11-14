@@ -8,7 +8,8 @@ import {readCommandNonce,writeCommandNonce,clearCommandNonce} from "@/platform/h
 import {guestHubProfileGrantStatusSchema,guestHubProfileGrantReviewSchema,guestHubProfileGrantReceiptSchema,guestHubProfileGrantRecoveryResultSchema} from "../domain/guest-hub-profile-contract";
 import {guestHubRequest,GuestHubBrowserError,type GuestHubBrowserState} from "./guest-hub-browser";
 
-type Status=z.infer<typeof guestHubProfileGrantStatusSchema>,Review=z.infer<typeof guestHubProfileGrantReviewSchema>;
+type Status=z.infer<typeof guestHubProfileGrantStatusSchema>;
+type Review=z.infer<typeof guestHubProfileGrantReviewSchema>;
 type Decision="GRANTED"|"WITHDRAWN";
 type Pending={nonce:string;decision:Decision};
 class GrantNonceStorageError extends Error{}

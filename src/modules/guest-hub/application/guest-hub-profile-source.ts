@@ -33,8 +33,8 @@ export function guestHubProfileRevisionBinding(row:GuestHubProfileRevision){
 }
 /** A read capability acquires only this form's explicitly signed, currently retained authority. */
 export async function activeGuestHubProfile(context:Pick<GuestHubCapabilityContext,"tx"|"actual">,env:NodeJS.ProcessEnv=process.env){
- const {tx,actual}=context,{row,source}=actual,repository=new GuestHubProfileRepository(tx,row.organizationId),grant=await repository.grantHead(row.id),now=await actual.repository.clock();
- if(!grant)throw new GuestHubProfileAccessError();const authenticated=authenticateGuestHubFormGrant(grant,env);
+ const {tx,actual}=context,{row,source}=actual,repository=new GuestHubProfileRepository(tx,row.organizationId),grant=await repository.grantHead(row.id);
+ if(!grant)throw new GuestHubProfileAccessError();const authenticated=authenticateGuestHubFormGrant(grant,env),now=await actual.repository.clock();
  if(grant.decision!=="GRANTED"||grant.organizationId!==row.organizationId||grant.linkId!==row.id||grant.reservationId!==row.reservationId||grant.propertyId!==row.propertyId||grant.guestId!==row.guestId||grant.linkTokenHash!==row.tokenHash||grant.createdAt<row.createdAt||grant.createdAt>now||grant.expiresAt.getTime()!==row.expiresAt.getTime()||grant.expiresAt<=now)throw new GuestHubProfileAccessError();
  const settings=await guestHubProfileSettings(tx,row.organizationId,source,now),captured=guestHubProfilePolicySchema.parse((grant.policySnapshot as {value:unknown}).value),policy=effectiveGuestHubProfilePolicy(captured,settings.policy),sourceSnapshot=guestHubSourceSnapshot(row.organizationId,source),sourceFingerprint=jsonbFingerprint(sourceSnapshot);
  return{repository,grant,grantFingerprint:authenticated.fingerprint,settings,policy,sourceSnapshot,sourceFingerprint,now,
