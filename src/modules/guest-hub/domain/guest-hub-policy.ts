@@ -3,10 +3,15 @@ import {reservationStateSchema} from "@/modules/reservations/domain/reservation"
 import {localClockInstant} from "@/platform/time/local-instant";
 
 export const guestHubLinkPolicyKey="guest_hub.links";
+export const guestHubVerificationPolicyKey="guest_hub.verification";
 export const guestHubMaximumRequestBytes=8192;
 export const guestHubTokenEntropyBytes=32;
 const rate=z.object({requests:z.number().int().positive().max(2147483647),window_seconds:z.number().int().positive().max(2147483647)}).strict();
 const approval=z.string().trim().min(1).max(1000).refine(value=>!/[\p{Cc}]/u.test(value));
+
+/** The trusted server organization owns the pre-signature abuse budget; unverified claims never select it. */
+export const guestHubVerificationPolicySchema=z.object({source:z.literal("NATIVE_GUEST_CAPABILITY_VERIFICATION"),enabled:z.boolean(),checks:rate,clients:rate}).strict();
+export type GuestHubVerificationPolicy=z.infer<typeof guestHubVerificationPolicySchema>;
 
 /** Security format is fixed; business schedules, eligibility and budgets come from config_rule. */
 export const guestHubLinkPolicySchema=z.object({
