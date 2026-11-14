@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
@@ -75,8 +75,9 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native supplier invoice 
       await page.evaluate(() => document.documentElement.style.fontSize = "200%");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
       await page.screenshot({ path: info.outputPath(`invoice-submit-${locale}-${emergency}.png`), fullPage: true }); await page.evaluate(() => document.documentElement.style.fontSize = "");
-      const captured = page.waitForRequest(request => request.method() === "POST" && Boolean(request.headers()["next-action"]) && Boolean(request.postData()?.includes(`Actual native invoice submission ${suffix}`)));
-      await submission.getByTestId("invoice-submit").click(); const request = await captured;
+      const isSubmission = (request: Request) => request.method() === "POST" && Boolean(request.headers()["next-action"]) && Boolean(request.postData()?.includes(`Actual native invoice submission ${suffix}`));
+      const captured = page.waitForRequest(isSubmission),acknowledged=page.waitForResponse(response=>isSubmission(response.request()),{timeout:30000}).then(async response=>{expect(response.status()).toBe(200);expect((await response.body()).byteLength).toBeGreaterThan(0);});
+      const [request] = await Promise.all([captured,submission.getByTestId("invoice-submit").click(),acknowledged]);
       await expect(page.getByTestId("invoice-state")).toHaveText(messages.SupplierInvoices.states[emergency ? "APPROVED" : "PENDING_APPROVAL"]);
       await expect(submission).toHaveCount(0);
       const headers = { "content-type": request.headers()["content-type"], "next-action": request.headers()["next-action"], accept: "text/x-component", origin };
