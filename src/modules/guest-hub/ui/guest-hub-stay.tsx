@@ -5,7 +5,7 @@ import {useTranslations} from "next-intl";
 import type {z} from "zod";
 import type {AppLocale} from "@/i18n/routing";
 import type {guestHubPublicViewSchema} from "../domain/guest-hub-contract";
-import {GuestHubProfileEntry} from "./guest-hub-profile-form";
+import {GuestHubProfileEntry} from "./guest-hub-profile-entry";
 
 type View=z.infer<typeof guestHubPublicViewSchema>;
 function StayPhoto({src,property}:{src:string|null;property:string}){

@@ -13,10 +13,11 @@ import {guestHubRequest,GuestHubBrowserError,type GuestHubBrowserState} from "./
 type View=z.infer<typeof guestHubProfileViewSchema>;
 type Review=z.infer<typeof guestHubProfileReviewSchema>;
 class ProfileNonceStorageError extends Error{}
-function GuestHubProfileForm({locale,linkId,onClose}:{locale:AppLocale;linkId:string;onClose:()=>void}){
+export function GuestHubProfileForm({locale,linkId,onClose}:{locale:AppLocale;linkId:string;onClose:()=>void}){
  const t=useTranslations("GuestProfile"),access=useTranslations("GuestAccess"),[view,setView]=useState<View|null>(null),[values,setValues]=useState<GuestHubProfileValues>({}),[acknowledged,setAcknowledged]=useState(false),[review,setReview]=useState<Review|null>(null),[state,setState]=useState<GuestHubBrowserState|"storage_unavailable">("loading"),[busy,setBusy]=useState(true),[pending,setPending]=useState(false),[unrecorded,setUnrecorded]=useState(false),[notice,setNotice]=useState<"saved"|"recovered"|null>(null);
  const controller=useRef<AbortController|null>(null),epoch=useRef(0),busyRef=useRef(false),nonce=useRef<string|null>(null),key="alvillas:guest-profile:"+linkId,path="links/"+linkId+"/profile/";
  const active=useCallback((own:number)=>own===epoch.current&&!controller.current?.signal.aborted,[]);
+ const invalidate=useCallback(()=>{controller.current?.abort();epoch.current++;busyRef.current=false;},[]);
  const clearPrivate=useCallback(()=>{setView(null);setValues({});setReview(null);setAcknowledged(false);},[]);
  const load=useCallback(async(signal:AbortSignal,own:number)=>{
   const original=nonce.current??readCommandNonce(key);if(original){nonce.current=original;setPending(true);const recovered=guestHubProfileRecoveryResultSchema.parse(await guestHubRequest(path+"recover",{idempotencyKey:original},signal));if(recovered.linkId!==linkId||recovered.idempotencyKey!==original)throw new GuestHubBrowserError("uncertain");if(!active(own))return;if(recovered.recorded){clearCommandNonce(key,original);nonce.current=null;setPending(false);setUnrecorded(false);setNotice("recovered");}else setUnrecorded(true);}
@@ -28,7 +29,7 @@ function GuestHubProfileForm({locale,linkId,onClose}:{locale:AppLocale;linkId:st
   finally{if(active(own)){busyRef.current=false;setBusy(false);}}
  },[active,clearPrivate]);
  const refresh=useCallback(()=>{clearPrivate();void perform(load);},[clearPrivate,perform,load]);
- useEffect(()=>{void perform(load);return()=>{controller.current?.abort();epoch.current++;busyRef.current=false;};},[perform,load]);
+ useEffect(()=>{void perform(load);return invalidate;},[perform,load,invalidate]);
  const requestReview=(event:FormEvent<HTMLFormElement>)=>{event.preventDefault();if(!view||busyRef.current||pending&&!unrecorded)return;const parsed=guestHubProfileValuesSchema.safeParse(values);if(!parsed.success){setState("validation");return;}const idempotencyKey=nonce.current??crypto.randomUUID(),input={idempotencyKey,values:parsed.data,acknowledged};setNotice(null);void perform(async(signal,own)=>{const checked=guestHubProfileReviewSchema.parse(await guestHubRequest(path+"review",input,signal));if(checked.idempotencyKey!==idempotencyKey)throw new GuestHubBrowserError("uncertain");if(active(own)){setReview(checked);setState("ready");}});};
  const confirm=()=>{if(!review||busyRef.current)return;const checked=review;void perform(async(signal,own)=>{
   if(nonce.current&&nonce.current!==checked.idempotencyKey)throw new GuestHubBrowserError("uncertain");writeCommandNonce(key,checked.idempotencyKey);if(readCommandNonce(key)!==checked.idempotencyKey)throw new ProfileNonceStorageError();nonce.current=checked.idempotencyKey;setPending(true);setUnrecorded(false);clearPrivate();
@@ -46,7 +47,4 @@ function GuestHubProfileForm({locale,linkId,onClose}:{locale:AppLocale;linkId:st
   {view&&review&&<section className="resource-form" data-testid="guest-profile-review-record"><h4>{t("reviewTitle")}</h4><p>{t("reviewGuidance")}</p><dl>{view.allowedFields.map(name=><div key={name}><dt>{t("fields."+name)}</dt><dd dir="auto" className="guest-link-private-text">{review.values[name]==null?t("empty"):name==="preferredLocale"?access("languages."+review.values[name]):review.values[name]}</dd></div>)}</dl><div className="form-actions"><button type="button" className="primary-button" onClick={confirm} disabled={locked} data-testid="guest-profile-confirm">{t("confirm")}</button><button type="button" className="secondary-button" onClick={()=>setReview(null)} disabled={busy}>{t("edit")}</button></div></section>}
   <div className="form-actions">{!review&&<button type="button" className="secondary-button" onClick={refresh} disabled={busy} data-testid="guest-profile-refresh">{t("refresh")}</button>}<button type="button" className="secondary-button" onClick={onClose} disabled={busy}>{t("close")}</button></div>
  </section>;
-}
-export function GuestHubProfileEntry({locale,linkId}:{locale:AppLocale;linkId:string}){
- const t=useTranslations("GuestProfile"),[open,setOpen]=useState(false);return open?<GuestHubProfileForm key={linkId} locale={locale} linkId={linkId} onClose={()=>setOpen(false)}/>:<section className="resource-form" data-testid="guest-profile-entry"><h3>{t("title")}</h3><p>{t("guidance")}</p><button type="button" className="primary-button" onClick={()=>setOpen(true)} data-testid="guest-profile-open">{t("open")}</button></section>;
 }

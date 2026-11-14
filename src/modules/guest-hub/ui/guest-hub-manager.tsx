@@ -1,6 +1,7 @@
 "use client";
 import {useCallback,useEffect,useRef,useState,type FormEvent} from "react";
 import {useTranslations} from "next-intl";
+import dynamic from "next/dynamic";
 import type {z} from "zod";
 import type {AppLocale} from "@/i18n/routing";
 import {EmptyState,SkeletonBlock,StatusBadge} from "@/design-system/shells";
@@ -8,7 +9,7 @@ import {readCommandNonce,writeCommandNonce,clearCommandNonce} from "@/platform/h
 import {guestHubWorkspaceSchema,guestHubIssueReviewSchema,guestHubRevokeReviewSchema,guestHubStaffReceiptSchema,guestHubRevokeReceiptSchema,guestHubRecoveryResultSchema,guestHubRevocationRecoveryResultSchema} from "../domain/guest-hub-contract";
 import {guestHubRequest,GuestHubBrowserError,type GuestHubBrowserState} from "./guest-hub-browser";
 
-import {GuestHubProfileGrantManager} from "./guest-hub-profile-grant-manager";
+const GuestHubProfileGrantManager=dynamic(()=>import("./guest-hub-profile-grant-manager").then(module=>module.GuestHubProfileGrantManager),{loading:()=> <SkeletonBlock rows={2}/>});
 
 type Workspace=z.infer<typeof guestHubWorkspaceSchema>;
 type Pending={kind:"issue";nonce:string}|{kind:"revoke";nonce:string;linkId:string};
