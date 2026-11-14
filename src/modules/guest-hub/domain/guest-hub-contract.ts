@@ -17,3 +17,4 @@ export const guestHubRevokeCommandSchema=guestHubRevokeDraftSchema.extend(origin
 export const guestHubRecoveryInputSchema=z.object({idempotencyKey:guestHubIdSchema,reservationId:guestHubIdSchema.optional()}).strict();
 export const guestHubPublicInputSchema=z.object({token:guestHubTokenTextSchema}).strict();
 export const guestHubDirectoryInputSchema=z.object({reservationId:guestHubIdSchema,cursor:z.string().max(6000).optional()}).strict();
+export const guestHubStaffReceiptSchema=z.object({id:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),state:z.enum(["ACTIVE","EXPIRED","REVOKED","BLOCKED"]),replayed:z.boolean(),token:guestHubTokenTextSchema.optional()}).strict();
