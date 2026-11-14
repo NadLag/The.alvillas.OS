@@ -1,6 +1,6 @@
 import {z} from "zod";
 import {guestHubIdSchema,guestHubFingerprintSchema} from "./guest-hub-contract";
-import {guestHubProfileValuesSchema} from "./guest-hub-profile-policy";
+import {guestHubProfileValuesSchema,guestHubProfileNoticeSchema} from "./guest-hub-profile-policy";
 
 export const guestHubFormGrantBindingSchema=z.object({protocol:z.literal("NATIVE_GUEST_FORM_GRANT_V1"),formKey:z.literal("PROFILE"),id:guestHubIdSchema,organizationId:guestHubIdSchema,linkId:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,guestId:guestHubIdSchema,previousId:guestHubIdSchema.nullable(),version:z.number().int().positive(),decision:z.enum(["GRANTED","WITHDRAWN"]),linkTokenHash:guestHubFingerprintSchema,policyId:guestHubIdSchema.nullable(),policyVersion:z.number().int().positive().nullable(),policyFingerprint:guestHubFingerprintSchema.nullable(),sourceFingerprint:guestHubFingerprintSchema,createdBy:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),commandKey:guestHubIdSchema,commandHash:guestHubFingerprintSchema}).strict().superRefine((value,context)=>{
  if((value.version===1)!==(value.previousId===null))context.addIssue({code:"custom",path:["previousId"],message:"actual_form_grant_predecessor_required"});
@@ -15,3 +15,6 @@ export const guestHubProfileSubmitSchema=guestHubProfileDraftSchema.extend({revi
 export const guestHubProfileRecoverySchema=z.object({idempotencyKey:guestHubIdSchema}).strict();
 export const guestHubProfileGrantDraftSchema=z.object({linkId:guestHubIdSchema,decision:z.enum(["GRANTED","WITHDRAWN"])}).strict();
 export const guestHubProfileGrantCommandSchema=guestHubProfileGrantDraftSchema.extend({idempotencyKey:guestHubIdSchema,reviewFingerprint:guestHubFingerprintSchema,reason:z.string().trim().min(1).max(1000).refine(value=>!/[\p{Cc}]/u.test(value))}).strict();
+export const guestHubProfileGrantRecoverySchema=z.object({linkId:guestHubIdSchema,idempotencyKey:guestHubIdSchema}).strict();
+export const guestHubProfileGrantReceiptSchema=z.object({id:guestHubIdSchema,linkId:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,decision:z.enum(["GRANTED","WITHDRAWN"]),version:z.number().int().positive(),idempotencyKey:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),replayed:z.boolean()}).strict();
+export const guestHubProfileViewSchema=z.object({linkId:guestHubIdSchema,reservationId:guestHubIdSchema,grantId:guestHubIdSchema,previousRevisionId:guestHubIdSchema.nullable(),allowedFields:z.array(z.enum(["displayName","email","phone","preferredLocale"])).min(1).max(4),requiredFields:z.array(z.enum(["displayName","email","phone","preferredLocale"])).max(4),notice:guestHubProfileNoticeSchema,requireAcknowledgement:z.boolean(),values:guestHubProfileValuesSchema}).strict();
