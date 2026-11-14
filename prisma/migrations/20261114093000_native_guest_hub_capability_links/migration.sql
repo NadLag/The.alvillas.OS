@@ -161,7 +161,9 @@ BEGIN
   AND NEW.created_at<=clock_timestamp() AND policy.created_by IS NOT NULL AND policy.key='guest_hub.links' AND policy.lifecycle='ACTIVE'
   AND policy.version=NEW.policy_version AND policy.value=NEW.policy_snapshot->'value' AND policy.effective_from<=NEW.created_at
   AND (policy.effective_to IS NULL OR policy.effective_to>NEW.created_at)
-  AND (policy.scope_type='organization' AND policy.scope_id IS NULL OR policy.scope_type='property' AND policy.scope_id=p.id OR policy.scope_type='city' AND policy.scope_id=p.city_id)
+  AND (policy.scope_type='organization' AND policy.scope_id IS NULL OR policy.scope_type='property' AND policy.scope_id=p.id OR policy.scope_type='city' AND policy.scope_id=p.city_id
+   OR policy.scope_type='agreement' AND EXISTS(SELECT 1 FROM management_agreement a WHERE a.organization_id=NEW.organization_id AND a.id=policy.scope_id AND a.property_id=p.id AND a.archived_at IS NULL AND a.status<>'DRAFT' AND a.effective_from<=NEW.created_at AND (a.effective_to IS NULL OR a.effective_to>NEW.created_at))
+   OR policy.scope_type='booking_source_property' AND EXISTS(SELECT 1 FROM booking_channel c WHERE c.organization_id=NEW.organization_id AND c.id=policy.scope_id AND c.property_id=p.id AND c.source_key=r.source AND c.archived_at IS NULL))
   AND policy.value->>'source'='NATIVE_RESERVATION_GUEST_LINKS' AND policy.value->>'enabled'='true'
   AND policy.value->>'signature'='PURPOSE_BOUND_VERSIONED_KEY_RING' AND policy.value->>'history'='APPEND_ONLY_GUEST_LINK_HISTORY'
   AND length(btrim(policy.value->>'processing_approval_reference')) BETWEEN 1 AND 1000
