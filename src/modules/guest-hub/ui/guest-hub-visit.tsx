@@ -2,6 +2,7 @@
 import {useCallback,useEffect,useRef,useState} from "react";
 import {useTranslations} from "next-intl";
 import type {z} from "zod";
+import {GuestHubStay} from "./guest-hub-stay";
 import {SkeletonBlock} from "@/design-system/shells";
 import type {AppLocale} from "@/i18n/routing";
 import {guestHubPublicViewSchema,guestHubTokenTextSchema} from "../domain/guest-hub-contract";
@@ -26,10 +27,9 @@ export function GuestHubVisit({locale,initialLinkId}:{locale:AppLocale;initialLi
   void load();const focus=()=>{if(document.visibilityState==="visible")void load();},offline=()=>{invalidate();setView(null);setState("offline");},visibility=()=>{if(document.visibilityState==="hidden"){invalidate();setView(null);setState("loading");}else void load();};window.addEventListener("focus",focus);window.addEventListener("online",focus);window.addEventListener("offline",offline);document.addEventListener("visibilitychange",visibility);
   return()=>{invalidate();window.removeEventListener("focus",focus);window.removeEventListener("online",focus);window.removeEventListener("offline",offline);document.removeEventListener("visibilitychange",visibility);};
  },[load,invalidate]);
- const day=(value:string)=>new Intl.DateTimeFormat(locale,{dateStyle:"long",timeZone:"UTC"}).format(new Date(value+"T00:00:00Z"));
  return <section className="resource-form guest-access-record" data-testid="guest-access-record" aria-busy={state==="loading"}>
   <div aria-live="polite" data-testid="guest-access-status">{state==="loading"?<><p role="status">{t("loading")}</p><SkeletonBlock rows={2}/></>:view?<p role="status">{t("loaded")}</p>:<p role="alert">{t("states."+state)}</p>}</div>
-  {view&&<><dl className="guest-access-dates"><div><dt>{t("arrival")}</dt><dd><time dateTime={view.checkIn}>{day(view.checkIn)}</time></dd></div><div><dt>{t("departure")}</dt><dd><time dateTime={view.checkOut}>{day(view.checkOut)}</time></dd></div></dl><p>{t("accessUntil",{date:new Intl.DateTimeFormat(locale,{dateStyle:"medium",timeStyle:"short",timeZone:view.timezone}).format(new Date(view.expiresAt))})}</p><nav className="form-actions" aria-label={t("language")}>{(["en","fr","ar"]as const).map(language=><a key={language} className="secondary-button" href={"/"+language+"/guest/"+view.id} hrefLang={language} lang={language} aria-current={locale===language?"page":undefined}>{t("languages."+language)}</a>)}</nav></>}
-  {state!=="loading"&&<button type="button" className="primary-button" onClick={()=>{void load();}} data-testid="guest-access-refresh">{t(view?"refresh":"retry")}</button>}
+  {view&&<GuestHubStay view={view} locale={locale} onRefresh={()=>{void load();}}/>}
+  {!view&&state!=="loading"&&<button type="button" className="primary-button" onClick={()=>{void load();}} data-testid="guest-access-refresh">{t(view?"refresh":"retry")}</button>}
  </section>;
 }

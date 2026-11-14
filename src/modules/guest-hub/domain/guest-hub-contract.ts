@@ -1,4 +1,5 @@
 import {z} from "zod";
+import {guestHubHomeSchema} from "./guest-hub-presentation";
 
 export const guestHubIdSchema=z.uuid().transform(value=>value.toLowerCase());
 export const guestHubFingerprintSchema=z.string().regex(/^[a-f0-9]{64}$/u);
@@ -30,6 +31,6 @@ export const guestHubRevocationRecoveryResultSchema=z.discriminatedUnion("record
  z.object({recorded:z.literal(true),id:guestHubIdSchema,linkId:guestHubIdSchema,idempotencyKey:guestHubIdSchema,createdAt:z.iso.datetime()}).strict(),
  z.object({recorded:z.literal(false),linkId:guestHubIdSchema,idempotencyKey:guestHubIdSchema,alreadyRevoked:z.boolean()}).strict()
 ]);
-export const guestHubPublicViewSchema=z.object({id:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,checkIn:z.iso.date(),checkOut:z.iso.date(),expiresAt:z.iso.datetime(),timezone:z.string().min(1).max(120),state:z.literal("ACTIVE"),locale:z.enum(["en","fr","ar"])}).strict();
+export const guestHubPublicViewSchema=z.object({id:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,checkIn:z.iso.date(),checkOut:z.iso.date(),expiresAt:z.iso.datetime(),timezone:z.string().min(1).max(120),state:z.literal("ACTIVE"),locale:z.enum(["en","fr","ar"]),home:guestHubHomeSchema}).strict();
 export const guestHubLinkSummarySchema=z.object({id:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),state:z.enum(["ACTIVE","EXPIRED","REVOKED","BLOCKED"]),originalCreator:z.boolean(),recoveryKey:guestHubIdSchema.optional(),canRevoke:z.boolean()}).strict();
 export const guestHubWorkspaceSchema=z.object({reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,reference:z.string().min(1).max(200),locale:z.enum(["en","fr","ar"]),timezone:z.string().min(1).max(120),checkedAt:z.iso.datetime(),canCreate:z.boolean(),issuanceAvailable:z.boolean(),items:z.array(guestHubLinkSummarySchema).max(25),next:z.string().max(6000).nullable()}).strict();

@@ -1,4 +1,5 @@
 import {randomUUID} from "node:crypto";
+import {guestHubHome} from "./guest-hub-home";
 import type {GuestHubLink} from "@prisma/client";
 import {z} from "zod";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
@@ -57,9 +58,10 @@ export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependenci
    const repository=new GuestHubRepository(tx,claims.organizationId);await repository.lockLink(claims.linkId);await repository.lockSources(claims.reservationId);
    const actual=await actualSource(tx,claims,token);if(actual.state!=="ACTIVE")throw new GuestHubInvalidLinkError();
    const authority=visitorAuthority(actual.row),resource=guestHubResource(claims.organizationId,actual.source,await guestHubLinkTarget(actual.repository,actual.row,actual.source));if(!authorize(authority,"view",resource,actual.now))throw new GuestHubInvalidLinkError();
-   const data=guestHubPublicViewSchema.parse({id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
+   const home=await guestHubHome(tx,claims.organizationId,actual.source,actual.settings.scopes,actual.now);
+   const data=guestHubPublicViewSchema.parse({home:home.data,id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
    await writeAuditEvent(tx,{organizationId:claims.organizationId,actorId:null,action:"guest_hub.link_opened",resourceType:"guest_hub",resourceId:actual.row.id,propertyScopeId:actual.row.propertyId,after:{linkId:actual.row.id,reservationId:actual.row.reservationId},requestId:deps.requestId??randomUUID(),occurredAt:actual.now});
-   const final=await actualSource(tx,claims,token);if(final.state!=="ACTIVE"||final.settings.fingerprint!==actual.settings.fingerprint||jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,final.source))!==jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,actual.source)))throw new GuestHubInvalidLinkError();
+   const final=await actualSource(tx,claims,token),finalHome=await guestHubHome(tx,claims.organizationId,final.source,final.settings.scopes,final.now);if(finalHome.fingerprint!==home.fingerprint)throw new GuestHubInvalidLinkError();if(final.state!=="ACTIVE"||final.settings.fingerprint!==actual.settings.fingerprint||jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,final.source))!==jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,actual.source)))throw new GuestHubInvalidLinkError();
    return guestHubPublicViewSchema.parse(present({...authority,visibleDataClasses:new Set()},"view",{...resource,data},catalogFieldPolicy("guest_hub"),final.now));
   });
  }catch(error){if(error instanceof GuestHubRateLimitError)throw error;throw new GuestHubInvalidLinkError();}

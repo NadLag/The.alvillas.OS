@@ -6355,5 +6355,21 @@
       "unavailable": "تعذّر تحميل وصول الضيف. يُرجى إعادة المحاولة.",
       "storage_unavailable": "لا يستطيع هذا المتصفح حفظ طلبك المعلّق. اسمح بتخزين الجلسة أو استخدم متصفحًا آخر قبل التأكيد."
     }
+  },
+  "GuestStay": {
+    "photo": "صورة {property}",
+    "photoUnavailable": "الصورة غير متاحة لـ {property}",
+    "dates": "مواعيد إقامتك",
+    "timezone": "جميع الأوقات بالتوقيت المحلي للفيلا ({timezone}).",
+    "checkedAt": "تم التحقق من التفاصيل في {date} بالتوقيت المحلي.",
+    "adults": "{count, plural, zero {لا بالغين} one {بالغ واحد} two {بالغان} few {# بالغين} many {# بالغًا} other {# بالغ}}",
+    "children": "{count, plural, zero {لا أطفال} one {طفل واحد} two {طفلان} few {# أطفال} many {# طفلًا} other {# طفل}}",
+    "calendarStage": {
+      "UPCOMING": "موعد وصولك يقترب",
+      "ARRIVAL_DAY": "يوم وصولك",
+      "STAY_DAYS": "مواعيد إقامتك",
+      "DEPARTURE_DAY": "يوم مغادرتك",
+      "PAST": "انتهت مواعيد إقامتك"
+    }
   }
 }

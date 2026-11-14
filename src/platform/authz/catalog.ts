@@ -362,7 +362,7 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
-  ...(["id","reservationId","propertyId","checkIn","checkOut","expiresAt","createdAt","state","timezone","locale","reference","originalCreator","canRevoke","replayed","reviewFingerprint","items","next"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub","view"),mask:"omit"})),
+  ...(["id","reservationId","propertyId","checkIn","checkOut","expiresAt","createdAt","state","timezone","locale","home","reference","originalCreator","canRevoke","replayed","reviewFingerprint","items","next"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub","view"),mask:"omit"})),
   {resource:"guest_hub",field:"token",dataClass:"sensitive",requiredPermission:permissionKey("guest_hub","create"),mask:"omit"},
   {resource:"guest_hub",field:"recoveryKey",dataClass:"sensitive",requiredPermission:permissionKey("guest_hub","create"),mask:"omit"},
   ...(["fields","ownerContact","phone","email","location","objectives","notes","referralContact","stageHistory","profileHistory","workHistory","original"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"lead",field,dataClass:"personal",requiredPermission:permissionKey("lead","view"),mask:"omit"})),
