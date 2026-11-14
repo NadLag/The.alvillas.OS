@@ -5,6 +5,7 @@ import {useTranslations} from "next-intl";
 import type {z} from "zod";
 import type {AppLocale} from "@/i18n/routing";
 import type {guestHubPublicViewSchema} from "../domain/guest-hub-contract";
+import {GuestHubProfileEntry} from "./guest-hub-profile-form";
 
 type View=z.infer<typeof guestHubPublicViewSchema>;
 function StayPhoto({src,property}:{src:string|null;property:string}){
@@ -22,6 +23,7 @@ export function GuestHubStay({view,locale,onRefresh}:{view:View;locale:AppLocale
   <section aria-labelledby="guest-stay-dates-title"><h3 id="guest-stay-dates-title">{t("dates")}</h3><ol className="guest-stay-itinerary" data-testid="guest-stay-itinerary">{(["arrival","departure"]as const).map(kind=><li key={kind} aria-current={current===kind?"step":undefined}><p>{access(kind)}</p><time dateTime={kind==="arrival"?view.checkIn:view.checkOut}>{day(kind==="arrival"?view.checkIn:view.checkOut)}</time></li>)}</ol><p className="guest-stay-timezone">{t("timezone",{timezone:view.timezone})}</p></section>
   <p>{access("accessUntil",{date:new Intl.DateTimeFormat(locale,{dateStyle:"medium",timeStyle:"short",timeZone:view.timezone}).format(new Date(view.expiresAt))})}</p>
   <p className="guest-stay-checked" data-testid="guest-stay-checked">{t("checkedAt",{date:new Intl.DateTimeFormat(locale,{timeStyle:"short",timeZone:view.timezone}).format(new Date(home.checkedAt))})}</p>
+  {home.profileAvailable&&<GuestHubProfileEntry key={view.id} locale={locale} linkId={view.id}/>}
   <div className="guest-stay-tools"><nav aria-label={access("language")}>{(["en","fr","ar"]as const).map(language=><a key={language} className="secondary-button" href={"/"+language+"/guest/"+view.id} hrefLang={language} lang={language} aria-current={locale===language?"page":undefined}>{access("languages."+language)}</a>)}</nav><button type="button" className="primary-button" onClick={onRefresh} data-testid="guest-access-refresh">{access("refresh")}</button></div>
  </section>;
 }

@@ -1,4 +1,5 @@
 import {randomUUID} from "node:crypto";
+import {z,ZodError} from "zod";
 import type {GuestHubFormGrant} from "@prisma/client";
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import {recheckAccountAuthorization} from "@/platform/authz/current-authority";
@@ -10,7 +11,9 @@ import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {GuestHubRepository} from "../infrastructure/guest-hub-repository";
 import {GuestHubProfileRepository} from "../infrastructure/guest-hub-profile-repository";
-import {guestHubProfileGrantDraftSchema,guestHubProfileGrantCommandSchema,guestHubProfileGrantRecoverySchema,guestHubProfileGrantReceiptSchema} from "../domain/guest-hub-profile-contract";
+import {guestHubProfileGrantDraftSchema,guestHubProfileGrantCommandSchema,guestHubProfileGrantRecoverySchema,guestHubProfileGrantReceiptSchema,guestHubProfileGrantStatusSchema} from "../domain/guest-hub-profile-contract";
+import {guestHubIdSchema} from "../domain/guest-hub-contract";
+import {GuestHubAccessError,GuestHubConfigurationError} from "../domain/guest-hub-policy";
 import {signGuestHubFormGrant} from "../domain/guest-hub-profile-signatures";
 import {GuestHubProfileAccessError,GuestHubProfileConflictError} from "../domain/guest-hub-profile-policy";
 import {guestHubResource,guestHubLinkTarget,requireGuestHubStaffAuthority} from "./guest-hub-access";
@@ -19,20 +22,29 @@ import {guestHubProfileSettings} from "./guest-hub-profile-source";
 import type {GuestHubDependencies} from "./guest-hub-service";
 
 type Decision="GRANTED"|"WITHDRAWN";
-async function grantContext(actor:AccountActorContext,tx:TenantTransaction,linkId:string,decision:Decision,requireEnabled=true){
+async function grantContext(actor:AccountActorContext,tx:TenantTransaction,linkId:string,decision:Decision|null,requireEnabled=true){
  const repository=new GuestHubRepository(tx,actor.organizationId),profiles=new GuestHubProfileRepository(tx,actor.organizationId),row=await repository.byId(linkId);if(!row)throw new GuestHubProfileAccessError();
- const source=await repository.source(row.reservationId);if(!source)throw new GuestHubProfileAccessError();const now=await repository.clock(),linkTarget=await guestHubLinkTarget(repository,row,source),target={...guestHubResource(actor.organizationId,source,linkTarget),type:"guest_hub_profile"},action=decision==="GRANTED"?"create":"void";
+ const source=await repository.source(row.reservationId);if(!source)throw new GuestHubProfileAccessError();const now=await repository.clock(),linkTarget=await guestHubLinkTarget(repository,row,source),target={...guestHubResource(actor.organizationId,source,linkTarget),type:"guest_hub_profile"},action=decision===null?"view":decision==="GRANTED"?"create":"void";
  await requireGuestHubStaffAuthority(actor,tx,source,action,now,linkTarget);
  const personal={...guestHubResource(actor.organizationId,source),type:"guest",id:source.guestId,dataClass:"personal" as const,occurredAt:source.guestCreatedAt};
  await recheckAccountAuthorization(actor,tx,now,[{action,resource:target},{action:"view",resource:target},{action:"view",resource:personal},{action:"edit",resource:personal}],new GuestHubProfileAccessError());
  let settings:Awaited<ReturnType<typeof guestHubProfileSettings>>|null=null;
  if(decision==="GRANTED"&&requireEnabled){
   const linkSettings=await guestHubSettings(tx,actor.organizationId,source,now);if(currentGuestHubState(row,source,linkSettings,!!await repository.revocation(row.id),now)!=="ACTIVE")throw new GuestHubProfileAccessError();
-  settings=await guestHubProfileSettings(tx,actor.organizationId,linkSettings.scopes,now);
+  settings=await guestHubProfileSettings(tx,actor.organizationId,source,now);
  }
  const head=await profiles.grantHead(row.id),sourceSnapshot=guestHubSourceSnapshot(actor.organizationId,source);
  const fingerprint=jsonbFingerprint({protocol:"NATIVE_GUEST_PROFILE_GRANT_REVIEW_V1",organizationId:actor.organizationId,actorId:actor.actorId,linkId:row.id,linkTokenHash:row.tokenHash,source:sourceSnapshot,headId:head?.id??null,headVersion:head?.version??0,decision,policy:settings?.snapshot??null});
  return{repository,profiles,row,source,sourceSnapshot,now,target,settings,head,fingerprint};
+}
+export async function guestHubProfileGrantStatus(actor:AccountActorContext,raw:unknown,deps:GuestHubDependencies){
+ const input=z.object({linkId:guestHubIdSchema}).strict().parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{
+  const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockLink(input.linkId);const initial=await grantContext(actor,tx,input.linkId,null,false);
+  const permitted=async(decision:Decision)=>{try{await grantContext(actor,tx,input.linkId,decision);return true;}catch(error){if(error instanceof GuestHubProfileAccessError||error instanceof GuestHubAccessError||error instanceof GuestHubConfigurationError||error instanceof ZodError)return false;throw error;}};
+  const canGrant=await permitted("GRANTED"),canWithdraw=!!initial.head&&initial.head.decision!=="WITHDRAWN"&&await permitted("WITHDRAWN"),final=await grantContext(actor,tx,input.linkId,null,false);
+  const data={linkId:final.row.id,reservationId:final.row.reservationId,decision:final.head?.decision??null,version:final.head?.version??0,canGrant,canWithdraw};
+  return guestHubProfileGrantStatusSchema.parse(present({...actor.authContext,visibleDataClasses:new Set()},"view",{...final.target,data},catalogFieldPolicy("guest_hub_profile"),final.now));
+ });
 }
 function receipt(actor:AccountActorContext,context:Awaited<ReturnType<typeof grantContext>>,row:GuestHubFormGrant,replayed:boolean){
  return guestHubProfileGrantReceiptSchema.parse(present({...actor.authContext,visibleDataClasses:new Set()},"view",{...context.target,data:{id:row.id,linkId:row.linkId,reservationId:row.reservationId,propertyId:row.propertyId,decision:row.decision,version:row.version,idempotencyKey:row.commandKey,createdAt:row.createdAt.toISOString(),expiresAt:row.expiresAt.toISOString(),replayed}},catalogFieldPolicy("guest_hub_profile"),context.now));
