@@ -33,7 +33,7 @@ export class GuestHubRepository{
  create(input:Omit<Prisma.GuestHubLinkUncheckedCreateInput,"organizationId">){return this.tx.guestHubLink.create({data:{...input,organizationId:this.organizationId}});}
  revoke(input:Omit<Prisma.GuestHubLinkRevocationUncheckedCreateInput,"organizationId">){return this.tx.guestHubLinkRevocation.create({data:{...input,organizationId:this.organizationId}});}
  history(reservationId:string,asOf:Date,before?:{createdAt:Date;id:string}){
-  return this.tx.guestHubLink.findMany({where:{organizationId:this.organizationId,reservationId,createdAt:{lte:asOf},...before?{OR:[{createdAt:{lt:before.createdAt}},{createdAt:before.createdAt,id:{lt:before.id}}]}:{}},orderBy:[{createdAt:"desc"},{id:"desc"}],take:26,select:{id:true,createdAt:true,expiresAt:true,createdBy:true,commandKey:true,reservationId:true,propertyId:true,guestId:true,revocations:{select:{id:true,createdAt:true}}}});
+  return this.tx.guestHubLink.findMany({where:{organizationId:this.organizationId,reservationId,createdAt:{lte:asOf},...before?{OR:[{createdAt:{lt:before.createdAt}},{createdAt:before.createdAt,id:{lt:before.id}}]}:{}},orderBy:[{createdAt:"desc"},{id:"desc"}],take:101,select:{id:true,createdAt:true,expiresAt:true,createdBy:true,commandKey:true,reservationId:true,propertyId:true,guestId:true,revocations:{select:{id:true,createdAt:true}}}});
  }
  async validateBirth(){await this.tx.$executeRaw(Prisma.sql`SET CONSTRAINTS guest_hub_link_birth_guard,guest_hub_revocation_birth_guard,guest_hub_event_birth_guard IMMEDIATE`);}
 }
