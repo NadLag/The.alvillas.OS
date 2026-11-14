@@ -75,7 +75,8 @@ export async function recoverGuestHubProfileGrant(actor:AccountActorContext,raw:
   const repository=new GuestHubRepository(tx,actor.organizationId),profiles=new GuestHubProfileRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);await repository.lockLink(input.linkId);
   const original=await profiles.grantByNonce(input.idempotencyKey);if(original&&(original.createdBy!==actor.actorId||original.linkId!==input.linkId))throw new GuestHubProfileAccessError();
   // Recovery never needs a private key or processing enablement; the recorded decision stays metadata.
-  const decision=guestHubProfileGrantDraftSchema.parse({linkId:input.linkId,decision:original?.decision??"GRANTED"}).decision,context=await grantContext(actor,tx,input.linkId,decision,false);if(!original)return{recorded:false as const,linkId:input.linkId,idempotencyKey:input.idempotencyKey};
+  const decision=guestHubProfileGrantDraftSchema.parse({linkId:input.linkId,decision:original?.decision??input.decision??"GRANTED"}).decision,context=await grantContext(actor,tx,input.linkId,decision,false);if(!original)return{recorded:false as const,linkId:input.linkId,idempotencyKey:input.idempotencyKey};
+  if(input.decision&&input.decision!==original.decision)throw new GuestHubProfileConflictError();
   await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"guest_hub.form_grant_recovered",resourceType:"guest_hub_profile",resourceId:original.id,propertyScopeId:original.propertyId,after:{grantId:original.id,linkId:original.linkId,reservationId:original.reservationId},requestId:deps.requestId??randomUUID(),occurredAt:context.now});
   return{...receipt(actor,context,original,true),recorded:true as const};
  });
