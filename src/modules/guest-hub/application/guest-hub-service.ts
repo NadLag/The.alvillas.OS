@@ -32,12 +32,14 @@ async function issueFence(actor:AccountActorContext,tx:TenantTransaction,source:
 }
 async function privateReceipt(actor:AccountActorContext,tx:TenantTransaction,row:GuestHubLink,replayed:boolean,deps:GuestHubDependencies){
  if(row.createdBy!==actor.actorId)throw new GuestHubAccessError();
- const repository=new GuestHubRepository(tx,actor.organizationId),source=await sourceFor(repository,row.reservationId),now=await repository.clock();
+ const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockSources(row.reservationId);
+ const source=await sourceFor(repository,row.reservationId),now=await repository.clock();if(source.propertyId!==row.propertyId)throw new GuestHubAccessError();
  await requireGuestHubStaffAuthority(actor,tx,source,"create",now,row.id);
  const settings=await guestHubSettings(tx,actor.organizationId,source,now),revoked=!!await repository.revocation(row.id),state=currentGuestHubState(row,source,settings,revoked,now);
  const token=state==="ACTIVE"?decryptGuestHubPayload(row.encryptedPayload,guestHubOriginalBinding(row),deps.env).token:undefined;
- const finalNow=await repository.clock();await requireGuestHubStaffAuthority(actor,tx,source,"create",finalNow,row.id);
- if(currentGuestHubState(row,source,settings,revoked,finalNow)!==state)throw new GuestHubConflictError();
+ const finalNow=await repository.clock(),finalSource=await sourceFor(repository,row.reservationId),finalSettings=await guestHubSettings(tx,actor.organizationId,finalSource,finalNow);
+ await requireGuestHubStaffAuthority(actor,tx,finalSource,"create",finalNow,row.id);
+ if(finalSettings.fingerprint!==settings.fingerprint||jsonbFingerprint(guestHubSourceSnapshot(actor.organizationId,finalSource))!==jsonbFingerprint(guestHubSourceSnapshot(actor.organizationId,source))||currentGuestHubState(row,finalSource,finalSettings,!!await repository.revocation(row.id),finalNow)!==state)throw new GuestHubConflictError();
  const data={id:row.id,reservationId:row.reservationId,propertyId:row.propertyId,createdAt:row.createdAt.toISOString(),expiresAt:row.expiresAt.toISOString(),state,replayed,...token?{token}:{}};
  return guestHubStaffReceiptSchema.parse(present({...actor.authContext,visibleDataClasses:new Set()},"view",{...guestHubResource(actor.organizationId,source,row.id),data},catalogFieldPolicy("guest_hub"),finalNow));
 }
