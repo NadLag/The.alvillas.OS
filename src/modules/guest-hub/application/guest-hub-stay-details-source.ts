@@ -1,0 +1,14 @@
+import type {GuestHubFormGrant,GuestHubStayDetailsRevision} from "@prisma/client";
+import type {TenantTransaction} from "@/platform/db/tenant";
+import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
+import {guestHubStayDetailsPayloadBindingSchema} from "../domain/guest-hub-stay-details-contract";
+import {guestHubStayDetailsPolicyKey,guestHubStayDetailsPolicySchema,effectiveGuestHubStayDetailsPolicy,GuestHubStayDetailsAccessError} from "../domain/guest-hub-stay-details-policy";
+import {GuestHubStayDetailsRepository} from "../infrastructure/guest-hub-stay-details-repository";
+import type {GuestHubNativeSource} from "../infrastructure/guest-hub-repository";
+import type {GuestHubCapabilityContext} from "./guest-hub-visit";
+import {guestHubFormSettings,activeGuestHubForm} from "./guest-hub-form-source";
+
+const definition={policyKey:guestHubStayDetailsPolicyKey,parsePolicy:(raw:unknown)=>guestHubStayDetailsPolicySchema.parse(raw),assertPolicy:effectiveGuestHubStayDetailsPolicy,AccessError:GuestHubStayDetailsAccessError};
+export function guestHubStayDetailsSettings(tx:TenantTransaction,organizationId:string,source:GuestHubNativeSource,now:Date){return guestHubFormSettings(tx,organizationId,source,now,definition);}
+export function guestHubStayDetailsRevisionBinding(row:GuestHubStayDetailsRevision){if(row.payloadSchema!==1||jsonbFingerprint(row.policySnapshot)!==row.policyFingerprint||jsonbFingerprint(row.sourceSnapshot)!==row.sourceFingerprint)throw new GuestHubStayDetailsAccessError();return guestHubStayDetailsPayloadBindingSchema.parse({protocol:"NATIVE_GUEST_STAY_DETAILS_PAYLOAD_V1",id:row.id,organizationId:row.organizationId,linkId:row.linkId,grantId:row.grantId,reservationId:row.reservationId,propertyId:row.propertyId,guestId:row.guestId,previousId:row.previousId,version:row.version,commandKey:row.commandKey,commandHash:row.commandHash,commandKeyVersion:row.commandKeyVersion,grantFingerprint:row.grantFingerprint,policyId:row.policyId,policyVersion:row.policyVersion,policyFingerprint:row.policyFingerprint,sourceFingerprint:row.sourceFingerprint,createdAt:row.createdAt.toISOString()});}
+export async function activeGuestHubStayDetails(context:Pick<GuestHubCapabilityContext,"tx"|"actual">,env:NodeJS.ProcessEnv=process.env,head?:GuestHubFormGrant|null){const active=await activeGuestHubForm(context,{formKey:"STAY_DETAILS",settings:guestHubStayDetailsSettings,parsePolicy:definition.parsePolicy,effectivePolicy:effectiveGuestHubStayDetailsPolicy,AccessError:GuestHubStayDetailsAccessError},env,head),source=context.actual.source;return{...active,repository:new GuestHubStayDetailsRepository(context.tx,context.actual.row.organizationId),calendar:{checkIn:source.checkIn.toISOString().slice(0,10),checkOut:source.checkOut.toISOString().slice(0,10),timezone:source.timezone}};}

@@ -610,6 +610,7 @@ model Organization {
   onboardingOwnerDeliveries OwnerOnboardingDelivery[]
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantOrganization")
   guestHubProfileRevisions GuestHubProfileRevision[] @relation("GuestProfileOrganization")
+  guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsOrganization")
 }
 
 model Region {
@@ -1365,6 +1366,7 @@ model Property {
   onboardingOwnerDeliveries OwnerOnboardingDelivery[]
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantProperty")
   guestHubProfileRevisions GuestHubProfileRevision[] @relation("GuestProfileProperty")
+  guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsProperty")
 }
 
 model PropertyTemplateVersion {
@@ -1612,6 +1614,7 @@ model Reservation {
   employeeEarningPercentageWitnesses EmployeeEarningRequestPercentageWitness[]
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantReservation")
   guestHubProfileRevisions GuestHubProfileRevision[] @relation("GuestProfileReservation")
+  guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsReservation")
 }
 
 model ReservationConflict {
@@ -2440,6 +2443,7 @@ model ConfigRule {
   onboardingOwnerDeliveries OwnerOnboardingDelivery[] @relation("OwnerDeliveryPolicy")
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantPolicy")
   guestHubProfileRevisions GuestHubProfileRevision[] @relation("GuestProfilePolicy")
+  guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsPolicy")
 }
 
 model ReservationConfigSnapshot {
@@ -2622,6 +2626,7 @@ model OutboxEvent {
   onboardingOwnerDeliveries OwnerOnboardingDelivery[]
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantOutbox")
   guestHubProfileRevisions GuestHubProfileRevision[] @relation("GuestProfileOutbox")
+  guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsOutbox")
 }
 
 model PushSubscription {
@@ -2881,6 +2886,7 @@ model GuestRecord {
   @@map("guest")
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantGuest")
   guestHubProfileRevisions GuestHubProfileRevision[] @relation("GuestProfileGuest")
+  guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsGuest")
 }
 
 model ReservationFeed {
@@ -5865,6 +5871,7 @@ model GuestHubLink {
  @@map("guest_hub_link")
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantLink")
   guestHubProfileRevisions GuestHubProfileRevision[] @relation("GuestProfileLink")
+  guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsLink")
 }
 
 model GuestHubLinkRevocation {
@@ -5932,6 +5939,7 @@ model GuestHubFormGrant {
  previous GuestHubFormGrant? @relation("GuestFormGrantPredecessor",fields:[organizationId,previousId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
  successors GuestHubFormGrant[] @relation("GuestFormGrantPredecessor")
  profileRevisions GuestHubProfileRevision[]
+ stayDetailsRevisions GuestHubStayDetailsRevision[]
  @@unique([organizationId,id],map:"guest_form_grant_org_id_key")
  @@unique([organizationId,commandKey],map:"guest_form_grant_nonce_key")
  @@unique([organizationId,linkId,formKey,version],map:"guest_form_grant_version_key")
@@ -5984,4 +5992,49 @@ model GuestHubProfileRevision {
  @@unique([organizationId,outboxEventId],map:"guest_profile_outbox_key")
  @@index([organizationId,linkId,createdAt,id],map:"guest_profile_link_history_idx")
  @@map("guest_hub_profile_revision")
+}
+
+model GuestHubStayDetailsRevision {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ linkId String @map("link_id") @db.Uuid
+ grantId String @map("grant_id") @db.Uuid
+ reservationId String @map("reservation_id") @db.Uuid
+ propertyId String @map("property_id") @db.Uuid
+ guestId String @map("guest_id") @db.Uuid
+ previousId String? @map("previous_id") @db.Uuid
+ version Int
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ commandKeyVersion String @map("command_key_version")
+ grantFingerprint String @map("grant_fingerprint")
+ policyId String @map("policy_id") @db.Uuid
+ policyVersion Int @map("policy_version")
+ policyFingerprint String @map("policy_fingerprint")
+ policySnapshot Json @map("policy_snapshot")
+ sourceFingerprint String @map("source_fingerprint")
+ sourceSnapshot Json @map("source_snapshot")
+ encryptedPayload Bytes @map("encrypted_payload")
+ payloadSha256 String @map("payload_sha256")
+ payloadSchema Int @default(1) @map("payload_schema")
+ outboxEventId String @map("outbox_event_id") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation("GuestStayDetailsOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"guest_stay_details_organization_fk")
+ link GuestHubLink @relation("GuestStayDetailsLink",fields:[organizationId,linkId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_stay_details_link_fk")
+ grant GuestHubFormGrant @relation(fields:[organizationId,grantId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_stay_details_grant_fk")
+ reservation Reservation @relation("GuestStayDetailsReservation",fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_stay_details_reservation_fk")
+ property Property @relation("GuestStayDetailsProperty",fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_stay_details_property_fk")
+ guest GuestRecord @relation("GuestStayDetailsGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_stay_details_guest_fk")
+ policy ConfigRule @relation("GuestStayDetailsPolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_stay_details_policy_fk")
+ outbox OutboxEvent @relation("GuestStayDetailsOutbox",fields:[organizationId,outboxEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_stay_details_outbox_fk")
+ previous GuestHubStayDetailsRevision? @relation("GuestStayDetailsPredecessor",fields:[organizationId,previousId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_stay_details_previous_fk")
+ successors GuestHubStayDetailsRevision[] @relation("GuestStayDetailsPredecessor")
+ @@unique([organizationId,id],map:"guest_stay_details_org_id_key")
+ @@unique([organizationId,linkId,commandKey],map:"guest_stay_details_nonce_key")
+ @@unique([organizationId,reservationId,guestId,version],map:"guest_stay_details_version_key")
+ @@unique([organizationId,previousId],map:"guest_stay_details_predecessor_key")
+ @@unique([organizationId,outboxEventId],map:"guest_stay_details_outbox_key")
+ @@index([organizationId,linkId,createdAt,id],map:"guest_stay_details_link_history_idx")
+ @@map("guest_hub_stay_details_revision")
 }
