@@ -672,7 +672,7 @@ Occupancy = occupied nights ÷ available nights (blocks excluded; configurable) 
 | 2 | Lead becomes Owner | No re-entry of fields; audit entry |
 | 3 | Agreement drafted, sent, signed | Documenso webhook → signed PDF archived; document v1 immutable |
 | 4 | Property created | Template applied; overrides visible |
-| 5 | Onboarding wizard steps 01–11 | Review blocks on invalid config; activation job completes |
+| 5 | Onboarding wizard steps 01–11 | Review blocks on invalid config; signed durable activation completes its five genuine effects; original-nonce recovery after a lost reply, actual readiness, later source correction and independent authority withdrawal pass in `onboarding-configuration.spec.ts` and `onboarding-activation.spec.ts` across EN/FR/AR desktop/mobile |
 | 6 | Team assigned | Multiple scoped assignments incl. compensation |
 | 7 | Permissions verified | Simulator for co-host shows spec §16 lists; negative tests pass; admin/finance enrollment denies business access before passkey + confirmed TOTP, invalidates earlier sessions, and requires real MFA on sign-in (`identity-closeout.spec.ts`) |
 | 8 | Owner report generated | FR + EN PDFs contain only configured services |
