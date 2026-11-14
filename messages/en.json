@@ -6262,5 +6262,34 @@
     "reports": "Owner reports",
     "midStayNights": "Configured mid-stay threshold in nights",
     "archiveTitle": "Owner onboarding package"
+  },
+  "GuestAccess": {
+    "eyebrow": "ALVILLAS",
+    "title": "Your stay",
+    "guidance": "Your private stay details, in one place.",
+    "loading": "Checking your stay link…",
+    "loaded": "Your stay details",
+    "arrival": "Check-in",
+    "departure": "Check-out",
+    "accessUntil": "Access until {date}, in the property’s local time.",
+    "language": "Language",
+    "languages": {
+      "en": "English",
+      "fr": "Français",
+      "ar": "العربية"
+    },
+    "refresh": "Refresh stay details",
+    "retry": "Try again",
+    "states": {
+      "link_unavailable": "This stay link is unavailable. Please open the original link sent by your host.",
+      "offline": "You’re offline. Reconnect to open your stay details.",
+      "rate_limited": "Please wait before trying your stay link again.",
+      "unavailable": "Your stay details could not be loaded. Please try again.",
+      "configuration_unavailable": "Your stay details are currently unavailable. Please contact your host.",
+      "forbidden": "Your stay could not be opened. Please use the original link sent by your host.",
+      "validation": "Your stay could not be opened. Please use the original link sent by your host.",
+      "conflict": "Your stay details have changed. Please try again.",
+      "uncertain": "Your stay could not be checked. Please try again."
+    }
   }
 }

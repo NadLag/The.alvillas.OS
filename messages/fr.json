@@ -6262,5 +6262,34 @@
     "reports": "Rapports propriétaire",
     "midStayNights": "Seuil de milieu de séjour configuré en nuits",
     "archiveTitle": "Dossier d’accueil du propriétaire"
+  },
+  "GuestAccess": {
+    "eyebrow": "ALVILLAS",
+    "title": "Votre séjour",
+    "guidance": "Les informations privées de votre séjour, au même endroit.",
+    "loading": "Vérification de votre lien de séjour…",
+    "loaded": "Les informations de votre séjour",
+    "arrival": "Arrivée",
+    "departure": "Départ",
+    "accessUntil": "Accès jusqu’au {date}, à l’heure locale de la propriété.",
+    "language": "Langue",
+    "languages": {
+      "en": "English",
+      "fr": "Français",
+      "ar": "العربية"
+    },
+    "refresh": "Actualiser les informations",
+    "retry": "Réessayer",
+    "states": {
+      "link_unavailable": "Ce lien de séjour est indisponible. Veuillez ouvrir le lien original envoyé par votre hôte.",
+      "offline": "Vous êtes hors ligne. Reconnectez-vous pour consulter votre séjour.",
+      "rate_limited": "Veuillez patienter avant de réessayer votre lien de séjour.",
+      "unavailable": "Les informations de votre séjour n’ont pas pu être chargées. Veuillez réessayer.",
+      "configuration_unavailable": "Les informations de votre séjour sont actuellement indisponibles. Veuillez contacter votre hôte.",
+      "forbidden": "Votre séjour n’a pas pu être ouvert. Veuillez utiliser le lien original envoyé par votre hôte.",
+      "validation": "Votre séjour n’a pas pu être ouvert. Veuillez utiliser le lien original envoyé par votre hôte.",
+      "conflict": "Les informations de votre séjour ont changé. Veuillez réessayer.",
+      "uncertain": "Votre séjour n’a pas pu être vérifié. Veuillez réessayer."
+    }
   }
 }

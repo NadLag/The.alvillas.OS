@@ -2869,3 +2869,9 @@ textarea:disabled {
 .onboarding-workspace-page .onboarding-values dt { color: var(--text-secondary); }
 .onboarding-workspace-page .onboarding-private-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (min-width: 48rem) { .onboarding-workspace-page .onboarding-values { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.guest-access-page { max-inline-size: 44rem; }
+.guest-access-record { min-inline-size: 0; overflow-wrap: anywhere; }
+.guest-access-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
+.guest-access-dates dd { margin-inline-start: 0; margin-block-start: var(--space-2); font-size: var(--font-size-lg); }
+.guest-access-record .form-actions { flex-wrap: wrap; }
