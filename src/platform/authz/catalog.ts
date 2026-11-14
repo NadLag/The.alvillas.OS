@@ -45,6 +45,7 @@ export const permissionResources = [
   "property",
   "reservation",
   "guest",
+  "guest_hub",
   "task",
   "issue",
   "service",
@@ -361,6 +362,8 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
+  ...(["id","reservationId","propertyId","checkIn","checkOut","expiresAt","createdAt","state","locale","reference","replayed","reviewFingerprint","items","next"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub","view"),mask:"omit"})),
+  {resource:"guest_hub",field:"token",dataClass:"sensitive",requiredPermission:permissionKey("guest_hub","create"),mask:"omit"},
   ...(["fields","ownerContact","phone","email","location","objectives","notes","referralContact","stageHistory","profileHistory","workHistory","original"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"lead",field,dataClass:"personal",requiredPermission:permissionKey("lead","view"),mask:"omit"})),
   ...(["account","statement","lines","items","rowCount","reviewFingerprint","next","summary"] as const).map<FieldPolicyCatalogEntry>(field => ({ resource: "bank_statement", field, dataClass: "financial", requiredPermission: permissionKey("bank_statement", "view"), mask: "placeholder" })),
   ...(["source","parts","taxes","providerCosts","ownerAmounts","snapshot","history","amount","currency","next","items"]as const).map<FieldPolicyCatalogEntry>(field=>({resource:"service_allocation",field,dataClass:"financial",requiredPermission:permissionKey("service_allocation","view"),mask:"placeholder"})),
