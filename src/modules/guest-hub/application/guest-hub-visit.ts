@@ -9,7 +9,7 @@ import {authorize,type AuthContext} from "@/platform/authz/authorize";
 import {present,catalogFieldPolicy} from "@/platform/authz/present";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
-import {guestHubPublicInputSchema,guestHubPublicViewSchema,type GuestHubCapabilityClaims} from "../domain/guest-hub-contract";
+import {guestHubPublicInputSchema,guestHubPublicViewSchema,guestHubIdSchema,type GuestHubCapabilityClaims} from "../domain/guest-hub-contract";
 import {verifyGuestHubCapability,guestHubCapabilityDigest} from "../domain/guest-hub-capability";
 import {guestHubVerificationPolicyKey,guestHubVerificationPolicySchema,GuestHubConfigurationError,GuestHubInvalidLinkError,GuestHubRateLimitError} from "../domain/guest-hub-policy";
 import {GuestHubRepository} from "../infrastructure/guest-hub-repository";
@@ -17,7 +17,7 @@ import {currentGuestHubState,guestHubSettings,guestHubOriginalBinding,guestHubSo
 import {guestHubResource} from "./guest-hub-access";
 import type {GuestHubDependencies} from "./guest-hub-service";
 
-export type GuestHubVisitDependencies=GuestHubDependencies&{clientKey:string;verificationOrganizationId?:string};
+export type GuestHubVisitDependencies=GuestHubDependencies&{clientKey:string;verificationOrganizationId?:string;expectedLinkId?:string};
 const clientKeySchema=z.string().min(1).max(200);
 async function consumeVerificationBudget(deps:GuestHubVisitDependencies){
  const organizationId=deps.verificationOrganizationId??bootstrapOrganizationId,client=clientKeySchema.parse(deps.clientKey);
@@ -46,7 +46,7 @@ export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependenci
  // No unverified token byte selects a tenant, policy, quota or native record.
  await consumeVerificationBudget(deps);
  let token:string,claims:GuestHubCapabilityClaims;
- try{token=guestHubPublicInputSchema.parse(raw).token;claims=verifyGuestHubCapability(token,deps.env);}catch{throw new GuestHubInvalidLinkError();}
+ try{token=guestHubPublicInputSchema.parse(raw).token;claims=verifyGuestHubCapability(token,deps.env);if(deps.expectedLinkId&&claims.linkId!==guestHubIdSchema.parse(deps.expectedLinkId))throw new GuestHubInvalidLinkError();}catch{throw new GuestHubInvalidLinkError();}
  try{
   const budget=await withTenant(deps.db,claims.organizationId,async tx=>{
    const actual=await actualSource(tx,claims,token),policy=actual.settings.policy.reads;

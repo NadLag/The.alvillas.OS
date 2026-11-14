@@ -1,0 +1,12 @@
+import {randomUUID} from "node:crypto";
+import {describe,expect,it} from "vitest";
+import {guestHubCapabilityCookie} from "@/modules/guest-hub/domain/guest-hub-cookie";
+import {GuestHubConfigurationError} from "@/modules/guest-hub/domain/guest-hub-policy";
+
+describe("essential native Guest Hub capability cookie",()=>{
+ it("keeps the original credential HttpOnly, secure, host-only and scoped to one actual link API",()=>{const id=randomUUID(),cookie=guestHubCapabilityCookie(id,{APP_URL:"https://alvillas.example.test",NODE_ENV:"production"});expect(cookie).toEqual({name:"__Secure-alvillas_guest_"+id,path:"/api/guest-hub/links/"+id,httpOnly:true,secure:true,sameSite:"strict"});for(const key of["maxAge","expires","domain"])expect(cookie).not.toHaveProperty(key);});
+ it("never shares a credential name or request path between two stays",()=>{const env={APP_URL:"https://alvillas.example.test"},a=guestHubCapabilityCookie(randomUUID(),env),b=guestHubCapabilityCookie(randomUUID(),env);expect(a.name).not.toBe(b.name);expect(a.path).not.toBe(b.path);});
+ it("normalizes only actual UUID identifiers and never takes scope from a token or arbitrary path",()=>{const id=randomUUID();expect(guestHubCapabilityCookie(id.toUpperCase(),{APP_URL:"https://alvillas.example.test"}).path).toBe("/api/guest-hub/links/"+id);for(const value of["../another-stay","guest#secret",null,"a".repeat(200)])expect(()=>guestHubCapabilityCookie(value,{APP_URL:"https://alvillas.example.test"})).toThrow();});
+ it("permits explicit owned loopback verification without allowing insecure public credentials",()=>{for(const host of["localhost","127.0.0.1","[::1]"])expect(guestHubCapabilityCookie(randomUUID(),{APP_URL:"http://"+host+":3000",NODE_ENV:"production"})).toMatchObject({secure:false,httpOnly:true,sameSite:"strict"});for(const APP_URL of["http://alvillas.example.test","ftp://localhost","http://localhost.attacker.test","https://name:secret@alvillas.example.test","https://alvillas.example.test?override=true","https://alvillas.example.test#override"])expect(()=>guestHubCapabilityCookie(randomUUID(),{APP_URL})).toThrow(GuestHubConfigurationError);});
+ it("requires a trusted configured application URL instead of browser-supplied scheme or host",()=>{expect(()=>guestHubCapabilityCookie(randomUUID(),{})).toThrow(GuestHubConfigurationError);expect(()=>guestHubCapabilityCookie(randomUUID(),{APP_URL:"not-a-url"})).toThrow(GuestHubConfigurationError);});
+});
