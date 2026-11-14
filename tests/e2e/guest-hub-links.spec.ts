@@ -7,7 +7,7 @@ import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {guestHubIssueCommandSchema,guestHubRevokeCommandSchema,guestHubRecoveryResultSchema,guestHubPublicViewSchema} from "@/modules/guest-hub/domain/guest-hub-contract";
 import {guestHubLinkPolicyKey} from "@/modules/guest-hub/domain/guest-hub-policy";
-import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace,nativeGuestHubResponse} from "./support/guest-hub-fixture";
+import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace,nativeGuestHubResponse,retainNativeGuestHubResponses} from "./support/guest-hub-fixture";
 import {e2eEmail,ensureE2EAccount,waitForE2EAdminLoginWindow,completeE2EAdminMfa} from "./support/auth";
 import {nativeLeadBrowserFinancial,privateNativeLeadBrowserStorage} from "./support/crm-document-fixtures";
 import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
@@ -25,6 +25,7 @@ for(const locale of["en","fr","ar"]as const)test("Actual scoped Guest Hub links 
  if(!target||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated244 Guest Hub browser database required");
  const db=new PrismaClient(),email=e2eEmail("native-guest-links-"+locale+"-"+randomUUID(),info.project.name),password=process.env.ADMIN_PASSWORD??"correct horse battery staple",t=messages[locale].GuestLinkManagement,g=messages[locale].GuestAccess,errors:string[]=[];
  page.on("pageerror",error=>errors.push(error.name));page.setDefaultTimeout(30000);const visitor=await browser.newContext({baseURL:info.project.use.baseURL,viewport:info.project.name==="field-mobile"?{width:360,height:800}:{width:1280,height:900}});
+ await retainNativeGuestHubResponses(context);await retainNativeGuestHubResponses(visitor);
  try{
   expect((await db.$queryRaw<Array<{count:number}>>`SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`)[0].count).toBeGreaterThanOrEqual(244);
   await ensureE2EAccount(email,password,{permissionKeys:[],page});const account=await withTenant(db,bootstrapOrganizationId,tx=>tx.userAccount.findUniqueOrThrow({where:{organizationId_email:{organizationId:bootstrapOrganizationId,email}}}));
