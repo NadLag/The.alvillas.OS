@@ -22,7 +22,7 @@ export async function onboardingServicesSourceMetadata(actor:AccountActorContext
  const selectedId=target?.mode==="TEMPLATE"?target.templateVersionId:null,selectedTemplate=selectedId?templates.find(row=>row.id===selectedId):null;if(target?.mode==="TEMPLATE"&&(!selectedTemplate||selectedTemplate.status!=="ACTIVE"||selectedTemplate.latestStatus!=="ACTIVE"||(binding?.revision??0)!==target.expectedRevision))throw new OnboardingConflictError();
  const checks:CurrentAuthorityCheck[]=[propertyCheck,...onboardingServicesFinancialSourceChecks(scope)];for(const action of["view","export"]as const){checks.push({action,resource:{...scope,dataClass:"financial",type:"config_rule",id:onboardingServicesRuleKey,status:"ACTIVE",occurredAt:now}});if(rule)checks.push({action,resource:{...scope,dataClass:"financial",type:"config_rule",id:rule.id,status:rule.lifecycle,occurredAt:rule.createdAt}});for(const row of templates)checks.push({action,resource:{...scope,dataClass:"financial",type:"config_rule",id:row.id,status:row.status,occurredAt:row.createdAt}});}
  assertAccountAuthorization(actor,stored,now,checks,new OnboardingAccessError());
- return{target,property,repository,rule,scopes,binding,templates,selectedTemplate,fingerprint:commandFingerprint({property,rule,scopes,binding,templates})};
+ const fingerprintInputs={property,rule,scopes,binding,templates};return{target,property,repository,rule,scopes,binding,templates,selectedTemplate,fingerprintInputs,fingerprint:commandFingerprint(fingerprintInputs)};
 }
 
 /** Metadata only: the actual geography and ownership define all scoped source checks. */
