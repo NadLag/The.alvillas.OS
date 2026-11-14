@@ -1,13 +1,14 @@
+import {GuestHubFormGrantRepository} from "./guest-hub-form-grant-repository";
 import {Prisma} from "@prisma/client";
 import type {TenantTransaction} from "@/platform/db/tenant";
 
 export class GuestHubProfileRepository{
  constructor(private readonly tx:TenantTransaction,private readonly organizationId:string){}
  async lockProfile(reservationId:string,guestId:string){await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${"guest-hub-profile:"+this.organizationId+":"+reservationId+":"+guestId},0))`);}
- grantHead(linkId:string){return this.tx.guestHubFormGrant.findFirst({where:{organizationId:this.organizationId,linkId,formKey:"PROFILE"},orderBy:{version:"desc"}});}
- grantByNonce(commandKey:string){return this.tx.guestHubFormGrant.findFirst({where:{organizationId:this.organizationId,commandKey}});}
- grantById(id:string){return this.tx.guestHubFormGrant.findFirst({where:{organizationId:this.organizationId,id}});}
- createGrant(input:Omit<Prisma.GuestHubFormGrantUncheckedCreateInput,"organizationId">){return this.tx.guestHubFormGrant.create({data:{...input,organizationId:this.organizationId}});}
+ grantHead(linkId:string){return new GuestHubFormGrantRepository(this.tx,this.organizationId,"PROFILE").grantHead(linkId);}
+ grantByNonce(commandKey:string){return new GuestHubFormGrantRepository(this.tx,this.organizationId,"PROFILE").grantByNonce(commandKey);}
+ grantById(id:string){return new GuestHubFormGrantRepository(this.tx,this.organizationId,"PROFILE").grantById(id);}
+ createGrant(input:Omit<Prisma.GuestHubFormGrantUncheckedCreateInput,"organizationId">){return new GuestHubFormGrantRepository(this.tx,this.organizationId,"PROFILE").createGrant(input);}
  latestRevision(reservationId:string,guestId:string){return this.tx.guestHubProfileRevision.findFirst({where:{organizationId:this.organizationId,reservationId,guestId},orderBy:{version:"desc"}});}
  revisionByNonce(linkId:string,commandKey:string){return this.tx.guestHubProfileRevision.findFirst({where:{organizationId:this.organizationId,linkId,commandKey}});}
  createRevision(input:Omit<Prisma.GuestHubProfileRevisionUncheckedCreateInput,"organizationId">){return this.tx.guestHubProfileRevision.create({data:{...input,organizationId:this.organizationId}});}

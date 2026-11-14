@@ -1,35 +1,21 @@
 import {createHash,randomUUID} from "node:crypto";
 import type {GuestHubProfileRevision} from "@prisma/client";
-import {authorize,type AuthContext,type Resource} from "@/platform/authz/authorize";
+import type {AuthContext,Resource} from "@/platform/authz/authorize";
 import {present,catalogFieldPolicy} from "@/platform/authz/present";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
-import {consumeRateLimit} from "@/platform/rate-limit/postgres-rate-limiter";
+
 import {guestHubProfileDraftSchema,guestHubProfileSubmitSchema,guestHubProfileRecoverySchema,guestHubProfileViewSchema,guestHubProfileReceiptSchema,guestHubProfileReviewSchema,type GuestHubProfileReviewBinding} from "../domain/guest-hub-profile-contract";
 import {validateGuestHubProfileValues,presentGuestHubProfileValues,GuestHubProfileAccessError,GuestHubProfileConflictError} from "../domain/guest-hub-profile-policy";
 import {signGuestHubProfileReview,verifyGuestHubProfileReview,signGuestHubProfileCommand,verifyGuestHubProfileCommand} from "../domain/guest-hub-profile-signatures";
 import {encryptGuestHubProfile,decryptGuestHubProfile,guestHubStoredProfileReview,type GuestHubProfilePayloadBinding} from "../domain/guest-hub-profile-payload";
 import {GuestHubProfileRepository} from "../infrastructure/guest-hub-profile-repository";
 import {activeGuestHubProfile,guestHubProfileRevisionBinding} from "./guest-hub-profile-source";
-import {withGuestHubCapability,type GuestHubCapabilityContext,type GuestHubVisitDependencies} from "./guest-hub-visit";
+import type {GuestHubCapabilityContext,GuestHubVisitDependencies} from "./guest-hub-visit";
+import {withGuestHubForm} from "./guest-hub-form-visit";
 
 type ProfileContext=GuestHubCapabilityContext&{profile:Awaited<ReturnType<typeof activeGuestHubProfile>>;profileAuthority:AuthContext;profileResource:Resource};
-function profileAuthority(context:GuestHubCapabilityContext,profile:ProfileContext["profile"]){
- const permissions=new Set(["guest_hub_profile:view","guest_hub_profile:create"]),scope={organizationId:context.actual.row.organizationId,resourceType:"guest_hub_profile",resourceId:context.actual.row.id};
- return{organizationId:context.actual.row.organizationId,permissions,scopes:[scope],assignments:[{permissions,scope,validFrom:profile.grant.createdAt,validTo:profile.grant.expiresAt}]};
-}
-async function withGuestHubProfile<T>(capability:unknown,deps:GuestHubVisitDependencies,work:(context:ProfileContext)=>Promise<T>,submission=false){
- return withGuestHubCapability(capability,deps,async context=>{
-  const profile=await activeGuestHubProfile(context,deps.env);await profile.repository.lockProfile(context.actual.row.reservationId,context.actual.row.guestId);
-  const authority=profileAuthority(context,profile),resource={...context.resource,type:"guest_hub_profile",id:context.actual.row.id,dataClass:"personal" as const};
-  if(!authorize(authority,submission?"create":"view",resource,profile.now))throw new GuestHubProfileAccessError();
-  const result=await work({...context,profile,profileAuthority:authority,profileResource:resource}),final=await activeGuestHubProfile(context,deps.env);
-  if(final.fingerprint!==profile.fingerprint||!authorize(authority,submission?"create":"view",resource,final.now))throw new GuestHubProfileAccessError();return result;
- },submission?async context=>{
-  const profile=await activeGuestHubProfile(context,deps.env),limits=new Map<number,number>();for(const limit of profile.policy.limits)limits.set(limit.window_seconds,Math.min(limits.get(limit.window_seconds)??limit.requests,limit.requests));
-  let allowed=true;for(const[windowSeconds,limit]of limits){const result=await consumeRateLimit(context.tx,context.actual.row.organizationId,{key:"guest-hub:profile-submit:"+context.actual.row.id,limit,windowSeconds,now:profile.now});allowed=result.allowed&&allowed;}return allowed;
- }:undefined);
-}
+async function withGuestHubProfile<T>(capability:unknown,deps:GuestHubVisitDependencies,work:(context:ProfileContext)=>Promise<T>,submission=false){return withGuestHubForm(capability,deps,{resourceType:"guest_hub_profile",rateKey:"guest-hub:profile-submit:",active:activeGuestHubProfile,lock:context=>new GuestHubProfileRepository(context.tx,context.actual.row.organizationId).lockProfile(context.actual.row.reservationId,context.actual.row.guestId),AccessError:GuestHubProfileAccessError},context=>work({...context,profile:context.form,profileAuthority:context.formAuthority,profileResource:context.formResource}),submission);}
 function reviewBinding(context:ProfileContext,input:ReturnType<typeof guestHubProfileDraftSchema.parse>,previousRevisionId:string|null):GuestHubProfileReviewBinding{
  const {row}=context.actual,profile=context.profile;return{protocol:"NATIVE_GUEST_PROFILE_REVIEW_V1",organizationId:row.organizationId,linkId:row.id,reservationId:row.reservationId,propertyId:row.propertyId,guestId:row.guestId,grantId:profile.grant.id,grantFingerprint:profile.grantFingerprint,policyFingerprint:profile.settings.fingerprint,sourceFingerprint:profile.sourceFingerprint,previousRevisionId,idempotencyKey:input.idempotencyKey,values:validateGuestHubProfileValues(input.values,profile.policy,input.acknowledged),acknowledged:input.acknowledged};
 }
