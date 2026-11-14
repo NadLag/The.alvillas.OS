@@ -1,6 +1,5 @@
 import {z} from "zod";
-import {documentUploadReviewInput} from "@/modules/documents/domain/document-command";
-import {documentRetentionTagKey} from "@/modules/documents/domain/document-retention-policy";
+import {documentUploadReviewInput,documentRetentionTagKey} from "@/modules/documents";
 import {guestHubFormBudgetSchema,guestHubFormNoticeSchema,guestHubFormReferenceSchema,retainsGuestHubFormPurpose} from "./guest-hub-form-policy";
 
 export const guestHubIdentityDocumentPolicyKey="guest_hub.identity_documents";

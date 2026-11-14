@@ -1,8 +1,7 @@
 import {z} from "zod";
 import {authorizationCapSchema} from "@/platform/authz/authorization-cap";
 import {signBytes,verifyBytes} from "@/platform/auth/secret-encryption";
-import {documentArchivePolicySchema} from "@/modules/documents/domain/document-policy";
-import {documentRetentionPolicySchema} from "@/modules/documents/domain/document-retention-policy";
+import {documentArchivePolicySchema,documentRetentionPolicySchema} from "@/modules/documents";
 import {guestHubIdSchema,guestHubFingerprintSchema} from "./guest-hub-contract";
 import {GuestHubIdentityDocumentConfigurationError} from "./guest-hub-identity-document-policy";
 
