@@ -13,7 +13,7 @@ export async function prepareNativeGuestHubBrowserFixture(input:{organizationId:
  return fixture.parse(JSON.parse(await readFile(input.output,"utf8")));
 }
 export async function openNativeGuestHubWorkspace(page:Page,reservationId:string,navigate:()=>Promise<unknown>){
- const loaded=page.waitForResponse(response=>new URL(response.url()).pathname==="/api/guest-hub/directory"&&response.request().method()==="POST"&&response.request().postDataJSON()?.reservationId===reservationId,{timeout:30000});
+ const loaded=page.waitForResponse(response=>{if(new URL(response.url()).pathname!=="/api/guest-hub/directory"||response.request().method()!=="POST")return false;const input:unknown=response.request().postDataJSON(),parsed=z.object({reservationId:z.uuid()}).safeParse(input);return parsed.success&&parsed.data.reservationId===reservationId;},{timeout:30000});
  const [response]=await Promise.all([loaded,navigate()]);expect(response.status()).toBe(200);
  expect(guestHubWorkspaceSchema.parse(await response.json()).reservationId).toBe(reservationId);
 }
