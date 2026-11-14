@@ -7,7 +7,7 @@ import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {guestHubIssueCommandSchema,guestHubRevokeCommandSchema,guestHubRecoveryResultSchema,guestHubPublicViewSchema} from "@/modules/guest-hub/domain/guest-hub-contract";
 import {guestHubLinkPolicyKey} from "@/modules/guest-hub/domain/guest-hub-policy";
-import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace} from "./support/guest-hub-fixture";
+import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace,nativeGuestHubResponse} from "./support/guest-hub-fixture";
 import {e2eEmail,ensureE2EAccount,waitForE2EAdminLoginWindow,completeE2EAdminMfa} from "./support/auth";
 import {nativeLeadBrowserFinancial,privateNativeLeadBrowserStorage} from "./support/crm-document-fixtures";
 import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
@@ -17,7 +17,7 @@ import fr from "../../messages/fr.json" with {type:"json"};
 import ar from "../../messages/ar.json" with {type:"json"};
 
 const messages={en,fr,ar};
-function response(page:Page,path:string){return page.waitForResponse(value=>new URL(value.url()).pathname==="/api/guest-hub/"+path&&value.request().method()==="POST",{timeout:30000});}
+const response=nativeGuestHubResponse;
 async function privateStorage(page:Page,values:string[]){const body=await privateNativeLeadBrowserStorage(page);for(const value of values)expect(body.includes(value)).toBe(false);}
 
 for(const locale of["en","fr","ar"]as const)test("Actual scoped Guest Hub links recover original issuance and revoke guest access in "+locale,async({page,context,browser},info)=>{

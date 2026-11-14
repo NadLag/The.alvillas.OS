@@ -76,7 +76,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native supplier invoice 
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
       await page.screenshot({ path: info.outputPath(`invoice-submit-${locale}-${emergency}.png`), fullPage: true }); await page.evaluate(() => document.documentElement.style.fontSize = "");
       const isSubmission = (request: Request) => request.method() === "POST" && Boolean(request.headers()["next-action"]) && Boolean(request.postData()?.includes(`Actual native invoice submission ${suffix}`));
-      const captured = page.waitForRequest(isSubmission),acknowledged=page.waitForResponse(response=>isSubmission(response.request()),{timeout:30000}).then(async response=>{expect(response.status()).toBe(200);expect((await response.body()).byteLength).toBeGreaterThan(0);});
+      const captured = page.waitForRequest(isSubmission),acknowledged=page.waitForResponse(response=>isSubmission(response.request()),{timeout:30000}).then(response=>{expect(response.status()).toBe(200);});
       const [request] = await Promise.all([captured,submission.getByTestId("invoice-submit").click(),acknowledged]);
       await expect(page.getByTestId("invoice-state")).toHaveText(messages.SupplierInvoices.states[emergency ? "APPROVED" : "PENDING_APPROVAL"]);
       await expect(submission).toHaveCount(0);

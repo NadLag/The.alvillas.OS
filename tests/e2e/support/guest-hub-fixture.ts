@@ -17,3 +17,8 @@ export async function openNativeGuestHubWorkspace(page:Page,reservationId:string
  const [response]=await Promise.all([loaded,navigate()]);expect(response.status()).toBe(200);
  expect(guestHubWorkspaceSchema.parse(await response.json()).reservationId).toBe(reservationId);
 }
+/** Retain actual JSON while the click is pending; native locale refresh can replace its browser resource. */
+export async function nativeGuestHubResponse(page:Page,path:string){
+ const response=await page.waitForResponse(value=>new URL(value.url()).pathname==="/api/guest-hub/"+path&&value.request().method()==="POST",{timeout:30000}),status=response.status(),headers=response.headers(),value:unknown=await response.json();
+ return{status:()=>status,headers:()=>headers,json:()=>Promise.resolve(value)};
+}
