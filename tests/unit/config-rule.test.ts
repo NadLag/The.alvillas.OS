@@ -81,6 +81,8 @@ describe("config rule registry", () => {
       "finance.service_allocation",
       "finance.tax",
       "finance.transaction_attachments",
+      "guest_hub.links",
+      "guest_hub.verification",
       "identity.pin_lockout",
       "inventory.minimums",
       "notification.digest.delivery_policy",

@@ -396,6 +396,8 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  guestHubLinks GuestHubLink[] @relation("GuestHubLinkOrganization")
+  guestHubRevocations GuestHubLinkRevocation[] @relation("GuestHubRevocationOrganization")
   leadConversions LeadConversion[]
   leadWorkEntries LeadWorkEntry[]
   leads Lead[]
@@ -817,6 +819,8 @@ model Person {
 }
 
 model UserAccount {
+  issuedGuestHubLinks GuestHubLink[] @relation("GuestHubLinkIssuer")
+  guestHubRevocations GuestHubLinkRevocation[] @relation("GuestHubRevocationActor")
   leadConversions LeadConversion[] @relation("LeadConversionAuthor")
   createdLeadWork LeadWorkEntry[] @relation("LeadWorkAuthor")
   receivedLeadWork LeadWorkEntry[] @relation("LeadWorkRecipient")
@@ -1278,6 +1282,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  guestHubLinks GuestHubLink[] @relation("GuestHubLinkProperty")
   documents Document[] @relation("DocumentProperty")
   guestPaymentReceipts GuestPaymentReceipt[]
 
@@ -1540,6 +1545,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  guestHubLinks GuestHubLink[] @relation("GuestHubLinkReservation")
   documents Document[] @relation("DocumentReservation")
   externalPaymentIntents ExternalPaymentIntent[]
   guestPaymentReceipts GuestPaymentReceipt[]
@@ -2351,6 +2357,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  guestHubLinks GuestHubLink[] @relation("GuestHubLinkPolicy")
   leadConversions LeadConversion[] @relation("LeadConversionPolicy")
   leadWorkVersions LeadWorkEntry[] @relation("LeadWorkPolicy")
   leadWorkCaptureVersions LeadWorkEntry[] @relation("LeadWorkCapturePolicy")
@@ -2580,6 +2587,8 @@ model VarianceWorkflowEvent {
 }
 
 model OutboxEvent {
+  issuedGuestHubLinks GuestHubLink[] @relation("GuestHubLinkOutbox")
+  guestHubRevocations GuestHubLinkRevocation[] @relation("GuestHubRevocationOutbox")
   notificationDeliveries NotificationDelivery[]
   id                     String                 @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
   organizationId         String                 @map("organization_id") @db.Uuid
@@ -2834,6 +2843,7 @@ model NotificationEmailSuppression {
 }
 
 model GuestRecord {
+  guestHubLinks GuestHubLink[] @relation("GuestHubLinkGuest")
   documents Document[] @relation("DocumentGuest")
   documentSignatureRecipients SignatureRecipient[] @relation("SignatureRecipientGuest")
   guestPaymentReceipts GuestPaymentReceipt[]
@@ -5798,4 +5808,70 @@ model OwnerOnboardingDelivery {
  @@index([organizationId,propertyId,createdAt,id],map:"owner_delivery_property_history_idx")
  @@index([organizationId,createdBy,createdAt,id],map:"owner_delivery_creator_history_idx")
  @@map("owner_onboarding_delivery")
+}
+
+model GuestHubLink {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ reservationId String @map("reservation_id") @db.Uuid
+ propertyId String @map("property_id") @db.Uuid
+ guestId String @map("guest_id") @db.Uuid
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ reviewFingerprint String @map("review_fingerprint")
+ sourceFingerprint String @map("source_fingerprint")
+ sourceSnapshot Json @map("source_snapshot")
+ tokenHash String @map("token_hash")
+ encryptedPayload Bytes @map("encrypted_payload")
+ payloadSha256 String @map("payload_sha256")
+ payloadSchema Int @default(1) @map("payload_schema")
+ policyId String @map("policy_id") @db.Uuid
+ policyVersion Int @map("policy_version")
+ policyFingerprint String @map("policy_fingerprint")
+ policySnapshot Json @map("policy_snapshot")
+ authorizationCap Json @map("authorization_cap")
+ outboxEventId String @map("outbox_event_id") @db.Uuid
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation("GuestHubLinkOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ reservation Reservation @relation("GuestHubLinkReservation",fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ property Property @relation("GuestHubLinkProperty",fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ guest GuestRecord @relation("GuestHubLinkGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ actor UserAccount @relation("GuestHubLinkIssuer",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ policy ConfigRule @relation("GuestHubLinkPolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ outbox OutboxEvent @relation("GuestHubLinkOutbox",fields:[organizationId,outboxEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ revocations GuestHubLinkRevocation[]
+ @@unique([organizationId,id],map:"guest_hub_link_org_id_key")
+ @@unique([organizationId,commandKey],map:"guest_hub_link_nonce_key")
+ @@unique([organizationId,tokenHash],map:"guest_hub_link_token_key")
+ @@unique([organizationId,outboxEventId],map:"guest_hub_link_outbox_key")
+ @@index([organizationId,reservationId,createdAt,id],map:"guest_hub_link_reservation_history_idx")
+ @@index([organizationId,createdBy,createdAt,id],map:"guest_hub_link_issuer_history_idx")
+ @@map("guest_hub_link")
+}
+
+model GuestHubLinkRevocation {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ linkId String @map("link_id") @db.Uuid
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ reviewFingerprint String @map("review_fingerprint")
+ reason String
+ outboxEventId String @map("outbox_event_id") @db.Uuid
+ authorizationCap Json @map("authorization_cap")
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation("GuestHubRevocationOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ link GuestHubLink @relation(fields:[organizationId,linkId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ actor UserAccount @relation("GuestHubRevocationActor",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ outbox OutboxEvent @relation("GuestHubRevocationOutbox",fields:[organizationId,outboxEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ @@unique([organizationId,id],map:"guest_hub_revocation_org_id_key")
+ @@unique([organizationId,linkId],map:"guest_hub_revocation_final_key")
+ @@unique([organizationId,commandKey],map:"guest_hub_revocation_nonce_key")
+ @@unique([organizationId,outboxEventId],map:"guest_hub_revocation_outbox_key")
+ @@map("guest_hub_link_revocation")
 }

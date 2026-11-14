@@ -9,6 +9,7 @@ import {leadCapturePolicyKey,leadCapturePolicySchema} from "@/modules/crm/domain
 import {onboardingPolicyKey,onboardingPolicySchema} from "@/modules/onboarding/domain/onboarding-policy";
 import {onboardingOwnerPackagePolicyKey,onboardingOwnerPackagePolicySchema,onboardingOwnerPackageContentKey,onboardingOwnerPackageContentSchema} from "@/modules/onboarding/domain/onboarding-owner-package-policy";
 import {onboardingOwnerDeliveryPolicyKey,onboardingOwnerDeliveryPolicySchema} from "@/modules/onboarding/domain/onboarding-owner-delivery-policy";
+import {guestHubLinkPolicyKey,guestHubLinkPolicySchema,guestHubVerificationPolicyKey,guestHubVerificationPolicySchema} from "@/modules/guest-hub/domain/guest-hub-policy";
 import {leadPipelinePolicyKey,leadPipelinePolicySchema} from "@/modules/crm/domain/lead-pipeline";
 import {leadProfilePolicyKey,leadProfilePolicySchema} from "@/modules/crm/domain/lead-profile";
 import {leadWorkPolicyKey,leadWorkPolicySchema} from "@/modules/crm/domain/lead-work";
@@ -384,6 +385,8 @@ export const configRuleSchemas = {
   [onboardingPolicyKey]:onboardingPolicySchema,
   [onboardingOwnerPackagePolicyKey]:onboardingOwnerPackagePolicySchema,
   [onboardingOwnerDeliveryPolicyKey]:onboardingOwnerDeliveryPolicySchema,
+  [guestHubLinkPolicyKey]:guestHubLinkPolicySchema,
+  [guestHubVerificationPolicyKey]:guestHubVerificationPolicySchema,
   [onboardingOwnerPackageContentKey]:onboardingOwnerPackageContentSchema,
   [leadPipelinePolicyKey]:leadPipelinePolicySchema,
   [leadProfilePolicyKey]:leadProfilePolicySchema,

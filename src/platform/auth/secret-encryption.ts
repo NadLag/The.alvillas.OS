@@ -1,4 +1,5 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
+import { requirePrivatePayloadKeys } from "./private-payload-keys";
 
 const devFallbackSecret = "dev-only-alvillas-os-auth-secret";
 
@@ -26,7 +27,7 @@ function activeKeyMaterial(env: NodeJS.ProcessEnv = process.env): { version: str
   };
 }
 
-function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env): Buffer {
+function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env, requireCanonicalPrivateKey = false): Buffer {
   const configured =
     env.ENCRYPTION_KEYS?.split(",")
       .map((entry) => entry.trim())
@@ -37,6 +38,10 @@ function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env): B
 
     if (entryVersion === version) {
       const decoded = Buffer.from(materialCandidate ?? entryVersion, "base64");
+      if (requireCanonicalPrivateKey && (decoded.length !== 32 || decoded.toString("base64") !== (materialCandidate ?? entryVersion))) {
+        decoded.fill(0);
+        throw new Error("Signature key material is invalid");
+      }
 
       return decoded.length === 32
         ? decoded
@@ -46,6 +51,7 @@ function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env): B
     }
   }
 
+  if (requireCanonicalPrivateKey) throw new Error("No matching private signature key version");
   const active = activeKeyMaterial(env);
 
   if (active.version === version) {
@@ -132,4 +138,30 @@ export function decryptBytes(
   decipher.setAAD(Buffer.from(context, "utf8"));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(bytes.subarray(boundary + 1)), decipher.final()]);
+}
+
+function signatureKey(key:Buffer,context:string):Buffer{
+  const info=Buffer.from(context,"utf8");
+  if(!info.length||info.length>1024)throw new Error("Signature purpose is invalid");
+  return Buffer.from(hkdfSync("sha256",key,Buffer.from("alvillas-keyring-signature-v1","utf8"),info,32));
+}
+
+/** Purpose-separated signatures share the existing versioned key ring, without exporting its keys. */
+export function signBytes(plainText:Uint8Array,context:string,env:NodeJS.ProcessEnv=process.env):{version:string;signature:Buffer}{
+  requirePrivatePayloadKeys(env,true,()=>new Error("Signature key ring is unavailable"));
+  const {version,key}=activeKeyMaterial(env);let derived:Buffer|undefined;
+  try{derived=signatureKey(key,context);return{version,signature:createHmac("sha256",derived).update(version,"utf8").update(Buffer.from([0])).update(plainText).digest()};}
+  finally{derived?.fill(0);key.fill(0);}
+}
+
+/** Untrusted versions, purposes, lengths and key rings fail closed; comparison uses equal-size MACs. */
+export function verifyBytes(plainText:Uint8Array,signature:Uint8Array,version:string,context:string,env:NodeJS.ProcessEnv=process.env):boolean{
+  let key:Buffer|undefined,derived:Buffer|undefined,expected:Buffer|undefined;
+  try{
+    if(signature.byteLength!==32||!/^[a-zA-Z0-9_.-]{1,120}$/u.test(version))return false;
+    requirePrivatePayloadKeys(env,false,()=>new Error("Signature key ring is unavailable"));
+    key=keyForVersion(version,env,true);derived=signatureKey(key,context);
+    expected=createHmac("sha256",derived).update(version,"utf8").update(Buffer.from([0])).update(plainText).digest();
+    return timingSafeEqual(expected,signature);
+  }catch{return false;}finally{expected?.fill(0);derived?.fill(0);key?.fill(0);}
 }
