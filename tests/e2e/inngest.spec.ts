@@ -15,6 +15,7 @@ test("Inngest authenticates discovery and denies unsigned execution", async ({ r
   expect((await request.get("/api/inngest",{headers:{"x-inngest-signature":`t=${seconds}&s=${invalidDigest}`}})).status()).toBe(401);
   const response = await request.post("/api/inngest?fnId=alvillas-os-dispatch-outbox&stepId=step", { data: {} });
   expect(response.status()).toBe(401);
+  expect((await request.post("/api/inngest?fnId=alvillas-os-native-onboarding-activation&stepId=step",{data:{}})).status()).toBe(401);
   expect((await request.get("/api/inngest")).status()).toBe(401);
   const body = await response.text(); expect(body).not.toContain("organizations");
   expect((await request.post("/api/jobs/outbox", { data: {} })).status()).toBe(401);
