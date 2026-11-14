@@ -10,6 +10,8 @@ import {guestHubRequest,GuestHubBrowserError,type GuestHubBrowserState} from "./
 type View=z.infer<typeof guestHubPublicViewSchema>;
 export function GuestHubVisit({locale,initialLinkId}:{locale:AppLocale;initialLinkId?:string}){
  const t=useTranslations("GuestAccess"),[view,setView]=useState<View|null>(null),[state,setState]=useState<GuestHubBrowserState>("loading"),controller=useRef<AbortController|null>(null),epoch=useRef(0),token=useRef<string|null>(null),linkId=useRef(initialLinkId);
+ // Invalidate the live request generation, including requests started by focus/visibility handlers.
+ const invalidate=useCallback(()=>{controller.current?.abort();epoch.current++;},[]);
  const load=useCallback(async()=>{
   if(controller.current&&!controller.current.signal.aborted)return;const selected=new AbortController();controller.current=selected;const own=++epoch.current;setView(null);setState("loading");
   try{
@@ -21,9 +23,9 @@ export function GuestHubVisit({locale,initialLinkId}:{locale:AppLocale;initialLi
  },[locale]);
  useEffect(()=>{
   const fragment=window.location.hash.slice(1);if(fragment){history.replaceState(history.state,"",window.location.pathname);const parsed=guestHubTokenTextSchema.safeParse(fragment);token.current=parsed.success?parsed.data:null;}
-  void load();const focus=()=>{if(document.visibilityState==="visible")void load();},offline=()=>{controller.current?.abort();epoch.current++;setView(null);setState("offline");},visibility=()=>{if(document.visibilityState==="hidden"){controller.current?.abort();epoch.current++;setView(null);setState("loading");}else void load();};window.addEventListener("focus",focus);window.addEventListener("online",focus);window.addEventListener("offline",offline);document.addEventListener("visibilitychange",visibility);
-  return()=>{controller.current?.abort();epoch.current++;window.removeEventListener("focus",focus);window.removeEventListener("online",focus);window.removeEventListener("offline",offline);document.removeEventListener("visibilitychange",visibility);};
- },[load]);
+  void load();const focus=()=>{if(document.visibilityState==="visible")void load();},offline=()=>{invalidate();setView(null);setState("offline");},visibility=()=>{if(document.visibilityState==="hidden"){invalidate();setView(null);setState("loading");}else void load();};window.addEventListener("focus",focus);window.addEventListener("online",focus);window.addEventListener("offline",offline);document.addEventListener("visibilitychange",visibility);
+  return()=>{invalidate();window.removeEventListener("focus",focus);window.removeEventListener("online",focus);window.removeEventListener("offline",offline);document.removeEventListener("visibilitychange",visibility);};
+ },[load,invalidate]);
  const day=(value:string)=>new Intl.DateTimeFormat(locale,{dateStyle:"long",timeZone:"UTC"}).format(new Date(value+"T00:00:00Z"));
  return <section className="resource-form guest-access-record" data-testid="guest-access-record" aria-busy={state==="loading"}>
   <div aria-live="polite" data-testid="guest-access-status">{state==="loading"?<><p role="status">{t("loading")}</p><SkeletonBlock rows={2}/></>:view?<p role="status">{t("loaded")}</p>:<p role="alert">{t("states."+state)}</p>}</div>

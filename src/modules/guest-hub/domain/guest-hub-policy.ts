@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {reservationStateSchema} from "@/modules/reservations/domain/reservation";
+import {reservationStateSchema} from "@/platform/reservations/lifecycle-contract";
 import {localClockInstant} from "@/platform/time/local-instant";
 
 export const guestHubLinkPolicyKey="guest_hub.links";
