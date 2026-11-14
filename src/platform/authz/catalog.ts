@@ -364,7 +364,7 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
-  ...(["id","reservationId","propertyId","checkIn","checkOut","expiresAt","createdAt","state","timezone","locale","home","reference","originalCreator","canRevoke","canManageProfile","replayed","reviewFingerprint","items","next"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub","view"),mask:"omit"})),
+  ...(["id","reservationId","propertyId","checkIn","checkOut","expiresAt","createdAt","state","timezone","locale","home","reference","originalCreator","canRevoke","canManageProfile","canManageStayDetails","replayed","reviewFingerprint","items","next"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub","view"),mask:"omit"})),
   {resource:"guest_hub",field:"token",dataClass:"sensitive",requiredPermission:permissionKey("guest_hub","create"),mask:"omit"},
   {resource:"guest_hub",field:"recoveryKey",dataClass:"sensitive",requiredPermission:permissionKey("guest_hub","create"),mask:"omit"},
   ...(["id","linkId","grantId","reservationId","propertyId","version","previousRevisionId","createdAt","expiresAt","decision","replayed","recorded","idempotencyKey","reviewFingerprint","allowedFields","requiredFields","notice","requireAcknowledgement","canGrant","canWithdraw"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub_profile",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub_profile","view"),mask:"omit"})),
