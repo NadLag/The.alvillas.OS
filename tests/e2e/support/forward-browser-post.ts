@@ -1,6 +1,6 @@
 import { request as httpRequest, type IncomingHttpHeaders } from "node:http";
 import { request as httpsRequest } from "node:https";
-import type { Page, Request } from "@playwright/test";
+import type { BrowserContext, Page, Request } from "@playwright/test";
 
 type ObservedRequest=Pick<Request,"url"|"method"|"allHeaders">&Partial<Pick<Request,"postDataBuffer">>;
 async function forwardObservedRequestOnce(request:ObservedRequest,method:"GET"|"POST",onBody?: (body: Buffer, headers: Readonly<IncomingHttpHeaders>) => void): Promise<number> {
@@ -29,6 +29,15 @@ export async function forwardBrowserGetOnce(request:Pick<Request,"url"|"method"|
  const status=await forwardObservedRequestOnce(request,"GET",(value,headers)=>{body=value;responseHeaders=headers;});
  const headers:Record<string,string>={};for(const[name,value]of Object.entries(responseHeaders))if(value!==undefined)headers[name]=Array.isArray(value)?value.join(name.toLowerCase()==="set-cookie"?"\n":", "):value;
  return{status,headers,body};
+}
+
+/** Replay the observed Server Action bytes once under the chosen context's own cookies. */
+export async function postBrowserActionOnce(context:Pick<BrowserContext,"cookies">,request:Pick<Request,"url"|"method"|"allHeaders"|"postDataBuffer">,headers:Record<string,string>&{origin:string}){
+ const target=new URL(request.url()),origin=new URL(headers.origin),bytes=request.postDataBuffer();
+ if(request.method()!=="POST"||!bytes||!["127.0.0.1","localhost","[::1]"].includes(origin.hostname)||!["http:","https:"].includes(origin.protocol)||target.origin!==origin.origin)throw new Error("Same-origin owned browser action required");
+ const cookies=await context.cookies(target.href),observed=await request.allHeaders();let body:Buffer=Buffer.alloc(0);
+ const status=await forwardBrowserPostOnce({url:()=>target.href,method:()=>"POST",postDataBuffer:()=>bytes,allHeaders:()=>Promise.resolve({...headers,"content-length":String(bytes.byteLength),"user-agent":observed["user-agent"]??"",cookie:cookies.map(cookie=>cookie.name+"="+cookie.value).join("; ")})},value=>{body=value;});
+ return{status:()=>status,text:()=>Promise.resolve(body.toString("utf8"))};
 }
 
 /** Use the authenticated browser cookies once; an unknown POST outcome is never retried. */

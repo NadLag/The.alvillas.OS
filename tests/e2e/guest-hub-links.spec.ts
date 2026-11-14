@@ -7,7 +7,7 @@ import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {guestHubIssueCommandSchema,guestHubRevokeCommandSchema,guestHubRecoveryResultSchema,guestHubPublicViewSchema} from "@/modules/guest-hub/domain/guest-hub-contract";
 import {guestHubLinkPolicyKey} from "@/modules/guest-hub/domain/guest-hub-policy";
-import {prepareNativeGuestHubBrowserFixture} from "./support/guest-hub-fixture";
+import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace,nativeGuestHubResponse,retainNativeGuestHubResponses} from "./support/guest-hub-fixture";
 import {e2eEmail,ensureE2EAccount,waitForE2EAdminLoginWindow,completeE2EAdminMfa} from "./support/auth";
 import {nativeLeadBrowserFinancial,privateNativeLeadBrowserStorage} from "./support/crm-document-fixtures";
 import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
@@ -17,7 +17,7 @@ import fr from "../../messages/fr.json" with {type:"json"};
 import ar from "../../messages/ar.json" with {type:"json"};
 
 const messages={en,fr,ar};
-function response(page:Page,path:string){return page.waitForResponse(value=>new URL(value.url()).pathname==="/api/guest-hub/"+path&&value.request().method()==="POST",{timeout:30000});}
+const response=nativeGuestHubResponse;
 async function privateStorage(page:Page,values:string[]){const body=await privateNativeLeadBrowserStorage(page);for(const value of values)expect(body.includes(value)).toBe(false);}
 
 for(const locale of["en","fr","ar"]as const)test("Actual scoped Guest Hub links recover original issuance and revoke guest access in "+locale,async({page,context,browser},info)=>{
@@ -25,13 +25,14 @@ for(const locale of["en","fr","ar"]as const)test("Actual scoped Guest Hub links 
  if(!target||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated244 Guest Hub browser database required");
  const db=new PrismaClient(),email=e2eEmail("native-guest-links-"+locale+"-"+randomUUID(),info.project.name),password=process.env.ADMIN_PASSWORD??"correct horse battery staple",t=messages[locale].GuestLinkManagement,g=messages[locale].GuestAccess,errors:string[]=[];
  page.on("pageerror",error=>errors.push(error.name));page.setDefaultTimeout(30000);const visitor=await browser.newContext({baseURL:info.project.use.baseURL,viewport:info.project.name==="field-mobile"?{width:360,height:800}:{width:1280,height:900}});
+ await retainNativeGuestHubResponses(context);await retainNativeGuestHubResponses(visitor);
  try{
   expect((await db.$queryRaw<Array<{count:number}>>`SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`)[0].count).toBeGreaterThanOrEqual(244);
   await ensureE2EAccount(email,password,{permissionKeys:[],page});const account=await withTenant(db,bootstrapOrganizationId,tx=>tx.userAccount.findUniqueOrThrow({where:{organizationId_email:{organizationId:bootstrapOrganizationId,email}}}));
   await page.goto("/en/login");await waitForE2EAdminLoginWindow(page,email);await page.getByTestId("login-email").fill(email);await page.getByTestId("login-password").fill(password);await page.getByTestId("login-submit").click();await Promise.all([page.waitForURL(/\/en\/app/u,{timeout:30000}),completeE2EAdminMfa(page,email)]);
   const financial=await nativeLeadBrowserFinancial(db),fixture=await prepareNativeGuestHubBrowserFixture({organizationId:bootstrapOrganizationId,accountId:account.id,personId:account.personId,guestLocale:locale,output:info.outputPath("native-guest-hub-fixture.private.json")}),origin=new URL(page.url()).origin,scope=fixture.organizationId+"."+account.id,nonceRoot="alvillas:guest-hub:"+scope+":"+fixture.reservation.id,issueKey=nonceRoot+":issue",reason="Explicit native Guest Hub access "+locale+" "+randomUUID();
   if(info.project.name==="field-mobile")await page.setViewportSize({width:360,height:800});
-  await page.goto(`/${locale}/app/reservations/${fixture.reservation.id}`);await page.getByTestId("reservation-guest-access").click();
+  await openNativeGuestHubWorkspace(page,fixture.reservation.id,async()=>{await page.goto(`/${locale}/app/reservations/${fixture.reservation.id}`);await page.getByTestId("reservation-guest-access").click();});
   const panel=page.getByTestId("guest-link-manager"),form=page.getByTestId("guest-link-form"),history=page.getByTestId("guest-link-history");await expect(form).toBeVisible();await expect(history).toContainText(t.empty);expect(await page.evaluate(()=>document.documentElement.dir)).toBe(locale==="ar"?"rtl":"ltr");
   await form.getByRole("textbox").fill(reason);let reviewed=response(page,"issue/review");await page.getByTestId("guest-link-review").click();expect((await reviewed).status()).toBe(200);await expect(page.getByTestId("guest-link-review-record")).toContainText(reason);
   let nonce:string|null=null;
