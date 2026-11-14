@@ -1,0 +1,9 @@
+# Native activation and readiness HTTP boundaries
+
+The native private workspace needs to review and admit an activation, recover its original nonce, and read actual delivery and operational readiness. These POST routes call the existing native services through the existing onboarding HTTP boundary. Session authority, same-origin JSON, the account scope, bounded bodies, private responses, sanitized errors and server request IDs remain shared with the preceding wizard steps.
+
+An activation request queues the already defined immutable native intent. HTTP does not run effects, render documents, send mail, set property status or accept client completion claims. Only the canonical workers and atomic native completion service can establish those facts. Readiness selects native references and derives its checklist from actual protected records.
+
+The status route accepts the original native session and nonce. In one tenant transaction it composes the existing original activation reader and actual readiness reader. Successful protected Document and Email phase evidence selects the native package and delivery identities; callers never need to supply internal worker references. Pending work has no invented readiness, and the same actual native activation must bind every returned receipt. Captured and current source authority, original envelope checks, configured read budgets and read audits remain with the canonical readers. Native admission transport preserves an uncertain result after a lost response and never resends automatically.
+
+The existing real PostgreSQL service acceptance remains required alongside the route boundary checks. Background job wiring, private localized workspace controls, mandatory CI and provider-restricted hosted acceptance remain separate outstanding requirements. All feature IDs remain required and retain their evidence-based statuses.

@@ -111,7 +111,7 @@ describe("measured native document search at100 and500 properties",()=>{
    const measure=(query:string,cursor?:string)=>measureTransaction(()=>searchDocuments(f.ctx,{query,kind:"ALL",versionSelection:"CURRENT_EFFECTIVE",includeArchived:false,...cursor?{cursor}:{}},{db:measured,env}));
    const sample=async(properties:number)=>{
     await measure(needle);const single=await measure(needle),page=await measure("Search scale original");expect(single.result.items).toHaveLength(1);expect(page.result.items).toHaveLength(20);expect(page.result.next).not.toBeNull();expect(page.queries).toBe(single.queries);expect(page.queries).toBeLessThanOrEqual(40);
-    const samples:number[]=[];for(let i=0;i<10;i++)samples.push((await measure("Search scale original")).elapsedMs);samples.sort((a,b)=>a-b);const p95=samples[Math.ceil(samples.length*.95)-1];expect(p95).toBeLessThan(300);
+    const samples:number[]=[],cpuMilliseconds:number[]=[];for(let i=0;i<10;i++){const startedCpu=process.cpuUsage(),read=await measure("Search scale original"),cpu=process.cpuUsage(startedCpu);samples.push(read.elapsedMs);cpuMilliseconds.push((cpu.user+cpu.system)/1000);}console.info(JSON.stringify({searchBenchmarkSample:{properties,sampleMilliseconds:samples,requestCpuMilliseconds:cpuMilliseconds,latencyBudgetMilliseconds:300,queryBudget:40,queryCount:page.queries}}));samples.sort((a,b)=>a-b);const p95=samples[Math.ceil(samples.length*.95)-1];expect(p95).toBeLessThan(300);
     return{properties,single:{elapsedMs:single.elapsedMs,queries:single.queries},page:{elapsedMs:page.elapsedMs,queries:page.queries},warmPageP95Ms:p95,sampleCount:samples.length};
    };
    const at100=await sample(100),beforeGrowth=await originals(f);await append(100,400);
