@@ -17,7 +17,10 @@ export const guestHubRevokeCommandSchema=guestHubRevokeDraftSchema.extend(origin
 export const guestHubRecoveryInputSchema=z.object({idempotencyKey:guestHubIdSchema,reservationId:guestHubIdSchema.optional()}).strict();
 export const guestHubPublicInputSchema=z.object({token:guestHubTokenTextSchema}).strict();
 export const guestHubDirectoryInputSchema=z.object({reservationId:guestHubIdSchema,cursor:z.string().max(6000).optional()}).strict();
-export const guestHubStaffReceiptSchema=z.object({id:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),state:z.enum(["ACTIVE","EXPIRED","REVOKED","BLOCKED"]),replayed:z.boolean(),token:guestHubTokenTextSchema.optional()}).strict();
+export const guestHubStaffReceiptSchema=z.object({id:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,idempotencyKey:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),state:z.enum(["ACTIVE","EXPIRED","REVOKED","BLOCKED"]),replayed:z.boolean(),token:guestHubTokenTextSchema.optional()}).strict();
+export const guestHubIssueReviewSchema=z.object({reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,expiresAt:z.iso.datetime(),reviewFingerprint:guestHubFingerprintSchema}).strict();
+export const guestHubRevokeReviewSchema=z.object({linkId:guestHubIdSchema,reservationId:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),revoked:z.boolean(),reviewFingerprint:guestHubFingerprintSchema}).strict();
+export const guestHubRevokeReceiptSchema=z.object({id:guestHubIdSchema,linkId:guestHubIdSchema,idempotencyKey:guestHubIdSchema,createdAt:z.iso.datetime(),replayed:z.boolean()}).strict();
 export const guestHubRecoveryResultSchema=z.discriminatedUnion("recorded",[
  guestHubStaffReceiptSchema.extend({recorded:z.literal(true),idempotencyKey:guestHubIdSchema}),
  z.object({recorded:z.literal(false),reservationId:guestHubIdSchema,idempotencyKey:guestHubIdSchema}).strict()

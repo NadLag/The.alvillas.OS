@@ -4,7 +4,7 @@ import { getTranslations, setRequestLocale } from "next-intl/server";
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import { auth } from "@/platform/auth/session";
-import { authorize } from "@/platform/authz/authorize";
+import { authorize, authorizeCollection } from "@/platform/authz/authorize";
 import { safeLocale } from "@/i18n/routing";
 import { ManagerShell, ShellHeader } from "@/design-system/shells";
 import { reservationActorContextFromSession } from "@/modules/reservations/application/reservation-access";
@@ -32,7 +32,7 @@ export default async function ReservationDetail({ params, searchParams }: { para
   const hidden = <><input type="hidden" name="reservationId" value={reservationId} /><input type="hidden" name="expectedVersion" value={version} /></>;
   const reason = <label className="field"><span>{t("reason")}</span><textarea name="reason" minLength={3} maxLength={1000} required rows={2} /></label>;
   return <ManagerShell className="resource-page reservation-management-page" testId="reservation-detail-page">
-    <ShellHeader eyebrow={t("eyebrow")} title={r.reference!} subtitle={`${r.property?.name} · ${r.guestName || t("unknownGuest")}`} actions={<Link className="secondary-button" href={`/${locale}/app/reservations/calendar?start=${r.checkIn!.toISOString().slice(0, 10)}&end=${r.checkOut!.toISOString().slice(0, 10)}&property=${r.propertyId}`}>{t("calendar")}</Link>} />
+    <ShellHeader eyebrow={t("eyebrow")} title={r.reference!} subtitle={`${r.property?.name} · ${r.guestName || t("unknownGuest")}`} actions={<><Link className="secondary-button" href={`/${locale}/app/reservations/calendar?start=${r.checkIn!.toISOString().slice(0, 10)}&end=${r.checkOut!.toISOString().slice(0, 10)}&property=${r.propertyId}`}>{t("calendar")}</Link>{detail.canSeeGuests&&authorizeCollection(ctx.authContext,"view","guest_hub")&&<Link className="secondary-button" href={`/${locale}/app/reservations/${reservationId}/guest-access`} data-testid="reservation-guest-access">{t("guestAccess")}</Link>}</>} />
     <div className="resource-layout"><section className="workspace-main">
       <dl className="reservation-summary"><div><dt>{t("status")}</dt><dd data-testid="reservation-status">{t(`states.${status}`)}</dd></div><div><dt>{t("arrival")}</dt><dd>{date(r.checkIn!)}</dd></div><div><dt>{t("departure")}</dt><dd>{date(r.checkOut!)}</dd></div><div><dt>{t("revision")}</dt><dd data-testid="reservation-version">{version}</dd></div><div><dt>{t("guest")}</dt><dd>{r.guestName || t("unknownGuest")}</dd></div>{r.guestEmail ? <div><dt>{t("email")}</dt><dd>{r.guestEmail}</dd></div> : null}</dl>
       {r.cancellationSuspectedAt ? <p role="alert">{t("suspectedCancellation")}</p> : null}

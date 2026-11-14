@@ -2189,7 +2189,8 @@
         "tax": "Configuration fiscale"
       }
     },
-    "blockCount": "{count} blocages de disponibilité"
+    "blockCount": "{count} blocages de disponibilité",
+    "guestAccess": "Accès voyageur"
   },
   "Automation": {
     "organization": "Organisation",
@@ -6290,6 +6291,69 @@
       "validation": "Votre séjour n’a pas pu être ouvert. Veuillez utiliser le lien original envoyé par votre hôte.",
       "conflict": "Les informations de votre séjour ont changé. Veuillez réessayer.",
       "uncertain": "Votre séjour n’a pas pu être vérifié. Veuillez réessayer."
+    }
+  },
+  "GuestLinkManagement": {
+    "eyebrow": "Expérience voyageur",
+    "title": "Accès voyageur",
+    "guidance": "Gérez les liens privés de ce séjour. La création d’un lien ne l’envoie pas au voyageur.",
+    "working": "Mise à jour de l’accès voyageur…",
+    "loading": "Chargement de l’accès voyageur…",
+    "loaded": "L’accès voyageur est à jour.",
+    "reservation": "Réservation {reference}",
+    "unrecorded": "Votre demande originale n’a pas été enregistrée. Vérifiez-la à nouveau pour continuer.",
+    "uncertain": "Le résultat de votre demande est encore inconnu. Récupérez-la avant de commencer une autre demande.",
+    "recover": "Récupérer la demande originale",
+    "createTitle": "Créer un lien de séjour",
+    "revokeTitle": "Révoquer un lien de séjour",
+    "reason": "Motif",
+    "reviewCreate": "Vérifier le nouveau lien",
+    "reviewRevoke": "Vérifier la révocation",
+    "cancel": "Annuler la vérification",
+    "confirmCreateTitle": "Confirmer l’accès voyageur",
+    "confirmRevokeTitle": "Confirmer la révocation",
+    "confirmCreateGuidance": "Créez un accès privé pour le voyageur de cette réservation. Partagez le lien obtenu avec ce voyageur.",
+    "confirmRevokeGuidance": "Toute personne utilisant ce lien perdra son accès. Son historique sera conservé.",
+    "createdAt": "Créé le {date} UTC",
+    "originalExpiry": "Expiration originale : {date} UTC",
+    "confirmCreate": "Créer le lien de séjour",
+    "confirmRevoke": "Révoquer ce lien",
+    "issuanceUnavailable": "Les nouveaux liens sont indisponibles pour la réservation ou les paramètres actuels du Guest Hub.",
+    "shareableLink": "Lien de séjour à partager",
+    "history": "Historique des liens de séjour",
+    "empty": "Aucun lien de séjour n’est accessible à ce compte.",
+    "createdByYou": "Créé par vous",
+    "createdByTeam": "Créé par un autre membre de l’équipe",
+    "copy": "Copier le lien de séjour",
+    "revoke": "Révoquer le lien",
+    "next": "Liens plus anciens",
+    "refresh": "Actualiser l’accès voyageur",
+    "back": "Retour à la réservation",
+    "linkStates": {
+      "ACTIVE": "Actif",
+      "EXPIRED": "Expiré",
+      "REVOKED": "Révoqué",
+      "BLOCKED": "Indisponible"
+    },
+    "notices": {
+      "recovered": "Demande originale récupérée.",
+      "alreadyRevoked": "Ce lien est déjà révoqué.",
+      "created": "Lien de séjour créé. Vous pouvez le copier depuis l’historique.",
+      "revoked": "Lien de séjour révoqué.",
+      "copied": "Lien de séjour copié.",
+      "copyManually": "Sélectionnez et copiez le lien ci-dessous."
+    },
+    "states": {
+      "uncertain": "Le résultat de la demande est inconnu. Récupérez la demande originale.",
+      "forbidden": "Votre compte ne peut pas accéder à ces liens voyageurs.",
+      "offline": "Vous êtes hors ligne. Votre demande originale est conservée ; reconnectez-vous pour continuer.",
+      "validation": "Vérifiez les informations et examinez à nouveau votre demande.",
+      "conflict": "La réservation ou les paramètres d’accès ont changé. Actualisez et vérifiez à nouveau.",
+      "configuration_unavailable": "Les paramètres d’accès voyageur sont indisponibles. Demandez à un administrateur autorisé de les vérifier.",
+      "rate_limited": "Veuillez patienter avant de réessayer cette demande.",
+      "link_unavailable": "Ce lien de séjour est indisponible.",
+      "unavailable": "L’accès voyageur n’a pas pu être chargé. Veuillez réessayer.",
+      "storage_unavailable": "Ce navigateur ne peut pas enregistrer votre demande en attente. Autorisez le stockage de session ou utilisez un autre navigateur avant de confirmer."
     }
   }
 }

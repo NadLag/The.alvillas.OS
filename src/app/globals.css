@@ -2875,3 +2875,9 @@ textarea:disabled {
 .guest-access-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
 .guest-access-dates dd { margin-inline-start: 0; margin-block-start: var(--space-2); font-size: var(--font-size-lg); }
 .guest-access-record .form-actions { flex-wrap: wrap; }
+
+.guest-link-manager, .guest-link-history, .guest-link-history > li { min-inline-size: 0; max-inline-size: 100%; }
+.guest-link-history { display: grid; gap: var(--space-5); list-style: none; padding-inline-start: 0; }
+.guest-link-manager .form-actions { flex-wrap: wrap; }
+.guest-link-private-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.guest-link-manager :is(input, textarea, button) { min-inline-size: 0; max-inline-size: 100%; overflow-wrap: anywhere; }

@@ -2189,7 +2189,8 @@
         "tax": "Tax configuration"
       }
     },
-    "blockCount": "{count} availability blocks"
+    "blockCount": "{count} availability blocks",
+    "guestAccess": "Guest access"
   },
   "Automation": {
     "organization": "Organization",
@@ -6290,6 +6291,69 @@
       "validation": "Your stay could not be opened. Please use the original link sent by your host.",
       "conflict": "Your stay details have changed. Please try again.",
       "uncertain": "Your stay could not be checked. Please try again."
+    }
+  },
+  "GuestLinkManagement": {
+    "eyebrow": "Guest experience",
+    "title": "Guest access",
+    "guidance": "Manage private stay links for this reservation. Creating a link does not send it to the guest.",
+    "working": "Updating guest access…",
+    "loading": "Loading guest access…",
+    "loaded": "Guest access is up to date.",
+    "reservation": "Reservation {reference}",
+    "unrecorded": "Your original request has not been saved. Review it again to continue.",
+    "uncertain": "The result of your request is still unknown. Recover it before starting another request.",
+    "recover": "Recover original request",
+    "createTitle": "Create a stay link",
+    "revokeTitle": "Revoke a stay link",
+    "reason": "Reason",
+    "reviewCreate": "Review new link",
+    "reviewRevoke": "Review revocation",
+    "cancel": "Cancel review",
+    "confirmCreateTitle": "Confirm guest access",
+    "confirmRevokeTitle": "Confirm revocation",
+    "confirmCreateGuidance": "Create private access for the guest on this reservation. Share the resulting link with that guest.",
+    "confirmRevokeGuidance": "Anyone using this link will lose access. Its history will be retained.",
+    "createdAt": "Created {date} UTC",
+    "originalExpiry": "Original expiry: {date} UTC",
+    "confirmCreate": "Create stay link",
+    "confirmRevoke": "Revoke this link",
+    "issuanceUnavailable": "New links are unavailable for the current reservation or Guest Hub settings.",
+    "shareableLink": "Shareable stay link",
+    "history": "Stay-link history",
+    "empty": "No stay links are available to this account.",
+    "createdByYou": "Created by you",
+    "createdByTeam": "Created by another team member",
+    "copy": "Copy stay link",
+    "revoke": "Revoke link",
+    "next": "Older links",
+    "refresh": "Refresh guest access",
+    "back": "Back to reservation",
+    "linkStates": {
+      "ACTIVE": "Active",
+      "EXPIRED": "Expired",
+      "REVOKED": "Revoked",
+      "BLOCKED": "Unavailable"
+    },
+    "notices": {
+      "recovered": "Original request recovered.",
+      "alreadyRevoked": "This link is already revoked.",
+      "created": "Stay link created. You can copy it from the history.",
+      "revoked": "Stay link revoked.",
+      "copied": "Stay link copied.",
+      "copyManually": "Select and copy the stay link below."
+    },
+    "states": {
+      "uncertain": "The request result is unknown. Recover the original request.",
+      "forbidden": "Your account cannot access these guest links.",
+      "offline": "You’re offline. Your original request is preserved; reconnect to continue.",
+      "validation": "Check the details and review your request again.",
+      "conflict": "The reservation or access settings have changed. Refresh and review again.",
+      "configuration_unavailable": "Guest access settings are unavailable. Ask an authorized administrator to review them.",
+      "rate_limited": "Please wait before trying this request again.",
+      "link_unavailable": "This stay link is unavailable.",
+      "unavailable": "Guest access could not be loaded. Please try again.",
+      "storage_unavailable": "This browser cannot save your pending request. Allow session storage or use another browser before confirming."
     }
   }
 }
