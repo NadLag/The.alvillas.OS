@@ -50,8 +50,8 @@ export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependenci
  try{
   const budget=await withTenant(deps.db,claims.organizationId,async tx=>{
    const actual=await actualSource(tx,claims,token),policy=actual.settings.policy.reads;
-   const organization=await consumeRateLimit(tx,claims.organizationId,{key:"guest-hub:read:organization",limit:policy.requests,windowSeconds:policy.window_seconds,now:actual.now}),link=await consumeRateLimit(tx,claims.organizationId,{key:"guest-hub:read:"+actual.row.id,limit:policy.requests,windowSeconds:policy.window_seconds,now:actual.now});
-   return{allowed:organization.allowed&&link.allowed,active:actual.state==="ACTIVE"};
+   const link=await consumeRateLimit(tx,claims.organizationId,{key:"guest-hub:read:"+actual.row.id,limit:policy.requests,windowSeconds:policy.window_seconds,now:actual.now});
+   return{allowed:link.allowed,active:actual.state==="ACTIVE"};
   });if(!budget.allowed)throw new GuestHubRateLimitError();if(!budget.active)throw new GuestHubInvalidLinkError();
   return await withTenant(deps.db,claims.organizationId,async tx=>{
    const repository=new GuestHubRepository(tx,claims.organizationId);await repository.lockLink(claims.linkId);await repository.lockSources(claims.reservationId);

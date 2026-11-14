@@ -58,7 +58,7 @@ export async function issueGuestHubLink(actor:AccountActorContext,raw:unknown,de
   if(original&&original.reservationId!==input.reservationId)throw new GuestHubConflictError();
   const source=await sourceFor(repository,input.reservationId),now=await repository.clock();await requireGuestHubStaffAuthority(actor,tx,source,"create",now,original?await guestHubLinkTarget(repository,original,source):undefined);
   const settings=await guestHubSettings(tx,actor.organizationId,source,now),budget=settings.policy.issuance;
-  const organization=await consumeRateLimit(tx,actor.organizationId,{key:"guest-hub:issue:organization",limit:budget.requests,windowSeconds:budget.window_seconds,now}),issuer=await consumeRateLimit(tx,actor.organizationId,{key:"guest-hub:issue:"+actor.actorId,limit:budget.requests,windowSeconds:budget.window_seconds,now});return organization.allowed&&issuer.allowed;
+  const issuer=await consumeRateLimit(tx,actor.organizationId,{key:"guest-hub:issue:"+settings.rule.scopeType+":"+(settings.rule.scopeId??actor.organizationId)+":"+actor.actorId,limit:budget.requests,windowSeconds:budget.window_seconds,now});return issuer.allowed;
  });if(!allowed)throw new GuestHubRateLimitError();
  return withTenant(deps.db,actor.organizationId,async tx=>{
   const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);
