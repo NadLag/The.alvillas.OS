@@ -27,7 +27,9 @@ import type {GuestHubDependencies} from "./guest-hub-service";
 
 type Decision="GRANTED"|"WITHDRAWN";
 type Settings={rule:{id:string;version:number};snapshot:Prisma.InputJsonObject;fingerprint:string};
-type Definition={formKey:GuestHubFormKey;resourceType:PermissionResource;reviewProtocol:string;settings:(tx:TenantTransaction,organizationId:string,source:GuestHubNativeSource,now:Date)=>Promise<Settings>;AccessError:new()=>Error;ConflictError:new()=>Error};
+export type GuestHubFormGrantExtension={fingerprint:string;policyIds:readonly string[];snapshot:Prisma.InputJsonObject};
+type GrantExtension={context:(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,now:Date,settings:Settings)=>Promise<GuestHubFormGrantExtension>;record:(actor:AccountActorContext,tx:TenantTransaction,grant:GuestHubFormGrant,extension:GuestHubFormGrantExtension,deps:GuestHubDependencies)=>Promise<void>};
+type Definition={resourceType:PermissionResource;reviewProtocol:string;settings:(tx:TenantTransaction,organizationId:string,source:GuestHubNativeSource,now:Date)=>Promise<Settings>;AccessError:new()=>Error;ConflictError:new()=>Error}&({formKey:Exclude<GuestHubFormKey,"IDENTITY_DOCUMENTS">;extension?:never}|{formKey:"IDENTITY_DOCUMENTS";extension:GrantExtension});
 export function createGuestHubFormGrantService(definition:Definition){
 async function grantContext(actor:AccountActorContext,tx:TenantTransaction,linkId:string,decision:Decision|null,requireEnabled=true){
  const repository=new GuestHubRepository(tx,actor.organizationId),profiles=new GuestHubFormGrantRepository(tx,actor.organizationId,definition.formKey),row=await repository.byId(linkId);if(!row)throw new definition.AccessError();
@@ -41,8 +43,9 @@ async function grantContext(actor:AccountActorContext,tx:TenantTransaction,linkI
   settings=await definition.settings(tx,actor.organizationId,source,now);
  }
  const head=await profiles.grantHead(row.id),sourceSnapshot=guestHubSourceSnapshot(actor.organizationId,source);
- const fingerprint=jsonbFingerprint({protocol:definition.reviewProtocol,organizationId:actor.organizationId,actorId:actor.actorId,linkId:row.id,linkTokenHash:row.tokenHash,source:sourceSnapshot,headId:head?.id??null,headVersion:head?.version??0,decision,policy:settings?.snapshot??null});
- return{repository,profiles,row,source,sourceSnapshot,now,target,settings,head,fingerprint};
+ const extension=settings&&definition.extension?await definition.extension.context(actor,tx,source,now,settings):null;
+ const fingerprint=jsonbFingerprint({protocol:definition.reviewProtocol,organizationId:actor.organizationId,actorId:actor.actorId,linkId:row.id,linkTokenHash:row.tokenHash,source:sourceSnapshot,headId:head?.id??null,headVersion:head?.version??0,decision,policy:settings?.snapshot??null,...extension?{additionalAuthority:extension.fingerprint}:{}});
+ return{repository,profiles,row,source,sourceSnapshot,now,target,settings,head,extension,fingerprint};
 }
 async function guestHubFormGrantStatus(actor:AccountActorContext,raw:unknown,deps:GuestHubDependencies){
  const input=z.object({linkId:guestHubIdSchema}).strict().parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{
@@ -67,13 +70,15 @@ async function recordGuestHubProfileGrant(actor:AccountActorContext,raw:unknown,
   const profiles=new GuestHubFormGrantRepository(tx,actor.organizationId,definition.formKey),original=await profiles.grantByNonce(input.idempotencyKey),context=await grantContext(actor,tx,input.linkId,input.decision,!original);
   if(original){if(original.formKey!==definition.formKey||original.createdBy!==actor.actorId)throw new definition.AccessError();if(original.linkId!==input.linkId||original.commandHash!==commandHash)throw new definition.ConflictError();return receipt(actor,context,original,true);}
   if(context.fingerprint!==input.reviewFingerprint)throw new definition.ConflictError();if(context.settings)await repository.lockPolicy(context.settings.rule.id);
+  for(const policyId of [...new Set(context.extension?.policyIds??[])].sort())await repository.lockPolicy(policyId);
   const now=new Date(Math.floor(context.now.getTime())),id=randomUUID(),requestId=deps.requestId??randomUUID(),sourceFingerprint=jsonbFingerprint(context.sourceSnapshot),version=(context.head?.version??0)+1;
   const binding={protocol:"NATIVE_GUEST_FORM_GRANT_V1",formKey:definition.formKey,id,organizationId:actor.organizationId,linkId:context.row.id,reservationId:context.row.reservationId,propertyId:context.row.propertyId,guestId:context.row.guestId,previousId:context.head?.id??null,version,decision:input.decision,linkTokenHash:context.row.tokenHash,policyId:context.settings?.rule.id??null,policyVersion:context.settings?.rule.version??null,policyFingerprint:context.settings?.fingerprint??null,sourceFingerprint,createdBy:actor.actorId,createdAt:now.toISOString(),expiresAt:context.row.expiresAt.toISOString(),commandKey:input.idempotencyKey,commandHash};
   const signed=signGuestHubFormGrant(binding,deps.env);let signature:string;try{signature=signed.signature.toString("hex");}finally{signed.signature.fill(0);}
   const event=await new OutboxRepository(tx,actor.organizationId).append("guest_hub.form_grant_recorded",{grantId:id,linkId:context.row.id,reservationId:context.row.reservationId,formKey:definition.formKey,decision:input.decision},"guest-hub-form-grant:"+actor.actorId+":"+input.idempotencyKey,now);
   const saved=await context.profiles.createGrant({id,linkId:context.row.id,reservationId:context.row.reservationId,propertyId:context.row.propertyId,guestId:context.row.guestId,formKey:definition.formKey,previousId:context.head?.id??null,version,decision:input.decision,linkTokenHash:context.row.tokenHash,policyId:context.settings?.rule.id??null,policyVersion:context.settings?.rule.version??null,policyFingerprint:context.settings?.fingerprint??null,policySnapshot:context.settings?.snapshot??{},sourceFingerprint,sourceSnapshot:context.sourceSnapshot,commandKey:input.idempotencyKey,commandHash,reviewFingerprint:input.reviewFingerprint,signatureVersion:signed.version,signature,authorizationCap:captureAuthorizationCap(actor.authContext),outboxEventId:event.id,reason:input.reason,createdBy:actor.actorId,createdAt:now,expiresAt:context.row.expiresAt,requestId});
+  if(context.extension&&definition.extension)await definition.extension.record(actor,tx,saved,context.extension,deps);
   await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"guest_hub.form_grant_recorded",resourceType:definition.resourceType,resourceId:id,propertyScopeId:saved.propertyId,after:{grantId:id,linkId:saved.linkId,reservationId:saved.reservationId,formKey:definition.formKey,decision:input.decision,commandHash,outboxEventId:event.id},reason:input.reason,requestId,occurredAt:now});
-  const final=await grantContext(actor,tx,input.linkId,input.decision);if(final.head?.id!==saved.id||final.settings?.fingerprint!==context.settings?.fingerprint||jsonbFingerprint(final.sourceSnapshot)!==sourceFingerprint)throw new definition.ConflictError();
+  const final=await grantContext(actor,tx,input.linkId,input.decision);if(final.head?.id!==saved.id||final.settings?.fingerprint!==context.settings?.fingerprint||final.extension?.fingerprint!==context.extension?.fingerprint||jsonbFingerprint(final.sourceSnapshot)!==sourceFingerprint)throw new definition.ConflictError();
   await context.profiles.validateBirth();return receipt(actor,final,saved,false);
  });
 }

@@ -5,9 +5,14 @@ type ArchiveSnapshot=GuestHubIdentityDocumentDelegationBinding["archivePolicy"];
 type RetentionSnapshot=GuestHubIdentityDocumentDelegationBinding["retentionPolicy"];
 /** Pure constraints only: the caller must first authenticate the delegation and intersect current account authority. */
 export function effectiveGuestHubIdentityDocumentArchive(captured:GuestHubIdentityDocumentPolicy,current:GuestHubIdentityDocumentPolicy,delegation:GuestHubIdentityDocumentDelegationBinding,archive:ArchiveSnapshot,retention:RetentionSnapshot){
- const held=guestHubIdentityDocumentDelegationBindingSchema.safeParse(delegation),currentArchive=guestHubIdentityDocumentDelegationBindingSchema.shape.archivePolicy.safeParse(archive),currentRetention=guestHubIdentityDocumentDelegationBindingSchema.shape.retentionPolicy.safeParse(retention);
- if(!held.success||!currentArchive.success||!currentRetention.success||currentArchive.data.organizationId!==held.data.organizationId||currentRetention.data.organizationId!==held.data.organizationId)throw new GuestHubIdentityDocumentAccessError();
- const identity=effectiveGuestHubIdentityDocumentPolicy(captured,current),original=held.data,latestArchive=currentArchive.data.value,latestRetention=currentRetention.data.value;
+ const held=guestHubIdentityDocumentDelegationBindingSchema.safeParse(delegation);if(!held.success)throw new GuestHubIdentityDocumentAccessError();
+ return intersectGuestHubIdentityDocumentArchivePolicies(captured,current,held.data.archivePolicy,held.data.retentionPolicy,archive,retention);
+}
+/** Shared pure constraints for an actual staff delegation review and a subsequently authenticated grant. */
+export function intersectGuestHubIdentityDocumentArchivePolicies(captured:GuestHubIdentityDocumentPolicy,current:GuestHubIdentityDocumentPolicy,capturedArchive:ArchiveSnapshot,capturedRetention:RetentionSnapshot,archive:ArchiveSnapshot,retention:RetentionSnapshot){
+ const originalArchive=guestHubIdentityDocumentDelegationBindingSchema.shape.archivePolicy.safeParse(capturedArchive),originalRetention=guestHubIdentityDocumentDelegationBindingSchema.shape.retentionPolicy.safeParse(capturedRetention),currentArchive=guestHubIdentityDocumentDelegationBindingSchema.shape.archivePolicy.safeParse(archive),currentRetention=guestHubIdentityDocumentDelegationBindingSchema.shape.retentionPolicy.safeParse(retention);
+ if(!originalArchive.success||!originalRetention.success||!currentArchive.success||!currentRetention.success||[originalRetention.data.organizationId,currentArchive.data.organizationId,currentRetention.data.organizationId].some(id=>id!==originalArchive.data.organizationId))throw new GuestHubIdentityDocumentAccessError();
+ const identity=effectiveGuestHubIdentityDocumentPolicy(captured,current),original={archivePolicy:originalArchive.data,retentionPolicy:originalRetention.data},latestArchive=currentArchive.data.value,latestRetention=currentRetention.data.value;
  if(original.retentionPolicy.value.archive_tagging!=="ALLOW"||latestRetention.archive_tagging!=="ALLOW")throw new GuestHubIdentityDocumentAccessError();
  const documents=identity.documents.flatMap(document=>{
   const capturedType=original.archivePolicy.value.types.find(type=>type.key===document.documentTypeKey),currentType=latestArchive.types.find(type=>type.key===document.documentTypeKey);

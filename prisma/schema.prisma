@@ -611,6 +611,7 @@ model Organization {
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantOrganization")
   guestHubProfileRevisions GuestHubProfileRevision[] @relation("GuestProfileOrganization")
   guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsOrganization")
+  guestHubIdentityDocumentDelegations GuestHubIdentityDocumentDelegation[] @relation("GuestIdentityDelegationOrganization")
 }
 
 model Region {
@@ -2444,6 +2445,8 @@ model ConfigRule {
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantPolicy")
   guestHubProfileRevisions GuestHubProfileRevision[] @relation("GuestProfilePolicy")
   guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsPolicy")
+  guestIdentityArchiveDelegations GuestHubIdentityDocumentDelegation[] @relation("GuestIdentityDelegationArchivePolicy")
+  guestIdentityRetentionDelegations GuestHubIdentityDocumentDelegation[] @relation("GuestIdentityDelegationRetentionPolicy")
 }
 
 model ReservationConfigSnapshot {
@@ -5940,6 +5943,7 @@ model GuestHubFormGrant {
  successors GuestHubFormGrant[] @relation("GuestFormGrantPredecessor")
  profileRevisions GuestHubProfileRevision[]
  stayDetailsRevisions GuestHubStayDetailsRevision[]
+ identityDocumentDelegation GuestHubIdentityDocumentDelegation?
  @@unique([organizationId,id],map:"guest_form_grant_org_id_key")
  @@unique([organizationId,commandKey],map:"guest_form_grant_nonce_key")
  @@unique([organizationId,linkId,formKey,version],map:"guest_form_grant_version_key")
@@ -5947,6 +5951,28 @@ model GuestHubFormGrant {
  @@unique([organizationId,outboxEventId],map:"guest_form_grant_outbox_key")
  @@index([organizationId,reservationId,createdAt,id],map:"guest_form_grant_reservation_idx")
  @@map("guest_hub_form_grant")
+}
+
+model GuestHubIdentityDocumentDelegation {
+ organizationId String @map("organization_id") @db.Uuid
+ grantId String @map("grant_id") @db.Uuid
+ archivePolicyId String @map("archive_policy_id") @db.Uuid
+ archivePolicyVersion Int @map("archive_policy_version")
+ archivePolicySnapshot Json @map("archive_policy_snapshot")
+ retentionPolicyId String @map("retention_policy_id") @db.Uuid
+ retentionPolicyVersion Int @map("retention_policy_version")
+ retentionPolicySnapshot Json @map("retention_policy_snapshot")
+ signatureVersion String @map("signature_version")
+ signature String
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation("GuestIdentityDelegationOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_delegation_organization_fk")
+ grant GuestHubFormGrant @relation(fields:[organizationId,grantId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_delegation_grant_fk")
+ archivePolicy ConfigRule @relation("GuestIdentityDelegationArchivePolicy",fields:[organizationId,archivePolicyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_delegation_archive_fk")
+ retentionPolicy ConfigRule @relation("GuestIdentityDelegationRetentionPolicy",fields:[organizationId,retentionPolicyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_delegation_retention_fk")
+ @@id([organizationId,grantId],map:"guest_identity_delegation_pkey")
+ @@index([organizationId,archivePolicyId],map:"guest_identity_delegation_archive_idx")
+ @@index([organizationId,retentionPolicyId],map:"guest_identity_delegation_retention_idx")
+ @@map("guest_hub_identity_document_delegation")
 }
 
 model GuestHubProfileRevision {
