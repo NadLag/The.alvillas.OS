@@ -1,4 +1,7 @@
 import {tickLeadWorkReminders} from "@/modules/crm/application/lead-work-reminders";
+import {executeOnboardingActivationJob,recoverOnboardingActivationJobs} from "@/modules/onboarding/application/onboarding-activation-jobs";
+import {onboardingActivationRequested} from "@/modules/onboarding/domain/onboarding-activation-payload";
+import {onboardingActivationContinuationRequested} from "@/modules/onboarding/domain/onboarding-activation-job";
 import {tickDocumentExpiryReminders} from "@/modules/documents/application/document-expiry-reminders";
 import { scheduleReservationSyncs } from "@/modules/reservations/application/reservation-management-service";
 import { cleanupFieldUploadParts } from "@/modules/reservations/application/field-upload-cleanup";
@@ -74,6 +77,7 @@ export const dispatchOutbox = inngest.createFunction({ id: "dispatch-outbox", na
     : [{ id: await step.run("validate-dispatch-reference", () => dispatchRequestOrganization(event.data)) }];
   const total: DispatchOutboxResult & { organizations: number } = { organizations: organizations.length, dispatched: 0, failed: 0, skipped: 0 };
   for (const { id } of organizations) {
+    await step.run(`recover-native-onboarding-${id}`,()=>recoverOnboardingActivationJobs(id,{db:prisma}));
     await step.run(`sync-reservation-feeds-${id}`, () => scheduleReservationSyncs(id));
     const operationProperties=await step.run(`operations-properties-${id}`,()=>operationSchedulerProperties(id));
     for(const propertyId of operationProperties)await step.run(`schedule-operations-${id}-${propertyId}`,()=>scheduleOperationTasks(id,{propertyId}));
@@ -170,4 +174,5 @@ export const recoverSignatureIdentities=inngest.createFunction({id:"native-signa
   async({event,step})=>step.run("bind-reviewed-original-signature-through-readback",()=>executeSignatureIdentityRecoveryReference(event.data)));
 export const archiveSignedDocuments=inngest.createFunction({id:"native-signed-document-archive",name:"ALVILLAS OS original signed document archive",triggers:[{event:signedArchiveRequested}],concurrency:{limit:1},retries:3},
   async({event,step})=>step.run("retain-original-signed-pdf-and-certificate",()=>executeSignedArchiveReference(event.data)));
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments];
+export const advanceNativeOnboarding=inngest.createFunction({id:"native-onboarding-activation",name:"ALVILLAS OS native onboarding activation",triggers:[{event:onboardingActivationRequested},{event:onboardingActivationContinuationRequested}],concurrency:{limit:1},retries:3},async({event,step})=>step.run("advance-original-native-activation",()=>executeOnboardingActivationJob(event.data,{db:prisma})));
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments,advanceNativeOnboarding];

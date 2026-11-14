@@ -9,9 +9,9 @@ export type OutboxDatabase = TenantTransactionRunner & {
 export class OutboxRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
 
-  append(type: string, payload: Prisma.InputJsonObject, idempotencyKey: string, occurredAt: Date) {
+  append(type: string, payload: Prisma.InputJsonObject, idempotencyKey: string, occurredAt: Date, options?: {nextAttemptAt?:Date|null}) {
     return this.tx.outboxEvent.upsert({ where: { organizationId_idempotencyKey: { organizationId: this.organizationId, idempotencyKey } },
-      update: {}, create: { organizationId: this.organizationId, type, payload, idempotencyKey, occurredAt } });
+      update: {}, create: { organizationId: this.organizationId, type, payload, idempotencyKey, occurredAt,...options?.nextAttemptAt!==undefined?{nextAttemptAt:options.nextAttemptAt}:{} } });
   }
 
   // The HTTP drain and Inngest runs share this lock, including across processes.

@@ -164,3 +164,4 @@ prisma/migrations/20261112110000_atomic_owner_package_documents/migration.sql te
 prisma/migrations/20261112130000_native_activation_effect_evidence/migration.sql text eol=lf
 
 prisma/migrations/20261112140000_native_onboarding_operational_completion/migration.sql text eol=lf
+prisma/migrations/20261113093000_native_onboarding_activation_job_continuations/migration.sql text eol=lf
