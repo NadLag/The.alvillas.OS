@@ -9,7 +9,7 @@ import type {guestHubPublicViewSchema} from "../domain/guest-hub-contract";
 type View=z.infer<typeof guestHubPublicViewSchema>;
 function StayPhoto({src,property}:{src:string|null;property:string}){
  const t=useTranslations("GuestStay"),[failed,setFailed]=useState(false);
- return <div className="guest-stay-photo" data-testid="guest-stay-photo">{src&&!failed?<Image src={src} alt={t("photo",{property})} fill sizes="(max-width: 720px) 100vw, 640px" unoptimized referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:<div className="guest-stay-photo-placeholder" role="img" aria-label={t("photoUnavailable",{property})}><span>{t("photoUnavailable",{property})}</span></div>}</div>;
+ return <div className="guest-stay-photo" data-testid="guest-stay-photo">{src&&!failed?<Image src={src} alt={t("photo",{property})} fill sizes="(max-width: 720px) 100vw, 640px" unoptimized loading="eager" fetchPriority="high" referrerPolicy="no-referrer" onError={()=>setFailed(true)}/>:<div className="guest-stay-photo-placeholder" role="img" aria-label={t("photoUnavailable",{property})}><span>{t("photoUnavailable",{property})}</span></div>}</div>;
 }
 
 /** Every visible fact belongs to the already verified original reservation. */
