@@ -27,7 +27,7 @@ function activeKeyMaterial(env: NodeJS.ProcessEnv = process.env): { version: str
   };
 }
 
-function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env): Buffer {
+function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env, requireCanonicalPrivateKey = false): Buffer {
   const configured =
     env.ENCRYPTION_KEYS?.split(",")
       .map((entry) => entry.trim())
@@ -38,6 +38,10 @@ function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env): B
 
     if (entryVersion === version) {
       const decoded = Buffer.from(materialCandidate ?? entryVersion, "base64");
+      if (requireCanonicalPrivateKey && (decoded.length !== 32 || decoded.toString("base64") !== (materialCandidate ?? entryVersion))) {
+        decoded.fill(0);
+        throw new Error("Signature key material is invalid");
+      }
 
       return decoded.length === 32
         ? decoded
@@ -47,6 +51,7 @@ function keyForVersion(version: string, env: NodeJS.ProcessEnv = process.env): B
     }
   }
 
+  if (requireCanonicalPrivateKey) throw new Error("No matching private signature key version");
   const active = activeKeyMaterial(env);
 
   if (active.version === version) {
@@ -155,7 +160,7 @@ export function verifyBytes(plainText:Uint8Array,signature:Uint8Array,version:st
   try{
     if(signature.byteLength!==32||!/^[a-zA-Z0-9_.-]{1,120}$/u.test(version))return false;
     requirePrivatePayloadKeys(env,false,()=>new Error("Signature key ring is unavailable"));
-    key=keyForVersion(version,env);derived=signatureKey(key,context);
+    key=keyForVersion(version,env,true);derived=signatureKey(key,context);
     expected=createHmac("sha256",derived).update(version,"utf8").update(Buffer.from([0])).update(plainText).digest();
     return timingSafeEqual(expected,signature);
   }catch{return false;}finally{expected?.fill(0);derived?.fill(0);key?.fill(0);}
