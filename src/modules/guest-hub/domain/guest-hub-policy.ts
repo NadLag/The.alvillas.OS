@@ -29,6 +29,7 @@ export class GuestHubConfigurationError extends Error{constructor(){super("guest
 export class GuestHubAccessError extends Error{constructor(){super("guest_hub_access_denied");}}
 export class GuestHubConflictError extends Error{constructor(){super("guest_hub_source_changed");}}
 export class GuestHubInvalidLinkError extends Error{constructor(){super("guest_hub_link_unavailable");}}
+export class GuestHubRateLimitError extends Error{constructor(){super("guest_hub_rate_limit_exceeded");}}
 
 /** Reservation checkout is a property calendar day; an explicit policy supplies its local clock. */
 export function configuredGuestHubExpiry(raw:unknown,checkoutDay:string,propertyTimezone:string):Date{
