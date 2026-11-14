@@ -9,7 +9,7 @@ import {consumeRateLimit} from "@/platform/rate-limit/postgres-rate-limiter";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {GuestHubRepository,type GuestHubNativeSource} from "../infrastructure/guest-hub-repository";
-import {guestHubIssueDraftSchema,guestHubIssueCommandSchema,guestHubRevokeDraftSchema,guestHubRevokeCommandSchema,guestHubRecoveryInputSchema,guestHubStaffReceiptSchema} from "../domain/guest-hub-contract";
+import {guestHubIssueDraftSchema,guestHubIssueCommandSchema,guestHubRevokeDraftSchema,guestHubRevokeCommandSchema,guestHubRecoveryInputSchema,guestHubStaffReceiptSchema,guestHubRecoveryResultSchema,guestHubRevocationRecoveryInputSchema,guestHubRevocationRecoveryResultSchema} from "../domain/guest-hub-contract";
 import {issueGuestHubCapability} from "../domain/guest-hub-capability";
 import {encryptGuestHubPayload,decryptGuestHubPayload} from "../domain/guest-hub-payload";
 import {configuredGuestHubExpiry,GuestHubAccessError,GuestHubConflictError,GuestHubConfigurationError,GuestHubRateLimitError} from "../domain/guest-hub-policy";
@@ -78,7 +78,21 @@ export async function issueGuestHubLink(actor:AccountActorContext,raw:unknown,de
 }
 
 export async function recoverGuestHubLink(actor:AccountActorContext,raw:unknown,deps:GuestHubDependencies){
- const input=guestHubRecoveryInputSchema.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);const original=await repository.byNonce(input.idempotencyKey);if(!original||original.createdBy!==actor.actorId)throw new GuestHubAccessError();if(input.reservationId&&input.reservationId!==original.reservationId)throw new GuestHubConflictError();await repository.lockLink(original.id);await repository.lockSources(original.reservationId);return privateReceipt(actor,tx,original,true,deps);});
+ const input=guestHubRecoveryInputSchema.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{
+  const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);const original=await repository.byNonce(input.idempotencyKey);
+  if(!original){if(!input.reservationId)throw new GuestHubAccessError();const source=await sourceFor(repository,input.reservationId);await requireGuestHubStaffAuthority(actor,tx,source,"create",await repository.clock());return guestHubRecoveryResultSchema.parse({recorded:false,reservationId:source.reservationId,idempotencyKey:input.idempotencyKey});}
+  if(original.createdBy!==actor.actorId)throw new GuestHubAccessError();if(input.reservationId&&input.reservationId!==original.reservationId)throw new GuestHubConflictError();await repository.lockLink(original.id);await repository.lockSources(original.reservationId);
+  return guestHubRecoveryResultSchema.parse({...await privateReceipt(actor,tx,original,true,deps),recorded:true,idempotencyKey:input.idempotencyKey});
+ });
+}
+
+export async function recoverGuestHubRevocation(actor:AccountActorContext,raw:unknown,deps:GuestHubDependencies){
+ const input=guestHubRevocationRecoveryInputSchema.parse(raw);return withTenant(deps.db,actor.organizationId,async tx=>{
+  const repository=new GuestHubRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);await repository.lockLink(input.linkId);
+  const row=await repository.byId(input.linkId);if(!row)throw new GuestHubAccessError();const source=await sourceFor(repository,row.reservationId);await requireGuestHubStaffAuthority(actor,tx,source,"void",await repository.clock(),await guestHubLinkTarget(repository,row,source));
+  const original=await repository.revocationByNonce(input.idempotencyKey);if(!original)return guestHubRevocationRecoveryResultSchema.parse({recorded:false,linkId:row.id,idempotencyKey:input.idempotencyKey,alreadyRevoked:!!await repository.revocation(row.id)});
+  if(original.createdBy!==actor.actorId)throw new GuestHubAccessError();if(original.linkId!==row.id)throw new GuestHubConflictError();return guestHubRevocationRecoveryResultSchema.parse({recorded:true,id:original.id,linkId:row.id,idempotencyKey:input.idempotencyKey,createdAt:original.createdAt.toISOString()});
+ });
 }
 
 function revokeFingerprint(actor:AccountActorContext,row:GuestHubLink,revocationId:string|null){return jsonbFingerprint({kind:"GUEST_HUB_REVOKE_V1",organizationId:actor.organizationId,actorId:actor.actorId,linkId:row.id,payloadSha256:row.payloadSha256,revocationId});}
