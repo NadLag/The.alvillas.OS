@@ -43,12 +43,16 @@ export function configuredGuestHubExpiry(raw:unknown,checkoutDay:string,property
 }
 
 export type GuestHubLinkState="ACTIVE"|"EXPIRED"|"REVOKED"|"BLOCKED";
+export function effectiveGuestHubExpiry(policy:GuestHubLinkPolicy,recordedExpiresAt:Date,currentCheckoutDay:string,propertyTimezone:string):Date{
+ if(!Number.isFinite(recordedExpiresAt.getTime()))throw new GuestHubConfigurationError();
+ return new Date(Math.min(recordedExpiresAt.getTime(),configuredGuestHubExpiry(policy,currentCheckoutDay,propertyTimezone).getTime()));
+}
 /** Inputs are protected server metadata, never public claims of eligibility or completion. */
 export function guestHubLinkState(input:{policy:GuestHubLinkPolicy;issuedAt:Date;recordedExpiresAt:Date;currentCheckoutDay:string;propertyTimezone:string;now:Date;revoked:boolean;reservationStatus:string;sourceAvailable:boolean;guestSourceMatches:boolean}):GuestHubLinkState{
  const policy=guestHubLinkPolicySchema.parse(input.policy),times=[input.issuedAt,input.recordedExpiresAt,input.now];
  if(times.some(value=>!Number.isFinite(value.getTime()))||input.recordedExpiresAt<=input.issuedAt)throw new GuestHubConfigurationError();
  if(input.revoked)return"REVOKED";
- const currentExpiry=configuredGuestHubExpiry(policy,input.currentCheckoutDay,input.propertyTimezone),expiry=Math.min(input.recordedExpiresAt.getTime(),currentExpiry.getTime());
+ const expiry=effectiveGuestHubExpiry(policy,input.recordedExpiresAt,input.currentCheckoutDay,input.propertyTimezone).getTime();
  if(input.now.getTime()>=expiry)return"EXPIRED";
  if(input.now<input.issuedAt||!policy.enabled||!policy.processing_approval_reference||!input.sourceAvailable||!input.guestSourceMatches||!policy.allowed_reservation_states.some(state=>state===input.reservationStatus))return"BLOCKED";
  return"ACTIVE";
