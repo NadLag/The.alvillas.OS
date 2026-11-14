@@ -1,3 +1,4 @@
+import {onboardingActivationWorkspaceInputSchema,onboardingActivationWorkspaceSchema} from "../domain/onboarding-activation-workspace";
 import {readOnboardingConfigurationReferences,authorizeRecordedOnboardingConfigurationReferences} from "./onboarding-configuration-reference-source";
 import {appendNativeOnboardingActivationEvent} from "./onboarding-activation-events";
 import {onboardingActivationPolicySchema} from "../domain/onboarding-activation-policy";
@@ -1229,6 +1230,26 @@ export async function nativeOnboardingActivationEvidence(actor:AccountActorConte
  for(const principal of[ctx,{...ctx,authContext:restoreAuthorizationCap(row.authorizationCap)}])await activationRecordedContext(principal,tx,row);retainedActivation(row,deps);const result=await activationReceipt(tx,row,true),[property]=await nativeOnboardingPropertyHeads(tx,ctx.organizationId,[row.propertyId],true);return{receipt:result,operational:result.state==="COMPLETE"&&property?.status==="ACTIVE"&&!property.archivedAt};
 }
 /** Internal worker composition restores the original creator cap and rechecks actual current approval/configuration. */
+/** Metadata navigation never substitutes for the reviewed command or its current independent producer grants. */
+export async function readOnboardingActivationWorkspace(actor:AccountActorContext,raw:unknown,deps:OnboardingDependencies){
+ const ctx=actorContext(actor),input=onboardingActivationWorkspaceInputSchema.parse(raw);await spendRead(ctx,deps,input.sessionId);
+ return withTenant(deps.db,ctx.organizationId,async tx=>{
+  const repository=new OnboardingRepository(tx,ctx.organizationId),runs=new OnboardingActivationRepository(tx,ctx.organizationId);
+  const select=async()=>{
+   const {row}=await sessionContext(ctx,tx,input.sessionId),[property]=row.propertyId?await nativeOnboardingPropertyHeads(tx,ctx.organizationId,[row.propertyId],true):[],checks:CurrentAuthorityCheck[]=[{action:"view",resource:resource(ctx.organizationId,row)},{action:"export",resource:{...resource(ctx.organizationId,row),dataClass:"personal"}},...property?[{action:"view"as const,resource:propertyResource(ctx.organizationId,property,row.ownerId)}]:[]],{stored,now}=await authority(ctx,tx,checks),run=await runs.currentForSession(input.sessionId),head=run?await runs.head(run.id):null;
+   let configured:Awaited<ReturnType<typeof settings>>|null=null;try{configured=await settings(tx,ctx.organizationId,now);}catch(error){if(!(error instanceof OnboardingConfigurationError))throw error;}
+   if(row.propertyId&&!property)throw new OnboardingAccessError();
+   if(run){if(run.createdBy!==ctx.actorId)throw new OnboardingAccessError();const trackedProperty=run.propertyId===property?.id?property:(await nativeOnboardingPropertyHeads(tx,ctx.organizationId,[run.propertyId],true))[0];if(!trackedProperty)throw new OnboardingAccessError();const originalResource=resource(ctx.organizationId,{sessionId:run.sessionId,ownerId:run.ownerId,propertyId:run.propertyId,step:"ACTIVATE",createdAt:run.createdAt});await authority(ctx,tx,[{action:"view",resource:originalResource},{action:"export",resource:{...originalResource,dataClass:"personal"}},{action:"view",resource:propertyResource(ctx.organizationId,trackedProperty,run.ownerId)}]);}
+   const [visibleProperty]=property?await nativeOnboardingPropertyRows(tx,ctx.organizationId,[property.id],true):[];if(property&&!visibleProperty)throw new OnboardingAccessError();
+   const review=row.step==="REVIEW"&&property?{revisionId:row.id,propertyId:property.id}:null;
+   let canApprove=Boolean(review&&property&&!property.archivedAt&&["DRAFT","ONBOARDING"].includes(property.status)&&configured?.policy.activation?.modes.includes("BACKGROUND")&&(!run||run.reviewRevisionId!==row.id&&head&&["BLOCKED","FAILED"].includes(head.type)));
+   if(canApprove&&property)try{assertAccountAuthorization(ctx,stored,now,[{action:"approve",resource:resource(ctx.organizationId,row)},{action:"edit",resource:resource(ctx.organizationId,row)},{action:"edit",resource:propertyResource(ctx.organizationId,property,row.ownerId)}],new OnboardingAccessError());}catch(error){if(!(error instanceof OnboardingAccessError))throw error;canApprove=false;}
+   const data=onboardingActivationWorkspaceSchema.parse({sessionId:input.sessionId,property:visibleProperty?{id:visibleProperty.id,name:visibleProperty.name}:null,review,canApprove,run:run?{runId:run.id,reviewRevisionId:run.reviewRevisionId,idempotencyKey:run.commandKey}:null});
+   return{data,fingerprint:commandFingerprint({data,property,policy:configured?.snapshot??null,headId:head?.id??null,authorizationCap:captureAuthorizationCap(ctx.authContext)})};
+  };
+  const before=await select();await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"onboarding.activation_workspace_read",resourceType:"onboarding",resourceId:input.sessionId,propertyScopeId:before.data.property?.id??null,after:{canApprove:before.data.canApprove,hasNativeIntent:Boolean(before.data.run)},requestId:deps.requestId??randomUUID(),occurredAt:await repository.clock()});const final=await select();if(final.fingerprint!==before.fingerprint)throw new OnboardingConflictError();return final.data;
+ });
+}
 export async function nativeOnboardingActivationReference(organizationId:string,tx:TenantTransaction,activationId:string){
  const runs=new OnboardingActivationRepository(tx,organizationId),row=await runs.byId(activationId);if(!row)throw new OnboardingAccessError();const cap=restoreAuthorizationCap(row.authorizationCap);if(cap.organizationId!==organizationId||cap.userAccountId!==row.createdBy)throw new OnboardingAccessError();const actor=actorContext({organizationId,actorId:row.createdBy,authContext:cap}),event=await new OutboxRepository(tx,organizationId).byIdempotencyKey("onboarding.activation:"+row.id),head=await runs.head(row.id);
  if(!event||event.type!==onboardingActivationRequested||event.occurredAt.getTime()!==row.createdAt.getTime()||!isDeepStrictEqual(event.payload,{sessionId:row.sessionId,activationId:row.id,reviewRevisionId:row.reviewRevisionId,propertyId:row.propertyId})||!head)throw new OnboardingConflictError();

@@ -12,11 +12,13 @@ import {POST as admit} from "@/app/api/onboarding/activation/admit/route";
 import {POST as recover} from "@/app/api/onboarding/activation/recover/route";
 import {POST as readiness} from "@/app/api/onboarding/readiness/route";
 import {POST as status} from "@/app/api/onboarding/activation/status/route";
+import {POST as workspace} from "@/app/api/onboarding/activation/workspace/route";
 
 const organizationId=randomUUID(),actorId=randomUUID(),sessionId=randomUUID(),reviewId=randomUUID(),propertyId=randomUUID(),nonce=randomUUID(),scope=organizationId+"."+actorId,origin="http://localhost:3000";
 const actor={organizationId,actorId,authContext:{organizationId,userAccountId:actorId,permissions:new Set(["onboarding:view","onboarding:edit","onboarding:approve","onboarding:export"]),scopes:[{organizationId,scopeType:"organization"as const}]}};
 const draft={sessionId,previousRevisionId:reviewId,step:"ACTIVATE",target:{mode:"BACKGROUND",propertyId}};
 const endpoints=[
+ {path:"activation/workspace",post:workspace,input:{sessionId}},
  {path:"activation/review",post:review,input:draft},
  {path:"activation/admit",post:admit,input:{...draft,idempotencyKey:nonce,reviewFingerprint:"a".repeat(64),reason:"Explicit reviewed native activation"}},
  {path:"activation/recover",post:recover,input:{sessionId,idempotencyKey:nonce}},

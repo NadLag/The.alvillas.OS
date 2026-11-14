@@ -6126,6 +6126,48 @@
         "WORKFLOW_REFERENCE_INVALID": "A workflow refers to invalid configuration.",
         "WORKFLOW_TASK_REFERENCE_MISSING": "Referenced configuration points to a missing task template."
       }
+    },
+    "activation": {
+      "title": "Property activation",
+      "guidance": "Review the approved configuration, start activation and follow the actual results before going live.",
+      "loaded": "Activation details are up to date.",
+      "open": "Open activation",
+      "review": "Review activation",
+      "confirmTitle": "Confirm property activation",
+      "confirmGuidance": "Start the approved work. The property becomes active after all required results have been verified.",
+      "confirm": "Start activation",
+      "uncertain": "The activation reply was interrupted. Recover the original request before taking another action.",
+      "recover": "Recover original request",
+      "notRecorded": "No activation was recorded for the saved request. Review the current configuration before starting again.",
+      "refresh": "Refresh progress",
+      "historical": "This is an earlier activation request. Its results do not confirm readiness of the current configuration.",
+      "ready": "Ready to go live",
+      "notReady": "Go-live checks still pending",
+      "configurationChanged": "Configuration has changed since approval. Review the current configuration before going live.",
+      "unavailableReview": "Complete the configuration review and check your approval access to start activation.",
+      "states": {
+        "PENDING": "Activation queued",
+        "RUNNING": "Activation in progress",
+        "BLOCKED": "Activation needs attention",
+        "COMPLETE": "Property activated",
+        "FAILED": "Activation could not complete"
+      },
+      "effects": {
+        "WORKFLOWS": "Operating workflows",
+        "DOCUMENTS": "French and English owner documents",
+        "EMAIL": "Owner email",
+        "TASKS": "Operational tasks",
+        "NOTIFICATION": "Delivery confirmation"
+      },
+      "checks": {
+        "configuration": "Current approved configuration",
+        "documents": "Owner documents complete",
+        "email": "Owner email delivered",
+        "workflows": "Operating workflows prepared",
+        "tasks": "Operational tasks prepared",
+        "notification": "Delivery confirmed",
+        "activation": "Property activated"
+      }
     }
   },
   "OwnerOnboardingPackage": {
