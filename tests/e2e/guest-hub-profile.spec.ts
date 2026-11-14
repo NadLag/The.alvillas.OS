@@ -9,7 +9,7 @@ import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {guestHubStaffReceiptSchema} from "@/modules/guest-hub/domain/guest-hub-contract";
 import {guestHubProfileGrantCommandSchema,guestHubProfileSubmitSchema} from "@/modules/guest-hub/domain/guest-hub-profile-contract";
 import {guestHubProfilePolicyKey,guestHubProfilePolicySchema} from "@/modules/guest-hub/domain/guest-hub-profile-policy";
-import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace} from "./support/guest-hub-fixture";
+import {prepareNativeGuestHubBrowserFixture,openNativeGuestHubWorkspace,nativeGuestHubResponse,retainNativeGuestHubResponses} from "./support/guest-hub-fixture";
 import {e2eEmail,ensureE2EAccount,waitForE2EAdminLoginWindow,completeE2EAdminMfa} from "./support/auth";
 import {nativeLeadBrowserFinancial,privateNativeLeadBrowserStorage} from "./support/crm-document-fixtures";
 import {acknowledgementBarrier} from "./support/acknowledgement-barrier";
@@ -19,7 +19,7 @@ import fr from "../../messages/fr.json" with {type:"json"};
 import ar from "../../messages/ar.json" with {type:"json"};
 
 const messages={en,fr,ar};
-function response(page:Page,path:string){return page.waitForResponse(value=>new URL(value.url()).pathname==="/api/guest-hub/"+path&&value.request().method()==="POST",{timeout:30000});}
+const response=nativeGuestHubResponse;
 async function privateStorage(page:Page,values:string[]){const stored=await privateNativeLeadBrowserStorage(page);for(const value of values)expect(stored.includes(value)).toBe(false);}
 async function lostReply(page:Page,path:string,parseNonce:(raw:unknown)=>string,button:string){
  const accepted=acknowledgementBarrier();let nonce:string|undefined,sends=0;
@@ -30,6 +30,7 @@ async function lostReply(page:Page,path:string,parseNonce:(raw:unknown)=>string,
 for(const locale of["en","fr","ar"]as const)test("Actual granted native profile preserves contacts and original acknowledgements in "+locale,async({page,browser},info)=>{
  test.setTimeout(600000);const target=process.env.DATABASE_URL?new URL(process.env.DATABASE_URL):null;if(!target||!["127.0.0.1","localhost"].includes(target.hostname)||!(["/alvillas_automation_guest246_profile_20261114","/alvillas_automation_guest248_arrival_20261114"].includes(target.pathname)||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated246+ native profile browser database required");
  const db=new PrismaClient(),email=e2eEmail("native-profile-"+locale+"-"+randomUUID(),info.project.name),password=process.env.ADMIN_PASSWORD??"correct horse battery staple",p=messages[locale].GuestProfile,m=messages[locale].GuestProfileManagement,errors:string[]=[],visitor=await browser.newContext({baseURL:info.project.use.baseURL,viewport:info.project.name==="field-mobile"?{width:360,height:800}:{width:1280,height:900}});
+ await retainNativeGuestHubResponses(page.context());await retainNativeGuestHubResponses(visitor);
  page.on("pageerror",error=>errors.push(error.name));page.setDefaultTimeout(30000);
  try{
   expect((await db.$queryRaw<Array<{count:number}>>`SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`)[0].count).toBeGreaterThanOrEqual(246);
