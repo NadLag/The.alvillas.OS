@@ -6440,5 +6440,101 @@
     "unavailable": "No profile access change is currently permitted. Check the approved policy and your source permissions.",
     "refresh": "Refresh access",
     "close": "Close profile access"
+  },
+  "GuestStayDetailsManagement": {
+    "title": "Arrival and departure access",
+    "guidance": "Grant or withdraw arrival and departure access for this original stay link. Each decision retains its history.",
+    "loading": "Checking current arrival and departure authority…",
+    "loaded": "Current arrival and departure access is ready.",
+    "lastDecision": "Last recorded decision",
+    "decisions": {
+      "GRANTED": "Granted",
+      "WITHDRAWN": "Withdrawn",
+      "NONE": "No decision recorded"
+    },
+    "decision": "Access decision",
+    "grant": "Grant arrival and departure access",
+    "withdraw": "Withdraw arrival and departure access",
+    "reason": "Reason for this decision",
+    "review": "Review this decision",
+    "confirmTitle": "Confirm arrival and departure access",
+    "expiresAt": "Original link expires {date} (UTC).",
+    "confirm": "Record this decision",
+    "edit": "Edit the decision",
+    "saved": "The arrival and departure access decision was recorded.",
+    "recovered": "The original access decision was recovered.",
+    "unrecorded": "The earlier decision was not recorded. Review current authority before retrying.",
+    "uncertain": "The reply was interrupted. Recover the original decision before recording another.",
+    "recover": "Recover the decision",
+    "unavailable": "No arrival and departure access change is currently permitted. Check the approved policy and your source permissions.",
+    "refresh": "Refresh access",
+    "close": "Close arrival and departure access"
+  },
+  "GuestStayDetails": {
+    "title": "Your arrival and departure",
+    "guidance": "Share your arrival and departure plans for this stay. Your booking dates remain the same.",
+    "open": "Share your plans",
+    "loading": "Checking arrival and departure access…",
+    "loaded": "Your current arrival and departure plans are ready.",
+    "fields": {
+      "arrival": "Planned arrival",
+      "departure": "Planned departure",
+      "arrivalMethod": "Arrival travel method",
+      "arrivalReference": "Arrival travel reference",
+      "departureMethod": "Departure travel method",
+      "departureReference": "Departure travel reference"
+    },
+    "empty": "Not provided",
+    "acknowledge": "I acknowledge the notice above.",
+    "review": "Review your plans",
+    "reviewTitle": "Check your arrival and departure",
+    "reviewGuidance": "Confirm these plans for this reservation. Booking dates remain the same.",
+    "confirm": "Save your plans",
+    "edit": "Edit details",
+    "saved": "Your arrival and departure plans were saved.",
+    "recovered": "Your previously saved plans were recovered.",
+    "unrecorded": "Your earlier request was not saved. Review the current details before trying again.",
+    "uncertain": "The reply was interrupted. Recover your earlier request before saving again.",
+    "recover": "Recover your request",
+    "storageUnavailable": "Your browser cannot retain the recovery reference. Allow session storage before saving.",
+    "refresh": "Refresh your plans",
+    "close": "Close your plans",
+    "states": {
+      "uncertain": "The request result is unknown. Recover the original request.",
+      "forbidden": "Your account cannot access these guest links.",
+      "offline": "You’re offline. Your original request is preserved; reconnect to continue.",
+      "validation": "Check the details and review your request again.",
+      "conflict": "The reservation or access settings have changed. Refresh and review again.",
+      "configuration_unavailable": "Guest access settings are unavailable. Ask an authorized administrator to review them.",
+      "rate_limited": "Please wait before trying this request again.",
+      "link_unavailable": "This stay link is unavailable.",
+      "unavailable": "Guest access could not be loaded. Please try again.",
+      "storage_unavailable": "This browser cannot save your pending request. Allow session storage or use another browser before confirming."
+    },
+    "methods": {
+      "AIR": "Air",
+      "RAIL": "Rail",
+      "ROAD": "Road",
+      "SEA": "Sea",
+      "OTHER": "Other"
+    },
+    "occurrences": {
+      "reject": "Only an unambiguous time",
+      "earlier": "First occurrence",
+      "later": "Second occurrence"
+    },
+    "occurrence": "Occurrence of this local time",
+    "timezone": "Times are for the property: {timezone}.",
+    "dateWindow": "Choose a date from {earliest} to {latest}.",
+    "issues": {
+      "required": "Complete this required field.",
+      "not_allowed": "This field is no longer available. Refresh your plans.",
+      "outside_window": "Choose a date within the allowed window.",
+      "occurrence_required": "This local time occurs twice. Choose the first or second occurrence.",
+      "nonexistent_time": "This local time does not exist. Choose another time.",
+      "invalid_time": "Enter a valid local date and time.",
+      "chronology": "Departure must be later than arrival.",
+      "method_unavailable": "Choose an available travel method."
+    }
   }
 }
