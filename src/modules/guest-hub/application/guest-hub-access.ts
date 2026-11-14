@@ -1,6 +1,6 @@
 import type {Action,Resource} from "@/platform/authz/authorize";
 import type {AccountActorContext} from "@/platform/authz/session-context";
-import {recheckAccountAuthorization} from "@/platform/authz/current-authority";
+import {recheckAccountAuthorization,type CurrentAuthorityCheck} from "@/platform/authz/current-authority";
 import type {TenantTransaction} from "@/platform/db/tenant";
 import type {GuestHubLink} from "@prisma/client";
 import type {GuestHubNativeSource,GuestHubRepository} from "../infrastructure/guest-hub-repository";
@@ -15,11 +15,15 @@ export function guestHubResource(organizationId:string,source:GuestHubNativeSour
  return{type:"guest_hub",id:target?.id,organizationId,dataClass:"guest",propertyId:target?.propertyId??source.propertyId,reservationId:source.reservationId,
   city:target?.city??source.cityId??source.city,region:target?.region??source.regionId??source.region,status:source.reservationStatus,occurredAt:target?.createdAt??source.reservationCreatedAt};
 }
+export function guestHubSourceChecks(organizationId:string,source:GuestHubNativeSource):CurrentAuthorityCheck[]{
+ const target=guestHubResource(organizationId,source);
+ return[{action:"view",resource:{...target,type:"reservation",id:source.reservationId,occurredAt:source.reservationCreatedAt}},
+  {action:"view",resource:{...target,type:"guest",id:source.guestId,occurredAt:source.guestCreatedAt}}];
+}
 /** Link management never replaces independent permission to view the actual reservation and guest. */
 export async function requireGuestHubStaffAuthority(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,action:Action,now:Date,link?:GuestHubLinkTarget){
  const target={...guestHubResource(actor.organizationId,source,link),...!link?{occurredAt:now}:{}};
  await recheckAccountAuthorization(actor,tx,now,[{action,resource:target},{action:"view",resource:target},
-  {action:"view",resource:{...target,type:"reservation",id:source.reservationId,propertyId:source.propertyId,city:source.cityId??source.city,region:source.regionId??source.region,occurredAt:source.reservationCreatedAt}},
-  {action:"view",resource:{...target,type:"guest",id:source.guestId,propertyId:source.propertyId,city:source.cityId??source.city,region:source.regionId??source.region,occurredAt:source.guestCreatedAt}}],new GuestHubAccessError());
+  ...guestHubSourceChecks(actor.organizationId,source)],new GuestHubAccessError());
  return target;
 }

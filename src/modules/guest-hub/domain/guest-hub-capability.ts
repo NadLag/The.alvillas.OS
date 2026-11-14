@@ -4,7 +4,7 @@ import {guestHubCapabilityBindingSchema,guestHubCapabilityClaimsSchema,guestHubT
 import {GuestHubConfigurationError,GuestHubInvalidLinkError,guestHubTokenEntropyBytes} from "./guest-hub-policy";
 
 const purpose="alvillas.guest-hub.capability.v1",prefix="alvillas-guest-v1";
-function decodeCanonical(value:string,maximum:number):Buffer{
+export function decodeGuestHubEnvelopePart(value:string,maximum:number):Buffer{
  if(!/^[A-Za-z0-9_-]+$/u.test(value)||value.length>Math.ceil(maximum*4/3))throw new GuestHubInvalidLinkError();
  const bytes=Buffer.from(value,"base64url");if(bytes.byteLength>maximum||bytes.toString("base64url")!==value){bytes.fill(0);throw new GuestHubInvalidLinkError();}return bytes;
 }
@@ -21,8 +21,8 @@ export function issueGuestHubCapability(rawBinding:unknown,env:NodeJS.ProcessEnv
 export function verifyGuestHubCapability(rawToken:unknown,env:NodeJS.ProcessEnv=process.env):GuestHubCapabilityClaims{
  const allocated:Buffer[]=[],retain=(bytes:Buffer)=>{allocated.push(bytes);return bytes;};
  try{
-  const token=guestHubTokenTextSchema.parse(rawToken),[,versionPart,payloadPart,signaturePart]=token.split("."),versionBytes=retain(decodeCanonical(versionPart,120)),plain=retain(decodeCanonical(payloadPart,2048)),signature=retain(decodeCanonical(signaturePart,32));
+  const token=guestHubTokenTextSchema.parse(rawToken),[,versionPart,payloadPart,signaturePart]=token.split("."),versionBytes=retain(decodeGuestHubEnvelopePart(versionPart,120)),plain=retain(decodeGuestHubEnvelopePart(payloadPart,2048)),signature=retain(decodeGuestHubEnvelopePart(signaturePart,32));
   const version=new TextDecoder("utf8",{fatal:true}).decode(versionBytes);if(!verifyBytes(plain,signature,version,purpose,env))throw new GuestHubInvalidLinkError();
-  const claims=guestHubCapabilityClaimsSchema.parse(JSON.parse(new TextDecoder("utf8",{fatal:true}).decode(plain))),nonce=retain(decodeCanonical(claims.nonce,guestHubTokenEntropyBytes));if(nonce.byteLength!==guestHubTokenEntropyBytes)throw new GuestHubInvalidLinkError();return claims;
+  const claims=guestHubCapabilityClaimsSchema.parse(JSON.parse(new TextDecoder("utf8",{fatal:true}).decode(plain))),nonce=retain(decodeGuestHubEnvelopePart(claims.nonce,guestHubTokenEntropyBytes));if(nonce.byteLength!==guestHubTokenEntropyBytes)throw new GuestHubInvalidLinkError();return claims;
  }catch{throw new GuestHubInvalidLinkError();}finally{for(const bytes of allocated)bytes.fill(0);}
 }

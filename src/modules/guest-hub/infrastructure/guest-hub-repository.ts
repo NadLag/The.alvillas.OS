@@ -24,6 +24,8 @@ export class GuestHubRepository{
  }
  async lockPolicy(policyId:string){await this.tx.$queryRaw(Prisma.sql`SELECT id FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND id=${policyId}::uuid FOR SHARE`);}
  async propertyDimensions(propertyId:string){const rows=await this.tx.$queryRaw<Array<{id:string;city:string;cityId:string|null;region:string;regionId:string|null}>>(Prisma.sql`SELECT id,city,city_id AS "cityId",region,region_id AS "regionId" FROM property WHERE organization_id=${this.organizationId}::uuid AND id=${propertyId}::uuid FOR SHARE`);return rows[0]??null;}
+ propertyDimensionsMany(ids:readonly string[]){return this.tx.$queryRaw<Array<{id:string;city:string;cityId:string|null;region:string;regionId:string|null}>>(Prisma.sql`SELECT id,city,city_id AS "cityId",region,region_id AS "regionId" FROM property WHERE organization_id=${this.organizationId}::uuid AND id=ANY(${[...ids]}::uuid[]) ORDER BY id FOR SHARE`);}
+ revocationHeads(linkIds:readonly string[]){return this.tx.guestHubLinkRevocation.findMany({where:{organizationId:this.organizationId,linkId:{in:[...linkIds]}},select:{id:true,linkId:true}});}
  byId(id:string){return this.tx.guestHubLink.findFirst({where:{organizationId:this.organizationId,id}});}
  byNonce(commandKey:string){return this.tx.guestHubLink.findFirst({where:{organizationId:this.organizationId,commandKey}});}
  revocation(linkId:string){return this.tx.guestHubLinkRevocation.findFirst({where:{organizationId:this.organizationId,linkId}});}
@@ -31,7 +33,7 @@ export class GuestHubRepository{
  create(input:Omit<Prisma.GuestHubLinkUncheckedCreateInput,"organizationId">){return this.tx.guestHubLink.create({data:{...input,organizationId:this.organizationId}});}
  revoke(input:Omit<Prisma.GuestHubLinkRevocationUncheckedCreateInput,"organizationId">){return this.tx.guestHubLinkRevocation.create({data:{...input,organizationId:this.organizationId}});}
  history(reservationId:string,asOf:Date,before?:{createdAt:Date;id:string}){
-  return this.tx.guestHubLink.findMany({where:{organizationId:this.organizationId,reservationId,createdAt:{lte:asOf},...before?{OR:[{createdAt:{lt:before.createdAt}},{createdAt:before.createdAt,id:{lt:before.id}}]}:{}},orderBy:[{createdAt:"desc"},{id:"desc"}],take:26,select:{id:true,createdAt:true,expiresAt:true,createdBy:true,reservationId:true,propertyId:true,guestId:true,revocations:{select:{id:true,createdAt:true}}}});
+  return this.tx.guestHubLink.findMany({where:{organizationId:this.organizationId,reservationId,createdAt:{lte:asOf},...before?{OR:[{createdAt:{lt:before.createdAt}},{createdAt:before.createdAt,id:{lt:before.id}}]}:{}},orderBy:[{createdAt:"desc"},{id:"desc"}],take:26,select:{id:true,createdAt:true,expiresAt:true,createdBy:true,commandKey:true,reservationId:true,propertyId:true,guestId:true,revocations:{select:{id:true,createdAt:true}}}});
  }
  async validateBirth(){await this.tx.$executeRaw(Prisma.sql`SET CONSTRAINTS guest_hub_link_birth_guard,guest_hub_revocation_birth_guard,guest_hub_event_birth_guard IMMEDIATE`);}
 }

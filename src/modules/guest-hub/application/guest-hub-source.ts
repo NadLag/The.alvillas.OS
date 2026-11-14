@@ -27,6 +27,6 @@ export function guestHubOriginalBinding(row:GuestHubLink):GuestHubPayloadBinding
  if(row.payloadSchema!==1||jsonbFingerprint(row.policySnapshot)!==row.policyFingerprint||jsonbFingerprint(row.sourceSnapshot)!==row.sourceFingerprint)throw new GuestHubConfigurationError();
  return{organizationId:row.organizationId,linkId:row.id,reservationId:row.reservationId,propertyId:row.propertyId,guestId:row.guestId,issuedAt:row.createdAt.toISOString(),expiresAt:row.expiresAt.toISOString(),createdBy:row.createdBy,policyId:row.policyId,policyVersion:row.policyVersion,commandKey:row.commandKey,commandHash:row.commandHash,policyFingerprint:row.policyFingerprint,sourceFingerprint:row.sourceFingerprint,tokenHash:row.tokenHash};
 }
-export function currentGuestHubState(row:GuestHubLink,source:GuestHubNativeSource,settings:Awaited<ReturnType<typeof guestHubSettings>>,revoked:boolean,now:Date){
+export function currentGuestHubState(row:Pick<GuestHubLink,"createdAt"|"expiresAt"|"propertyId"|"guestId">,source:GuestHubNativeSource,settings:Awaited<ReturnType<typeof guestHubSettings>>,revoked:boolean,now:Date){
  return guestHubLinkState({policy:settings.policy,issuedAt:row.createdAt,recordedExpiresAt:row.expiresAt,currentCheckoutDay:source.checkOut.toISOString().slice(0,10),propertyTimezone:source.timezone,now,revoked,reservationStatus:source.reservationStatus,sourceAvailable:source.sourceAvailable&&source.propertyId===row.propertyId,guestSourceMatches:source.guestId===row.guestId});
 }
