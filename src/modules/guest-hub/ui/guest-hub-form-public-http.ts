@@ -11,7 +11,7 @@ import {guestHubIdSchema} from "../domain/guest-hub-contract";
 import {guestHubMaximumRequestBytes,GuestHubInvalidLinkError,GuestHubRateLimitError,GuestHubConfigurationError} from "../domain/guest-hub-policy";
 
 type Command=(capability:unknown,input:unknown,deps:GuestHubVisitDependencies)=>Promise<unknown>;
-type Definition={feature:"F-GST-03"|"F-GST-04";view:(capability:unknown,deps:GuestHubVisitDependencies)=>Promise<unknown>;review:Command;admit:Command;recover:Command;validation?:(error:unknown)=>unknown|null};
+type Definition={feature:"F-GST-03"|"F-GST-04";view:(capability:unknown,deps:GuestHubVisitDependencies)=>Promise<unknown>;review:Command;admit:Command;recover:Command;validation?:(error:unknown)=>unknown};
 const headers={"Cache-Control":"private, no-store","Referrer-Policy":"no-referrer",Vary:"Cookie, Origin"},empty=z.object({}).strict();
 /** Every self-service form retains the original cookie, CSRF, body, cache and sanitized-error boundary. */
 export async function guestHubFormPublicHttp(request:NextRequest,deps:GuestHubDependencies&{verificationOrganizationId?:string},rawLinkId:unknown,action:"view"|"review"|"admit"|"recover",definition:Definition){
