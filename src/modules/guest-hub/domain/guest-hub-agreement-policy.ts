@@ -18,6 +18,7 @@ export const guestHubAgreementPolicySchema=z.object({
 export type GuestHubAgreementPolicy=z.infer<typeof guestHubAgreementPolicySchema>;
 export class GuestHubAgreementAccessError extends Error{constructor(){super("guest_agreement_access_unavailable");}}
 export class GuestHubAgreementConflictError extends Error{constructor(){super("guest_agreement_original_changed");}}
+export class GuestHubAgreementConfigurationError extends Error{constructor(){super("guest_agreement_private_configuration_required");}}
 
 export function effectiveGuestHubAgreementPolicy(captured:GuestHubAgreementPolicy,current:GuestHubAgreementPolicy){
  const original=guestHubAgreementPolicySchema.parse(captured),latest=guestHubAgreementPolicySchema.parse(current);

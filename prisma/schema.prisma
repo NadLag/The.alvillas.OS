@@ -619,6 +619,9 @@ model Organization {
   guestHubIdentityDocumentFiles GuestHubIdentityDocumentFile[]
  guestIdentityDocumentAdmissions GuestHubIdentityDocumentAdmission[] @relation("GuestIdentityAdmissionOrganization")
  guestIdentityDocumentPublications GuestHubIdentityDocumentPublication[] @relation("GuestIdentityPublicationOrganization")
+  guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleaseOrganization")
+  guestHubAgreementRequests GuestHubAgreementRequest[] @relation("GuestAgreementRequestOrganization")
+  guestHubAgreementDocumentOrigins GuestHubAgreementDocumentOrigin[] @relation("GuestAgreementOriginOrganization")
 }
 
 model Region {
@@ -966,6 +969,8 @@ model UserAccount {
  requestedOwnerPackages OwnerOnboardingPackage[]
   onboardingOwnerDeliveries OwnerOnboardingDelivery[]
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantActor")
+  guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleaseActor")
+  guestHubAgreementDocumentOrigins GuestHubAgreementDocumentOrigin[] @relation("GuestAgreementOriginDelegator")
 }
 
 model AuthCredential {
@@ -1379,6 +1384,8 @@ model Property {
   guestHubHouseRulesAcceptances GuestHubHouseRulesAcceptance[] @relation("GuestHouseRulesProperty")
 
   guestHubIdentityDocumentCaptures GuestHubIdentityDocumentCapture[] @relation("GuestIdentityCaptureProperty")
+  guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleaseProperty")
+  guestHubAgreementRequests GuestHubAgreementRequest[] @relation("GuestAgreementRequestProperty")
 }
 
 model PropertyTemplateVersion {
@@ -1631,6 +1638,8 @@ model Reservation {
   guestHubHouseRulesAcceptances GuestHubHouseRulesAcceptance[] @relation("GuestHouseRulesReservation")
 
   guestHubIdentityDocumentCaptures GuestHubIdentityDocumentCapture[] @relation("GuestIdentityCaptureReservation")
+  guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleaseReservation")
+  guestHubAgreementRequests GuestHubAgreementRequest[] @relation("GuestAgreementRequestReservation")
 }
 
 model ReservationConflict {
@@ -2467,6 +2476,8 @@ model ConfigRule {
   guestIdentityArchiveDelegations GuestHubIdentityDocumentDelegation[] @relation("GuestIdentityDelegationArchivePolicy")
   guestIdentityRetentionDelegations GuestHubIdentityDocumentDelegation[] @relation("GuestIdentityDelegationRetentionPolicy")
  guestIdentityAdmissionRetentionPolicies GuestHubIdentityDocumentAdmission[] @relation("GuestIdentityAdmissionRetentionPolicy")
+  guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleasePolicy")
+  guestHubAgreementRequests GuestHubAgreementRequest[] @relation("GuestAgreementRequestPolicy")
 }
 
 model ReservationConfigSnapshot {
@@ -2656,6 +2667,8 @@ model OutboxEvent {
   guestHubIdentityDocumentCaptures GuestHubIdentityDocumentCapture[] @relation("GuestIdentityCaptureOutbox")
  guestIdentityDocumentAdmission GuestHubIdentityDocumentAdmission? @relation("GuestIdentityAdmissionOutbox")
  guestIdentityDocumentPublication GuestHubIdentityDocumentPublication? @relation("GuestIdentityPublicationOutbox")
+  guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleaseOutbox")
+  guestHubAgreementRequests GuestHubAgreementRequest[] @relation("GuestAgreementRequestOutbox")
 }
 
 model PushSubscription {
@@ -2920,6 +2933,8 @@ model GuestRecord {
   guestHubHouseRulesAcceptances GuestHubHouseRulesAcceptance[] @relation("GuestHouseRulesGuest")
 
   guestHubIdentityDocumentCaptures GuestHubIdentityDocumentCapture[] @relation("GuestIdentityCaptureGuest")
+  guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleaseGuest")
+  guestHubAgreementRequests GuestHubAgreementRequest[] @relation("GuestAgreementRequestGuest")
 }
 
 model ReservationFeed {
@@ -5359,6 +5374,9 @@ model SignatureProviderIntent {
   @@index([organizationId,commandKey],map:"signature_provider_intent_nonce_idx")
   @@index([providerScopeHash,organizationId],map:"signature_provider_intent_scope_idx")
   @@map("signature_provider_intent")
+  guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleasePreparation")
+  guestHubAgreementRequests GuestHubAgreementRequest[] @relation("GuestAgreementRequestPreparation")
+  guestHubAgreementDocumentOrigin GuestHubAgreementDocumentOrigin? @relation("GuestAgreementOriginIntent")
 }
 
 model SignatureProviderAttempt {
@@ -5913,6 +5931,8 @@ model GuestHubLink {
   guestHubHouseRulesAcceptances GuestHubHouseRulesAcceptance[] @relation("GuestHouseRulesLink")
 
   guestHubIdentityDocumentCaptures GuestHubIdentityDocumentCapture[] @relation("GuestIdentityCaptureLink")
+  guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleaseLink")
+  guestHubAgreementRequests GuestHubAgreementRequest[] @relation("GuestAgreementRequestLink")
 }
 
 model GuestHubLinkRevocation {
@@ -6270,4 +6290,126 @@ model GuestHubHouseRulesAcceptance {
  @@unique([organizationId,outboxEventId],map:"guest_house_rules_outbox_key")
  @@index([organizationId,linkId,createdAt,id],map:"guest_house_rules_link_history_idx")
  @@map("guest_hub_house_rules_acceptance")
+}
+
+
+model GuestHubAgreementRelease {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ linkId String @map("link_id") @db.Uuid
+ reservationId String @map("reservation_id") @db.Uuid
+ propertyId String @map("property_id") @db.Uuid
+ guestId String @map("guest_id") @db.Uuid
+ previousId String? @map("previous_id") @db.Uuid
+ version Int
+ decision String
+ preparationId String? @map("preparation_id") @db.Uuid
+ requestedLocale String? @map("requested_locale")
+ originalFingerprint String? @map("original_fingerprint")
+ originalSnapshot Json @map("original_snapshot")
+ documentAuthorityFingerprint String? @map("document_authority_fingerprint")
+ linkTokenHash String @map("link_token_hash")
+ policyId String? @map("policy_id") @db.Uuid
+ policyVersion Int? @map("policy_version")
+ policyFingerprint String? @map("policy_fingerprint")
+ policySnapshot Json @map("policy_snapshot")
+ sourceFingerprint String @map("source_fingerprint")
+ sourceSnapshot Json @map("source_snapshot")
+ authorizationCap Json @map("authorization_cap")
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ reviewFingerprint String @map("review_fingerprint")
+ signatureVersion String @map("signature_version")
+ signature String
+ outboxEventId String @map("outbox_event_id") @db.Uuid
+ reason String
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation("GuestAgreementReleaseOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ link GuestHubLink @relation("GuestAgreementReleaseLink",fields:[organizationId,linkId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ reservation Reservation @relation("GuestAgreementReleaseReservation",fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ property Property @relation("GuestAgreementReleaseProperty",fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ guest GuestRecord @relation("GuestAgreementReleaseGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ policy ConfigRule? @relation("GuestAgreementReleasePolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ preparation SignatureProviderIntent? @relation("GuestAgreementReleasePreparation",fields:[organizationId,preparationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ actor UserAccount @relation("GuestAgreementReleaseActor",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ outbox OutboxEvent @relation("GuestAgreementReleaseOutbox",fields:[organizationId,outboxEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ previous GuestHubAgreementRelease? @relation("GuestAgreementReleasePredecessor",fields:[organizationId,previousId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ successors GuestHubAgreementRelease[] @relation("GuestAgreementReleasePredecessor")
+ requests GuestHubAgreementRequest[]
+ @@unique([organizationId,id],map:"guest_agreement_release_org_id_key")
+ @@unique([organizationId,linkId,version],map:"guest_agreement_release_version_key")
+ @@unique([organizationId,previousId],map:"guest_agreement_release_predecessor_key")
+ @@unique([organizationId,createdBy,commandKey],map:"guest_agreement_release_actor_nonce_key")
+ @@unique([organizationId,outboxEventId],map:"guest_agreement_release_outbox_key")
+ @@index([organizationId,linkId,createdAt,id],map:"guest_agreement_release_link_history_idx")
+ @@map("guest_hub_agreement_release")
+}
+
+model GuestHubAgreementRequest {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ linkId String @map("link_id") @db.Uuid
+ releaseId String @map("release_id") @db.Uuid
+ reservationId String @map("reservation_id") @db.Uuid
+ propertyId String @map("property_id") @db.Uuid
+ guestId String @map("guest_id") @db.Uuid
+ preparationId String @map("preparation_id") @db.Uuid
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ commandKeyVersion String @map("command_key_version")
+ releaseFingerprint String @map("release_fingerprint")
+ policyId String @map("policy_id") @db.Uuid
+ policyVersion Int @map("policy_version")
+ policyFingerprint String @map("policy_fingerprint")
+ policySnapshot Json @map("policy_snapshot")
+ sourceFingerprint String @map("source_fingerprint")
+ sourceSnapshot Json @map("source_snapshot")
+ originalFingerprint String @map("original_fingerprint")
+ requestedLocale String @map("requested_locale")
+ documentLocale String @map("document_locale")
+ encryptedPayload Bytes @map("encrypted_payload")
+ payloadSha256 String @map("payload_sha256")
+ payloadSchema Int @default(1) @map("payload_schema")
+ outboxEventId String @map("outbox_event_id") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation("GuestAgreementRequestOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ link GuestHubLink @relation("GuestAgreementRequestLink",fields:[organizationId,linkId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ release GuestHubAgreementRelease @relation(fields:[organizationId,releaseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ reservation Reservation @relation("GuestAgreementRequestReservation",fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ property Property @relation("GuestAgreementRequestProperty",fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ guest GuestRecord @relation("GuestAgreementRequestGuest",fields:[organizationId,guestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ policy ConfigRule @relation("GuestAgreementRequestPolicy",fields:[organizationId,policyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ preparation SignatureProviderIntent @relation("GuestAgreementRequestPreparation",fields:[organizationId,preparationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ outbox OutboxEvent @relation("GuestAgreementRequestOutbox",fields:[organizationId,outboxEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ documentOrigin GuestHubAgreementDocumentOrigin?
+ @@unique([organizationId,id],map:"guest_agreement_request_org_id_key")
+ @@unique([organizationId,linkId,commandKey],map:"guest_agreement_request_nonce_key")
+ @@unique([organizationId,preparationId],map:"guest_agreement_request_preparation_key")
+ @@unique([organizationId,outboxEventId],map:"guest_agreement_request_outbox_key")
+ @@index([organizationId,releaseId,createdAt,id],map:"guest_agreement_request_release_history_idx")
+ @@map("guest_hub_agreement_request")
+}
+
+model GuestHubAgreementDocumentOrigin {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ guestRequestId String @map("guest_request_id") @db.Uuid
+ distributionIntentId String @map("distribution_intent_id") @db.Uuid
+ delegatedBy String @map("delegated_by") @db.Uuid
+ provenance Json
+ provenanceFingerprint String @map("provenance_fingerprint")
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation("GuestAgreementOriginOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ guestRequest GuestHubAgreementRequest @relation(fields:[organizationId,guestRequestId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ distributionIntent SignatureProviderIntent @relation("GuestAgreementOriginIntent",fields:[organizationId,distributionIntentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ delegator UserAccount @relation("GuestAgreementOriginDelegator",fields:[organizationId,delegatedBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ @@unique([organizationId,id],map:"guest_agreement_origin_org_id_key")
+ @@unique([organizationId,guestRequestId],map:"guest_agreement_origin_request_key")
+ @@unique([organizationId,distributionIntentId],map:"guest_agreement_origin_intent_key")
+ @@map("guest_hub_agreement_document_origin")
 }
