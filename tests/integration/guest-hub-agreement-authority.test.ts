@@ -5,7 +5,7 @@ import {withTenant} from "@/platform/db/tenant";
 import {nativeGuestAgreementDocumentAuthority} from "@/app/api/guest-hub/agreement/native-document-authority";
 import {nativeGuestAgreementPreparedFixture} from "./support/guest-hub-agreement-fixture";
 import {nativeDocumentObjectFixture} from "./support/document-object-store-fixture";
-import {ownedSignatureProvider} from "./support/document-signature-provider";
+import type {ownedSignatureProvider} from "./support/document-signature-provider";
 import {nativeLeadFinancialGuard} from "./support/lead-fixture";
 import {provisionIntegrationRole} from "./support/database-role";
 
