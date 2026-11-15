@@ -1,0 +1,16 @@
+import {z} from "zod";
+import {guestHubIdSchema,guestHubFingerprintSchema} from "./guest-hub-contract";
+export const guestHubFormKeySchema=z.enum(["PROFILE","STAY_DETAILS"]);
+export type GuestHubFormKey=z.infer<typeof guestHubFormKeySchema>;
+export const guestHubFormGrantBindingSchema=z.object({protocol:z.literal("NATIVE_GUEST_FORM_GRANT_V1"),formKey:guestHubFormKeySchema,id:guestHubIdSchema,organizationId:guestHubIdSchema,linkId:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,guestId:guestHubIdSchema,previousId:guestHubIdSchema.nullable(),version:z.number().int().positive(),decision:z.enum(["GRANTED","WITHDRAWN"]),linkTokenHash:guestHubFingerprintSchema,policyId:guestHubIdSchema.nullable(),policyVersion:z.number().int().positive().nullable(),policyFingerprint:guestHubFingerprintSchema.nullable(),sourceFingerprint:guestHubFingerprintSchema,createdBy:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),commandKey:guestHubIdSchema,commandHash:guestHubFingerprintSchema}).strict().superRefine((value,context)=>{
+ if((value.version===1)!==(value.previousId===null))context.addIssue({code:"custom",path:["previousId"],message:"actual_form_grant_predecessor_required"});
+ if(value.decision==="GRANTED"&&(!value.policyId||!value.policyVersion||!value.policyFingerprint||Date.parse(value.expiresAt)<=Date.parse(value.createdAt)))context.addIssue({code:"custom",path:["policyId"],message:"actual_approved_unexpired_profile_grant_required"});
+});
+export type GuestHubFormGrantBinding=z.infer<typeof guestHubFormGrantBindingSchema>;
+export const guestHubFormGrantDraftSchema=z.object({linkId:guestHubIdSchema,decision:z.enum(["GRANTED","WITHDRAWN"])}).strict();
+export const guestHubFormGrantCommandSchema=guestHubFormGrantDraftSchema.extend({idempotencyKey:guestHubIdSchema,reviewFingerprint:guestHubFingerprintSchema,reason:z.string().trim().min(1).max(1000).refine(value=>!/[\p{Cc}]/u.test(value))}).strict();
+export const guestHubFormGrantRecoverySchema=z.object({linkId:guestHubIdSchema,idempotencyKey:guestHubIdSchema,decision:z.enum(["GRANTED","WITHDRAWN"]).optional()}).strict();
+export const guestHubFormGrantReceiptSchema=z.object({id:guestHubIdSchema,linkId:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,decision:z.enum(["GRANTED","WITHDRAWN"]),version:z.number().int().positive(),idempotencyKey:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),replayed:z.boolean()}).strict();
+export const guestHubFormGrantStatusSchema=z.object({linkId:guestHubIdSchema,reservationId:guestHubIdSchema,decision:z.enum(["GRANTED","WITHDRAWN"]).nullable(),version:z.number().int().nonnegative(),canGrant:z.boolean(),canWithdraw:z.boolean()}).strict();
+export const guestHubFormGrantReviewSchema=z.object({linkId:guestHubIdSchema,reservationId:guestHubIdSchema,decision:z.enum(["GRANTED","WITHDRAWN"]),expiresAt:z.iso.datetime(),reviewFingerprint:guestHubFingerprintSchema}).strict();
+export const guestHubFormGrantRecoveryResultSchema=z.discriminatedUnion("recorded",[guestHubFormGrantReceiptSchema.extend({recorded:z.literal(true)}).strict(),z.object({recorded:z.literal(false),linkId:guestHubIdSchema,idempotencyKey:guestHubIdSchema}).strict()]);

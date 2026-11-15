@@ -6440,5 +6440,101 @@
     "unavailable": "Aucune modification d’accès au profil n’est actuellement autorisée. Vérifiez la politique approuvée et vos droits sur les données concernées.",
     "refresh": "Actualiser l’accès",
     "close": "Fermer l’accès au profil"
+  },
+  "GuestStayDetailsManagement": {
+    "title": "Accès aux horaires du séjour",
+    "guidance": "Autorisez ou retirez la saisie des horaires d’arrivée et de départ pour ce lien de séjour. Chaque décision conserve son historique.",
+    "loading": "Vérification des droits actuels sur les horaires…",
+    "loaded": "Les droits actuels sur les horaires sont prêts.",
+    "lastDecision": "Dernière décision enregistrée",
+    "decisions": {
+      "GRANTED": "Accordé",
+      "WITHDRAWN": "Retiré",
+      "NONE": "Aucune décision enregistrée"
+    },
+    "decision": "Décision d’accès",
+    "grant": "Autoriser la saisie des horaires",
+    "withdraw": "Retirer la saisie des horaires",
+    "reason": "Motif de cette décision",
+    "review": "Vérifier cette décision",
+    "confirmTitle": "Confirmer l’accès aux horaires",
+    "expiresAt": "Le lien d’origine expire le {date} (UTC).",
+    "confirm": "Enregistrer cette décision",
+    "edit": "Modifier la décision",
+    "saved": "La décision d’accès aux horaires a été enregistrée.",
+    "recovered": "La décision d’accès d’origine a été récupérée.",
+    "unrecorded": "La décision précédente n’a pas été enregistrée. Vérifiez les autorisations actuelles avant de réessayer.",
+    "uncertain": "La réponse a été interrompue. Récupérez la décision d’origine avant un nouvel enregistrement.",
+    "recover": "Récupérer la décision",
+    "unavailable": "Aucun changement d’accès aux horaires n’est actuellement autorisé. Vérifiez la politique approuvée et vos droits sur les sources.",
+    "refresh": "Actualiser l’accès",
+    "close": "Fermer l’accès aux horaires"
+  },
+  "GuestStayDetails": {
+    "title": "Votre arrivée et votre départ",
+    "guidance": "Indiquez vos horaires prévus pour ce séjour. Les dates de réservation restent identiques.",
+    "open": "Indiquer vos horaires",
+    "loading": "Vérification de l’accès aux horaires…",
+    "loaded": "Vos horaires actuels d’arrivée et de départ sont prêts.",
+    "fields": {
+      "arrival": "Arrivée prévue",
+      "departure": "Départ prévu",
+      "arrivalMethod": "Moyen de transport à l’arrivée",
+      "arrivalReference": "Référence du trajet à l’arrivée",
+      "departureMethod": "Moyen de transport au départ",
+      "departureReference": "Référence du trajet au départ"
+    },
+    "empty": "Non renseigné",
+    "acknowledge": "Je prends connaissance de la notice ci-dessus.",
+    "review": "Vérifier vos horaires",
+    "reviewTitle": "Vérifier l’arrivée et le départ",
+    "reviewGuidance": "Confirmez ces horaires pour cette réservation. Les dates de réservation restent identiques.",
+    "confirm": "Enregistrer vos horaires",
+    "edit": "Modifier les informations",
+    "saved": "Vos horaires d’arrivée et de départ ont été enregistrés.",
+    "recovered": "Vos horaires déjà enregistrés ont été retrouvés.",
+    "unrecorded": "Votre demande précédente n’a pas été enregistrée. Vérifiez les informations actuelles avant de réessayer.",
+    "uncertain": "La réponse a été interrompue. Récupérez votre demande précédente avant un nouvel enregistrement.",
+    "recover": "Récupérer votre demande",
+    "storageUnavailable": "Votre navigateur ne peut pas conserver la référence de récupération. Autorisez le stockage de session avant d’enregistrer.",
+    "refresh": "Actualiser vos horaires",
+    "close": "Fermer vos horaires",
+    "states": {
+      "uncertain": "Le résultat de la demande est inconnu. Récupérez la demande originale.",
+      "forbidden": "Votre compte ne peut pas accéder à ces liens voyageurs.",
+      "offline": "Vous êtes hors ligne. Votre demande originale est conservée ; reconnectez-vous pour continuer.",
+      "validation": "Vérifiez les informations et examinez à nouveau votre demande.",
+      "conflict": "La réservation ou les paramètres d’accès ont changé. Actualisez et vérifiez à nouveau.",
+      "configuration_unavailable": "Les paramètres d’accès voyageur sont indisponibles. Demandez à un administrateur autorisé de les vérifier.",
+      "rate_limited": "Veuillez patienter avant de réessayer cette demande.",
+      "link_unavailable": "Ce lien de séjour est indisponible.",
+      "unavailable": "L’accès voyageur n’a pas pu être chargé. Veuillez réessayer.",
+      "storage_unavailable": "Ce navigateur ne peut pas enregistrer votre demande en attente. Autorisez le stockage de session ou utilisez un autre navigateur avant de confirmer."
+    },
+    "methods": {
+      "AIR": "Avion",
+      "RAIL": "Train",
+      "ROAD": "Route",
+      "SEA": "Mer",
+      "OTHER": "Autre"
+    },
+    "occurrences": {
+      "reject": "Uniquement une heure sans ambiguïté",
+      "earlier": "Première occurrence",
+      "later": "Seconde occurrence"
+    },
+    "occurrence": "Occurrence de cette heure locale",
+    "timezone": "Les horaires suivent le fuseau du logement : {timezone}.",
+    "dateWindow": "Choisissez une date du {earliest} au {latest}.",
+    "issues": {
+      "required": "Renseignez ce champ obligatoire.",
+      "not_allowed": "Ce champ n’est plus disponible. Actualisez vos horaires.",
+      "outside_window": "Choisissez une date dans la période autorisée.",
+      "occurrence_required": "Cette heure locale existe deux fois. Choisissez la première ou la seconde occurrence.",
+      "nonexistent_time": "Cette heure locale n’existe pas. Choisissez une autre heure.",
+      "invalid_time": "Saisissez une date et une heure locales valides.",
+      "chronology": "Le départ doit suivre l’arrivée.",
+      "method_unavailable": "Choisissez un moyen de transport disponible."
+    }
   }
 }

@@ -28,7 +28,7 @@ async function lostReply(page:Page,path:string,parseNonce:(raw:unknown)=>string,
 }
 
 for(const locale of["en","fr","ar"]as const)test("Actual granted native profile preserves contacts and original acknowledgements in "+locale,async({page,browser},info)=>{
- test.setTimeout(600000);const target=process.env.DATABASE_URL?new URL(process.env.DATABASE_URL):null;if(!target||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname==="/alvillas_automation_guest246_profile_20261114"||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated246 native profile browser database required");
+ test.setTimeout(600000);const target=process.env.DATABASE_URL?new URL(process.env.DATABASE_URL):null;if(!target||!["127.0.0.1","localhost"].includes(target.hostname)||!(["/alvillas_automation_guest246_profile_20261114","/alvillas_automation_guest248_arrival_20261114"].includes(target.pathname)||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated246+ native profile browser database required");
  const db=new PrismaClient(),email=e2eEmail("native-profile-"+locale+"-"+randomUUID(),info.project.name),password=process.env.ADMIN_PASSWORD??"correct horse battery staple",p=messages[locale].GuestProfile,m=messages[locale].GuestProfileManagement,errors:string[]=[],visitor=await browser.newContext({baseURL:info.project.use.baseURL,viewport:info.project.name==="field-mobile"?{width:360,height:800}:{width:1280,height:900}});
  await retainNativeGuestHubResponses(page.context());await retainNativeGuestHubResponses(visitor);
  page.on("pageerror",error=>errors.push(error.name));page.setDefaultTimeout(30000);
