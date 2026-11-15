@@ -45,7 +45,7 @@ import { reservationSyncPolicyKey, reservationSyncPolicySchema } from "@/modules
 import { fieldDevicePolicyKey, fieldDevicePolicySchema } from "./field-device-policy";
 import { fieldUploadLifecycleKey, fieldUploadLifecycleSchema } from "./field-upload-lifecycle-policy";
 import { configSlugSchema } from "./identifiers";
-import {serviceCatalogMaximumItems,servicePricingModelSchema} from "./service-catalog-policy";
+import {serviceCatalogMaximumItems,servicePricingModelSchema,serviceCatalogOrderTermsSchema} from "./service-catalog-policy";
 import {workflowCatalogSchema} from "./workflow-policy";
 import { inventoryMinimumsSchema } from "./inventory-policy";
 import { accountingPeriodPolicyKey, accountingPeriodPolicySchema } from "@/modules/finance/domain/accounting-period";
@@ -291,7 +291,8 @@ export const servicePricingSchema = z
           available: z.boolean().optional(),
           pricing_model: servicePricingModelSchema,
           amount: moneyAmountSchema.optional(),
-          currency: currencySchema.optional()
+          currency: currencySchema.optional(),
+          order_terms:serviceCatalogOrderTermsSchema.optional()
         })
         .passthrough()
     ).max(serviceCatalogMaximumItems).refine(v => new Set(v.map(i => i.key)).size === v.length, "Service keys must be unique")
