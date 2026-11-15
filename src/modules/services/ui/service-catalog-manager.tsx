@@ -27,8 +27,8 @@ export function ServiceCatalogManager({locale,timezone,propertyId,authorizationS
  },[invalidate,nonceKey,canConfigure,propertyId,authorizationScope]);
  useEffect(()=>{
   const hide=()=>{invalidate();setVisible(false);setPage(null);setEditor(null);setHistory(false);setQuery("");setNotice(null);},show=()=>{if(document.hidden)return;setVisible(true);void load();},visibility=()=>document.hidden?hide():show(),offline=()=>{hide();setState("offline");},pageShow=(event:PageTransitionEvent)=>{if(event.persisted)show();};
-  document.addEventListener("visibilitychange",visibility);window.addEventListener("pagehide",hide);window.addEventListener("pageshow",pageShow);window.addEventListener("offline",offline);window.addEventListener("online",show);if(document.hidden)hide();else void load();
-  return()=>{invalidate();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("pagehide",hide);window.removeEventListener("pageshow",pageShow);window.removeEventListener("offline",offline);window.removeEventListener("online",show);};
+  let mounted=true;document.addEventListener("visibilitychange",visibility);window.addEventListener("pagehide",hide);window.addEventListener("pageshow",pageShow);window.addEventListener("offline",offline);window.addEventListener("online",show);queueMicrotask(()=>{if(mounted){if(document.hidden)hide();else void load();}});
+  return()=>{mounted=false;invalidate();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("pagehide",hide);window.removeEventListener("pageshow",pageShow);window.removeEventListener("offline",offline);window.removeEventListener("online",show);};
  },[invalidate,load]);
  function search(event:FormEvent){event.preventDefault();setHistory(false);void load(query);}
  if(!visible)return<p role="status">{t(state==="offline"?"states.offline":"privateHidden")}</p>;
