@@ -6,7 +6,7 @@ import type {guestHubAgreementTemplate} from "../domain/guest-hub-agreement-poli
 import type {GuestHubAgreementNativeStatus} from "../domain/guest-hub-agreement-progress";
 
 export type GuestHubAgreementPreparedAuthority={
- original:GuestHubAgreementOriginal;preparationId:string;fingerprint:string;
+ original:GuestHubAgreementOriginal;preparationId:string;fingerprint:string;documentVersionNumber:number;
  archivePolicyId:string;signaturePolicyId:string;templatePolicyId:string;
 };
 /** App composition supplies the existing native original PDF, template, guest
@@ -14,6 +14,6 @@ export type GuestHubAgreementPreparedAuthority={
 export interface GuestHubAgreementDocumentAuthorityProvider{
  capture(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,selection:ReturnType<typeof guestHubAgreementTemplate>,preparationId:string,env?:NodeJS.ProcessEnv):Promise<GuestHubAgreementPreparedAuthority>;
  status(actor:AccountActorContext,tx:TenantTransaction,original:GuestHubAgreementOriginal,preparationId:string,env?:NodeJS.ProcessEnv):Promise<GuestHubAgreementNativeStatus>;
- choices(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,selection:ReturnType<typeof guestHubAgreementTemplate>,filter:string,cursor?:string,env?:NodeJS.ProcessEnv):Promise<{items:Array<{preparationId:string;preparedAt:string;original:GuestHubAgreementOriginal}>;next:string|null}>;
- history(actor:AccountActorContext,tx:TenantTransaction,original:GuestHubAgreementOriginal,env?:NodeJS.ProcessEnv):Promise<void>;
+ choices(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,selection:ReturnType<typeof guestHubAgreementTemplate>,filter:string,cursor?:string,env?:NodeJS.ProcessEnv):Promise<{items:Array<{preparationId:string;preparedAt:string;original:GuestHubAgreementOriginal;documentVersionNumber:number}>;next:string|null}>;
+ history(actor:AccountActorContext,tx:TenantTransaction,original:GuestHubAgreementOriginal,env?:NodeJS.ProcessEnv):Promise<{documentVersionNumber:number}>;
 }
