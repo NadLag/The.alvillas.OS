@@ -1,6 +1,6 @@
 import {ZodError} from "zod";
 import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
-import {readPreparedSignatureAuthority,readPreparedSignatureDeliveryStatus,preparedSignatureCandidatePage} from "@/modules/documents/application/document-prepared-signature-authority";
+import {readPreparedSignatureAuthority,readPreparedSignatureDeliveryStatus,preparedSignatureCandidatePage,retainedSignatureOriginalAuthority} from "@/modules/documents/application/document-prepared-signature-authority";
 import {DocumentAccessError,DocumentConfigurationError,DocumentConflictError} from "@/modules/documents/domain/document-command";
 import {bindGuestHubAgreementOriginal} from "@/modules/guest-hub/domain/guest-hub-agreement-source";
 import {GuestHubAgreementAccessError} from "@/modules/guest-hub/domain/guest-hub-agreement-policy";
@@ -8,6 +8,7 @@ import type {GuestHubAgreementDocumentAuthorityProvider} from "@/modules/guest-h
 
 /** Canonical document/signature authority remains behind its application boundary. */
 export const nativeGuestAgreementDocumentAuthority:GuestHubAgreementDocumentAuthorityProvider={
+ async history(actor,tx,original,env){try{const current=await retainedSignatureOriginalAuthority(actor,tx,original.signature.id,env);if(original.organizationId!==actor.organizationId||current.documentId!==original.document.id||current.instanceId!==original.document.instanceId||current.versionId!==original.document.versionId||current.sha256!==original.document.sha256||!current.guestIds.includes(original.guestId))throw new GuestHubAgreementAccessError();}catch(error){if(error instanceof DocumentAccessError||error instanceof DocumentConflictError||error instanceof DocumentConfigurationError)throw new GuestHubAgreementAccessError();throw error;}},
  async choices(actor,tx,source,selection,filter,cursor,env){const page=await preparedSignatureCandidatePage(actor,tx,source.reservationId,filter,cursor),items=[];for(const row of page.items){try{const current=await nativeGuestAgreementDocumentAuthority.capture(actor,tx,source,selection,row.preparationId,env);items.push({...row,original:current.original});}catch(error){if(!(error instanceof GuestHubAgreementAccessError))throw error;}}return{items,next:page.next};},
  async status(actor,tx,original,preparationId,env){const status=await readPreparedSignatureDeliveryStatus(actor,tx,preparationId,env);if(original.organizationId!==actor.organizationId||status.signatureId!==original.signature.id||status.originalVersionId!==original.document.versionId)throw new GuestHubAgreementAccessError();return status;},
  async capture(actor,tx,source,selection,preparationId,env){try{

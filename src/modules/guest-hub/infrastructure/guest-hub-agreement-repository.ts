@@ -10,6 +10,7 @@ export class GuestHubAgreementRepository{
  request(id:string){return this.tx.guestHubAgreementRequest.findFirst({where:{organizationId:this.organizationId,id}});}
  requestByNonce(linkId:string,commandKey:string){return this.tx.guestHubAgreementRequest.findFirst({where:{organizationId:this.organizationId,linkId,commandKey}});}
  requestForPreparation(preparationId:string){return this.tx.guestHubAgreementRequest.findFirst({where:{organizationId:this.organizationId,preparationId}});}
+ history(linkId:string,asOf:Date,before?:{id:string;createdAt:Date}){return this.tx.guestHubAgreementRequest.findMany({where:{organizationId:this.organizationId,linkId,createdAt:{lte:asOf},...before?{OR:[{createdAt:{lt:before.createdAt}},{createdAt:before.createdAt,id:{lt:before.id}}]}:{}},orderBy:[{createdAt:"desc"},{id:"desc"}],take:26});}
  async lockPreparation(preparationId:string){await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${"guest-hub-agreement:"+this.organizationId+":"+preparationId},0))`);}
  createRequest(input:Omit<Prisma.GuestHubAgreementRequestUncheckedCreateInput,"organizationId">){return this.tx.guestHubAgreementRequest.create({data:{...input,organizationId:this.organizationId}});}
  documentOrigin(guestRequestId:string){return this.tx.guestHubAgreementDocumentOrigin.findFirst({where:{organizationId:this.organizationId,guestRequestId}});}

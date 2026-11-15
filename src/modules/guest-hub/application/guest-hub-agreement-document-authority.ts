@@ -15,4 +15,5 @@ export interface GuestHubAgreementDocumentAuthorityProvider{
  capture(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,selection:ReturnType<typeof guestHubAgreementTemplate>,preparationId:string,env?:NodeJS.ProcessEnv):Promise<GuestHubAgreementPreparedAuthority>;
  status(actor:AccountActorContext,tx:TenantTransaction,original:GuestHubAgreementOriginal,preparationId:string,env?:NodeJS.ProcessEnv):Promise<GuestHubAgreementNativeStatus>;
  choices(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,selection:ReturnType<typeof guestHubAgreementTemplate>,filter:string,cursor?:string,env?:NodeJS.ProcessEnv):Promise<{items:Array<{preparationId:string;preparedAt:string;original:GuestHubAgreementOriginal}>;next:string|null}>;
+ history(actor:AccountActorContext,tx:TenantTransaction,original:GuestHubAgreementOriginal,env?:NodeJS.ProcessEnv):Promise<void>;
 }

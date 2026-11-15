@@ -12,6 +12,7 @@ import {guestHubAgreementFileHttp} from "@/modules/guest-hub/ui/guest-hub-agreem
 import {guestHubAgreementPublicHttp} from "@/modules/guest-hub/ui/guest-hub-agreement-public-http";
 import {guestHubCapabilityCookie} from "@/modules/guest-hub/domain/guest-hub-cookie";
 import {guestHubAgreementViewSchema} from "@/modules/guest-hub/domain/guest-hub-agreement-contract";
+import {readGuestHubAgreementHistory} from "@/modules/guest-hub/application/guest-hub-agreement-history";
 import {executeSignatureDistributionReference} from "@/modules/documents/application/document-signature-distribution-worker";
 import {signatureDistributionOutboxKey} from "@/modules/documents/application/document-signature-distribution";
 import {reviewGuestHubIssue,issueGuestHubLink} from "@/modules/guest-hub/application/guest-hub-service";
@@ -42,6 +43,11 @@ beforeAll(async()=>{const value=process.env.TEST_DATABASE_URL,url=value?new URL(
 afterAll(async()=>{try{if(financial)await financial.assertPreserved(organizations);}finally{for(const provider of providers)await provider.close();await objects?.close();await db?.$disconnect();await admin?.$disconnect();}});
 
 describe("native released guest agreement requests and canonical distribution",()=>{
+ it("retains original request history after withdrawal and processing changes under independent current read authority",async()=>{
+  const c=await fresh(),a=await requested(c),before=c.f.http.calls.length;await release(c,"WITHDRAWN");await withTenant(db,c.f.organizationId,async tx=>{await tx.roleAssignment.update({where:{id:c.f.documentGrants["signature:edit"]},data:{archivedAt:new Date()}});await new ConfigRuleRepository(tx,c.f.organizationId).createVersion({key:"guest_hub.guest_agreement",scopeType:"property",scopeId:c.f.property.id,createdBy:c.f.account.id,effectiveFrom:new Date("2020-01-01"),reason:"Owned processing withdrawn while preserving original agreement history",value:{...c.f.policy,enabled:false}});await tx.guestRecord.updateMany({where:{id:c.f.reservation.guestId!,organizationId:c.f.organizationId},data:{email:"corrected-history-agreement@example.test"}});});
+  const history=await readGuestHubAgreementHistory(c.ctx,{linkId:c.link.id},deps());expect(history.items).toHaveLength(1);expect(history.items[0]).toMatchObject({id:a.receipt.id,releaseId:a.row.releaseId,payload:{acknowledged:true,original:{document:{versionId:c.f.complete.versionId}}}});expect(history.items[0].payload.notice.title).toBe(c.f.policy.notice!.title.fr);expect(c.f.http.calls.length).toBe(before);
+  await withTenant(db,c.f.organizationId,tx=>tx.roleAssignment.update({where:{id:c.f.documentGrants["signature:view"]},data:{archivedAt:new Date()}}));await expect(readGuestHubAgreementHistory(c.ctx,{linkId:c.link.id},deps())).rejects.toThrow();
+ });
  it("lists only the actual approved prepared language and retains withdrawal metadata without current document-edit authority",async()=>{
   const c=await fresh(),input={linkId:c.link.id,locale:"fr"},before=c.f.http.calls.length;expect(await guestHubAgreementReleaseStatus(c.ctx,{linkId:c.link.id},deps())).toMatchObject({decision:null,version:0,canWithdraw:false});
   const choices=await guestHubAgreementReleaseChoices(c.ctx,input,deps());expect(choices.items).toHaveLength(1);expect(choices.items[0]).toMatchObject({preparationId:c.f.prepared.id,original:{document:{versionId:c.f.complete.versionId,locale:"fr"}}});expect((await guestHubAgreementReleaseChoices(c.ctx,{...input,locale:"en"},deps())).items).toEqual([]);await expect(guestHubAgreementReleaseChoices(c.f.ctx,input,deps())).rejects.toThrow();await expect(guestHubAgreementReleaseChoices(c.ctx,{...input,cursor:"untrusted-cursor"},deps())).rejects.toThrow();await release(c);
