@@ -21,11 +21,11 @@ The existing native signature email distribution remains the delivery mechanism.
 Provider calls require the existing policy, source, document, counterparty,
 signature and transport permissions, including held and current authority.
 
-The eventual Guest Hub flow must retain one durable guest nonce before provider
-I/O and recover an uncertain original without redistributing or generating a new
-PDF. Only canonical native signed evidence with its archived signed original can
-satisfy agreement completion. A house-rules acknowledgement does not establish a
-document signature.
+The Guest Hub flow retains one durable guest nonce before provider I/O and recovers
+an uncertain original without redistributing or generating a new PDF. Completion
+requires canonical native signed evidence and both verified archived artifacts:
+the signed original and its certificate. Email delivery, an unarchived completion
+and a house-rules acknowledgement cannot establish agreement completion.
 
 Prepared agreement selection has its own append-only staff release: it chooses an
 actual prepared original, rather than changing a generic form flag. Its purpose-
@@ -43,7 +43,18 @@ an uncertain provider acknowledgement retains the original and cannot cause an
 automatic second send. Canonical document/signature history remains independently
 readable by authorized staff.
 
+Staff choose an actual authorized prepared original and review their release or
+withdrawal. Original requests remain independently readable after withdrawal,
+processing changes or the loss of edit authority. Document version numbers used
+by existing protected download links stay outside the immutable original signing
+protocol. Guest JSON and PDF routes share the original scoped cookie, origin,
+budget and live-authority boundaries; PDFs recheck authority after object I/O.
+
+The deferred origin check reads the inserted distribution intent's physical row
+when checking same-transaction birth. The forward correction preserves the
+already-applied migration and every other provenance, audit and outbox guard.
+
 Legal wording, provider/certificate approval and restricted hosted acceptance
-remain external gates. The policy foundation alone does not complete F-GST-07;
-native producer integration, delegation/history, UI and acceptance evidence remain
-required. All 355 approved features remain in scope.
+remain external gates. Native producer integration, delegation/history, UI and
+acceptance evidence do not authorize those external decisions or production
+activation. All 355 approved features remain in scope.
