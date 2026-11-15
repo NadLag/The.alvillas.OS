@@ -32,5 +32,5 @@ async function execute(raw:unknown){const input=command.parse(raw);if(busy)throw
  }
  if(sends()!==1)throw Error("An actual native send is required before owned completion");await completeOwnedNativeGuestAgreement(f,db,env,objects);if(!f.http.state.signedPdf||!f.http.state.certificatePdf)throw Error("Actual provider artifacts are required");const digest=(bytes:Uint8Array)=>createHash("sha256").update(bytes).digest("hex");send(input.id,{signedSha256:digest(f.http.state.signedPdf),certificateSha256:digest(f.http.state.certificatePdf),providerPosts:sends()});
  }finally{busy=false;}}
-process.on("message",(raw:unknown)=>{void execute(raw).catch(error=>{const id=z.object({id:z.uuid()}).safeParse(raw);process.send?.({id:id.success?id.data.id:randomUUID(),ok:false,error:error instanceof Error?error.name:"Error"});});});
+process.on("message",(raw:unknown)=>{void execute(raw).catch(error=>{const id=z.object({id:z.uuid()}).safeParse(raw);process.stderr.write(JSON.stringify({errorName:error instanceof Error?error.name:"Error",frames:error instanceof Error?error.stack?.split("\n").filter(line=>/^\s*at /u.test(line)).slice(0,10):[]})+"\n");process.send?.({id:id.success?id.data.id:randomUUID(),ok:false,error:error instanceof Error?error.name:"Error"});});});
 process.once("disconnect",()=>{void close().then(()=>process.exit(0),()=>process.exit(1));});
