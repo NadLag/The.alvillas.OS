@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { z } from "zod";
-import type { DocumentRetentionRevision } from "@prisma/client";
+import type { DocumentAdmission, DocumentRetentionRevision } from "@prisma/client";
 import { withTenant, type TenantTransaction, type TenantTransactionRunner } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { captureAuthorizationCap, restoreAuthorizationCap } from "@/platform/authz/authorization-cap";
@@ -11,13 +11,21 @@ import { consumeRateLimit } from "@/platform/rate-limit/postgres-rate-limiter";
 import { DocumentRetentionRepository } from "../infrastructure/document-retention-repository";
 import { documentActorContext, documentArchiveContext, documentAuthorityChecks, documentJson, type DocumentActorContext } from "./document-archive";
 import { generatedDocumentUploadInput } from "../domain/document-generated-upload";
+import { nativeGuestIdentityDocumentUploadInput, nativeGuestIdentityDocumentProvenanceSchema } from "../domain/document-guest-identity-upload";
 import { documentSourceReferenceSchema, DocumentAccessError, DocumentConflictError, DocumentConfigurationError, DocumentRateLimitError } from "../domain/document-command";
 import { documentRetentionProtocol, documentRetentionDraftSchema, documentRetentionCommandSchema, documentRetentionRecoverySchema, documentRetentionRevisionSchema, documentRetentionHistoryInputSchema, documentRetentionHistorySchema, documentRetentionReceiptSchema, documentRetentionRecoveredSchema, documentRetentionPolicyContextSchema } from "../domain/document-retention";
 import { documentRetentionPolicyKey, documentRetentionPolicySchema, retainedDocumentTags, documentRetentionHookState } from "../domain/document-retention-policy";
 
 type Dependencies={db:TenantTransactionRunner;requestId?:string;env?:NodeJS.ProcessEnv};
+type NativeOrigin=z.infer<typeof nativeGuestIdentityDocumentProvenanceSchema>;
+type WriteDependencies=Dependencies&{guestIdentityOrigin?:NativeOrigin};
 type Draft=z.infer<typeof documentRetentionDraftSchema>;
 const dto=(row:DocumentRetentionRevision)=>documentRetentionRevisionSchema.parse({id:row.id,versionId:row.versionId,number:row.number,previousRevisionId:row.previousId,tags:row.tags,createdAt:row.createdAt.toISOString(),createdBy:row.createdBy,reason:row.reason});
+
+async function retentionPolicy(tx:TenantTransaction,organizationId:string,now:Date){
+  const rule=await new ConfigRuleRepository(tx,organizationId).resolve({key:documentRetentionPolicyKey,scopes:[{scopeType:"organization",scopeId:null}],asOf:now}),parsed=documentRetentionPolicySchema.safeParse(rule?.value);
+  return rule&&parsed.success?{id:rule.id,version:rule.version,value:parsed.data}:null;
+}
 
 async function versionContext(ctx:DocumentActorContext,tx:TenantTransaction,versionId:string,deps:Dependencies){
   const repository=new DocumentRetentionRepository(tx,ctx.organizationId),version=await repository.version(versionId);if(!version)throw new DocumentAccessError();
@@ -29,7 +37,7 @@ async function retentionContext(ctx:DocumentActorContext,tx:TenantTransaction,ve
   const requested=await versionContext(ctx,tx,versionId,deps),inherited=requested.archive.signedArtifact,
     governed=inherited?await versionContext(ctx,tx,inherited.originalVersionId,deps):requested;
   if(governed.archive.signedArtifact||inherited&&(governed.root.id!==inherited.originalDocumentId||governed.version.number!==inherited.originalVersionNumber))throw new DocumentAccessError();
-  const latest=await governed.repository.currentRetention(governed.version.id),rule=await new ConfigRuleRepository(tx,ctx.organizationId).resolve({key:documentRetentionPolicyKey,scopes:[{scopeType:"organization",scopeId:null}],asOf:governed.archive.now}),parsed=documentRetentionPolicySchema.safeParse(rule?.value),policy=rule&&parsed.success?{id:rule.id,version:rule.version,value:parsed.data}:null;
+  const latest=await governed.repository.currentRetention(governed.version.id),policy=await retentionPolicy(tx,ctx.organizationId,governed.archive.now);
   const checks=documentAuthorityChecks(governed.archive.native,governed.archive.privacy,"edit",governed.root);
   let canEdit=Boolean(!inherited&&policy?.value.type_keys.includes(governed.root.typeKey)&&(policy.value.archive_tagging==="ALLOW"||!governed.archive.native.archived&&!governed.root.archivedAt));
   if(canEdit)try{await recheckAccountAuthorization(ctx,tx,governed.archive.now,checks,new DocumentAccessError());}catch(error){if(!(error instanceof DocumentAccessError))throw error;canEdit=false;}
@@ -46,8 +54,54 @@ function reviewHash(ctx:DocumentActorContext,current:Current,input:Draft){return
 async function requireAvailableNonce(repository:DocumentRetentionRepository,key:string){
   if(await repository.retentionNonceOwner(key)||await repository.nonceOwner(key)||await repository.instanceNonceOwner(key)||await repository.signatureNonceOwner(key)||await repository.providerPreparationNonceOwner(key))throw new DocumentAccessError();
 }
-async function auditRead(ctx:DocumentActorContext,tx:TenantTransaction,current:Current,deps:Dependencies,action:string,after:Record<string,unknown>,reason?:string){
-  await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action,resourceType:"document",resourceId:current.governed.root.id,after:documentJson({requestedVersionId:current.requested.version.id,versionId:current.governed.version.id,...after}),reason,requestId:deps.requestId??randomUUID(),occurredAt:current.governed.archive.now});
+async function auditRead(ctx:DocumentActorContext,tx:TenantTransaction,current:Current,deps:WriteDependencies,action:string,after:Record<string,unknown>,reason?:string){
+  const origin=deps.guestIdentityOrigin?nativeOrigin(ctx,current.governed.version.admission,deps.guestIdentityOrigin):undefined;
+  await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:origin?null:ctx.actorId,...origin?{propertyScopeId:current.governed.archive.native.resource.propertyId}: {},action,resourceType:"document",resourceId:current.governed.root.id,after:documentJson({requestedVersionId:current.requested.version.id,versionId:current.governed.version.id,...after,...origin?{guestIdentityOrigin:origin}: {}}),reason,requestId:deps.requestId??randomUUID(),occurredAt:current.governed.archive.now});
+}
+
+function nativeOrigin(ctx:DocumentActorContext,admission:DocumentAdmission,raw:NativeOrigin){
+  const origin=nativeGuestIdentityDocumentProvenanceSchema.parse(raw),input=nativeGuestIdentityDocumentUploadInput.safeParse(admission.input);
+  if(!input.success||origin.organizationId!==ctx.organizationId||origin.delegatedBy!==ctx.actorId||admission.createdBy!==ctx.actorId||origin.captureId!==input.data.guestIdentity.captureId||origin.fileId!==input.data.guestIdentity.fileId)throw new DocumentAccessError();
+  return origin;
+}
+
+async function appendRetention(ctx:DocumentActorContext,tx:TenantTransaction,current:Current,input:z.infer<typeof documentRetentionCommandSchema>,commandHash:string,deps:WriteDependencies){
+  requireEdit(current);requirePrevious(current,input);const tags=retainedDocumentTags(current.policy!.value,input.tagKeys);
+  const row=await current.governed.repository.appendRetention({versionId:input.versionId,previousId:input.previousRevisionId,number:(current.latest?.number??0)+1,tagKeys:input.tagKeys,tags:documentJson(tags),commandKey:input.idempotencyKey,commandHash,sourceFingerprint:current.sourceFingerprint,authorizationCap:documentJson(captureAuthorizationCap(ctx.authContext)),sourceSnapshot:documentJson({documentId:current.governed.root.id,versionId:current.governed.version.id,versionSha256:current.governed.version.admission.sha256,archiveFingerprint:current.governed.archive.fingerprint,privacy:current.governed.archive.privacy}),policySnapshot:documentJson(current.policy),input:documentJson({...input,protocol:documentRetentionProtocol}),reason:input.reason,createdBy:ctx.actorId,createdAt:current.governed.archive.now});
+  await auditRead(ctx,tx,current,deps,"documents.retention_recorded",{revisionId:row.id,documentId:current.governed.root.id,previousRevisionId:row.previousId,number:row.number,tagKeys:row.tagKeys,commandHash:row.commandHash,sourceFingerprint:row.sourceFingerprint},row.reason);
+  const final=await unchanged(ctx,tx,current,deps,true);if(final.latest?.id!==row.id)throw new DocumentConflictError();return row;
+}
+
+export type NativeGuestIdentityRetentionReservation=Readonly<{allowed:boolean;resetAt:Date}>;
+type NativeRetentionPlan={origin:NativeOrigin;policy:{id:string;version:number;value:z.infer<typeof documentRetentionPolicySchema>};tagKeys:string[]};
+type NativeReservationProof={admissionId:string;documentId:string;principal:string;archiveFingerprint:string;policy:NativeRetentionPlan["policy"];tagKeys:string[];tags:ReturnType<typeof retainedDocumentTags>;origin:NativeOrigin};
+const nativeReservations=new WeakMap<NativeGuestIdentityRetentionReservation,NativeReservationProof>();
+
+/** Called inside the committed pre-object-I/O transaction. A denied reservation
+ * is returned so the caller can commit its budget before reporting the denial. */
+export async function reserveNativeGuestIdentityRetention(actor:DocumentActorContext,tx:TenantTransaction,admission:DocumentAdmission,plan:NativeRetentionPlan,deps:Dependencies){
+  const ctx=documentActorContext(actor),origin=nativeOrigin(ctx,admission,plan.origin),repository=new DocumentRetentionRepository(tx,ctx.organizationId),root=await repository.document(admission.documentId);
+  if(!root||root.kind!=="FILE"||root.sourceKind!=="RESERVATION"||root.archivedAt)throw new DocumentAccessError();
+  const archive=await documentArchiveContext(ctx,tx,documentSourceReferenceSchema.parse({kind:root.sourceKind,id:root.sourceId}),"view",root,undefined,deps.env),policy=await retentionPolicy(tx,ctx.organizationId,archive.now);
+  if(!policy)throw new DocumentConfigurationError();
+  if(archive.signedArtifact||archive.native.archived||!archive.privacy.includes("sensitive")||archive.privacy.includes("financial")||policy.value.archive_tagging!=="ALLOW"||!policy.value.type_keys.includes(root.typeKey)||commandFingerprint(policy)!==commandFingerprint(plan.policy))throw new DocumentAccessError();
+  await recheckAccountAuthorization(ctx,tx,archive.now,documentAuthorityChecks(archive.native,archive.privacy,"edit",root),new DocumentAccessError());
+  const tags=retainedDocumentTags(policy.value,plan.tagKeys),tagKeys=tags.map(tag=>tag.key),budget=policy.value.change_admission,decision=await consumeRateLimit(tx,ctx.organizationId,{key:"document-retention:"+ctx.actorId,limit:budget.max_requests,windowSeconds:budget.window_seconds,now:archive.now});
+  if(!tags.length)throw new DocumentAccessError();
+  const reservation=Object.freeze({allowed:decision.allowed,resetAt:decision.resetAt});
+  nativeReservations.set(reservation,{admissionId:admission.id,documentId:admission.documentId,principal:commandFingerprint(captureAuthorizationCap(ctx.authContext)),archiveFingerprint:archive.fingerprint,policy,tagKeys,tags,origin});return reservation;
+}
+
+/** Publishes the initial tags in the actual canonical version transaction. The
+ * opaque reservation cannot be reconstructed from public JSON or another file. */
+export async function publishNativeGuestIdentityRetention(actor:DocumentActorContext,tx:TenantTransaction,admission:DocumentAdmission,versionId:string,reservation:NativeGuestIdentityRetentionReservation,deps:Dependencies){
+  const ctx=documentActorContext(actor),proof=nativeReservations.get(reservation);if(!reservation.allowed||!proof||proof.admissionId!==admission.id||proof.documentId!==admission.documentId||proof.principal!==commandFingerprint(captureAuthorizationCap(ctx.authContext)))throw new DocumentAccessError();
+  nativeOrigin(ctx,admission,proof.origin);
+  const current=await retentionContext(ctx,tx,versionId,deps);requireEdit(current);
+  if(current.latest||current.requested.version.admission.id!==admission.id||current.requested.version.number!==1||current.governed.archive.fingerprint!==proof.archiveFingerprint||commandFingerprint(current.policy)!==commandFingerprint(proof.policy)||commandFingerprint(retainedDocumentTags(current.policy!.value,proof.tagKeys))!==commandFingerprint(proof.tags))throw new DocumentConflictError();
+  const draft=documentRetentionDraftSchema.parse({versionId,previousRevisionId:null,tagKeys:proof.tagKeys}),input=documentRetentionCommandSchema.parse({...draft,idempotencyKey:randomUUID(),reviewFingerprint:reviewHash(ctx,current,draft),reason:admission.reason});
+  await requireAvailableNonce(current.governed.repository,input.idempotencyKey);
+  const row=await appendRetention(ctx,tx,current,input,commandFingerprint({protocol:documentRetentionProtocol,input}),{...deps,guestIdentityOrigin:proof.origin});return row;
 }
 export async function readDocumentRetention(actor:DocumentActorContext,raw:unknown,deps:Dependencies){
   const ctx=documentActorContext(actor),input=documentRetentionHistoryInputSchema.parse(raw);return withTenant(deps.db,ctx.organizationId,async tx=>{
@@ -86,9 +140,7 @@ export async function admitDocumentRetention(actor:DocumentActorContext,raw:unkn
   });if(rate.replay)return rate.replay;if(!rate.decision?.allowed)throw new DocumentRateLimitError(rate.decision.resetAt);
   return withTenant(deps.db,ctx.organizationId,async tx=>{
     const repository=new DocumentRetentionRepository(tx,ctx.organizationId);await repository.lock("nonce:"+ctx.actorId+":"+input.idempotencyKey);await repository.lock("retention:"+input.versionId);const existing=await repository.retentionByNonce(ctx.actorId,input.idempotencyKey);if(existing){if(existing.commandHash!==commandHash)throw new DocumentConflictError();return receipt(ctx,tx,existing,deps);}await requireAvailableNonce(repository,input.idempotencyKey);
-    const current=await retentionContext(ctx,tx,input.versionId,deps);requireEdit(current);requirePrevious(current,draft);if(reviewHash(ctx,current,draft)!==input.reviewFingerprint)throw new DocumentConflictError();const tags=retainedDocumentTags(current.policy!.value,input.tagKeys);
-    const row=await repository.appendRetention({versionId:input.versionId,previousId:input.previousRevisionId,number:(current.latest?.number??0)+1,tagKeys:input.tagKeys,tags:documentJson(tags),commandKey:input.idempotencyKey,commandHash,sourceFingerprint:current.sourceFingerprint,authorizationCap:documentJson(captureAuthorizationCap(ctx.authContext)),sourceSnapshot:documentJson({documentId:current.governed.root.id,versionId:current.governed.version.id,versionSha256:current.governed.version.admission.sha256,archiveFingerprint:current.governed.archive.fingerprint,privacy:current.governed.archive.privacy}),policySnapshot:documentJson(current.policy),input:documentJson({...input,protocol:documentRetentionProtocol}),reason:input.reason,createdBy:ctx.actorId,createdAt:current.governed.archive.now});
-    await auditRead(ctx,tx,current,deps,"documents.retention_recorded",{revisionId:row.id,documentId:current.governed.root.id,previousRevisionId:row.previousId,number:row.number,tagKeys:row.tagKeys,commandHash:row.commandHash,sourceFingerprint:row.sourceFingerprint},row.reason);
-    const final=await unchanged(ctx,tx,current,deps,true);if(final.latest?.id!==row.id)throw new DocumentConflictError();return receipt(ctx,tx,row,deps);
+    const current=await retentionContext(ctx,tx,input.versionId,deps);requireEdit(current);requirePrevious(current,draft);if(reviewHash(ctx,current,draft)!==input.reviewFingerprint)throw new DocumentConflictError();
+    const row=await appendRetention(ctx,tx,current,input,commandHash,deps);return receipt(ctx,tx,row,deps);
   });
 }

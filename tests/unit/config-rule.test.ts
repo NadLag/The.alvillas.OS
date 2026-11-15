@@ -81,6 +81,7 @@ describe("config rule registry", () => {
       "finance.service_allocation",
       "finance.tax",
       "finance.transaction_attachments",
+      "guest_hub.identity_documents",
       "guest_hub.links",
       "guest_hub.presentation",
       "guest_hub.profile",

@@ -5,6 +5,9 @@ import {z,ZodError} from "zod";
 import {activeGuestHubProfile} from "./guest-hub-profile-source";
 import {GuestHubProfileAccessError} from "../domain/guest-hub-profile-policy";
 import {activeGuestHubStayDetails} from "./guest-hub-stay-details-source";
+import {activeGuestHubIdentityDocuments} from "./guest-hub-identity-document-source";
+import type {GuestHubIdentityDocumentAuthorityProvider} from "./guest-hub-identity-document-grants";
+import {GuestHubIdentityDocumentAccessError} from "../domain/guest-hub-identity-document-policy";
 import {GuestHubStayDetailsAccessError} from "../domain/guest-hub-stay-details-policy";
 import {GuestHubFormGrantRepository} from "../infrastructure/guest-hub-form-grant-repository";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
@@ -23,7 +26,7 @@ import {currentGuestHubState,guestHubSettings,guestHubOriginalBinding,guestHubSo
 import {guestHubResource,guestHubLinkTarget} from "./guest-hub-access";
 import type {GuestHubDependencies} from "./guest-hub-service";
 
-export type GuestHubVisitDependencies=GuestHubDependencies&{clientKey:string;verificationOrganizationId?:string;expectedLinkId?:string};
+export type GuestHubVisitDependencies=GuestHubDependencies&{clientKey:string;verificationOrganizationId?:string;expectedLinkId?:string;identityDocuments?:GuestHubIdentityDocumentAuthorityProvider};
 const clientKeySchema=z.string().min(1).max(200);
 async function consumeVerificationBudget(deps:GuestHubVisitDependencies){
  const organizationId=deps.verificationOrganizationId??bootstrapOrganizationId,client=clientKeySchema.parse(deps.clientKey);
@@ -50,8 +53,9 @@ function visitorAuthority(row:GuestHubLink):AuthContext{
 
 export type GuestHubCapabilityContext={tx:TenantTransaction;actual:Awaited<ReturnType<typeof actualSource>>;authority:AuthContext;resource:ReturnType<typeof guestHubResource>};
 
-/** Every native Guest Hub flow enters through the same verified, budgeted capability boundary. */
-export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDependencies,work:(context:GuestHubCapabilityContext)=>Promise<T>,additionalBudget?:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">)=>Promise<boolean>,fence?:(context:GuestHubCapabilityContext)=>Promise<void>){
+/** A request-scoped lease rechecks the original capability inside an existing tenant transaction.
+ * Object I/O belongs between calls, after each transaction releases its native locks. */
+export async function createGuestHubCapabilityLease(raw:unknown,deps:GuestHubVisitDependencies,additionalBudget?:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">)=>Promise<boolean>){
  // No unverified token byte selects a tenant, policy, quota or native record.
  await consumeVerificationBudget(deps);
  let token:string,claims:GuestHubCapabilityClaims;
@@ -63,33 +67,44 @@ export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDe
    const extra=link.allowed&&actual.state==="ACTIVE"&&additionalBudget?await additionalBudget({tx,actual}):true;
    return{allowed:link.allowed&&extra,active:actual.state==="ACTIVE"};
   });if(!budget.allowed)throw new GuestHubRateLimitError();if(!budget.active)throw new GuestHubInvalidLinkError();
-  return await withTenant(deps.db,claims.organizationId,async tx=>{
+  let expectedSource:string|undefined;
+  return Object.freeze({organizationId:claims.organizationId,linkId:claims.linkId,async run<T>(tx:TenantTransaction,work:(context:GuestHubCapabilityContext)=>Promise<T>,fence?:(context:GuestHubCapabilityContext)=>Promise<void>):Promise<T>{try{
    const repository=new GuestHubRepository(tx,claims.organizationId);await repository.lockLink(claims.linkId);await repository.lockSources(claims.reservationId);
    const actual=await actualSource(tx,claims,token);if(actual.state!=="ACTIVE")throw new GuestHubInvalidLinkError();
+   const sourceFingerprint=jsonbFingerprint({policy:actual.settings.fingerprint,source:guestHubSourceSnapshot(claims.organizationId,actual.source)});
+   if(expectedSource!==undefined&&sourceFingerprint!==expectedSource)throw new GuestHubInvalidLinkError();expectedSource=sourceFingerprint;
    const authority=visitorAuthority(actual.row),resource=guestHubResource(claims.organizationId,actual.source,await guestHubLinkTarget(actual.repository,actual.row,actual.source));if(!authorize(authority,"view",resource,actual.now))throw new GuestHubInvalidLinkError();
    const result=await work({tx,actual,authority,resource});
    const final=await actualSource(tx,claims,token);if(final.state!=="ACTIVE"||final.settings.fingerprint!==actual.settings.fingerprint||jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,final.source))!==jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,actual.source))||!authorize(authority,"view",resource,final.now))throw new GuestHubInvalidLinkError();
    await fence?.({tx,actual:final,authority,resource});return result;
-  });
+  }catch(error){if(error instanceof GuestHubRateLimitError)throw error;throw new GuestHubInvalidLinkError();}}});
  }catch(error){if(error instanceof GuestHubRateLimitError)throw error;throw new GuestHubInvalidLinkError();}
 }
 
-async function formAvailability(context:GuestHubCapabilityContext,env?:NodeJS.ProcessEnv){
+export type GuestHubCapabilityLease=Awaited<ReturnType<typeof createGuestHubCapabilityLease>>;
+/** Every existing native Guest Hub flow retains the same verified, budgeted transaction boundary. */
+export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDependencies,work:(context:GuestHubCapabilityContext)=>Promise<T>,additionalBudget?:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">)=>Promise<boolean>,fence?:(context:GuestHubCapabilityContext)=>Promise<void>){
+ const lease=await createGuestHubCapabilityLease(raw,deps,additionalBudget);
+ try{return await withTenant(deps.db,lease.organizationId,tx=>lease.run(tx,work,fence));}
+ catch(error){if(error instanceof GuestHubRateLimitError)throw error;throw new GuestHubInvalidLinkError();}
+}
+
+async function formAvailability(context:GuestHubCapabilityContext,env?:NodeJS.ProcessEnv,documents?:GuestHubIdentityDocumentAuthorityProvider){
  const heads=await new GuestHubFormGrantRepository(context.tx,context.actual.row.organizationId,"PROFILE").headsForLink(context.actual.row.id),selected=new Map(heads.map(row=>[row.formKey,row]));
- const available=async(work:()=>Promise<{fingerprint:string}>)=>{try{return(await work()).fingerprint;}catch(error){if(error instanceof GuestHubProfileAccessError||error instanceof GuestHubStayDetailsAccessError||error instanceof ZodError)return null;throw error;}};
- return{profile:await available(()=>activeGuestHubProfile(context,env,selected.get("PROFILE")??null)),stayDetails:await available(()=>activeGuestHubStayDetails(context,env,selected.get("STAY_DETAILS")??null))};
+ const available=async(work:()=>Promise<{fingerprint:string}>)=>{try{return(await work()).fingerprint;}catch(error){if(error instanceof GuestHubProfileAccessError||error instanceof GuestHubStayDetailsAccessError||error instanceof GuestHubIdentityDocumentAccessError||error instanceof ZodError)return null;throw error;}};
+ return{profile:await available(()=>activeGuestHubProfile(context,env,selected.get("PROFILE")??null)),stayDetails:await available(()=>activeGuestHubStayDetails(context,env,selected.get("STAY_DETAILS")??null)),identityDocuments:documents?await available(()=>activeGuestHubIdentityDocuments(context,documents,env,selected.get("IDENTITY_DOCUMENTS")??null)):null};
 }
 export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependencies){
  let expectedHome:string|null|undefined,expectedForms:string|undefined;
  return withGuestHubCapability(raw,deps,async(context)=>{
   const {tx,actual,authority,resource}=context;
   const organizationId=actual.row.organizationId,home=await guestHubHome(tx,organizationId,actual.source,actual.settings.scopes,actual.now);
-  const forms=await formAvailability(context,deps.env);expectedHome=home.fingerprint;expectedForms=jsonbFingerprint(forms);
-  const data=guestHubPublicViewSchema.parse({home:{...home.data,...forms.profile?{profileAvailable:true}:{},...forms.stayDetails?{stayDetailsAvailable:true}:{}},id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
+  const forms=await formAvailability(context,deps.env,deps.identityDocuments);expectedHome=home.fingerprint;expectedForms=jsonbFingerprint(forms);
+  const data=guestHubPublicViewSchema.parse({home:{...home.data,...forms.profile?{profileAvailable:true}:{},...forms.stayDetails?{stayDetailsAvailable:true}:{},...forms.identityDocuments?{identityDocumentsAvailable:true}:{}},id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
   await writeAuditEvent(tx,{organizationId,actorId:null,action:"guest_hub.link_opened",resourceType:"guest_hub",resourceId:actual.row.id,propertyScopeId:actual.row.propertyId,after:{linkId:actual.row.id,reservationId:actual.row.reservationId},requestId:deps.requestId??randomUUID(),occurredAt:actual.now});
   return guestHubPublicViewSchema.parse(present({...authority,visibleDataClasses:new Set()},"view",{...resource,data},catalogFieldPolicy("guest_hub"),actual.now));
  },undefined,async context=>{
   const {tx,actual}=context,home=await guestHubHome(tx,actual.row.organizationId,actual.source,actual.settings.scopes,actual.now);
-  if(home.fingerprint!==expectedHome||jsonbFingerprint(await formAvailability(context,deps.env))!==expectedForms)throw new GuestHubInvalidLinkError();
+  if(home.fingerprint!==expectedHome||jsonbFingerprint(await formAvailability(context,deps.env,deps.identityDocuments))!==expectedForms)throw new GuestHubInvalidLinkError();
  });
 }

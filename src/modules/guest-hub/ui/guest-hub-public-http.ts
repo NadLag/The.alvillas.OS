@@ -5,13 +5,14 @@ import {readBoundedJsonRequest} from "@/platform/http/read-exact-response";
 import {loginRateLimitIp} from "@/platform/auth/login-rate-limit";
 import {captureException} from "@/platform/observability/sentry";
 import {visitGuestHubLink} from "../application/guest-hub-visit";
+import type {GuestHubVisitDependencies} from "../application/guest-hub-visit";
 import type {GuestHubDependencies} from "../application/guest-hub-service";
 import {guestHubCapabilityCookie} from "../domain/guest-hub-cookie";
 import {guestHubIdSchema,guestHubPublicInputSchema} from "../domain/guest-hub-contract";
 import {guestHubMaximumRequestBytes,GuestHubInvalidLinkError,GuestHubRateLimitError,GuestHubConfigurationError} from "../domain/guest-hub-policy";
 
 const headers={"Cache-Control":"private, no-store","Referrer-Policy":"no-referrer",Vary:"Cookie, Origin"},empty=z.object({}).strict();
-type Dependencies=GuestHubDependencies&{verificationOrganizationId?:string};
+type Dependencies=GuestHubDependencies&Pick<GuestHubVisitDependencies,"verificationOrganizationId"|"identityDocuments">;
 export async function guestHubPublicHttp(request:NextRequest,deps:Dependencies,rawLinkId?:unknown){
  const requestId=crypto.randomUUID(),failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
  try{

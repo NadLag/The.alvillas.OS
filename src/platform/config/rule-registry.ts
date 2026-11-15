@@ -10,6 +10,7 @@ import {onboardingPolicyKey,onboardingPolicySchema} from "@/modules/onboarding/d
 import {onboardingOwnerPackagePolicyKey,onboardingOwnerPackagePolicySchema,onboardingOwnerPackageContentKey,onboardingOwnerPackageContentSchema} from "@/modules/onboarding/domain/onboarding-owner-package-policy";
 import {onboardingOwnerDeliveryPolicyKey,onboardingOwnerDeliveryPolicySchema} from "@/modules/onboarding/domain/onboarding-owner-delivery-policy";
 import {guestHubStayDetailsPolicyKey,guestHubStayDetailsPolicySchema} from "@/modules/guest-hub/domain/guest-hub-stay-details-policy";
+import {guestHubIdentityDocumentPolicyKey,guestHubIdentityDocumentPolicySchema} from "@/modules/guest-hub/domain/guest-hub-identity-document-policy";
 import {guestHubProfilePolicyKey,guestHubProfilePolicySchema} from "@/modules/guest-hub/domain/guest-hub-profile-policy";
 import {guestHubPresentationPolicyKey,guestHubPresentationPolicySchema} from "@/modules/guest-hub/domain/guest-hub-presentation";
 import {guestHubLinkPolicyKey,guestHubLinkPolicySchema,guestHubVerificationPolicyKey,guestHubVerificationPolicySchema} from "@/modules/guest-hub/domain/guest-hub-policy";
@@ -392,6 +393,7 @@ export const configRuleSchemas = {
   [guestHubPresentationPolicyKey]:guestHubPresentationPolicySchema,
   [guestHubProfilePolicyKey]:guestHubProfilePolicySchema,
   [guestHubStayDetailsPolicyKey]:guestHubStayDetailsPolicySchema,
+  [guestHubIdentityDocumentPolicyKey]:guestHubIdentityDocumentPolicySchema,
   [guestHubVerificationPolicyKey]:guestHubVerificationPolicySchema,
   [onboardingOwnerPackageContentKey]:onboardingOwnerPackageContentSchema,
   [leadPipelinePolicyKey]:leadPipelinePolicySchema,

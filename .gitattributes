@@ -165,3 +165,17 @@ prisma/migrations/20261112130000_native_activation_effect_evidence/migration.sql
 
 prisma/migrations/20261112140000_native_onboarding_operational_completion/migration.sql text eol=lf
 prisma/migrations/20261113093000_native_onboarding_activation_job_continuations/migration.sql text eol=lf
+
+# Keep canonical legacy Guest Hub SQL and exact newly admitted delegation bytes across checkouts.
+/prisma/migrations/20261114093000_native_guest_hub_capability_links/migration.sql text eol=lf
+/prisma/migrations/20261114122000_canonical_guest_hub_revocation_policy/migration.sql text eol=lf
+/prisma/migrations/20261114144500_native_guest_profile_grants_and_revisions/migration.sql text eol=lf
+/prisma/migrations/20261114153000_guest_hub_original_event_type_guards/migration.sql text eol=lf
+/prisma/migrations/20261114174500_native_guest_arrival_departure_details/migration.sql text eol=lf
+/prisma/migrations/20261114224500_native_guest_identity_document_delegation/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/prisma/migrations/20261114230000_native_guest_identity_document_tuple_birth/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/prisma/migrations/20261115001000_native_guest_identity_document_tenant_policy/migration.sql text eol=lf
+/prisma/migrations/20261115003000_native_guest_identity_document_capture/migration.sql text eol=lf
+/prisma/migrations/20261115010000_native_guest_identity_document_archive/migration.sql text eol=lf
+/prisma/migrations/20261115013000_native_guest_identity_document_attribution/migration.sql text eol=lf
+/prisma/migrations/20261115020000_native_guest_identity_document_privacy/migration.sql text eol=lf

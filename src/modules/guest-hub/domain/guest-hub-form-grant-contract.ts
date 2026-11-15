@@ -1,6 +1,6 @@
 import {z} from "zod";
 import {guestHubIdSchema,guestHubFingerprintSchema} from "./guest-hub-contract";
-export const guestHubFormKeySchema=z.enum(["PROFILE","STAY_DETAILS"]);
+export const guestHubFormKeySchema=z.enum(["PROFILE","STAY_DETAILS","IDENTITY_DOCUMENTS"]);
 export type GuestHubFormKey=z.infer<typeof guestHubFormKeySchema>;
 export const guestHubFormGrantBindingSchema=z.object({protocol:z.literal("NATIVE_GUEST_FORM_GRANT_V1"),formKey:guestHubFormKeySchema,id:guestHubIdSchema,organizationId:guestHubIdSchema,linkId:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,guestId:guestHubIdSchema,previousId:guestHubIdSchema.nullable(),version:z.number().int().positive(),decision:z.enum(["GRANTED","WITHDRAWN"]),linkTokenHash:guestHubFingerprintSchema,policyId:guestHubIdSchema.nullable(),policyVersion:z.number().int().positive().nullable(),policyFingerprint:guestHubFingerprintSchema.nullable(),sourceFingerprint:guestHubFingerprintSchema,createdBy:guestHubIdSchema,createdAt:z.iso.datetime(),expiresAt:z.iso.datetime(),commandKey:guestHubIdSchema,commandHash:guestHubFingerprintSchema}).strict().superRefine((value,context)=>{
  if((value.version===1)!==(value.previousId===null))context.addIssue({code:"custom",path:["previousId"],message:"actual_form_grant_predecessor_required"});

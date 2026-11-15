@@ -2898,3 +2898,11 @@ textarea:disabled {
 .guest-stay-tools { position: sticky; inset-block-end: 0; display: grid; gap: var(--space-3); padding-block: var(--space-3); background: var(--surface-panel); }
 .guest-stay-tools nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
 .guest-stay-tools :is(a, button) { min-inline-size: 0; min-block-size: var(--target-min); max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; text-align: center; }
+.guest-identity-form, .guest-identity-form :is(.resource-form, .field, .form-actions, section, ul, li) { min-inline-size: 0; max-inline-size: 100%; }
+.guest-identity-form, .guest-identity-form .resource-form { grid-template-columns: minmax(0, 1fr); }
+.guest-identity-form input[type="file"] { inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; }
+.guest-identity-form input::file-selector-button { min-block-size: var(--target-min); font: inherit; }
+.guest-identity-form input[type="checkbox"] { inline-size: 24px; block-size: 24px; min-block-size: 24px; margin-inline-end: var(--space-2); vertical-align: middle; }
+.guest-identity-form label:has(input[type="checkbox"]) { min-block-size: var(--target-min); align-items: center; }
+.guest-identity-form button { white-space: normal; overflow-wrap: anywhere; }
+.guest-stay:has(.guest-identity-form) > .guest-stay-tools { position: static; }
