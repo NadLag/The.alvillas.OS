@@ -1,6 +1,8 @@
 import {randomUUID} from "node:crypto";
 import {guestHubHome} from "./guest-hub-home";
 import type {GuestHubLink} from "@prisma/client";
+import {activeGuestHubHouseRules} from "./guest-hub-house-rules-source";
+import {GuestHubHouseRulesAccessError} from "../domain/guest-hub-house-rules-policy";
 import {z,ZodError} from "zod";
 import {activeGuestHubProfile} from "./guest-hub-profile-source";
 import {GuestHubProfileAccessError} from "../domain/guest-hub-profile-policy";
@@ -91,8 +93,8 @@ export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDe
 
 async function formAvailability(context:GuestHubCapabilityContext,env?:NodeJS.ProcessEnv,documents?:GuestHubIdentityDocumentAuthorityProvider){
  const heads=await new GuestHubFormGrantRepository(context.tx,context.actual.row.organizationId,"PROFILE").headsForLink(context.actual.row.id),selected=new Map(heads.map(row=>[row.formKey,row]));
- const available=async(work:()=>Promise<{fingerprint:string}>)=>{try{return(await work()).fingerprint;}catch(error){if(error instanceof GuestHubProfileAccessError||error instanceof GuestHubStayDetailsAccessError||error instanceof GuestHubIdentityDocumentAccessError||error instanceof ZodError)return null;throw error;}};
- return{profile:await available(()=>activeGuestHubProfile(context,env,selected.get("PROFILE")??null)),stayDetails:await available(()=>activeGuestHubStayDetails(context,env,selected.get("STAY_DETAILS")??null)),identityDocuments:documents?await available(()=>activeGuestHubIdentityDocuments(context,documents,env,selected.get("IDENTITY_DOCUMENTS")??null)):null};
+ const available=async(work:()=>Promise<{fingerprint:string}>)=>{try{return(await work()).fingerprint;}catch(error){if(error instanceof GuestHubProfileAccessError||error instanceof GuestHubStayDetailsAccessError||error instanceof GuestHubIdentityDocumentAccessError||error instanceof GuestHubHouseRulesAccessError||error instanceof ZodError)return null;throw error;}};
+ return{houseRules:await available(()=>activeGuestHubHouseRules(context,env,selected.get("HOUSE_RULES")??null)),profile:await available(()=>activeGuestHubProfile(context,env,selected.get("PROFILE")??null)),stayDetails:await available(()=>activeGuestHubStayDetails(context,env,selected.get("STAY_DETAILS")??null)),identityDocuments:documents?await available(()=>activeGuestHubIdentityDocuments(context,documents,env,selected.get("IDENTITY_DOCUMENTS")??null)):null};
 }
 export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependencies){
  let expectedHome:string|null|undefined,expectedForms:string|undefined;
@@ -100,7 +102,7 @@ export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependenci
   const {tx,actual,authority,resource}=context;
   const organizationId=actual.row.organizationId,home=await guestHubHome(tx,organizationId,actual.source,actual.settings.scopes,actual.now);
   const forms=await formAvailability(context,deps.env,deps.identityDocuments);expectedHome=home.fingerprint;expectedForms=jsonbFingerprint(forms);
-  const data=guestHubPublicViewSchema.parse({home:{...home.data,...forms.profile?{profileAvailable:true}:{},...forms.stayDetails?{stayDetailsAvailable:true}:{},...forms.identityDocuments?{identityDocumentsAvailable:true}:{}},id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
+  const data=guestHubPublicViewSchema.parse({home:{...home.data,...forms.profile?{profileAvailable:true}:{},...forms.stayDetails?{stayDetailsAvailable:true}:{},...forms.identityDocuments?{identityDocumentsAvailable:true}:{},...forms.houseRules?{houseRulesAvailable:true}:{}},id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
   await writeAuditEvent(tx,{organizationId,actorId:null,action:"guest_hub.link_opened",resourceType:"guest_hub",resourceId:actual.row.id,propertyScopeId:actual.row.propertyId,after:{linkId:actual.row.id,reservationId:actual.row.reservationId},requestId:deps.requestId??randomUUID(),occurredAt:actual.now});
   return guestHubPublicViewSchema.parse(present({...authority,visibleDataClasses:new Set()},"view",{...resource,data},catalogFieldPolicy("guest_hub"),actual.now));
  },undefined,async context=>{
