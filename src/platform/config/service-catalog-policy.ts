@@ -1,16 +1,20 @@
 import {z} from "zod";
 import {ruleConditionSchema} from "@/platform/automation/rule";
 import {configSlugSchema} from "./identifiers";
+import {localizedTextSchema} from "@/i18n/content";
 
 export const serviceCatalogRuleKey="services.pricing";
 // The existing canonical catalog protocol bounds one property catalog, independently of its configured business minimum.
 export const serviceCatalogMaximumItems=200;
 export const servicePricingModelSchema=z.enum(["FIXED","PER_GUEST","PER_DAY","CUSTOM"]);
+export const serviceCatalogAmountSchema=z.string().trim().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u,"Use a money amount with up to 2 decimals");
+const currency=z.string().trim().regex(/^[A-Z]{3}$/u);
 
 export const serviceCatalogCostSchema=z.object({
- amount:z.string().regex(/^(?:0|[1-9]\d{0,15})(?:\.\d{1,2})?$/u),
- currency:z.string().regex(/^[A-Z]{3}$/u)
+ amount:serviceCatalogAmountSchema,
+ currency
 }).strict();
+
 export const serviceCatalogProviderSchema=z.object({
  component_key:configSlugSchema,
  kind:z.enum(["SUPPLIER","PERSON"]),
@@ -27,3 +31,16 @@ export const serviceCatalogOrderTermsSchema=z.object({
  tax_rule_id:z.uuid(),
  availability:ruleConditionSchema
 }).strict();
+
+/** One canonical, browser-safe catalog protocol for configuration, onboarding,
+ * staff authoring and reservation-bound service ordering. */
+export const servicePricingSchema=z.object({services:z.array(z.object({
+ key:configSlugSchema,
+ name:localizedTextSchema.optional(),
+ description:localizedTextSchema.optional(),
+ available:z.boolean().optional(),
+ pricing_model:servicePricingModelSchema,
+ amount:serviceCatalogAmountSchema.optional(),
+ currency:currency.optional(),
+ order_terms:serviceCatalogOrderTermsSchema.optional()
+}).passthrough()).max(serviceCatalogMaximumItems).refine(rows=>new Set(rows.map(row=>row.key)).size===rows.length,"Service keys must be unique")}).passthrough();

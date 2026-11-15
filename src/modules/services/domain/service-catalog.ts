@@ -1,7 +1,6 @@
 import {z} from "zod";
 import {Money} from "@/platform/money/money";
-import {servicePricingSchema} from "@/platform/config/rule-registry";
-import {serviceCatalogOrderTermsSchema} from "@/platform/config/service-catalog-policy";
+import {servicePricingSchema,serviceCatalogOrderTermsSchema} from "@/platform/config/service-catalog-policy";
 import {localizedTextSchema} from "@/i18n/content";
 
 export class ServiceCatalogAccessError extends Error{}

@@ -2,11 +2,12 @@ import {describe,it,expect} from "vitest";
 import {randomUUID} from "node:crypto";
 import {Money} from "@/platform/money/money";
 import {servicePricingSchema} from "@/platform/config/rule-registry";
-import {serviceCatalogOrderTermsSchema} from "@/platform/config/service-catalog-policy";
+import {serviceCatalogOrderTermsSchema,servicePricingSchema as canonicalPricing} from "@/platform/config/service-catalog-policy";
 import {canonicalServiceCatalogEntry,serviceCatalogPrice,ServiceCatalogValidationError} from "@/modules/services/domain/service-catalog";
 
 describe("canonical service catalog and exact configured pricing",()=>{
  it("preserves legacy onboarding catalogs and unmodified extension data",()=>{
+  expect(servicePricingSchema).toBe(canonicalPricing);
   const previous=servicePricingSchema.parse({services:[{key:"chef",pricing_model:"CUSTOM",currency:"MAD",private_original:{version:1}}]}).services[0],next=canonicalServiceCatalogEntry({key:"chef",name:{en:"Chef",fr:"Chef"},description:null,available:true,pricing_model:"CUSTOM",amount:null,currency:"MAD",order_terms:null},previous);
   expect(next.private_original).toEqual(previous.private_original);expect(next.amount).toBeUndefined();expect(next.currency).toBe("MAD");expect(next).not.toHaveProperty("order_terms");
  });

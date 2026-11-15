@@ -221,6 +221,16 @@ export class ConfigRuleRepository {
     return rows[0]??null;
   }
 
+  async sourceMetadataWitnesses(ids:readonly string[]){
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<Array<NonNullable<Awaited<ReturnType<ConfigRuleRepository["sourceMetadataWitness"]>>>>>(Prisma.sql`SELECT id,key,version,scope_type AS "scopeType",scope_id AS "scopeId",lifecycle,created_by AS "createdBy",created_at AS "createdAt",effective_from AS "effectiveFrom",effective_to AS "effectiveTo",archived_at AS "archivedAt",xmin::text,ctid::text AS tuple FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND id=ANY(${[...new Set(ids)]}::uuid[]) ORDER BY id`);
+  }
+
+  async sourceWitnesses(ids:readonly string[]){
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<Array<NonNullable<Awaited<ReturnType<ConfigRuleRepository["sourceWitness"]>>>>>(Prisma.sql`SELECT id,key,version,scope_type AS "scopeType",scope_id AS "scopeId",lifecycle,created_by AS "createdBy",archived_at AS "archivedAt",value,xmin::text,ctid::text AS tuple FROM config_rule WHERE organization_id=${this.organizationId}::uuid AND id=ANY(${[...new Set(ids)]}::uuid[]) ORDER BY id`);
+  }
+
   async resolve(input: {
     key: string;
     scopes: readonly ConfigScopeCandidate[];
