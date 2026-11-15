@@ -49,7 +49,7 @@ export async function serviceCatalogTermsSources(actor:AccountActorContext,tx:Te
    const selected=taxes.taxes.filter(row=>row.key===key);if(selected.length!==1)return true;const tax=selected[0];
    return!tax.service_assessment||(tax.service_assessment.method==="FIXED"?(tax.amount===undefined||tax.currency!==entry.item.currency):tax.rate_bps===undefined);
   }))throw new ServiceCatalogConfigurationError();
-  policies.push({serviceKey:entry.item.key,allocationRuleId:allocation.id,taxRuleId:tax.id,recipe,taxes:taxes.taxes.filter(row=>recipe.tax_rule_keys.includes(row.key)).map(row=>({key:row.key,amount:row.amount??null,currency:row.currency??null,rate_bps:row.rate_bps??null,service_assessment:row.service_assessment!})),providers:providers.items.filter(row=>entry.terms.providers.some(ref=>ref.component_key===row.component_key&&ref.kind===row.kind&&ref.id===row.id))});
+  policies.push({serviceKey:entry.item.key,allocationRuleId:allocation.id,allocationRuleVersion:allocation.version,taxRuleId:tax.id,taxRuleVersion:tax.version,recipe,taxes:taxes.taxes.filter(row=>recipe.tax_rule_keys.includes(row.key)).map(row=>({key:row.key,amount:row.amount??null,currency:row.currency??null,rate_bps:row.rate_bps??null,service_assessment:row.service_assessment!})),providers:providers.items.filter(row=>entry.terms.providers.some(ref=>ref.component_key===row.component_key&&ref.kind===row.kind&&ref.id===row.id))});
  }
  return{policies,checks:[...checks,...providers.checks],fingerprint:commandFingerprint({heads,providers:providers.fingerprint,current})};
 }
