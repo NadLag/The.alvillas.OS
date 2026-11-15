@@ -14,6 +14,9 @@ export class SupplierRepository {
     return this.tx.$queryRaw<Array<{id:string;version:number;createdAt:Date;archivedAt:Date|null;rowVersion:string;tuple:string}>>(Prisma.sql`SELECT id,version,created_at AS "createdAt",archived_at AS "archivedAt",xmin::text AS "rowVersion",ctid::text AS tuple FROM supplier WHERE organization_id=${this.organizationId}::uuid AND id=ANY(${[...new Set(ids)]}::uuid[]) ORDER BY id`);
   }
   sourceLabels(ids:readonly string[]){return this.tx.supplier.findMany({where:{organizationId:this.organizationId,id:{in:[...new Set(ids)]}},select:{id:true,displayName:true},orderBy:{id:"asc"}});}
+  catalogChoiceHeads(query:string,after:string|undefined,asOf:Date){
+    return this.tx.supplier.findMany({where:{organizationId:this.organizationId,archivedAt:null,createdAt:{lte:asOf},...after?{id:{gt:after}}:{},...query?{displayName:{contains:query,mode:"insensitive"as const}}:{}},select:{id:true,createdAt:true},orderBy:{id:"asc"},take:51});
+  }
   request(idempotencyKey: string) { return this.tx.supplier.findFirst({ where: { organizationId: this.organizationId, idempotencyKey } }); }
   list(input: { query?: string; category?: string; includeArchived?: boolean; after?: string }) {
     return this.tx.supplier.findMany({ where: { organizationId: this.organizationId, ...(input.includeArchived ? {} : { archivedAt: null }),

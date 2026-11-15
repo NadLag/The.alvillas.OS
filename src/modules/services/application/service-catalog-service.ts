@@ -12,7 +12,7 @@ import {nativeServiceCatalogActor} from "@/platform/services/catalog-provider-so
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {canonicalServiceCatalogEntry,ServiceCatalogAccessError,ServiceCatalogConflictError,type ServiceCatalogEntry} from "../domain/service-catalog";
-import {serviceCatalogDraftSchema,serviceCatalogCommandSchema,serviceCatalogPageSchema,serviceCatalogHistorySchema,serviceCatalogVersionSchema,serviceCatalogReceiptSchema,serviceCatalogPublished,type ServiceCatalogCommand} from "../domain/service-catalog-command";
+import {serviceCatalogDraftSchema,serviceCatalogCommandSchema,serviceCatalogPageSchema,serviceCatalogHistorySchema,serviceCatalogVersionSchema,serviceCatalogRecoverSchema,serviceCatalogReceiptSchema,serviceCatalogPublished,type ServiceCatalogCommand} from "../domain/service-catalog-command";
 import {ServiceCatalogRepository} from "../infrastructure/service-catalog-repository";
 import {readNativeServiceCatalog,serviceCatalogSourceContext,serviceCatalogTermsSources} from "./service-catalog-source";
 
@@ -39,13 +39,24 @@ export async function previewServiceCatalogChange(actor:AccountActorContext,raw:
   return{reviewFingerprint:after.reviewFingerprint,baseRule:after.context.rule?{id:after.context.rule.id,version:after.context.rule.version,scopeType:after.context.rule.scopeType}:null,entry:project(actor,after.context,after.entry,after.terms.policies[0])};
  });
 }
-async function receipt(actor:AccountActorContext,tx:TenantTransaction,command:ServiceCatalogCommand){
- const event=await new OutboxRepository(tx,actor.organizationId).byIdempotencyKey(`service-catalog:${command.idempotencyKey}`);if(!event)return null;
- const value=serviceCatalogReceiptSchema.parse(event.payload);if(event.type!==serviceCatalogPublished||value.actorId!==actor.actorId||value.commandHash!==jsonbFingerprint(command)||value.propertyId!==command.draft.scope.propertyId||value.ownerId!==(command.draft.scope.ownerId??null)||value.serviceKey!==command.draft.entry.key)throw new ServiceCatalogConflictError();
- const context=await serviceCatalogSourceContext(actor,tx,command.draft.scope,"configure"),head=await context.repository.sourceMetadataWitness(value.ruleId);if(!head||head.key!==serviceCatalogRuleKey||head.scopeType!=="property"||head.scopeId!==value.propertyId||head.createdBy!==actor.actorId||head.version!==value.ruleVersion||head.archivedAt)throw new ServiceCatalogAccessError();
+async function originalReceipt(actor:AccountActorContext,tx:TenantTransaction,input:z.infer<typeof serviceCatalogRecoverSchema>){
+ const context=await serviceCatalogSourceContext(actor,tx,input.scope,"configure"),event=await new OutboxRepository(tx,actor.organizationId).byIdempotencyKey(`service-catalog:${input.idempotencyKey}`);if(!event)return null;
+ const value=serviceCatalogReceiptSchema.parse(event.payload);if(event.type!==serviceCatalogPublished||value.actorId!==actor.actorId||value.propertyId!==input.scope.propertyId||value.ownerId!==(input.scope.ownerId??null))throw new ServiceCatalogConflictError();
+ const head=await context.repository.sourceMetadataWitness(value.ruleId);if(!head||head.key!==serviceCatalogRuleKey||head.scopeType!=="property"||head.scopeId!==value.propertyId||head.createdBy!==actor.actorId||head.version!==value.ruleVersion||head.archivedAt)throw new ServiceCatalogAccessError();
  const checks:CurrentAuthorityCheck[]=(["view","export"]as const).map(action=>({action,unconditional:true,resource:{...context.scope,type:"config_rule",id:head.id,dataClass:"financial",status:head.lifecycle,occurredAt:head.createdAt}}));assertAccountAuthorization(actor,context.stored,context.now,checks,new ServiceCatalogAccessError());
- const original=await context.repository.sourceWitness(head.id);if(!original||original.xmin!==head.xmin||original.tuple!==head.tuple)throw new ServiceCatalogConflictError();const entry=servicePricingSchema.parse(original.value).services.find(row=>row.key===value.serviceKey);if(!entry||jsonbFingerprint(canonicalServiceCatalogEntry(command.draft.entry,entry))!==jsonbFingerprint(entry))throw new ServiceCatalogConflictError();await serviceCatalogTermsSources(actor,tx,context,[entry]);
+ const original=await context.repository.sourceWitness(head.id);if(!original||original.xmin!==head.xmin||original.tuple!==head.tuple)throw new ServiceCatalogConflictError();const entry=servicePricingSchema.parse(original.value).services.find(row=>row.key===value.serviceKey);if(!entry)throw new ServiceCatalogConflictError();const terms=await serviceCatalogTermsSources(actor,tx,context,[entry]);
+ return{value,entry,fingerprint:jsonbFingerprint({value,source:original,context:context.fingerprint,authority:context.authorizationFingerprint,terms:terms.fingerprint})};
+}
+async function receipt(actor:AccountActorContext,tx:TenantTransaction,command:ServiceCatalogCommand){
+ const original=await originalReceipt(actor,tx,{scope:command.draft.scope,idempotencyKey:command.idempotencyKey});if(!original)return null;const{value,entry}=original;
+ if(value.commandHash!==jsonbFingerprint(command)||value.serviceKey!==command.draft.entry.key||jsonbFingerprint(canonicalServiceCatalogEntry(command.draft.entry,entry))!==jsonbFingerprint(entry))throw new ServiceCatalogConflictError();
  return{ruleId:value.ruleId,ruleVersion:value.ruleVersion,serviceKey:value.serviceKey,replayed:true};
+}
+export async function recoverServiceCatalogChange(actor:AccountActorContext,raw:unknown,deps:Dependencies){
+ const input=serviceCatalogRecoverSchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{
+  await new ServiceCatalogRepository(tx,actor.organizationId).lockCommand(input.idempotencyKey);const before=await originalReceipt(actor,tx,input),after=await originalReceipt(actor,tx,input);if(before?.fingerprint!==after?.fingerprint)throw new ServiceCatalogConflictError();
+  return{propertyId:input.scope.propertyId,idempotencyKey:input.idempotencyKey,recorded:Boolean(after),receipt:after?{ruleId:after.value.ruleId,ruleVersion:after.value.ruleVersion,serviceKey:after.value.serviceKey}:null};
+ });
 }
 export async function publishServiceCatalogChange(actor:AccountActorContext,raw:unknown,deps:Dependencies){
  const command=serviceCatalogCommandSchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{

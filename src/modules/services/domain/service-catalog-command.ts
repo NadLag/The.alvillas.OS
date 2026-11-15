@@ -7,6 +7,7 @@ export const serviceCatalogCommandSchema=z.object({draft:serviceCatalogDraftSche
 export const serviceCatalogPageSchema=z.object({scope:serviceCatalogScopeSchema,after:z.string().regex(/^[a-z][a-z0-9_.-]{0,99}$/u).optional(),query:z.string().trim().max(100).default("")}).strict();
 export const serviceCatalogHistorySchema=z.object({scope:serviceCatalogScopeSchema,afterVersion:z.number().int().positive().optional()}).strict();
 export const serviceCatalogVersionSchema=z.object({scope:serviceCatalogScopeSchema,ruleId:z.uuid()}).strict();
+export const serviceCatalogRecoverSchema=z.object({scope:serviceCatalogScopeSchema,idempotencyKey:z.uuid()}).strict();
 export const serviceCatalogPublished="services.catalog.published";
 export const serviceCatalogReceiptSchema=z.object({
  schemaVersion:z.literal(1),actorId:z.uuid(),propertyId:z.uuid(),ownerId:z.uuid().nullable(),
