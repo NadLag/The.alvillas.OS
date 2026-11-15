@@ -6,7 +6,10 @@ histories. It does not introduce another agreement renderer or signature ledger.
 
 The `guest_hub.guest_agreement` policy requires explicit processing and wording
 approval references, a processing notice, a document type and native template
-keys. It has no enabled production or approved legal default. EN and FR have
+family and approved immutable EN/FR/optional-AR version IDs. These are references
+to actual authored templates; a later template version needs a new approval and
+delegation. The native generation service continues to enforce one variant family.
+It has no enabled production or approved legal default. EN and FR have
 explicit selections. Arabic uses its own approved template or an explicitly
 configured EN/FR fallback; otherwise that language is unavailable. The actual PDF
 language and immutable template/version identity must survive recovery unchanged.
