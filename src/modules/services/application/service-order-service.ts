@@ -8,7 +8,7 @@ import {writeAuditEvent} from "@/platform/audit/audit-writer";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {ServiceOrderRepository} from "../infrastructure/service-order-repository";
 import {serviceOrderRequestSchema,serviceOrderCreateSchema,serviceOrderRecoverSchema,ServiceOrderAccessError,ServiceOrderConflictError} from "../domain/service-order";
-import {inspectNewServiceOrder,serviceOrderAuthority} from "./service-order-source";
+import {inspectNewServiceOrder,serviceOrderAuthority,serviceOrderPropertyAuthority} from "./service-order-source";
 
 type Dependencies={db?:TenantTransactionRunner;requestId:string;ipAddress?:string|null};
 const asJson=(value:unknown)=>JSON.parse(JSON.stringify(value))as Prisma.InputJsonObject;
@@ -70,9 +70,9 @@ export async function createServiceOrder(actor:AccountActorContext,raw:unknown,d
 export async function recoverServiceOrderCommand(actor:AccountActorContext,raw:unknown,deps:Dependencies){
  const input=serviceOrderRecoverSchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{
   const repository=new ServiceOrderRepository(tx,actor.organizationId);await repository.lockCommand(input.idempotencyKey);const recorded=await repository.byNonce(input.idempotencyKey);
-  if(!recorded){await serviceOrderAuthority(actor,tx,input);return{recorded:false,receipt:null};}
+  if(!recorded){if(input.reservationId)await serviceOrderAuthority(actor,tx,{...input,reservationId:input.reservationId});else await serviceOrderPropertyAuthority(actor,tx,input.propertyId);return{recorded:false,receipt:null};}
   if(recorded.createdBy!==actor.actorId)throw new ServiceOrderAccessError();const head=await repository.head(recorded.orderId);
-  if(!head||head.propertyId!==input.propertyId||head.reservationId!==input.reservationId)throw new ServiceOrderAccessError();
+  if(!head||head.propertyId!==input.propertyId||input.reservationId!==undefined&&head.reservationId!==input.reservationId)throw new ServiceOrderAccessError();
   await serviceOrderAuthority(actor,tx,head);return{recorded:true,receipt:{orderId:head.id,eventId:recorded.id,version:recorded.version,state:recorded.toState}};
  },{timeout:120000});
 }

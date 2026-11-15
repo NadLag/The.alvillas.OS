@@ -148,16 +148,24 @@ function fieldTaskToSummary(task: FieldTaskWithRelations): FieldTaskSummary {
   };
 }
 
+export type ServiceOrderReservationHead={id:string;organizationId:string;propertyId:string;version:number;status:string;source:string;checkIn:Date;checkOut:Date;adultCount:number;childCount:number;archivedAt:Date|null;createdAt:Date;xmin:string;tuple:string};
+
 export class ReservationRepository {
   constructor(
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
   ) {}
 
-  async serviceOrderSourceHead(id:string){
-    const rows=await this.tx.$queryRaw<Array<{id:string;organizationId:string;propertyId:string;version:number;status:string;source:string;checkIn:Date;checkOut:Date;adultCount:number;childCount:number;archivedAt:Date|null;createdAt:Date;xmin:string;tuple:string}>>(Prisma.sql`SELECT id,organization_id AS "organizationId",property_id AS "propertyId",version,status,source,check_in AS "checkIn",check_out AS "checkOut",adult_count AS "adultCount",child_count AS "childCount",archived_at AS "archivedAt",created_at AS "createdAt",xmin::text,ctid::text AS tuple FROM reservation WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid`);
-    return rows[0]??null;
+  async serviceOrderSourceHeads(ids:readonly string[]){
+    if(!ids.length)return[];
+    return this.tx.$queryRaw<Array<ServiceOrderReservationHead>>(Prisma.sql`SELECT id,organization_id AS "organizationId",property_id AS "propertyId",version,status,source,check_in AS "checkIn",check_out AS "checkOut",adult_count AS "adultCount",child_count AS "childCount",archived_at AS "archivedAt",created_at AS "createdAt",xmin::text,ctid::text AS tuple FROM reservation WHERE organization_id=${this.organizationId}::uuid AND id=ANY(${[...new Set(ids)]}::uuid[]) ORDER BY id`);
   }
+  async serviceOrderSourceHead(id:string){return(await this.serviceOrderSourceHeads([id]))[0]??null;}
+  async serviceOrderChoiceHeads(propertyId:string,query:string,after?:string){
+    const rows=await this.tx.reservation.findMany({where:{organizationId:this.organizationId,propertyId,archivedAt:null,status:{notIn:["CANCELLED","NO_SHOW","CLOSED"]},...query?{reference:{contains:query,mode:"insensitive"}}:{},...after?{id:{gt:after}}:{}},orderBy:{id:"asc"},take:51,select:{id:true}});
+    const heads=await this.serviceOrderSourceHeads(rows.map(row=>row.id)),byId=new Map(heads.map(row=>[row.id,row]));return rows.map(row=>byId.get(row.id)).filter((row):row is ServiceOrderReservationHead=>row!==undefined);
+  }
+  serviceOrderChoiceLabels(ids:readonly string[]){return this.tx.reservation.findMany({where:{organizationId:this.organizationId,id:{in:[...ids]}},select:{id:true,reference:true}});}
 
   async findProperty(propertyId: string): Promise<{ id: string; name: string; city: string; cityId: string | null; region: string | null; regionId: string | null } | null> {
     return this.tx.property.findFirst({

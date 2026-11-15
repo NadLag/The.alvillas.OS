@@ -1,5 +1,7 @@
 import {z} from "zod";
-import {configSlugSchema} from "@/platform/config/identifiers";
+import {serviceOrderStateSchema,serviceOrderReasonSchema,serviceOrderRequestSchema,serviceOrderPositiveInteger as positiveInteger,type ServiceOrderState} from "./service-order-contracts";
+import {canTransitionServiceOrder} from "./service-order-contracts";
+export {serviceOrderStates,serviceOrderStateSchema,serviceOrderReasonSchema,serviceOrderRequestSchema,terminalServiceOrderStates,canTransitionServiceOrder,type ServiceOrderState,type ServiceOrderRequest} from "./service-order-contracts";
 import {serviceCatalogAmountSchema} from "@/platform/config/service-catalog-policy";
 import {serviceOrderPolicySchema,type ServiceOrderPolicy} from "@/platform/config/service-order-policy";
 import {serviceOrderTaskPlanSchema} from "@/platform/services/order-task-contracts";
@@ -13,27 +15,6 @@ export class ServiceOrderSourceUnavailableError extends Error {}
 export class ServiceOrderConfigurationError extends Error {}
 export class ServiceOrderValidationError extends Error {}
 
-export const serviceOrderStates=["REQUESTED","QUOTED","CONFIRMED","IN_PROGRESS","FULFILLED","REJECTED","CANCELLED"]as const;
-export const serviceOrderStateSchema=z.enum(serviceOrderStates);
-export type ServiceOrderState=z.infer<typeof serviceOrderStateSchema>;
-export const terminalServiceOrderStates:readonly ServiceOrderState[]=["FULFILLED","REJECTED","CANCELLED"];
-const transitions:Record<ServiceOrderState,readonly ServiceOrderState[]>={
- REQUESTED:["QUOTED","CONFIRMED","REJECTED","CANCELLED"],
- QUOTED:["QUOTED","CONFIRMED","REJECTED","CANCELLED"],
- CONFIRMED:["IN_PROGRESS","FULFILLED","CANCELLED"],
- IN_PROGRESS:["FULFILLED","CANCELLED"],
- FULFILLED:[],REJECTED:[],CANCELLED:[]
-};
-export function canTransitionServiceOrder(from:ServiceOrderState,to:ServiceOrderState){return transitions[from].includes(to);}
-
-const positiveInteger=z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-export const serviceOrderReasonSchema=z.string().trim().min(6).max(500);
-export const serviceOrderRequestSchema=z.object({
- propertyId:z.uuid(),reservationId:z.uuid(),serviceKey:configSlugSchema,
- serviceDate:z.iso.date(),lastServiceDate:z.iso.date(),quantity:positiveInteger,guests:positiveInteger,
- reason:serviceOrderReasonSchema
-}).strict().refine(value=>value.lastServiceDate>=value.serviceDate,{path:["lastServiceDate"],message:"service_order_invalid_dates"});
-export type ServiceOrderRequest=z.infer<typeof serviceOrderRequestSchema>;
 export const serviceOrderCreateSchema=z.object({request:serviceOrderRequestSchema,reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:z.uuid()}).strict();
 export const serviceOrderQuoteSchema=z.object({amount:serviceCatalogAmountSchema,currency:z.string().regex(/^[A-Z]{3}$/u),approvalReference:z.string().trim().min(1).max(240)}).strict();
 const transitionFields={
@@ -50,7 +31,7 @@ export const serviceOrderTransitionDraftSchema=z.object(transitionFields).strict
 export const serviceOrderTransitionSchema=z.object({...transitionFields,
  reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:z.uuid()
 }).strict().superRefine(refineTransition);
-export const serviceOrderRecoverSchema=z.object({propertyId:z.uuid(),reservationId:z.uuid(),idempotencyKey:z.uuid()}).strict();
+export const serviceOrderRecoverSchema=z.object({propertyId:z.uuid(),reservationId:z.uuid().optional(),idempotencyKey:z.uuid()}).strict();
 export const serviceOrderPageSchema=z.object({propertyId:z.uuid(),reservationId:z.uuid().optional(),state:serviceOrderStateSchema.optional(),after:z.uuid().optional()}).strict();
 
 export type ServiceOrderReservationSource={

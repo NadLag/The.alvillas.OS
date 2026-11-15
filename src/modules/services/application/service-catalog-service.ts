@@ -27,10 +27,11 @@ async function currencySource(actor:AccountActorContext,tx:TenantTransaction,ent
  for(const amount of[entry.amount,entry.order_terms?.internal_cost.amount])if(amount!==undefined&&Money.of(amount,currency.code).amount.decimalPlaces()>currency.minorUnit)throw new ServiceCatalogValidationError();
  return{code:currency.code,minorUnit:currency.minorUnit};
 }
-function project(actor:AccountActorContext,context:Context,entry:ServiceCatalogEntry,policy:Awaited<ReturnType<typeof serviceCatalogTermsSources>>["policies"][number]|undefined){
+export function projectServiceCatalogItem(actor:AccountActorContext,context:Pick<Context,"target"|"now">,entry:ServiceCatalogEntry,policy:Awaited<ReturnType<typeof serviceCatalogTermsSources>>["policies"][number]|undefined){
  const data={key:entry.key,name:entry.name??null,description:entry.description??null,available:entry.available??null,pricingModel:entry.pricing_model,amount:entry.amount??null,currency:entry.currency??null,orderTerms:entry.order_terms??null,financialPolicy:policy??null};
  return present({...actor.authContext,visibleDataClasses:new Set(["financial","personal"]as const)},"view",{...context.target,data},{},context.now);
 }
+const project=projectServiceCatalogItem;
 async function prepare(actor:AccountActorContext,tx:TenantTransaction,draft:z.infer<typeof serviceCatalogDraftSchema>){
  const context=await readNativeServiceCatalog(actor,tx,draft.scope,"configure"),previous=context.catalog?.services.find(item=>item.key===draft.entry.key),entry=canonicalServiceCatalogEntry(draft.entry,previous),terms=await serviceCatalogTermsSources(actor,tx,context,[entry],true),services=context.catalog?.services??[],next=servicePricingSchema.parse({...context.catalog,services:previous?services.map(item=>item.key===entry.key?entry:item):[...services,entry]});
  // A more specific agreement/channel policy must be edited through its existing
@@ -102,6 +103,6 @@ export async function serviceCatalogVersion(actor:AccountActorContext,raw:unknow
   const context=await serviceCatalogSourceContext(actor,tx,input.scope),head=await context.repository.sourceMetadataWitness(input.ruleId);if(!head||head.key!==serviceCatalogRuleKey||head.archivedAt||head.scopeType!=="property"||head.scopeId!==input.scope.propertyId)throw new ServiceCatalogAccessError();historyAuthority(actor,context,[head]);
   const row=await context.repository.sourceWitness(head.id);if(!row||row.xmin!==head.xmin||row.tuple!==head.tuple)throw new ServiceCatalogConflictError();const catalog=servicePricingSchema.parse(row.value),{selected,next}=serviceCatalogSelection(catalog.services,input),terms=await serviceCatalogTermsSources(actor,tx,context,selected),after=await serviceCatalogSourceContext(actor,tx,input.scope),final=await after.repository.sourceMetadataWitness(head.id),termsAfter=await serviceCatalogTermsSources(actor,tx,after,selected);historyAuthority(actor,after,[head]);
   if(!final||head.xmin!==final.xmin||head.tuple!==final.tuple||context.fingerprint!==after.fingerprint||context.authorizationFingerprint!==after.authorizationFingerprint||terms.fingerprint!==termsAfter.fingerprint)throw new ServiceCatalogConflictError();
-  return{rule:{id:head.id,version:head.version,scopeType:head.scopeType,lifecycle:head.lifecycle,createdAt:head.createdAt.toISOString()},items:selected.map(entry=>project(actor,{...after,catalog},entry,termsAfter.policies.find(policy=>policy.serviceKey===entry.key))),next};
+  return{rule:{id:head.id,version:head.version,scopeType:head.scopeType,lifecycle:head.lifecycle,createdAt:head.createdAt.toISOString()},items:selected.map(entry=>project(actor,after,entry,termsAfter.policies.find(policy=>policy.serviceKey===entry.key))),next};
  });
 }

@@ -26,6 +26,14 @@ type Metadata={id:string;propertyId:string;reservationId:string;titleTranslation
 type Boundary={stored:AuthContext;now:Date;scope:Pick<Resource,"organizationId"|"propertyId"|"reservationId"|"city"|"region">};
 type Command={key:string;requestId:string};
 
+export async function nativeServiceOrderTaskChoices(actor:AccountActorContext,tx:TenantTransaction,boundary:Boundary){
+ if(!boundary.scope.propertyId||boundary.scope.organizationId!==actor.organizationId)throw new ServiceOrderAccessError();
+ const rules=new ConfigRuleRepository(tx,actor.organizationId),scopes=await new ReservationConfigScopeRepository(tx,actor.organizationId).scopes({propertyId:boundary.scope.propertyId,asOf:boundary.now}),metadata=await rules.resolveMetadata({key:"ops.checklists",scopes,asOf:boundary.now}),head=metadata?await rules.sourceMetadataWitness(metadata.id):null;if(!head)throw new ServiceOrderConfigurationError();
+ const checks:CurrentAuthorityCheck[]=[{action:"view",unconditional:true,resource:{...boundary.scope,type:"config_rule",id:head.id,dataClass:"operational",occurredAt:head.createdAt}}];assertAccountAuthorization(actor,boundary.stored,boundary.now,checks,new ServiceOrderAccessError());
+ const native=await new OperationRepository(tx,actor.organizationId).checklists(boundary.scope.propertyId),after=await rules.sourceMetadataWitness(head.id);if(!native||native.rule.id!==head.id||head.xmin!==after?.xmin||head.tuple!==after.tuple)throw new ServiceOrderConflictError();
+ await recheckAccountAuthorization(actor,tx,await configurationSourceClock(tx,actor.organizationId),checks,new ServiceOrderAccessError());return{ruleId:head.id,ruleVersion:head.version,types:serviceOrderTaskPlanSchema.shape.type.options,priorities:serviceOrderTaskPlanSchema.shape.priority.options,checklists:native.catalog.checklists.map(item=>({key:item.key,name:item.name}))};
+}
+
 export async function inspectNativeServiceOrderTaskPlan(actor:AccountActorContext,tx:TenantTransaction,plan:z.infer<typeof serviceOrderTaskPlanSchema>,boundary:Boundary){
  if(boundary.scope.organizationId!==actor.organizationId||!boundary.scope.propertyId)throw new ServiceOrderAccessError();
  const selected=serviceOrderTaskPlanSchema.parse(plan),rules=new ConfigRuleRepository(tx,actor.organizationId),scopes=await new ReservationConfigScopeRepository(tx,actor.organizationId).scopes({propertyId:boundary.scope.propertyId,asOf:boundary.now}),

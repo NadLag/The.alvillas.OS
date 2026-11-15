@@ -1,6 +1,6 @@
 import type {TenantTransaction} from "@/platform/db/tenant";
 import type {AccountActorContext} from "@/platform/authz/session-context";
-import type {Action,Resource} from "@/platform/authz/authorize";
+import type {Action,AuthContext,Resource} from "@/platform/authz/authorize";
 import {authContextForAccountInTransaction} from "@/platform/authz/account-context";
 import {assertAccountAuthorization,type CurrentAuthorityCheck} from "@/platform/authz/current-authority";
 import {captureAuthorizationCap} from "@/platform/authz/authorization-cap";
@@ -15,11 +15,23 @@ import {ServiceOrderAccessError,ServiceOrderConflictError,ServiceOrderConfigurat
 import {readNativeServiceCatalog,serviceCatalogTermsSources} from "./service-catalog-source";
 
 type Identity={propertyId:string;reservationId:string;serviceKey?:string;id?:string;state?:string;createdAt?:Date};
+type NativeMetadata={property:NonNullable<Awaited<ReturnType<typeof nativeServiceOrderProperty>>>;reservation:NonNullable<Awaited<ReturnType<typeof nativeServiceOrderReservation>>>;stored:AuthContext;now:Date};
+export async function serviceOrderPropertyAuthority(actor:AccountActorContext,tx:TenantTransaction,propertyId:string){
+ const repository=new ServiceOrderRepository(tx,actor.organizationId),[property,stored,now]=await Promise.all([nativeServiceOrderProperty(tx,actor.organizationId,propertyId),authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId),repository.clock()]);if(!property)throw new ServiceOrderAccessError();
+ const scope={organizationId:actor.organizationId,propertyId:property.id,city:property.cityId,region:property.regionId},checks:CurrentAuthorityCheck[]=[{action:"view",resource:{...scope,type:"property",id:property.id,status:property.status,occurredAt:property.createdAt}},{action:"view",resource:{...scope,type:"service_order",dataClass:"operational"}}];
+ assertAccountAuthorization(actor,stored,now,checks,new ServiceOrderAccessError());return{repository,property,stored,now,scope,checks};
+}
 /** Metadata remains independently readable without disclosing catalog prices,
  * internal costs, provider labels, financial rules or private reasons. */
 export async function serviceOrderAuthority(actor:AccountActorContext,tx:TenantTransaction,input:Identity,action:Action="view"){
  const repository=new ServiceOrderRepository(tx,actor.organizationId),[property,reservation,stored,now]=await Promise.all([nativeServiceOrderProperty(tx,actor.organizationId,input.propertyId),nativeServiceOrderReservation(tx,actor.organizationId,input.reservationId),authContextForAccountInTransaction(tx,actor.organizationId,actor.actorId),repository.clock()]);
  if(!property||!reservation||reservation.propertyId!==property.id)throw new ServiceOrderAccessError();
+ return{repository,...serviceOrderMetadataAuthority(actor,input,{property,reservation,stored,now},action)};
+}
+/** Single-record and bounded page reads share the same actual source facts
+ * and deny-by-default authority checks without per-row account queries. */
+export function serviceOrderMetadataAuthority(actor:AccountActorContext,input:Identity,native:NativeMetadata,action:Action="view"){
+ const{property,reservation,stored,now}=native;if(property.id!==input.propertyId||reservation.id!==input.reservationId||reservation.propertyId!==property.id)throw new ServiceOrderAccessError();
  const scope={organizationId:actor.organizationId,propertyId:property.id,reservationId:reservation.id,city:property.cityId,region:property.regionId},resource:Resource={...scope,type:"service_order",id:input.id,serviceId:input.serviceKey,status:input.state,occurredAt:input.createdAt,dataClass:"operational"},checks:CurrentAuthorityCheck[]=[
   {action:"view",resource:{...scope,type:"property",id:property.id,status:property.status,occurredAt:property.createdAt}},
   {action:"view",resource:{...scope,type:"reservation",id:reservation.id,status:reservation.status,occurredAt:reservation.createdAt,dataClass:"guest"}},
@@ -27,7 +39,7 @@ export async function serviceOrderAuthority(actor:AccountActorContext,tx:TenantT
   {action,resource}
  ];
  assertAccountAuthorization(actor,stored,now,checks,new ServiceOrderAccessError());
- return{repository,property,reservation,stored,now,scope,resource,checks,fingerprint:commandFingerprint({property,reservation,held:captureAuthorizationCap(actor.authContext),current:captureAuthorizationCap(stored)})};
+ return{property,reservation,stored,now,scope,resource,checks,fingerprint:commandFingerprint({property,reservation,held:captureAuthorizationCap(actor.authContext),current:captureAuthorizationCap(stored)})};
 }
 
 /** The actual booking source participates in the existing precedence resolver;

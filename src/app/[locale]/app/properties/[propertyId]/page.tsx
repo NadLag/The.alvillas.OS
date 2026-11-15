@@ -476,6 +476,7 @@ export default async function PropertyDetailPage({
           {canEditOwnership ? <Link className="secondary-button" href={`/${appLocale}/app/properties/${property.id}/approvals/new`}>{t("properties.requestApproval")}</Link> : null}
           <Link className="secondary-button" href={`/${appLocale}/app/templates?property=${property.id}`}>{t("properties.templates")}</Link>
           {canViewServices&&(["view","export"]as const).every(action=>["config_rule","financial_transaction"].every(type=>authorizeUnconditionalSource(ctx.authContext,action,{...propertyScopedResource,type,...type==="config_rule"?{id:"services.pricing"}:{},dataClass:"financial"},new Date())))?<Link className="secondary-button" data-testid="property-service-catalog-link" prefetch={false} href={`/${appLocale}/app/properties/${property.id}/services`}>{(await getTranslations("ServiceCatalog"))("title")}</Link>:null}
+          {authorize(ctx.authContext,"view",{...propertyScopedResource,type:"service_order",dataClass:"operational"},new Date())?<Link className="secondary-button" data-testid="property-service-orders-link" prefetch={false} href={`/${appLocale}/app/properties/${property.id}/services/orders`}>{(await getTranslations("ServiceOrders"))("title")}</Link>:null}
         <Link className="secondary-button" href={`/${appLocale}/app/properties`}>
           {t("properties.backToProperties")}
         </Link></>

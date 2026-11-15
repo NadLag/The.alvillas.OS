@@ -12,6 +12,8 @@ import {nativeServiceOrderFixture} from "./support/service-order-fixture";
 import {nativeGuestHubSecondActor} from "./support/guest-hub-fixture";
 import {provisionIntegrationRole} from "./support/database-role";
 import * as auditWriter from "@/platform/audit/audit-writer";
+import {serviceOrderPage,readServiceOrderOriginal,serviceOrderHistory,serviceOrderHistoryOriginal,serviceOrderReservationChoices,serviceOrderCatalogChoices,serviceOrderTaskChoices} from "@/modules/services/application/service-order-workspace";
+import {serviceOrderPageResponseSchema,serviceOrderOriginalResponseSchema,serviceOrderHistoryResponseSchema,serviceOrderHistoryOriginalSchema,serviceOrderReservationsResponseSchema,serviceOrderCatalogResponseSchema,serviceOrderTaskChoicesResponseSchema} from "@/modules/services/domain/service-order-view";
 
 const url=process.env.TEST_DATABASE_URL;let admin:PrismaClient,db:PrismaClient;
 beforeAll(async()=>{
@@ -26,6 +28,20 @@ const command=async(f:Fixture)=>({request:f.request,reviewFingerprint:(await pre
 const financial=(f:Fixture)=>withTenant(db,f.organizationId,tx=>tx.$queryRaw`SELECT 'transaction' AS kind,id::text,xmin::text,ctid::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${f.organizationId}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,ctid::text,to_jsonb(p) FROM posting p WHERE organization_id=${f.organizationId}::uuid ORDER BY kind,id`);
 
 describe("native reviewed service order persistence",()=>{
+ it("projects real property workspace choices, original terms and append-only history through strict private DTOs",async()=>{
+  const f=await fixture(),before=await financial(f),created=await createServiceOrder(f.ctx,await command(f),f.deps),page=serviceOrderPageResponseSchema.parse(await serviceOrderPage(f.ctx,{propertyId:f.property.id},f.deps));expect(page.items).toHaveLength(1);expect(page.items[0].id).toBe(created.orderId);expect(JSON.stringify(page)).not.toContain("240.00");
+  const reservations=serviceOrderReservationsResponseSchema.parse(await serviceOrderReservationChoices(f.ctx,{propertyId:f.property.id},f.deps));expect(reservations.items.find(row=>row.id===f.reservation.id)).toMatchObject({guestCapacity:f.reservation.adultCount+f.reservation.childCount});
+  const catalog=serviceOrderCatalogResponseSchema.parse(await serviceOrderCatalogChoices(f.ctx,{propertyId:f.property.id,reservationId:f.reservation.id},f.deps));expect(catalog.items.find(row=>row.key===f.entry.key)).toMatchObject({amount:"120.00",orderTerms:{internal_cost:{amount:"30.00"}}});expect(catalog.policy).toEqual({maxQuantity:10,maxServiceDays:10});
+  const original=serviceOrderOriginalResponseSchema.parse(await readServiceOrderOriginal(f.ctx,{orderId:created.orderId},f.deps));expect(original).toMatchObject({totalAmount:"240.00",request:f.request,catalog:{key:f.entry.key}});
+  const history=serviceOrderHistoryResponseSchema.parse(await serviceOrderHistory(f.ctx,{orderId:created.orderId},f.deps));expect(history.items).toHaveLength(1);expect(JSON.stringify(history)).not.toContain(f.request.reason);expect(serviceOrderHistoryOriginalSchema.parse(await serviceOrderHistoryOriginal(f.ctx,{orderId:created.orderId,eventId:history.items[0].id},f.deps))).toMatchObject({reason:f.request.reason,snapshot:{totalAmount:"240.00"}});
+  expect(serviceOrderTaskChoicesResponseSchema.parse(await serviceOrderTaskChoices(f.ctx,{orderId:created.orderId},f.deps))).toMatchObject({ruleVersion:1,checklists:[{key:"owned_service"}]});expect(await financial(f)).toEqual(before);
+ });
+ it("retains permitted metadata and nonce-only recovery after financial revocation while denying original values before private reads",async()=>{
+  const f=await fixture(),input=await command(f),created=await createServiceOrder(f.ctx,input,f.deps);await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.grants["financial_transaction:view"]},data:{archivedAt:new Date()}}));
+  expect(await recoverServiceOrderCommand(f.ctx,{propertyId:f.property.id,idempotencyKey:input.idempotencyKey},f.deps)).toMatchObject({recorded:true,receipt:{orderId:created.orderId}});expect((await serviceOrderPage(f.ctx,{propertyId:f.property.id},f.deps)).items).toHaveLength(1);expect((await serviceOrderHistory(f.ctx,{orderId:created.orderId},f.deps)).items).toHaveLength(1);
+  const spy=vi.spyOn(ConfigRuleRepository.prototype,"sourceWitness");try{await expect(readServiceOrderOriginal(f.ctx,{orderId:created.orderId},f.deps)).rejects.toBeInstanceOf(ServiceOrderAccessError);await expect(serviceOrderCatalogChoices(f.ctx,{propertyId:f.property.id,reservationId:f.reservation.id},f.deps)).rejects.toBeInstanceOf(ServiceCatalogAccessError);expect(spy).not.toHaveBeenCalled();}finally{spy.mockRestore();}
+  const other=await fixture();await expect(serviceOrderPage(other.ctx,{propertyId:f.property.id},other.deps)).rejects.toBeInstanceOf(ServiceOrderAccessError);await expect(serviceOrderReservationChoices(other.ctx,{propertyId:f.property.id},other.deps)).rejects.toBeInstanceOf(ServiceOrderAccessError);
+ });
  it("commits one exact reviewed request, event, audit and receipt under concurrent retries without financial effects",async()=>{
   const f=await fixture(),before=await financial(f),input=await command(f),review=await previewServiceOrder(f.ctx,f.request,f.deps);expect(review).toMatchObject({totalAmount:"240.00",currency:"MAD",quoteRequired:false});
   const results=await Promise.all([createServiceOrder(f.ctx,input,f.deps),createServiceOrder(f.ctx,input,f.deps)]);expect(results.map(r=>r.replayed).sort()).toEqual([false,true]);expect(results[0].orderId).toBe(results[1].orderId);
