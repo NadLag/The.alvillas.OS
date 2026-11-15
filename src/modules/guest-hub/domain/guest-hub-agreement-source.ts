@@ -1,7 +1,8 @@
 import {z} from "zod";
 import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
 import {guestHubIdSchema,guestHubFingerprintSchema} from "./guest-hub-contract";
-import {guestHubAgreementTemplate,GuestHubAgreementAccessError} from "./guest-hub-agreement-policy";
+import type {guestHubAgreementTemplate} from "./guest-hub-agreement-policy";
+import {GuestHubAgreementAccessError} from "./guest-hub-agreement-policy";
 
 /** A normalized projection supplied by canonical document/signature services.
  * Public commands never accept these source identities or recipient references. */
