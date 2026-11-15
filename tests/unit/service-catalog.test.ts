@@ -2,10 +2,16 @@ import {describe,it,expect} from "vitest";
 import {randomUUID} from "node:crypto";
 import {Money} from "@/platform/money/money";
 import {servicePricingSchema} from "@/platform/config/rule-registry";
-import {serviceCatalogOrderTermsSchema,servicePricingSchema as canonicalPricing} from "@/platform/config/service-catalog-policy";
+import {serviceCatalogOrderTermsSchema,serviceCatalogAvailabilitySchema,servicePricingSchema as canonicalPricing} from "@/platform/config/service-catalog-policy";
 import {canonicalServiceCatalogEntry,serviceCatalogPrice,ServiceCatalogValidationError} from "@/modules/services/domain/service-catalog";
 
 describe("canonical service catalog and exact configured pricing",()=>{
+ it("keeps private configuration and arbitrary personal fields out of guest availability probes",()=>{
+  expect(serviceCatalogAvailabilitySchema.safeParse({all:[{path:"request.guests",op:">=",value:2},{path:"request.date",op:">=",value:{field:"reservation.checkInDate"}}]}).success).toBe(true);
+  expect(serviceCatalogAvailabilitySchema.safeParse({path:"request.quantity",op:">",value:{config:"finance.commission",path:"rate_bps"}}).success).toBe(false);
+  expect(serviceCatalogAvailabilitySchema.safeParse({not:{path:"reservation.guest.passport",op:"exists"}}).success).toBe(false);
+  expect(serviceCatalogAvailabilitySchema.safeParse({path:"request.guests",op:"in",value:[{field:"property.internalCost"}]}).success).toBe(false);
+ });
  it("preserves legacy onboarding catalogs and unmodified extension data",()=>{
   expect(servicePricingSchema).toBe(canonicalPricing);
   const previous=servicePricingSchema.parse({services:[{key:"chef",pricing_model:"CUSTOM",currency:"MAD",private_original:{version:1}}]}).services[0],next=canonicalServiceCatalogEntry({key:"chef",name:{en:"Chef",fr:"Chef"},description:null,available:true,pricing_model:"CUSTOM",amount:null,currency:"MAD",order_terms:null},previous);

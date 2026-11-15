@@ -1,5 +1,5 @@
 import {z} from "zod";
-import {ruleConditionSchema} from "@/platform/automation/rule";
+import {ruleConditionSchema,type Condition,type Operand} from "@/platform/automation/rule";
 import {configSlugSchema} from "./identifiers";
 import {localizedTextSchema} from "@/i18n/content";
 
@@ -20,6 +20,24 @@ export const serviceCatalogProviderSchema=z.object({
  kind:z.enum(["SUPPLIER","PERSON"]),
  id:z.uuid()
 }).strict();
+// Availability sees this explicit request/reservation/property projection only.
+// Private configuration and arbitrary record paths cannot become guest probes.
+export const serviceCatalogAvailabilityFields=new Set([
+ "request.quantity","request.guests","request.days","request.date",
+ "reservation.status","reservation.source","reservation.checkInDate","reservation.checkOutDate",
+ "property.id","property.cityId","property.regionId"
+]);
+function availabilityOperand(value:Operand|undefined):boolean{
+ if(Array.isArray(value))return value.every(availabilityOperand);
+ return value===null||typeof value!=="object"||"field"in value&&serviceCatalogAvailabilityFields.has(value.field);
+}
+function availabilityCondition(value:Condition):boolean{
+ if("all"in value)return value.all.every(availabilityCondition);
+ if("any"in value)return value.any.every(availabilityCondition);
+ if("not"in value)return availabilityCondition(value.not);
+ return serviceCatalogAvailabilityFields.has(value.path)&&availabilityOperand(value.value);
+}
+export const serviceCatalogAvailabilitySchema=ruleConditionSchema.refine(availabilityCondition,"Service availability may use only its public request, reservation and property fields");
 /** The canonical catalog references actual immutable financial policy versions.
  * It owns neither another allocation recipe nor a legal tax treatment. */
 export const serviceCatalogOrderTermsSchema=z.object({
@@ -29,7 +47,7 @@ export const serviceCatalogOrderTermsSchema=z.object({
  providers:z.array(serviceCatalogProviderSchema).max(100).refine(rows=>new Set(rows.map(row=>row.component_key)).size===rows.length,"Provider component identities must be unique"),
  allocation_rule_id:z.uuid(),
  tax_rule_id:z.uuid(),
- availability:ruleConditionSchema
+ availability:serviceCatalogAvailabilitySchema
 }).strict();
 
 /** One canonical, browser-safe catalog protocol for configuration, onboarding,

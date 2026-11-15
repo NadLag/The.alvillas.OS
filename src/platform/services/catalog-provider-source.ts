@@ -11,6 +11,11 @@ import type {z} from "zod";
 import type {serviceCatalogProviderSchema} from "@/platform/config/service-catalog-policy";
 
 type Reference=z.infer<typeof serviceCatalogProviderSchema>;
+export async function nativeServiceCatalogActor(actor:AccountActorContext,tx:TenantTransaction){
+ const[account]=await new TeamRepository(tx,actor.organizationId).onboardingTeamAccountHeads([actor.actorId]);
+ if(!account?.personId||account.status!=="ACTIVE"||actor.authContext.personId!==undefined&&actor.authContext.personId!==account.personId)throw new ServiceCatalogAccessError();
+ return{...actor,personId:account.personId};
+}
 /** Cross-module provider reads retain the canonical tenant repositories and
  * actual team memberships. A catalog property never fabricates a person's scope. */
 export async function nativeServiceCatalogProviders(actor:AccountActorContext,tx:TenantTransaction,references:readonly Reference[],stored:AuthContext,now:Date){
