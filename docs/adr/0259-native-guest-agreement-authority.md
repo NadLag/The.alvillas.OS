@@ -27,6 +27,22 @@ PDF. Only canonical native signed evidence with its archived signed original can
 satisfy agreement completion. A house-rules acknowledgement does not establish a
 document signature.
 
+Prepared agreement selection has its own append-only staff release: it chooses an
+actual prepared original, rather than changing a generic form flag. Its purpose-
+bound signature must cover the original document/signer fingerprints and held
+authorization cap. Existing form-grant signing protocols remain unchanged.
+
+A guest delivery request records guest-capability provenance with no human staff
+actor. Its native document-distribution admission must attach that provenance in
+the same transaction as its outbox event. As with native identity-document
+archive boundaries, a guest-origin intent cannot execute through an ordinary
+document worker without the composition-supplied guest authority boundary. That
+boundary rechecks the original release, processing purpose, source and held/current
+staff authority at every native phase. Withdrawal before dispatch closes delivery;
+an uncertain provider acknowledgement retains the original and cannot cause an
+automatic second send. Canonical document/signature history remains independently
+readable by authorized staff.
+
 Legal wording, provider/certificate approval and restricted hosted acceptance
 remain external gates. The policy foundation alone does not complete F-GST-07;
 native producer integration, delegation/history, UI and acceptance evidence remain
