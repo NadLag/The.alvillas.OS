@@ -6536,5 +6536,85 @@
       "chronology": "Departure must be later than arrival.",
       "method_unavailable": "Choose an available travel method."
     }
+  },
+  "GuestIdentityDocuments": {
+    "title": "Identity documents",
+    "guidance": "Send only the identity documents requested for your stay.",
+    "open": "Open the private document form",
+    "loading": "Checking your private document access…",
+    "loaded": "Your private document form is ready.",
+    "privacy": "Original filenames are not sent. Files are kept in the private document archive under the approved policy.",
+    "choose": "Choose the requested document and each required side.",
+    "acknowledge": "I have read the notice above.",
+    "review": "Review my documents",
+    "reviewTitle": "Review the selected document sides",
+    "reviewGuidance": "Check the document and side before sending. Publication is confirmed separately for each original file.",
+    "confirm": "Send these documents",
+    "edit": "Change my selection",
+    "close": "Close the document form",
+    "refresh": "Refresh private document access",
+    "limit": "Up to {size} MB per file",
+    "progress": "{completed} of {total} files published",
+    "published": "Published privately",
+    "awaiting": "Awaiting original file",
+    "reselect": "Select the same original file for each unfinished side. Files are not saved in this browser for recovery.",
+    "resume": "Resume the original upload",
+    "replace": "Submit an updated document record",
+    "limitReached": "The configured submission limit has been reached. Contact the villa team if a correction is needed.",
+    "saved": "Every selected original file is now published privately.",
+    "recovered": "The original published files were recovered.",
+    "replaced": "An updated document record is already in use. The original history is retained.",
+    "uncertain": "A request is pending. Refresh to check the original record before sending again.",
+    "storageUnavailable": "This browser cannot retain the pending request identifier. Allow browser storage or use another browser before confirming.",
+    "kinds": {
+      "PASSPORT": "Passport",
+      "NATIONAL_ID": "National identity card"
+    },
+    "parts": {
+      "IDENTITY_PAGE": "Identity page",
+      "FRONT": "Front",
+      "BACK": "Back"
+    },
+    "states": {
+      "uncertain": "The reply was interrupted. Refresh to check the original record.",
+      "forbidden": "This private document form is unavailable.",
+      "offline": "You’re offline. Reconnect and select unfinished original files again.",
+      "validation": "Check the requested sides, file type, file size and acknowledgement.",
+      "conflict": "The original record or approved settings changed. Refresh before continuing.",
+      "configuration_unavailable": "Private document collection is currently unavailable. Contact the villa team.",
+      "rate_limited": "Please wait before continuing the original upload.",
+      "link_unavailable": "This stay link or document access is unavailable.",
+      "unavailable": "The private document form could not be loaded. Refresh to check the original record.",
+      "storage_unavailable": "This browser cannot retain your pending request identifier."
+    }
+  },
+  "GuestIdentityManagement": {
+    "title": "Identity document access",
+    "guidance": "Delegate or withdraw private identity document collection for this original stay link. Collection requires the approved privacy policy and independent document and retention authority.",
+    "loading": "Checking current private document authority…",
+    "loaded": "Current private document access is ready.",
+    "lastDecision": "Last recorded decision",
+    "decisions": {
+      "GRANTED": "Granted",
+      "WITHDRAWN": "Withdrawn",
+      "NONE": "No decision recorded"
+    },
+    "decision": "Access decision",
+    "grant": "Delegate private identity document collection",
+    "withdraw": "Withdraw identity document collection",
+    "reason": "Reason for this decision",
+    "review": "Review this decision",
+    "confirmTitle": "Confirm identity document access",
+    "expiresAt": "Original link expires {date} (UTC).",
+    "confirm": "Record this decision",
+    "edit": "Edit the decision",
+    "saved": "The private document access decision was recorded.",
+    "recovered": "The original access decision was recovered.",
+    "unrecorded": "The earlier decision was not recorded. Review current authority before retrying.",
+    "uncertain": "The reply was interrupted. Recover the original decision before recording another.",
+    "recover": "Recover the decision",
+    "unavailable": "No collection change is currently permitted. Check the approved privacy policy and independent source, document and retention permissions.",
+    "refresh": "Refresh access",
+    "close": "Close identity document access"
   }
 }

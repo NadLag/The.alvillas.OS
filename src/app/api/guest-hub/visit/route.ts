@@ -1,4 +1,5 @@
+import {nativeGuestIdentityDocumentAuthority} from "@/app/api/guest-hub/identity-documents/native-document-authority";
 import type {NextRequest} from "next/server";
 import {prisma} from "@/platform/db/client";
 import {guestHubPublicHttp} from "@/modules/guest-hub/ui/guest-hub-public-http";
-export async function POST(request:NextRequest){return guestHubPublicHttp(request,{db:prisma});}
+export async function POST(request:NextRequest){return guestHubPublicHttp(request,{db:prisma,identityDocuments:nativeGuestIdentityDocumentAuthority});}

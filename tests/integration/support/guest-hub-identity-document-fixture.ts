@@ -8,8 +8,8 @@ import {nativeGuestHubStayDetailsFixture} from "./guest-hub-stay-details-fixture
 import {ownedGuestHubIdentityDocumentPolicy} from "./guest-hub-identity-document-policy";
 import {ownedGuestHubIdentityDocumentDelegation} from "./guest-hub-identity-document-delegation";
 
-export async function nativeGuestHubIdentityDocumentFixture(admin:PrismaClient,db:PrismaClient,changes:Partial<GuestHubIdentityDocumentPolicy>={}){
- const f=await nativeGuestHubStayDetailsFixture(admin,db),identityPolicy=ownedGuestHubIdentityDocumentPolicy(changes),canonical=ownedGuestHubIdentityDocumentDelegation();
+export async function nativeGuestHubIdentityDocumentFixture(admin:PrismaClient,db:PrismaClient,changes:Partial<GuestHubIdentityDocumentPolicy>={},existing?:Parameters<typeof nativeGuestHubStayDetailsFixture>[3]){
+ const f=await nativeGuestHubStayDetailsFixture(admin,db,{},existing),identityPolicy=ownedGuestHubIdentityDocumentPolicy(changes),canonical=ownedGuestHubIdentityDocumentDelegation();
  await withTenant(db,f.organizationId,async tx=>{
   for(const key of["guest_hub_identity_documents:view","guest_hub_identity_documents:create","guest_hub_identity_documents:void","property:view","document:view","document:create","document:edit"]){
    const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key}}),role=await tx.role.create({data:{organizationId:f.organizationId,key:"native_identity_"+randomUUID(),name:"Independent private identity "+key}});

@@ -12,7 +12,7 @@ import { withTenant, type TenantTransaction, type TenantTransactionRunner } from
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { writeAuditEvent } from "@/platform/audit/audit-writer";
 import { consumeRateLimit } from "@/platform/rate-limit/postgres-rate-limiter";
-import { commandFingerprint } from "@/platform/http/command-fingerprint";
+import { commandFingerprint,jsonbFingerprint } from "@/platform/http/command-fingerprint";
 import { DocumentRepository, documentSourceRuleScopes, type DocumentSourceFacts } from "../infrastructure/document-repository";
 import type { DocumentObjectStore } from "../infrastructure/document-object-store";
 import { documentObjectKey } from "../domain/document-object";
@@ -129,7 +129,7 @@ async function review(ctx: DocumentActorContext, tx: TenantTransaction, input: R
   if (input.documentId && !root&&!boundary) throw new DocumentAccessError();
   if(root&&await repository.nativeIdentityAdmissionForDocument(root.id))throw new DocumentAccessError();
   if (root && (root.sourceKind !== input.source.kind || root.sourceId !== input.source.id || root.typeKey !== input.typeKey || root.kind !== input.kind || root.locale !== input.locale || (root.template?.key ?? null) !== input.templateKey)) throw new DocumentConflictError();
-  const current = await context(ctx, tx, input.source, "create", root ?? undefined, input,env), previous = root ? await repository.latest(root.id) : null;
+  const current = await context(ctx, tx, input.source, "create", root ?? undefined, {...input,...boundary?{privacy:boundary.privacy}:{}},env), previous = root ? await repository.latest(root.id) : null;
   if (!current.type?.content_types.includes(input.contentType) || input.fileSize > current.type.max_bytes || (previous?.id ?? null) !== input.supersedesId) throw new DocumentConflictError();
   if(input.parts&&!current.policy.value.upload_transport)throw new DocumentConfigurationError();
   return { ...current, root, previous, reviewFingerprint: commandFingerprint({ actorId: ctx.actorId, input, source: current.fingerprint, latest: previous?.id ?? null, cap: captureAuthorizationCap(ctx.authContext) }) };
@@ -176,6 +176,15 @@ async function admissionResult(ctx: DocumentActorContext, tx: TenantTransaction,
   const current = await admittedContext(ctx, tx, row,undefined,env,boundary);
   return documentUploadAdmissionSchema.parse({ recorded: true, id: row.id, documentId: row.documentId, idempotencyKey: row.commandKey, state: row.version ? "COMPLETE" : current.superseded ? "SUPERSEDED" : "ADMITTED", complete: Boolean(row.version), version: row.version ? publicVersion(ctx, current, current.root, row.version) : null,
     expected: { fileName: row.fileName, contentType: row.contentType, fileSize: row.fileSize, sha256: row.sha256,parts:storedDocumentUploadInput.parse(row.input).parts??null } });
+}
+
+/** Server composition may recover only the exact native file under independent
+ * canonical source/document read authority and the original delegated cap. */
+export async function readNativeGuestIdentityAdmission(actor:DocumentActorContext,tx:TenantTransaction,reference:{admissionId:string;documentId:string;captureId:string;fileId:string},env?:NodeJS.ProcessEnv){
+  const ctx=actorContext(actor),repository=new DocumentRepository(tx,ctx.organizationId),row=await repository.admission(reference.admissionId);if(!row)throw new DocumentAccessError();
+  const input=nativeGuestIdentityDocumentUploadInput.safeParse(row.input),root=await repository.document(row.documentId);
+  if(!input.success||!root||row.documentId!==reference.documentId||input.data.guestIdentity.captureId!==reference.captureId||input.data.guestIdentity.fileId!==reference.fileId||row.createdBy!==ctx.actorId||jsonbFingerprint(row.authorizationCap)!==jsonbFingerprint(captureAuthorizationCap(ctx.authContext)))throw new DocumentAccessError();
+  await context(ctx,tx,sourceOf(root),"view",root,undefined,env);return row;
 }
 
 export async function reviewDocumentUpload(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {

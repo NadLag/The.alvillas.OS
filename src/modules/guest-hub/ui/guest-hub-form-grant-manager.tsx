@@ -13,7 +13,7 @@ type Review=z.infer<typeof guestHubFormGrantReviewSchema>;
 type Decision="GRANTED"|"WITHDRAWN";
 type Pending={nonce:string;decision:Decision};
 class GrantNonceStorageError extends Error{}
-type Definition={messages:"GuestProfileManagement"|"GuestStayDetailsManagement";path:"profile/grant/"|"stay-details/grant/";noncePrefix:"alvillas:guest-profile-grant:"|"alvillas:guest-stay-details-grant:";testId:"guest-profile-grant"|"guest-stay-details-grant"};
+type Definition={messages:"GuestProfileManagement"|"GuestStayDetailsManagement"|"GuestIdentityManagement";path:"profile/grant/"|"stay-details/grant/"|"identity-documents/grant/";noncePrefix:"alvillas:guest-profile-grant:"|"alvillas:guest-stay-details-grant:"|"alvillas:guest-identity-grant:";testId:"guest-profile-grant"|"guest-stay-details-grant"|"guest-identity-grant"};
 export function GuestHubFormGrantManager({locale,scope,reservationId,linkId,onClose,definition}:{locale:AppLocale;scope:string;reservationId:string;linkId:string;onClose:()=>void;definition:Definition}){
  const t=useTranslations(definition.messages),shared=useTranslations("GuestLinkManagement"),[metadata,setMetadata]=useState<Status|null>(null),[decision,setDecision]=useState<Decision>("GRANTED"),[reason,setReason]=useState(""),[review,setReview]=useState<{value:Review;reason:string}|null>(null),[pending,setPending]=useState<Pending|null>(null),[unrecorded,setUnrecorded]=useState(false),[notice,setNotice]=useState<"saved"|"recovered"|null>(null),[state,setState]=useState<GuestHubBrowserState|"storage_unavailable">("loading"),[busy,setBusy]=useState(true);
  const controller=useRef<AbortController|null>(null),epoch=useRef(0),busyRef=useRef(false),pendingRef=useRef<Pending|null>(null),nonceBase=definition.noncePrefix+scope+":"+linkId;

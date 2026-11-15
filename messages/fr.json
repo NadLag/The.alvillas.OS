@@ -6536,5 +6536,85 @@
       "chronology": "Le départ doit suivre l’arrivée.",
       "method_unavailable": "Choisissez un moyen de transport disponible."
     }
+  },
+  "GuestIdentityDocuments": {
+    "title": "Documents d’identité",
+    "guidance": "Transmettez uniquement les documents d’identité demandés pour votre séjour.",
+    "open": "Ouvrir le formulaire privé",
+    "loading": "Vérification de l’accès à vos documents privés…",
+    "loaded": "Votre formulaire privé est prêt.",
+    "privacy": "Les noms de fichiers d’origine ne sont pas transmis. Les fichiers sont conservés dans les archives privées selon la politique approuvée.",
+    "choose": "Choisissez le document demandé et chaque face requise.",
+    "acknowledge": "J’ai lu l’avis ci-dessus.",
+    "review": "Vérifier mes documents",
+    "reviewTitle": "Vérifier les faces sélectionnées",
+    "reviewGuidance": "Vérifiez le document et sa face avant l’envoi. La publication de chaque fichier d’origine est confirmée séparément.",
+    "confirm": "Envoyer ces documents",
+    "edit": "Modifier ma sélection",
+    "close": "Fermer le formulaire",
+    "refresh": "Actualiser l’accès aux documents",
+    "limit": "Jusqu’à {size} Mo par fichier",
+    "progress": "{completed} fichiers publiés sur {total}",
+    "published": "Publié dans les archives privées",
+    "awaiting": "Fichier d’origine attendu",
+    "reselect": "Sélectionnez le même fichier d’origine pour chaque face inachevée. Les fichiers ne sont pas enregistrés dans ce navigateur pour la récupération.",
+    "resume": "Reprendre l’envoi d’origine",
+    "replace": "Transmettre un dossier de documents actualisé",
+    "limitReached": "Le nombre d’envois configuré a été atteint. Contactez l’équipe de la villa pour une correction.",
+    "saved": "Chaque fichier d’origine sélectionné est maintenant publié dans les archives privées.",
+    "recovered": "Les fichiers publiés d’origine ont été récupérés.",
+    "replaced": "Un dossier actualisé est déjà utilisé. L’historique d’origine est conservé.",
+    "uncertain": "Une demande est en attente. Actualisez pour vérifier le dossier d’origine avant un nouvel envoi.",
+    "storageUnavailable": "Ce navigateur ne peut pas conserver l’identifiant de la demande. Autorisez le stockage du navigateur ou utilisez-en un autre avant de confirmer.",
+    "kinds": {
+      "PASSPORT": "Passeport",
+      "NATIONAL_ID": "Carte nationale d’identité"
+    },
+    "parts": {
+      "IDENTITY_PAGE": "Page d’identité",
+      "FRONT": "Recto",
+      "BACK": "Verso"
+    },
+    "states": {
+      "uncertain": "La réponse a été interrompue. Actualisez pour vérifier le dossier d’origine.",
+      "forbidden": "Ce formulaire privé n’est pas accessible.",
+      "offline": "Vous êtes hors ligne. Reconnectez-vous et sélectionnez les fichiers d’origine inachevés.",
+      "validation": "Vérifiez les faces demandées, le type et la taille des fichiers, et l’accusé de lecture.",
+      "conflict": "Le dossier d’origine ou les paramètres approuvés ont changé. Actualisez avant de continuer.",
+      "configuration_unavailable": "La collecte privée des documents est actuellement indisponible. Contactez l’équipe de la villa.",
+      "rate_limited": "Veuillez patienter avant de reprendre l’envoi d’origine.",
+      "link_unavailable": "Ce lien de séjour ou l’accès aux documents n’est plus disponible.",
+      "unavailable": "Le formulaire privé n’a pas pu être chargé. Actualisez pour vérifier le dossier d’origine.",
+      "storage_unavailable": "Ce navigateur ne peut pas conserver l’identifiant de votre demande."
+    }
+  },
+  "GuestIdentityManagement": {
+    "title": "Accès aux documents d’identité",
+    "guidance": "Déléguez ou retirez la collecte privée des documents pour ce lien de séjour. La politique de confidentialité approuvée et des droits indépendants sur les documents et leur conservation sont requis.",
+    "loading": "Vérification des droits sur les documents privés…",
+    "loaded": "Les droits actuels sur les documents privés sont prêts.",
+    "lastDecision": "Dernière décision enregistrée",
+    "decisions": {
+      "GRANTED": "Accordé",
+      "WITHDRAWN": "Retiré",
+      "NONE": "Aucune décision enregistrée"
+    },
+    "decision": "Décision d’accès",
+    "grant": "Déléguer la collecte privée des documents",
+    "withdraw": "Retirer la collecte des documents d’identité",
+    "reason": "Motif de cette décision",
+    "review": "Vérifier cette décision",
+    "confirmTitle": "Confirmer l’accès aux documents d’identité",
+    "expiresAt": "Le lien d’origine expire le {date} (UTC).",
+    "confirm": "Enregistrer cette décision",
+    "edit": "Modifier la décision",
+    "saved": "La décision d’accès aux documents privés a été enregistrée.",
+    "recovered": "La décision d’accès d’origine a été récupérée.",
+    "unrecorded": "La décision précédente n’a pas été enregistrée. Vérifiez les autorisations actuelles avant de réessayer.",
+    "uncertain": "La réponse a été interrompue. Récupérez la décision d’origine avant un nouvel enregistrement.",
+    "recover": "Récupérer la décision",
+    "unavailable": "Aucun changement de collecte n’est actuellement autorisé. Vérifiez la politique approuvée et les droits sur les sources, les documents et leur conservation.",
+    "refresh": "Actualiser l’accès",
+    "close": "Fermer l’accès aux documents d’identité"
   }
 }

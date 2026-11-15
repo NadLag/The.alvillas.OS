@@ -5,6 +5,9 @@ import {z,ZodError} from "zod";
 import {activeGuestHubProfile} from "./guest-hub-profile-source";
 import {GuestHubProfileAccessError} from "../domain/guest-hub-profile-policy";
 import {activeGuestHubStayDetails} from "./guest-hub-stay-details-source";
+import {activeGuestHubIdentityDocuments} from "./guest-hub-identity-document-source";
+import type {GuestHubIdentityDocumentAuthorityProvider} from "./guest-hub-identity-document-grants";
+import {GuestHubIdentityDocumentAccessError} from "../domain/guest-hub-identity-document-policy";
 import {GuestHubStayDetailsAccessError} from "../domain/guest-hub-stay-details-policy";
 import {GuestHubFormGrantRepository} from "../infrastructure/guest-hub-form-grant-repository";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
@@ -23,7 +26,7 @@ import {currentGuestHubState,guestHubSettings,guestHubOriginalBinding,guestHubSo
 import {guestHubResource,guestHubLinkTarget} from "./guest-hub-access";
 import type {GuestHubDependencies} from "./guest-hub-service";
 
-export type GuestHubVisitDependencies=GuestHubDependencies&{clientKey:string;verificationOrganizationId?:string;expectedLinkId?:string};
+export type GuestHubVisitDependencies=GuestHubDependencies&{clientKey:string;verificationOrganizationId?:string;expectedLinkId?:string;identityDocuments?:GuestHubIdentityDocumentAuthorityProvider};
 const clientKeySchema=z.string().min(1).max(200);
 async function consumeVerificationBudget(deps:GuestHubVisitDependencies){
  const organizationId=deps.verificationOrganizationId??bootstrapOrganizationId,client=clientKeySchema.parse(deps.clientKey);
@@ -86,22 +89,22 @@ export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDe
  catch(error){if(error instanceof GuestHubRateLimitError)throw error;throw new GuestHubInvalidLinkError();}
 }
 
-async function formAvailability(context:GuestHubCapabilityContext,env?:NodeJS.ProcessEnv){
+async function formAvailability(context:GuestHubCapabilityContext,env?:NodeJS.ProcessEnv,documents?:GuestHubIdentityDocumentAuthorityProvider){
  const heads=await new GuestHubFormGrantRepository(context.tx,context.actual.row.organizationId,"PROFILE").headsForLink(context.actual.row.id),selected=new Map(heads.map(row=>[row.formKey,row]));
- const available=async(work:()=>Promise<{fingerprint:string}>)=>{try{return(await work()).fingerprint;}catch(error){if(error instanceof GuestHubProfileAccessError||error instanceof GuestHubStayDetailsAccessError||error instanceof ZodError)return null;throw error;}};
- return{profile:await available(()=>activeGuestHubProfile(context,env,selected.get("PROFILE")??null)),stayDetails:await available(()=>activeGuestHubStayDetails(context,env,selected.get("STAY_DETAILS")??null))};
+ const available=async(work:()=>Promise<{fingerprint:string}>)=>{try{return(await work()).fingerprint;}catch(error){if(error instanceof GuestHubProfileAccessError||error instanceof GuestHubStayDetailsAccessError||error instanceof GuestHubIdentityDocumentAccessError||error instanceof ZodError)return null;throw error;}};
+ return{profile:await available(()=>activeGuestHubProfile(context,env,selected.get("PROFILE")??null)),stayDetails:await available(()=>activeGuestHubStayDetails(context,env,selected.get("STAY_DETAILS")??null)),identityDocuments:documents?await available(()=>activeGuestHubIdentityDocuments(context,documents,env,selected.get("IDENTITY_DOCUMENTS")??null)):null};
 }
 export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependencies){
  let expectedHome:string|null|undefined,expectedForms:string|undefined;
  return withGuestHubCapability(raw,deps,async(context)=>{
   const {tx,actual,authority,resource}=context;
   const organizationId=actual.row.organizationId,home=await guestHubHome(tx,organizationId,actual.source,actual.settings.scopes,actual.now);
-  const forms=await formAvailability(context,deps.env);expectedHome=home.fingerprint;expectedForms=jsonbFingerprint(forms);
-  const data=guestHubPublicViewSchema.parse({home:{...home.data,...forms.profile?{profileAvailable:true}:{},...forms.stayDetails?{stayDetailsAvailable:true}:{}},id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
+  const forms=await formAvailability(context,deps.env,deps.identityDocuments);expectedHome=home.fingerprint;expectedForms=jsonbFingerprint(forms);
+  const data=guestHubPublicViewSchema.parse({home:{...home.data,...forms.profile?{profileAvailable:true}:{},...forms.stayDetails?{stayDetailsAvailable:true}:{},...forms.identityDocuments?{identityDocumentsAvailable:true}:{}},id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
   await writeAuditEvent(tx,{organizationId,actorId:null,action:"guest_hub.link_opened",resourceType:"guest_hub",resourceId:actual.row.id,propertyScopeId:actual.row.propertyId,after:{linkId:actual.row.id,reservationId:actual.row.reservationId},requestId:deps.requestId??randomUUID(),occurredAt:actual.now});
   return guestHubPublicViewSchema.parse(present({...authority,visibleDataClasses:new Set()},"view",{...resource,data},catalogFieldPolicy("guest_hub"),actual.now));
  },undefined,async context=>{
   const {tx,actual}=context,home=await guestHubHome(tx,actual.row.organizationId,actual.source,actual.settings.scopes,actual.now);
-  if(home.fingerprint!==expectedHome||jsonbFingerprint(await formAvailability(context,deps.env))!==expectedForms)throw new GuestHubInvalidLinkError();
+  if(home.fingerprint!==expectedHome||jsonbFingerprint(await formAvailability(context,deps.env,deps.identityDocuments))!==expectedForms)throw new GuestHubInvalidLinkError();
  });
 }

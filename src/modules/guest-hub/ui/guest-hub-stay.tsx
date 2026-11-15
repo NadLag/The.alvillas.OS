@@ -7,6 +7,7 @@ import type {AppLocale} from "@/i18n/routing";
 import type {guestHubPublicViewSchema} from "../domain/guest-hub-contract";
 import {GuestHubProfileEntry} from "./guest-hub-profile-entry";
 import {GuestHubStayDetailsEntry} from "./guest-hub-stay-details-entry";
+import {GuestHubIdentityDocumentsEntry} from "./guest-hub-identity-documents-entry";
 
 type View=z.infer<typeof guestHubPublicViewSchema>;
 function StayPhoto({src,property}:{src:string|null;property:string}){
@@ -26,6 +27,7 @@ export function GuestHubStay({view,locale,onRefresh}:{view:View;locale:AppLocale
   <p className="guest-stay-checked" data-testid="guest-stay-checked">{t("checkedAt",{date:new Intl.DateTimeFormat(locale,{timeStyle:"short",timeZone:view.timezone}).format(new Date(home.checkedAt))})}</p>
   {home.profileAvailable&&<GuestHubProfileEntry key={view.id} locale={locale} linkId={view.id}/>}
   {home.stayDetailsAvailable&&<GuestHubStayDetailsEntry key={view.id} locale={locale} linkId={view.id}/>}
+  {home.identityDocumentsAvailable&&<GuestHubIdentityDocumentsEntry key={view.id} locale={locale} linkId={view.id}/>}
   <div className="guest-stay-tools"><nav aria-label={access("language")}>{(["en","fr","ar"]as const).map(language=><a key={language} className="secondary-button" href={"/"+language+"/guest/"+view.id} hrefLang={language} lang={language} aria-current={locale===language?"page":undefined}>{access("languages."+language)}</a>)}</nav><button type="button" className="primary-button" onClick={onRefresh} data-testid="guest-access-refresh">{access("refresh")}</button></div>
  </section>;
 }

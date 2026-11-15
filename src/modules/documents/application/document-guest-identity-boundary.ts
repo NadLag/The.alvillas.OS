@@ -10,6 +10,7 @@ import type {nativeGuestIdentityDocumentProvenanceSchema} from "../domain/docume
 export type NativeGuestIdentityArchiveBoundary={
  access:"UPLOAD"|"STATUS";
  documentId:string;
+ privacy:readonly string[];
  provenance:z.infer<typeof nativeGuestIdentityDocumentProvenanceSchema>;
  prepareAdmission(actor:DocumentActorContext,tx:TenantTransaction,input:unknown):Promise<void>;
  recordAdmission(actor:DocumentActorContext,tx:TenantTransaction,admission:DocumentAdmission):Promise<void>;

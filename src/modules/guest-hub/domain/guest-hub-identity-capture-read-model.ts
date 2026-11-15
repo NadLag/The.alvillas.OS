@@ -8,6 +8,7 @@ import {guestHubIdentityDocumentManifestSchema} from "./guest-hub-identity-docum
 export const guestHubIdentityCaptureViewSchema=z.object({
  linkId:guestHubIdSchema,reservationId:guestHubIdSchema,grantId:guestHubIdSchema,previousCaptureId:guestHubIdSchema.nullable(),
  captureCount:z.number().int().nonnegative().max(2147483647),maxCaptures:z.number().int().positive().max(2147483647),
+ originalCapture:z.object({id:guestHubIdSchema,files:guestHubIdentityDocumentManifestSchema}).strict().optional(),
  notice:guestHubFormNoticeSchema,requireAcknowledgement:z.boolean(),requiredKinds:z.array(guestHubIdentityDocumentKindSchema).max(2),
  documentKinds:z.array(z.object({kind:guestHubIdentityDocumentKindSchema,allowedParts:z.array(guestHubIdentityDocumentPartSchema).min(1).max(3),requiredParts:z.array(guestHubIdentityDocumentPartSchema).max(3),contentTypes:z.array(guestHubIdentityDocumentContentTypeSchema).min(1).max(3),maxBytes:guestHubIdentityDocumentFileSchema.shape.fileSize}).strict()).min(1).max(guestHubIdentityDocumentKindSchema.options.length)
 }).strict();
@@ -17,3 +18,7 @@ export const guestHubIdentityCaptureReceiptSchema=z.object({
  id:guestHubIdSchema,linkId:guestHubIdSchema,reservationId:guestHubIdSchema,grantId:guestHubIdSchema,version:z.number().int().positive().max(2147483647),
  idempotencyKey:guestHubIdSchema,createdAt:z.iso.datetime(),files:guestHubIdentityDocumentManifestSchema,replayed:z.boolean()
 }).strict();
+export const guestHubIdentityCaptureRecoverySchema=z.discriminatedUnion("recorded",[
+ guestHubIdentityCaptureReceiptSchema.extend({recorded:z.literal(true)}),
+ z.object({recorded:z.literal(false),linkId:guestHubIdSchema,idempotencyKey:guestHubIdSchema}).strict()
+]);
