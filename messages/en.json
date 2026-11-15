@@ -6748,5 +6748,45 @@
       "link_unavailable": "This agreement is no longer available through this link.",
       "unavailable": "Your agreement could not be loaded. Please try again."
     }
+  },
+  "GuestAgreementManagement": {
+    "title": "Guest agreement",
+    "releaseTitle": "Release an approved original",
+    "releaseGuidance": "Choose an existing prepared agreement for this reservation. Guests can request its signature email; they cannot choose a different PDF or recipient. Withdrawal closes future Guest Hub access and preserves the original history.",
+    "loaded": "Current agreement access checked.",
+    "loading": "Checking agreement access…",
+    "saved": "The access decision has been recorded.",
+    "recovered": "The original access decision has been recovered.",
+    "unrecorded": "No decision is recorded for this reference. Review the intended decision before using the same reference again.",
+    "uncertain": "The response could not be confirmed. Recover the original decision before recording another.",
+    "recover": "Recover original decision",
+    "chooseOriginal": "Prepared agreement",
+    "choosePlaceholder": "Choose an approved original",
+    "choice": "{language} · version {number} · prepared {date}",
+    "readOriginal": "Read original version {number} in Documents",
+    "choicesNext": "More prepared originals",
+    "noOriginal": "No eligible prepared agreement is available in this language. Check the approved originals and independent access in Documents. Existing access can still be withdrawn.",
+    "reason": "Reason for this access decision",
+    "reviewGrant": "Review release",
+    "reviewWithdraw": "Review withdrawal",
+    "reviewGrantTitle": "Review the selected original and guest access",
+    "reviewWithdrawTitle": "Review withdrawal of guest access",
+    "expiresAt": "Guest access ends {date}",
+    "confirm": "Record access decision",
+    "edit": "Edit decision",
+    "refresh": "Check current access",
+    "close": "Close agreement controls",
+    "decisions": {
+      "NONE": "No original has been released to this guest link.",
+      "GRANTED": "An original agreement is released to this guest link. Current source and permissions still apply.",
+      "WITHDRAWN": "Agreement access has been withdrawn from this guest link."
+    },
+    "historyTitle": "Original guest request history",
+    "historyGuidance": "Retained requests keep their original agreement and processing notice. Reading them requires independent current access to the original document, even after withdrawal.",
+    "historyLoad": "Read retained requests",
+    "historyEmpty": "No guest signature-email request is recorded for this link.",
+    "historyRequested": "Guest requested a signature email {date}",
+    "historyNext": "Earlier requests",
+    "historyClose": "Clear private history"
   }
 }

@@ -37,6 +37,7 @@ export async function preparedSignatureCandidatePage(actor:DocumentActorContext,
  const ctx=documentActorContext(actor),before=readDocumentCursor(ctx,filter,cursor),rows=await new SignaturePreparationRepository(tx,ctx.organizationId).preparedForReservation(reservationId,before),page=rows.slice(0,25),last=page.at(-1);
  return{items:page.map(row=>({preparationId:row.id,preparedAt:row.requestedAt.toISOString()})),next:rows.length>25&&last?documentReadCursor(ctx,filter,last.id):null};
 }
+export function preparedSignatureChoiceCursor(actor:DocumentActorContext,filter:string,before:string){return documentReadCursor(documentActorContext(actor),filter,before);}
 export async function retainedSignatureOriginalAuthority(actor:DocumentActorContext,tx:TenantTransaction,signatureId:string,env?:NodeJS.ProcessEnv){
  const current=await retainedNativeSignatureReadContext(documentActorContext(actor),tx,signatureId,{env});return{signatureId:current.row.id,documentId:current.current.instance.documentId,instanceId:current.row.instanceId,versionId:current.row.documentVersionId,documentVersionNumber:current.current.version.number,sha256:current.current.version.admission.sha256,guestIds:current.recipients.filter(row=>row.reference.kind==="GUEST").map(row=>row.reference.id)};
 }

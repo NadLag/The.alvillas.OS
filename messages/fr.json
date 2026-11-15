@@ -6748,5 +6748,45 @@
       "link_unavailable": "Cette convention n’est plus disponible depuis ce lien.",
       "unavailable": "Votre convention n’a pas pu être chargée. Veuillez réessayer."
     }
+  },
+  "GuestAgreementManagement": {
+    "title": "Convention du voyageur",
+    "releaseTitle": "Donner accès à un original approuvé",
+    "releaseGuidance": "Choisissez une convention déjà préparée pour cette réservation. Le voyageur peut demander son e-mail de signature, sans choisir un autre PDF ni destinataire. Le retrait ferme l’accès futur dans l’espace voyageur et conserve l’historique d’origine.",
+    "loaded": "Accès actuel à la convention vérifié.",
+    "loading": "Vérification de l’accès à la convention…",
+    "saved": "La décision d’accès a été enregistrée.",
+    "recovered": "La décision d’accès d’origine a été retrouvée.",
+    "unrecorded": "Aucune décision n’est enregistrée pour cette référence. Vérifiez la décision souhaitée avant de réutiliser la même référence.",
+    "uncertain": "La réponse n’a pas pu être confirmée. Retrouvez la décision d’origine avant d’en enregistrer une autre.",
+    "recover": "Retrouver la décision d’origine",
+    "chooseOriginal": "Convention préparée",
+    "choosePlaceholder": "Choisir un original approuvé",
+    "choice": "{language} · version {number} · préparée le {date}",
+    "readOriginal": "Lire la version originale {number} dans Documents",
+    "choicesNext": "Autres originaux préparés",
+    "noOriginal": "Aucune convention préparée n’est disponible dans cette langue. Vérifiez les originaux approuvés et les accès indépendants dans Documents. L’accès existant peut toujours être retiré.",
+    "reason": "Motif de cette décision d’accès",
+    "reviewGrant": "Vérifier l’ouverture de l’accès",
+    "reviewWithdraw": "Vérifier le retrait",
+    "reviewGrantTitle": "Vérifier l’original choisi et l’accès du voyageur",
+    "reviewWithdrawTitle": "Vérifier le retrait de l’accès du voyageur",
+    "expiresAt": "L’accès du voyageur prend fin le {date}",
+    "confirm": "Enregistrer la décision d’accès",
+    "edit": "Modifier la décision",
+    "refresh": "Vérifier l’accès actuel",
+    "close": "Fermer les contrôles de la convention",
+    "decisions": {
+      "NONE": "Aucun original n’a été rendu accessible depuis ce lien voyageur.",
+      "GRANTED": "Une convention originale est accessible depuis ce lien. La source et les autorisations actuelles restent applicables.",
+      "WITHDRAWN": "L’accès à la convention a été retiré de ce lien voyageur."
+    },
+    "historyTitle": "Historique des demandes d’origine",
+    "historyGuidance": "Les demandes conservées gardent leur convention et leur notice de traitement d’origine. Leur lecture nécessite un accès actuel indépendant au document original, même après un retrait.",
+    "historyLoad": "Lire les demandes conservées",
+    "historyEmpty": "Aucune demande d’e-mail de signature n’est enregistrée pour ce lien.",
+    "historyRequested": "Le voyageur a demandé un e-mail de signature le {date}",
+    "historyNext": "Demandes précédentes",
+    "historyClose": "Effacer l’historique privé"
   }
 }
