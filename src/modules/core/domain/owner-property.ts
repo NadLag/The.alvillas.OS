@@ -1,4 +1,6 @@
 import { z } from "zod";
+import {propertyHouseRulesSchema} from "@/platform/config/property-house-rules";
+export {normalizeHouseRules} from "@/platform/config/property-house-rules";
 export {managementAgreementRuleKeys} from "@/platform/config/management-agreement-keys";
 import {
   approvalStepSchema,
@@ -154,16 +156,6 @@ export function normalizePhotoUrls(value: string | readonly string[] | undefined
   return normalized.slice(0, 30);
 }
 
-export function normalizeHouseRules(value: string | readonly string[] | undefined): string[] {
-  const rawItems: string[] =
-    typeof value === "string" ? value.split(/\r?\n|,/u) : [...(value ?? [])];
-  const normalized = rawItems
-    .map((item) => item.trim())
-    .filter((item, index, items) => item.length > 0 && items.indexOf(item) === index);
-
-  return normalized.slice(0, 30);
-}
-
 export function normalizeOtherServices(value: string | readonly string[] | undefined): string[] {
   const rawItems: string[] =
     typeof value === "string" ? value.split(/\r?\n|,/u) : [...(value ?? [])];
@@ -189,7 +181,7 @@ export const propertyOnboardingProfileInputSchema = z.object({
   description: optionalText(2000),
   publicDirections: optionalText(1200),
   internalAccessNotes: optionalText(1200),
-  houseRules: z.array(z.string().trim().min(1).max(180)).max(30).default([]),
+  houseRules: propertyHouseRulesSchema.default([]),
   onboardingNotes: optionalText(2000)
 });
 

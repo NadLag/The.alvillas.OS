@@ -1,0 +1,26 @@
+import {z} from "zod";
+import {propertyHouseRulesMaximumCount} from "@/platform/config/property-house-rules";
+import {guestHubIdSchema,guestHubFingerprintSchema} from "./guest-hub-contract";
+import {guestHubFormNoticeSchema} from "./guest-hub-form-policy";
+import {guestHubProfilePayloadBindingSchema} from "./guest-hub-profile-payload-contract";
+import {guestHubProfileReviewBindingSchema,guestHubProfileReceiptSchema} from "./guest-hub-profile-contract";
+import {guestHubHouseRulesContentSchema,guestHubHouseRulesLocaleSchema} from "./guest-hub-house-rules-content";
+
+const text=guestHubFormNoticeSchema.shape.title.shape.en;
+export const guestHubHouseRulesRenderedContentSchema=z.object({requestedLocale:guestHubHouseRulesLocaleSchema,locale:guestHubHouseRulesLocaleSchema,title:text,rules:z.array(text).min(1).max(propertyHouseRulesMaximumCount),acceptanceStatement:text}).strict();
+export const guestHubHouseRulesRenderedNoticeSchema=z.object({title:text,paragraphs:z.array(text).min(1).max(30)}).strict();
+export const guestHubHouseRulesDraftSchema=z.object({idempotencyKey:guestHubIdSchema,locale:guestHubHouseRulesLocaleSchema,acknowledged:z.literal(true)}).strict();
+export const guestHubHouseRulesReviewTokenSchema=z.string().min(40).max(512).regex(/^guest-house-rules-review-v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
+export const guestHubHouseRulesReviewBindingSchema=guestHubProfileReviewBindingSchema.omit({values:true,previousRevisionId:true}).extend({protocol:z.literal("NATIVE_GUEST_HOUSE_RULES_REVIEW_V1"),previousAcceptanceId:guestHubIdSchema.nullable(),locale:guestHubHouseRulesLocaleSchema,acknowledged:z.literal(true),rulesFingerprint:guestHubFingerprintSchema,editionFingerprint:guestHubFingerprintSchema,renderedFingerprint:guestHubFingerprintSchema}).strict();
+export type GuestHubHouseRulesReviewBinding=z.infer<typeof guestHubHouseRulesReviewBindingSchema>;
+export const guestHubHouseRulesPayloadBindingSchema=z.object({...guestHubProfilePayloadBindingSchema.shape,protocol:z.literal("NATIVE_GUEST_HOUSE_RULES_PAYLOAD_V1"),rulesFingerprint:guestHubFingerprintSchema,editionFingerprint:guestHubFingerprintSchema,renderedFingerprint:guestHubFingerprintSchema,requestedLocale:guestHubHouseRulesLocaleSchema,displayedLocale:guestHubHouseRulesLocaleSchema}).strict().superRefine((value,context)=>{if((value.version===1)!==(value.previousId===null))context.addIssue({code:"custom",path:["previousId"],message:"actual_house_rules_predecessor_required"});});
+export type GuestHubHouseRulesPayloadBinding=z.infer<typeof guestHubHouseRulesPayloadBindingSchema>;
+export const guestHubPrivateHouseRulesSchema=z.object({schemaVersion:z.literal(1),content:guestHubHouseRulesRenderedContentSchema,notice:guestHubHouseRulesRenderedNoticeSchema,acknowledged:z.literal(true),reviewFingerprint:guestHubHouseRulesReviewTokenSchema}).strict();
+export type GuestHubPrivateHouseRules=z.infer<typeof guestHubPrivateHouseRulesSchema>;
+export const guestHubHouseRulesSubmitSchema=guestHubHouseRulesDraftSchema.extend({reviewFingerprint:guestHubHouseRulesReviewTokenSchema}).strict();
+export const guestHubHouseRulesRecoverySchema=z.object({idempotencyKey:guestHubIdSchema}).strict();
+export const guestHubHouseRulesReceiptSchema=guestHubProfileReceiptSchema.extend({grantId:guestHubIdSchema,editionFingerprint:guestHubFingerprintSchema,requestedLocale:guestHubHouseRulesLocaleSchema,displayedLocale:guestHubHouseRulesLocaleSchema,currentEdition:z.boolean()}).strict();
+export const guestHubHouseRulesViewSchema=z.object({linkId:guestHubIdSchema,reservationId:guestHubIdSchema,grantId:guestHubIdSchema,previousAcceptanceId:guestHubIdSchema.nullable(),notice:guestHubFormNoticeSchema,content:guestHubHouseRulesContentSchema,editionFingerprint:guestHubFingerprintSchema,currentAcceptance:guestHubHouseRulesReceiptSchema.nullable()}).strict();
+export const guestHubHouseRulesReviewSchema=guestHubHouseRulesDraftSchema.extend({grantId:guestHubIdSchema,previousAcceptanceId:guestHubIdSchema.nullable(),editionFingerprint:guestHubFingerprintSchema,content:guestHubHouseRulesRenderedContentSchema,notice:guestHubHouseRulesRenderedNoticeSchema,reviewFingerprint:guestHubHouseRulesReviewTokenSchema}).strict();
+export const guestHubHouseRulesRecoveryResultSchema=z.discriminatedUnion("recorded",[guestHubHouseRulesReceiptSchema.extend({recorded:z.literal(true)}).strict(),z.object({recorded:z.literal(false),linkId:guestHubIdSchema,idempotencyKey:guestHubIdSchema}).strict()]);
+export const guestHubHouseRulesHistorySchema=z.object({linkId:guestHubIdSchema,reservationId:guestHubIdSchema,items:z.array(guestHubHouseRulesReceiptSchema.omit({currentEdition:true,replayed:true}).extend({payload:guestHubPrivateHouseRulesSchema})).max(25),next:z.string().max(6000).nullable()}).strict();
