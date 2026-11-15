@@ -6686,5 +6686,67 @@
     "historyAccepted": "Accept? le {date} (UTC).",
     "historyNext": "Acceptations pr?c?dentes",
     "historyClose": "Masquer les preuves d?acceptation"
+  },
+  "GuestAgreement": {
+    "title": "Votre convention de séjour",
+    "guidance": "Consultez la convention approuvée et demandez son e-mail de signature. Votre demande d’origine reste récupérable.",
+    "open": "Consulter la convention",
+    "loaded": "Votre convention peut être consultée.",
+    "loading": "Vérification de votre convention…",
+    "storageUnavailable": "Votre navigateur n’a pas pu conserver la référence de cette demande. Autorisez le stockage du site avant de demander l’e-mail de signature.",
+    "saved": "Votre demande d’e-mail de signature a été enregistrée.",
+    "recovered": "Votre demande d’origine a été retrouvée.",
+    "previousAgreement": "La demande retrouvée concerne une convention précédente.",
+    "unrecorded": "Aucune demande n’est enregistrée pour cette référence. Vous pouvez examiner à nouveau la même demande.",
+    "uncertain": "La réponse n’a pas pu être confirmée. Retrouvez la demande d’origine avant de réessayer.",
+    "recover": "Retrouver la demande",
+    "originalTitle": "Convention approuvée",
+    "documentLanguage": "Langue du PDF : {language}",
+    "approvedLanguageFallback": "Changer la langue de la page conserve le même PDF approuvé.",
+    "readOriginal": "Lire la convention (PDF)",
+    "readSigned": "Télécharger la convention signée",
+    "readCertificate": "Télécharger le certificat",
+    "progressTitle": "Suivi de la signature",
+    "acknowledge": "J’ai lu la notice de traitement et je demande l’e-mail de signature. Cette demande ne signe pas la convention.",
+    "review": "Vérifier la demande",
+    "reviewTitle": "Confirmer votre demande d’e-mail de signature",
+    "reviewGuidance": "La convention approuvée sera envoyée à l’adresse e-mail déjà associée à cette réservation. Cette demande ne constitue pas une signature.",
+    "confirm": "Demander l’e-mail de signature",
+    "edit": "Revenir à la convention",
+    "refresh": "Actualiser le suivi",
+    "close": "Fermer",
+    "languages": {
+      "en": "Anglais",
+      "fr": "Français",
+      "ar": "Arabe"
+    },
+    "fileNames": {
+      "ORIGINAL": "convention-sejour.pdf",
+      "SIGNED_ORIGINAL": "convention-sejour-signee.pdf",
+      "CERTIFICATE": "certificat-convention-sejour.pdf"
+    },
+    "progress": {
+      "READY": "Lisez la convention approuvée, puis demandez l’e-mail de signature.",
+      "REQUESTED": "Votre demande est enregistrée. L’e-mail de signature est en préparation.",
+      "EMAIL_SENT": "L’e-mail de signature a été envoyé. Poursuivez la signature depuis votre messagerie.",
+      "VIEWED": "La convention a été ouverte. La signature est toujours en cours.",
+      "ARCHIVING": "La signature est terminée. La convention signée et son certificat sont en cours de conservation.",
+      "SIGNED": "Votre convention signée et son certificat sont prêts.",
+      "DECLINED": "La signature a été refusée. Veuillez contacter votre hôte.",
+      "EXPIRED": "La demande de signature a expiré. Veuillez contacter votre hôte.",
+      "UNCERTAIN": "L’envoi d’origine est en cours de vérification. Aucun deuxième e-mail ne sera demandé automatiquement.",
+      "PREVIOUS_REQUEST": "Une demande antérieure concerne une convention précédente. Contactez votre hôte avant d’en demander une autre."
+    },
+    "states": {
+      "uncertain": "La réponse n’a pas pu être confirmée. Retrouvez votre demande d’origine.",
+      "forbidden": "Cette convention n’est pas disponible pour cette visite.",
+      "offline": "Vous êtes hors ligne. Les détails privés de la convention ont été effacés. Reconnectez-vous pour continuer.",
+      "validation": "Vérifiez la demande et réessayez.",
+      "conflict": "La convention a changé. Actualisez avant de la consulter à nouveau.",
+      "configuration_unavailable": "Votre convention n’est pas encore disponible. Veuillez contacter votre hôte.",
+      "rate_limited": "Veuillez patienter avant de vérifier à nouveau votre convention.",
+      "link_unavailable": "Cette convention n’est plus disponible depuis ce lien.",
+      "unavailable": "Votre convention n’a pas pu être chargée. Veuillez réessayer."
+    }
   }
 }

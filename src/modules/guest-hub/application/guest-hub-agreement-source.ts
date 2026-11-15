@@ -9,6 +9,7 @@ import type {GuestHubNativeSource} from "../infrastructure/guest-hub-repository"
 import {guestHubAgreementPolicyKey,guestHubAgreementPolicySchema,effectiveGuestHubAgreementPolicy,guestHubAgreementTemplate,GuestHubAgreementAccessError} from "../domain/guest-hub-agreement-policy";
 import {guestHubAgreementReleaseBindingSchema,guestHubAgreementPayloadBindingSchema,guestHubAgreementLocaleSchema} from "../domain/guest-hub-agreement-contract";
 import {verifyGuestHubAgreementRelease} from "../domain/guest-hub-agreement-private";
+import {GuestHubAccessError} from "../domain/guest-hub-policy";
 import {bindGuestHubAgreementOriginal} from "../domain/guest-hub-agreement-source";
 import {guestHubFormSettings} from "./guest-hub-form-source";
 import {guestHubSourceSnapshot} from "./guest-hub-source";
@@ -27,7 +28,7 @@ export function authenticateGuestHubAgreementRelease(row:GuestHubAgreementReleas
  return{binding,fingerprint:jsonbFingerprint({binding,signatureVersion:row.signatureVersion,signature:row.signature})};
 }
 export async function requireGuestHubAgreementStaffAuthority(actor:AccountActorContext,tx:TenantTransaction,source:GuestHubNativeSource,link:Awaited<ReturnType<typeof guestHubLinkTarget>>,now:Date,action:"view"|"create"|"void"){
- await requireGuestHubStaffAuthority(actor,tx,source,action,now,link);
+ try{await requireGuestHubStaffAuthority(actor,tx,source,action,now,link);}catch(error){if(error instanceof GuestHubAccessError)throw new GuestHubAgreementAccessError();throw error;}
  const target={...guestHubResource(actor.organizationId,source,link),type:"guest_hub_agreement"},personal={...guestHubResource(actor.organizationId,source),type:"guest",id:source.guestId,dataClass:"personal" as const,occurredAt:source.guestCreatedAt};
  await recheckAccountAuthorization(actor,tx,now,[{action,resource:target},{action:"view",resource:target},{action:"view",resource:personal},{action:"edit",resource:personal}],new GuestHubAgreementAccessError());return target;
 }

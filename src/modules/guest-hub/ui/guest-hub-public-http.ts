@@ -12,7 +12,7 @@ import {guestHubIdSchema,guestHubPublicInputSchema} from "../domain/guest-hub-co
 import {guestHubMaximumRequestBytes,GuestHubInvalidLinkError,GuestHubRateLimitError,GuestHubConfigurationError} from "../domain/guest-hub-policy";
 
 const headers={"Cache-Control":"private, no-store","Referrer-Policy":"no-referrer",Vary:"Cookie, Origin"},empty=z.object({}).strict();
-type Dependencies=GuestHubDependencies&Pick<GuestHubVisitDependencies,"verificationOrganizationId"|"identityDocuments">;
+type Dependencies=GuestHubDependencies&Pick<GuestHubVisitDependencies,"verificationOrganizationId"|"identityDocuments"|"agreementDocuments">;
 export async function guestHubPublicHttp(request:NextRequest,deps:Dependencies,rawLinkId?:unknown){
  const requestId=crypto.randomUUID(),failure=(error:string,status:number)=>NextResponse.json({error},{status,headers});
  try{
