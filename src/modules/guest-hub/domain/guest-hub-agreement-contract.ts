@@ -2,6 +2,7 @@ import {z} from "zod";
 import {guestHubIdSchema as id,guestHubFingerprintSchema as fingerprint} from "./guest-hub-contract";
 import {guestHubFormNoticeSchema} from "./guest-hub-form-policy";
 import {guestHubAgreementOriginalSchema} from "./guest-hub-agreement-source";
+import {guestHubAgreementProgressSchema} from "./guest-hub-agreement-progress";
 
 export const guestHubAgreementLocaleSchema=z.enum(["en","fr","ar"]);
 const timestamp=z.iso.datetime(),reason=z.string().trim().min(1).max(1000);
@@ -50,5 +51,5 @@ export type GuestHubPrivateAgreementRequest=z.infer<typeof guestHubPrivateAgreem
 export const guestHubAgreementSubmitSchema=guestHubAgreementDraftSchema.extend({reviewFingerprint:guestHubAgreementReviewTokenSchema}).strict();
 export const guestHubAgreementRecoverySchema=z.object({idempotencyKey:id}).strict();
 export const guestHubAgreementRequestReceiptSchema=z.object({id,linkId:id,reservationId:id,releaseId:id,idempotencyKey:id,createdAt:timestamp,requestedLocale:guestHubAgreementLocaleSchema,documentLocale:guestHubAgreementLocaleSchema,currentAgreement:z.boolean(),replayed:z.boolean()}).strict();
-export const guestHubAgreementViewSchema=z.object({linkId:id,reservationId:id,releaseId:id,original:guestHubAgreementOriginalSchema,notice:guestHubFormNoticeSchema,currentRequest:guestHubAgreementRequestReceiptSchema.nullable()}).strict();
+export const guestHubAgreementViewSchema=z.object({linkId:id,reservationId:id,releaseId:id,original:guestHubAgreementOriginalSchema,notice:guestHubFormNoticeSchema,progress:guestHubAgreementProgressSchema,currentRequest:guestHubAgreementRequestReceiptSchema.nullable()}).strict();
 export const guestHubAgreementReviewSchema=guestHubAgreementDraftSchema.extend({releaseId:id,original:guestHubAgreementOriginalSchema,notice:guestHubAgreementRenderedNoticeSchema,documentLocale:guestHubAgreementLocaleSchema,reviewFingerprint:guestHubAgreementReviewTokenSchema}).strict();

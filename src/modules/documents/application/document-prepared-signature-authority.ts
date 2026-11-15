@@ -6,6 +6,9 @@ import {documentGenerationSnapshotSchema} from "../domain/document-generation";
 import {nativeSignatureRecipientPayloadSchema} from "../domain/document-signature-command";
 import {documentActorContext,documentArchiveContext,type DocumentActorContext} from "./document-archive";
 import {nativeSignatureDistributionContext} from "./document-signature-distribution-context";
+import {retainedNativeSignatureReadContext,retainedNativeSignatureSummary} from "./document-signature-history";
+import {retainedSignedArchiveReceipt} from "./document-signed-archive-reconciliation";
+import {SignaturePreparationRepository} from "../infrastructure/signature-preparation-repository";
 
 /** Authorized original metadata without private recipient contact values,
  * provider calls or a second document/source authority. */
@@ -19,4 +22,11 @@ export async function readPreparedSignatureAuthority(actor:DocumentActorContext,
   document:{id:instance.documentId,instanceId:instance.id,versionId:version.id,typeKey:instance.document.typeKey,locale:instance.document.locale,sha256:version.admission.sha256,templateKey:template.template.key,templateId:template.id,templateVersionId:templateVersion.id},
   signature:{id:target.row.id,documentVersionId:target.row.documentVersionId,recipients},variantVersionIds:generation.variants.map(item=>item.versionId),emailSigningRequestEnabled:target.policy.value.signing.delivery.emailSettings.recipientSigningRequest,
   archivePolicyId:current.archive.policy.id,signaturePolicyId:target.policy.id,templatePolicyId:templateContext.policy.id,fingerprint:commandFingerprint({protocol:"NATIVE_PREPARED_SIGNATURE_DOCUMENT_AUTHORITY_V1",prepared:target.fingerprint,template:templateContext.fingerprint,templateVersionId:templateVersion.id,templateSha256:templateVersion.admission.sha256})};
+}
+/** Completion comes only from native signature history and the existing sealed
+ * signed-PDF/certificate archive. Email delivery is a separate observation. */
+export async function readPreparedSignatureDeliveryStatus(actor:DocumentActorContext,tx:TenantTransaction,preparationId:string,env?:NodeJS.ProcessEnv){
+ const ctx=documentActorContext(actor),prepared=await readPreparedSignatureAuthority(ctx,tx,preparationId,env),current=await retainedNativeSignatureReadContext(ctx,tx,prepared.signature.id,{env}),summary=await retainedNativeSignatureSummary(current),archive=await retainedSignedArchiveReceipt(ctx,tx,prepared.signature.id,env),attempt=await new SignaturePreparationRepository(tx,ctx.organizationId).distributionAttempt(prepared.signature.id);
+ if(summary.documentVersionId!==prepared.document.versionId||archive.signatureId!==summary.id)throw new DocumentConflictError();
+ return{signatureId:summary.id,originalVersionId:summary.documentVersionId,signatureState:summary.state,archiveState:archive.state,signedVersionId:archive.signedVersionId,certificateVersionId:archive.certificateVersionId,distributionState:attempt?attempt.evidence.some(row=>row.kind==="SENT")?"SENT" as const:"UNCERTAIN" as const:null};
 }

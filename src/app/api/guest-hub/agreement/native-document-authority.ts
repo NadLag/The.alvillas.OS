@@ -1,6 +1,6 @@
 import {ZodError} from "zod";
 import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
-import {readPreparedSignatureAuthority} from "@/modules/documents/application/document-prepared-signature-authority";
+import {readPreparedSignatureAuthority,readPreparedSignatureDeliveryStatus} from "@/modules/documents/application/document-prepared-signature-authority";
 import {DocumentAccessError,DocumentConfigurationError,DocumentConflictError} from "@/modules/documents/domain/document-command";
 import {bindGuestHubAgreementOriginal} from "@/modules/guest-hub/domain/guest-hub-agreement-source";
 import {GuestHubAgreementAccessError} from "@/modules/guest-hub/domain/guest-hub-agreement-policy";
@@ -8,6 +8,7 @@ import type {GuestHubAgreementDocumentAuthorityProvider} from "@/modules/guest-h
 
 /** Canonical document/signature authority remains behind its application boundary. */
 export const nativeGuestAgreementDocumentAuthority:GuestHubAgreementDocumentAuthorityProvider={
+ async status(actor,tx,original,preparationId,env){const status=await readPreparedSignatureDeliveryStatus(actor,tx,preparationId,env);if(original.organizationId!==actor.organizationId||status.signatureId!==original.signature.id||status.originalVersionId!==original.document.versionId)throw new GuestHubAgreementAccessError();return status;},
  async capture(actor,tx,source,selection,preparationId,env){try{
   const target=await readPreparedSignatureAuthority(actor,tx,preparationId,env),guests=target.signature.recipients.filter(item=>item.reference.kind==="GUEST");
   if(target.source.kind!=="RESERVATION"||target.source.id!==source.reservationId||target.propertyId!==source.propertyId||!target.emailSigningRequestEnabled||guests.length!==1||guests[0].reference.id!==source.guestId||guests[0].role!=="SIGNER"||JSON.stringify([...target.variantVersionIds].sort())!==JSON.stringify([...selection.variantVersionIds].sort()))throw new GuestHubAgreementAccessError();

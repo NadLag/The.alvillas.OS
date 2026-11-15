@@ -25,7 +25,7 @@ export function originalSignedReconciliation(row: Command) {
   if (!row.actorId || cap.organizationId !== row.organizationId || cap.userAccountId !== row.actorId || snapshot.input.idempotencyKey !== row.commandKey || snapshot.input.reason !== row.reason || JSON.stringify(canonical) !== snapshot.canonicalRequest || commandFingerprint(canonical) !== row.commandHash) throw new DocumentConflictError();
   return { snapshot, cap };
 }
-async function context(ctx: DocumentActorContext, tx: TenantTransaction, signatureId: string, deps: Dependencies, edit = false) {
+async function context(ctx: DocumentActorContext, tx: TenantTransaction, signatureId: string, deps: Pick<Dependencies,"env">, edit = false) {
   const current = await (edit ? signatureIdentityRecoveryAuthority(ctx, tx, signatureId, deps) : retainedNativeSignatureReadContext(ctx, tx, signatureId, deps)), repository = new SignedSignatureRepository(tx, ctx.organizationId), archive = await repository.signedArchiveForSignature(signatureId), completion = await repository.completionEvidence(signatureId);
   return { current, repository, archive, completion, fingerprint: commandFingerprint({ current: current.fingerprint, signature: current.row.commandHash, completion: completion?.payloadSha256 ?? null, archive: archive?.commandHash ?? null }) };
 }
@@ -38,6 +38,9 @@ async function receipt(current: Awaited<ReturnType<typeof context>>, env?: NodeJ
   return signedArchiveReceiptSchema.parse({ signatureId: current.current.row.id, archiveId: archive?.id ?? null, state: signed ? "COMPLETE" : archive || current.completion ? "PENDING" : "AWAITING_COMPLETION", signedDocumentId: signed ? signedFile?.documentId : null, certificateDocumentId: signed ? certificate?.documentId : null, signedVersionId: signed ? signedFile?.admission.version?.id : null, certificateVersionId: signed ? certificate?.admission.version?.id : null });
 }
 const reviewFingerprint = (ctx: DocumentActorContext, current: Awaited<ReturnType<typeof context>>) => commandFingerprint({ actorId: ctx.actorId, scope: current.fingerprint, cap: captureAuthorizationCap(ctx.authContext) });
+/** Composition can inspect the same verified archive proof inside its existing
+ * tenant transaction, without provider I/O or another completion collector. */
+export async function retainedSignedArchiveReceipt(ctx:DocumentActorContext,tx:TenantTransaction,signatureId:string,env?:NodeJS.ProcessEnv){return receipt(await context(documentActorContext(ctx),tx,signatureId,{env},false),env);}
 export async function reviewSignedArchive(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx = documentActorContext(actor), input = signedArchiveStatusInput.parse(raw);
   return withTenant(deps.db, ctx.organizationId, async tx => { const current = await context(ctx, tx, input.signatureId, deps), result = await receipt(current, deps.env); let canReconcile = true; try { await signatureIdentityRecoveryAuthority(ctx, tx, input.signatureId, deps); } catch (error) { if (!(error instanceof DocumentAccessError)) throw error; canReconcile = false; }
