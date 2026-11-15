@@ -6371,5 +6371,74 @@
       "DEPARTURE_DAY": "Le jour de votre départ",
       "PAST": "Les dates de votre séjour sont passées"
     }
+  },
+  "GuestProfile": {
+    "title": "Votre profil de séjour",
+    "guidance": "Vérifiez et modifiez les coordonnées autorisées pour ce séjour.",
+    "open": "Ouvrir votre profil",
+    "loading": "Vérification de l’accès au profil…",
+    "loaded": "Votre profil actuel de séjour est disponible.",
+    "fields": {
+      "displayName": "Nom complet",
+      "email": "Adresse e-mail",
+      "phone": "Numéro de téléphone international",
+      "preferredLocale": "Langue préférée"
+    },
+    "empty": "Non renseigné",
+    "acknowledge": "Je prends connaissance de la notice ci-dessus.",
+    "review": "Vérifier vos coordonnées",
+    "reviewTitle": "Vérifier avant d’enregistrer",
+    "reviewGuidance": "Confirmez ces informations pour cette réservation.",
+    "confirm": "Enregistrer ces informations",
+    "edit": "Modifier les informations",
+    "saved": "Vos informations ont été enregistrées pour ce séjour.",
+    "recovered": "Vos informations déjà enregistrées ont été récupérées.",
+    "unrecorded": "Votre demande précédente n’a pas été enregistrée. Vérifiez les informations actuelles avant de réessayer.",
+    "uncertain": "La réponse a été interrompue. Récupérez votre demande précédente avant un nouvel enregistrement.",
+    "recover": "Récupérer votre demande",
+    "storageUnavailable": "Votre navigateur ne peut pas conserver la référence de récupération. Autorisez le stockage de session avant d’enregistrer.",
+    "refresh": "Actualiser votre profil",
+    "close": "Fermer votre profil",
+    "states": {
+      "uncertain": "Le résultat de la demande est inconnu. Récupérez la demande originale.",
+      "forbidden": "Votre compte ne peut pas accéder à ces liens voyageurs.",
+      "offline": "Vous êtes hors ligne. Votre demande originale est conservée ; reconnectez-vous pour continuer.",
+      "validation": "Vérifiez les informations et examinez à nouveau votre demande.",
+      "conflict": "La réservation ou les paramètres d’accès ont changé. Actualisez et vérifiez à nouveau.",
+      "configuration_unavailable": "Les paramètres d’accès voyageur sont indisponibles. Demandez à un administrateur autorisé de les vérifier.",
+      "rate_limited": "Veuillez patienter avant de réessayer cette demande.",
+      "link_unavailable": "Ce lien de séjour est indisponible.",
+      "unavailable": "L’accès voyageur n’a pas pu être chargé. Veuillez réessayer.",
+      "storage_unavailable": "Ce navigateur ne peut pas enregistrer votre demande en attente. Autorisez le stockage de session ou utilisez un autre navigateur avant de confirmer."
+    }
+  },
+  "GuestProfileManagement": {
+    "title": "Accès au profil",
+    "guidance": "Accordez ou retirez l’accès au profil pour ce lien de séjour d’origine. L’historique de chaque décision est conservé.",
+    "loading": "Vérification des autorisations actuelles du profil…",
+    "loaded": "Les décisions actuelles d’accès au profil sont disponibles.",
+    "lastDecision": "Dernière décision enregistrée",
+    "decisions": {
+      "GRANTED": "Accordé",
+      "WITHDRAWN": "Retiré",
+      "NONE": "Aucune décision enregistrée"
+    },
+    "decision": "Décision d’accès",
+    "grant": "Accorder l’accès au profil",
+    "withdraw": "Retirer l’accès au profil",
+    "reason": "Motif de cette décision",
+    "review": "Vérifier cette décision",
+    "confirmTitle": "Confirmer la décision d’accès au profil",
+    "expiresAt": "Le lien d’origine expire le {date} (UTC).",
+    "confirm": "Enregistrer cette décision",
+    "edit": "Modifier la décision",
+    "saved": "La décision d’accès au profil a été enregistrée.",
+    "recovered": "La décision d’accès d’origine a été récupérée.",
+    "unrecorded": "La décision précédente n’a pas été enregistrée. Vérifiez les autorisations actuelles avant de réessayer.",
+    "uncertain": "La réponse a été interrompue. Récupérez la décision d’origine avant un nouvel enregistrement.",
+    "recover": "Récupérer la décision",
+    "unavailable": "Aucune modification d’accès au profil n’est actuellement autorisée. Vérifiez la politique approuvée et vos droits sur les données concernées.",
+    "refresh": "Actualiser l’accès",
+    "close": "Fermer l’accès au profil"
   }
 }

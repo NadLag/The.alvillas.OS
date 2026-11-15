@@ -1,7 +1,9 @@
 import {randomUUID} from "node:crypto";
 import {guestHubHome} from "./guest-hub-home";
 import type {GuestHubLink} from "@prisma/client";
-import {z} from "zod";
+import {z,ZodError} from "zod";
+import {activeGuestHubProfile} from "./guest-hub-profile-source";
+import {GuestHubProfileAccessError} from "../domain/guest-hub-profile-policy";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {bootstrapOrganizationId} from "@/platform/identity/bootstrap";
@@ -43,7 +45,10 @@ function visitorAuthority(row:GuestHubLink):AuthContext{
  return{organizationId:row.organizationId,permissions:new Set([permission]),scopes:[scope],assignments:[{permissions:new Set([permission]),scope,validFrom:row.createdAt,validTo:row.expiresAt}]};
 }
 
-export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependencies){
+export type GuestHubCapabilityContext={tx:TenantTransaction;actual:Awaited<ReturnType<typeof actualSource>>;authority:AuthContext;resource:ReturnType<typeof guestHubResource>};
+
+/** Every native Guest Hub flow enters through the same verified, budgeted capability boundary. */
+export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDependencies,work:(context:GuestHubCapabilityContext)=>Promise<T>,additionalBudget?:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">)=>Promise<boolean>,fence?:(context:GuestHubCapabilityContext)=>Promise<void>){
  // No unverified token byte selects a tenant, policy, quota or native record.
  await consumeVerificationBudget(deps);
  let token:string,claims:GuestHubCapabilityClaims;
@@ -52,17 +57,32 @@ export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependenci
   const budget=await withTenant(deps.db,claims.organizationId,async tx=>{
    const actual=await actualSource(tx,claims,token),policy=actual.settings.policy.reads;
    const link=await consumeRateLimit(tx,claims.organizationId,{key:"guest-hub:read:"+actual.row.id,limit:policy.requests,windowSeconds:policy.window_seconds,now:actual.now});
-   return{allowed:link.allowed,active:actual.state==="ACTIVE"};
+   const extra=link.allowed&&actual.state==="ACTIVE"&&additionalBudget?await additionalBudget({tx,actual}):true;
+   return{allowed:link.allowed&&extra,active:actual.state==="ACTIVE"};
   });if(!budget.allowed)throw new GuestHubRateLimitError();if(!budget.active)throw new GuestHubInvalidLinkError();
   return await withTenant(deps.db,claims.organizationId,async tx=>{
    const repository=new GuestHubRepository(tx,claims.organizationId);await repository.lockLink(claims.linkId);await repository.lockSources(claims.reservationId);
    const actual=await actualSource(tx,claims,token);if(actual.state!=="ACTIVE")throw new GuestHubInvalidLinkError();
    const authority=visitorAuthority(actual.row),resource=guestHubResource(claims.organizationId,actual.source,await guestHubLinkTarget(actual.repository,actual.row,actual.source));if(!authorize(authority,"view",resource,actual.now))throw new GuestHubInvalidLinkError();
-   const home=await guestHubHome(tx,claims.organizationId,actual.source,actual.settings.scopes,actual.now);
-   const data=guestHubPublicViewSchema.parse({home:home.data,id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
-   await writeAuditEvent(tx,{organizationId:claims.organizationId,actorId:null,action:"guest_hub.link_opened",resourceType:"guest_hub",resourceId:actual.row.id,propertyScopeId:actual.row.propertyId,after:{linkId:actual.row.id,reservationId:actual.row.reservationId},requestId:deps.requestId??randomUUID(),occurredAt:actual.now});
-   const final=await actualSource(tx,claims,token),finalHome=await guestHubHome(tx,claims.organizationId,final.source,final.settings.scopes,final.now);if(finalHome.fingerprint!==home.fingerprint)throw new GuestHubInvalidLinkError();if(final.state!=="ACTIVE"||final.settings.fingerprint!==actual.settings.fingerprint||jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,final.source))!==jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,actual.source)))throw new GuestHubInvalidLinkError();
-   return guestHubPublicViewSchema.parse(present({...authority,visibleDataClasses:new Set()},"view",{...resource,data},catalogFieldPolicy("guest_hub"),final.now));
+   const result=await work({tx,actual,authority,resource});
+   const final=await actualSource(tx,claims,token);if(final.state!=="ACTIVE"||final.settings.fingerprint!==actual.settings.fingerprint||jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,final.source))!==jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,actual.source))||!authorize(authority,"view",resource,final.now))throw new GuestHubInvalidLinkError();
+   await fence?.({tx,actual:final,authority,resource});return result;
   });
  }catch(error){if(error instanceof GuestHubRateLimitError)throw error;throw new GuestHubInvalidLinkError();}
+}
+
+async function profileAvailability(context:GuestHubCapabilityContext,env?:NodeJS.ProcessEnv){try{return(await activeGuestHubProfile(context,env)).fingerprint;}catch(error){if(error instanceof GuestHubProfileAccessError||error instanceof ZodError)return null;throw error;}}
+export async function visitGuestHubLink(raw:unknown,deps:GuestHubVisitDependencies){
+ let expectedHome:string|null|undefined,expectedProfile:string|null|undefined;
+ return withGuestHubCapability(raw,deps,async(context)=>{
+  const {tx,actual,authority,resource}=context;
+  const organizationId=actual.row.organizationId,home=await guestHubHome(tx,organizationId,actual.source,actual.settings.scopes,actual.now);
+  const profile=await profileAvailability(context,deps.env);expectedHome=home.fingerprint;expectedProfile=profile;
+  const data=guestHubPublicViewSchema.parse({home:{...home.data,...profile?{profileAvailable:true}:{}},id:actual.row.id,reservationId:actual.row.reservationId,propertyId:actual.row.propertyId,checkIn:actual.source.checkIn.toISOString().slice(0,10),checkOut:actual.source.checkOut.toISOString().slice(0,10),expiresAt:effectiveGuestHubExpiry(actual.settings.policy,actual.row.expiresAt,actual.source.checkOut.toISOString().slice(0,10),actual.source.timezone).toISOString(),timezone:actual.source.timezone,state:"ACTIVE",locale:actual.source.locale});
+  await writeAuditEvent(tx,{organizationId,actorId:null,action:"guest_hub.link_opened",resourceType:"guest_hub",resourceId:actual.row.id,propertyScopeId:actual.row.propertyId,after:{linkId:actual.row.id,reservationId:actual.row.reservationId},requestId:deps.requestId??randomUUID(),occurredAt:actual.now});
+  return guestHubPublicViewSchema.parse(present({...authority,visibleDataClasses:new Set()},"view",{...resource,data},catalogFieldPolicy("guest_hub"),actual.now));
+ },undefined,async context=>{
+  const {tx,actual}=context,home=await guestHubHome(tx,actual.row.organizationId,actual.source,actual.settings.scopes,actual.now);
+  if(home.fingerprint!==expectedHome||await profileAvailability(context,deps.env)!==expectedProfile)throw new GuestHubInvalidLinkError();
+ });
 }

@@ -4,9 +4,9 @@ import {readBoundedResponseBytes} from "@/platform/http/read-exact-response";
 export type GuestHubBrowserState="loading"|"ready"|"uncertain"|"forbidden"|"offline"|"validation"|"conflict"|"configuration_unavailable"|"rate_limited"|"link_unavailable"|"unavailable";
 export class GuestHubBrowserError extends Error{constructor(readonly state:GuestHubBrowserState){super(state);}}
 export async function guestHubRequest(path:string,input:unknown,signal:AbortSignal,scope?:string):Promise<unknown>{
- const mutation=path==="issue/admit"||path==="revoke/admit";
+ const mutation=path==="issue/admit"||path==="revoke/admit"||/^profile\/grant\/admit$|^links\/[a-f0-9-]{36}\/profile\/admit$/u.test(path);
  try{
-  if(!/^(?:issue\/(?:review|admit|recover)|revoke\/(?:review|admit|recover)|directory|visit|links\/[a-f0-9-]{36}\/visit)$/u.test(path))throw new GuestHubBrowserError("validation");
+  if(!/^(?:issue\/(?:review|admit|recover)|revoke\/(?:review|admit|recover)|directory|visit|profile\/grant\/(?:status|review|admit|recover)|links\/[a-f0-9-]{36}\/(?:visit|profile\/(?:view|review|admit|recover)))$/u.test(path))throw new GuestHubBrowserError("validation");
   const response=await fetch("/api/guest-hub/"+path,{method:"POST",credentials:"same-origin",cache:"no-store",signal,headers:{"content-type":"application/json",...scope?{"x-alvillas-guest-hub-scope":scope}:{}},body:JSON.stringify(input)});
   if(response.status===401||response.status===403){await response.body?.cancel().catch(()=>undefined);throw new GuestHubBrowserError("forbidden");}
   const bytes=await readBoundedResponseBytes(response,65536);let value:unknown;try{value=JSON.parse(new TextDecoder("utf8",{fatal:true}).decode(bytes));}finally{bytes.fill(0);}
