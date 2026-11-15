@@ -22,7 +22,7 @@ let original:Awaited<ReturnType<typeof nativeGuestAgreementPreparedFixture>>|nul
 const send=(id:string,value:unknown)=>process.send?.({id,ok:true,value}),sends=()=>original?.http.calls.filter(call=>call.method==="POST"&&call.path==="/api/v2/envelope/distribute").length??0;
 async function close(){for(const provider of providers)await provider.close();await db.$disconnect();}
 async function execute(raw:unknown){const input=command.parse(raw);if(busy)throw Error("One original fixture phase at a time is required");busy=true;try{
- if(input.type==="close"){await close();send(input.id,{});process.disconnect();return;}
+ if(input.type==="close"){await close();send(input.id,{});process.disconnect?.();return;}
  if(input.type==="prepare"){
   if(original)throw Error("An original native fixture already exists");objects=documentFixtureObjects(input.origin,{write:true});const locale=input.locale==="ar"?"fr":input.locale;original=await nativeGuestAgreementPreparedFixture(db,db,env,objects,locale,providers,{identity:{organizationId:input.organizationId,accountId:input.accountId,personId:input.personId,guestLocale:input.locale},provider:{port:3198,publicOrigin:signatureFixtureEnvironment.DOCUMENSO_URL},arabicFallbackLocale:"fr"});send(input.id,{organizationId:original.organizationId,propertyId:original.property.id,reservationId:original.reservation.id,preparationId:original.prepared.id,documentGrants:original.documentGrants,noticeTitle:original.policy.notice!.title.en});return;
  }
