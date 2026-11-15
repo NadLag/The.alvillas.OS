@@ -8,10 +8,11 @@ import {present} from "@/platform/authz/present";
 import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
 import {serviceCatalogRuleKey,servicePricingSchema} from "@/platform/config/service-catalog-policy";
 import {writePropertyConfiguration} from "@/platform/config/property-configuration";
-import {nativeServiceCatalogActor} from "@/platform/services/catalog-provider-source";
+import {nativeServiceCatalogActor,nativeServiceCatalogCurrency} from "@/platform/services/catalog-provider-source";
+import {Money} from "@/platform/money/money";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
-import {canonicalServiceCatalogEntry,serviceCatalogSelection,ServiceCatalogAccessError,ServiceCatalogConflictError,type ServiceCatalogEntry} from "../domain/service-catalog";
+import {canonicalServiceCatalogEntry,serviceCatalogSelection,ServiceCatalogAccessError,ServiceCatalogConflictError,ServiceCatalogValidationError,type ServiceCatalogEntry} from "../domain/service-catalog";
 import {serviceCatalogDraftSchema,serviceCatalogCommandSchema,serviceCatalogPageSchema,serviceCatalogHistorySchema,serviceCatalogVersionSchema,serviceCatalogRecoverSchema,serviceCatalogReceiptSchema,serviceCatalogPublished,type ServiceCatalogCommand} from "../domain/service-catalog-command";
 import {ServiceCatalogRepository} from "../infrastructure/service-catalog-repository";
 import {readNativeServiceCatalog,serviceCatalogSourceContext,serviceCatalogTermsSources} from "./service-catalog-source";
@@ -21,6 +22,11 @@ const asJson=(value:unknown)=>JSON.parse(JSON.stringify(value))as Prisma.InputJs
 type Context=Awaited<ReturnType<typeof readNativeServiceCatalog>>;
 const authority=(context:Context)=>context.authorizationFingerprint;
 const stableScope=(context:Context)=>jsonbFingerprint({property:context.property,scopes:context.scopes});
+async function currencySource(actor:AccountActorContext,tx:TenantTransaction,entry:ServiceCatalogEntry){
+ if(!entry.currency)return null;const currency=await nativeServiceCatalogCurrency(tx,actor.organizationId,entry.currency);if(!currency||currency.minorUnit<0||currency.minorUnit>2)throw new ServiceCatalogValidationError();
+ for(const amount of[entry.amount,entry.order_terms?.internal_cost.amount])if(amount!==undefined&&!Money.of(amount,currency.code).amount.equals(Money.of(amount,currency.code,currency.minorUnit).amount))throw new ServiceCatalogValidationError();
+ return{code:currency.code,minorUnit:currency.minorUnit};
+}
 function project(actor:AccountActorContext,context:Context,entry:ServiceCatalogEntry,policy:Awaited<ReturnType<typeof serviceCatalogTermsSources>>["policies"][number]|undefined){
  const data={key:entry.key,name:entry.name??null,description:entry.description??null,available:entry.available??null,pricingModel:entry.pricing_model,amount:entry.amount??null,currency:entry.currency??null,orderTerms:entry.order_terms??null,financialPolicy:policy??null};
  return present({...actor.authContext,visibleDataClasses:new Set(["financial","personal"]as const)},"view",{...context.target,data},{},context.now);
@@ -30,8 +36,8 @@ async function prepare(actor:AccountActorContext,tx:TenantTransaction,draft:z.in
  // A more specific agreement/channel policy must be edited through its existing
  // configuration workflow; silently creating a hidden property rule is unsafe.
  if(context.rule&&["agreement","booking_source_property","role_assignment"].includes(context.rule.scopeType))throw new ServiceCatalogConflictError();
- const reviewFingerprint=jsonbFingerprint({protocol:"native-service-catalog-v1",actorId:actor.actorId,draft,source:context.fingerprint,authority:authority(context),terms:terms.fingerprint,catalog:context.catalog,next});
- return{context,entry,next,terms,reviewFingerprint};
+ const currency=await currencySource(actor,tx,entry),reviewFingerprint=jsonbFingerprint({protocol:"native-service-catalog-v1",actorId:actor.actorId,draft,source:context.fingerprint,authority:authority(context),terms:terms.fingerprint,currency,catalog:context.catalog,next});
+ return{context,entry,next,terms,currency,reviewFingerprint};
 }
 export async function previewServiceCatalogChange(actor:AccountActorContext,raw:unknown,deps:Dependencies){
  const draft=serviceCatalogDraftSchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{
@@ -66,12 +72,12 @@ export async function publishServiceCatalogChange(actor:AccountActorContext,raw:
   const prepared=await prepare(actor,tx,command.draft);if(prepared.reviewFingerprint!==command.reviewFingerprint)throw new ServiceCatalogConflictError();
   const account=await nativeServiceCatalogActor(actor,tx),created=await writePropertyConfiguration(account,{...command.draft.scope,key:serviceCatalogRuleKey,value:prepared.next,reason:command.draft.reason},{tx,requestId:deps.requestId,ipAddress:deps.ipAddress});
   const final=await readNativeServiceCatalog(actor,tx,command.draft.scope,"configure"),terms=await serviceCatalogTermsSources(actor,tx,final,[prepared.entry],true),accountAfter=await nativeServiceCatalogActor(actor,tx);
-  if(final.rule?.id!==created.id||jsonbFingerprint(final.catalog)!==jsonbFingerprint(prepared.next)||stableScope(prepared.context)!==stableScope(final)||authority(prepared.context)!==authority(final)||terms.fingerprint!==prepared.terms.fingerprint||accountAfter.personId!==account.personId)throw new ServiceCatalogConflictError();
+  if(final.rule?.id!==created.id||jsonbFingerprint(final.catalog)!==jsonbFingerprint(prepared.next)||stableScope(prepared.context)!==stableScope(final)||authority(prepared.context)!==authority(final)||terms.fingerprint!==prepared.terms.fingerprint||accountAfter.personId!==account.personId||jsonbFingerprint(await currencySource(actor,tx,prepared.entry))!==jsonbFingerprint(prepared.currency))throw new ServiceCatalogConflictError();
   const payload=serviceCatalogReceiptSchema.parse({schemaVersion:1,actorId:actor.actorId,propertyId:command.draft.scope.propertyId,ownerId:command.draft.scope.ownerId??null,serviceKey:prepared.entry.key,ruleId:created.id,ruleVersion:created.version,commandHash:jsonbFingerprint(command),reviewFingerprint:command.reviewFingerprint});
   await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"service.catalog.published",resourceType:"config_rule",resourceId:created.id,propertyScopeId:command.draft.scope.propertyId,after:{key:serviceCatalogRuleKey,...payload},reason:command.draft.reason,requestId:deps.requestId,ipAddress:deps.ipAddress,occurredAt:final.now});
   await new OutboxRepository(tx,actor.organizationId).append(serviceCatalogPublished,asJson(payload),`service-catalog:${command.idempotencyKey}`,final.now);
   const committed=await readNativeServiceCatalog(actor,tx,command.draft.scope,"configure"),committedTerms=await serviceCatalogTermsSources(actor,tx,committed,[prepared.entry],true);
-  if(committed.fingerprint!==final.fingerprint||authority(committed)!==authority(final)||committedTerms.fingerprint!==terms.fingerprint)throw new ServiceCatalogConflictError();
+  if(committed.fingerprint!==final.fingerprint||authority(committed)!==authority(final)||committedTerms.fingerprint!==terms.fingerprint||jsonbFingerprint(await currencySource(actor,tx,prepared.entry))!==jsonbFingerprint(prepared.currency))throw new ServiceCatalogConflictError();
   return{ruleId:created.id,ruleVersion:created.version,serviceKey:prepared.entry.key,replayed:false};
  });
 }

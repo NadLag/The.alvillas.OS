@@ -10,7 +10,7 @@ import {setSupplierArchived} from "@/modules/finance/application/supplier-servic
 import {serviceAllocationPolicySchema} from "@/platform/config/service-allocation-policy";
 import {serviceCatalogFinancialChoices,serviceCatalogProviderChoices} from "@/modules/services/application/service-catalog-choices";
 import {previewServiceCatalogChange,publishServiceCatalogChange,recoverServiceCatalogChange,serviceCatalogPage,serviceCatalogHistory,serviceCatalogVersion} from "@/modules/services/application/service-catalog-service";
-import {ServiceCatalogAccessError,ServiceCatalogConflictError,ServiceCatalogConfigurationError} from "@/modules/services/domain/service-catalog";
+import {ServiceCatalogAccessError,ServiceCatalogConflictError,ServiceCatalogConfigurationError,ServiceCatalogValidationError} from "@/modules/services/domain/service-catalog";
 import {listAuditHistory,exportAuditHistoryCsv} from "@/modules/audit/application/audit-service";
 import {maskedValue} from "@/platform/authz/present";
 import * as auditWriter from "@/platform/audit/audit-writer";
@@ -29,6 +29,13 @@ const revoke=(f:NativeServiceCatalogFixture,key:string)=>withTenant(db,f.organiz
 const financial=(f:NativeServiceCatalogFixture)=>withTenant(db,f.organizationId,tx=>tx.$queryRaw`SELECT 'transaction' AS kind,id::text,xmin::text,ctid::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${f.organizationId}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,ctid::text,to_jsonb(p) FROM posting p WHERE organization_id=${f.organizationId}::uuid ORDER BY kind,id`);
 
 describe("native reviewed canonical service catalogs",()=>{
+ it("requires a registered currency and rejects fractional amounts outside its native ledger precision",async()=>{
+  const f=await fixture(),yen=await admin.currency.upsert({where:{code:"JPY"},update:{},create:{code:"JPY",name:"Japanese Yen",minorUnit:0}});expect(yen.minorUnit).toBe(0);
+  const registered=await admin.currency.findMany({select:{code:true}}),unknown=Array.from({length:26},(_,index)=>"Q"+String.fromCharCode(65+index)+"Q").find(code=>!registered.some(row=>row.code===code));if(!unknown)throw Error("An unused owned currency test identity is required");
+  await expect(previewServiceCatalogChange(f.ctx,{...f.draft,entry:{...f.entry,currency:unknown,order_terms:null}},f.deps)).rejects.toBeInstanceOf(ServiceCatalogValidationError);
+  await expect(previewServiceCatalogChange(f.ctx,{...f.draft,entry:{...f.entry,currency:"JPY",amount:"120.50",order_terms:null}},f.deps)).rejects.toBeInstanceOf(ServiceCatalogValidationError);
+  const accepted=await previewServiceCatalogChange(f.ctx,{...f.draft,entry:{...f.entry,currency:"JPY",amount:"120.00",order_terms:null}},f.deps);expect(accepted.entry).toMatchObject({amount:"120.00",currency:"JPY",orderTerms:null});
+ });
  it("authorizes person providers by actual memberships and exposes only independently authorized selector labels",async()=>{
   const f=await fixture(),saved=await withTenant(db,f.organizationId,async tx=>{
    const person=await tx.person.create({data:{organizationId:f.organizationId,displayName:"Actual independently scoped catalog performer"}}),other=await tx.property.create({data:{organizationId:f.organizationId,name:"Other actual provider membership",addressLine1:"Owned separate fixture address",city:f.property.city,cityId:f.property.cityId,regionId:f.property.regionId,timezone:f.property.timezone,propertyType:f.property.propertyType,bedrooms:2,bathrooms:2,maxGuests:4,amenities:[],photoUrls:[]}}),permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"team_member:view"}}),role=await tx.role.create({data:{organizationId:f.organizationId,key:"actual_catalog_person_"+randomUUID(),name:"Independent property person access"}});await tx.rolePermission.create({data:{organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}});await tx.roleAssignment.create({data:{organizationId:f.organizationId,personId:f.person.id,userAccountId:f.account.id,roleId:role.id,scopeType:"property",scopeId:f.property.id,validFrom:new Date("2020-01-01")}});await tx.roleAssignment.create({data:{organizationId:f.organizationId,personId:person.id,roleId:role.id,scopeType:"property",scopeId:other.id,validFrom:new Date("2020-01-01")}});

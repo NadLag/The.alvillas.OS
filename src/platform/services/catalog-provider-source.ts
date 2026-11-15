@@ -11,6 +11,7 @@ import type {z} from "zod";
 import type {serviceCatalogProviderSchema} from "@/platform/config/service-catalog-policy";
 
 type Reference=z.infer<typeof serviceCatalogProviderSchema>;
+export const nativeServiceCatalogCurrency=(tx:TenantTransaction,organizationId:string,code:string)=>new TeamRepository(tx,organizationId).currency(code);
 export async function nativeServiceCatalogActor(actor:AccountActorContext,tx:TenantTransaction){
  const[account]=await new TeamRepository(tx,actor.organizationId).onboardingTeamAccountHeads([actor.actorId]);
  if(!account?.personId||account.status!=="ACTIVE"||actor.authContext.personId!==undefined&&actor.authContext.personId!==account.personId)throw new ServiceCatalogAccessError();
