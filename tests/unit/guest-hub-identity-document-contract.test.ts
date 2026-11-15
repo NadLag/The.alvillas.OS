@@ -8,6 +8,7 @@ import {ownedGuestHubIdentityDocumentPolicy} from "../integration/support/guest-
 import {ownedGuestHubIdentityDocumentDelegation} from "../integration/support/guest-hub-identity-document-delegation";
 
 const file=()=>({kind:"PASSPORT" as const,part:"IDENTITY_PAGE" as const,contentType:"image/jpeg" as const,fileSize:1024,sha256:"a".repeat(64)});
+const reviewToken="guest-identity-documents-review-v1."+Buffer.from("owned-protocol").toString("base64url")+"."+Buffer.alloc(32,1).toString("base64url");
 const draft=()=>({previousCaptureId:null,files:[file()],acknowledged:true});
 function policy(){const identity=ownedGuestHubIdentityDocumentPolicy(),delegation=ownedGuestHubIdentityDocumentDelegation();return effectiveGuestHubIdentityDocumentArchive(identity,identity,delegation,delegation.archivePolicy,delegation.retentionPolicy);}
 function issues(run:()=>unknown){try{run();throw Error("Expected the selected files to be rejected");}catch(error){if(!(error instanceof ZodError))throw error;return error.issues;}}
@@ -15,7 +16,7 @@ function issues(run:()=>unknown){try{run();throw Error("Expected the selected fi
 describe("private native identity capture descriptors",()=>{
  it("frames every distinct kind and side with maximum canonical multipart hashes inside its dedicated JSON bound",()=>{
   const fileSize=10*1024*1024,parts={schemaVersion:1 as const,chunkBytes:documentUploadChunkBytes,hashes:Array.from({length:Math.ceil(fileSize/documentUploadChunkBytes)},()=>"b".repeat(64))};
-  const files=(["PASSPORT","NATIONAL_ID"] as const).flatMap(kind=>(["IDENTITY_PAGE","FRONT","BACK"] as const).map(part=>({...file(),kind,part,fileSize,parts}))),input={previousCaptureId:randomUUID(),files,acknowledged:true,idempotencyKey:randomUUID(),reviewFingerprint:"c".repeat(64)};
+  const files=(["PASSPORT","NATIONAL_ID"] as const).flatMap(kind=>(["IDENTITY_PAGE","FRONT","BACK"] as const).map(part=>({...file(),kind,part,fileSize,parts}))),input={previousCaptureId:randomUUID(),files,acknowledged:true,idempotencyKey:randomUUID(),reviewFingerprint:reviewToken};
   expect(guestHubIdentityDocumentSubmitSchema.parse(input)).toEqual(input);const size=Buffer.byteLength(JSON.stringify(input));expect(size).toBeGreaterThan(8192);expect(size).toBeLessThan(guestHubIdentityDocumentMaximumJsonBytes);
  });
  it("rejects original filenames, identity numbers, object URLs and file bytes instead of admitting them as capture metadata",()=>{
@@ -34,7 +35,7 @@ describe("private native identity capture descriptors",()=>{
  });
  it("requires an explicit predecessor and an original scoped nonce and fingerprint for submission",()=>{
   expect(guestHubIdentityDocumentDraftSchema.safeParse({files:[file()],acknowledged:true}).success).toBe(false);expect(guestHubIdentityDocumentSubmitSchema.safeParse(draft()).success).toBe(false);
-  const input={...draft(),previousCaptureId:randomUUID(),idempotencyKey:randomUUID(),reviewFingerprint:"a".repeat(64)};expect(guestHubIdentityDocumentSubmitSchema.parse(input)).toEqual(input);
+  const input={...draft(),previousCaptureId:randomUUID(),idempotencyKey:randomUUID(),reviewFingerprint:reviewToken};expect(guestHubIdentityDocumentSubmitSchema.parse(input)).toEqual(input);expect(guestHubIdentityDocumentSubmitSchema.safeParse({...input,reviewFingerprint:"a".repeat(64)}).success).toBe(false);
   expect(guestHubIdentityDocumentRecoverySchema.parse({idempotencyKey:input.idempotencyKey})).toEqual({idempotencyKey:input.idempotencyKey});expect(guestHubIdentityDocumentRecoverySchema.safeParse(input).success).toBe(false);
  });
  it("admits a complete selection only under the actual effective canonical document constraints",()=>{

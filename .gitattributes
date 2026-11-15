@@ -174,3 +174,4 @@ prisma/migrations/20261113093000_native_onboarding_activation_job_continuations/
 /prisma/migrations/20261114174500_native_guest_arrival_departure_details/migration.sql text eol=lf
 /prisma/migrations/20261114224500_native_guest_identity_document_delegation/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
 /prisma/migrations/20261114230000_native_guest_identity_document_tuple_birth/migration.sql -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+/prisma/migrations/20261115001000_native_guest_identity_document_tenant_policy/migration.sql text eol=lf

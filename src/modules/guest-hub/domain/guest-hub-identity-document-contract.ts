@@ -1,13 +1,13 @@
 import {z} from "zod";
 import {documentUploadReviewInput,documentUploadChunkBytes,documentSingleBodyBytes} from "@/modules/documents";
-import {guestHubIdSchema,guestHubFingerprintSchema} from "./guest-hub-contract";
+import {guestHubIdSchema} from "./guest-hub-contract";
 import {guestHubIdentityDocumentKindSchema,guestHubIdentityDocumentPartSchema,guestHubIdentityDocumentContentTypeSchema} from "./guest-hub-identity-document-policy";
 import type {effectiveGuestHubIdentityDocumentArchive} from "./guest-hub-identity-document-archive";
 
 // This framing bound accommodates all six distinct kind/side descriptors and their canonical chunk hashes.
 // Existing profile and stay-details body limits are unchanged; no file bytes enter this JSON protocol.
 export const guestHubIdentityDocumentMaximumJsonBytes=32768;
-const maximumFiles=guestHubIdentityDocumentKindSchema.options.length*guestHubIdentityDocumentPartSchema.options.length;
+export const guestHubIdentityDocumentMaximumFiles=guestHubIdentityDocumentKindSchema.options.length*guestHubIdentityDocumentPartSchema.options.length;
 export const guestHubIdentityDocumentFileSchema=z.object({
  kind:guestHubIdentityDocumentKindSchema,part:guestHubIdentityDocumentPartSchema,
  contentType:guestHubIdentityDocumentContentTypeSchema,fileSize:documentUploadReviewInput.shape.fileSize,
@@ -16,12 +16,13 @@ export const guestHubIdentityDocumentFileSchema=z.object({
  if(value.fileSize>documentSingleBodyBytes&&!value.parts)context.addIssue({code:"custom",path:["parts"],message:"bounded_document_parts_required"});
  if(value.parts&&value.parts.hashes.length!==Math.ceil(value.fileSize/documentUploadChunkBytes))context.addIssue({code:"custom",path:["parts"],message:"exact_document_part_count_required"});
 });
-export const guestHubIdentityDocumentDraftSchema=z.object({
- previousCaptureId:guestHubIdSchema.nullable(),files:z.array(guestHubIdentityDocumentFileSchema).min(1).max(maximumFiles),acknowledged:z.boolean()
-}).strict().superRefine((value,context)=>{
- const seen=new Set<string>();for(const[index,file]of value.files.entries()){const key=file.kind+":"+file.part;if(seen.has(key))context.addIssue({code:"custom",path:["files",index,"part"],message:"distinct_identity_document_parts_required"});seen.add(key);}
+export const guestHubIdentityDocumentFilesSchema=z.array(guestHubIdentityDocumentFileSchema).min(1).max(guestHubIdentityDocumentMaximumFiles).superRefine((files,context)=>{
+ const seen=new Set<string>();for(const[index,file]of files.entries()){const key=file.kind+":"+file.part;if(seen.has(key))context.addIssue({code:"custom",path:[index,"part"],message:"distinct_identity_document_parts_required"});seen.add(key);}
 });
-export const guestHubIdentityDocumentSubmitSchema=guestHubIdentityDocumentDraftSchema.safeExtend({idempotencyKey:guestHubIdSchema,reviewFingerprint:guestHubFingerprintSchema}).strict();
+export const guestHubIdentityDocumentDraftSchema=z.object({previousCaptureId:guestHubIdSchema.nullable(),files:guestHubIdentityDocumentFilesSchema,acknowledged:z.boolean()}).strict();
+export const guestHubIdentityDocumentReviewTokenSchema=z.string().min(40).max(512).regex(/^guest-identity-documents-review-v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u);
+export const guestHubIdentityDocumentReviewInputSchema=guestHubIdentityDocumentDraftSchema.extend({idempotencyKey:guestHubIdSchema}).strict();
+export const guestHubIdentityDocumentSubmitSchema=guestHubIdentityDocumentReviewInputSchema.extend({reviewFingerprint:guestHubIdentityDocumentReviewTokenSchema}).strict();
 export const guestHubIdentityDocumentRecoverySchema=z.object({idempotencyKey:guestHubIdSchema}).strict();
 export type GuestHubIdentityDocumentDraft=z.infer<typeof guestHubIdentityDocumentDraftSchema>;
 

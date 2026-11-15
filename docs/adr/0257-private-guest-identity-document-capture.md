@@ -12,4 +12,6 @@ An identity-only grant extension records that delegation in the same transaction
 
 Database birth checks use the stored grant's explicitly selected system transaction marker. A copied PostgreSQL table-row composite does not retain that tuple header. Migration250 selects the actual `g.xmin` beside its user columns and retains every source, policy, timing and atomic-delegation predicate; applied migration249 remains unchanged. An identity grant cannot commit when its document delegation write is omitted.
 
+Capture review, command commitments and encrypted descriptors reuse the existing private-form codec with separate identity-document purposes. The review binds the original nonce, predecessor, grant, effective form, source and exact filename-free descriptors. AEAD also binds the server-assigned file identities and sides through an immutable manifest fingerprint. Plain document hashes and chunk hashes stay inside the encrypted payload. Retained key rotation preserves original recoverability; profile, stay-details and delegation signatures cannot authorize a capture.
+
 Legal approval, retention and disposition decisions, real provider enablement, restricted hosted acceptance and production changes remain owner-reserved. This decision supplies no automatic document-disposition workflow.
