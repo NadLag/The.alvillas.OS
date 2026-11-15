@@ -11,6 +11,7 @@ import {downloadNativeGuestAgreement} from "@/app/api/guest-hub/agreement/native
 import {guestHubAgreementFileHttp} from "@/modules/guest-hub/ui/guest-hub-agreement-file-http";
 import {guestHubAgreementPublicHttp} from "@/modules/guest-hub/ui/guest-hub-agreement-public-http";
 import {guestHubCapabilityCookie} from "@/modules/guest-hub/domain/guest-hub-cookie";
+import {guestHubAgreementViewSchema} from "@/modules/guest-hub/domain/guest-hub-agreement-contract";
 import {executeSignatureDistributionReference} from "@/modules/documents/application/document-signature-distribution-worker";
 import {signatureDistributionOutboxKey} from "@/modules/documents/application/document-signature-distribution";
 import {reviewGuestHubIssue,issueGuestHubLink} from "@/modules/guest-hub/application/guest-hub-service";
@@ -80,7 +81,7 @@ describe("native released guest agreement requests and canonical distribution",(
  });
  it("uses the original scoped cookie and CSRF boundary for JSON and PDF while rejecting guest-selected documents",async()=>{
   const c=await fresh();await release(c);const origin="http://localhost",cookie=guestHubCapabilityCookie(c.link.id,env),headers={origin,"content-type":"application/json",cookie:cookie.name+"="+c.link.token},request=(path:string,input:unknown,changes:Record<string,string>={})=>new NextRequest(origin+"/api/guest-hub/links/"+c.link.id+"/agreement/"+path,{method:"POST",headers:{...headers,...changes},body:JSON.stringify(input)}),context={...deps(),verificationOrganizationId:c.f.organizationId};let reads=0;const download=(capability:unknown,input:unknown,visit:GuestHubAgreementVisitDependencies)=>{reads++;return downloadNativeGuestAgreement(capability,input,{...visit,objects:objects.objects});};
-  const view=await guestHubAgreementPublicHttp(request("view",{}),context,c.link.id,"view");expect(view.status).toBe(200);expect((await view.json()).progress).toEqual({state:"READY",complete:false});
+  const view=await guestHubAgreementPublicHttp(request("view",{}),context,c.link.id,"view");expect(view.status).toBe(200);expect(guestHubAgreementViewSchema.parse(await view.json()).progress).toEqual({state:"READY",complete:false});
   expect((await guestHubAgreementPublicHttp(request("admit",{idempotencyKey:randomUUID(),locale:"fr",acknowledged:true,signed:true,documentId:c.f.complete.versionId}),context,c.link.id,"admit")).status).toBe(400);
   expect((await guestHubAgreementFileHttp(request("file",{kind:"ORIGINAL"},{origin:"http://foreign.example.test"}),context,c.link.id,download)).status).toBe(403);expect((await guestHubAgreementFileHttp(request("file",{kind:"ORIGINAL",versionId:randomUUID()}),context,c.link.id,download)).status).toBe(400);expect(reads).toBe(0);
   const response=await guestHubAgreementFileHttp(request("file",{kind:"ORIGINAL"}),context,c.link.id,download);expect(response.status).toBe(200);expect(response.headers.get("cache-control")).toBe("private, no-store");expect(response.headers.get("content-security-policy")).toBe("sandbox");expect(Buffer.from(await response.arrayBuffer()).subarray(0,4).toString()).toBe("%PDF");expect(reads).toBe(1);
