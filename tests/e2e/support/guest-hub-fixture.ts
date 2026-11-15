@@ -14,9 +14,11 @@ export async function prepareNativeGuestHubBrowserFixture(input:{organizationId:
  return fixture.parse(JSON.parse(await readFile(input.output,"utf8")));
 }
 export async function openNativeGuestHubWorkspace(page:Page,reservationId:string,navigate:()=>Promise<unknown>){
+ await retainNativeGuestHubResponses(page.context());
  const loaded=page.waitForResponse(response=>{if(new URL(response.url()).pathname!=="/api/guest-hub/directory"||response.request().method()!=="POST")return false;const input:unknown=response.request().postDataJSON(),parsed=z.object({reservationId:z.uuid()}).safeParse(input);return parsed.success&&parsed.data.reservationId===reservationId;},{timeout:30000});
  const [response]=await Promise.all([loaded,navigate()]);expect(response.status()).toBe(200);
- expect(guestHubWorkspaceSchema.parse(await response.json()).reservationId).toBe(reservationId);
+ const retained=nativeResponses.get(response.request());expect(retained).toBeDefined();if(!retained)throw Error("Original native directory response must be retained before UI navigation");expect(retained.status).toBe(response.status());
+ expect(guestHubWorkspaceSchema.parse(JSON.parse(retained.body.toString("utf8"))as unknown).reservationId).toBe(reservationId);
 }
 const nativeResponses=new WeakMap<Request,{status:number;body:Buffer}>(),retainedContexts=new WeakSet<BrowserContext>();
 /** Retain the one original HTTP acknowledgement before the real UI can replace its browser resource. */
