@@ -11,7 +11,7 @@ const tax=z.object({key:configSlugSchema,amount:money,currency,rate_bps:z.number
 const financialPolicy=z.object({serviceKey:configSlugSchema,allocationRuleId:z.uuid(),taxRuleId:z.uuid(),recipe:serviceAllocationRecipeSchema,taxes:z.array(tax).max(20),providers:z.array(serviceCatalogProviderSchema.extend({label:z.string()})).max(100)}).strict();
 export const serviceCatalogItemSchema=z.object({key:configSlugSchema,name:localizedTextSchema.nullable(),description:localizedTextSchema.nullable(),available:z.boolean().nullable(),pricingModel:servicePricingModelSchema,amount:money,currency,orderTerms:serviceCatalogOrderTermsSchema.nullable(),financialPolicy:financialPolicy.nullable()}).strict();
 export const serviceCatalogPageResponseSchema=z.object({rule:rule.nullable(),items:z.array(serviceCatalogItemSchema).max(20),next:configSlugSchema.nullable()}).strict();
-export const serviceCatalogPreviewResponseSchema=z.object({reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),baseRule:rule.nullable(),entry:serviceCatalogItemSchema}).strict();
+export const serviceCatalogPreviewResponseSchema=z.object({reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),baseRule:rule.nullable(),entry:serviceCatalogItemSchema.extend({name:localizedTextSchema})}).strict();
 export const serviceCatalogPublishResponseSchema=z.object({ruleId:z.uuid(),ruleVersion:z.number().int().positive(),serviceKey:configSlugSchema,replayed:z.boolean()}).strict();
 const savedReceipt=serviceCatalogPublishResponseSchema.omit({replayed:true});
 export const serviceCatalogRecoveryResponseSchema=z.object({propertyId:z.uuid(),idempotencyKey:z.uuid(),recorded:z.boolean(),receipt:savedReceipt.nullable()}).strict().refine(value=>value.recorded===(value.receipt!==null));
