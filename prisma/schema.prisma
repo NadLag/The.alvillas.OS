@@ -396,6 +396,8 @@ model ReceivableCollectionReversal {
 }
 
 model Organization {
+  serviceOrders ServiceOrder[]
+  serviceOrderEvents ServiceOrderEvent[]
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkOrganization")
   guestHubRevocations GuestHubLinkRevocation[] @relation("GuestHubRevocationOrganization")
   leadConversions LeadConversion[]
@@ -833,6 +835,8 @@ model Person {
 }
 
 model UserAccount {
+  serviceOrders ServiceOrder[] @relation("ServiceOrderCreator")
+  serviceOrderEvents ServiceOrderEvent[] @relation("ServiceOrderEventActor")
   issuedGuestHubLinks GuestHubLink[] @relation("GuestHubLinkIssuer")
   guestHubRevocations GuestHubLinkRevocation[] @relation("GuestHubRevocationActor")
   leadConversions LeadConversion[] @relation("LeadConversionAuthor")
@@ -1299,6 +1303,7 @@ model OwnerPortalAccess {
 }
 
 model Property {
+  serviceOrders ServiceOrder[]
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkProperty")
   documents Document[] @relation("DocumentProperty")
   guestPaymentReceipts GuestPaymentReceipt[]
@@ -1571,6 +1576,7 @@ model BookingChannel {
 }
 
 model Reservation {
+  serviceOrders ServiceOrder[]
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkReservation")
   documents Document[] @relation("DocumentReservation")
   externalPaymentIntents ExternalPaymentIntent[]
@@ -1664,6 +1670,7 @@ model ReservationConflict {
 }
 
 model OperationTask {
+  serviceOrder ServiceOrder?
   percentageEarningWitnesses EmployeeCompensationPercentageWitness[]
   workTimeEvidence EmployeeWorkTimeEvidence[]
   compensationRunLines EmployeeCompensationRunLine[]
@@ -2341,6 +2348,7 @@ model ReferenceSequence {
 }
 
 model Currency {
+  serviceOrders ServiceOrder[]
   externalPaymentRefundFees ExternalPaymentRefundFee[]
   externalPaymentRefundIntents ExternalPaymentRefundIntent[]
   externalPaymentIntents ExternalPaymentIntent[]
@@ -2392,6 +2400,7 @@ model ExchangeRate {
 }
 
 model ConfigRule {
+  serviceOrders ServiceOrder[] @relation("ServiceOrderCatalog")
   guestHubLinks GuestHubLink[] @relation("GuestHubLinkPolicy")
   leadConversions LeadConversion[] @relation("LeadConversionPolicy")
   leadWorkVersions LeadWorkEntry[] @relation("LeadWorkPolicy")
@@ -6412,4 +6421,70 @@ model GuestHubAgreementDocumentOrigin {
  @@unique([organizationId,guestRequestId],map:"guest_agreement_origin_request_key")
  @@unique([organizationId,distributionIntentId],map:"guest_agreement_origin_intent_key")
  @@map("guest_hub_agreement_document_origin")
+}
+
+model ServiceOrder {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ propertyId String @map("property_id") @db.Uuid
+ reservationId String @map("reservation_id") @db.Uuid
+ catalogRuleId String @map("catalog_rule_id") @db.Uuid
+ catalogRuleVersion Int @map("catalog_rule_version")
+ serviceKey String @map("service_key")
+ titleTranslations Json @map("title_translations")
+ serviceDate DateTime @map("service_date") @db.Date
+ lastServiceDate DateTime @map("last_service_date") @db.Date
+ quantity BigInt
+ guestCount Int @map("guest_count")
+ requestSnapshot Json @map("request_snapshot")
+ catalogSnapshot Json @map("catalog_snapshot")
+ sourceWitnesses Json @map("source_witnesses")
+ state String @default("REQUESTED")
+ version Int @default(1)
+ totalAmount Decimal? @map("total_amount") @db.Decimal(18,2)
+ currency String @db.Char(3)
+ quoteReference String? @map("quote_reference")
+ taskId String? @map("task_id") @db.Uuid
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ property Property @relation(fields:[organizationId,propertyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ reservation Reservation @relation(fields:[organizationId,reservationId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ catalogRule ConfigRule @relation("ServiceOrderCatalog",fields:[organizationId,catalogRuleId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ currencyRef Currency @relation(fields:[currency],references:[code],onDelete:Restrict,onUpdate:NoAction)
+ task OperationTask? @relation(fields:[organizationId,taskId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ creator UserAccount @relation("ServiceOrderCreator",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ events ServiceOrderEvent[]
+ @@unique([organizationId,id],map:"service_order_org_id_key")
+ @@unique([organizationId,taskId],map:"service_order_native_task_key")
+ @@index([organizationId,propertyId,id],map:"service_order_property_page_idx")
+ @@index([organizationId,propertyId,serviceDate,id],map:"service_order_property_date_idx")
+ @@index([organizationId,reservationId,id],map:"service_order_reservation_page_idx")
+ @@index([organizationId,state,id],map:"service_order_state_page_idx")
+ @@map("service_order")
+}
+
+model ServiceOrderEvent {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ orderId String @map("order_id") @db.Uuid
+ version Int
+ fromState String? @map("from_state")
+ toState String @map("to_state")
+ snapshot Json
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash")
+ reviewFingerprint String @map("review_fingerprint")
+ createdBy String @map("created_by") @db.Uuid
+ reason String
+ requestId String @map("request_id")
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ order ServiceOrder @relation(fields:[organizationId,orderId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ actor UserAccount @relation("ServiceOrderEventActor",fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction)
+ @@unique([organizationId,id],map:"service_order_event_org_id_key")
+ @@unique([organizationId,orderId,version],map:"service_order_event_version_key")
+ @@unique([organizationId,commandKey],map:"service_order_event_command_key")
+ @@map("service_order_event")
 }

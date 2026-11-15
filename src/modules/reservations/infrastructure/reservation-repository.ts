@@ -154,6 +154,11 @@ export class ReservationRepository {
     private readonly organizationId: string
   ) {}
 
+  async serviceOrderSourceHead(id:string){
+    const rows=await this.tx.$queryRaw<Array<{id:string;organizationId:string;propertyId:string;version:number;status:string;source:string;checkIn:Date;checkOut:Date;adultCount:number;childCount:number;archivedAt:Date|null;createdAt:Date;xmin:string;tuple:string}>>(Prisma.sql`SELECT id,organization_id AS "organizationId",property_id AS "propertyId",version,status,source,check_in AS "checkIn",check_out AS "checkOut",adult_count AS "adultCount",child_count AS "childCount",archived_at AS "archivedAt",created_at AS "createdAt",xmin::text,ctid::text AS tuple FROM reservation WHERE organization_id=${this.organizationId}::uuid AND id=${id}::uuid`);
+    return rows[0]??null;
+  }
+
   async findProperty(propertyId: string): Promise<{ id: string; name: string; city: string; cityId: string | null; region: string | null; regionId: string | null } | null> {
     return this.tx.property.findFirst({
       where: {
