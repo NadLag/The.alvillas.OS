@@ -3,6 +3,7 @@ import { DocumentRepository } from "./document-repository";
 
 const intentInclude = { attempt: { include: { evidence: { orderBy: [{ observedAt: "asc" }, { id: "asc" }] } } } } satisfies Prisma.SignatureProviderIntentInclude;
 export class SignaturePreparationRepository extends DocumentRepository {
+  preparedForReservation(reservationId:string,before?:string){return this.tx.signatureProviderIntent.findMany({where:{organizationId:this.organizationId,phase:"PREPARE",...before?{id:{lt:before}}:{},signature:{instance:{document:{organizationId:this.organizationId,sourceKind:"RESERVATION",sourceId:reservationId,archivedAt:null}}},attempt:{evidence:{some:{kind:"PREPARED"}}}},select:{id:true,requestedAt:true},orderBy:{id:"desc"},take:26});}
   signatureSent(signatureId: string, providerScopeHash: string, providerRequestId: string) { return this.tx.signatureEvent.findFirst({ where: { organizationId: this.organizationId, signatureId, state: "SENT", providerIdentityHash: providerScopeHash, providerRequestId, providerEvidenceId: { not: null } }, select: { id: true } }); }
   scope(scopeHash: string) { return this.tx.signatureProviderScope.findFirst({ where: { organizationId: this.organizationId, scopeHash } }); }
   async lockProviderScope(scopeHash: string) { await this.tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${'signature-provider-scope:' + scopeHash},0))::text`; }

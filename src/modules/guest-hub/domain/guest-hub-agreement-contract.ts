@@ -13,6 +13,11 @@ const selection=z.discriminatedUnion("decision",[
 export const guestHubAgreementReleaseDraftSchema=z.object({linkId:id,selection}).strict();
 export const guestHubAgreementReleaseCommandSchema=guestHubAgreementReleaseDraftSchema.extend({idempotencyKey:id,reviewFingerprint:fingerprint,reason}).strict();
 export const guestHubAgreementReleaseRecoverySchema=z.object({linkId:id,idempotencyKey:id}).strict();
+export const guestHubAgreementReleaseStatusInputSchema=z.object({linkId:id}).strict();
+export const guestHubAgreementReleaseChoicesInputSchema=z.object({linkId:id,locale:guestHubAgreementLocaleSchema,cursor:z.string().min(1).max(6000).optional()}).strict();
+export const guestHubAgreementReleaseStatusSchema=z.object({linkId:id,reservationId:id,decision:z.enum(["GRANTED","WITHDRAWN"]).nullable(),version:z.number().int().nonnegative(),canWithdraw:z.boolean()}).strict();
+export const guestHubAgreementReleaseChoicesSchema=z.object({linkId:id,reservationId:id,requestedLocale:guestHubAgreementLocaleSchema,documentLocale:guestHubAgreementLocaleSchema,items:z.array(z.object({preparationId:id,preparedAt:timestamp,original:guestHubAgreementOriginalSchema}).strict()).max(25),next:z.string().max(6000).nullable()}).strict();
+export const guestHubAgreementReleaseReviewSchema=z.object({linkId:id,reservationId:id,decision:z.enum(["GRANTED","WITHDRAWN"]),expiresAt:timestamp,original:guestHubAgreementOriginalSchema.nullable(),requestedLocale:guestHubAgreementLocaleSchema.nullable(),documentLocale:guestHubAgreementLocaleSchema.nullable(),reviewFingerprint:fingerprint}).strict();
 export const guestHubAgreementReleaseBindingSchema=z.object({
  protocol:z.literal("NATIVE_GUEST_AGREEMENT_RELEASE_V1"),id,organizationId:id,linkId:id,reservationId:id,propertyId:id,guestId:id,
  previousId:id.nullable(),version:z.number().int().positive(),decision:z.enum(["GRANTED","WITHDRAWN"]),

@@ -9,6 +9,7 @@ import {nativeSignatureDistributionContext} from "./document-signature-distribut
 import {retainedNativeSignatureReadContext,retainedNativeSignatureSummary} from "./document-signature-history";
 import {retainedSignedArchiveReceipt} from "./document-signed-archive-reconciliation";
 import {SignaturePreparationRepository} from "../infrastructure/signature-preparation-repository";
+import {documentReadCursor,readDocumentCursor} from "./document-workspace";
 
 /** Authorized original metadata without private recipient contact values,
  * provider calls or a second document/source authority. */
@@ -29,4 +30,10 @@ export async function readPreparedSignatureDeliveryStatus(actor:DocumentActorCon
  const ctx=documentActorContext(actor),prepared=await readPreparedSignatureAuthority(ctx,tx,preparationId,env),current=await retainedNativeSignatureReadContext(ctx,tx,prepared.signature.id,{env}),summary=await retainedNativeSignatureSummary(current),archive=await retainedSignedArchiveReceipt(ctx,tx,prepared.signature.id,env),attempt=await new SignaturePreparationRepository(tx,ctx.organizationId).distributionAttempt(prepared.signature.id);
  if(summary.documentVersionId!==prepared.document.versionId||archive.signatureId!==summary.id)throw new DocumentConflictError();
  return{signatureId:summary.id,originalVersionId:summary.documentVersionId,signatureState:summary.state,archiveState:archive.state,signedVersionId:archive.signedVersionId,certificateVersionId:archive.certificateVersionId,distributionState:attempt?attempt.evidence.some(row=>row.kind==="SENT")?"SENT" as const:"UNCERTAIN" as const:null};
+}
+/** Only opaque native candidate identities cross to composition. Each original
+ * must pass its independent document/template/signature authority before display. */
+export async function preparedSignatureCandidatePage(actor:DocumentActorContext,tx:TenantTransaction,reservationId:string,filter:string,cursor?:string){
+ const ctx=documentActorContext(actor),before=readDocumentCursor(ctx,filter,cursor),rows=await new SignaturePreparationRepository(tx,ctx.organizationId).preparedForReservation(reservationId,before),page=rows.slice(0,25),last=page.at(-1);
+ return{items:page.map(row=>({preparationId:row.id,preparedAt:row.requestedAt.toISOString()})),next:rows.length>25&&last?documentReadCursor(ctx,filter,last.id):null};
 }
