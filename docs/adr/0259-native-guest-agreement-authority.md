@@ -50,6 +50,12 @@ by existing protected download links stay outside the immutable original signing
 protocol. Guest JSON and PDF routes share the original scoped cookie, origin,
 budget and live-authority boundaries; PDFs recheck authority after object I/O.
 
+Source snapshots retain the existing PostgreSQL row witnesses. A logical database
+restore closes the original delegation and requires an explicitly reviewed staff
+release for the restored source. Original history and nonces remain retained;
+recovering an earlier request cannot complete that new release. Authorized staff
+can still read the original documents and signed artifacts independently.
+
 The deferred origin check reads the inserted distribution intent's physical row
 when checking same-transaction birth. The forward correction preserves the
 already-applied migration and every other provenance, audit and outbox guard.
