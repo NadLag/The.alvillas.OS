@@ -1,6 +1,7 @@
 import {z} from "zod";
 import {documentUploadInput,documentSourceReferenceSchema,DocumentConflictError} from "./document-command";
-import {validateGeneratedPdf} from "./document-pdf";
+import {validateGeneratedPdf,hasDocumentPdfHeader} from "./document-pdf";
+import {documentUploadPartsSchema} from "./document-upload-parts";
 
 export const nativeGuestIdentityDocumentProtocol="ALVILLAS_NATIVE_GUEST_IDENTITY_DOCUMENT_V1";
 export const nativeGuestIdentityReferenceSchema=z.object({protocol:z.literal(nativeGuestIdentityDocumentProtocol),captureId:z.uuid(),fileId:z.uuid()}).strict();
@@ -31,5 +32,17 @@ export function assertNativeGuestIdentityMediaFraming(contentType:unknown,bytes:
   if(type==="application/pdf"){const checked=validateGeneratedPdf(bytes,maximumBytes);checked.fill(0);return;}
   const prefix=type==="image/png"?[137,80,78,71,13,10,26,10]:[255,216,255],suffix=type==="image/png"?[0,0,0,0,73,69,78,68,174,66,96,130]:[255,217];
   if(bytes.length<prefix.length+suffix.length||prefix.some((value,index)=>bytes[index]!==value)||suffix.some((value,index)=>bytes[bytes.length-suffix.length+index]!==value))throw new DocumentConflictError();
+ }catch{throw new DocumentConflictError();}
+}
+/** Canonical part hashes bind every segment. Only the first segment has a media
+ * header; complete assembly validates the whole file, including split trailers. */
+export function assertNativeGuestIdentityMediaPart(contentType:unknown,bytes:Uint8Array,index:number,rawParts:unknown){
+ try{
+  const type=nativeGuestIdentityContentTypeSchema.parse(contentType),parts=documentUploadPartsSchema.parse(rawParts);
+  if(!Number.isSafeInteger(index)||index<0||index>=parts.hashes.length||!bytes.length)throw new DocumentConflictError();
+  if(parts.hashes.length===1)return assertNativeGuestIdentityMediaFraming(type,bytes,bytes.length);
+  if(index!==0)return;
+  const prefix=type==="image/png"?[137,80,78,71,13,10,26,10]:[255,216,255];
+  if(type==="application/pdf"?!hasDocumentPdfHeader(bytes):bytes.length<prefix.length||prefix.some((value,offset)=>bytes[offset]!==value))throw new DocumentConflictError();
  }catch{throw new DocumentConflictError();}
 }

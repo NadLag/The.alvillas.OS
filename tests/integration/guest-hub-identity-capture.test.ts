@@ -12,7 +12,7 @@ import {decryptGuestHubIdentityDocumentCapture} from "@/modules/guest-hub/domain
 import {reviewGuestHubIssue,issueGuestHubLink} from "@/modules/guest-hub/application/guest-hub-service";
 import {createGuestHubCapabilityLease} from "@/modules/guest-hub/application/guest-hub-visit";
 import {activeGuestHubIdentityDocuments} from "@/modules/guest-hub/application/guest-hub-identity-document-source";
-import {createGuestHubIdentityUploadRequest} from "@/modules/guest-hub/application/guest-hub-identity-upload-request";
+import {createGuestHubIdentityUploadRequest,createGuestHubIdentityFileStatusRequest} from "@/modules/guest-hub/application/guest-hub-identity-upload-request";
 import {hashRateLimitKey} from "@/platform/rate-limit/postgres-rate-limiter";
 import {GuestHubInvalidLinkError,GuestHubRateLimitError} from "@/modules/guest-hub/domain/guest-hub-policy";
 import {guestHubIdentityDocumentPolicyKey} from "@/modules/guest-hub/domain/guest-hub-identity-document-policy";
@@ -40,6 +40,12 @@ beforeAll(async()=>{const url=new URL(process.env.TEST_DATABASE_URL!);admin=new 
 afterAll(async()=>{try{if(financial)await financial.assertPreserved(organizations);}finally{await db?.$disconnect();await admin?.$disconnect();}});
 
 describe("actual append-only native identity capture intents",()=>{
+ it("keeps exact read-only file metadata recovery available after upload quota exhaustion and pending-capture replacement",async()=>{
+  const current=await fresh(true,{uploads:{requests:1,window_seconds:3600}}),first=await service.record(current.capability,await command(current),current.visit),reference={captureId:first.id,fileId:first.files[0].id};
+  await createGuestHubIdentityUploadRequest(current.capability,reference,current.visit,nativeGuestIdentityDocumentAuthority);await expect(createGuestHubIdentityUploadRequest(current.capability,reference,current.visit,nativeGuestIdentityDocumentAuthority)).rejects.toBeInstanceOf(GuestHubRateLimitError);
+  const count=await withTenant(db,current.f.organizationId,tx=>tx.rateLimitBucket.findFirstOrThrow({where:{keyHash:hashRateLimitKey("guest-hub:identity-upload:"+current.link.id)}})),second=await service.record(current.capability,await command(current),current.visit),status=await createGuestHubIdentityFileStatusRequest(current.capability,reference,current.visit,nativeGuestIdentityDocumentAuthority);expect(status.access).toBe("STATUS");expect(second.id).not.toBe(first.id);
+  expect(await withTenant(db,current.f.organizationId,tx=>status.run(tx,file=>Promise.resolve({id:file.file.id,currentCapture:file.currentCapture})))).toEqual({id:first.files[0].id,currentCapture:false});expect(await withTenant(db,current.f.organizationId,tx=>tx.rateLimitBucket.findFirstOrThrow({where:{id:count.id}}))).toEqual(count);
+ });
  it("budgets each native file request once while rechecking its real original descriptor and signed grantor in each canonical transaction",async()=>{
   const current=await fresh(true,{uploads:{requests:1,window_seconds:3600}}),saved=await service.record(current.capability,await command(current),current.visit),reference={captureId:saved.id,fileId:saved.files[0].id},request=await createGuestHubIdentityUploadRequest(current.capability,reference,current.visit,nativeGuestIdentityDocumentAuthority);
   const phase=()=>withTenant(db,current.f.organizationId,tx=>request.run(tx,file=>Promise.resolve({id:file.file.id,descriptor:file.descriptor,actorId:file.documentActor.actorId,grantId:file.grant.id,retention:file.policy.retentionTagKeys}))),first=await phase();expect(await phase()).toEqual(first);expect(first).toMatchObject({id:reference.fileId,descriptor:descriptor(),actorId:current.f.account.id,grantId:saved.grantId,retention:["owned_identity_hold"]});

@@ -19,10 +19,11 @@ export const documentPdfInputSchema = z.object({ source: z.union([renderedDocume
 export class DocumentPdfConfigurationError extends Error { constructor() { super("document_pdf_unavailable"); } }
 
 /** A provider result remains untrusted until its bounded PDF envelope is checked. */
+export function hasDocumentPdfHeader(raw:Uint8Array){return /^%PDF-(?:1\.[0-9]|2\.0)(?:\r?\n|\r)/u.test(new TextDecoder().decode(raw.subarray(0,16)));}
+export function hasDocumentPdfTrailer(raw:Uint8Array){return /%%EOF\s*$/u.test(new TextDecoder().decode(raw.subarray(Math.max(0,raw.length-1024))));}
 export function validateGeneratedPdf(raw: Uint8Array, maximumBytes: number) {
   if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1 || maximumBytes > 10 * 1024 * 1024 ||
     !(raw instanceof Uint8Array) || raw.length < 12 || raw.length > maximumBytes ||
-    !new TextDecoder().decode(raw.subarray(0, 16)).match(/^%PDF-(?:1\.[0-9]|2\.0)(?:\r?\n|\r)/u) ||
-    !/%%EOF\s*$/u.test(new TextDecoder().decode(raw.subarray(Math.max(0, raw.length - 1024))))) throw new DocumentPdfConfigurationError();
+    !hasDocumentPdfHeader(raw) || !hasDocumentPdfTrailer(raw)) throw new DocumentPdfConfigurationError();
   return new Uint8Array(raw);
 }

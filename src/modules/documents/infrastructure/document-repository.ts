@@ -124,6 +124,7 @@ export class DocumentRepository extends FinancialAttachmentSourceRepository {
     return { reference, resource, checks, archived, snapshot, label, fingerprint: commandFingerprint({ reference, resource, snapshot, checks }) };
   }
   async document(id: string,instanceId?:string) { const row=await this.tx.document.findFirst({ where: { organizationId: this.organizationId, id }, include: instanceId?{...rootInclude,instances:{where:{id:instanceId},take:1}}:rootInclude });return row?rootView(row):null; }
+  nativeIdentityAdmissionForDocument(documentId:string){return this.tx.guestHubIdentityDocumentAdmission.findUnique({where:{organizationId_documentId:{organizationId:this.organizationId,documentId}}});}
   version(id: string) { return this.tx.documentVersion.findFirst({ where: { organizationId: this.organizationId, id }, include: versionInclude }); }
   originalVersionMetadata(id:string){return this.tx.documentVersion.findFirst({where:{organizationId:this.organizationId,id},select:{id:true,documentId:true,admissionId:true,cipherSha256:true,admission:{select:{contentType:true,fileSize:true,sha256:true}}}});}
   latest(documentId: string) { return this.tx.documentVersion.findFirst({ where: { organizationId: this.organizationId, documentId }, orderBy: { number: "desc" }, include: versionInclude }); }

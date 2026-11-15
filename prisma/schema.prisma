@@ -615,6 +615,8 @@ model Organization {
   guestHubIdentityDocumentCaptures GuestHubIdentityDocumentCapture[] @relation("GuestIdentityCaptureOrganization")
   guestHubIdentityDocumentDelegations GuestHubIdentityDocumentDelegation[] @relation("GuestIdentityDelegationOrganization")
   guestHubIdentityDocumentFiles GuestHubIdentityDocumentFile[]
+ guestIdentityDocumentAdmissions GuestHubIdentityDocumentAdmission[] @relation("GuestIdentityAdmissionOrganization")
+ guestIdentityDocumentPublications GuestHubIdentityDocumentPublication[] @relation("GuestIdentityPublicationOrganization")
 }
 
 model Region {
@@ -2456,6 +2458,7 @@ model ConfigRule {
   guestHubIdentityDocumentCaptures GuestHubIdentityDocumentCapture[] @relation("GuestIdentityCapturePolicy")
   guestIdentityArchiveDelegations GuestHubIdentityDocumentDelegation[] @relation("GuestIdentityDelegationArchivePolicy")
   guestIdentityRetentionDelegations GuestHubIdentityDocumentDelegation[] @relation("GuestIdentityDelegationRetentionPolicy")
+ guestIdentityAdmissionRetentionPolicies GuestHubIdentityDocumentAdmission[] @relation("GuestIdentityAdmissionRetentionPolicy")
 }
 
 model ReservationConfigSnapshot {
@@ -2641,6 +2644,8 @@ model OutboxEvent {
   guestHubStayDetailsRevisions GuestHubStayDetailsRevision[] @relation("GuestStayDetailsOutbox")
 
   guestHubIdentityDocumentCaptures GuestHubIdentityDocumentCapture[] @relation("GuestIdentityCaptureOutbox")
+ guestIdentityDocumentAdmission GuestHubIdentityDocumentAdmission? @relation("GuestIdentityAdmissionOutbox")
+ guestIdentityDocumentPublication GuestHubIdentityDocumentPublication? @relation("GuestIdentityPublicationOutbox")
 }
 
 model PushSubscription {
@@ -5063,6 +5068,7 @@ model Document {
   @@index([organizationId,sourceKind,sourceId,id],map:"document_source_page_idx")
   @@index([organizationId,onboardingRevisionId,id],map:"document_org_onboarding_review_idx")
   @@map("document")
+ guestIdentityAdmission GuestHubIdentityDocumentAdmission?
 }
 
 model DocumentAdmission {
@@ -5097,6 +5103,7 @@ model DocumentAdmission {
   @@unique([organizationId,storageKey],map:"document_admission_storage_unique")
   @@index([organizationId,commandKey],map:"document_admission_nonce_owner_idx")
   @@map("document_admission")
+ guestIdentityAdmission GuestHubIdentityDocumentAdmission?
 }
 
 model DocumentVersion {
@@ -5130,6 +5137,7 @@ model DocumentVersion {
   @@unique([organizationId,admissionId],map:"document_version_admission_unique")
   @@unique([organizationId,supersedesId],map:"document_version_successor_unique")
   @@map("document_version")
+ guestIdentityPublication GuestHubIdentityDocumentPublication?
 }
 
 model DocumentRetentionRevision {
@@ -5161,6 +5169,7 @@ model DocumentRetentionRevision {
   @@unique([organizationId,createdBy,commandKey],map:"document_retention_revision_command_unique")
   @@index([organizationId,commandKey],map:"document_retention_revision_nonce_owner_idx")
   @@map("document_retention_revision")
+ guestIdentityPublication GuestHubIdentityDocumentPublication?
 }
 
 model DocumentExpiryRevision {
@@ -6143,4 +6152,54 @@ model GuestHubIdentityDocumentFile {
  @@unique([organizationId,id],map:"guest_identity_file_org_id_key")
  @@unique([organizationId,captureId,kind,part],map:"guest_identity_file_side_key")
  @@map("guest_hub_identity_document_file")
+ archiveAdmission GuestHubIdentityDocumentAdmission?
+}
+
+
+model GuestHubIdentityDocumentAdmission {
+ organizationId String @map("organization_id") @db.Uuid
+ fileId String @map("file_id") @db.Uuid
+ documentId String @map("document_id") @db.Uuid
+ admissionId String @map("admission_id") @db.Uuid
+ retentionPolicyId String @map("retention_policy_id") @db.Uuid
+ retentionPolicyVersion Int @map("retention_policy_version")
+ retentionPolicySnapshot Json @map("retention_policy_snapshot")
+ tagKeys String[] @map("tag_keys")
+ tags Json
+ outboxEventId String @map("outbox_event_id") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation("GuestIdentityAdmissionOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_admission_organization_fk")
+ file GuestHubIdentityDocumentFile @relation(fields:[organizationId,fileId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_admission_file_fk")
+ document Document @relation(fields:[organizationId,documentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_admission_document_fk")
+ admission DocumentAdmission @relation(fields:[organizationId,admissionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_admission_original_fk")
+ retentionPolicy ConfigRule @relation("GuestIdentityAdmissionRetentionPolicy",fields:[organizationId,retentionPolicyId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_admission_policy_fk")
+ outbox OutboxEvent @relation("GuestIdentityAdmissionOutbox",fields:[organizationId,outboxEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_admission_outbox_fk")
+ publication GuestHubIdentityDocumentPublication?
+ @@id([organizationId,fileId],map:"guest_identity_admission_pkey")
+ @@unique([organizationId,documentId],map:"guest_identity_admission_document_key")
+ @@unique([organizationId,admissionId],map:"guest_identity_admission_original_key")
+ @@unique([organizationId,outboxEventId],map:"guest_identity_admission_outbox_key")
+ @@index([organizationId,retentionPolicyId],map:"guest_identity_admission_policy_idx")
+ @@map("guest_hub_identity_document_admission")
+}
+
+model GuestHubIdentityDocumentPublication {
+ organizationId String @map("organization_id") @db.Uuid
+ fileId String @map("file_id") @db.Uuid
+ versionId String @map("version_id") @db.Uuid
+ retentionRevisionId String @map("retention_revision_id") @db.Uuid
+ outboxEventId String @map("outbox_event_id") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ requestId String @map("request_id")
+ organization Organization @relation("GuestIdentityPublicationOrganization",fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_publication_organization_fk")
+ original GuestHubIdentityDocumentAdmission @relation(fields:[organizationId,fileId],references:[organizationId,fileId],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_publication_original_fk")
+ version DocumentVersion @relation(fields:[organizationId,versionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_publication_version_fk")
+ retention DocumentRetentionRevision @relation(fields:[organizationId,retentionRevisionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_publication_retention_fk")
+ outbox OutboxEvent @relation("GuestIdentityPublicationOutbox",fields:[organizationId,outboxEventId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"guest_identity_publication_outbox_fk")
+ @@id([organizationId,fileId],map:"guest_identity_publication_pkey")
+ @@unique([organizationId,versionId],map:"guest_identity_publication_version_key")
+ @@unique([organizationId,retentionRevisionId],map:"guest_identity_publication_retention_key")
+ @@unique([organizationId,outboxEventId],map:"guest_identity_publication_outbox_key")
+ @@map("guest_hub_identity_document_publication")
 }
