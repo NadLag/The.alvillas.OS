@@ -34,14 +34,15 @@ export async function readNativeServiceCatalog(actor:AccountActorContext,tx:Tena
 
 /** Metadata and private policy values are fetched in batches for the selected
  * page/edited item. All independent financial and person sources stay explicit. */
-export async function serviceCatalogFinancialSources(actor:AccountActorContext,context:Awaited<ReturnType<typeof serviceCatalogSourceContext>>,requestedIds:readonly string[]){
+export type ServiceCatalogTermsContext=Pick<Awaited<ReturnType<typeof serviceCatalogSourceContext>>,"repository"|"scope"|"stored"|"now"|"scopes">;
+export async function serviceCatalogFinancialSources(actor:AccountActorContext,context:ServiceCatalogTermsContext,requestedIds:readonly string[]){
  const ids=[...new Set(requestedIds)],heads=await context.repository.sourceMetadataWitnesses(ids);
  if(heads.length!==ids.length||heads.some(row=>row.archivedAt||!row.createdBy||![serviceAllocationPolicyKey,"finance.tax"].includes(row.key)))throw new ServiceCatalogAccessError();
  const checks:CurrentAuthorityCheck[]=[...new Set(heads.map(row=>row.key))].flatMap(key=>financialRuleSourceChecks(actor.organizationId,key,"export"));for(const row of heads)for(const verb of["view","export"]as const)checks.push({action:verb,organizationOnly:true,resource:{type:"config_rule",organizationId:actor.organizationId,id:row.id,dataClass:"financial",status:row.lifecycle,occurredAt:row.createdAt}});
  assertAccountAuthorization(actor,context.stored,context.now,checks,new ServiceCatalogAccessError());const rows=await context.repository.sourceWitnesses(ids);if(rows.length!==heads.length||rows.some(row=>{const head=heads.find(candidate=>candidate.id===row.id);return!head||head.xmin!==row.xmin||head.tuple!==row.tuple;}))throw new ServiceCatalogConflictError();
  return{heads,rows,checks};
 }
-export async function serviceCatalogTermsSources(actor:AccountActorContext,tx:TenantTransaction,context:Awaited<ReturnType<typeof serviceCatalogSourceContext>>,items:readonly ServiceCatalogEntry[],requireCurrent=false){
+export async function serviceCatalogTermsSources(actor:AccountActorContext,tx:TenantTransaction,context:ServiceCatalogTermsContext,items:readonly ServiceCatalogEntry[],requireCurrent=false){
  const terms=items.flatMap(item=>item.order_terms?[{item,terms:item.order_terms}]:[]),{heads,rows,checks}=await serviceCatalogFinancialSources(actor,context,terms.flatMap(row=>[row.terms.allocation_rule_id,row.terms.tax_rule_id]));
  const current=requireCurrent?await Promise.all([context.repository.resolveMetadata({key:serviceAllocationPolicyKey,scopes:context.scopes,asOf:context.now}),context.repository.resolveMetadata({key:"finance.tax",scopes:context.scopes,asOf:context.now})]):null,providers=await nativeServiceCatalogProviders(actor,tx,terms.flatMap(row=>row.terms.providers),context.stored,context.now,{allowArchived:!requireCurrent}),policies=[];
  for(const entry of terms){const allocation=rows.find(row=>row.id===entry.terms.allocation_rule_id),tax=rows.find(row=>row.id===entry.terms.tax_rule_id);if(!allocation||allocation.key!==serviceAllocationPolicyKey||!tax||tax.key!=="finance.tax"||requireCurrent&&(current?.[0]?.id!==allocation.id||current?.[1]?.id!==tax.id))throw new ServiceCatalogConfigurationError();const recipe=serviceAllocationPolicySchema.parse(allocation.value).services.find(row=>row.service_key===entry.item.key),taxes=taxRuleSchema.parse(tax.value);if(!recipe||recipe.currency!==entry.item.currency||entry.terms.internal_cost.currency!==entry.item.currency)throw new ServiceCatalogConfigurationError();

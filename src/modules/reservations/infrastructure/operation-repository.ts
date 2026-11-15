@@ -15,6 +15,8 @@ export class OperationRepository {
     readonly tx: TenantTransaction,
     readonly organizationId: string,
   ) {}
+  serviceOrderTaskHead(id:string){return this.tx.operationTask.findFirst({where:{organizationId:this.organizationId,id},select:{id:true,organizationId:true,propertyId:true,reservationId:true,state:true,version:true,archivedAt:true,assignedToUserAccountId:true,assignedToPersonId:true,createdBy:true,createdAt:true,property:{select:{city:true,cityId:true,region:true,regionId:true}}}});}
+  serviceOrderTaskStart(id:string){return this.tx.operationTaskEvent.findFirst({where:{organizationId:this.organizationId,taskId:id,kind:"CHANGED",after:{path:["state"],equals:"IN_PROGRESS"},NOT:{before:{path:["state"],equals:"IN_PROGRESS"}}},orderBy:{version:"desc"},select:{id:true,taskId:true,organizationId:true,actorId:true,version:true,after:true,occurredAt:true}});}
   async context(actorId: string, requestId: string, reason: string) {
     await this.tx.$executeRaw(
       Prisma.sql`SELECT set_config('app.task_actor_id', ${actorId}, true), set_config('app.task_request_id', ${requestId}, true), set_config('app.task_reason', ${reason}, true)`,

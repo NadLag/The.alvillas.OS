@@ -2,6 +2,7 @@ import {z} from "zod";
 import {configSlugSchema} from "@/platform/config/identifiers";
 import {serviceCatalogAmountSchema} from "@/platform/config/service-catalog-policy";
 import {serviceOrderPolicySchema,type ServiceOrderPolicy} from "@/platform/config/service-order-policy";
+import {serviceOrderTaskPlanSchema} from "@/platform/services/order-task-contracts";
 import {evaluate} from "@/platform/automation/rule";
 import {Money} from "@/platform/money/money";
 import {serviceCatalogPrice,type ServiceCatalogEntry} from "./service-catalog";
@@ -19,7 +20,7 @@ export const terminalServiceOrderStates:readonly ServiceOrderState[]=["FULFILLED
 const transitions:Record<ServiceOrderState,readonly ServiceOrderState[]>={
  REQUESTED:["QUOTED","CONFIRMED","REJECTED","CANCELLED"],
  QUOTED:["QUOTED","CONFIRMED","REJECTED","CANCELLED"],
- CONFIRMED:["IN_PROGRESS","CANCELLED"],
+ CONFIRMED:["IN_PROGRESS","FULFILLED","CANCELLED"],
  IN_PROGRESS:["FULFILLED","CANCELLED"],
  FULFILLED:[],REJECTED:[],CANCELLED:[]
 };
@@ -35,14 +36,20 @@ export const serviceOrderRequestSchema=z.object({
 export type ServiceOrderRequest=z.infer<typeof serviceOrderRequestSchema>;
 export const serviceOrderCreateSchema=z.object({request:serviceOrderRequestSchema,reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:z.uuid()}).strict();
 export const serviceOrderQuoteSchema=z.object({amount:serviceCatalogAmountSchema,currency:z.string().regex(/^[A-Z]{3}$/u),approvalReference:z.string().trim().min(1).max(240)}).strict();
-export const serviceOrderTransitionSchema=z.object({
+const transitionFields={
  orderId:z.uuid(),expectedVersion:positiveInteger,state:serviceOrderStateSchema,
  quote:serviceOrderQuoteSchema.optional(),reason:serviceOrderReasonSchema,
- reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:z.uuid()
-}).strict().superRefine((value,context)=>{
+ taskPlan:serviceOrderTaskPlanSchema.optional(),
+};
+function refineTransition(value:{state:ServiceOrderState;quote?:unknown;taskPlan?:unknown},context:z.RefinementCtx){
  if((value.state==="QUOTED")!==(value.quote!==undefined))context.addIssue({code:"custom",path:["quote"],message:"service_order_explicit_quote_required"});
+ if((value.state==="CONFIRMED")!==(value.taskPlan!==undefined))context.addIssue({code:"custom",path:["taskPlan"],message:"service_order_explicit_native_task_plan_required"});
  if(value.state==="REQUESTED")context.addIssue({code:"custom",path:["state"],message:"service_order_request_is_birth_only"});
-});
+}
+export const serviceOrderTransitionDraftSchema=z.object(transitionFields).strict().superRefine(refineTransition);
+export const serviceOrderTransitionSchema=z.object({...transitionFields,
+ reviewFingerprint:z.string().regex(/^[a-f0-9]{64}$/u),idempotencyKey:z.uuid()
+}).strict().superRefine(refineTransition);
 export const serviceOrderRecoverSchema=z.object({propertyId:z.uuid(),reservationId:z.uuid(),idempotencyKey:z.uuid()}).strict();
 export const serviceOrderPageSchema=z.object({propertyId:z.uuid(),reservationId:z.uuid().optional(),state:serviceOrderStateSchema.optional(),after:z.uuid().optional()}).strict();
 

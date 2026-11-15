@@ -23,5 +23,5 @@ export class ServiceOrderRepository{
  }
  historyHeads(orderId:string,beforeVersion?:number){return this.tx.serviceOrderEvent.findMany({where:{organizationId:this.organizationId,orderId,...beforeVersion?{version:{lt:beforeVersion}}:{}},orderBy:{version:"desc"},take:21,select:{id:true,orderId:true,version:true,fromState:true,toState:true,createdBy:true,createdAt:true}});}
  historyOriginal(id:string,orderId:string){return this.tx.serviceOrderEvent.findFirst({where:{organizationId:this.organizationId,id,orderId}});}
- async validateAtomicHistory(){await this.tx.$executeRaw(Prisma.sql`SET CONSTRAINTS service_order_history_guard,service_order_event_birth_guard IMMEDIATE`);}
+ async validateAtomicHistory(){await this.tx.$executeRaw(Prisma.sql`SET CONSTRAINTS service_order_history_guard,service_order_event_birth_guard,service_order_confirmation_task_guard IMMEDIATE`);}
 }

@@ -37,6 +37,7 @@ describe("native service order consent and lifecycle",()=>{
   expect(()=>validateServiceOrderTransition({...transition,from:"CONFIRMED",to:"IN_PROGRESS"})).toThrow(ServiceOrderSourceUnavailableError);
   expect(()=>validateServiceOrderTransition({...transition,from:"IN_PROGRESS",to:"FULFILLED"})).toThrow(ServiceOrderSourceUnavailableError);
   expect(validateServiceOrderTransition({...transition,from:"IN_PROGRESS",to:"FULFILLED",hasActualTaskCompletion:true})).toEqual(transition.total);
+  expect(validateServiceOrderTransition({...transition,from:"CONFIRMED",to:"FULFILLED",hasActualTaskCompletion:true})).toEqual(transition.total);
   expect(()=>validateServiceOrderTransition({...transition,from:"IN_PROGRESS",to:"CANCELLED",hasActualTaskCompletion:true})).toThrow(ServiceOrderSourceUnavailableError);
   for(const state of["FULFILLED","CANCELLED","REJECTED"]as const)expect(canTransitionServiceOrder(state,"CONFIRMED")).toBe(false);
   expect(()=>validateServiceOrderTransition({...transition,from:"FULFILLED"})).toThrow(ServiceOrderConflictError);
@@ -52,5 +53,6 @@ describe("native service order consent and lifecycle",()=>{
   expect(serviceOrderTransitionSchema.safeParse(command).success).toBe(true);
   expect(serviceOrderTransitionSchema.safeParse({...command,state:"CONFIRMED"}).success).toBe(false);
   expect(serviceOrderTransitionSchema.safeParse({...command,quote:undefined}).success).toBe(false);
+  expect(serviceOrderTransitionSchema.safeParse({...command,state:"CONFIRMED",quote:undefined,taskPlan:{type:"TRANSFER",priority:"NORMAL",checklistTemplateKey:"owned_service"}}).success).toBe(true);
  });
 });

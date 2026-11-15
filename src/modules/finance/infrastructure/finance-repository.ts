@@ -121,6 +121,7 @@ export class FinanceRepository {
     private readonly tx: TenantTransaction,
     private readonly organizationId: string
   ) {}
+  serviceOrderActiveCollectionHead(taskId:string){return this.tx.cashCollection.findFirst({where:{organizationId:this.organizationId,taskId,transaction:{reversedByTransactions:{none:{sealed:true}}}},select:{id:true,transactionId:true}});}
 
   async lockPaymentAccount(key: string): Promise<Date> {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":payment-account:" + key},0))::text`);

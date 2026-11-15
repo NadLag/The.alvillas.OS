@@ -3,13 +3,12 @@ import {execFileSync} from "node:child_process";
 import {PrismaClient} from "@prisma/client";
 import {afterAll,beforeAll,describe,expect,it,vi} from "vitest";
 import {withTenant,type TenantTransaction} from "@/platform/db/tenant";
-import {authContextForAccount} from "@/platform/authz/account-context";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {previewServiceCatalogChange,publishServiceCatalogChange} from "@/modules/services/application/service-catalog-service";
 import {previewServiceOrder,createServiceOrder,recoverServiceOrderCommand,readServiceOrderMetadata,serviceOrderChanged} from "@/modules/services/application/service-order-service";
 import {ServiceOrderAccessError,ServiceOrderConflictError} from "@/modules/services/domain/service-order";
 import {ServiceCatalogAccessError} from "@/modules/services/domain/service-catalog";
-import {nativeServiceCatalogFixture} from "./support/service-catalog-fixture";
+import {nativeServiceOrderFixture} from "./support/service-order-fixture";
 import {nativeGuestHubSecondActor} from "./support/guest-hub-fixture";
 import {provisionIntegrationRole} from "./support/database-role";
 import * as auditWriter from "@/platform/audit/audit-writer";
@@ -21,20 +20,7 @@ beforeAll(async()=>{
 });
 afterAll(async()=>{await db?.$disconnect();await admin?.$disconnect();});
 
-async function fixture(){
- const f=await nativeServiceCatalogFixture(admin,db),grants={...f.grants};
- await withTenant(db,f.organizationId,async tx=>{
-  for(const action of["view","create","edit","approve","void","reject"]){
-   const key="service_order:"+action,permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key}}),role=await tx.role.create({data:{organizationId:f.organizationId,key:"service_order_"+randomUUID(),name:"Independent owned service order "+action}});await tx.rolePermission.create({data:{organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}});
-   const grant=await tx.roleAssignment.create({data:{organizationId:f.organizationId,userAccountId:f.account.id,personId:f.person.id,roleId:role.id,scopeType:"property",scopeId:f.property.id,validFrom:new Date("2020-01-01")}});grants[key]=grant.id;
-  }
-  await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"services.ordering",scopeType:"property",scopeId:f.property.id,createdBy:f.account.id,effectiveFrom:new Date("2020-01-01"),reason:"Explicit fictional native order request policy",value:{schemaVersion:1,max_quantity:10,max_service_days:10,participant_basis:"SELECTED_RESERVATION_GUESTS",date_basis:"INCLUSIVE_RESERVATION_DATES"}});
- });
- const ctx={...f.ctx,authContext:{...await authContextForAccount(f.organizationId,f.account.id,{db}),personId:f.person.id}},draft={...f.draft,entry:{...f.entry,order_terms:{...f.entry.order_terms,availability:{path:"property.cityId",op:"!=",value:null}}}},catalogReview=await previewServiceCatalogChange(ctx,draft,f.deps);
- await publishServiceCatalogChange(ctx,{draft,reviewFingerprint:catalogReview.reviewFingerprint,idempotencyKey:randomUUID()},f.deps);
- const request={propertyId:f.property.id,reservationId:f.reservation.id,serviceKey:f.entry.key,serviceDate:f.reservation.checkIn.toISOString().slice(0,10),lastServiceDate:f.reservation.checkIn.toISOString().slice(0,10),quantity:2,guests:1,reason:"Actual private service order reason with agreed total 240.00"};
- return{...f,ctx,grants,request};
-}
+const fixture=()=>nativeServiceOrderFixture(admin,db);
 type Fixture=Awaited<ReturnType<typeof fixture>>;
 const command=async(f:Fixture)=>({request:f.request,reviewFingerprint:(await previewServiceOrder(f.ctx,f.request,f.deps)).reviewFingerprint,idempotencyKey:randomUUID()});
 const financial=(f:Fixture)=>withTenant(db,f.organizationId,tx=>tx.$queryRaw`SELECT 'transaction' AS kind,id::text,xmin::text,ctid::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${f.organizationId}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,ctid::text,to_jsonb(p) FROM posting p WHERE organization_id=${f.organizationId}::uuid ORDER BY kind,id`);
