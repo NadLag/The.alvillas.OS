@@ -50,8 +50,9 @@ function visitorAuthority(row:GuestHubLink):AuthContext{
 
 export type GuestHubCapabilityContext={tx:TenantTransaction;actual:Awaited<ReturnType<typeof actualSource>>;authority:AuthContext;resource:ReturnType<typeof guestHubResource>};
 
-/** Every native Guest Hub flow enters through the same verified, budgeted capability boundary. */
-export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDependencies,work:(context:GuestHubCapabilityContext)=>Promise<T>,additionalBudget?:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">)=>Promise<boolean>,fence?:(context:GuestHubCapabilityContext)=>Promise<void>){
+/** A request-scoped lease rechecks the original capability inside an existing tenant transaction.
+ * Object I/O belongs between calls, after each transaction releases its native locks. */
+export async function createGuestHubCapabilityLease(raw:unknown,deps:GuestHubVisitDependencies,additionalBudget?:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">)=>Promise<boolean>){
  // No unverified token byte selects a tenant, policy, quota or native record.
  await consumeVerificationBudget(deps);
  let token:string,claims:GuestHubCapabilityClaims;
@@ -63,15 +64,26 @@ export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDe
    const extra=link.allowed&&actual.state==="ACTIVE"&&additionalBudget?await additionalBudget({tx,actual}):true;
    return{allowed:link.allowed&&extra,active:actual.state==="ACTIVE"};
   });if(!budget.allowed)throw new GuestHubRateLimitError();if(!budget.active)throw new GuestHubInvalidLinkError();
-  return await withTenant(deps.db,claims.organizationId,async tx=>{
+  let expectedSource:string|undefined;
+  return Object.freeze({organizationId:claims.organizationId,linkId:claims.linkId,async run<T>(tx:TenantTransaction,work:(context:GuestHubCapabilityContext)=>Promise<T>,fence?:(context:GuestHubCapabilityContext)=>Promise<void>):Promise<T>{try{
    const repository=new GuestHubRepository(tx,claims.organizationId);await repository.lockLink(claims.linkId);await repository.lockSources(claims.reservationId);
    const actual=await actualSource(tx,claims,token);if(actual.state!=="ACTIVE")throw new GuestHubInvalidLinkError();
+   const sourceFingerprint=jsonbFingerprint({policy:actual.settings.fingerprint,source:guestHubSourceSnapshot(claims.organizationId,actual.source)});
+   if(expectedSource!==undefined&&sourceFingerprint!==expectedSource)throw new GuestHubInvalidLinkError();expectedSource=sourceFingerprint;
    const authority=visitorAuthority(actual.row),resource=guestHubResource(claims.organizationId,actual.source,await guestHubLinkTarget(actual.repository,actual.row,actual.source));if(!authorize(authority,"view",resource,actual.now))throw new GuestHubInvalidLinkError();
    const result=await work({tx,actual,authority,resource});
    const final=await actualSource(tx,claims,token);if(final.state!=="ACTIVE"||final.settings.fingerprint!==actual.settings.fingerprint||jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,final.source))!==jsonbFingerprint(guestHubSourceSnapshot(claims.organizationId,actual.source))||!authorize(authority,"view",resource,final.now))throw new GuestHubInvalidLinkError();
    await fence?.({tx,actual:final,authority,resource});return result;
-  });
+  }catch(error){if(error instanceof GuestHubRateLimitError)throw error;throw new GuestHubInvalidLinkError();}}});
  }catch(error){if(error instanceof GuestHubRateLimitError)throw error;throw new GuestHubInvalidLinkError();}
+}
+
+export type GuestHubCapabilityLease=Awaited<ReturnType<typeof createGuestHubCapabilityLease>>;
+/** Every existing native Guest Hub flow retains the same verified, budgeted transaction boundary. */
+export async function withGuestHubCapability<T>(raw:unknown,deps:GuestHubVisitDependencies,work:(context:GuestHubCapabilityContext)=>Promise<T>,additionalBudget?:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">)=>Promise<boolean>,fence?:(context:GuestHubCapabilityContext)=>Promise<void>){
+ const lease=await createGuestHubCapabilityLease(raw,deps,additionalBudget);
+ try{return await withTenant(deps.db,lease.organizationId,tx=>lease.run(tx,work,fence));}
+ catch(error){if(error instanceof GuestHubRateLimitError)throw error;throw new GuestHubInvalidLinkError();}
 }
 
 async function formAvailability(context:GuestHubCapabilityContext,env?:NodeJS.ProcessEnv){
