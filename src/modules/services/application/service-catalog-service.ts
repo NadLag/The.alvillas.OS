@@ -24,7 +24,7 @@ const authority=(context:Context)=>context.authorizationFingerprint;
 const stableScope=(context:Context)=>jsonbFingerprint({property:context.property,scopes:context.scopes});
 async function currencySource(actor:AccountActorContext,tx:TenantTransaction,entry:ServiceCatalogEntry){
  if(!entry.currency)return null;const currency=await nativeServiceCatalogCurrency(tx,actor.organizationId,entry.currency);if(!currency||currency.minorUnit<0||currency.minorUnit>2)throw new ServiceCatalogValidationError();
- for(const amount of[entry.amount,entry.order_terms?.internal_cost.amount])if(amount!==undefined&&!Money.of(amount,currency.code).amount.equals(Money.of(amount,currency.code,currency.minorUnit).amount))throw new ServiceCatalogValidationError();
+ for(const amount of[entry.amount,entry.order_terms?.internal_cost.amount])if(amount!==undefined&&Money.of(amount,currency.code).amount.decimalPlaces()>currency.minorUnit)throw new ServiceCatalogValidationError();
  return{code:currency.code,minorUnit:currency.minorUnit};
 }
 function project(actor:AccountActorContext,context:Context,entry:ServiceCatalogEntry,policy:Awaited<ReturnType<typeof serviceCatalogTermsSources>>["policies"][number]|undefined){
