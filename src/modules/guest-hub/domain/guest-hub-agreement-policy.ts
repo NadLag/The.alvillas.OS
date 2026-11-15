@@ -4,11 +4,10 @@ import type {AppLocale} from "@/i18n/routing";
 
 export const guestHubAgreementPolicyKey="guest_hub.guest_agreement";
 const key=z.string().min(1).max(120).regex(/^[a-z][a-z0-9_]*$/u);
-const template=z.string().min(1).max(120).regex(/^[a-z][a-z0-9_.-]*$/u);
 export const guestHubAgreementPolicySchema=z.object({
  source:z.literal("NATIVE_GENERATED_GUEST_AGREEMENT"),history:z.literal("APPEND_ONLY_GUEST_AGREEMENT_REQUESTS"),enabled:z.boolean(),
  processing_approval_reference:guestHubFormReferenceSchema.nullable(),wording_approval_reference:guestHubFormReferenceSchema.nullable(),notice:guestHubFormNoticeSchema.nullable(),
- document_type_key:key,template_key:template,template_versions:z.object({en:z.uuid(),fr:z.uuid(),ar:z.uuid().nullable()}).strict(),arabic_fallback_locale:z.enum(["en","fr"]).nullable(),
+ document_type_key:key,template_key:key,template_versions:z.object({en:z.uuid(),fr:z.uuid(),ar:z.uuid().nullable()}).strict(),arabic_fallback_locale:z.enum(["en","fr"]).nullable(),
  signature_source:z.literal("EXISTING_NATIVE_DOCUMENT_SIGNATURE"),delivery:z.literal("EXISTING_NATIVE_SIGNATURE_EMAIL"),
  submissions:guestHubFormBudgetSchema
 }).strict().superRefine((value,context)=>{

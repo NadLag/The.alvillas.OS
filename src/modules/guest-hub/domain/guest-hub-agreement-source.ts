@@ -2,13 +2,13 @@ import {z} from "zod";
 import {jsonbFingerprint} from "@/platform/http/command-fingerprint";
 import {guestHubIdSchema,guestHubFingerprintSchema} from "./guest-hub-contract";
 import type {guestHubAgreementTemplate} from "./guest-hub-agreement-policy";
-import {GuestHubAgreementAccessError} from "./guest-hub-agreement-policy";
+import {GuestHubAgreementAccessError,guestHubAgreementPolicySchema} from "./guest-hub-agreement-policy";
 
 /** A normalized projection supplied by canonical document/signature services.
  * Public commands never accept these source identities or recipient references. */
 export const guestHubAgreementOriginalSchema=z.object({
  protocol:z.literal("NATIVE_GUEST_AGREEMENT_ORIGINAL_V1"),organizationId:guestHubIdSchema,reservationId:guestHubIdSchema,propertyId:guestHubIdSchema,guestId:guestHubIdSchema,
- document:z.object({id:guestHubIdSchema,instanceId:guestHubIdSchema,versionId:guestHubIdSchema,typeKey:z.string().min(1).max(120),locale:z.enum(["en","fr","ar"]),sha256:guestHubFingerprintSchema,templateKey:z.string().min(1).max(120),templateId:guestHubIdSchema,templateVersionId:guestHubIdSchema}).strict(),
+ document:z.object({id:guestHubIdSchema,instanceId:guestHubIdSchema,versionId:guestHubIdSchema,typeKey:guestHubAgreementPolicySchema.shape.document_type_key,locale:z.enum(["en","fr","ar"]),sha256:guestHubFingerprintSchema,templateKey:guestHubAgreementPolicySchema.shape.template_key,templateId:guestHubIdSchema,templateVersionId:guestHubIdSchema}).strict(),
  signature:z.object({id:guestHubIdSchema,documentVersionId:guestHubIdSchema,guestRecipientId:guestHubIdSchema,guestReference:z.object({kind:z.literal("GUEST"),id:guestHubIdSchema}).strict(),guestIdentityFingerprint:guestHubFingerprintSchema}).strict()
 }).strict();
 export type GuestHubAgreementOriginal=z.infer<typeof guestHubAgreementOriginalSchema>;
