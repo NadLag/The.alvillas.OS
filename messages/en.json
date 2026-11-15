@@ -6679,6 +6679,12 @@
     "recover": "Recover the decision",
     "unavailable": "No house-rules access change is currently permitted. Check the property rules, approved wording, processing policy and your source permissions.",
     "refresh": "Refresh access",
-    "close": "Close house-rules access"
+    "close": "Close house-rules access",
+    "historyTitle": "Recorded acceptances",
+    "historyLoad": "View original acceptance evidence",
+    "historyEmpty": "No acceptance has been recorded for this link.",
+    "historyAccepted": "Accepted on {date} (UTC).",
+    "historyNext": "Earlier acceptances",
+    "historyClose": "Hide acceptance evidence"
   }
 }

@@ -102,7 +102,7 @@ CREATE FUNCTION app_guest_house_rules_edition(source_fingerprint TEXT,policy JSO
  SELECT encode(sha256(convert_to(app_onboarding_effect_json_text(jsonb_build_object(
   'protocol','NATIVE_APPROVED_HOUSE_RULES_EDITION_V1','sourceFingerprint',source_fingerprint,
   'processingApprovalReference',policy->'processing_approval_reference','wordingApprovalReference',policy->'wording_approval_reference',
-  'notice',policy->'notice','content',(policy->'approved_content')-'source_rules'))),'UTF8')),'hex')
+  'notice',policy->'notice','content',(policy->'approved_content')-'source_rules')),'UTF8')),'hex')
 $$;
 ALTER TABLE guest_hub_form_grant DROP CONSTRAINT guest_form_grant_shape;
 ALTER TABLE guest_hub_form_grant ADD CONSTRAINT guest_form_grant_shape CHECK(coalesce(

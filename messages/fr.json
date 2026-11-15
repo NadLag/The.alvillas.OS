@@ -6679,6 +6679,12 @@
     "recover": "Récupérer la décision",
     "unavailable": "Aucune modification d’accès au règlement n’est autorisée actuellement. Vérifiez les règles, leur texte approuvé, la politique de traitement et vos autorisations sur les sources.",
     "refresh": "Actualiser l’accès",
-    "close": "Fermer l’accès au règlement"
+    "close": "Fermer l’accès au règlement",
+    "historyTitle": "Acceptations enregistr?es",
+    "historyLoad": "Voir les preuves d?acceptation initiales",
+    "historyEmpty": "Aucune acceptation n?a ?t? enregistr?e pour ce lien.",
+    "historyAccepted": "Accept? le {date} (UTC).",
+    "historyNext": "Acceptations pr?c?dentes",
+    "historyClose": "Masquer les preuves d?acceptation"
   }
 }
