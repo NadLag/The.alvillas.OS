@@ -1,0 +1,9 @@
+# ADR0254: Native mobile Guest Hub stay presentation
+
+The Guest Hub home uses the already verified link's actual reservation, attached guest and property. A closed home projection exposes the property's name, party counts, canonical stay dates, property timezone and database read time. Its calendar labels describe dates; they never claim that a guest checked in or completed required forms. Profile, agreement, service and readiness behavior remains attached to the approved feature that supplies its actual source.
+
+Property photos require an explicit scoped `guest_hub.presentation` configuration. Only exact approved HTTPS origins and ordinary public image paths are accepted. Credentials, query strings, fragments, non-image formats and loopback/internal origins are omitted. The home never reclassifies signed private URLs or internal access notes as public. An absent approval or unavailable image produces a labelled placeholder. Images load directly with no referrer and no application optimization proxy or shared private cache; a guest capability is never appended to an asset URL.
+
+Link verification, database-clock expiry, current native eligibility, independent budgets, tenant isolation and final revocation remain authoritative. Current property rows are locked and the selected presentation policy is resolved again before a response commits, so an in-flight policy withdrawal closes the response and rolls back its opened audit. Every sensitive read retains the existing authorization, field presentation and audit writer. No provider account, production setting or legal approval is provisioned by this change.
+
+The EN/FR/AR home uses logical CSS, actual localized facts, reserved image space, a date itinerary and persistent language/refresh actions. Hidden, offline, unauthorized or revoked views remove the native facts. All 355 approved features remain required; staged/native approval requirements remain evidence gates before DONE.

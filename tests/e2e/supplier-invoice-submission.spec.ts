@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 import { withTenant } from "@/platform/db/tenant";
 import { ConfigRuleRepository } from "@/platform/config/config-rule-repository";
 import { NotificationRepository } from "@/platform/notifications/notification-repository";
@@ -8,6 +8,7 @@ import { defaultNotificationPreferences } from "@/platform/notifications/notific
 import { formatCurrencyAmount } from "@/i18n/format";
 import { openFieldFixture } from "./support/field-fixture";
 import { ensureE2EAdmin, e2eEmail, completeE2EAdminMfa, waitForE2EAdminLoginWindow } from "./support/auth";
+import {postBrowserActionOnce} from "./support/forward-browser-post";
 import en from "../../messages/en.json" with { type: "json" };
 import fr from "../../messages/fr.json" with { type: "json" };
 import ar from "../../messages/ar.json" with { type: "json" };
@@ -74,13 +75,14 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native supplier invoice 
       await page.evaluate(() => document.documentElement.style.fontSize = "200%");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
       await page.screenshot({ path: info.outputPath(`invoice-submit-${locale}-${emergency}.png`), fullPage: true }); await page.evaluate(() => document.documentElement.style.fontSize = "");
-      const captured = page.waitForRequest(request => request.method() === "POST" && Boolean(request.headers()["next-action"]) && Boolean(request.postData()?.includes(`Actual native invoice submission ${suffix}`)));
-      await submission.getByTestId("invoice-submit").click(); const request = await captured;
+      const isSubmission = (request: Request) => request.method() === "POST" && Boolean(request.headers()["next-action"]) && Boolean(request.postData()?.includes(`Actual native invoice submission ${suffix}`));
+      const captured = page.waitForRequest(isSubmission),acknowledged=page.waitForResponse(response=>isSubmission(response.request()),{timeout:30000}).then(response=>{expect(response.status()).toBe(200);});
+      const [request] = await Promise.all([captured,submission.getByTestId("invoice-submit").click(),acknowledged]);
       await expect(page.getByTestId("invoice-state")).toHaveText(messages.SupplierInvoices.states[emergency ? "APPROVED" : "PENDING_APPROVAL"]);
       await expect(submission).toHaveCount(0);
       const headers = { "content-type": request.headers()["content-type"], "next-action": request.headers()["next-action"], accept: "text/x-component", origin };
-      for (const response of await Promise.all(Array.from({ length: 4 }, () => page.request.post(request.url(), { data: request.postDataBuffer()!, headers })))) expect(await response.text()).toContain('"idempotent":true');
-      expect(await (await anonymous.request.post(request.url(), { data: request.postDataBuffer()!, headers })).text()).toContain('"code":"forbidden"');
+      for (const response of await Promise.all(Array.from({ length: 4 }, () => postBrowserActionOnce(page.context(),request,headers)))) {expect(response.status()).toBe(200);expect(await response.text()).toContain('"idempotent":true');}
+      const anonymousReplay=await postBrowserActionOnce(anonymous,request,headers);expect(anonymousReplay.status()).toBe(200);expect(await anonymousReplay.text()).toContain('"code":"forbidden"');
       return { id, request, headers };
     };
     const invoice = await create(`INV-REVIEW-${suffix}`, false);
@@ -94,7 +96,7 @@ for (const locale of ["en", "fr", "ar"] as const) test(`Native supplier invoice 
     await expect(ownerPage.getByTestId("approval-form")).toContainText(`Actual private owner cost note ${suffix}`);
     expect(await ownerPage.locator("main").innerText()).not.toContain(`Private complete invoice header ${suffix}`);
     expect((await ownerPage.request.get(`/${locale}/app/finance/supplier-invoices/${invoice.id}`)).status()).toBe(404);
-    expect(await (await ownerPage.request.post(invoice.request.url(), { data: invoice.request.postDataBuffer()!, headers: invoice.headers })).text()).toContain('"code":"forbidden"');
+    const ownerReplay=await postBrowserActionOnce(ownerPage.context(),invoice.request,invoice.headers);expect(ownerReplay.status()).toBe(200);expect(await ownerReplay.text()).toContain('"code":"forbidden"');
     await ownerPage.getByTestId("approval-reason").fill("Owner approves the actual invoice cost"); await ownerPage.getByTestId("approval-approve").click();
     await expect(ownerPage.getByTestId("approval-state")).toHaveText(messages.Approvals.states.APPROVED);
     await page.reload(); await expect(page.getByTestId("invoice-state")).toHaveText(messages.SupplierInvoices.states.APPROVED);

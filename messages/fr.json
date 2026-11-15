@@ -6355,5 +6355,21 @@
       "unavailable": "L’accès voyageur n’a pas pu être chargé. Veuillez réessayer.",
       "storage_unavailable": "Ce navigateur ne peut pas enregistrer votre demande en attente. Autorisez le stockage de session ou utilisez un autre navigateur avant de confirmer."
     }
+  },
+  "GuestStay": {
+    "photo": "Photo de {property}",
+    "photoUnavailable": "Photo indisponible pour {property}",
+    "dates": "Les dates de votre séjour",
+    "timezone": "Toutes les heures sont locales à la villa ({timezone}).",
+    "checkedAt": "Informations vérifiées à {date}, heure locale.",
+    "adults": "{count, plural, one {# adulte} other {# adultes}}",
+    "children": "{count, plural, one {# enfant} other {# enfants}}",
+    "calendarStage": {
+      "UPCOMING": "Votre arrivée approche",
+      "ARRIVAL_DAY": "Le jour de votre arrivée",
+      "STAY_DAYS": "Les dates de votre séjour",
+      "DEPARTURE_DAY": "Le jour de votre départ",
+      "PAST": "Les dates de votre séjour sont passées"
+    }
   }
 }

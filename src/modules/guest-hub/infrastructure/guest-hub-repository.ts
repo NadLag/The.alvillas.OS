@@ -2,7 +2,7 @@ import {Prisma} from "@prisma/client";
 import type {TenantTransaction} from "@/platform/db/tenant";
 
 export type GuestHubNativeSource={
- reservationId:string;propertyId:string;guestId:string;reservationStatus:string;bookingSource:string;sourceAvailable:boolean;checkIn:Date;checkOut:Date;timezone:string;
+ propertyName:string;photoUrls:Prisma.JsonValue;adultCount:number;childCount:number;reservationId:string;propertyId:string;guestId:string;reservationStatus:string;bookingSource:string;sourceAvailable:boolean;checkIn:Date;checkOut:Date;timezone:string;
  city:string;region:string;cityId:string|null;regionId:string|null;reference:string;locale:string;reservationCreatedAt:Date;guestCreatedAt:Date;
  reservationVersion:string;reservationTuple:string;reservationNumber:number;propertyVersion:string;propertyTuple:string;guestVersion:string;guestTuple:string;
 };
@@ -13,7 +13,7 @@ export class GuestHubRepository{
  async lockLink(linkId:string){await this.tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${"guest-hub-link:"+this.organizationId+":"+linkId},0))`);}
  async source(reservationId:string){
   const rows=await this.tx.$queryRaw<GuestHubNativeSource[]>(Prisma.sql`SELECT r.id AS "reservationId",r.property_id AS "propertyId",r.guest_id AS "guestId",r.status AS "reservationStatus",r.source AS "bookingSource",(r.archived_at IS NULL AND p.archived_at IS NULL AND g.archived_at IS NULL AND g.merged_into_id IS NULL) AS "sourceAvailable",r.check_in AS "checkIn",r.check_out AS "checkOut",p.timezone,
-   p.city,p.region,p.city_id AS "cityId",p.region_id AS "regionId",r.reference,r.guest_preferred_locale AS locale,r.created_at AS "reservationCreatedAt",g.created_at AS "guestCreatedAt",
+   p.name AS "propertyName",p.photo_urls AS "photoUrls",r.adult_count AS "adultCount",r.child_count AS "childCount",p.city,p.region,p.city_id AS "cityId",p.region_id AS "regionId",r.reference,r.guest_preferred_locale AS locale,r.created_at AS "reservationCreatedAt",g.created_at AS "guestCreatedAt",
    r.xmin::text AS "reservationVersion",r.ctid::text AS "reservationTuple",r.version AS "reservationNumber",p.xmin::text AS "propertyVersion",p.ctid::text AS "propertyTuple",g.xmin::text AS "guestVersion",g.ctid::text AS "guestTuple"
    FROM reservation r JOIN property p ON p.organization_id=r.organization_id AND p.id=r.property_id JOIN guest g ON g.organization_id=r.organization_id AND g.id=r.guest_id
    WHERE r.organization_id=${this.organizationId}::uuid AND r.id=${reservationId}::uuid`);

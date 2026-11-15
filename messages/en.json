@@ -6355,5 +6355,21 @@
       "unavailable": "Guest access could not be loaded. Please try again.",
       "storage_unavailable": "This browser cannot save your pending request. Allow session storage or use another browser before confirming."
     }
+  },
+  "GuestStay": {
+    "photo": "Photo of {property}",
+    "photoUnavailable": "Photo unavailable for {property}",
+    "dates": "Your stay dates",
+    "timezone": "All times are local to the villa ({timezone}).",
+    "checkedAt": "Details checked at {date}, local time.",
+    "adults": "{count, plural, one {# adult} other {# adults}}",
+    "children": "{count, plural, one {# child} other {# children}}",
+    "calendarStage": {
+      "UPCOMING": "Your arrival is coming up",
+      "ARRIVAL_DAY": "Your arrival day",
+      "STAY_DAYS": "Your stay dates",
+      "DEPARTURE_DAY": "Your departure day",
+      "PAST": "Your stay dates have passed"
+    }
   }
 }

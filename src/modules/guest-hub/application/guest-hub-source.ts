@@ -20,7 +20,7 @@ export async function guestHubSettings(tx:TenantTransaction,organizationId:strin
   const rule=await new ConfigRuleRepository(tx,organizationId).resolve({key:guestHubLinkPolicyKey,scopes,asOf:now});
   if(!rule?.createdBy||rule.lifecycle!=="ACTIVE")throw new GuestHubConfigurationError();
   const policy=guestHubLinkPolicySchema.parse(rule.parsedValue),snapshot={id:rule.id,version:rule.version,value:rule.value};
-  return{rule,policy,snapshot,fingerprint:jsonbFingerprint(snapshot)};
+  return{rule,policy,snapshot,scopes,fingerprint:jsonbFingerprint(snapshot)};
  }catch(error){if(error instanceof ZodError)throw new GuestHubConfigurationError();throw error;}
 }
 export function guestHubOriginalBinding(row:GuestHubLink):GuestHubPayloadBinding{
