@@ -50,6 +50,7 @@ export const guestHubPrivateAgreementRequestSchema=z.object({schemaVersion:z.lit
 export type GuestHubPrivateAgreementRequest=z.infer<typeof guestHubPrivateAgreementRequestSchema>;
 export const guestHubAgreementSubmitSchema=guestHubAgreementDraftSchema.extend({reviewFingerprint:guestHubAgreementReviewTokenSchema}).strict();
 export const guestHubAgreementRecoverySchema=z.object({idempotencyKey:id}).strict();
+export const guestHubAgreementFileInputSchema=z.object({kind:z.enum(["ORIGINAL","SIGNED_ORIGINAL","CERTIFICATE"])}).strict();
 export const guestHubAgreementRequestReceiptSchema=z.object({id,linkId:id,reservationId:id,releaseId:id,idempotencyKey:id,createdAt:timestamp,requestedLocale:guestHubAgreementLocaleSchema,documentLocale:guestHubAgreementLocaleSchema,currentAgreement:z.boolean(),replayed:z.boolean()}).strict();
 export const guestHubAgreementViewSchema=z.object({linkId:id,reservationId:id,releaseId:id,original:guestHubAgreementOriginalSchema,notice:guestHubFormNoticeSchema,progress:guestHubAgreementProgressSchema,currentRequest:guestHubAgreementRequestReceiptSchema.nullable()}).strict();
 export const guestHubAgreementReviewSchema=guestHubAgreementDraftSchema.extend({releaseId:id,original:guestHubAgreementOriginalSchema,notice:guestHubAgreementRenderedNoticeSchema,documentLocale:guestHubAgreementLocaleSchema,reviewFingerprint:guestHubAgreementReviewTokenSchema}).strict();

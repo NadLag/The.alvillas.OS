@@ -1,16 +1,21 @@
-import {randomBytes,randomUUID} from "node:crypto";
+import {createHash,randomBytes,randomUUID} from "node:crypto";
 import {Prisma,PrismaClient} from "@prisma/client";
-import {beforeAll,afterAll,describe,it,expect} from "vitest";
+import {beforeAll,afterAll,describe,it,expect,vi} from "vitest";
+import {NextRequest} from "next/server";
 import {withTenant} from "@/platform/db/tenant";
 import {authContextForAccount} from "@/platform/authz/account-context";
 import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
 import {nativeGuestAgreementDocumentAuthority} from "@/app/api/guest-hub/agreement/native-document-authority";
 import {admitGuestAgreementSignatureReference,executeComposedSignatureDistributionReference} from "@/app/api/guest-hub/agreement/native-signature-distribution";
+import {downloadNativeGuestAgreement} from "@/app/api/guest-hub/agreement/native-document-download";
+import {guestHubAgreementFileHttp} from "@/modules/guest-hub/ui/guest-hub-agreement-file-http";
+import {guestHubAgreementPublicHttp} from "@/modules/guest-hub/ui/guest-hub-agreement-public-http";
+import {guestHubCapabilityCookie} from "@/modules/guest-hub/domain/guest-hub-cookie";
 import {executeSignatureDistributionReference} from "@/modules/documents/application/document-signature-distribution-worker";
 import {signatureDistributionOutboxKey} from "@/modules/documents/application/document-signature-distribution";
 import {reviewGuestHubIssue,issueGuestHubLink} from "@/modules/guest-hub/application/guest-hub-service";
 import {reviewGuestHubAgreementRelease,recordGuestHubAgreementRelease,recoverGuestHubAgreementRelease} from "@/modules/guest-hub/application/guest-hub-agreement-releases";
-import {viewGuestHubAgreement,reviewGuestHubAgreementRequest,requestGuestHubAgreementSignature,recoverGuestHubAgreementRequest} from "@/modules/guest-hub/application/guest-hub-agreement-requests";
+import {viewGuestHubAgreement,reviewGuestHubAgreementRequest,requestGuestHubAgreementSignature,recoverGuestHubAgreementRequest,type GuestHubAgreementVisitDependencies} from "@/modules/guest-hub/application/guest-hub-agreement-requests";
 import {nativeGuestAgreementPreparedFixture} from "./support/guest-hub-agreement-fixture";
 import {nativeDocumentObjectFixture} from "./support/document-object-store-fixture";
 import type {ownedSignatureProvider} from "./support/document-signature-provider";
@@ -63,5 +68,21 @@ describe("native released guest agreement requests and canonical distribution",(
  });
  it("enforces forced tenant isolation and append-only release, request, origin and event identity",async()=>{
   const c=await fresh(),a=await admitted(c),other=randomUUID();for(const table of["guest_hub_agreement_release","guest_hub_agreement_request","guest_hub_agreement_document_origin"]){expect(await withTenant(db,other,tx=>tx.$queryRawUnsafe<Array<{id:string}>>("SELECT id FROM "+table))).toEqual([]);for(const operation of["UPDATE "+table+" SET request_id='rewritten'","DELETE FROM "+table])await expect(withTenant(db,c.f.organizationId,tx=>tx.$executeRawUnsafe(operation))).rejects.toThrow();}await expect(withTenant(db,c.f.organizationId,tx=>tx.$executeRaw(Prisma.sql`UPDATE outbox_event SET payload='{}'::jsonb WHERE id=${a.row.outboxEventId}::uuid`))).rejects.toThrow();expect(await admin.$queryRaw<Array<{relrowsecurity:boolean;relforcerowsecurity:boolean}>>`SELECT relrowsecurity,relforcerowsecurity FROM pg_class WHERE relname IN('guest_hub_agreement_release','guest_hub_agreement_request','guest_hub_agreement_document_origin')`).toEqual(Array.from({length:3},()=>({relrowsecurity:true,relforcerowsecurity:true})));
+ });
+ it("reads the exact released original through canonical document authority without a provider call",async()=>{
+  const c=await fresh();await release(c);const view=await viewGuestHubAgreement(c.capability,c.visit),before=c.f.http.calls.length,file=await downloadNativeGuestAgreement(c.capability,{kind:"ORIGINAL"},{...c.visit,objects:objects.objects});expect(file.contentType).toBe("application/pdf");expect(createHash("sha256").update(file.bytes).digest("hex")).toBe(view.original.document.sha256);expect(c.f.http.calls.length).toBe(before);file.bytes.fill(0);
+  await expect(downloadNativeGuestAgreement(c.capability,{kind:"SIGNED_ORIGINAL"},{...c.visit,objects:objects.objects})).rejects.toThrow();expect((await viewGuestHubAgreement(c.capability,c.visit)).progress).toEqual({state:"READY",complete:false});const audit=await withTenant(db,c.f.organizationId,tx=>tx.auditLog.findFirstOrThrow({where:{action:"guest_hub.agreement_file_read"}}));expect(audit.actorId).toBeNull();
+ });
+ it("rechecks the live release after object I/O and clears downloaded bytes after withdrawal",async()=>{
+  const c=await fresh();await release(c);const retained:{bytes?:Uint8Array}={},originalRead=objects.objects.read.bind(objects.objects),spy=vi.spyOn(objects.objects,"read").mockImplementation(async(...args)=>{const bytes=await originalRead(...args);retained.bytes=bytes;await release(c,"WITHDRAWN");return bytes;});
+  try{await expect(downloadNativeGuestAgreement(c.capability,{kind:"ORIGINAL"},{...c.visit,objects:objects.objects})).rejects.toThrow();expect(retained.bytes?.byteLength).toBeGreaterThan(0);expect(retained.bytes?.some(byte=>byte!==0)).toBe(false);}finally{spy.mockRestore();}
+  expect(await withTenant(db,c.f.organizationId,tx=>tx.auditLog.count({where:{action:"guest_hub.agreement_file_read"}}))).toBe(0);
+ });
+ it("uses the original scoped cookie and CSRF boundary for JSON and PDF while rejecting guest-selected documents",async()=>{
+  const c=await fresh();await release(c);const origin="http://localhost",cookie=guestHubCapabilityCookie(c.link.id,env),headers={origin,"content-type":"application/json",cookie:cookie.name+"="+c.link.token},request=(path:string,input:unknown,changes:Record<string,string>={})=>new NextRequest(origin+"/api/guest-hub/links/"+c.link.id+"/agreement/"+path,{method:"POST",headers:{...headers,...changes},body:JSON.stringify(input)}),context={...deps(),verificationOrganizationId:c.f.organizationId};let reads=0;const download=(capability:unknown,input:unknown,visit:GuestHubAgreementVisitDependencies)=>{reads++;return downloadNativeGuestAgreement(capability,input,{...visit,objects:objects.objects});};
+  const view=await guestHubAgreementPublicHttp(request("view",{}),context,c.link.id,"view");expect(view.status).toBe(200);expect((await view.json()).progress).toEqual({state:"READY",complete:false});
+  expect((await guestHubAgreementPublicHttp(request("admit",{idempotencyKey:randomUUID(),locale:"fr",acknowledged:true,signed:true,documentId:c.f.complete.versionId}),context,c.link.id,"admit")).status).toBe(400);
+  expect((await guestHubAgreementFileHttp(request("file",{kind:"ORIGINAL"},{origin:"http://foreign.example.test"}),context,c.link.id,download)).status).toBe(403);expect((await guestHubAgreementFileHttp(request("file",{kind:"ORIGINAL",versionId:randomUUID()}),context,c.link.id,download)).status).toBe(400);expect(reads).toBe(0);
+  const response=await guestHubAgreementFileHttp(request("file",{kind:"ORIGINAL"}),context,c.link.id,download);expect(response.status).toBe(200);expect(response.headers.get("cache-control")).toBe("private, no-store");expect(response.headers.get("content-security-policy")).toBe("sandbox");expect(Buffer.from(await response.arrayBuffer()).subarray(0,4).toString()).toBe("%PDF");expect(reads).toBe(1);
  });
 });
