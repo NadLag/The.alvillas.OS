@@ -17,22 +17,36 @@ import { originalSignatureDistribution, signatureDistributionOutboxKey, type Sig
 import { nativeSignatureDistributionContext } from "./document-signature-distribution-context";
 import { readSignaturePreparationEvidence } from "./document-signature-preparation";
 import { appendNativeSignatureProviderEvidence, readNativeSignatureProviderEvidence, type SignatureProviderObservation } from "./document-signature-provider-evidence";
+import {assertNativeGuestAgreementDistribution,requireNativeGuestAgreementDistributionBoundary,type NativeGuestAgreementSignatureBoundary} from "./document-guest-agreement-boundary";
 
 const referenceSchema = z.object({ organizationId: z.uuid(), outboxEventId: z.uuid() }).strict(), payloadSchema = z.object({ intentId: z.uuid() }).strict();
 type Reference = z.infer<typeof referenceSchema>;
-type Dependencies = Omit<SignatureDistributionDependencies, "db"> & { db?: SignatureDistributionDependencies["db"]; provider?: Pick<SignatureProvider, "distributeSignatureRequest" | "readSignatureRequest" | "downloadSignatureRequest">; providerOrigin?: string; reconcileActor?: DocumentActorContext };
-async function referenced(tx: TenantTransaction, reference: Reference) {
+export type SignatureDistributionWorkerDependencies = Omit<SignatureDistributionDependencies, "db"> & { db?: SignatureDistributionDependencies["db"]; provider?: Pick<SignatureProvider, "distributeSignatureRequest" | "readSignatureRequest" | "downloadSignatureRequest">; providerOrigin?: string; reconcileActor?: DocumentActorContext };
+type Dependencies=SignatureDistributionWorkerDependencies;
+/** Composition needs only the authenticated original provenance to supply the
+ * purpose boundary. This reference lookup performs no provider or file I/O. */
+export async function readNativeGuestAgreementDistributionReference(raw:unknown,deps:Pick<SignatureDistributionDependencies,"db">){
+ const reference=referenceSchema.parse(raw);return withTenant(deps.db,reference.organizationId,async tx=>{
+  const event=await new OutboxRepository(tx,reference.organizationId).event(reference.outboxEventId),payload=payloadSchema.safeParse(event?.payload);if(!event||event.type!==signatureDistributionRequested||!payload.success)throw new DocumentAccessError();
+  const row=await new SignaturePreparationRepository(tx,reference.organizationId).distribution(payload.data.intentId);if(!row||event.idempotencyKey!==signatureDistributionOutboxKey(row.requestedBy,row.commandKey)||event.occurredAt.getTime()!==row.requestedAt.getTime())throw new DocumentAccessError();
+  const {snapshot}=originalSignatureDistribution(row);return"guestAgreement"in snapshot.command?snapshot.command.guestAgreement:null;
+ });
+}
+async function referenced(tx: TenantTransaction, reference: Reference,boundary?:NativeGuestAgreementSignatureBoundary) {
   const event = await new OutboxRepository(tx, reference.organizationId).event(reference.outboxEventId), payload = payloadSchema.safeParse(event?.payload);
   if (!event || event.type !== signatureDistributionRequested || !payload.success) throw new DocumentAccessError();
   const repository = new SignaturePreparationRepository(tx, reference.organizationId), row = await repository.distribution(payload.data.intentId);
   if (!row || event.idempotencyKey !== signatureDistributionOutboxKey(row.requestedBy, row.commandKey) || event.occurredAt.getTime() !== row.requestedAt.getTime()) throw new DocumentAccessError();
   const original = originalSignatureDistribution(row), actor = documentActorContext({ organizationId: reference.organizationId, actorId: row.requestedBy, authContext: restoreAuthorizationCap(row.authorizationCap) });
+  const guestBoundary=requireNativeGuestAgreementDistributionBoundary(actor,original.snapshot.command,boundary);
+  if(guestBoundary)await guestBoundary.assertOriginal(actor,tx,row);
   return { repository, row, original, actor };
 }
 type Original = Awaited<ReturnType<typeof referenced>>;
-async function authorized(tx: TenantTransaction, original: Original, env?: NodeJS.ProcessEnv, reconcileActor?: DocumentActorContext) {
+async function authorized(tx: TenantTransaction, original: Original, env?: NodeJS.ProcessEnv, reconcileActor?: DocumentActorContext,boundary?:NativeGuestAgreementSignatureBoundary) {
   const actor = reconcileActor ? documentActorContext(reconcileActor) : original.actor; if (actor.organizationId !== original.row.organizationId) throw new DocumentAccessError();
   const current = await nativeSignatureDistributionContext(actor, tx, original.original.snapshot.command.preparationId, env), snapshot = original.original.snapshot;
+  await assertNativeGuestAgreementDistribution(original.actor,tx,snapshot.command,boundary,original.row);
   if (current.fingerprint !== snapshot.contextFingerprint || current.contractHash !== snapshot.contractHash || current.row.commandHash !== snapshot.signatureCommandHash ||
     current.providerScopeHash !== original.row.providerScopeHash || current.retainedPreparation.evidenceId !== snapshot.preparation.evidenceId || current.retainedPreparation.providerRequestId !== snapshot.preparation.providerRequestId) throw new DocumentConflictError();
   return current;
@@ -40,22 +54,29 @@ async function authorized(tx: TenantTransaction, original: Original, env?: NodeJ
 const summary = (intentId: string, state: "SENT" | "UNCERTAIN" | "SUPERSEDED") => ({ intentId, state });
 async function retain(reference: Reference, attemptId: string, value: SignatureProviderObservation, deps: Dependencies) {
   return withTenant(deps.db ?? prisma, reference.organizationId, async tx => {
-    const original = await referenced(tx, reference), { repository, row } = original; await repository.lock("signature-provider:" + row.signatureId);
+    const original = await referenced(tx, reference,deps.nativeGuestAgreement), { repository, row } = original; await repository.lock("signature-provider:" + row.signatureId);
     const attempt = await repository.distributionAttempt(row.signatureId); if (!attempt || attempt.id !== attemptId || attempt.intentId !== row.id) throw new DocumentConflictError();
     return appendNativeSignatureProviderEvidence(tx, repository, row, attempt, original.original.snapshot, value, deps);
   });
 }
 export async function executeSignatureDistributionReference(raw: unknown, deps: Dependencies = {}) {
-  const reference = referenceSchema.parse(raw), db = deps.db ?? prisma, initial = await withTenant(db, reference.organizationId, tx => referenced(tx, reference)),
+  const reference = referenceSchema.parse(raw), db = deps.db ?? prisma, initial = await withTenant(db, reference.organizationId, tx => referenced(tx, reference,deps.nativeGuestAgreement)),
     previous = await withTenant(db, reference.organizationId, tx => new SignaturePreparationRepository(tx, reference.organizationId).distributionAttempt(initial.row.signatureId));
+  // A retained result never makes guest-origin work executable through the
+  // ordinary worker. Historical facts remain readable through native history.
+  const phase=()=>withTenant(db,reference.organizationId,async tx=>authorized(tx,await referenced(tx,reference,deps.nativeGuestAgreement),deps.env,deps.reconcileActor,deps.nativeGuestAgreement));
+  const guestPhase=()=>"guestAgreement"in initial.original.snapshot.command?phase():Promise.resolve();
+  await guestPhase();
   if (previous && previous.intentId !== initial.row.id) return summary(initial.row.id, "SUPERSEDED");
   const confirmed = () => withTenant(db, reference.organizationId, tx => new SignaturePreparationRepository(tx, reference.organizationId).signatureSent(initial.row.signatureId, initial.row.providerScopeHash, initial.original.snapshot.preparation.providerRequestId));
   if (await confirmed()) return summary(initial.row.id, "SENT");
   if (deps.reconcileActor && !previous) throw new DocumentConflictError();
   if (previous?.evidence.some(item => item.kind === "SENT")) return summary(initial.row.id, "SENT");
   const actor = deps.reconcileActor ? documentActorContext(deps.reconcileActor) : initial.actor;
-  const current = await withTenant(db, reference.organizationId, async tx => authorized(tx, await referenced(tx, reference), deps.env, actor)), account = current.policy.value.account, { origin, provider } = signatureProviderBoundary(account, deps),
-    scopeProof = await readSignatureProviderScope(provider, account, origin), prepared = readSignaturePreparationEvidence(current.preparation, current.preparationEvidence, deps.env),
+  const current = await phase(), account = current.policy.value.account, { origin, provider } = signatureProviderBoundary(account, deps),
+    scopeProof = await readSignatureProviderScope(provider, account, origin);
+  await guestPhase();
+  const prepared = readSignaturePreparationEvidence(current.preparation, current.preparationEvidence, deps.env),
     file = await downloadDocumentVersion(actor, { versionId: current.current.version.id }, { ...deps, db, objects: deps.objects ?? configuredDocumentObjects() }),
     input = captureSignatureRequest({ ...current.metadata, file: { ...current.metadata.file, bytes: file.bytes } }), requestId = current.retainedPreparation.providerRequestId;
   if (prepared.kind !== "PREPARED" || !prepared.prepareReceipt && prepared.preparationProof !== "READBACK_IDENTITY_RECOVERY" || prepared.providerRequestId !== requestId) throw new DocumentConflictError();
@@ -64,7 +85,8 @@ export async function executeSignatureDistributionReference(raw: unknown, deps: 
   // redelivery can only reconcile this already-known identity through GETs.
   if (!previous) {
     try {
-    const observation = signatureRequestObservationSchema.parse(await provider.readSignatureRequest({ requestId, reference: input.reference })); if (observation.items.length !== 1) throw new DocumentConflictError();
+    await guestPhase();const observation = signatureRequestObservationSchema.parse(await provider.readSignatureRequest({ requestId, reference: input.reference })); if (observation.items.length !== 1) throw new DocumentConflictError();
+    await guestPhase();
     const download = await provider.downloadSignatureRequest({ requestId, reference: input.reference, itemId: observation.items[0].id, version: "original" });
     if (download.requestId !== requestId || download.itemId !== observation.items[0].id || download.version !== "original" || download.sha256 !== input.file.sha256) throw new DocumentConflictError();
     assertSignatureRequestObservation(input, observation, { requestId, teamId: account.teamId, distributionMethod: "NONE", originalPdf: download.bytes });
@@ -76,14 +98,14 @@ export async function executeSignatureDistributionReference(raw: unknown, deps: 
     }
   }
   const start = await withTenant(db, reference.organizationId, async tx => {
-    const original = await referenced(tx, reference), { repository, row } = original; await repository.lock("signature-provider:" + row.signatureId);
+    const original = await referenced(tx, reference,deps.nativeGuestAgreement), { repository, row } = original; await repository.lock("signature-provider:" + row.signatureId);
     const existing = await repository.distributionAttempt(row.signatureId); if (existing) return { attempt: existing, post: false };
     if (deps.reconcileActor) throw new DocumentConflictError();
-    const checked = await authorized(tx, original, deps.env); if (checked.fingerprint !== current.fingerprint) throw new DocumentConflictError();
+    const checked = await authorized(tx, original, deps.env,undefined,deps.nativeGuestAgreement); if (checked.fingerprint !== current.fingerprint) throw new DocumentConflictError();
     const id = randomUUID(), now = await repository.clock(), attempt = await repository.appendPreparationAttempt({ id, intentId: row.id, signatureId: row.signatureId, phase: "SEND", startedAt: now });
     await writeAuditEvent(tx, { organizationId: row.organizationId, actorId: null, action: "documents.signature.preparation_started", resourceType: "signature", resourceId: id,
       after: { signatureId: row.signatureId, intentId: row.id, attemptId: id, commandHash: row.commandHash }, requestId: deps.requestId ?? randomUUID(), occurredAt: now });
-    if ((await authorized(tx, original, deps.env)).fingerprint !== checked.fingerprint) throw new DocumentConflictError(); return { attempt, post: true };
+    if ((await authorized(tx, original, deps.env,undefined,deps.nativeGuestAgreement)).fingerprint !== checked.fingerprint) throw new DocumentConflictError(); return { attempt, post: true };
   });
   if (start.attempt.intentId !== initial.row.id) return summary(initial.row.id, "SUPERSEDED");
   // A competing delivery that observed no committed attempt must not inspect a
@@ -94,16 +116,18 @@ export async function executeSignatureDistributionReference(raw: unknown, deps: 
   const unconfirmed = (failureCode: SignatureProviderObservation["failureCode"]): SignatureProviderObservation => ({ kind: "UNCERTAIN", providerRequestId: requestId, prepareReceipt: prepared.prepareReceipt, ...preparationIdentity ? { preparationIdentity } : {}, observation: null, observationReceipt: null,
     distributionReceipt: receipt ? Buffer.from(receipt.evidence).toString("base64") : null, distributionProof: receipt ? "POST_ACKNOWLEDGED" : null, scopeProof, failureCode });
   if (start.post) {
-    try { receipt = captureSignatureProviderReceipt(await provider.distributeSignatureRequest({ requestId })); if (receipt.requestId !== requestId) { receipt = null; throw new DocumentConflictError(); } }
+    try { await guestPhase();receipt = captureSignatureProviderReceipt(await provider.distributeSignatureRequest({ requestId })); if (receipt.requestId !== requestId) { receipt = null; throw new DocumentConflictError(); } }
     catch { await retain(reference, start.attempt.id, unconfirmed("SIGNATURE_OUTCOME_UNCONFIRMED"), deps); return summary(initial.row.id, await confirmed() ? "SENT" : "UNCERTAIN"); }
     await retain(reference, start.attempt.id, unconfirmed("SIGNATURE_OUTCOME_UNCONFIRMED"), deps);
   }
   try {
-    const observation = signatureRequestObservationSchema.parse(await provider.readSignatureRequest({ requestId, reference: input.reference })); if (observation.items.length !== 1) throw new DocumentConflictError();
+    await guestPhase();const observation = signatureRequestObservationSchema.parse(await provider.readSignatureRequest({ requestId, reference: input.reference })); if (observation.items.length !== 1) throw new DocumentConflictError();
+    await guestPhase();
     const download = await provider.downloadSignatureRequest({ requestId, reference: input.reference, itemId: observation.items[0].id, version: "original" });
     if (download.requestId !== requestId || download.itemId !== observation.items[0].id || download.version !== "original" || download.sha256 !== input.file.sha256) throw new DocumentConflictError();
     assertDistributedSignatureRequestObservation(input, observation, { requestId, teamId: account.teamId, originalPdf: download.bytes });
     const final = signatureRequestObservationSchema.parse(download.observation); assertDistributedSignatureRequestObservation(input, final, { requestId, teamId: account.teamId, originalPdf: download.bytes });
+    await guestPhase();
     await retain(reference, start.attempt.id, { kind: "SENT", providerRequestId: requestId, prepareReceipt: prepared.prepareReceipt, ...preparationIdentity ? { preparationIdentity } : {}, observation: signatureObservationFactsSchema.strip().parse(final), observationReceipt: Buffer.from(final.evidence).toString("base64"),
       distributionReceipt: receipt ? Buffer.from(receipt.evidence).toString("base64") : null, distributionProof: receipt ? "POST_ACKNOWLEDGED" : "READBACK_RECONCILED", scopeProof, failureCode: null }, deps);
     return summary(initial.row.id, "SENT");

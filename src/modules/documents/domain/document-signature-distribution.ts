@@ -3,6 +3,7 @@ import { signatureRequestIdSchema, signatureRecipientRoleSchema } from "@/platfo
 import { documentUploadInput } from "./document-command";
 import { signaturePreparationSnapshotSchema, signaturePreparationTargetSchema } from "./document-signature-preparation";
 import { enabledDocumentSignaturePolicySchema } from "./document-signature-policy";
+import {nativeGuestAgreementDistributionProvenanceSchema} from "./document-guest-agreement-distribution";
 
 export const signatureDistributionProtocol = "ALVILLAS_SIGNATURE_DISTRIBUTION_V1";
 export const signatureDistributionRequested = "documents.signature.distribute_requested";
@@ -10,8 +11,12 @@ const sha = z.string().regex(/^[a-f0-9]{64}$/u);
 export const signatureDistributionReviewInput = z.object({ preparationId: z.uuid() }).strict();
 export const signatureDistributionCommandSchema = signatureDistributionReviewInput.extend({ delivery: z.literal("EMAIL"),
   idempotencyKey: documentUploadInput.shape.idempotencyKey, reviewFingerprint: documentUploadInput.shape.reviewFingerprint, reason: documentUploadInput.shape.reason });
+export const nativeGuestAgreementSignatureDistributionCommandSchema=signatureDistributionCommandSchema.extend({guestAgreement:nativeGuestAgreementDistributionProvenanceSchema}).strict().superRefine((command,ctx)=>{
+ if(command.idempotencyKey!==command.guestAgreement.guestRequestId||command.preparationId!==command.guestAgreement.preparationId)ctx.addIssue({code:"custom",message:"original_guest_agreement_request_and_preparation_required"});
+});
+export const storedSignatureDistributionCommandSchema=z.union([signatureDistributionCommandSchema,nativeGuestAgreementSignatureDistributionCommandSchema]);
 export const signatureDistributionSnapshotSchema = z.object({ protocol: z.literal(signatureDistributionProtocol), schemaVersion: z.literal(1),
-  command: signatureDistributionCommandSchema, commandHash: sha, signatureId: z.uuid(), signatureCommandHash: sha, contextFingerprint: sha, contractHash: sha,
+  command: storedSignatureDistributionCommandSchema, commandHash: sha, signatureId: z.uuid(), signatureCommandHash: sha, contextFingerprint: sha, contractHash: sha,
   document: signaturePreparationSnapshotSchema.shape.document, providerPolicy: signaturePreparationSnapshotSchema.shape.providerPolicy, providerScopeHash: sha,
   recipients: signaturePreparationSnapshotSchema.shape.recipients,
   preparation: z.object({ intentId: z.uuid(), attemptId: z.uuid(), evidenceId: z.uuid(), commandHash: sha, providerRequestId: signatureRequestIdSchema }).strict()
