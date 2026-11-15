@@ -1,0 +1,25 @@
+import {randomBytes,randomUUID} from "node:crypto";
+import {PrismaClient} from "@prisma/client";
+import {beforeAll,afterAll,describe,it,expect} from "vitest";
+import {withTenant} from "@/platform/db/tenant";
+import {nativeGuestAgreementDocumentAuthority} from "@/app/api/guest-hub/agreement/native-document-authority";
+import {nativeGuestAgreementPreparedFixture} from "./support/guest-hub-agreement-fixture";
+import {nativeDocumentObjectFixture} from "./support/document-object-store-fixture";
+import {ownedSignatureProvider} from "./support/document-signature-provider";
+import {nativeLeadFinancialGuard} from "./support/lead-fixture";
+import {provisionIntegrationRole} from "./support/database-role";
+
+let admin:PrismaClient,db:PrismaClient,objects:Awaited<ReturnType<typeof nativeDocumentObjectFixture>>,financial:Awaited<ReturnType<typeof nativeLeadFinancialGuard>>;
+const organizations:string[]=[],providers:Array<Awaited<ReturnType<typeof ownedSignatureProvider>>>=[],env:NodeJS.ProcessEnv={NODE_ENV:"test",ENCRYPTION_KEYS:"owned-guest-agreement:"+randomBytes(32).toString("base64")};
+async function fixture(locale:"en"|"fr"="fr"){const f=await nativeGuestAgreementPreparedFixture(admin,db,env,objects.objects,locale,providers);organizations.push(f.organizationId);return f;}
+type Fixture=Awaited<ReturnType<typeof fixture>>;
+function capture(f:Fixture,changes:Partial<Fixture["source"]>={},selection=f.selection,actor=f.ctx){return withTenant(db,f.organizationId,tx=>nativeGuestAgreementDocumentAuthority.capture(actor,tx,{...f.source,...changes},selection,f.prepared.id,env));}
+beforeAll(async()=>{const value=process.env.TEST_DATABASE_URL,url=value?new URL(value):null;if(!url||!["localhost","127.0.0.1"].includes(url.hostname)||!(url.pathname==="/alvillas_automation_guest257_guest_agreement_20261115"||process.env.GITHUB_ACTIONS==="true"&&url.pathname==="/alvillas_os"))throw Error("Owned migrated256 guest-agreement authority database required");admin=new PrismaClient({datasourceUrl:value});expect((await admin.$queryRaw<Array<{count:number}>>`SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`)[0].count).toBeGreaterThanOrEqual(256);await provisionIntegrationRole(admin,"alvillas_ops_tests");url.username=url.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:url.toString()});objects=await nativeDocumentObjectFixture(env);financial=await nativeLeadFinancialGuard(admin,db);},120000);
+afterAll(async()=>{try{if(financial)await financial.assertPreserved(organizations);}finally{for(const provider of providers)await provider.close();await objects?.close();await db?.$disconnect();await admin?.$disconnect();}});
+
+describe("canonical prepared native guest agreement authority",()=>{
+ it.each(["en","fr"]as const)("binds an actual authored %s PDF, original guest signer and provider preparation without new I/O",async locale=>{const f=await fixture(locale),before=f.http.calls.length,actual=await capture(f);expect(actual.original).toMatchObject({organizationId:f.organizationId,reservationId:f.reservation.id,propertyId:f.property.id,guestId:f.reservation.guestId,document:{versionId:f.complete.versionId,templateVersionId:f.selection.templateVersionId,locale},signature:{id:f.signature.id,guestReference:{kind:"GUEST",id:f.reservation.guestId}}});expect(actual.preparationId).toBe(f.prepared.id);expect(actual.fingerprint).toMatch(/^[a-f0-9]{64}$/u);expect(JSON.stringify(actual)).not.toContain("@example.test");expect(f.http.calls.length).toBe(before);});
+ it("denies another canonical reservation, property, guest or approved native language/version",async()=>{const f=await fixture();for(const changes of[{reservationId:randomUUID()},{propertyId:randomUUID()},{guestId:randomUUID()}])await expect(capture(f,changes)).rejects.toThrow();for(const selection of[{...f.selection,templateVersionId:randomUUID()},{...f.selection,templateKey:"other_guest_agreement"},{...f.selection,locale:"en" as const},{...f.selection,variantVersionIds:[f.selection.templateVersionId,randomUUID()]}])await expect(capture(f,{},selection)).rejects.toThrow();});
+ it("requires independent held and current document/signature authority",async()=>{const f=await fixture();await expect(capture(f,{},f.selection,f.originalHeld)).rejects.toThrow();await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:f.documentGrants["signature:edit"]},data:{archivedAt:new Date()}}));await expect(capture(f)).rejects.toThrow();});
+ it("closes a prepared original after the canonical guest contact changes",async()=>{const f=await fixture();await withTenant(db,f.organizationId,tx=>tx.guestRecord.updateMany({where:{id:f.reservation.guestId!,organizationId:f.organizationId},data:{email:"changed-owned-agreement@example.test"}}));await expect(capture(f)).rejects.toThrow();});
+});
