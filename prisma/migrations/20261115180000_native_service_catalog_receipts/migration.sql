@@ -21,7 +21,7 @@ BEGIN
  IF NOT coalesce(jsonb_typeof(payload)='object' AND payload->>'schemaVersion'='1'
   AND payload->>'actorId' ~ '^[a-f0-9-]{36}$' AND payload->>'propertyId' ~ '^[a-f0-9-]{36}$'
   AND (payload->'ownerId'='null'::jsonb OR payload->>'ownerId' ~ '^[a-f0-9-]{36}$')
-  AND payload->>'ruleId' ~ '^[a-f0-9-]{36}$' AND payload->>'serviceKey' ~ '^[a-z][a-z0-9_.-]{0,99}$'
+  AND payload->>'ruleId' ~ '^[a-f0-9-]{36}$' AND payload->>'serviceKey' ~ '^[a-z0-9_.-]{1,120}$'
   AND payload->>'ruleVersion' ~ '^[1-9][0-9]*$'
   AND payload->>'commandHash' ~ '^[a-f0-9]{64}$' AND payload->>'reviewFingerprint' ~ '^[a-f0-9]{64}$'
   AND NEW.idempotency_key ~ '^service-catalog:[a-f0-9-]{36}$'

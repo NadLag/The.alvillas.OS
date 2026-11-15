@@ -24,6 +24,10 @@ export const serviceCatalogPublishEntrySchema=originalEntry.extend({
 });
 export type ServiceCatalogEntry=z.infer<typeof originalEntry>;
 export type ServiceCatalogPublishEntry=z.infer<typeof serviceCatalogPublishEntrySchema>;
+export function serviceCatalogSelection(items:readonly ServiceCatalogEntry[],input:{after?:string;query:string}){
+ const needle=input.query.toLocaleLowerCase(),matching=items.filter(row=>(!input.after||row.key>input.after)&&(!needle||[row.key,...Object.values(row.name??{})].some(text=>text.toLocaleLowerCase().includes(needle)))).sort((a,b)=>a.key<b.key?-1:a.key>b.key?1:0),selected=matching.slice(0,20);
+ return{selected,next:matching.length>20?selected.at(-1)!.key:null};
+}
 
 /** Preserve optional legacy fields and exact unknown canonical extensions when
  * editing one item; only the explicitly reviewed registered fields change. */

@@ -3,9 +3,13 @@ import {randomUUID} from "node:crypto";
 import {Money} from "@/platform/money/money";
 import {servicePricingSchema} from "@/platform/config/rule-registry";
 import {serviceCatalogOrderTermsSchema,serviceCatalogAvailabilitySchema,servicePricingSchema as canonicalPricing} from "@/platform/config/service-catalog-policy";
-import {canonicalServiceCatalogEntry,serviceCatalogPrice,ServiceCatalogValidationError} from "@/modules/services/domain/service-catalog";
+import {canonicalServiceCatalogEntry,serviceCatalogPrice,serviceCatalogSelection,ServiceCatalogValidationError} from "@/modules/services/domain/service-catalog";
 
 describe("canonical service catalog and exact configured pricing",()=>{
+ it("pages canonical 120-character and numeric service identities without dropping legacy entries",()=>{
+  const key="9"+"x".repeat(119),items=canonicalPricing.parse({services:[{key,pricing_model:"CUSTOM"},...Array.from({length:21},(_,i)=>({key:"service_"+String(i).padStart(2,"0"),pricing_model:"CUSTOM",name:{en:"Retained service",fr:"Service conservé"}}))]}).services,first=serviceCatalogSelection(items,{query:""});
+  expect(first.selected).toHaveLength(20);expect(first.selected[0].key).toBe(key);const last=serviceCatalogSelection(items,{query:"",after:first.next!});expect(last.selected).toHaveLength(2);expect(new Set([...first.selected,...last.selected].map(row=>row.key)).size).toBe(22);expect(last.next).toBeNull();expect(serviceCatalogSelection(items,{query:"conservé"}).selected).toHaveLength(20);
+ });
  it("keeps private configuration and arbitrary personal fields out of guest availability probes",()=>{
   expect(serviceCatalogAvailabilitySchema.safeParse({all:[{path:"request.guests",op:">=",value:2},{path:"request.date",op:">=",value:{field:"reservation.checkInDate"}}]}).success).toBe(true);
   expect(serviceCatalogAvailabilitySchema.safeParse({path:"request.quantity",op:">",value:{config:"finance.commission",path:"rate_bps"}}).success).toBe(false);

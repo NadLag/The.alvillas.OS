@@ -11,7 +11,7 @@ import {writePropertyConfiguration} from "@/platform/config/property-configurati
 import {nativeServiceCatalogActor} from "@/platform/services/catalog-provider-source";
 import {OutboxRepository} from "@/platform/events/outbox-repository";
 import {writeAuditEvent} from "@/platform/audit/audit-writer";
-import {canonicalServiceCatalogEntry,ServiceCatalogAccessError,ServiceCatalogConflictError,type ServiceCatalogEntry} from "../domain/service-catalog";
+import {canonicalServiceCatalogEntry,serviceCatalogSelection,ServiceCatalogAccessError,ServiceCatalogConflictError,type ServiceCatalogEntry} from "../domain/service-catalog";
 import {serviceCatalogDraftSchema,serviceCatalogCommandSchema,serviceCatalogPageSchema,serviceCatalogHistorySchema,serviceCatalogVersionSchema,serviceCatalogRecoverSchema,serviceCatalogReceiptSchema,serviceCatalogPublished,type ServiceCatalogCommand} from "../domain/service-catalog-command";
 import {ServiceCatalogRepository} from "../infrastructure/service-catalog-repository";
 import {readNativeServiceCatalog,serviceCatalogSourceContext,serviceCatalogTermsSources} from "./service-catalog-source";
@@ -77,9 +77,9 @@ export async function publishServiceCatalogChange(actor:AccountActorContext,raw:
 }
 export async function serviceCatalogPage(actor:AccountActorContext,raw:unknown,deps:Dependencies){
  const input=serviceCatalogPageSchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{
-  const context=await readNativeServiceCatalog(actor,tx,input.scope),needle=input.query.toLocaleLowerCase(),matching=(context.catalog?.services??[]).filter(row=>(!input.after||row.key>input.after)&&(!needle||[row.key,...Object.values(row.name??{})].some(text=>text.toLocaleLowerCase().includes(needle)))).sort((a,b)=>a.key<b.key?-1:a.key>b.key?1:0),selected=matching.slice(0,20),terms=await serviceCatalogTermsSources(actor,tx,context,selected),after=await readNativeServiceCatalog(actor,tx,input.scope),termsAfter=await serviceCatalogTermsSources(actor,tx,after,selected);
+  const context=await readNativeServiceCatalog(actor,tx,input.scope),{selected,next}=serviceCatalogSelection(context.catalog?.services??[],input),terms=await serviceCatalogTermsSources(actor,tx,context,selected),after=await readNativeServiceCatalog(actor,tx,input.scope),termsAfter=await serviceCatalogTermsSources(actor,tx,after,selected);
   if(context.fingerprint!==after.fingerprint||authority(context)!==authority(after)||terms.fingerprint!==termsAfter.fingerprint)throw new ServiceCatalogConflictError();
-  return{rule:context.rule?{id:context.rule.id,version:context.rule.version,scopeType:context.rule.scopeType}:null,items:selected.map(row=>project(actor,after,row,termsAfter.policies.find(policy=>policy.serviceKey===row.key))),next:matching.length>20?selected.at(-1)!.key:null};
+  return{rule:context.rule?{id:context.rule.id,version:context.rule.version,scopeType:context.rule.scopeType}:null,items:selected.map(row=>project(actor,after,row,termsAfter.policies.find(policy=>policy.serviceKey===row.key))),next};
  });
 }
 function historyAuthority(actor:AccountActorContext,context:Awaited<ReturnType<typeof serviceCatalogSourceContext>>,rows:readonly{id:string;lifecycle:string;createdAt:Date}[]){
@@ -94,8 +94,8 @@ export async function serviceCatalogHistory(actor:AccountActorContext,raw:unknow
 export async function serviceCatalogVersion(actor:AccountActorContext,raw:unknown,deps:Dependencies){
  const input=serviceCatalogVersionSchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{
   const context=await serviceCatalogSourceContext(actor,tx,input.scope),head=await context.repository.sourceMetadataWitness(input.ruleId);if(!head||head.key!==serviceCatalogRuleKey||head.archivedAt||head.scopeType!=="property"||head.scopeId!==input.scope.propertyId)throw new ServiceCatalogAccessError();historyAuthority(actor,context,[head]);
-  const row=await context.repository.sourceWitness(head.id);if(!row||row.xmin!==head.xmin||row.tuple!==head.tuple)throw new ServiceCatalogConflictError();const catalog=servicePricingSchema.parse(row.value),terms=await serviceCatalogTermsSources(actor,tx,context,catalog.services),after=await serviceCatalogSourceContext(actor,tx,input.scope),final=await after.repository.sourceMetadataWitness(head.id),termsAfter=await serviceCatalogTermsSources(actor,tx,after,catalog.services);historyAuthority(actor,after,[head]);
+  const row=await context.repository.sourceWitness(head.id);if(!row||row.xmin!==head.xmin||row.tuple!==head.tuple)throw new ServiceCatalogConflictError();const catalog=servicePricingSchema.parse(row.value),{selected,next}=serviceCatalogSelection(catalog.services,input),terms=await serviceCatalogTermsSources(actor,tx,context,selected),after=await serviceCatalogSourceContext(actor,tx,input.scope),final=await after.repository.sourceMetadataWitness(head.id),termsAfter=await serviceCatalogTermsSources(actor,tx,after,selected);historyAuthority(actor,after,[head]);
   if(!final||head.xmin!==final.xmin||head.tuple!==final.tuple||context.fingerprint!==after.fingerprint||context.authorizationFingerprint!==after.authorizationFingerprint||terms.fingerprint!==termsAfter.fingerprint)throw new ServiceCatalogConflictError();
-  return{rule:{id:head.id,version:head.version,scopeType:head.scopeType,lifecycle:head.lifecycle,createdAt:head.createdAt.toISOString()},items:catalog.services.map(entry=>project(actor,{...after,catalog},entry,termsAfter.policies.find(policy=>policy.serviceKey===entry.key)))};
+  return{rule:{id:head.id,version:head.version,scopeType:head.scopeType,lifecycle:head.lifecycle,createdAt:head.createdAt.toISOString()},items:selected.map(entry=>project(actor,{...after,catalog},entry,termsAfter.policies.find(policy=>policy.serviceKey===entry.key))),next};
  });
 }
