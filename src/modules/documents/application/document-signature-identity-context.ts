@@ -17,7 +17,7 @@ import type { DocumentActorContext } from "./document-archive";
 
 export type SignatureIdentityRecoveryDependencies = { db: TenantTransactionRunner; env?: NodeJS.ProcessEnv; requestId?: string; provider?: Pick<SignatureProvider, "readSignatureRequest" | "downloadSignatureRequest">; providerOrigin?: string };
 type Draft = z.infer<typeof signatureIdentityRecoveryDraftSchema>;
-export async function signatureIdentityRecoveryAuthority(ctx: DocumentActorContext, tx: TenantTransaction, signatureId: string, deps: SignatureIdentityRecoveryDependencies) {
+export async function signatureIdentityRecoveryAuthority(ctx: DocumentActorContext, tx: TenantTransaction, signatureId: string, deps: Pick<SignatureIdentityRecoveryDependencies,"env">) {
   const current = await retainedNativeSignatureReadContext(ctx, tx, signatureId, deps);
   const checks = current.current.archive.privacy.map(dataClass => ({ action: "edit" as const, resource: { ...current.current.archive.native.resource, type: "signature", id: current.row.id, documentId: current.current.instance.documentId, assignedUserAccountId: current.row.requestedBy, dataClass } })); await recheckAccountAuthorization(ctx, tx, current.current.archive.now, checks, new DocumentAccessError());
   return current;

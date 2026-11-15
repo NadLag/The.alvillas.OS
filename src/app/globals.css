@@ -2906,10 +2906,10 @@ textarea:disabled {
 .guest-identity-form label:has(input[type="checkbox"]) { min-block-size: var(--target-min); align-items: center; }
 .guest-identity-form button { white-space: normal; overflow-wrap: anywhere; }
 .guest-stay:has(.guest-identity-form) > .guest-stay-tools { position: static; }
-.guest-house-rules-form, .guest-house-rules-form :is(.resource-form, .field, .form-actions, section, ol, li) { min-inline-size: 0; max-inline-size: 100%; }
-.guest-house-rules-form, .guest-house-rules-form .resource-form { grid-template-columns: minmax(0, 1fr); }
-.guest-house-rules-form input[type="checkbox"] { inline-size: 24px; block-size: 24px; min-block-size: 24px; margin-inline-end: var(--space-2); vertical-align: middle; }
-.guest-house-rules-form label:has(input[type="checkbox"]) { min-block-size: var(--target-min); align-items: center; }
-.guest-house-rules-form :is(button, p, li, span) { overflow-wrap: anywhere; }
-.guest-house-rules-form button { white-space: normal; }
-.guest-stay:has(.guest-house-rules-form) > .guest-stay-tools { position: static; }
+:is(.guest-house-rules-form, .guest-agreement-form), :is(.guest-house-rules-form, .guest-agreement-form) :is(.resource-form, .field, .form-actions, section, ol, li) { min-inline-size: 0; max-inline-size: 100%; }
+:is(.guest-house-rules-form, .guest-agreement-form), :is(.guest-house-rules-form, .guest-agreement-form) .resource-form { grid-template-columns: minmax(0, 1fr); }
+:is(.guest-house-rules-form, .guest-agreement-form) input[type="checkbox"] { inline-size: 24px; block-size: 24px; min-block-size: 24px; margin-inline-end: var(--space-2); vertical-align: middle; }
+:is(.guest-house-rules-form, .guest-agreement-form) label:has(input[type="checkbox"]) { min-block-size: var(--target-min); align-items: center; }
+:is(.guest-house-rules-form, .guest-agreement-form) :is(button, p, li, span) { overflow-wrap: anywhere; }
+:is(.guest-house-rules-form, .guest-agreement-form) button { white-space: normal; }
+.guest-stay:has(:is(.guest-house-rules-form, .guest-agreement-form)) > .guest-stay-tools { position: static; }

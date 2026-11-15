@@ -41,7 +41,8 @@ import {signatureIdentityRecoveryRequested} from "@/modules/documents/domain/doc
 import {executeSignatureIdentityRecoveryReference} from "@/modules/documents/application/document-signature-identity-worker";
 import {signedArchiveRequested} from "@/modules/documents/domain/document-signed-archive";
 import {executeSignedArchiveReference} from "@/modules/documents/application/document-signed-archive-worker";
-import {executeSignatureDistributionReference} from "@/modules/documents/application/document-signature-distribution-worker";
+import {executeComposedSignatureDistributionReference,admitGuestAgreementSignatureReference} from "@/app/api/guest-hub/agreement/native-signature-distribution";
+import {guestHubAgreementSignatureRequested} from "@/modules/guest-hub/application/guest-hub-agreement-requests";
 import {executeDocumentGenerationReference,failDocumentGenerationReference} from "@/modules/documents/application/document-generation-worker";
 
 export { outboxDispatchEvent };
@@ -167,7 +168,9 @@ export const failDocumentGenerations=inngest.createFunction({id:"native-document
 export const prepareSignatures=inngest.createFunction({id:"native-signature-preparation",name:"ALVILLAS OS private signature preparation",triggers:[{event:signaturePreparationRequested}],concurrency:{limit:1},retries:3},
   async({event,step})=>step.run("prepare-original-private-signature-once",()=>executeSignaturePreparationReference(event.data)));
 export const distributeSignatures=inngest.createFunction({id:"native-signature-distribution",name:"ALVILLAS OS explicit signature distribution",triggers:[{event:signatureDistributionRequested}],concurrency:{limit:1},retries:3},
-  async({event,step})=>step.run("distribute-original-private-signature-once",()=>executeSignatureDistributionReference(event.data)));
+  async({event,step})=>step.run("distribute-original-private-signature-once",()=>executeComposedSignatureDistributionReference(event.data)));
+export const admitGuestAgreementSignatures=inngest.createFunction({id:"native-guest-agreement-signature-admission",name:"ALVILLAS OS released guest agreement signature admission",triggers:[{event:guestHubAgreementSignatureRequested}],concurrency:{limit:1},retries:3},
+ async({event,step})=>step.run("admit-original-guest-agreement-distribution",()=>admitGuestAgreementSignatureReference(event.data)));
 export const observeSignatureWebhooks=inngest.createFunction({id:"native-signature-webhook-observation",name:"ALVILLAS OS authenticated original signature observations",triggers:[{event:signatureWebhookReceived}],concurrency:{limit:1},retries:3},
   async({event,step})=>step.run("verify-original-authenticated-signature-observation",()=>executeSignatureWebhookReference(event.data)));
 export const recoverSignatureIdentities=inngest.createFunction({id:"native-signature-identity-recovery",name:"ALVILLAS OS reviewed original signature identity recovery",triggers:[{event:signatureIdentityRecoveryRequested}],concurrency:{limit:1},retries:3},
@@ -175,4 +178,4 @@ export const recoverSignatureIdentities=inngest.createFunction({id:"native-signa
 export const archiveSignedDocuments=inngest.createFunction({id:"native-signed-document-archive",name:"ALVILLAS OS original signed document archive",triggers:[{event:signedArchiveRequested}],concurrency:{limit:1},retries:3},
   async({event,step})=>step.run("retain-original-signed-pdf-and-certificate",()=>executeSignedArchiveReference(event.data)));
 export const advanceNativeOnboarding=inngest.createFunction({id:"native-onboarding-activation",name:"ALVILLAS OS native onboarding activation",triggers:[{event:onboardingActivationRequested},{event:onboardingActivationContinuationRequested}],concurrency:{limit:1},retries:3},async({event,step})=>step.run("advance-original-native-activation",()=>executeOnboardingActivationJob(event.data,{db:prisma})));
-export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments,advanceNativeOnboarding];
+export const inngestFunctions = [dispatchOutbox,...consumeAutomations,cleanupUploadParts,recognizeSupplierInvoices,failSupplierInvoiceRecognitions,generateDocuments,failDocumentGenerations,prepareSignatures,distributeSignatures,admitGuestAgreementSignatures,observeSignatureWebhooks,recoverSignatureIdentities,archiveSignedDocuments,advanceNativeOnboarding];

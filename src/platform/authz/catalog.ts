@@ -50,6 +50,7 @@ export const permissionResources = [
   "guest_hub_stay_details",
   "guest_hub_identity_documents",
   "guest_hub_house_rules",
+  "guest_hub_agreement",
   "task",
   "issue",
   "service",
@@ -366,7 +367,7 @@ export type FieldPolicyCatalogEntry = {
 };
 
 export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
-  ...(["id","reservationId","propertyId","checkIn","checkOut","expiresAt","createdAt","state","timezone","locale","home","reference","originalCreator","canRevoke","canManageProfile","canManageStayDetails","canManageIdentityDocuments","canManageHouseRules","replayed","reviewFingerprint","items","next"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub","view"),mask:"omit"})),
+  ...(["id","reservationId","propertyId","checkIn","checkOut","expiresAt","createdAt","state","timezone","locale","home","reference","originalCreator","canRevoke","canManageProfile","canManageStayDetails","canManageIdentityDocuments","canManageHouseRules","canManageAgreement","canReadAgreementHistory","replayed","reviewFingerprint","items","next"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub","view"),mask:"omit"})),
   {resource:"guest_hub",field:"token",dataClass:"sensitive",requiredPermission:permissionKey("guest_hub","create"),mask:"omit"},
   {resource:"guest_hub",field:"recoveryKey",dataClass:"sensitive",requiredPermission:permissionKey("guest_hub","create"),mask:"omit"},
   ...(["id","linkId","grantId","reservationId","propertyId","version","previousRevisionId","createdAt","expiresAt","decision","replayed","recorded","idempotencyKey","reviewFingerprint","allowedFields","requiredFields","notice","requireAcknowledgement","canGrant","canWithdraw"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub_profile",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub_profile","view"),mask:"omit"})),
@@ -377,6 +378,8 @@ export const fieldPolicyCatalog: readonly FieldPolicyCatalogEntry[] = [
   {resource:"guest_hub_identity_documents",field:"originalCapture",dataClass:"personal",requiredPermission:permissionKey("guest_hub_identity_documents","view"),mask:"omit"},
   ...(["id","linkId","grantId","reservationId","propertyId","version","previousAcceptanceId","createdAt","expiresAt","decision","replayed","recorded","idempotencyKey","reviewFingerprint","canGrant","canWithdraw","notice","content","editionFingerprint","requestedLocale","displayedLocale","currentEdition","locale","acknowledged"]as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub_house_rules",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub_house_rules","view"),mask:"omit"})),
   {resource:"guest_hub_house_rules",field:"currentAcceptance",dataClass:"personal",requiredPermission:permissionKey("guest_hub_house_rules","view"),mask:"omit"},
+  ...(["id","linkId","releaseId","reservationId","propertyId","version","createdAt","expiresAt","decision","replayed","recorded","idempotencyKey","reviewFingerprint","canGrant","canWithdraw","preparationId","requestedLocale","documentLocale","currentAgreement","locale","acknowledged","state"]as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub_agreement",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub_agreement","view"),mask:"omit"})),
+  ...(["original","notice","progress","currentRequest","items","next"]as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub_agreement",field,dataClass:"personal",requiredPermission:permissionKey("guest_hub_agreement","view"),mask:"omit"})),
   ...(["items","next"]as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub_house_rules",field,dataClass:"personal",requiredPermission:permissionKey("guest_hub_house_rules","view"),mask:"omit"})),
   ...(["id","linkId","grantId","reservationId","propertyId","version","previousRevisionId","createdAt","expiresAt","decision","replayed","recorded","idempotencyKey","reviewFingerprint","allowedFields","requiredFields","notice","requireAcknowledgement","canGrant","canWithdraw","timezone","dateWindows","methods"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub_stay_details",field,dataClass:"guest",requiredPermission:permissionKey("guest_hub_stay_details","view"),mask:"omit"})),
   ...(["values","resolved"] as const).map<FieldPolicyCatalogEntry>(field=>({resource:"guest_hub_stay_details",field,dataClass:"personal",requiredPermission:permissionKey("guest_hub_stay_details","view"),mask:"omit"})),

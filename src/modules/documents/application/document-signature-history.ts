@@ -35,6 +35,7 @@ async function summary(current: Awaited<ReturnType<typeof retainedContext>>) {
   const latest = await current.repository.latestSignatureEvent(current.row.id); if (!latest) throw new DocumentConflictError();
   return { id: current.row.id, documentId: current.current.instance.documentId, instanceId: current.row.instanceId, documentVersionId: current.row.documentVersionId, requestedAt: current.row.requestedAt.toISOString(), state: nativeSignatureHistoryStates.parse(latest.state) };
 }
+export {summary as retainedNativeSignatureSummary};
 export async function listNativeSignatures(actor: DocumentActorContext, raw: unknown, deps: Dependencies) {
   const ctx = documentActorContext(actor), input = nativeSignatureListInput.parse(raw), filter = commandFingerprint({ operation: "NATIVE_SIGNATURE_LIST", documentVersionId: input.documentVersionId }), before = readDocumentCursor(ctx, filter, input.cursor);
   return withTenant(deps.db, ctx.organizationId, async tx => {
