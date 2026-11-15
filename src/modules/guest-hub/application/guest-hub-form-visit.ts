@@ -4,7 +4,7 @@ import {withGuestHubCapability,type GuestHubCapabilityContext,type GuestHubVisit
 
 type FormState={grant:{createdAt:Date;expiresAt:Date};now:Date;fingerprint:string;policy:{limits:Array<{requests:number;window_seconds:number}>}};
 export type GuestHubFormContext<Form extends FormState>=GuestHubCapabilityContext&{form:Form;formAuthority:AuthContext;formResource:Resource};
-type Definition<Form extends FormState>={resourceType:"guest_hub_profile"|"guest_hub_stay_details";rateKey:string;active:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">,env?:NodeJS.ProcessEnv)=>Promise<Form>;lock:(context:GuestHubCapabilityContext)=>Promise<void>;AccessError:new()=>Error;isValidation?:(error:unknown)=>boolean};
+type Definition<Form extends FormState>={resourceType:"guest_hub_profile"|"guest_hub_stay_details"|"guest_hub_identity_documents";rateKey:string;active:(context:Pick<GuestHubCapabilityContext,"tx"|"actual">,env?:NodeJS.ProcessEnv)=>Promise<Form>;lock:(context:GuestHubCapabilityContext)=>Promise<void>;AccessError:new()=>Error;isValidation?:(error:unknown)=>boolean};
 /** A field-validation result is released only after the same final source/form fences as a successful command. */
 export async function withGuestHubForm<Form extends FormState,Result>(capability:unknown,deps:GuestHubVisitDependencies,definition:Definition<Form>,work:(context:GuestHubFormContext<Form>)=>Promise<Result>,submission=false):Promise<Result>{
  let expected:string|undefined,authority:AuthContext|undefined,resource:Resource|undefined;

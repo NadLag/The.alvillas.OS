@@ -1,0 +1,82 @@
+import {createHash,randomBytes,randomUUID} from "node:crypto";
+import {PrismaClient} from "@prisma/client";
+import {beforeAll,afterAll,describe,it,expect,vi} from "vitest";
+import {withTenant,type TenantTransaction,type TenantTransactionRunner} from "@/platform/db/tenant";
+import * as auditWriter from "@/platform/audit/audit-writer";
+import {ConfigRuleRepository} from "@/platform/config/config-rule-repository";
+import {nativeGuestIdentityDocumentAuthority} from "@/app/api/guest-hub/identity-documents/native-document-authority";
+import {createGuestHubIdentityDocumentGrantService} from "@/modules/guest-hub/application/guest-hub-identity-document-grants";
+import {createGuestHubIdentityCaptureService} from "@/modules/guest-hub/application/guest-hub-identity-capture";
+import {guestHubIdentityCaptureBinding} from "@/modules/guest-hub/application/guest-hub-identity-capture-source";
+import {decryptGuestHubIdentityDocumentCapture} from "@/modules/guest-hub/domain/guest-hub-identity-document-private";
+import {reviewGuestHubIssue,issueGuestHubLink} from "@/modules/guest-hub/application/guest-hub-service";
+import {GuestHubInvalidLinkError} from "@/modules/guest-hub/domain/guest-hub-policy";
+import {guestHubIdentityDocumentPolicyKey} from "@/modules/guest-hub/domain/guest-hub-identity-document-policy";
+import {nativeGuestHubIdentityDocumentFixture} from "./support/guest-hub-identity-document-fixture";
+import {nativeLeadFinancialGuard} from "./support/lead-fixture";
+import {provisionIntegrationRole} from "./support/database-role";
+
+let admin:PrismaClient,db:PrismaClient,financial:Awaited<ReturnType<typeof nativeLeadFinancialGuard>>;
+const organizations:string[]=[],env:NodeJS.ProcessEnv={NODE_ENV:"test",ENCRYPTION_KEYS:"owned-identity-capture:"+randomBytes(32).toString("base64")},grants=createGuestHubIdentityDocumentGrantService(nativeGuestIdentityDocumentAuthority),service=createGuestHubIdentityCaptureService(nativeGuestIdentityDocumentAuthority),deps=()=>({db,env});
+type Fixture=Awaited<ReturnType<typeof nativeGuestHubIdentityDocumentFixture>>;
+async function link(f:Fixture){const draft={reservationId:f.reservation.id},review=await reviewGuestHubIssue(f.ctx,draft,deps());return issueGuestHubLink(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Owned native private identity capture link"},deps());}
+async function grant(f:Fixture,linkId:string,decision:"GRANTED"|"WITHDRAWN"="GRANTED"){
+ const draft={linkId,decision},review=await grants.review(f.ctx,draft,deps());return grants.record(f.ctx,{...draft,idempotencyKey:randomUUID(),reviewFingerprint:review.reviewFingerprint,reason:"Owned actual identity capture authority"},deps());
+}
+async function fresh(delegated=true){const f=await nativeGuestHubIdentityDocumentFixture(admin,db);organizations.push(f.organizationId);const original=await link(f);if(delegated)await grant(f,original.id);return{f,link:original,capability:{token:original.token},visit:{...deps(),verificationOrganizationId:f.organizationId,clientKey:"owned-identity-capture"}};}
+const descriptor=()=>({kind:"PASSPORT"as const,part:"IDENTITY_PAGE"as const,contentType:"image/jpeg"as const,fileSize:8,sha256:createHash("sha256").update(Buffer.from([255,216,255,224,1,2,255,217])).digest("hex")});
+async function command(current:Awaited<ReturnType<typeof fresh>>){const view=await service.view(current.capability,current.visit),draft={previousCaptureId:view.previousCaptureId,idempotencyKey:randomUUID(),acknowledged:true,files:[descriptor()]},review=await service.review(current.capability,draft,current.visit);return{...draft,reviewFingerprint:review.reviewFingerprint};}
+function originalMethod(target:object,key:string|symbol):unknown{
+ const value:unknown=Reflect.get(target,key);if(typeof value!=="function")return value;
+ const callable=value as(this:object,...args:unknown[])=>unknown;return(...args:unknown[]):unknown=>Reflect.apply<object,unknown[],unknown>(callable,target,args);
+}
+function omitNativeFiles(runner:TenantTransactionRunner):TenantTransactionRunner{return{$transaction:(work,options)=>runner.$transaction(tx=>work(new Proxy(tx,{get(target,key){if(key==="guestHubIdentityDocumentFile")return new Proxy(target.guestHubIdentityDocumentFile,{get(delegate,method){return method==="createMany"?()=>Promise.resolve({count:0}):originalMethod(delegate,method);}});return originalMethod(target,key);}})),options)};}
+
+beforeAll(async()=>{const url=new URL(process.env.TEST_DATABASE_URL!);admin=new PrismaClient({datasourceUrl:url.toString()});expect((await admin.$queryRaw<Array<{count:number}>>`SELECT count(*)::int AS count FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`)[0].count).toBeGreaterThanOrEqual(252);await provisionIntegrationRole(admin,"alvillas_ops_tests");url.username=url.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:url.toString()});financial=await nativeLeadFinancialGuard(admin,db);},120000);
+afterAll(async()=>{try{if(financial)await financial.assertPreserved(organizations);}finally{await db?.$disconnect();await admin?.$disconnect();}});
+
+describe("actual append-only native identity capture intents",()=>{
+ it("requires an independent live document delegation and acknowledges persisted metadata without claiming publication",async()=>{
+  const current=await fresh(false);await expect(service.view(current.capability,current.visit)).rejects.toBeInstanceOf(GuestHubInvalidLinkError);await grant(current.f,current.link.id);
+  const input=await command(current),saved=await service.record(current.capability,input,current.visit),rows=await withTenant(db,current.f.organizationId,async tx=>({capture:await tx.guestHubIdentityDocumentCapture.findFirstOrThrow({where:{id:saved.id}}),files:await tx.guestHubIdentityDocumentFile.findMany(),documents:await tx.document.count(),admissions:await tx.documentAdmission.count(),audit:await tx.auditLog.findMany({where:{action:"guest_hub.identity_capture_recorded"}}),events:await tx.outboxEvent.findMany({where:{type:"guest_hub.identity_capture_recorded"}})}));
+  expect(saved).toMatchObject({version:1,replayed:false,files:[{kind:"PASSPORT",part:"IDENTITY_PAGE"}]});expect(saved).not.toHaveProperty("published");expect(saved).not.toHaveProperty("versionId");expect(rows.files.map(file=>({id:file.id,kind:file.kind,part:file.part}))).toEqual(saved.files);expect(rows.documents+rows.admissions).toBe(0);
+  expect(rows.audit).toHaveLength(1);expect(rows.audit[0].actorId).toBeNull();expect(rows.events).toHaveLength(1);expect(decryptGuestHubIdentityDocumentCapture(rows.capture.encryptedPayload,guestHubIdentityCaptureBinding(rows.capture),rows.capture.fileManifest,env).files).toEqual(input.files);
+  for(const value of [saved,rows.audit,rows.events])expect(JSON.stringify(value)).not.toContain(input.files[0].sha256);expect(Buffer.from(rows.capture.encryptedPayload).includes(Buffer.from(input.files[0].sha256))).toBe(false);
+ });
+ it("serializes concurrent original-command replay and recovers one exact native file manifest",async()=>{
+  const current=await fresh(),input=await command(current),attempts=await Promise.all([service.record(current.capability,input,current.visit),service.record(current.capability,input,current.visit),service.record(current.capability,input,current.visit)]),saved=attempts[0];expect(new Set(attempts.map(item=>item.id)).size).toBe(1);expect(attempts.filter(item=>!item.replayed)).toHaveLength(1);for(const result of attempts)expect(result.files).toEqual(saved.files);
+  expect(await service.recover(current.capability,{idempotencyKey:input.idempotencyKey},current.visit)).toMatchObject({...saved,replayed:true,recorded:true});expect(await withTenant(db,current.f.organizationId,async tx=>[await tx.guestHubIdentityDocumentCapture.count(),await tx.guestHubIdentityDocumentFile.count(),await tx.outboxEvent.count({where:{type:"guest_hub.identity_capture_recorded"}}),await tx.auditLog.count({where:{action:"guest_hub.identity_capture_recorded"}})])).toEqual([1,1,1,1]);
+ });
+ it("refuses changed descriptors, acknowledgement, predecessor and review commitments on an original nonce",async()=>{
+  const current=await fresh(),input=await command(current);await service.record(current.capability,input,current.visit);
+  for(const changed of [{files:[{...input.files[0],sha256:"a".repeat(64)}]},{acknowledged:false},{previousCaptureId:randomUUID()},{reviewFingerprint:input.reviewFingerprint.slice(0,-3)+"abc"}])await expect(service.record(current.capability,{...input,...changed},current.visit)).rejects.toBeInstanceOf(GuestHubInvalidLinkError);
+  expect(await withTenant(db,current.f.organizationId,tx=>tx.guestHubIdentityDocumentCapture.count())).toBe(1);
+ });
+ it("requires the exact global predecessor and retains the configured capture limit across a second original link",async()=>{
+  const current=await fresh(),firstInput=await command(current),first=await service.record(current.capability,firstInput,current.visit),stale={previousCaptureId:firstInput.previousCaptureId,idempotencyKey:randomUUID(),acknowledged:firstInput.acknowledged,files:firstInput.files};await expect(service.review(current.capability,stale,current.visit)).rejects.toBeInstanceOf(GuestHubInvalidLinkError);
+  const another=await link(current.f);await grant(current.f,another.id);const next={...current,link:another,capability:{token:another.token}},secondInput=await command(next),second=await service.record(next.capability,secondInput,next.visit);expect(second).toMatchObject({version:2});expect(secondInput.previousCaptureId).toBe(first.id);
+  const view=await service.view(next.capability,next.visit);expect(view).toMatchObject({captureCount:2,maxCaptures:2,previousCaptureId:second.id});await expect(command(next)).rejects.toBeInstanceOf(GuestHubInvalidLinkError);expect(await withTenant(db,current.f.organizationId,tx=>tx.guestHubIdentityDocumentCapture.count())).toBe(2);
+ });
+ it("closes a reviewed command after actual legal-policy withdrawal without retaining a capture or event",async()=>{
+  const current=await fresh(),input=await command(current);await withTenant(db,current.f.organizationId,tx=>new ConfigRuleRepository(tx,current.f.organizationId).createVersion({key:guestHubIdentityDocumentPolicyKey,scopeType:"property",scopeId:current.f.property.id,createdBy:current.f.account.id,effectiveFrom:new Date("2020-01-01"),value:{...current.f.identityPolicy,enabled:false},reason:"Owned actual withdrawal of new identity collection"}));
+  await expect(service.record(current.capability,input,current.visit)).rejects.toBeInstanceOf(GuestHubInvalidLinkError);expect(await withTenant(db,current.f.organizationId,async tx=>[await tx.guestHubIdentityDocumentCapture.count(),await tx.guestHubIdentityDocumentFile.count(),await tx.outboxEvent.count({where:{type:"guest_hub.identity_capture_recorded"}})])).toEqual([0,0,0]);
+ });
+ it("rechecks current document authority after the native capture audit and rolls back all intent facts",async()=>{
+  const current=await fresh(),input=await command(current),original=auditWriter.writeAuditEvent;let changed=false;const spy=vi.spyOn(auditWriter,"writeAuditEvent").mockImplementation(async(tx,event)=>{const result=await original(tx,event);if(!changed&&event.action==="guest_hub.identity_capture_recorded"){changed=true;await withTenant(db,current.f.organizationId,other=>other.roleAssignment.update({where:{id:current.f.grants["document:create"]},data:{validTo:new Date()}}));}return result;});
+  try{await expect(service.record(current.capability,input,current.visit)).rejects.toBeInstanceOf(GuestHubInvalidLinkError);}finally{spy.mockRestore();}expect(changed).toBe(true);expect(await withTenant(db,current.f.organizationId,async tx=>[await tx.guestHubIdentityDocumentCapture.count(),await tx.guestHubIdentityDocumentFile.count(),await tx.outboxEvent.count({where:{type:"guest_hub.identity_capture_recorded"}}),await tx.auditLog.count({where:{action:"guest_hub.identity_capture_recorded"}})])).toEqual([0,0,0,0]);
+ });
+ it("rejects an omitted actual file birth and preserves no partial capture, metadata audit or original event",async()=>{
+  const current=await fresh(),input=await command(current);await expect(service.record(current.capability,input,{...current.visit,db:omitNativeFiles(db)})).rejects.toBeInstanceOf(GuestHubInvalidLinkError);expect(await withTenant(db,current.f.organizationId,async tx=>[await tx.guestHubIdentityDocumentCapture.count(),await tx.guestHubIdentityDocumentFile.count(),await tx.outboxEvent.count({where:{type:"guest_hub.identity_capture_recorded"}}),await tx.auditLog.count({where:{action:"guest_hub.identity_capture_recorded"}})])).toEqual([0,0,0,0]);
+ });
+ it("retains immutable capture/file history and original event identity with forced tenant isolation",async()=>{
+  const current=await fresh(),input=await command(current),saved=await service.record(current.capability,input,current.visit),other=await fresh();
+  const mutations:Array<(tx:TenantTransaction)=>Promise<unknown>>=[tx=>tx.guestHubIdentityDocumentCapture.update({where:{id:saved.id},data:{requestId:"rewritten"}}),tx=>tx.guestHubIdentityDocumentCapture.delete({where:{id:saved.id}}),tx=>tx.guestHubIdentityDocumentFile.update({where:{id:saved.files[0].id},data:{part:"BACK"}}),tx=>tx.guestHubIdentityDocumentFile.delete({where:{id:saved.files[0].id}})];for(const mutate of mutations)await expect(withTenant(db,current.f.organizationId,mutate)).rejects.toThrow();
+  const capture=await withTenant(db,current.f.organizationId,tx=>tx.guestHubIdentityDocumentCapture.findFirstOrThrow({where:{id:saved.id}}));await expect(withTenant(db,current.f.organizationId,tx=>tx.outboxEvent.update({where:{id:capture.outboxEventId},data:{type:"unrelated"}}))).rejects.toThrow();await expect(withTenant(db,current.f.organizationId,tx=>tx.outboxEvent.delete({where:{id:capture.outboxEventId}}))).rejects.toThrow();
+  expect(await withTenant(db,other.f.organizationId,async tx=>[await tx.guestHubIdentityDocumentCapture.findFirst({where:{id:saved.id}}),await tx.guestHubIdentityDocumentFile.findFirst({where:{id:saved.files[0].id}})])).toEqual([null,null]);await expect(service.recover(other.capability,{idempotencyKey:input.idempotencyKey},other.visit)).resolves.toMatchObject({recorded:false});
+ });
+ it("preserves recovery under retained rotated keys and denies removed keys and a replacement form grant",async()=>{
+  const current=await fresh(),input=await command(current),saved=await service.record(current.capability,input,current.visit),rotated={...env,ENCRYPTION_KEYS:"owned-identity-new:"+randomBytes(32).toString("base64")+","+env.ENCRYPTION_KEYS};expect(await service.recover(current.capability,{idempotencyKey:input.idempotencyKey},{...current.visit,env:rotated})).toMatchObject({id:saved.id,recorded:true});
+  await expect(service.recover(current.capability,{idempotencyKey:input.idempotencyKey},{...current.visit,env:{...rotated,ENCRYPTION_KEYS:rotated.ENCRYPTION_KEYS.split(",")[0]}})).rejects.toBeInstanceOf(GuestHubInvalidLinkError);
+  await grant(current.f,current.link.id,"WITHDRAWN");await grant(current.f,current.link.id);await expect(service.recover(current.capability,{idempotencyKey:input.idempotencyKey},current.visit)).rejects.toBeInstanceOf(GuestHubInvalidLinkError);expect(await withTenant(db,current.f.organizationId,tx=>tx.guestHubIdentityDocumentCapture.count())).toBe(1);
+ });
+});
