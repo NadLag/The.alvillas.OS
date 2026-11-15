@@ -1,4 +1,4 @@
-import {z} from "zod";
+import type {z} from "zod";
 import type {Prisma} from "@prisma/client";
 import type {AccountActorContext} from "@/platform/authz/session-context";
 import {prisma} from "@/platform/db/client";
@@ -57,8 +57,10 @@ export async function publishServiceCatalogChange(actor:AccountActorContext,raw:
   const final=await readNativeServiceCatalog(actor,tx,command.draft.scope,"configure"),terms=await serviceCatalogTermsSources(actor,tx,final,[prepared.entry],true),accountAfter=await nativeServiceCatalogActor(actor,tx);
   if(final.rule?.id!==created.id||jsonbFingerprint(final.catalog)!==jsonbFingerprint(prepared.next)||stableScope(prepared.context)!==stableScope(final)||authority(prepared.context)!==authority(final)||terms.fingerprint!==prepared.terms.fingerprint||accountAfter.personId!==account.personId)throw new ServiceCatalogConflictError();
   const payload=serviceCatalogReceiptSchema.parse({schemaVersion:1,actorId:actor.actorId,propertyId:command.draft.scope.propertyId,ownerId:command.draft.scope.ownerId??null,serviceKey:prepared.entry.key,ruleId:created.id,ruleVersion:created.version,commandHash:jsonbFingerprint(command),reviewFingerprint:command.reviewFingerprint});
-  await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"service.catalog.published",resourceType:"service",resourceId:created.id,propertyScopeId:command.draft.scope.propertyId,after:payload,reason:command.draft.reason,requestId:deps.requestId,ipAddress:deps.ipAddress,occurredAt:final.now});
+  await writeAuditEvent(tx,{organizationId:actor.organizationId,actorId:actor.actorId,action:"service.catalog.published",resourceType:"config_rule",resourceId:created.id,propertyScopeId:command.draft.scope.propertyId,after:{key:serviceCatalogRuleKey,...payload},reason:command.draft.reason,requestId:deps.requestId,ipAddress:deps.ipAddress,occurredAt:final.now});
   await new OutboxRepository(tx,actor.organizationId).append(serviceCatalogPublished,asJson(payload),`service-catalog:${command.idempotencyKey}`,final.now);
+  const committed=await readNativeServiceCatalog(actor,tx,command.draft.scope,"configure"),committedTerms=await serviceCatalogTermsSources(actor,tx,committed,[prepared.entry],true);
+  if(committed.fingerprint!==final.fingerprint||authority(committed)!==authority(final)||committedTerms.fingerprint!==terms.fingerprint)throw new ServiceCatalogConflictError();
   return{ruleId:created.id,ruleVersion:created.version,serviceKey:prepared.entry.key,replayed:false};
  });
 }
@@ -69,19 +71,19 @@ export async function serviceCatalogPage(actor:AccountActorContext,raw:unknown,d
   return{rule:context.rule?{id:context.rule.id,version:context.rule.version,scopeType:context.rule.scopeType}:null,items:selected.map(row=>project(actor,after,row,termsAfter.policies.find(policy=>policy.serviceKey===row.key))),next:matching.length>20?selected.at(-1)!.key:null};
  });
 }
-async function historyAuthority(actor:AccountActorContext,context:Awaited<ReturnType<typeof serviceCatalogSourceContext>>,rows:readonly{id:string;lifecycle:string;createdAt:Date}[]){
+function historyAuthority(actor:AccountActorContext,context:Awaited<ReturnType<typeof serviceCatalogSourceContext>>,rows:readonly{id:string;lifecycle:string;createdAt:Date}[]){
  const checks:CurrentAuthorityCheck[]=rows.flatMap(row=>(["view","export"]as const).map(action=>({action,unconditional:true,resource:{...context.scope,type:"config_rule",id:row.id,dataClass:"financial"as const,status:row.lifecycle,occurredAt:row.createdAt}})));assertAccountAuthorization(actor,context.stored,context.now,checks,new ServiceCatalogAccessError());
 }
 export async function serviceCatalogHistory(actor:AccountActorContext,raw:unknown,deps:Dependencies){
  const input=serviceCatalogHistorySchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{
-  const context=await serviceCatalogSourceContext(actor,tx,input.scope),rows=await new ServiceCatalogRepository(tx,actor.organizationId).history(input.scope.propertyId,input.afterVersion),selected=rows.slice(0,20);await historyAuthority(actor,context,selected);
-  const after=await serviceCatalogSourceContext(actor,tx,input.scope);await historyAuthority(actor,after,selected);if(context.fingerprint!==after.fingerprint||context.authorizationFingerprint!==after.authorizationFingerprint)throw new ServiceCatalogConflictError();return{items:selected,nextVersion:rows.length>20?selected.at(-1)!.version:null};
+  const context=await serviceCatalogSourceContext(actor,tx,input.scope),rows=await new ServiceCatalogRepository(tx,actor.organizationId).history(input.scope.propertyId,input.afterVersion),selected=rows.slice(0,20);historyAuthority(actor,context,selected);
+  const after=await serviceCatalogSourceContext(actor,tx,input.scope);historyAuthority(actor,after,selected);if(context.fingerprint!==after.fingerprint||context.authorizationFingerprint!==after.authorizationFingerprint)throw new ServiceCatalogConflictError();return{items:selected,nextVersion:rows.length>20?selected.at(-1)!.version:null};
  });
 }
 export async function serviceCatalogVersion(actor:AccountActorContext,raw:unknown,deps:Dependencies){
  const input=serviceCatalogVersionSchema.parse(raw);return withTenant(deps.db??prisma,actor.organizationId,async tx=>{
-  const context=await serviceCatalogSourceContext(actor,tx,input.scope),head=await context.repository.sourceMetadataWitness(input.ruleId);if(!head||head.key!==serviceCatalogRuleKey||head.archivedAt||head.scopeType!=="property"||head.scopeId!==input.scope.propertyId)throw new ServiceCatalogAccessError();await historyAuthority(actor,context,[head]);
-  const row=await context.repository.sourceWitness(head.id);if(!row||row.xmin!==head.xmin||row.tuple!==head.tuple)throw new ServiceCatalogConflictError();const catalog=servicePricingSchema.parse(row.value),terms=await serviceCatalogTermsSources(actor,tx,context,catalog.services),after=await serviceCatalogSourceContext(actor,tx,input.scope),final=await after.repository.sourceMetadataWitness(head.id),termsAfter=await serviceCatalogTermsSources(actor,tx,after,catalog.services);await historyAuthority(actor,after,[head]);
+  const context=await serviceCatalogSourceContext(actor,tx,input.scope),head=await context.repository.sourceMetadataWitness(input.ruleId);if(!head||head.key!==serviceCatalogRuleKey||head.archivedAt||head.scopeType!=="property"||head.scopeId!==input.scope.propertyId)throw new ServiceCatalogAccessError();historyAuthority(actor,context,[head]);
+  const row=await context.repository.sourceWitness(head.id);if(!row||row.xmin!==head.xmin||row.tuple!==head.tuple)throw new ServiceCatalogConflictError();const catalog=servicePricingSchema.parse(row.value),terms=await serviceCatalogTermsSources(actor,tx,context,catalog.services),after=await serviceCatalogSourceContext(actor,tx,input.scope),final=await after.repository.sourceMetadataWitness(head.id),termsAfter=await serviceCatalogTermsSources(actor,tx,after,catalog.services);historyAuthority(actor,after,[head]);
   if(!final||head.xmin!==final.xmin||head.tuple!==final.tuple||context.fingerprint!==after.fingerprint||context.authorizationFingerprint!==after.authorizationFingerprint||terms.fingerprint!==termsAfter.fingerprint)throw new ServiceCatalogConflictError();
   return{rule:{id:head.id,version:head.version,scopeType:head.scopeType,lifecycle:head.lifecycle,createdAt:head.createdAt.toISOString()},items:catalog.services.map(entry=>project(actor,{...after,catalog},entry,termsAfter.policies.find(policy=>policy.serviceKey===entry.key)))};
  });

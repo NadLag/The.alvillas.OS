@@ -41,8 +41,8 @@ BEGIN
    AND NEW.occurred_at>=r.created_at AND NEW.occurred_at<=clock_timestamp()
    AND EXISTS(SELECT 1 FROM jsonb_array_elements(r.value->'services') item WHERE item->>'key'=payload->>'serviceKey')
    AND EXISTS(SELECT 1 FROM audit_log a WHERE a.organization_id=NEW.organization_id AND a.actor_id=u.id
-    AND a.action='service.catalog.published' AND a.resource_type='service' AND a.resource_id=r.id
-    AND a.property_scope_id=r.scope_id AND a.after=payload AND a.reason=r.reason
+    AND a.action='service.catalog.published' AND a.resource_type='config_rule' AND a.resource_id=r.id
+    AND a.property_scope_id=r.scope_id AND a.after=payload||jsonb_build_object('key','services.pricing') AND a.reason=r.reason
     AND a.occurred_at=NEW.occurred_at AND a.xmin::text=pg_current_xact_id()::xid::text)
  ) THEN RAISE EXCEPTION 'service_catalog_atomic_audited_version_required'; END IF;
  RETURN NEW;
