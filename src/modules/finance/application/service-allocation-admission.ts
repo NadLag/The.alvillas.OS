@@ -22,6 +22,7 @@ type Deps={db?:TenantTransactionRunner;requestId?:string};
 
 async function prepare(ctx:FinanceActorContext,input:z.infer<typeof serviceAllocationReviewInput>,tx:TenantTransaction,action:"view"|"create"){
  const repository=new ServiceAllocationRepository(tx,ctx.organizationId),source=await inspectServiceAllocationCollection(ctx,{collectionId:input.collectionId,completionEventId:input.completionEventId},tx),collection=source.collection;
+ if(source.order&&source.order.serviceKey!==input.serviceKey)throw new ServiceAllocationSourceChangedError();
  const target={type:"service_allocation",organizationId:ctx.organizationId,propertyId:collection.propertyId,reservationId:collection.reservationId,jobId:collection.taskId,city:collection.property.cityId,region:collection.property.regionId,amount:source.amount.toJSON().amount,occurredAt:source.task.completedAt!,dataClass:"financial"as const};
  const recheckAuthority=async()=>recheckFinanceAuthorization(ctx,tx,await source.finance.clock(),serviceAllocationAuthorityChecks(target,action),new ServiceAllocationAccessError());await recheckAuthority();
  if(new Set(input.providers.map(row=>row.componentKey)).size!==input.providers.length||new Set(input.providers.map(row=>row.bindingId)).size!==input.providers.length)throw new ServiceAllocationConfigurationError();

@@ -11,6 +11,7 @@ export class ServiceOrderRepository{
  lockOrder(id:string){return advisoryTransactionLock(this.tx,`service-order:${this.organizationId}:${id}`);}
  async clock(){const rows=await this.tx.$queryRaw<Array<{now:Date}>>(Prisma.sql`SELECT clock_timestamp() AS now`);return rows[0].now;}
  head(id:string){return this.tx.serviceOrder.findFirst({where:{organizationId:this.organizationId,id},select:orderHead});}
+ byTaskHead(taskId:string){return this.tx.serviceOrder.findFirst({where:{organizationId:this.organizationId,taskId},select:orderHead});}
  original(id:string){return this.tx.serviceOrder.findFirst({where:{organizationId:this.organizationId,id}});}
  byNonce(key:string){return this.tx.serviceOrderEvent.findFirst({where:{organizationId:this.organizationId,commandKey:key},select:{id:true,orderId:true,version:true,toState:true,commandHash:true,createdBy:true,createdAt:true}});}
  create(input:Omit<Prisma.ServiceOrderUncheckedCreateInput,"organizationId">){return this.tx.serviceOrder.create({data:{...input,organizationId:this.organizationId}});}
