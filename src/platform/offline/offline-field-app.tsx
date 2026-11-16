@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useRef, useState } from "react";
 import { liveQuery } from "dexie";
@@ -152,4 +152,3 @@ function CachedChecklist({ task, scope, locale }: { task: FieldWorkSnapshot; sco
       }} />
   </>;
 }
-
