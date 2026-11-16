@@ -8,12 +8,12 @@ import {formatNumber} from "@/i18n/format";
 import type {ServiceCatalogItem} from "../domain/service-catalog-view";
 import type {ChefMenuDefinition} from "@/platform/config/chef-menu-policy";
 type Recipe=Pick<ChefMenuDefinition,"serving_quantity"|"ingredients"|"preparation"|"allergens">;
-export function ChefMenuRecipe({locale,menu}:{locale:AppLocale;menu:Recipe}){
- const t=useTranslations("ChefMenu");
+export function ChefMenuRecipe({locale,menu,headingLevel=3}:{locale:AppLocale;menu:Recipe;headingLevel?:3|4}){
+ const t=useTranslations("ChefMenu"),Heading=headingLevel===3?"h3":"h4";
  return<><p>{t("servings")}{" · "}<span dir="auto">{formatNumber(locale,String(menu.serving_quantity))}</span></p><p className="muted-copy">{t("servingsHelp")}</p>
-  <h4>{t("ingredients")}</h4><ul className="service-catalog-list">{menu.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<span dir="auto">{formatNumber(locale,new Decimal(item.quantity),{maximumFractionDigits:6})}{" "}{localizedText(item.unit.name,locale)}</span></li>)}</ul>
-  <h4>{t("preparationTitle")}</h4><p className="preserve-lines" dir="auto">{localizedText(menu.preparation,locale)}</p>
-  <h4>{t("allergens")}</h4>{menu.allergens.length?<ul>{menu.allergens.map(item=><li key={item.key} dir="auto">{localizedText(item.name,locale)}</li>)}</ul>:<p>{t("noAllergens")}</p>}
+  <Heading>{t("ingredients")}</Heading><ul className="service-catalog-list">{menu.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<span dir="auto">{formatNumber(locale,new Decimal(item.quantity),{maximumFractionDigits:6})}{" "}{localizedText(item.unit.name,locale)}</span></li>)}</ul>
+  <Heading>{t("preparationTitle")}</Heading><p className="preserve-lines" dir="auto">{localizedText(menu.preparation,locale)}</p>
+  <Heading>{t("allergens")}</Heading>{menu.allergens.length?<ul>{menu.allergens.map(item=><li key={item.key} dir="auto">{localizedText(item.name,locale)}</li>)}</ul>:<p>{t("noAllergens")}</p>}
  </>;
 }
 export function ChefMenuDetails({locale,item,initiallyOpen=false}:{locale:AppLocale;item:ServiceCatalogItem;initiallyOpen?:boolean}){

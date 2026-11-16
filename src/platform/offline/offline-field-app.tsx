@@ -29,7 +29,7 @@ import { FieldProxyForm } from "@/modules/reservations/ui/field-proxy-form";
 import type { FieldCacheAudience } from "./field-queue-store";
 
 function fieldMessages(messages: typeof en) {
-  return { Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCash: messages.FieldCash, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, FieldIssue: messages.FieldIssue, FieldWallet: messages.FieldWallet, Operations: { manage: messages.Operations.manage } };
+  return { ChefMenu:messages.ChefMenu, Field: messages.Field, FieldProxy: messages.FieldProxy, FieldLinen: messages.FieldLinen, FieldInventory: messages.FieldInventory, FieldCash: messages.FieldCash, FieldCache: messages.FieldCache, FieldPwa: messages.FieldPwa, FieldPhoto: messages.FieldPhoto, FieldIssue: messages.FieldIssue, FieldWallet: messages.FieldWallet, Operations: { manage: messages.Operations.manage } };
 }
 const catalogs = { en: fieldMessages(en), fr: fieldMessages(fr), ar: fieldMessages(ar) };
 export function OfflineFieldApp({ initialLocale }: { initialLocale: AppLocale }) {
