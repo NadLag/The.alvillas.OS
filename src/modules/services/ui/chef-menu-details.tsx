@@ -10,7 +10,7 @@ import type {ChefMenuDefinition} from "@/platform/config/chef-menu-policy";
 type Recipe=Pick<ChefMenuDefinition,"serving_quantity"|"ingredients"|"preparation"|"allergens">;
 export function ChefMenuRecipe({locale,menu}:{locale:AppLocale;menu:Recipe}){
  const t=useTranslations("ChefMenu");
- return<><p>{t("servings")}{" · "}<span dir="auto">{formatNumber(locale,menu.serving_quantity)}</span></p><p className="muted-copy">{t("servingsHelp")}</p>
+ return<><p>{t("servings")}{" · "}<span dir="auto">{formatNumber(locale,String(menu.serving_quantity))}</span></p><p className="muted-copy">{t("servingsHelp")}</p>
   <h4>{t("ingredients")}</h4><ul className="service-catalog-list">{menu.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<span dir="auto">{formatNumber(locale,new Decimal(item.quantity),{maximumFractionDigits:6})}{" "}{localizedText(item.unit.name,locale)}</span></li>)}</ul>
   <h4>{t("preparationTitle")}</h4><p className="preserve-lines" dir="auto">{localizedText(menu.preparation,locale)}</p>
   <h4>{t("allergens")}</h4>{menu.allergens.length?<ul>{menu.allergens.map(item=><li key={item.key} dir="auto">{localizedText(item.name,locale)}</li>)}</ul>:<p>{t("noAllergens")}</p>}
