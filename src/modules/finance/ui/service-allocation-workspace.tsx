@@ -1,5 +1,5 @@
-import Link from "next/link";
 "use client";
+import Link from "next/link";
 import {useCallback,useState} from "react";
 import {useTranslations} from "next-intl";
 import type {z} from "zod";
