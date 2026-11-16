@@ -6967,6 +6967,24 @@
       "validation": "Vérifiez le service, les dates, les quantités et les champs obligatoires.",
       "unavailable": "Les détails des commandes sont temporairement indisponibles.",
       "storage_unavailable": "L’identifiant de récupération n’a pas pu être enregistré. La commande n’a pas été envoyée."
+    },
+    "financial": {
+      "title": "Montants comptabilisés du service",
+      "description": "Ces montants proviennent des services réalisés et des décisions financières enregistrées. Les devis et coûts estimés figurent séparément dans les conditions initiales.",
+      "open": "Lire les montants comptabilisés",
+      "close": "Fermer les montants comptabilisés",
+      "pageTotals": "Montants de cette page",
+      "gross": "Montant de service encaissé",
+      "companyRevenue": "Produit de service ALVILLAS",
+      "providerCost": "Coûts fournisseurs et personnel comptabilisés",
+      "ownerAmount": "Part du propriétaire",
+      "taxAmount": "Part des taxes",
+      "margin": "Marge comptabilisée",
+      "noRecognition": "Aucune comptabilisation financière active n’est enregistrée sur cette page.",
+      "recognized": "Comptabilisation financière enregistrée",
+      "awaitingRecognition": "En attente de comptabilisation financière",
+      "manage": "Ouvrir l’espace financier",
+      "closeWorkspace": "Fermer l’espace financier"
     }
   }
 }

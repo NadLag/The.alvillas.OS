@@ -18,6 +18,6 @@ export const serviceAllocationCommandSchema=z.discriminatedUnion("operation",[
 const operation=z.enum(["BIND","ADMIT","RECOGNIZE","REVERSE"]),base={requestId:identity,idempotencyKey:identity,operation};
 export const serviceAllocationCommandSuccessSchema=z.object({...base,state:z.literal("SUCCEEDED"),failureCode:z.null(),sourceId:identity,resultId:identity,version:z.number().int().positive(),idempotent:z.boolean()}).strict();
 export const serviceAllocationCommandResultSchema=z.union([serviceAllocationCommandSuccessSchema,z.object({...base,state:z.literal("CONFLICT"),failureCode:z.literal("SOURCE_CHANGED")}).strict(),z.object({...base,state:z.literal("FAILED"),failureCode:z.enum(["CONFIGURATION_UNAVAILABLE","SOURCE_UNAVAILABLE","PERIOD_CLOSED"])}).strict()]);
-export const serviceAllocationCommandRecoverySchema=z.object({key:identity}).strict();
+export const serviceAllocationCommandRecoverySchema=z.object({key:identity,taskId:identity.optional()}).strict();
 export const serviceAllocationCommandRecoveryResultSchema=z.object({request:serviceAllocationCommandSuccessSchema.nullable()}).strict();
 export type ServiceAllocationCommand=z.infer<typeof serviceAllocationCommandSchema>;

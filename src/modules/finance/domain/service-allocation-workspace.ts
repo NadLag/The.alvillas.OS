@@ -5,7 +5,7 @@ import {serviceAllocationSnapshotSchema} from "./service-allocation-snapshot-sch
 const id=z.uuid(),kind=z.enum(["SUPPLIER_INVOICE_LINE","EMPLOYEE_COST"]),money=z.object({amount:z.string(),currency:z.string()}).strict();
 export const serviceAllocationCapabilitiesSchema=z.object({admit:z.boolean(),bind:z.boolean(),recognize:z.boolean(),adjust:z.boolean(),reverse:z.boolean()}).strict();
 export const serviceAllocationWorkspaceReadSchema=z.discriminatedUnion("operation",[
- z.object({operation:z.literal("COLLECTIONS"),propertyId:id.optional(),after:id.optional()}).strict(),
+ z.object({operation:z.literal("COLLECTIONS"),propertyId:id.optional(),taskId:id.optional(),after:id.optional()}).strict(),
  serviceCollectionSourceInput.extend({operation:z.literal("COLLECTION")}).strict(),
  z.object({operation:z.literal("DETAIL"),sourceId:id,beforeAdmissionVersion:z.number().int().positive().optional(),beforePostingVersion:z.number().int().positive().optional(),beforeBinding:id.optional()}).strict(),
  z.object({operation:z.literal("PROVIDER_HISTORY"),sourceId:id,bindingId:id,before:id.optional()}).strict(),

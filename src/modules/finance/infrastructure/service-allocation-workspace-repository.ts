@@ -4,7 +4,7 @@ import {ServiceAllocationRepository,type ServiceProviderKind} from "./service-al
 /** Bounded native source identities; Money and availability are validated by the existing inspectors. */
 export class ServiceAllocationWorkspaceRepository extends ServiceAllocationRepository{
  property(id:string){return this.tx.property.findFirst({where:{organizationId:this.organizationId,id},select:{id:true,name:true,cityId:true,regionId:true,archivedAt:true}});}
- collections(input:{propertyId?:string;after?:string}){
+ collections(input:{propertyId?:string;taskId?:string;after?:string}){
   return this.tx.$queryRaw<Array<{id:string;completionEventId:string}>>(Prisma.sql`SELECT c.id,e.id AS "completionEventId" FROM cash_collection c
    JOIN operation_task t ON t.organization_id=c.organization_id AND t.id=c.task_id
    JOIN property p ON p.organization_id=c.organization_id AND p.id=c.property_id
@@ -13,6 +13,7 @@ export class ServiceAllocationWorkspaceRepository extends ServiceAllocationRepos
    WHERE c.organization_id=${this.organizationId}::uuid AND t.state='COMPLETED' AND t.archived_at IS NULL AND p.archived_at IS NULL AND journal.sealed
    AND NOT EXISTS(SELECT 1 FROM financial_transaction opposite WHERE opposite.organization_id=journal.organization_id AND opposite.reverses_transaction_id=journal.id)
    ${input.propertyId?Prisma.sql`AND c.property_id=${input.propertyId}::uuid`:Prisma.empty}
+   ${input.taskId?Prisma.sql`AND c.task_id=${input.taskId}::uuid`:Prisma.empty}
    ${input.after?Prisma.sql`AND c.id<${input.after}::uuid`:Prisma.empty} ORDER BY c.id DESC LIMIT 51`);
  }
  providers(kind:ServiceProviderKind,scope:{propertyId:string;reservationId:string|null;currency:string},after?:string){
