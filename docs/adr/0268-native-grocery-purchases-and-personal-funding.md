@@ -18,4 +18,6 @@ Reversals append exact opposite journals. Existing settlements must be reversed 
 
 Held and current authorization protect operational orders, native expenses, employee liabilities, suppliers, purchasers, original documents, source journals and actual funding accounts independently. These source restrictions also protect financial attachments and audit disclosure. Private browser responses are cleared on visibility, navigation, account scope and connectivity changes; only command nonces enter session storage.
 
+Original grocery orders expose a private, paginated history of their canonical expense family, including immutable corrections. A family can be associated only once, including historical associations retained without backfills. Operational audit projections mask purchasing details; a separate expense audit event in the same transaction retains those details behind native financial source authorization.
+
 Forward migrations preserve applied migration checksums and existing financial history. F-SVC-07 remains IN-PROGRESS until mandatory exact-head CI and hosted acceptance meet the Definition of Done. Hosted acceptance remains blocked while Vercel is restricted; no provider, billing or production settings are changed.

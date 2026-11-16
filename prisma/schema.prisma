@@ -3388,6 +3388,8 @@ model Expense {
   purchase ExpensePurchase? @relation("ExpensePurchaseSource")
   purchaseFamily ExpensePurchase[] @relation("ExpensePurchaseRoot")
 
+ groceryPurchaseFamilies GroceryExpenseBinding[] @relation("GroceryPurchaseFamily")
+
 }
 
 model RecurringExpenseOccurrence {
@@ -6540,6 +6542,9 @@ model GroceryExpenseBinding {
  @@map("grocery_expense_binding")
  receiptVersionId String? @map("receipt_version_id") @db.Uuid
  documentReceipt DocumentVersion? @relation(fields:[organizationId,receiptVersionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"grocery_expense_binding_document_fk")
+ rootExpenseId String? @map("root_expense_id") @db.Uuid
+ rootExpense Expense? @relation("GroceryPurchaseFamily",fields:[organizationId,rootExpenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"grocery_expense_binding_root_fk")
+ @@unique([organizationId,rootExpenseId],map:"grocery_expense_binding_root_key")
 }
 
 model ExpensePurchase {

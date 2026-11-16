@@ -7151,5 +7151,16 @@
     "reversed": "Reversed by an immutable opposite journal",
     "reverse": "Reverse this settlement",
     "next": "Older settlements"
+  },
+  "GroceryPurchases": {
+    "title": "Associated grocery expenses",
+    "help": "Open each expense to review its approval, original receipt and reimbursement. Amounts retain their original currency and history.",
+    "read": "Read purchase expenses",
+    "empty": "No associated purchase expenses.",
+    "company": "Company-funded purchase",
+    "personal": "Personally funded purchase",
+    "historical": "Original retained expense",
+    "open": "Open expense, receipt and reimbursement",
+    "next": "Next expenses"
   }
 }

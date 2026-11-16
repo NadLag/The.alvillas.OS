@@ -1,0 +1,18 @@
+"use client";
+import Link from "next/link";
+import {useCallback,useEffect,useRef,useState} from "react";
+import {useTranslations} from "next-intl";
+import type {z} from "zod";
+import type {AppLocale} from "@/i18n/routing";
+import {formatCurrencyAmount} from "@/i18n/format";
+import {groceryPurchaseHistorySchema} from "../domain/grocery-expense";
+import {privateServiceRequest,ServicePrivateBrowserError,type ServicePrivateBrowserState} from "./service-catalog-browser";
+export function GroceryPurchaseHistory({locale,scope,orderId}:{locale:AppLocale;scope:string;orderId:string}){
+ const t=useTranslations("GroceryPurchases"),states=useTranslations("ServiceOrders"),expenses=useTranslations("Expenses"),[value,setValue]=useState<(z.infer<typeof groceryPurchaseHistorySchema>&{scope:string})|null>(null),[state,setState]=useState<ServicePrivateBrowserState>("ready"),controller=useRef<AbortController|null>(null),epoch=useRef(0);
+ const cancel=useCallback(()=>{controller.current?.abort();epoch.current++;},[]);
+ const clear=useCallback(()=>{cancel();setValue(null);setState(navigator.onLine?"ready":"offline");},[cancel]);
+ useEffect(()=>{let live=true;const hide=()=>{if(document.hidden)clear();},restore=(event:PageTransitionEvent)=>{if(event.persisted)clear();};document.addEventListener("visibilitychange",hide);window.addEventListener("pagehide",clear);window.addEventListener("pageshow",restore);window.addEventListener("offline",clear);window.addEventListener("online",clear);queueMicrotask(()=>{if(live)clear();});return()=>{live=false;cancel();document.removeEventListener("visibilitychange",hide);window.removeEventListener("pagehide",clear);window.removeEventListener("pageshow",restore);window.removeEventListener("offline",clear);window.removeEventListener("online",clear);};},[scope,orderId,clear,cancel]);
+ async function load(after?:string){clear();const own=epoch.current,abort=new AbortController();controller.current=abort;setState("loading");try{const page=groceryPurchaseHistorySchema.parse(await privateServiceRequest("orders","groceryPurchases",{orderId,after},abort.signal,scope));if(abort.signal.aborted||own!==epoch.current||document.hidden)return;if(page.orderId!==orderId)throw new ServicePrivateBrowserError("unavailable");setValue({...page,scope});setState("ready");}catch(error){if(abort.signal.aborted||own!==epoch.current)return;setState(error instanceof ServicePrivateBrowserError?error.state:"unavailable");}}
+ const current=value?.scope===scope&&value.orderId===orderId?value:null;
+ return<section className="panel" data-testid="grocery-purchase-history"><h3>{t("title")}</h3><p>{t("help")}</p><button type="button" className="secondary-button" disabled={state==="loading"||state==="offline"} onClick={()=>void load()}>{t("read")}</button>{state!=="ready"?<p role={state==="loading"||state==="offline"?"status":"alert"}>{states("states."+state)}</p>:null}{current?<>{!current.items.length?<p>{t("empty")}</p>:<ul className="service-catalog-list">{current.items.map(item=><li key={item.expenseId}><p dir="auto">{item.purpose}</p><p className="money" dir="auto">{formatCurrencyAmount(locale,item.amount,item.currency)}</p><p>{expenses("states."+item.state)} · {t(item.fundingKind==="PERSONAL"?"personal":item.fundingKind==="COMPANY"?"company":"historical")}</p><Link className="secondary-button" prefetch={false} href={`/${locale}/app/expenses/${item.expenseId}?groceryOrder=${orderId}`}>{t("open")}</Link></li>)}</ul>}{current.next?<button type="button" className="secondary-button" onClick={()=>void load(current.next!)}>{t("next")}</button>:null}</>:null}</section>;
+}

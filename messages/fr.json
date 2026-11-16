@@ -7151,5 +7151,16 @@
     "reversed": "Contrepassé par une écriture opposée immuable",
     "reverse": "Contrepasser ce règlement",
     "next": "Règlements précédents"
+  },
+  "GroceryPurchases": {
+    "title": "Dépenses de courses associées",
+    "help": "Ouvrez chaque dépense pour consulter son approbation, son justificatif original et son remboursement. Les montants conservent leur devise et leur historique.",
+    "read": "Consulter les dépenses d’achat",
+    "empty": "Aucune dépense d’achat associée.",
+    "company": "Achat financé par l’entreprise",
+    "personal": "Achat financé personnellement",
+    "historical": "Dépense originale conservée",
+    "open": "Ouvrir la dépense, le justificatif et le remboursement",
+    "next": "Dépenses suivantes"
   }
 }
