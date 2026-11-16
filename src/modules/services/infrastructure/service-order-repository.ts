@@ -23,7 +23,7 @@ export class ServiceOrderRepository{
  async chefTaskRecipe(id:string){
   return(await this.chefRecipeRows(Prisma.sql`s.id=${id}::uuid`))[0]??null;
  }
- chefTaskRecipes(taskIds:readonly string[]){
+ async chefTaskRecipes(taskIds:readonly string[]):Promise<ChefRecipeRecord[]>{
   return taskIds.length?this.chefRecipeRows(Prisma.sql`s.task_id IN (${Prisma.join([...new Set(taskIds)].map(id=>Prisma.sql`${id}::uuid`))})`):Promise.resolve([]);
  }
  private chefRecipeRows(where:Prisma.Sql){
