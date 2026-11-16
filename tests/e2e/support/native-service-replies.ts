@@ -15,6 +15,6 @@ export async function nativeServiceReplies(page:Page,family:"catalog"|"orders"){
  return(operation:string)=>new Promise<APIResponse>((resolve,reject)=>{
   if(pending.has(operation)){reject(Error("A native service reply is already pending"));return;}
   const timeout=setTimeout(()=>{pending.delete(operation);reject(Error("The actual native service reply was not observed"));},30000);
-  pending.set(operation,{resolve:response=>{clearTimeout(timeout);resolve(response);},reject:error=>{clearTimeout(timeout);reject(error);}});
+  pending.set(operation,{resolve:response=>{clearTimeout(timeout);resolve(response);},reject:error=>{clearTimeout(timeout);reject(error instanceof Error?error:Error("The actual native service reply failed"));}});
  });
 }
