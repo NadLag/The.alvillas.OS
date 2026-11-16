@@ -1,0 +1,26 @@
+import {writeFile} from "node:fs/promises";
+import {resolve,sep} from "node:path";
+import {randomUUID} from "node:crypto";
+import {PrismaClient} from "@prisma/client";
+import {z} from "zod";
+import {withTenant} from "@/platform/db/tenant";
+import {authContextForAccount} from "@/platform/authz/account-context";
+import {FinanceRepository} from "@/modules/finance/infrastructure/finance-repository";
+import {nativeServiceOrderFixture} from "../../integration/support/service-order-fixture";
+import {previewServiceCatalogChange,publishServiceCatalogChange} from "@/modules/services/application/service-catalog-service";
+import {previewServiceOrder,createServiceOrder} from "@/modules/services/application/service-order-service";
+import {previewServiceOrderTransition,transitionServiceOrder} from "@/modules/services/application/service-order-transition";
+import {assignOperationTask} from "@/modules/reservations/application/operation-scheduling";
+const input=z.object({organizationId:z.uuid(),accountId:z.uuid(),personId:z.uuid(),guestLocale:z.enum(["en","fr","ar"]),output:z.string().min(1)}).strict().parse(JSON.parse(process.argv[2]??"null")),target=new URL(process.env.DATABASE_URL??"invalid:");
+if(process.env.VERCEL||process.env.VERCEL_ENV||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os")||!resolve(input.output).startsWith(resolve(process.cwd())+sep))throw Error("Owned native transfer browser fixture required");
+const db=new PrismaClient();try{
+ const f=await nativeServiceOrderFixture(db,db,input),bank=await withTenant(db,f.organizationId,async tx=>{
+  const keys=["team_member:view","cash_collection:create","property_finance:view","financial_transaction:pay","financial_transaction:create","financial_transaction:void"],permissions=await tx.permission.findMany({where:{organizationId:f.organizationId,key:{in:keys}}});if(permissions.length!==keys.length)throw Error("Actual native transfer grants required");const role=await tx.role.create({data:{organizationId:f.organizationId,key:"owned_transfer_browser_"+randomUUID(),name:"Explicit original transfer cash handover rights"}});await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}))});await tx.roleAssignment.create({data:{organizationId:f.organizationId,userAccountId:f.account.id,personId:f.person.id,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});
+  const driver=await tx.role.findFirstOrThrow({where:{organizationId:f.organizationId,key:"driver"}});await tx.roleAssignment.create({data:{organizationId:f.organizationId,userAccountId:f.account.id,personId:f.person.id,roleId:driver.id,scopeType:"property",scopeId:f.property.id,validFrom:new Date("2020-01-01")}});
+  return new FinanceRepository(tx,f.organizationId).ensureLedgerAccount({code:"OWNED_TRANSFER_CASH_"+randomUUID().replaceAll("-","").toUpperCase(),name:"Actual company transfer cash destination",accountType:"ASSET_LOCATION",normalSide:"DEBIT"});
+ }),actor={...f.ctx,authContext:{...await authContextForAccount(f.organizationId,f.account.id,{db}),personId:f.person.id}},draft={...f.draft,entry:{...f.entry,order_terms:{...f.entry.order_terms,transfer_order:{schemaVersion:1,task_type:"TRANSFER",cash:"NATIVE_CASH_CUSTODY"}}}},review=await previewServiceCatalogChange(actor,draft,f.deps);
+ await publishServiceCatalogChange(actor,{draft,reviewFingerprint:review.reviewFingerprint,idempotencyKey:randomUUID()},f.deps);
+ const transfer={pickup:"Actual airport terminal "+randomUUID(),destination:"Actual managed villa entrance",pickupTime:"09:00",flightReference:"AT 123",instructions:"Original requested pickup instructions"},request={...f.request,transfer},priced=await previewServiceOrder(actor,request,f.deps),order=await createServiceOrder(actor,{request,reviewFingerprint:priced.reviewFingerprint,idempotencyKey:randomUUID()},f.deps),confirmation={orderId:order.orderId,expectedVersion:1,state:"CONFIRMED",taskPlan:{type:"TRANSFER",priority:"NORMAL",checklistTemplateKey:"owned_service"},reason:"Confirm original native transfer before actual driver work"},checked=await previewServiceOrderTransition(actor,confirmation,f.deps);await transitionServiceOrder(actor,{...confirmation,reviewFingerprint:checked.reviewFingerprint,idempotencyKey:randomUUID()},f.deps);
+ const task=await withTenant(db,f.organizationId,async tx=>{const saved=await tx.serviceOrder.findFirstOrThrow({where:{organizationId:f.organizationId,id:order.orderId}});return tx.operationTask.findFirstOrThrow({where:{organizationId:f.organizationId,id:saved.taskId!}});});await assignOperationTask(actor,{taskId:task.id,expectedVersion:task.version,personId:f.person.id,startMinute:540,reason:"Assign actual native driver to original transfer pickup",idempotencyKey:randomUUID()},f.deps);
+ await writeFile(input.output,JSON.stringify({organizationId:f.organizationId,propertyId:f.property.id,orderId:order.orderId,taskId:task.id,reservationId:f.reservation.id,serviceKey:f.entry.key,date:f.request.serviceDate,timezone:f.property.timezone,personId:f.person.id,bankId:bank.id,transfer}),{flag:"wx",mode:0o600});
+}finally{await db.$disconnect();}

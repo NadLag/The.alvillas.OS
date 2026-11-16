@@ -206,3 +206,4 @@ prisma/migrations/20261115230000_native_service_order_tenant_policy_names/migrat
 
 /prisma/migrations/20261116224500_native_custody_physical_birth/migration.sql text eol=lf
 /prisma/migrations/20261116230000_native_custody_amount_reference/migration.sql text eol=lf
+/prisma/migrations/20261116231500_native_transfer_original_timezone/migration.sql text eol=lf
