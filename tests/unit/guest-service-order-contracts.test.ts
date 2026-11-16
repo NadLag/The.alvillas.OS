@@ -1,0 +1,17 @@
+import {randomUUID} from "node:crypto";
+import {describe,it,expect} from "vitest";
+import {serviceCatalogItemSchema} from "@/modules/services/domain/service-catalog-view";
+import {guestServiceOrderDraftSchema,guestServiceOrderPublicReviewSchema,projectReleasedGuestServiceOffer,bindGuestServiceOrderSelection,GuestServiceOfferUnavailableError} from "@/platform/services/guest-service-order-contracts";
+
+const selection={serviceKey:"owned_transfer",serviceDate:"2031-05-01",lastServiceDate:"2031-05-02",quantity:2,guests:1};
+describe("guest service ordering public boundary",()=>{
+ it("binds actual source identity and canonical date rules while rejecting client authority, price and state",()=>{
+  const source={propertyId:randomUUID(),reservationId:randomUUID()},nonce=randomUUID();expect(bindGuestServiceOrderSelection(selection,source,nonce)).toEqual({...selection,...source,reason:"Guest Hub service selection "+nonce});for(const injected of[{propertyId:randomUUID()},{reservationId:randomUUID()},{actorId:randomUUID()},{totalAmount:"0.01"},{internalCost:"30.00"},{state:"CONFIRMED"}])expect(()=>bindGuestServiceOrderSelection({...selection,...injected},source,nonce)).toThrow();expect(()=>bindGuestServiceOrderSelection({...selection,lastServiceDate:"2031-04-30"},source,nonce)).toThrow();expect(guestServiceOrderDraftSchema.safeParse({...selection,idempotencyKey:nonce,locale:"fr"}).success).toBe(true);
+ });
+ it("projects released selling terms without internal cost, provider or original policy identities",()=>{
+  const providerId=randomUUID(),allocationId=randomUUID(),taxId=randomUUID(),item=serviceCatalogItemSchema.parse({key:selection.serviceKey,name:{en:"Approved transfer",fr:"Transfert approuvé",ar:"نقل معتمد"},description:null,available:true,pricingModel:"FIXED",amount:"120.00",currency:"MAD",orderTerms:{schemaVersion:1,approval_reference:"Private native approval reference",internal_cost:{amount:"30.00",currency:"MAD"},providers:[{component_key:"provider",kind:"SUPPLIER",id:providerId}],allocation_rule_id:allocationId,tax_rule_id:taxId,availability:{all:[]}},financialPolicy:null}),publicOffer=projectReleasedGuestServiceOffer(item),serialized=JSON.stringify(publicOffer);expect(publicOffer).toEqual({key:selection.serviceKey,name:item.name,description:null,pricingModel:"FIXED",unitAmount:"120.00",currency:"MAD",quoteRequired:false});for(const value of["30.00",providerId,allocationId,taxId,"approval_reference","availability","financialPolicy"])expect(serialized).not.toContain(value);expect(()=>projectReleasedGuestServiceOffer({...item,available:false})).toThrow(GuestServiceOfferUnavailableError);expect(()=>projectReleasedGuestServiceOffer({...item,orderTerms:null})).toThrow(GuestServiceOfferUnavailableError);
+ });
+ it("requires a real customer total for priced reviews and an explicit quote state for custom service",()=>{
+  const value={selection,title:{en:"Actual reviewed service",fr:"Service effectivement vérifié"},totalAmount:"240.00",currency:"MAD",quoteRequired:false,reviewFingerprint:"opaque-signed-review"};expect(guestServiceOrderPublicReviewSchema.safeParse(value).success).toBe(true);expect(guestServiceOrderPublicReviewSchema.safeParse({...value,totalAmount:null}).success).toBe(false);expect(guestServiceOrderPublicReviewSchema.safeParse({...value,totalAmount:null,quoteRequired:true}).success).toBe(true);expect(guestServiceOrderPublicReviewSchema.safeParse({...value,providerCost:"30.00"}).success).toBe(false);
+ });
+});

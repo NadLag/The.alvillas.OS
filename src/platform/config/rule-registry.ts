@@ -13,6 +13,7 @@ import {guestHubStayDetailsPolicyKey,guestHubStayDetailsPolicySchema} from "@/mo
 import {guestHubIdentityDocumentPolicyKey,guestHubIdentityDocumentPolicySchema} from "@/modules/guest-hub/domain/guest-hub-identity-document-policy";
 import {guestHubHouseRulesPolicyKey,guestHubHouseRulesPolicySchema} from "@/modules/guest-hub/domain/guest-hub-house-rules-policy";
 import {guestHubAgreementPolicyKey,guestHubAgreementPolicySchema} from "@/modules/guest-hub/domain/guest-hub-agreement-policy";
+import {guestHubServiceOrderPolicyKey,guestHubServiceOrderPolicySchema} from "@/modules/guest-hub/domain/guest-hub-service-order-policy";
 import {guestHubProfilePolicyKey,guestHubProfilePolicySchema} from "@/modules/guest-hub/domain/guest-hub-profile-policy";
 import {guestHubPresentationPolicyKey,guestHubPresentationPolicySchema} from "@/modules/guest-hub/domain/guest-hub-presentation";
 import {guestHubLinkPolicyKey,guestHubLinkPolicySchema,guestHubVerificationPolicyKey,guestHubVerificationPolicySchema} from "@/modules/guest-hub/domain/guest-hub-policy";
@@ -382,6 +383,7 @@ export const configRuleSchemas = {
   [guestHubIdentityDocumentPolicyKey]:guestHubIdentityDocumentPolicySchema,
   [guestHubHouseRulesPolicyKey]:guestHubHouseRulesPolicySchema,
   [guestHubAgreementPolicyKey]:guestHubAgreementPolicySchema,
+  [guestHubServiceOrderPolicyKey]:guestHubServiceOrderPolicySchema,
   [guestHubVerificationPolicyKey]:guestHubVerificationPolicySchema,
   [onboardingOwnerPackageContentKey]:onboardingOwnerPackageContentSchema,
   [leadPipelinePolicyKey]:leadPipelinePolicySchema,

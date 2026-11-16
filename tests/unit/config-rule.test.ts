@@ -87,6 +87,7 @@ describe("config rule registry", () => {
       "guest_hub.links",
       "guest_hub.presentation",
       "guest_hub.profile",
+      "guest_hub.service_orders",
       "guest_hub.stay_details",
       "guest_hub.verification",
       "identity.pin_lockout",
