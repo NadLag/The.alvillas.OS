@@ -2927,9 +2927,12 @@ textarea:disabled {
 .service-catalog-list > li.detail-panel { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: var(--space-4); }
 .service-catalog .checkbox-field { display: flex; align-items: center; gap: var(--space-3); min-block-size: var(--target-min); }
 .service-catalog .checkbox-field input { inline-size: 24px; block-size: 24px; min-block-size: 24px; flex: 0 0 auto; }
-.service-catalog-terms, .service-catalog-review { display: grid; gap: var(--space-4); padding-block: var(--space-5); border-block-start: 1px solid var(--border-subtle); }
+.service-catalog-terms, .service-catalog-review { min-inline-size: 0; overflow-wrap: anywhere; display: grid; gap: var(--space-4); padding-block: var(--space-5); border-block-start: 1px solid var(--border-subtle); }
 .service-catalog-provider { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); justify-content: space-between; }
 .service-catalog .money { font-variant-numeric: tabular-nums; }
 .service-catalog-original-terms { min-inline-size: 0; }
 .service-catalog-original-terms summary { min-block-size: var(--target-min); padding-block: var(--space-3); cursor: pointer; }
 .service-catalog-original-terms pre { max-inline-size: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.preserve-lines { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.service-catalog-list { overflow-wrap: anywhere; }

@@ -6986,5 +6986,67 @@
       "manage": "Open financial workspace",
       "closeWorkspace": "Close financial workspace"
     }
+  },
+  "ChefMenu": {
+    "title": "Chef menu",
+    "configure": "This service is a chef menu item",
+    "canonicalHelp": "Use the service price, internal cost, financial rules and property availability above. Menu names, descriptions and preparation must be provided in English, French and Arabic.",
+    "details": "Menu, ingredients and preparation",
+    "servings": "Servings per priced unit",
+    "servingsHelp": "One priced unit provides this number of servings. The existing service pricing model determines the number of priced units.",
+    "assignedChef": "Assigned chef",
+    "chooseChef": "Choose the chef component",
+    "chefHelp": "Choose a person component from the reviewed financial recipe, then select the actual chef using its provider picker above.",
+    "chefUnavailable": "Chef source unavailable",
+    "ingredients": "Ingredients",
+    "ingredientNumber": "Ingredient {number}",
+    "ingredientKey": "Ingredient reference",
+    "ingredientQuantity": "Quantity per priced unit",
+    "unitKey": "Unit reference",
+    "addIngredient": "Add ingredient",
+    "removeIngredient": "Remove ingredient",
+    "preparationTitle": "Preparation",
+    "allergens": "Declared allergens",
+    "allergenHelp": "Record the allergens declared for this menu item. An empty list records that none were declared.",
+    "noAllergens": "No allergens declared",
+    "allergenNumber": "Allergen {number}",
+    "allergenKey": "Allergen reference",
+    "addAllergen": "Add allergen",
+    "removeAllergen": "Remove allergen",
+    "taskRecipe": "Original cooking instructions",
+    "readRecipe": "Read original recipe",
+    "refreshRecipe": "Refresh recipe",
+    "menuOnly": "Chef menu only",
+    "showAll": "All services",
+    "ingredientName": {
+      "en": "Ingredient name in English",
+      "fr": "Ingredient name in French",
+      "ar": "Ingredient name in Arabic"
+    },
+    "unitName": {
+      "en": "Unit name in English",
+      "fr": "Unit name in French",
+      "ar": "Unit name in Arabic"
+    },
+    "allergenName": {
+      "en": "Allergen name in English",
+      "fr": "Allergen name in French",
+      "ar": "Allergen name in Arabic"
+    },
+    "preparation": {
+      "en": "Preparation in English",
+      "fr": "Preparation in French",
+      "ar": "Preparation in Arabic"
+    },
+    "menuName": {
+      "en": "Menu name in English",
+      "fr": "Menu name in French",
+      "ar": "Menu name in Arabic"
+    },
+    "menuDescription": {
+      "en": "Menu description in English",
+      "fr": "Menu description in French",
+      "ar": "Menu description in Arabic"
+    }
   }
 }

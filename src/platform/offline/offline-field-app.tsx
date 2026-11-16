@@ -20,6 +20,7 @@ import { fieldQueue } from "./field-queue";
 import { type FieldQueueScope } from "./field-queue-store";
 import { resolveFieldScope } from "./field-session";
 import { FieldPhotoCapture } from "./field-photo-capture";
+import {ChefMenuRecipe} from "@/modules/services/ui/chef-menu-details";
 import { FieldIssueCapture } from "./field-issue-capture";
 import { FieldWallet } from "./field-wallet";
 import { FieldCash } from "./field-cash";
@@ -111,6 +112,9 @@ function OfflineWork({ locale, changeLocale }: { locale: AppLocale; changeLocale
     </>}
   </FieldShell></div>;
 }
+function CachedChefRecipe({ task, locale }: { task: FieldWorkSnapshot; locale: AppLocale }) {
+  return task.chefRecipe ? <section data-testid="field-chef-recipe"><h2 dir="auto">{localizedTaskTitle(task.chefRecipe.name, locale)}</h2><ChefMenuRecipe locale={locale} menu={task.chefRecipe.menu} /></section> : null;
+}
 function CachedProxy({ task, scope, locale }: { task: FieldWorkSnapshot; scope: FieldQueueScope; locale: AppLocale }) {
   const t = useTranslations("FieldProxy"), cache = useTranslations("FieldCache"), key = useRef<string | null>(null);
   const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -119,6 +123,7 @@ function CachedProxy({ task, scope, locale }: { task: FieldWorkSnapshot; scope: 
   return <><p>{task.propertyAddress}</p><dl className="field-proxy-identities" data-testid="field-proxy-identities">
     <dt>{t("performedBy")}</dt><dd>{task.proxyValidation.performerName ?? task.proxyValidation.performedByPersonId}</dd>
     <dt>{t("validatedBy")}</dt><dd>{t("you")}</dd></dl>
+    <CachedChefRecipe task={task} locale={locale} />
     <FieldProxyForm locale={locale} taskId={task.id} version={task.proxyValidation.expectedVersion} performerId={task.proxyValidation.performedByPersonId}
       organizationId={scope.organizationId} userId={scope.userId} idempotencyKey={idempotencyKey} cached
       checklist={task.checklistItems.map(item => ({ id: item.id, label: localizedTaskTitle(item.label, locale) }))} /></>;
@@ -131,6 +136,7 @@ function CachedChecklist({ task, scope, locale }: { task: FieldWorkSnapshot; sco
   return <>
     <p>{task.propertyAddress}</p><p>{cache("dueDate", { date: task.dueDate, timezone: task.propertyTimezone })}</p>
     {!task.canEdit ? <p role="status">{cache("readOnly")}</p> : null}
+    <CachedChefRecipe task={task} locale={locale} />
     <FieldTaskCompletionForm locale={locale} taskId={task.id} idempotencyKey={idempotencyKey} userId={scope.userId} organizationId={scope.organizationId}
       beforeComplete={<><FieldLinen scope={scope} taskId={task.id} locale={locale} />
         <FieldInventory scope={scope} taskId={task.id} locale={locale} />
