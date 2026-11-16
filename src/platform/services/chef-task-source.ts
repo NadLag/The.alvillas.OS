@@ -9,7 +9,9 @@ import {OperationRepository} from "@/modules/reservations/infrastructure/operati
 import {ServiceOrderRepository,type ChefRecipeRecord} from "@/modules/services/infrastructure/service-order-repository";
 import {ServiceOrderAccessError,ServiceOrderConflictError,ServiceOrderSourceUnavailableError} from "@/modules/services/domain/service-order";
 import {chefTaskResponseSchema} from "@/modules/services/domain/chef-menu-view";
-export function chefTaskRecipePayload(row:ChefRecipeRecord){return chefTaskResponseSchema.parse({taskId:row.taskId,orderId:row.orderId,propertyId:row.propertyId,name:row.name,description:row.description,quantity:Number(row.quantity),guests:row.guests,serviceDate:row.serviceDate,lastServiceDate:row.lastServiceDate,menu:row.menu});}
+import {servicePricedUnits} from "./priced-units";
+import {recipeQuantity,recipeQuantityString} from "./recipe-quantity";
+export function chefTaskRecipePayload(row:ChefRecipeRecord){const value=chefTaskResponseSchema.parse({taskId:row.taskId,orderId:row.orderId,propertyId:row.propertyId,name:row.name,description:row.description,quantity:Number(row.quantity),guests:row.guests,serviceDate:row.serviceDate,lastServiceDate:row.lastServiceDate,menu:row.menu}),units=servicePricedUnits(row.pricingModel,row.dimensions);return{...value,requirements:{servings:(units*BigInt(value.menu.serving_quantity)).toString(),ingredients:value.menu.ingredients.map(item=>({...item,quantity:recipeQuantityString(recipeQuantity(item.quantity,units))}))}};}
 
 /** Assigned work authority precedes a SQL projection of operational recipe
  * fields. Neither financial catalog access nor private guest data is needed. */

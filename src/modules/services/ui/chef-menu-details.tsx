@@ -1,17 +1,19 @@
 "use client";
+import type {z} from "zod";
+import type {chefTaskResponseSchema} from "@/platform/services/chef-menu-contracts";
 import {useState} from "react";
 import {useTranslations} from "next-intl";
-import Decimal from "decimal.js";
+
 import type {AppLocale} from "@/i18n/routing";
 import {localizedText} from "@/i18n/content";
-import {formatNumber} from "@/i18n/format";
+import {formatNumber,formatRecipeQuantity} from "@/i18n/format";
 import type {ServiceCatalogItem} from "../domain/service-catalog-view";
 import type {ChefMenuDefinition} from "@/platform/config/chef-menu-policy";
 type Recipe=Pick<ChefMenuDefinition,"serving_quantity"|"ingredients"|"preparation"|"allergens">;
 export function ChefMenuRecipe({locale,menu}:{locale:AppLocale;menu:Recipe}){
  const t=useTranslations("ChefMenu");
  return<><p>{t("servings")}{" · "}<span dir="auto">{formatNumber(locale,String(menu.serving_quantity))}</span></p><p className="muted-copy">{t("servingsHelp")}</p>
-  <h4>{t("ingredients")}</h4><ul className="service-catalog-list">{menu.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<span dir="auto">{formatNumber(locale,new Decimal(item.quantity),{maximumFractionDigits:6})}{" "}{localizedText(item.unit.name,locale)}</span></li>)}</ul>
+  <h4>{t("ingredients")}</h4><ul className="service-catalog-list">{menu.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<span dir="auto">{formatRecipeQuantity(locale,item.quantity)}{" "}{localizedText(item.unit.name,locale)}</span></li>)}</ul>
   <h4>{t("preparationTitle")}</h4><p className="preserve-lines" dir="auto">{localizedText(menu.preparation,locale)}</p>
   <h4>{t("allergens")}</h4>{menu.allergens.length?<ul>{menu.allergens.map(item=><li key={item.key} dir="auto">{localizedText(item.name,locale)}</li>)}</ul>:<p>{t("noAllergens")}</p>}
  </>;
@@ -24,3 +26,5 @@ export function ChefMenuDetails({locale,item,initiallyOpen=false}:{locale:AppLoc
   <ChefMenuRecipe locale={locale} menu={menu}/>
  </div>:null}</details>;
 }
+
+export function ChefOrderRequirements({locale,requirements}:{locale:AppLocale;requirements:z.infer<typeof chefTaskResponseSchema>["requirements"]}){const t=useTranslations("ChefShopping");if(!requirements)return null;return<section data-testid="chef-order-requirements"><h4>{t("requirements")}</h4><p>{t("servings",{count:formatRecipeQuantity(locale,requirements.servings)})}</p><ul className="service-catalog-list">{requirements.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<strong dir="auto">{formatRecipeQuantity(locale,item.quantity)}{" "}{localizedText(item.unit.name,locale)}</strong></li>)}</ul></section>;}

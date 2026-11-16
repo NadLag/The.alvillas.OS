@@ -7048,5 +7048,20 @@
       "fr": "Description du plat en français",
       "ar": "Description du plat en arabe"
     }
+  },
+  "ChefShopping": {
+    "title": "Liste de courses du chef",
+    "help": "Choisissez les dates de service. La liste comprend tous les besoins originaux de chaque commande active du chef visible sur cette période.",
+    "from": "Du jour de service",
+    "through": "Au jour de service",
+    "generate": "Générer la liste de courses",
+    "generated": "Générée le {time}",
+    "originals": "Les besoins utilisent la recette commandée et la quantité tarifée originales. Les unités et définitions différentes restent séparées. Le stock et les justificatifs suivent leurs propres opérations.",
+    "requirements": "Ingrédients nécessaires",
+    "sourceCount": "Commandes sources : {count}",
+    "empty": "Aucune commande active du chef sur cette période.",
+    "orders": "Commandes originales",
+    "servings": "Portions : {count}",
+    "narrowWindow": "Choisissez une période plus courte pour recevoir la liste complète."
   }
 }

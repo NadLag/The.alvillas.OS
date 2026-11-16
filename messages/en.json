@@ -7048,5 +7048,20 @@
       "fr": "Menu description in French",
       "ar": "Menu description in Arabic"
     }
+  },
+  "ChefShopping": {
+    "title": "Chef shopping list",
+    "help": "Select the service dates. This list includes the complete original requirements of every visible active Chef order overlapping these dates.",
+    "from": "From service date",
+    "through": "Through service date",
+    "generate": "Generate shopping list",
+    "generated": "Generated at {time}",
+    "originals": "Requirements use the original ordered recipe and priced quantity. Different units or ingredient definitions remain separate. Stock on hand and purchase receipts are recorded in their own workflows.",
+    "requirements": "Required ingredients",
+    "sourceCount": "Source orders: {count}",
+    "empty": "No active Chef orders in this period.",
+    "orders": "Original orders",
+    "servings": "Servings: {count}",
+    "narrowWindow": "Select a shorter period to keep the complete list within its delivery limit."
   }
 }
