@@ -46,6 +46,7 @@ import { fieldDevicePolicyKey, fieldDevicePolicySchema } from "./field-device-po
 import { fieldUploadLifecycleKey, fieldUploadLifecycleSchema } from "./field-upload-lifecycle-policy";
 import { configSlugSchema } from "./identifiers";
 import {servicePricingSchema} from "./service-catalog-policy";
+import {serviceOrderPolicyKey,serviceOrderPolicySchema} from "./service-order-policy";
 export {servicePricingSchema} from "./service-catalog-policy";
 import {workflowCatalogSchema} from "./workflow-policy";
 import { inventoryMinimumsSchema } from "./inventory-policy";
@@ -402,6 +403,7 @@ export const configRuleSchemas = {
   "ops.recurring_tasks": recurringTasksSchema,
   "ops.checklists": checklistCatalogSchema,
   "services.pricing": servicePricingSchema,
+  [serviceOrderPolicyKey]:serviceOrderPolicySchema,
   "finance.tax": taxRuleSchema,
   "ops.operating_rules": operatingRulesSchema,
   "ops.mid_stay_threshold": midStayThresholdSchema,

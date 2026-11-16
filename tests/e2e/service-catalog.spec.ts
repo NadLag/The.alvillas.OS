@@ -18,7 +18,7 @@ import ar from "../../messages/ar.json" with {type:"json"};
 
 const messages={en,fr,ar};
 for(const locale of["en","fr","ar"]as const)test("Actual reviewed property service catalog retains private financial authority in "+locale,async({page},info)=>{
- test.setTimeout(600000);const target=new URL(process.env.DATABASE_URL??"invalid:");if(process.env.VERCEL||process.env.VERCEL_ENV||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname==="/alvillas_automation_service_catalog260_20261115"||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated260 native catalog browser database required");
+ test.setTimeout(600000);const target=new URL(process.env.DATABASE_URL??"invalid:");if(process.env.VERCEL||process.env.VERCEL_ENV||!["127.0.0.1","localhost"].includes(target.hostname)||!(["/alvillas_automation_service_catalog260_20261115","/alvillas_automation_service_orders261_20261115"].includes(target.pathname)||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Owned migrated260 native catalog browser database required");
  const db=new PrismaClient(),email=e2eEmail("native-service-catalog-"+locale+"-"+randomUUID(),info.project.name),password=process.env.ADMIN_PASSWORD??"correct horse battery staple",m=messages[locale].ServiceCatalog,errors:string[]=[];page.on("pageerror",error=>errors.push(error.name));page.setDefaultTimeout(30000);if(info.project.name==="field-mobile")await page.setViewportSize({width:360,height:800});
  try{
   const reply=await nativeServiceReplies(page,"catalog");

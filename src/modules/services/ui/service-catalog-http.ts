@@ -9,7 +9,7 @@ import {PropertyConfigurationAuthorizationError} from "@/platform/config/propert
 import {ServiceCatalogAccessError,ServiceCatalogConflictError,ServiceCatalogConfigurationError,ServiceCatalogValidationError} from "../domain/service-catalog";
 
 export const serviceCatalogPrivateHeaders={"Cache-Control":"private, no-store","Referrer-Policy":"no-referrer",Vary:"Cookie, Origin"};
-export async function serviceCatalogHttp(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>){
+export async function serviceCatalogHttp(request:NextRequest,work:(actor:AccountActorContext,input:unknown,requestId:string)=>Promise<unknown>,classify?:(error:unknown)=>{error:string;status:number}|null){
  const requestId=crypto.randomUUID(),failure=(error:string,status:number)=>NextResponse.json({error},{status,headers:serviceCatalogPrivateHeaders});
  try{
   const actor=await accountActorContextFromSession(await auth());if(!actor)return failure("unauthorized",401);
@@ -17,6 +17,7 @@ export async function serviceCatalogHttp(request:NextRequest,work:(actor:Account
   if(request.nextUrl.search)return failure("validation",400);let input:unknown;try{input=await readBoundedJsonRequest(request,262144);}catch{return failure("validation",400);}
   return NextResponse.json(await work(actor,input,requestId),{headers:serviceCatalogPrivateHeaders});
  }catch(error){
+  const specific=classify?.(error);if(specific)return failure(specific.error,specific.status);
   if(error instanceof ServiceCatalogAccessError||error instanceof PropertyConfigurationAuthorizationError)return failure("forbidden",403);
   if(error instanceof ServiceCatalogConflictError)return failure("conflict",409);
   if(error instanceof ZodError||error instanceof ServiceCatalogValidationError)return failure("validation",400);
