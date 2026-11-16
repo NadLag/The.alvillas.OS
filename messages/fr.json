@@ -2739,7 +2739,8 @@
     "kinds": {
       "TRANSFER": "Transfert",
       "ADVANCE": "Avance au personnel",
-      "RETURN": "Retour d’avance"
+      "RETURN": "Retour d’avance",
+      "CUSTODY_HANDOVER": "Remise des espèces en garde"
     },
     "amount": "Montant",
     "currency": "Devise",
@@ -2767,7 +2768,9 @@
     "closed": "La période comptable est clôturée. Un administrateur autorisé doit la rouvrir avant la comptabilisation.",
     "error": "Le transfert n’a pas pu être effectué. Les informations saisies restent disponibles pour réessayer.",
     "loading": "Chargement des transferts…",
-    "retry": "Réessayer"
+    "retry": "Réessayer",
+    "custodyAvailable": "Espèces restantes pour ce reçu : {amount} {currency}. Enregistrez uniquement le montant réellement remis.",
+    "recover": "Retrouver le résultat de la remise"
   },
   "OwnerLedger": {
     "eyebrow": "Finances propriétaire",
@@ -4270,7 +4273,8 @@
     "paymentReversed": "Paiement contrepassé ; mouvement d’origine conservé.",
     "noPayments": "Aucun paiement enregistré.",
     "reviewAgain": "Vérifier une nouvelle décision de répartition",
-    "cancelReview": "Revenir à la répartition validée"
+    "cancelReview": "Revenir à la répartition validée",
+    "cashHandover": "Enregistrer la remise réelle des espèces"
   },
   "GuestDeposits": {
     "provenanceTitle": "Détails du paiement initial",
@@ -7162,5 +7166,18 @@
     "historical": "Dépense originale conservée",
     "open": "Ouvrir la dépense, le justificatif et le remboursement",
     "next": "Dépenses suivantes"
+  },
+  "Transfers": {
+    "title": "Prise en charge du transfert",
+    "pickup": "Lieu de prise en charge",
+    "destination": "Destination",
+    "pickupTime": "Heure de prise en charge",
+    "guests": "Passagers",
+    "flightReference": "Référence du vol",
+    "instructions": "Consignes de prise en charge",
+    "timeHelp": "Utilisez la date et l’heure locale de la propriété. Demandez chaque retour dans un autre transfert.",
+    "cashHelp": "Enregistrez uniquement l’argent réellement reçu dans le formulaire de caisse de la tâche assignée. La garde des fonds, la répartition et la rémunération du chauffeur restent distinctes.",
+    "service": "Service de transfert",
+    "serviceHelp": "La confirmation crée la tâche Transfert native. Affectez son chauffeur et son horaire dans Opérations ; les espèces utilisent le registre de garde existant."
   }
 }

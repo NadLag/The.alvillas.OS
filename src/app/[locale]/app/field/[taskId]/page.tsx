@@ -1,3 +1,4 @@
+import {TransferTask} from "@/modules/services/ui/transfer-task";
 import {GroceryTask} from "@/modules/services/ui/grocery-task";
 import { OperationEvidencePanel } from "@/modules/reservations/ui/operation-evidence-panel";
 import { FieldPwa } from "@/platform/offline/field-pwa";
@@ -79,7 +80,7 @@ export default async function FieldTaskPage({
       />
 
       <FieldLanguage locale={appLocale} path={`/app/field/${task.id}`} />
-      <GroceryTask locale={appLocale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/><FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} />
+      <TransferTask locale={appLocale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/><GroceryTask locale={appLocale} taskId={task.id} scope={`${ctx.organizationId}.${ctx.actorId}`}/><FieldPwa organizationId={ctx.organizationId} userId={ctx.actorId} />
       <FieldTaskCompletionForm
         checklistItems={task.checklistItems.map((item) => ({
           id: item.id,
