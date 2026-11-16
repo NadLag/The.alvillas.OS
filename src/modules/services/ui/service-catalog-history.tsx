@@ -1,0 +1,21 @@
+"use client";
+import {useCallback,useEffect,useRef,useState} from "react";
+import {useTranslations} from "next-intl";
+import type {z} from "zod";
+import type {AppLocale} from "@/i18n/routing";
+import {localizedText} from "@/i18n/content";
+import {formatCurrencyAmount,formatDateTime} from "@/i18n/format";
+import {SkeletonBlock} from "@/design-system/shells";
+import {serviceCatalogHistoryResponseSchema,serviceCatalogVersionResponseSchema} from "../domain/service-catalog-view";
+import {serviceCatalogRequest,ServiceCatalogBrowserError,type ServiceCatalogBrowserState} from "./service-catalog-browser";
+import {ServiceCatalogTerms} from "./service-catalog-terms";
+
+export function ServiceCatalogHistory({locale,timezone,propertyId,authorizationScope,onDenied}:{locale:AppLocale;timezone:string;propertyId:string;authorizationScope:string;onDenied:()=>void}){
+ const t=useTranslations("ServiceCatalog"),[page,setPage]=useState<z.infer<typeof serviceCatalogHistoryResponseSchema>|null>(null),[version,setVersion]=useState<z.infer<typeof serviceCatalogVersionResponseSchema>|null>(null),[state,setState]=useState<ServiceCatalogBrowserState>("loading"),controller=useRef<AbortController|null>(null),epoch=useRef(0);
+ const load=useCallback(async(input:{afterVersion?:number;ruleId?:string;after?:string}={})=>{controller.current?.abort();const own=++epoch.current,abort=new AbortController();controller.current=abort;setPage(null);setVersion(null);setState("loading");try{
+  const value=await serviceCatalogRequest(input.ruleId?"version":"history",{scope:{propertyId},...input},abort.signal,authorizationScope);if(abort.signal.aborted||own!==epoch.current)return;if(input.ruleId){const parsed=serviceCatalogVersionResponseSchema.parse(value);if(parsed.rule.id!==input.ruleId)throw new ServiceCatalogBrowserError("uncertain");setVersion(parsed);}else setPage(serviceCatalogHistoryResponseSchema.parse(value));setState("ready");
+ }catch(error){if(abort.signal.aborted||own!==epoch.current)return;setPage(null);setVersion(null);const next=error instanceof ServiceCatalogBrowserError?error.state:"unavailable";setState(next);if(next==="forbidden")onDenied();}},[propertyId,authorizationScope,onDenied]);
+ const cancel=useCallback(()=>{controller.current?.abort();epoch.current++;},[]);
+ useEffect(()=>{let mounted=true;queueMicrotask(()=>{if(mounted)void load();});return()=>{mounted=false;cancel();};},[load,cancel]);
+ return<section className="detail-panel" data-testid="service-catalog-history"><h2>{t("history")}</h2>{state==="loading"?<SkeletonBlock/>:state!=="ready"?<div role="alert"><p>{t("states."+state)}</p><button type="button" className="secondary-button" onClick={()=>void load()}>{t("retry")}</button></div>:version?<><h3>{t("version",{version:version.rule.version})}</h3><ul className="service-catalog-list">{version.items.map(item=><li key={item.key}><h4>{item.name?localizedText(item.name,locale):item.key}</h4><p className="money" dir="auto">{item.amount&&item.currency?formatCurrencyAmount(locale,item.amount,item.currency):t("quoteRequired")}</p>{item.orderTerms?<p>{t("fields.cost")} · {formatCurrencyAmount(locale,item.orderTerms.internal_cost.amount,item.orderTerms.internal_cost.currency)}</p>:null}<p>{t(item.available===true?"available":"unavailable")}</p><ServiceCatalogTerms locale={locale} item={item}/></li>)}</ul><div className="form-actions">{version.next?<button className="secondary-button" type="button" onClick={()=>void load({ruleId:version.rule.id,after:version.next!})}>{t("nextPage")}</button>:null}<button className="quiet-button" type="button" onClick={()=>void load()}>{t("history")}</button></div></>:page?.items.length?<><ul className="service-catalog-list">{page.items.map(item=><li key={item.id}><h3>{t("version",{version:item.version})}</h3><p>{formatDateTime(locale,new Date(item.createdAt),{timeZone:timezone})}</p><p>{item.reason}</p><button type="button" className="secondary-button" onClick={()=>void load({ruleId:item.id})}>{t("viewVersion")}</button></li>)}</ul><div className="form-actions">{page.nextVersion?<button className="secondary-button" type="button" onClick={()=>void load({afterVersion:page.nextVersion!})}>{t("nextPage")}</button>:null}<button className="quiet-button" type="button" onClick={()=>void load()}>{t("firstPage")}</button></div></>:<p>{t("emptyHistory")}</p>}</section>;
+}
