@@ -119,6 +119,7 @@ describe("config rule registry", () => {
       "ops.task_policy",
       "ops.workflows",
       "reservation.sync_policy",
+      "services.ordering",
       "services.pricing",
       "staff.compensation",
       "staff.compensation_hourly_earnings",
