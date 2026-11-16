@@ -1,4 +1,6 @@
 import {randomUUID} from "node:crypto";
+import {inspectNativeServiceOrderFinancialIdentity} from "@/platform/services/order-financial-source";
+import {ServiceAllocationAccessError,ServiceAllocationSourceUnavailableError} from "@/modules/finance/domain/service-allocation";
 import {execFileSync} from "node:child_process";
 import {PrismaClient} from "@prisma/client";
 import {afterAll,beforeAll,describe,expect,it,vi} from "vitest";
@@ -28,6 +30,17 @@ const confirmDraft=(orderId:string,expectedVersion=1)=>({orderId,expectedVersion
 const financial=(f:Fixture)=>withTenant(db,f.organizationId,tx=>tx.$queryRaw`SELECT 'transaction' AS kind,id::text,xmin::text,ctid::text,to_jsonb(t) AS body FROM financial_transaction t WHERE organization_id=${f.organizationId}::uuid UNION ALL SELECT 'posting',id::text,xmin::text,ctid::text,to_jsonb(p) FROM posting p WHERE organization_id=${f.organizationId}::uuid ORDER BY kind,id`);
 
 describe("native service order quotes and actual fulfillment",()=>{
+ it("binds native financial identity to the actual order task and invalidates the binding after canonical cancellation",async()=>{
+  const f=await nativeServiceOrderFixture(admin,db),created=await request(f),before=await financial(f);await transitionServiceOrder(f.ctx,await transition(f,confirmDraft(created.orderId)),f.deps);
+  const root=await withTenant(db,f.organizationId,tx=>tx.serviceOrder.findUniqueOrThrow({where:{id:created.orderId}})),selection={taskId:root.taskId!,propertyId:f.property.id,reservationId:f.reservation.id};
+  await withTenant(db,f.organizationId,async tx=>{const source=await inspectNativeServiceOrderFinancialIdentity(f.ctx,tx,selection);expect(source).toMatchObject({orderId:root.id,serviceKey:f.entry.key,taskId:root.taskId});await source!.recheck();await expect(inspectNativeServiceOrderFinancialIdentity(f.ctx,tx,{...selection,propertyId:randomUUID()})).rejects.toBeInstanceOf(ServiceAllocationSourceUnavailableError);expect(await inspectNativeServiceOrderFinancialIdentity(f.ctx,tx,{...selection,taskId:randomUUID()})).toBeNull();});
+  await withTenant(db,f.organizationId,async tx=>{const source=await inspectNativeServiceOrderFinancialIdentity(f.ctx,tx,selection);const cancelled={orderId:root.id,expectedVersion:2,state:"CANCELLED",reason:"Cancel the actual unperformed order before financial recognition"},deps={...f.deps,db:{$transaction:<T>(work:(inner:typeof tx)=>Promise<T>)=>work(tx)}};await transitionServiceOrder(f.ctx,{...cancelled,reviewFingerprint:(await previewServiceOrderTransition(f.ctx,cancelled,deps)).reviewFingerprint,idempotencyKey:randomUUID()},deps);await expect(source!.recheck()).rejects.toBeInstanceOf(ServiceAllocationSourceUnavailableError);});expect(await financial(f)).toEqual(before);
+ });
+ it("retains held restrictions and repeats current independent order authority before native financial source use",async()=>{
+  const f=await nativeServiceOrderFixture(admin,db),created=await request(f);await transitionServiceOrder(f.ctx,await transition(f,confirmDraft(created.orderId)),f.deps);const root=await withTenant(db,f.organizationId,tx=>tx.serviceOrder.findUniqueOrThrow({where:{id:created.orderId}})),selection={taskId:root.taskId!,propertyId:f.property.id,reservationId:f.reservation.id},held={...f.ctx,authContext:{...f.ctx.authContext,permissions:new Set<string>(),assignments:[],scopes:[]}};
+  const financialOnly={...f.ctx,authContext:{...f.ctx.authContext,permissions:new Set(["service_order:view"]),assignments:f.ctx.authContext.assignments?.filter(row=>row.permissions.has("service_order:view")).map(row=>({...row,permissions:new Set(["service_order:view"])}))}};
+  await withTenant(db,f.organizationId,async tx=>{await expect(inspectNativeServiceOrderFinancialIdentity(held,tx,selection)).rejects.toBeInstanceOf(ServiceAllocationAccessError);expect(await inspectNativeServiceOrderFinancialIdentity(financialOnly,tx,selection)).toMatchObject({orderId:root.id});const source=await inspectNativeServiceOrderFinancialIdentity(f.ctx,tx,selection);await tx.roleAssignment.update({where:{id:f.grants["service_order:view"]},data:{archivedAt:new Date()}});await expect(source!.recheck()).rejects.toBeInstanceOf(ServiceAllocationAccessError);});
+ });
  it("confirms once with one canonical task and its real reviewed checklist in the same transaction",async()=>{
   const f=await nativeServiceOrderFixture(admin,db),order=await request(f),before=await financial(f),input=await transition(f,confirmDraft(order.orderId));
   const results=await Promise.all([transitionServiceOrder(f.ctx,input,f.deps),transitionServiceOrder(f.ctx,input,f.deps)]);expect(results.map(row=>row.replayed).sort()).toEqual([false,true]);

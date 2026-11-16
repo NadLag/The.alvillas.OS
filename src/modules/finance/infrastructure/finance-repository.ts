@@ -122,6 +122,7 @@ export class FinanceRepository {
     private readonly organizationId: string
   ) {}
   serviceOrderActiveCollectionHead(taskId:string){return this.tx.cashCollection.findFirst({where:{organizationId:this.organizationId,taskId,transaction:{reversedByTransactions:{none:{sealed:true}}}},select:{id:true,transactionId:true}});}
+  serviceOrderFinancialSourceHeads(taskId:string,after?:string){return this.tx.serviceFinancialSource.findMany({where:{organizationId:this.organizationId,collection:{organizationId:this.organizationId,taskId},...after?{id:{gt:after}}:{}},select:{id:true,cashCollectionId:true,completionEventId:true},orderBy:{id:"asc"},take:21});}
 
   async lockPaymentAccount(key: string): Promise<Date> {
     await this.tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${this.organizationId + ":payment-account:" + key},0))::text`);

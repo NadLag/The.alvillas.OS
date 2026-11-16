@@ -187,3 +187,4 @@ prisma/migrations/20261115150000_guest_agreement_tenant_policy_names/migration.s
 prisma/migrations/20261115210000_native_service_order_lifecycle/migration.sql text eol=lf
 prisma/migrations/20261115220000_service_order_native_fulfillment/migration.sql text eol=lf
 prisma/migrations/20261115230000_native_service_order_tenant_policy_names/migration.sql text eol=lf
+/prisma/migrations/20261115233000_native_service_order_financial_sources/migration.sql text eol=lf

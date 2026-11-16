@@ -2,6 +2,7 @@ import {randomUUID} from "node:crypto";
 import {prisma} from "@/platform/db/client";
 import {withTenant,type TenantTransactionRunner,type TenantTransaction} from "@/platform/db/tenant";
 import {serviceAllocationAuthorityChecks} from "@/platform/authz/service-allocation-resource";
+import {inspectNativeServiceOrderFinancialIdentity} from "@/platform/services/order-financial-source";
 import {serviceAllocationCommandSchema,serviceAllocationCommandSuccessSchema,serviceAllocationCommandResultSchema,serviceAllocationCommandRecoverySchema} from "../domain/service-allocation-command";
 import {ServiceAllocationAccessError,ServiceAllocationSourceChangedError,ServiceAllocationSourceUnavailableError,ServiceAllocationConfigurationError} from "../domain/service-allocation";
 import {AccountingPeriodClosedError} from "../domain/accounting-period";
@@ -17,7 +18,7 @@ type Deps={db?:TenantTransactionRunner;requestId?:string};
 /** A receipt is read only after all independent current private-source grants have been repeated. */
 export async function recheckServiceAllocationRead(ctx:FinanceActorContext,tx:TenantTransaction,sourceId:string){
  const root=await new ServiceAllocationRepository(tx,ctx.organizationId).source(sourceId);if(!root)throw new ServiceAllocationAccessError();
- await recheckFinanceAuthorization(ctx,tx,await new FinanceRepository(tx,ctx.organizationId).clock(),serviceAllocationAuthorityChecks({type:"service_allocation",organizationId:ctx.organizationId,id:root.id,financialRecordId:root.id,propertyId:root.collection.propertyId,reservationId:root.collection.reservationId,jobId:root.collection.taskId,city:root.collection.property.cityId,region:root.collection.property.regionId,dataClass:"financial",amount:root.collection.amount.toFixed(2),occurredAt:root.collection.recordedAt}),new ServiceAllocationAccessError());return root;
+ await recheckFinanceAuthorization(ctx,tx,await new FinanceRepository(tx,ctx.organizationId).clock(),serviceAllocationAuthorityChecks({type:"service_allocation",organizationId:ctx.organizationId,id:root.id,financialRecordId:root.id,propertyId:root.collection.propertyId,reservationId:root.collection.reservationId,jobId:root.collection.taskId,city:root.collection.property.cityId,region:root.collection.property.regionId,dataClass:"financial",amount:root.collection.amount.toFixed(2),occurredAt:root.collection.recordedAt}),new ServiceAllocationAccessError());const order=await inspectNativeServiceOrderFinancialIdentity(ctx,tx,root.collection,"history");await order?.recheck();return root;
 }
 
 /** Execution uses the existing atomic native acknowledgements, without a second command ledger. */
@@ -33,7 +34,7 @@ export async function recoverServiceAllocationCommand(ctx:FinanceActorContext,ra
   const repository=new ServiceAllocationRepository(tx,ctx.organizationId);await repository.lockRequest(input.key);
   const posting=await new ServiceAllocationPostingRepository(tx,ctx.organizationId).byNonce(input.key),admission=posting?null:await repository.admissionByNonce(input.key),binding=posting||admission?null:await repository.bindingByNonce(input.key),row=posting??admission??binding;
   if(!row){await recheckFinanceAuthorization(ctx,tx,await new FinanceRepository(tx,ctx.organizationId).clock(),serviceAllocationAuthorityChecks({type:"service_allocation",organizationId:ctx.organizationId,dataClass:"financial"}),new ServiceAllocationAccessError());return{request:null};}
-  if(row.createdBy!==ctx.actorId)throw new ServiceAllocationAccessError();await recheckServiceAllocationRead(ctx,tx,row.sourceId);
+  if(row.createdBy!==ctx.actorId)throw new ServiceAllocationAccessError();const source=await recheckServiceAllocationRead(ctx,tx,row.sourceId);if(input.taskId&&source.collection.taskId!==input.taskId)throw new ServiceAllocationAccessError();
   const request=serviceAllocationCommandSuccessSchema.parse({requestId:input.key,idempotencyKey:input.key,operation:posting?(posting.kind==="RECOGNITION"?"RECOGNIZE":"REVERSE"):admission?"ADMIT":"BIND",state:"SUCCEEDED",failureCode:null,sourceId:row.sourceId,resultId:row.id,version:row.version,idempotent:true});await recheckServiceAllocationRead(ctx,tx,row.sourceId);return{request};
  },{timeout:120000});
 }

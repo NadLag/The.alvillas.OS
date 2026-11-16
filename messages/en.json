@@ -6967,6 +6967,24 @@
       "validation": "Check the selected service, dates, quantities and required fields.",
       "unavailable": "Order details are temporarily unavailable.",
       "storage_unavailable": "The recovery nonce could not be saved. The command was not sent."
+    },
+    "financial": {
+      "title": "Recognized service amounts",
+      "description": "These amounts come from completed services and recorded financial decisions. Quotes and estimated costs are shown separately in the original terms.",
+      "open": "Read recognized amounts",
+      "close": "Close recognized amounts",
+      "pageTotals": "Amounts on this page",
+      "gross": "Collected service amount",
+      "companyRevenue": "ALVILLAS service revenue",
+      "providerCost": "Recognized supplier and staff costs",
+      "ownerAmount": "Owner allocation",
+      "taxAmount": "Tax allocation",
+      "margin": "Recognized margin",
+      "noRecognition": "No active financial recognition is recorded on this page.",
+      "recognized": "Financial recognition recorded",
+      "awaitingRecognition": "Awaiting financial recognition",
+      "manage": "Open financial workspace",
+      "closeWorkspace": "Close financial workspace"
     }
   }
 }

@@ -6,9 +6,10 @@ import {previewServiceOrder,createServiceOrder,recoverServiceOrderCommand,readSe
 import {previewServiceOrderTransition,transitionServiceOrder} from "@/modules/services/application/service-order-transition";
 import {serviceOrderPage,readServiceOrderOriginal,serviceOrderHistory,serviceOrderHistoryOriginal,serviceOrderReservationChoices,serviceOrderCatalogChoices,serviceOrderTaskChoices} from "@/modules/services/application/service-order-workspace";
 import {ServiceOrderValidationError} from "@/modules/services/domain/service-order";
+import {serviceOrderFinancialPage} from "@/modules/services/application/service-order-financial";
 
 export const runtime="nodejs";
-const operations={review:previewServiceOrder,create:createServiceOrder,recover:recoverServiceOrderCommand,page:serviceOrderPage,original:readServiceOrderOriginal,history:serviceOrderHistory,version:serviceOrderHistoryOriginal,reservations:serviceOrderReservationChoices,catalog:serviceOrderCatalogChoices,tasks:serviceOrderTaskChoices,reviewTransition:previewServiceOrderTransition,transition:transitionServiceOrder};
+const operations={review:previewServiceOrder,create:createServiceOrder,recover:recoverServiceOrderCommand,page:serviceOrderPage,original:readServiceOrderOriginal,history:serviceOrderHistory,version:serviceOrderHistoryOriginal,reservations:serviceOrderReservationChoices,catalog:serviceOrderCatalogChoices,tasks:serviceOrderTaskChoices,financial:serviceOrderFinancialPage,reviewTransition:previewServiceOrderTransition,transition:transitionServiceOrder};
 export async function POST(request:NextRequest,{params}:{params:Promise<{operation:string}>}){
  const{operation}=await params;return serviceOrderHttp(request,(actor,input,requestId)=>{
   const deps={db:prisma,requestId,ipAddress:null};if(operation==="metadata")return readServiceOrderMetadata(actor,z.object({orderId:z.uuid()}).strict().parse(input).orderId,deps);
