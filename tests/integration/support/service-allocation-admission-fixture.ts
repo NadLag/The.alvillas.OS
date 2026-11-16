@@ -13,6 +13,7 @@ import {recognizeEmployeeCompensation} from "@/modules/finance/application/emplo
 import {actualServiceFixture} from "./service-allocation-fixture";
 import type {PrismaClient} from "@prisma/client";
 import {expect} from "vitest";
+import type {FinanceActorContext} from "@/modules/finance/application/finance-access";
 const policy={source:"COMPLETED_SERVICE_COLLECTION",rule_selection:"AT_ACTUAL_SERVICE_COMPLETION",ownership_basis:"CURRENT_PROPERTY_OWNERS_AT_ADMISSION",services:[{service_key:"actual_service",currency:"MAD",basis:"COLLECTED_GROSS_LESS_FIXED_COMPONENTS",rounding:"LARGEST_REMAINDER",provider_treatment:"REVENUE_WITH_EXISTING_COMPANY_COST",components:[{key:"owner",beneficiary:"OWNER",mode:"BASIS_POINTS",basis_points:5000},{key:"company",beneficiary:"COMPANY",mode:"REMAINDER"}],rounding_priority:["owner","company"],tax_rule_keys:["approved_tax"]}]};
 
 export function serviceAllocationFixtures(getDb:()=>PrismaClient,getAdmin:()=>PrismaClient){
@@ -24,8 +25,8 @@ async function fixture(){
   const rules=new ConfigRuleRepository(tx,f.org);await rules.createVersion({key:"finance.service_allocation",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:f.account.id,value:policy,reason:"Actual owner approved service allocation treatment"});await rules.createVersion({key:"finance.tax",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:f.account.id,value:{taxes:[{key:"approved_tax",currency:"MAD",amount:"0.00",service_assessment:{basis:"ACTUAL_COLLECTED_GROSS",method:"FIXED",rounding:"HALF_UP_AT_LEDGER_PRECISION"}}]},reason:"Actual explicit approved zero service tax decision"});
  });return{...f,ctx:{...f.ctx,authContext:{...await authContextForAccount(f.org,f.account.id,{db}),personId:f.person.id}},reviewInput:{...f.input,serviceKey:"actual_service",providers:[]}};
 }
-type Fixture=Pick<Awaited<ReturnType<typeof fixture>>,"org"|"account"|"role"|"person"|"ctx"|"input">;
-async function supplierProvider(f:Fixture,recognized=true,options:{amount?:string;supplier?:Awaited<ReturnType<typeof createSupplier>>}={}){
+type Fixture<OrganizationId extends string>={org:OrganizationId;account:{id:string};role:{id:string};person:{id:string};ctx:FinanceActorContext&{organizationId:OrganizationId;personId:string};input:{collectionId:string;completionEventId:string}};
+async function supplierProvider<OrganizationId extends string>(f:Fixture<OrganizationId>,recognized=true,options:{amount?:string;supplier?:Awaited<ReturnType<typeof createSupplier>>}={}){
  const db=getDb(),amount=options.amount??"0.03";
  await withTenant(db,f.org,async tx=>{
   const keys=["supplier:create","supplier:edit","supplier_invoice:create","supplier_invoice:edit","supplier_invoice:pay","supplier_invoice:approve","supplier_invoice:reject","supplier_invoice:void","financial_transaction:configure","financial_transaction:override"],permissions=await tx.permission.findMany({where:{key:{in:keys}}});expect(permissions).toHaveLength(keys.length);await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:f.role.id,permissionId:permission.id}))});
@@ -37,7 +38,7 @@ async function supplierProvider(f:Fixture,recognized=true,options:{amount?:strin
  return{ctx,supplier,invoice,costId:draft.lines[0].id,command:{...f.input,sourceKind:"SUPPLIER_INVOICE_LINE"as const,costId:draft.lines[0].id,operation:"ATTACH"as const,expectedVersion:0,idempotencyKey:randomUUID(),reason:"Bind the actual recognized original service provider"}};
 }
 
-async function employeeProvider(f:Fixture,amount="0.03"){
+async function employeeProvider<OrganizationId extends string>(f:Fixture<OrganizationId>,amount="0.03"){
  const db=getDb();
  const person=await withTenant(db,f.org,async tx=>{
   const keys=["role:assign","staff_compensation:create","employee_payable:create","employee_payable:edit","employee_payable:pay","expense:view","expense:approve","expense:reject"],permissions=await tx.permission.findMany({where:{key:{in:keys}}});expect(permissions).toHaveLength(keys.length);await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.org,roleId:f.role.id,permissionId:permission.id}))});
