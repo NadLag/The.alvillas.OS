@@ -190,3 +190,13 @@ prisma/migrations/20261115230000_native_service_order_tenant_policy_names/migrat
 /prisma/migrations/20261115233000_native_service_order_financial_sources/migration.sql text eol=lf
 /prisma/migrations/20261116120000_native_chef_menu_work_bindings/migration.sql text eol=lf
 /prisma/migrations/20261116123000_native_chef_cost_party_bindings/migration.sql text eol=lf
+/prisma/migrations/20261116160000_native_grocery_order_receipts/migration.sql text eol=lf
+/prisma/migrations/20261116170000_native_expense_purchase_funding/migration.sql text eol=lf
+/prisma/migrations/20261116173000_native_purchase_payable_admission/migration.sql text eol=lf
+/prisma/migrations/20261116180000_native_grocery_purchase_evidence/migration.sql text eol=lf
+/prisma/migrations/20261116183000_native_purchase_settlement_reference/migration.sql text eol=lf
+/prisma/migrations/20261116190000_native_purchase_settlement_source/migration.sql text eol=lf
+/prisma/migrations/20261116193000_native_purchase_settlement_source_namespace/migration.sql text eol=lf
+/prisma/migrations/20261116200000_native_purchase_settlement_alias/migration.sql text eol=lf
+/prisma/migrations/20261116203000_native_purchase_original_receipt_admission/migration.sql text eol=lf
+/prisma/migrations/20261116210000_native_purchase_receipt_family_admission/migration.sql text eol=lf

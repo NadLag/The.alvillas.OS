@@ -1,4 +1,7 @@
 import { z } from "zod";
+import {ExpensePurchaseRepository} from "../infrastructure/expense-purchase-repository";
+import {EmployeePayableRepository} from "../infrastructure/employee-payable-repository";
+import {inspectExpensePurchase} from "./expense-purchase-access";
 import { authorize, type Action, type Resource } from "@/platform/authz/authorize";
 import { authContextForAccountInTransaction } from "@/platform/authz/account-context";
 import { prisma } from "@/platform/db/client";
@@ -38,6 +41,8 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const sourceOccurredAt=externalOccurredAt??await periods.sourceInstant(row.occurredOn,timezone.success?timezone.data.timezone:row.property.timezone);
     if(externalOccurredAt&&input.currentPeriod)throw new ExpenseConflictError();
     const target=expenseResource(ctx.organizationId,row.property,{...row,amount:row.amount.toString(),occurredAt:sourceOccurredAt});
+    const purchase=await new ExpensePurchaseRepository(tx,ctx.organizationId).find(row.id);
+    if(purchase?.fundingKind==="PERSONAL")await new EmployeePayableRepository(tx,ctx.organizationId).lockKey(purchase.rootExpenseId);
     const finance=new FinanceRepository(tx,ctx.organizationId);let funding=await finance.findLedgerAccountById(row.fundingAccountId);
     if(!funding)throw new ExpenseConfigurationError("Expense funding account is unavailable");
     if(funding.teamWallet){
@@ -65,6 +70,8 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
       ...(wallet?[{action:"view" as const,resource:wallet},{action:"pay" as const,resource:wallet}]:[]),
       ...(input.currentPeriod?[{action:"override" as const,resource:{...target,type:"financial_transaction" as const}}]:[]),...correctionChecks
     ];
+    const recheckPurchase=async()=>{if(purchase)await inspectExpensePurchase(ctx,tx,{...purchase,propertyId:row.propertyId,reservationId:row.reservationId,fundingAccountId:row.fundingAccountId,amount:row.amount.toString()},target,"create",Boolean(row.transactionId||row.correctsExpenseId));};
+    await recheckPurchase();
     await recheckFinanceAuthorization(ctx,tx,clock.now,checks,new ExpenseAccessError());
     if(row.correctsExpenseId&&!input.currentPeriod&&!refundSource)throw new ExpenseConflictError();
     if(row.transactionId){
@@ -74,7 +81,7 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
         after.data.postingDateMode!==(input.currentPeriod?"CURRENT_OPEN_PERIOD":"SOURCE_DATE")||Boolean(row.periodAdjustment||row.correctsExpenseId&&!refundSource)!==input.currentPeriod)throw new ExpenseConflictError();
       return{id:row.id,version:row.version,transactionId:row.transactionId,idempotent:true,...(row.periodAdjustment?{accountingPeriodAdjustmentId:row.periodAdjustment.id}:{})};
     }
-    if(!isExpenseFundingAccount(funding))throw new ExpenseConfigurationError("Expense funding account is unavailable");
+    if(!(purchase?.fundingKind==="PERSONAL"?funding.code==="EMPLOYEE_PAYABLE"&&funding.accountType==="CLAIM_OWNERSHIP"&&funding.normalSide==="CREDIT"&&!funding.archivedAt:isExpenseFundingAccount(funding)))throw new ExpenseConfigurationError("Expense funding account is unavailable");
     if(row.state!=="APPROVED"||row.version!==input.expectedVersion||!row.submission||
       row.approval&&row.approval.state!=="APPROVED"||row.approval?.financialStages.some(stage=>stage.state!=="APPROVED"))throw new ExpenseConflictError();
     const frozen=snapshotSchema.safeParse(row.submission.snapshot);if(!frozen.success)throw new ExpenseConfigurationError("Submitted expense allocation is unavailable");
@@ -103,12 +110,12 @@ export async function postExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const ownerAccount=await account("OWNER_PAYABLE","Owner payable","CLAIM_OWNERSHIP","CREDIT",allocation.ownerAmount.amount.gt(0));
     const companyAccount=await account("ALVILLAS_EXPENSE","ALVILLAS expense","ALVILLAS_OWN","DEBIT",allocation.alvillasAmount.amount.gt(0));
     const guestAccount=await account("GUEST_RECEIVABLE","Guest receivable","CLAIM_OWNERSHIP","DEBIT",allocation.guestAmount.amount.gt(0));
-    const dimensions={expense_id:row.id,property_id:row.propertyId,...(row.reservationId?{reservation_id:row.reservationId}:{}),category:row.category,source:"EXPENSE"};
+    const dimensions={expense_id:row.id,property_id:row.propertyId,...(row.reservationId?{reservation_id:row.reservationId}:{}),category:row.category,source:"EXPENSE",...(purchase?{purchase_supplier_id:purchase.supplierId,purchase_person_id:purchase.purchaserId,purchase_receipt_version_id:purchase.receiptVersionId,purchase_funding_kind:purchase.fundingKind}:{}),...(purchase?.fundingKind==="PERSONAL"?{employee_person_id:purchase.purchaserId,employee_expense_claim_id:purchase.rootExpenseId}:{})};
     const postings=expensePostings({amount,allocation,owners:frozen.data.policies,ownerAmounts:frozen.data.policies.map(policy=>({ownerId:policy.ownerId,amount:money(policy.allocation.owner)})),
       ownerAccounts:new Map(frozen.data.policies.map(policy=>[policy.ownerId,ownerAccount])),companyExpenseAccountId:companyAccount,guestReceivableAccountId:guestAccount,fundingAccountId:funding.id,dimensions});
     const journal=await finance.createFinancialTransaction({reference:`EXPENSE:${row.id}`,description:row.purpose,occurredAt:postingTarget.occurredAt,
       idempotencyKey:`expense:${row.id}:posted`,createdBy:ctx.actorId,postings,
-      recheckAuthorization: at => recheckFinanceAuthorization(ctx,tx,at,checks,new ExpenseAccessError()) });
+      recheckAuthorization: async at => {await recheckPurchase();await recheckFinanceAuthorization(ctx,tx,at,checks,new ExpenseAccessError());} });
     const adjustment=sourcePeriod?await new AccountingPeriodAdjustmentRepository(tx,ctx.organizationId).create({expenseId:row.id,transactionId:journal.id,
       periodId:sourcePeriod.id,periodEventId:sourcePeriod.events[0].id,sourceOccurredAt,createdBy:ctx.actorId,reason:input.reason}):null;
     if((await expenses.transition(row.id,row.version,"APPROVED","POSTED",ctx.actorId,journal.id)).count!==1)throw new ExpenseConflictError();
@@ -149,6 +156,9 @@ export async function voidExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
     const walletChecks:ReadonlyArray<{action:Action;resource:Resource}>=wallet?[{action:"view",resource:wallet},{action:"void",resource:wallet}]:[];
     if(!authorize(auth,"view",target,clock.now)||!authorize(auth,"void",target,clock.now)||
       !authorize(auth,"void",financialTarget,clock.now)||walletChecks.some(({action,resource})=>[auth,ctx.authContext].some(authority=>!authorize(authority,action,resource,clock.now))))throw new ExpenseAccessError();
+    const purchase=await new ExpensePurchaseRepository(tx,ctx.organizationId).find(row.id);
+    const payable=new EmployeePayableRepository(tx,ctx.organizationId);if(purchase?.fundingKind==="PERSONAL")await payable.lockKey(purchase.rootExpenseId);
+    const recheckPurchase=async()=>{if(purchase)await inspectExpensePurchase(ctx,tx,{...purchase,propertyId:row.propertyId,reservationId:row.reservationId,fundingAccountId:row.fundingAccountId,amount:row.amount.toString()},target,"void",true);};await recheckPurchase();
     const finance=new FinanceRepository(tx,ctx.organizationId),journals=await finance.findTransactionsByIdempotencyKeys([`expense:${row.id}:posted`,`expense:${row.id}:voided`]);
     const original=journals.find(journal=>journal.id===row.transactionId),reversal=journals.find(journal=>journal.reversesTransactionId===row.transactionId);
     if(!original)throw new ExpenseConflictError();
@@ -158,15 +168,16 @@ export async function voidExpense(ctx:FinanceActorContext,raw:unknown,deps:Deps=
       return{id:row.id,version:row.version,transactionId:original.id,reversalTransactionId:reversal.id,idempotent:true};
     }
     if(row.state!=="POSTED"||row.version!==input.expectedVersion||original.reversedByTransactions.length)throw new ExpenseConflictError();
+    if(purchase?.fundingKind==="PERSONAL"&&!(await payable.outstanding({claimId:purchase.rootExpenseId,personId:purchase.purchaserId,currency:row.currency,claimKind:"EXPENSE"})).amount.eq(row.amount.toString()))throw new ExpenseConflictError("Reverse expense settlements before correcting or voiding their source");
     const reverse=await finance.createFinancialTransaction({reference:`EXPENSE:${row.id}:VOID`,description:input.reason,occurredAt:refundSource?.occurredAt??clock.now,
       idempotencyKey:`expense:${row.id}:voided`,reversesTransactionId:original.id,createdBy:ctx.actorId,postings:original.postings.map(posting=>({
         ledgerAccountId:posting.ledgerAccountId,side:posting.side==="DEBIT"?"CREDIT" as const:"DEBIT" as const,
         amount:Money.of(posting.amount.toString(),posting.currency),bucket:z.string().parse(posting.bucket),dimensions:z.record(z.string(),z.unknown()).parse(posting.dimensions)
-      })), recheckAuthorization: at => recheckFinanceAuthorization(ctx, tx, at, [
+      })), recheckAuthorization: async at => {await recheckPurchase();await recheckFinanceAuthorization(ctx, tx, at, [
         { action: "view", resource: target }, { action: "void", resource: target },
         ...walletChecks,
         { action: "void", resource: { ...financialTarget, id: original.id, financialRecordId: original.id, occurredAt: original.occurredAt } }
-      ], new ExpenseAccessError()) });
+      ], new ExpenseAccessError());} });
     if((await expenses.transition(row.id,row.version,"POSTED","VOIDED",ctx.actorId)).count!==1)throw new ExpenseConflictError();
     await writeAuditEvent(tx,{organizationId:ctx.organizationId,actorId:ctx.actorId,action:"expense.voided",resourceType:"expense",resourceId:row.id,propertyScopeId:row.propertyId,
       before:{state:row.state,version:row.version},after:{state:"VOIDED",version:row.version+1,transactionId:original.id,reversalTransactionId:reverse.id},

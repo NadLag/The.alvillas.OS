@@ -183,13 +183,14 @@ export class AuditRepository {
     }
     return result;
   }
-  async expenseResources(ids: string[]): Promise<Map<string, Resource>> {
+  async expenseResources(ids: string[]): Promise<Map<string, FinancialAuditResource>> {
     if (!ids.length) return new Map();
     const rows = await this.tx.expense.findMany({ where: { organizationId: this.organizationId, id: { in: ids } },
       select: { id: true, propertyId: true, reservationId: true, amount: true, state: true, createdBy: true, occurredOn: true,
         externalPaymentRefundFeeCorrection: { select: { refundIntent: { select: { identity: { select: { observations: { where: { state: "COMPLETED" }, orderBy: [{ providerUpdatedAt: "asc" }, { id: "asc" }], take: 1, select: { refundedAt: true } } } } } } } },
         externalPaymentFee: { select: { capture: { select: { capturedAt: true } } } },
         property: { select: { city: true, cityId: true, region: true, regionId: true, timezone: true } } } });
-    return new Map(rows.map(row => [row.id, expenseResource(this.organizationId, { ...row.property, id: row.propertyId }, { ...row, amount: row.amount.toString() })]));
+    const purchases=await new FinancialTransactionResourceRepository(this.tx,this.organizationId).purchaseDisclosures(ids);
+    return new Map(rows.map(row => {const resource=expenseResource(this.organizationId,{...row.property,id:row.propertyId},{...row,amount:row.amount.toString()}),purchase=purchases.get(row.id);return[row.id,{...resource,...purchase?{personalExpenseSources:purchase}:{}}];}));
   }
 }

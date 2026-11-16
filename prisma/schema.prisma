@@ -624,6 +624,10 @@ model Organization {
   guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleaseOrganization")
   guestHubAgreementRequests GuestHubAgreementRequest[] @relation("GuestAgreementRequestOrganization")
   guestHubAgreementDocumentOrigins GuestHubAgreementDocumentOrigin[] @relation("GuestAgreementOriginOrganization")
+  groceryExpenseBindings GroceryExpenseBinding[]
+
+  expensePurchases ExpensePurchase[]
+
 }
 
 model Region {
@@ -832,6 +836,8 @@ model Person {
   @@index([organizationId, displayName], map: "person_org_display_name_idx")
   @@map("person")
   employeeEarningRequestWorks EmployeeEarningRequestWork[]
+  expensePurchases ExpensePurchase[]
+
 }
 
 model UserAccount {
@@ -975,6 +981,10 @@ model UserAccount {
   guestHubFormGrants GuestHubFormGrant[] @relation("GuestFormGrantActor")
   guestHubAgreementReleases GuestHubAgreementRelease[] @relation("GuestAgreementReleaseActor")
   guestHubAgreementDocumentOrigins GuestHubAgreementDocumentOrigin[] @relation("GuestAgreementOriginDelegator")
+  groceryExpenseBindings GroceryExpenseBinding[]
+
+  expensePurchases ExpensePurchase[]
+
 }
 
 model AuthCredential {
@@ -3373,6 +3383,11 @@ model Expense {
   @@index([organizationId, propertyId, state, occurredOn, id])
   @@index([organizationId, correctsExpenseId, createdAt, id])
   @@map("expense")
+  groceryExpenseBindings GroceryExpenseBinding[]
+
+  purchase ExpensePurchase? @relation("ExpensePurchaseSource")
+  purchaseFamily ExpensePurchase[] @relation("ExpensePurchaseRoot")
+
 }
 
 model RecurringExpenseOccurrence {
@@ -3489,6 +3504,8 @@ model Supplier {
   @@index([organizationId, archivedAt, id])
   @@index([organizationId, category, archivedAt, id])
   @@map("supplier")
+  expensePurchases ExpensePurchase[]
+
 }
 
 model SupplierInvoice {
@@ -4785,6 +4802,8 @@ model FinancialAttachment {
  @@unique([organizationId,storageKey])
  @@index([organizationId,transactionId,id])
  @@map("financial_attachment")
+  groceryExpenseBindings GroceryExpenseBinding[]
+
 }
 
 model GuestPaymentReceipt {
@@ -5105,6 +5124,8 @@ model Document {
   @@index([organizationId,onboardingRevisionId,id],map:"document_org_onboarding_review_idx")
   @@map("document")
  guestIdentityAdmission GuestHubIdentityDocumentAdmission?
+ expensePurchases ExpensePurchase[]
+
 }
 
 model DocumentAdmission {
@@ -5174,6 +5195,10 @@ model DocumentVersion {
   @@unique([organizationId,supersedesId],map:"document_version_successor_unique")
   @@map("document_version")
  guestIdentityPublication GuestHubIdentityDocumentPublication?
+  expensePurchases ExpensePurchase[]
+
+ groceryExpenseBindings GroceryExpenseBinding[]
+
 }
 
 model DocumentRetentionRevision {
@@ -6463,6 +6488,8 @@ model ServiceOrder {
  @@index([organizationId,reservationId,id],map:"service_order_reservation_page_idx")
  @@index([organizationId,state,id],map:"service_order_state_page_idx")
  @@map("service_order")
+  groceryExpenseBindings GroceryExpenseBinding[]
+
 }
 
 model ServiceOrderEvent {
@@ -6487,4 +6514,57 @@ model ServiceOrderEvent {
  @@unique([organizationId,orderId,version],map:"service_order_event_version_key")
  @@unique([organizationId,commandKey],map:"service_order_event_command_key")
  @@map("service_order_event")
+}
+
+model GroceryExpenseBinding {
+ id String @id @default(dbgenerated("app_uuid_v7()")) @db.Uuid
+ organizationId String @map("organization_id") @db.Uuid
+ orderId String @map("order_id") @db.Uuid
+ orderVersion Int @map("order_version")
+ expenseId String @map("expense_id") @db.Uuid
+ receiptId String? @map("receipt_id") @db.Uuid
+ commandKey String @map("command_key") @db.Uuid
+ commandHash String @map("command_hash") @db.Char(64)
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ reason String
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction,map:"grocery_expense_binding_org_fk")
+ order ServiceOrder @relation(fields:[organizationId,orderId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"grocery_expense_binding_order_fk")
+ expense Expense @relation(fields:[organizationId,expenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"grocery_expense_binding_expense_fk")
+ receipt FinancialAttachment? @relation(fields:[organizationId,receiptId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"grocery_expense_binding_receipt_fk")
+ actor UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"grocery_expense_binding_actor_fk")
+ @@unique([organizationId,id],map:"grocery_expense_binding_org_id_key")
+ @@unique([organizationId,expenseId],map:"grocery_expense_binding_expense_key")
+ @@unique([organizationId,commandKey],map:"grocery_expense_binding_command_key")
+ @@index([organizationId,orderId,id],map:"grocery_expense_binding_order_idx")
+ @@map("grocery_expense_binding")
+ receiptVersionId String? @map("receipt_version_id") @db.Uuid
+ documentReceipt DocumentVersion? @relation(fields:[organizationId,receiptVersionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"grocery_expense_binding_document_fk")
+}
+
+model ExpensePurchase {
+ organizationId String @map("organization_id") @db.Uuid
+ expenseId String @map("expense_id") @db.Uuid
+ rootExpenseId String @map("root_expense_id") @db.Uuid
+ fundingKind String @map("funding_kind")
+ purchaserId String @map("purchaser_id") @db.Uuid
+ supplierId String @map("supplier_id") @db.Uuid
+ receiptVersionId String @map("receipt_version_id") @db.Uuid
+ createdBy String @map("created_by") @db.Uuid
+ createdAt DateTime @map("created_at") @db.Timestamptz(6)
+ organization Organization @relation(fields:[organizationId],references:[id],onDelete:Restrict,onUpdate:NoAction)
+ expense Expense @relation("ExpensePurchaseSource",fields:[organizationId,expenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"expense_purchase_expense_fk")
+ root Expense @relation("ExpensePurchaseRoot",fields:[organizationId,rootExpenseId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"expense_purchase_root_fk")
+ purchaser Person @relation(fields:[organizationId,purchaserId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"expense_purchase_person_fk")
+ supplier Supplier @relation(fields:[organizationId,supplierId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"expense_purchase_supplier_fk")
+ receipt DocumentVersion @relation(fields:[organizationId,receiptVersionId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"expense_purchase_receipt_fk")
+ actor UserAccount @relation(fields:[organizationId,createdBy],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"expense_purchase_actor_fk")
+ @@id([organizationId,expenseId],map:"expense_purchase_pkey")
+ @@index([organizationId,rootExpenseId],map:"expense_purchase_root_idx")
+ @@map("expense_purchase")
+ receiptDocumentId String? @map("receipt_document_id") @db.Uuid
+ receiptSha256 String? @map("receipt_sha256") @db.Char(64)
+ originalDocument Document? @relation(fields:[organizationId,receiptDocumentId],references:[organizationId,id],onDelete:Restrict,onUpdate:NoAction,map:"expense_purchase_document_fk")
+ @@index([organizationId,receiptDocumentId],map:"expense_purchase_receipt_document_idx")
+ @@index([organizationId,receiptSha256],map:"expense_purchase_receipt_sha_idx")
 }

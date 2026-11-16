@@ -2,6 +2,7 @@ import {z} from "zod";
 import {ruleConditionSchema,type Condition,type Operand} from "@/platform/automation/rule";
 import {configSlugSchema} from "./identifiers";
 import {localizedTextSchema} from "@/i18n/content";
+import {groceryOrderTermsSchema} from "./grocery-order-policy";
 import {chefMenuSchema,chefMenuTextSchema} from "./chef-menu-policy";
 
 export const serviceCatalogRuleKey="services.pricing";
@@ -49,8 +50,9 @@ export const serviceCatalogOrderTermsSchema=z.object({
  allocation_rule_id:z.uuid(),
  tax_rule_id:z.uuid(),
  availability:serviceCatalogAvailabilitySchema,
- chef_menu:chefMenuSchema.optional()
+ chef_menu:chefMenuSchema.optional(),grocery_order:groceryOrderTermsSchema.optional()
 }).strict().superRefine((value,context)=>{
+ if(value.chef_menu&&value.grocery_order)context.addIssue({code:"custom",message:"one_service_fulfillment_kind_required"});
  if(value.chef_menu&&!value.providers.some(provider=>provider.component_key===value.chef_menu!.chef_component_key&&provider.kind==="PERSON"))context.addIssue({code:"custom",path:["chef_menu","chef_component_key"],message:"chef_menu_actual_person_provider_required"});
 });
 

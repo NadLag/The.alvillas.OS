@@ -20,6 +20,7 @@ import { fieldQueue } from "./field-queue";
 import { type FieldQueueScope } from "./field-queue-store";
 import { resolveFieldScope } from "./field-session";
 import { FieldPhotoCapture } from "./field-photo-capture";
+import {GroceryItems} from "@/modules/services/ui/grocery-items";
 import {ChefMenuRecipe,ChefOrderRequirements} from "@/modules/services/ui/chef-menu-details";
 import { FieldIssueCapture } from "./field-issue-capture";
 import { FieldWallet } from "./field-wallet";
@@ -123,7 +124,7 @@ function CachedProxy({ task, scope, locale }: { task: FieldWorkSnapshot; scope: 
   return <><p>{task.propertyAddress}</p><dl className="field-proxy-identities" data-testid="field-proxy-identities">
     <dt>{t("performedBy")}</dt><dd>{task.proxyValidation.performerName ?? task.proxyValidation.performedByPersonId}</dd>
     <dt>{t("validatedBy")}</dt><dd>{t("you")}</dd></dl>
-    <CachedChefRecipe task={task} locale={locale} />
+    <CachedChefRecipe task={task} locale={locale} />{task.groceryRequest?<GroceryItems locale={locale} items={task.groceryRequest.items}/>:null}
     <FieldProxyForm locale={locale} taskId={task.id} version={task.proxyValidation.expectedVersion} performerId={task.proxyValidation.performedByPersonId}
       organizationId={scope.organizationId} userId={scope.userId} idempotencyKey={idempotencyKey} cached
       checklist={task.checklistItems.map(item => ({ id: item.id, label: localizedTaskTitle(item.label, locale) }))} /></>;
@@ -136,7 +137,7 @@ function CachedChecklist({ task, scope, locale }: { task: FieldWorkSnapshot; sco
   return <>
     <p>{task.propertyAddress}</p><p>{cache("dueDate", { date: task.dueDate, timezone: task.propertyTimezone })}</p>
     {!task.canEdit ? <p role="status">{cache("readOnly")}</p> : null}
-    <CachedChefRecipe task={task} locale={locale} />
+    <CachedChefRecipe task={task} locale={locale} />{task.groceryRequest?<GroceryItems locale={locale} items={task.groceryRequest.items}/>:null}
     <FieldTaskCompletionForm locale={locale} taskId={task.id} idempotencyKey={idempotencyKey} userId={scope.userId} organizationId={scope.organizationId}
       beforeComplete={<><FieldLinen scope={scope} taskId={task.id} locale={locale} />
         <FieldInventory scope={scope} taskId={task.id} locale={locale} />

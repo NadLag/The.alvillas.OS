@@ -17,6 +17,7 @@ import { fieldStockSnapshots } from "@/platform/inventory/field-stock-snapshot";
 import type { FieldLinenSnapshot } from "@/platform/inventory/field-stocktake";
 import { fieldCashSnapshots } from "@/platform/ledger/field-cash-snapshot";
 import type { FieldCashSnapshot } from "@/platform/ledger/field-cash";
+import {fieldGrocerySnapshots} from "@/platform/services/field-grocery-snapshot";
 import {fieldChefSnapshots} from "@/platform/services/field-chef-snapshot";
 
 type Deps = { db?: TenantTransactionRunner; now?: Date; env?: NodeJS.ProcessEnv };
@@ -43,6 +44,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
     const devicePolicies = new Map<string, ResolvedConfigRule | null>();
     let stockSnapshots = new Map<string, { linen: FieldLinenSnapshot; inventory: FieldLinenSnapshot }>();
     let cashSnapshots = new Map<string, FieldCashSnapshot>();
+    let grocery:Awaited<ReturnType<typeof fieldGrocerySnapshots>>|null=null;
     let chef:Awaited<ReturnType<typeof fieldChefSnapshots>>|null=null;
     const businessDate = (zone: string) => {
       const existing = days.get(zone); if (existing) return existing;
@@ -65,14 +67,14 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
       };
       const linen = input.include_linen ? stock("linen") : undefined, inventory = input.include_inventory ? stock("inventory") : undefined;
       const cash = input.include_cash ? cashSnapshots.get(row.id) : undefined;
-      const chefRecipe=input.include_chef_menu?chef?.items.get(row.id):undefined;
+      const chefRecipe=input.include_chef_menu?chef?.items.get(row.id):undefined,groceryRequest=input.include_grocery_orders?grocery?.items.get(row.id):undefined;
       const revision = createHash("sha256").update(JSON.stringify({ task: row.updatedAt.toISOString(),
         property: row.property.updatedAt.toISOString(), reservation: row.reservation?.updatedAt.toISOString() ?? null,
         scope: frame.scope, date, canGuest, canEdit,
         proxy: input.mode === "supervised" ? { version: row.version, performedBy: row.assignedToPersonId,
           person: canPerformer ? row.assignedToPerson?.updatedAt.toISOString() : null } : null,
-        devicePolicy, linen, inventory, canReportIssue, cash,chefRecipe })).digest("base64url");
-      return { task, canGuest, canEdit, canPerformer, date, revision, devicePolicy, linen, inventory, canReportIssue, cash,chefRecipe };
+        devicePolicy, linen, inventory, canReportIssue, cash,chefRecipe,groceryRequest })).digest("base64url");
+      return { task, canGuest, canEdit, canPerformer, date, revision, devicePolicy, linen, inventory, canReportIssue, cash,chefRecipe,groceryRequest };
     };
     const allowed = (row: FieldPullMetadata) => authorize(ctx.authContext, "view", resource(ctx, row, now), now) &&
       (input.mode !== "supervised" || (row.assignedToPersonId !== null && row.assignedToPersonId !== ctx.personId &&
@@ -83,6 +85,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
     const knownRows = input.known_tasks.length ? await repo.known(ctx.actorId, ctx.authContext, now, [...known.keys()], input.mode) : [];
     const dataRows = page.filter(row => allowed(row) && (input.mode !== "today" || row.dueDate.toISOString().slice(0, 10) <= businessDate(row.property.timezone)));
     const eligibleKnown = knownRows.filter(allowed);
+    if(input.include_grocery_orders)grocery=await fieldGrocerySnapshots(tx,ctx,[...new Map([...dataRows,...eligibleKnown].map(row=>[row.id,resource(ctx,row,now)])).values()],input.mode);
     if(input.include_chef_menu)chef=await fieldChefSnapshots(tx,ctx,[...new Map([...dataRows,...eligibleKnown].map(row=>[row.id,resource(ctx,row,now)])).values()],input.mode);
     if (input.include_cash && input.mode !== "supervised") {
       cashSnapshots = await fieldCashSnapshots(tx, ctx, [...new Map([...dataRows, ...eligibleKnown].map(row => [row.id, row])).values()].map(row => ({
@@ -119,6 +122,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
         ...(input.include_linen ? { linen: view.linen } : {}),
         ...(input.include_inventory ? { inventory: view.inventory } : {}),
         ...(input.include_cash ? { cash: view.cash } : {}),
+        ...(view.groceryRequest?{groceryRequest:view.groceryRequest}:{}),
         ...(view.chefRecipe?{chefRecipe:view.chefRecipe}:{}),
         ...(input.mode === "supervised" ? { proxyValidation: { performedByPersonId: row.assignedToPersonId!, expectedVersion: row.version,
           ...present({ ...ctx.authContext, visibleDataClasses: new Set() }, "view", { ...view.task, data: { performerName: row.assignedToPerson!.displayName } },
@@ -127,7 +131,7 @@ export async function pullFieldWork(ctx: ReservationActorContext, raw: FieldPull
         { ...view.task, data }, { guestName: { dataClass: "guest", mask: "omit", requiredPermission: view.canGuest ? "guest:view" : undefined } }, now));
     }
     for (const row of records) if (allowed(row)) snapshots.set(row.id, snapshot(row));
-    await chef?.recheck();
+    await chef?.recheck();await grocery?.recheck();
     const currentKnown = new Set(eligibleKnown.map(row => row.id)), changedKnownIds = new Set(changedKnown.map(row => row.id));
     const last = page.at(-1);
     const cursor = encodeFieldPullCursor({ ...frame, kind: hasMore ? "page" : "checkpoint",

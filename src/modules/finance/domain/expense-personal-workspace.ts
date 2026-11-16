@@ -1,0 +1,3 @@
+import {z} from "zod";
+const money=z.object({amount:z.string().regex(/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/u),currency:z.string().regex(/^[A-Z]{3}$/u)}).strict();
+export const expensePersonalWorkspaceSchema=z.object({expenseId:z.uuid(),outstanding:money,canPay:z.boolean(),wallet:z.object({ledgerAccountId:z.uuid(),name:z.string(),available:money,canOffset:z.boolean()}).strict().nullable(),payments:z.array(z.object({id:z.uuid(),kind:z.enum(["PAYMENT","WALLET_OFFSET"]),amount:money,paidAt:z.iso.datetime(),fundingName:z.string(),voided:z.boolean(),canVoid:z.boolean()}).strict()).max(20),next:z.uuid().nullable(),recovery:z.object({paymentId:z.uuid().nullable()}).strict().nullable()}).strict();

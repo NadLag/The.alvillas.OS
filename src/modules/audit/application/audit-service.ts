@@ -190,6 +190,7 @@ export function presentAuditHistoryRow(
     const allowed = Boolean(financialResource && financialResource.type === expectedType &&
       (!requiresSourceId || financialResource.id === row.resourceId) && permissionResource && authorize(ctx.authContext, action, permissionResource) &&
         (!financialResource.companyFinancialSources||financialResource.companyFinancialSources.every(source=>source.organizationId===ctx.organizationId&&source.type==="financial_transaction"&&authorizeOrganizationSource(ctx.authContext,"view",source,new Date())))&&
+        (!financialResource.personalExpenseSources||financialResource.personalExpenseSources.length>0&&financialResource.personalExpenseSources.every(source=>source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source)))&&
         (!financialResource.walletSources||financialResource.walletSources.every(source=>source.type==="wallet"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source)))&&
         (!financialResource.salarySources||Boolean(financialResource.compensationRoot?.type==="employee_payable"&&financialResource.compensationRoot.organizationId===ctx.organizationId&&authorize(ctx.authContext,action,financialResource.compensationRoot)&&
         financialResource.salarySources.length&&financialResource.salarySources.every(source=>source.type==="staff_compensation"&&source.organizationId===ctx.organizationId&&authorize(ctx.authContext,"view",source))&&

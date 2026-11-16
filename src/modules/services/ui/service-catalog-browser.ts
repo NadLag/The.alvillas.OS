@@ -9,7 +9,7 @@ export async function serviceCatalogRequest(operation:"review"|"publish"|"recove
  try{return await privateServiceRequest("catalog",operation,input,signal,scope);}catch(error){if(error instanceof ServicePrivateBrowserError)throw new ServiceCatalogBrowserError(error.state==="source_unavailable"?"configuration_unavailable":error.state);throw error;}
 }
 export async function privateServiceRequest(namespace:"catalog"|"orders",operation:string,input:unknown,signal:AbortSignal,scope:string):Promise<unknown>{
- const mutation=operation==="publish"||operation==="create"||operation==="transition";
+ const mutation=operation==="publish"||operation==="create"||operation==="transition"||operation==="groceryBind";
  try{
   const response=await fetch("/api/services/"+namespace+"/"+operation,{method:"POST",credentials:"same-origin",cache:"no-store",redirect:"error",signal,headers:{"content-type":"application/json","x-alvillas-service-scope":scope},body:JSON.stringify(input)});
   if(response.status===401||response.status===403){await response.body?.cancel().catch(()=>undefined);throw new ServicePrivateBrowserError("forbidden");}

@@ -13,7 +13,7 @@ import { EmployeeCompensationRecognitionSourceError } from "../domain/employee-c
 import { AccountingPeriodClosedError } from "../domain/accounting-period";
 import { PaymentAccountChoiceAccessError } from "../domain/payment-account-choices";
 import { PaymentMethodAccessError, PaymentMethodConfigurationError, PaymentMethodChangedError, PaymentMethodSourceError } from "../domain/payment-method";
-import { ExpenseAccessError } from "../application/expense-service";
+import { ExpenseAccessError,ExpenseConflictError,ExpenseConfigurationError } from "../application/expense-service";
 import { EmployeeWorkTimeAccessError,EmployeeWorkTimeConflictError,EmployeeWorkTimePolicyError,EmployeeWorkTimeSourceError } from "../domain/employee-work-time";
 import {ReceivableAccessError,ReceivablePolicyError} from "../domain/receivable";
 import {ReceivableAssignmentSourceError,ReceivableAssignmentConflictError} from "../domain/receivable-assignment";
@@ -125,7 +125,8 @@ export async function compensationHttp<T extends Promise<unknown>>(request:NextR
     if(error instanceof EmployeeCompensationSourceUnavailableError||error instanceof EmployeeCompensationClaimSourceError||error instanceof EmployeeCompensationRecognitionSourceError)return failure("source_unavailable",409);
     if(error instanceof AccountingPeriodClosedError)return failure("period_closed",409);
     if(error instanceof EmployeeCompensationRunPolicyError||error instanceof ExpensePolicyUnavailableError)return failure("configuration_unavailable",409);
-    if(error instanceof EmployeeCompensationRunConflictError)return failure("conflict",409);
+    if(error instanceof EmployeeCompensationRunConflictError||error instanceof ExpenseConflictError)return failure("conflict",409);
+    if(error instanceof ExpenseConfigurationError)return failure("configuration_unavailable",409);
     try{await captureException(error,{source:"api",requestId,tags:{feature:options.feature}});}catch{/* Preserve the private response if telemetry delivery fails. */}
     return failure("unavailable",503);
   }
