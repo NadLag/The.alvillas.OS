@@ -10,12 +10,12 @@ import {formatNumber,formatRecipeQuantity} from "@/i18n/format";
 import type {ServiceCatalogItem} from "../domain/service-catalog-view";
 import type {ChefMenuDefinition} from "@/platform/config/chef-menu-policy";
 type Recipe=Pick<ChefMenuDefinition,"serving_quantity"|"ingredients"|"preparation"|"allergens">;
-export function ChefMenuRecipe({locale,menu}:{locale:AppLocale;menu:Recipe}){
- const t=useTranslations("ChefMenu");
+export function ChefMenuRecipe({locale,menu,headingLevel=3}:{locale:AppLocale;menu:Recipe;headingLevel?:3|4}){
+ const t=useTranslations("ChefMenu"),Heading=headingLevel===3?"h3":"h4";
  return<><p>{t("servings")}{" · "}<span dir="auto">{formatNumber(locale,String(menu.serving_quantity))}</span></p><p className="muted-copy">{t("servingsHelp")}</p>
-  <h4>{t("ingredients")}</h4><ul className="service-catalog-list">{menu.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<span dir="auto">{formatRecipeQuantity(locale,item.quantity)}{" "}{localizedText(item.unit.name,locale)}</span></li>)}</ul>
-  <h4>{t("preparationTitle")}</h4><p className="preserve-lines" dir="auto">{localizedText(menu.preparation,locale)}</p>
-  <h4>{t("allergens")}</h4>{menu.allergens.length?<ul>{menu.allergens.map(item=><li key={item.key} dir="auto">{localizedText(item.name,locale)}</li>)}</ul>:<p>{t("noAllergens")}</p>}
+  <Heading>{t("ingredients")}</Heading><ul className="service-catalog-list">{menu.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<span dir="auto">{formatRecipeQuantity(locale,item.quantity)}{" "}{localizedText(item.unit.name,locale)}</span></li>)}</ul>
+  <Heading>{t("preparationTitle")}</Heading><p className="preserve-lines" dir="auto">{localizedText(menu.preparation,locale)}</p>
+  <Heading>{t("allergens")}</Heading>{menu.allergens.length?<ul>{menu.allergens.map(item=><li key={item.key} dir="auto">{localizedText(item.name,locale)}</li>)}</ul>:<p>{t("noAllergens")}</p>}
  </>;
 }
 export function ChefMenuDetails({locale,item,initiallyOpen=false}:{locale:AppLocale;item:ServiceCatalogItem;initiallyOpen?:boolean}){
@@ -27,4 +27,4 @@ export function ChefMenuDetails({locale,item,initiallyOpen=false}:{locale:AppLoc
  </div>:null}</details>;
 }
 
-export function ChefOrderRequirements({locale,requirements}:{locale:AppLocale;requirements:z.infer<typeof chefTaskResponseSchema>["requirements"]}){const t=useTranslations("ChefShopping");if(!requirements)return null;return<section data-testid="chef-order-requirements"><h4>{t("requirements")}</h4><p>{t("servings",{count:formatRecipeQuantity(locale,requirements.servings)})}</p><ul className="service-catalog-list">{requirements.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<strong dir="auto">{formatRecipeQuantity(locale,item.quantity)}{" "}{localizedText(item.unit.name,locale)}</strong></li>)}</ul></section>;}
+export function ChefOrderRequirements({locale,requirements,headingLevel=3}:{locale:AppLocale;requirements:z.infer<typeof chefTaskResponseSchema>["requirements"];headingLevel?:3|4}){const t=useTranslations("ChefShopping"),Heading=headingLevel===3?"h3":"h4";if(!requirements)return null;return<section data-testid="chef-order-requirements"><Heading>{t("requirements")}</Heading><p>{t("servings",{count:formatRecipeQuantity(locale,requirements.servings)})}</p><ul className="service-catalog-list">{requirements.ingredients.map(item=><li key={item.key}><span dir="auto">{localizedText(item.name,locale)}</span>{" · "}<strong dir="auto">{formatRecipeQuantity(locale,item.quantity)}{" "}{localizedText(item.unit.name,locale)}</strong></li>)}</ul></section>;}
