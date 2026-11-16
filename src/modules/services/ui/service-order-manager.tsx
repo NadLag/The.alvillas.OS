@@ -30,7 +30,7 @@ export function ServiceOrderManager({locale,timezone,propertyId,authorizationSco
   let mounted=true;document.addEventListener("visibilitychange",visibility);window.addEventListener("pagehide",hide);window.addEventListener("pageshow",pageShow);window.addEventListener("offline",offline);window.addEventListener("online",show);queueMicrotask(()=>{if(mounted){if(document.hidden)hide();else void load();}});
   return()=>{mounted=false;invalidate();document.removeEventListener("visibilitychange",visibility);window.removeEventListener("pagehide",hide);window.removeEventListener("pageshow",pageShow);window.removeEventListener("offline",offline);window.removeEventListener("online",show);};
  },[invalidate,load]);
- if(!visible)return<p role="status">{t(state==="offline"?"states.offline":"privateHidden")}</p>;
+ if(!visible)return<p role="status" data-testid="service-order-private-status">{t(state==="offline"?"states.offline":"privateHidden")}</p>;
  return<div className="service-catalog" data-testid="service-order-manager">
   <div className="form-actions"><button type="button" className="quiet-button" onClick={()=>void load(filter)}>{t("refresh")}</button>{state==="ready"&&!editor&&!selected?<button type="button" className="primary-button" onClick={()=>{setNotice(null);setEditor(true);}}>{t("add")}</button>:null}</div>
   {notice?<p role="status">{t(notice)}</p>:null}

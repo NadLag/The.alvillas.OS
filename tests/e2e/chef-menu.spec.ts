@@ -40,6 +40,7 @@ for(const locale of["en","fr","ar"]as const)test("Canonical chef menu authoring 
    await native.context.addCookies(await page.context().cookies());
    await native.page.goto("/"+locale+"/app/field/validate/"+f.taskId);
    await expect.poll(async()=>z.array(z.object({task:fieldWorkSnapshotSchema})).parse(await storedFieldData(native.page,"proxyJobs")).find(row=>row.task.id===f.taskId)?.task.chefRecipe?.menu.preparation).toEqual(f.menu.preparation);
+   await expect.poll(()=>native.page.evaluate(()=>Boolean(navigator.serviceWorker.controller))).toBe(true);
    await native.context.setOffline(true); await native.page.reload();
    await expect(native.page).toHaveURL(new RegExp("/"+locale+"/offline/field\\?view=supervised&task="+f.taskId+"$","u"));
    const cached=native.page.getByTestId("field-chef-recipe");
