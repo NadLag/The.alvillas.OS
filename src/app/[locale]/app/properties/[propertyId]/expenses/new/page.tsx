@@ -17,7 +17,7 @@ export default async function NewExpensePage({ params, searchParams }: { params:
   const actor = await financeActorContextFromSession(await auth()); if (!actor) redirect(`/${locale}/login`);
   const { fundingAccountId,groceryOrder } = await searchParams;
   let groceryOrderId:string|undefined;
-  if(groceryOrder){const id=z.uuid().safeParse(groceryOrder);if(!id.success)notFound();const source=await readServiceOrderOriginal(actor,{orderId:id.data});if(source.order.propertyId!==input.propertyId||!source.catalog.orderTerms?.grocery_order)notFound();groceryOrderId=id.data;}
+  if(groceryOrder){const id=z.uuid().safeParse(groceryOrder);if(!id.success)notFound();const source=await readServiceOrderOriginal(actor,{orderId:id.data},{requestId:crypto.randomUUID()});if(source.order.propertyId!==input.propertyId||!source.catalog.orderTerms?.grocery_order)notFound();groceryOrderId=id.data;}
   const t = await getTranslations("Expenses"),recurring=await getTranslations("RecurringExpenses"); let editor;
   try { editor = await getExpenseEditor(actor, input.propertyId, {}, fundingAccountId); }
   catch (error) { if (error instanceof ExpenseAccessError || error instanceof Error && error.name === "ZodError") notFound(); throw error; }
