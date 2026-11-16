@@ -7063,5 +7063,16 @@
     "orders": "Original orders",
     "servings": "Servings: {count}",
     "narrowWindow": "Select a shorter period to keep the complete list within its delivery limit."
+  },
+  "ChefCompensation": {
+    "title": "Chef compensation rules",
+    "help": "Open the contracts of the chef selected in this original order. Operational work and financial access are authorized separately.",
+    "read": "Read chef contract access",
+    "refresh": "Refresh chef contract access",
+    "rules": "Use the existing staff contracts to configure per job, per hour, monthly or percentage compensation with an effective date. Each change retains its original history.",
+    "configure": "Configure this chef’s contracts",
+    "contracts": "View this chef’s contracts",
+    "payables": "Review compensation runs and payables",
+    "earned": "A contract estimate does not create earned pay. Completed work, approved actual time, eligible monthly coverage or original percentage sources must pass the existing compensation and financial checks."
   }
 }

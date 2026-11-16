@@ -7,11 +7,12 @@ import {previewServiceOrderTransition,transitionServiceOrder} from "@/modules/se
 import {serviceOrderPage,readServiceOrderOriginal,serviceOrderHistory,serviceOrderHistoryOriginal,serviceOrderReservationChoices,serviceOrderCatalogChoices,serviceOrderTaskChoices} from "@/modules/services/application/service-order-workspace";
 import {ServiceOrderValidationError} from "@/modules/services/domain/service-order";
 import {serviceOrderFinancialPage} from "@/modules/services/application/service-order-financial";
+import {readChefCompensationContext} from "@/modules/services/application/chef-compensation-service";
 import {readChefShoppingList} from "@/modules/services/application/chef-shopping-service";
 import {readChefTaskRecipe} from "@/modules/services/application/chef-menu-service";
 
 export const runtime="nodejs";
-const operations={chefShopping:readChefShoppingList,chefTask:readChefTaskRecipe,review:previewServiceOrder,create:createServiceOrder,recover:recoverServiceOrderCommand,page:serviceOrderPage,original:readServiceOrderOriginal,history:serviceOrderHistory,version:serviceOrderHistoryOriginal,reservations:serviceOrderReservationChoices,catalog:serviceOrderCatalogChoices,tasks:serviceOrderTaskChoices,financial:serviceOrderFinancialPage,reviewTransition:previewServiceOrderTransition,transition:transitionServiceOrder};
+const operations={chefCompensation:readChefCompensationContext,chefShopping:readChefShoppingList,chefTask:readChefTaskRecipe,review:previewServiceOrder,create:createServiceOrder,recover:recoverServiceOrderCommand,page:serviceOrderPage,original:readServiceOrderOriginal,history:serviceOrderHistory,version:serviceOrderHistoryOriginal,reservations:serviceOrderReservationChoices,catalog:serviceOrderCatalogChoices,tasks:serviceOrderTaskChoices,financial:serviceOrderFinancialPage,reviewTransition:previewServiceOrderTransition,transition:transitionServiceOrder};
 export async function POST(request:NextRequest,{params}:{params:Promise<{operation:string}>}){
  const{operation}=await params;return serviceOrderHttp(request,(actor,input,requestId)=>{
   const deps={db:prisma,requestId,ipAddress:null};if(operation==="metadata")return readServiceOrderMetadata(actor,z.object({orderId:z.uuid()}).strict().parse(input).orderId,deps);
