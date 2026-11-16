@@ -3,6 +3,9 @@ import {execFileSync} from "node:child_process";
 import {PrismaClient} from "@prisma/client";
 import {afterAll,beforeAll,describe,expect,it} from "vitest";
 import {withTenant} from "@/platform/db/tenant";
+import {authContextForAccount} from "@/platform/authz/account-context";
+import {previewServiceOrder,createServiceOrder} from "@/modules/services/application/service-order-service";
+import {inspectOriginalServiceOrder} from "@/modules/services/application/service-order-original";
 import {serviceOrderFinancialPage} from "@/modules/services/application/service-order-financial";
 import {ServiceOrderAccessError} from "@/modules/services/domain/service-order";
 import {serviceOrderFinancialPageSchema} from "@/modules/services/domain/service-order-view";
@@ -14,12 +17,19 @@ import {readServiceAllocationWorkspace} from "@/modules/finance/application/serv
 import {serviceAllocationCollectionsSchema} from "@/modules/finance/domain/service-allocation-workspace";
 import {ServiceAllocationAccessError,ServiceAllocationSourceChangedError} from "@/modules/finance/domain/service-allocation";
 import {nativeServiceOrderFinancialFixture} from "./support/service-order-financial-fixture";
+import {nativeServiceOrderFixture} from "./support/service-order-fixture";
 import {provisionIntegrationRole} from "./support/database-role";
 
 const url=process.env.TEST_DATABASE_URL;let admin:PrismaClient,db:PrismaClient;
 beforeAll(async()=>{const target=url?new URL(url):null;if(!target||!["127.0.0.1","localhost"].includes(target.hostname)||!(target.pathname.startsWith("/alvillas_automation_")||process.env.GITHUB_ACTIONS==="true"&&target.pathname==="/alvillas_os"))throw Error("Dedicated native order financial database required");execFileSync(process.execPath,["node_modules/prisma/build/index.js","migrate","deploy"],{env:{...process.env,DATABASE_URL:url},stdio:"pipe"});admin=new PrismaClient({datasourceUrl:url});await provisionIntegrationRole(admin,"alvillas_ops_tests");const scoped=new URL(url!);scoped.username="alvillas_ops_tests";scoped.password="alvillas_ops_tests";db=new PrismaClient({datasourceUrl:scoped.toString()});});
 afterAll(async()=>{await db?.$disconnect();await admin?.$disconnect();});
 describe("canonical service order actual native financial effects",()=>{
+ it("requires independent held and current allocation authority even before an order has financial sources",async()=>{
+  const f=await nativeServiceOrderFixture(admin,db),role=await withTenant(db,f.organizationId,async tx=>{const role=await tx.role.create({data:{organizationId:f.organizationId,key:"empty_order_finance_"+randomUUID(),name:"Explicit independent financial-source access"}});for(const key of["owner:view","team_member:view"]){const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key}});await tx.rolePermission.create({data:{organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}});}const grant=await tx.roleAssignment.create({data:{organizationId:f.organizationId,userAccountId:f.account.id,personId:f.person.id,roleId:role.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});return{role,grant};}),ctx={...f.ctx,authContext:{...await authContextForAccount(f.organizationId,f.account.id,{db}),personId:f.person.id}},review=await previewServiceOrder(ctx,f.request,f.deps),order=await createServiceOrder(ctx,{request:f.request,reviewFingerprint:review.reviewFingerprint,idempotencyKey:randomUUID()},f.deps);
+  await withTenant(db,f.organizationId,async tx=>{expect((await inspectOriginalServiceOrder(ctx,tx,order.orderId)).root.id).toBe(order.orderId);});await expect(serviceOrderFinancialPage(ctx,{orderId:order.orderId},f.deps)).rejects.toBeInstanceOf(ServiceOrderAccessError);
+  await withTenant(db,f.organizationId,async tx=>{const permission=await tx.permission.findFirstOrThrow({where:{organizationId:f.organizationId,key:"service_allocation:view"}});await tx.rolePermission.create({data:{organizationId:f.organizationId,roleId:role.role.id,permissionId:permission.id}});});await expect(serviceOrderFinancialPage(ctx,{orderId:order.orderId},f.deps)).rejects.toBeInstanceOf(ServiceOrderAccessError);
+  const allowed={...ctx,authContext:{...await authContextForAccount(f.organizationId,f.account.id,{db}),personId:f.person.id}};expect(serviceOrderFinancialPageSchema.parse(await serviceOrderFinancialPage(allowed,{orderId:order.orderId},f.deps)).items).toEqual([]);await withTenant(db,f.organizationId,tx=>tx.roleAssignment.update({where:{id:role.grant.id},data:{archivedAt:new Date()}}));await expect(serviceOrderFinancialPage(allowed,{orderId:order.orderId},f.deps)).rejects.toBeInstanceOf(ServiceOrderAccessError);
+ });
  it.each(["SUPPLIER","EMPLOYEE"]as const)("recognizes actual %s costs and collected order margin exactly once, with original history and native reversals",async kind=>{
   const f=await nativeServiceOrderFinancialFixture(admin,db,kind),read=()=>serviceOrderFinancialPage(f.ctx,{orderId:f.orderId},f.deps).then(value=>serviceOrderFinancialPageSchema.parse(value)),original=await withTenant(db,f.organizationId,tx=>tx.serviceOrderEvent.findMany({where:{orderId:f.orderId},orderBy:{version:"asc"}}));
   expect((await read()).pageTotals.recognized).toBe(0);expect(serviceAllocationCollectionsSchema.parse(await readServiceAllocationWorkspace(f.ctx,{operation:"COLLECTIONS",propertyId:f.property.id,taskId:randomUUID()},{db})).items).toEqual([]);
