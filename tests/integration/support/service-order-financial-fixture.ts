@@ -14,10 +14,11 @@ import {assignOperationTask} from "@/modules/reservations/application/operation-
 import {completeAssignedFieldTask} from "@/modules/reservations/application/reservation-service";
 import {nativeServiceOrderFixture} from "./service-order-fixture";
 import {serviceAllocationFixtures} from "./service-allocation-admission-fixture";
+import type {NativeGuestHubFixtureIdentity} from "./guest-hub-fixture";
 
 /** Reuse actual native cost producers; every fictional rule is explicit in this fixture. */
-export async function nativeServiceOrderFinancialFixture(admin:PrismaClient,db:PrismaClient,kind:"SUPPLIER"|"EMPLOYEE"){
- const f=await nativeServiceOrderFixture(admin,db),role=await withTenant(db,f.organizationId,async tx=>{
+export async function nativeServiceOrderFinancialFixture(admin:PrismaClient,db:PrismaClient,kind:"SUPPLIER"|"EMPLOYEE",identity?:NativeGuestHubFixtureIdentity){
+ const f=await nativeServiceOrderFixture(admin,db,identity),role=await withTenant(db,f.organizationId,async tx=>{
   const keys=["service_allocation:view","service_allocation:create","service_allocation:edit","service_allocation:pay","service_allocation:void","owner:view","team_member:view","cash_collection:create","financial_transaction:create","financial_transaction:pay","financial_transaction:void"],permissions=await tx.permission.findMany({where:{organizationId:f.organizationId,key:{in:keys}}});if(permissions.length!==keys.length)throw Error("Actual native financial permissions required");
   const role=await tx.role.create({data:{organizationId:f.organizationId,key:"native_order_finance_"+randomUUID(),name:"Explicit actual native order financial grants"}});await tx.rolePermission.createMany({data:permissions.map(permission=>({organizationId:f.organizationId,roleId:role.id,permissionId:permission.id}))});await tx.roleAssignment.create({data:{organizationId:f.organizationId,roleId:role.id,userAccountId:f.account.id,personId:f.person.id,scopeType:"organization",validFrom:new Date("2020-01-01")}});
   const owner=await tx.owner.create({data:{organizationId:f.organizationId,displayName:"Actual original native service order owner"}});await tx.propertyOwner.create({data:{organizationId:f.organizationId,propertyId:f.property.id,ownerId:owner.id,shareBps:10000}});await new ConfigRuleRepository(tx,f.organizationId).createVersion({key:"finance.accounting_periods",scopeType:"organization",effectiveFrom:new Date("2020-01-01"),createdBy:f.account.id,value:{timezone:"UTC",allow_early_close:false,max_reopen_seconds:60},reason:"Explicit fictional native order accounting calendar"});return role;

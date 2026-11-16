@@ -8,6 +8,8 @@ For a collection linked to a canonical order, native admission must use that ord
 
 The financial source identity uses the independently scoped financial order grant. It does not require access to the guest directory or operational order interface. Historical source reads and nonce recovery repeat that financial order authority while retaining access to original corrections and reversals.
 
+The financial projection uses that same metadata authority before selecting the registered currency or native financial records. It never reads private catalog/order originals to establish financial access, and it repeats the order witness and independent allocation/source rights before returning even an empty page.
+
 Collection and actual validated work remain separate prerequisites. Catalog internal cost and a quote are estimates or agreed terms, never evidence of collected funds or incurred cost. Existing supplier-invoice and employee-compensation services supply actual recognized costs. Existing allocation policy continues to select its configured version at actual completion and creates its revenue, owner and tax postings exactly once through its original source and command guards.
 
 Order financial reads derive recognized revenue, original provider cost, ownership, tax and margin only from active native recognition journals and their validated original admissions. Reversed recognitions contribute nothing. Bounded pages label their totals as page totals; they never imply that a partial page is the entire order balance. Financial history and source rights remain independently protected, and no production legal, tax, retention or financial default is introduced.

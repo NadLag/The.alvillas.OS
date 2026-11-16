@@ -4,6 +4,8 @@ import {Money} from "@/platform/money/money";
 import {serviceAllocationAuthorityChecks} from "@/platform/authz/service-allocation-resource";
 import {recheckFinanceAuthorization} from "@/modules/finance/application/finance-access";
 import {nativeServiceOrderProperty} from "./order-source";
+import {inspectNativeServiceOrderFinancialHead} from "./order-financial-source";
+import {ServiceOrderRepository} from "@/modules/services/infrastructure/service-order-repository";
 import {FinanceRepository} from "@/modules/finance/infrastructure/finance-repository";
 import {ServiceAllocationPostingRepository} from "@/modules/finance/infrastructure/service-allocation-posting-repository";
 import {recheckServiceAllocationRead} from "@/modules/finance/application/service-allocation-command-service";
@@ -13,20 +15,21 @@ import {ServiceAllocationAccessError,ServiceAllocationSourceChangedError,Service
 import {ServiceOrderAccessError,ServiceOrderConflictError,ServiceOrderSourceUnavailableError,ServiceOrderConfigurationError} from "@/modules/services/domain/service-order";
 import {serviceOrderFinancialPageTotals,ServiceOrderFinancialIntegrityError,type RecognizedServiceOrderAmounts} from "@/modules/services/domain/service-order-financial";
 
-type Order={id:string;taskId:string|null;propertyId:string;reservationId:string;serviceKey:string;currency:string};
 /** Reuse the native actual-work, collection, source, cost and journal chains;
  * this projection creates neither another financial source nor a balance. */
-export async function nativeServiceOrderFinancialPage(actor:AccountActorContext,tx:TenantTransaction,order:Order,after?:string){
- try{return await readNativeServiceOrderFinancialPage(actor,tx,order,after);}catch(error){
+export async function nativeServiceOrderFinancialPage(actor:AccountActorContext,tx:TenantTransaction,selection:{orderId:string;after?:string}){
+ try{return await readNativeServiceOrderFinancialPage(actor,tx,selection);}catch(error){
   if(error instanceof ServiceAllocationAccessError)throw new ServiceOrderAccessError();
   if(error instanceof ServiceAllocationSourceChangedError)throw new ServiceOrderConflictError();
   if(error instanceof ServiceAllocationSourceUnavailableError||error instanceof ServiceOrderFinancialIntegrityError)throw new ServiceOrderSourceUnavailableError();
   if(error instanceof ServiceAllocationConfigurationError)throw new ServiceOrderConfigurationError();throw error;
  }
 }
-async function readNativeServiceOrderFinancialPage(actor:AccountActorContext,tx:TenantTransaction,order:Order,after?:string){
- const finance=new FinanceRepository(tx,actor.organizationId),property=await nativeServiceOrderProperty(tx,actor.organizationId,order.propertyId);if(!property)throw new ServiceOrderAccessError();const checks=serviceAllocationAuthorityChecks({type:"service_allocation",organizationId:actor.organizationId,propertyId:order.propertyId,reservationId:order.reservationId,jobId:order.taskId,city:property.cityId,region:property.regionId,dataClass:"financial"});await recheckFinanceAuthorization(actor,tx,await finance.clock(),checks,new ServiceAllocationAccessError());
- const heads=order.taskId?await finance.serviceOrderFinancialSourceHeads(order.taskId,after):[],selected=heads.slice(0,20),postings=new ServiceAllocationPostingRepository(tx,actor.organizationId),recognized:RecognizedServiceOrderAmounts[]=[],items=[];
+async function readNativeServiceOrderFinancialPage(actor:AccountActorContext,tx:TenantTransaction,selection:{orderId:string;after?:string}){
+ const authority=await inspectNativeServiceOrderFinancialHead(actor,tx,selection.orderId),head=authority.head;
+ const finance=new FinanceRepository(tx,actor.organizationId),property=await nativeServiceOrderProperty(tx,actor.organizationId,head.propertyId);if(!property)throw new ServiceOrderAccessError();const checks=serviceAllocationAuthorityChecks({type:"service_allocation",organizationId:actor.organizationId,propertyId:head.propertyId,reservationId:head.reservationId,jobId:head.taskId,city:property.cityId,region:property.regionId,dataClass:"financial"});await recheckFinanceAuthorization(actor,tx,await finance.clock(),checks,new ServiceAllocationAccessError());
+ const currency=await new ServiceOrderRepository(tx,actor.organizationId).financialCurrency(head.id);if(!currency)throw new ServiceAllocationSourceChangedError();const order={...head,currency:currency.currency};
+ const heads=order.taskId?await finance.serviceOrderFinancialSourceHeads(order.taskId,selection.after):[],selected=heads.slice(0,20),postings=new ServiceAllocationPostingRepository(tx,actor.organizationId),recognized:RecognizedServiceOrderAmounts[]=[],items=[];
  for(const head of selected){
   const root=await recheckServiceAllocationRead(actor,tx,head.id);if(root.collection.taskId!==order.taskId||root.collection.propertyId!==order.propertyId||root.collection.reservationId!==order.reservationId)throw new ServiceOrderAccessError();
   const active=await postings.activeRecognition(root.id);if(!active){items.push({sourceId:root.id,collectionId:root.cashCollectionId,postingId:null,amounts:null});continue;}
@@ -37,5 +40,5 @@ async function readNativeServiceOrderFinancialPage(actor:AccountActorContext,tx:
  }
  for(const head of selected)await recheckServiceAllocationRead(actor,tx,head.id);
  await recheckFinanceAuthorization(actor,tx,await finance.clock(),checks,new ServiceAllocationAccessError());
- return{items,next:heads.length>20?selected.at(-1)!.id:null,currency:order.currency,pageTotals:serviceOrderFinancialPageTotals(order.currency,recognized)};
+ await authority.recheck();return{orderId:order.id,items,next:heads.length>20?selected.at(-1)!.id:null,currency:order.currency,pageTotals:serviceOrderFinancialPageTotals(order.currency,recognized)};
 }
