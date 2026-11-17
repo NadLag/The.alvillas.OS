@@ -1,0 +1,6 @@
+import {randomUUID} from "node:crypto";
+import {it,expect} from "vitest";
+import {inventoryPurchaseDraftSchema,canonicalInventoryPurchaseLines} from "@/modules/inventory/domain/purchase-expense";
+it("retains exact original counting units and rejects fractional, duplicate or unbounded goods receipts",()=>{
+ const itemId=randomUUID(),locationId=randomUUID(),source={kind:"EXPENSE",id:randomUUID(),receiptId:randomUUID(),receiptSource:"DOCUMENT_VERSION"},draft={source,lines:[{itemId,locationId,quantity:"9".repeat(40)}],reason:"Actual original financial source and physical goods receipt"};expect(inventoryPurchaseDraftSchema.parse(draft).lines[0].quantity).toBe(draft.lines[0].quantity);for(const quantity of["0","-1","1.25","01","9".repeat(41)])expect(inventoryPurchaseDraftSchema.safeParse({...draft,lines:[{itemId,locationId,quantity}]}).success).toBe(false);expect(inventoryPurchaseDraftSchema.safeParse({...draft,lines:[draft.lines[0],draft.lines[0]]}).success).toBe(false);expect(inventoryPurchaseDraftSchema.safeParse({...draft,lines:Array.from({length:51},()=>({itemId:randomUUID(),locationId,quantity:"1"}))}).success).toBe(false);expect(canonicalInventoryPurchaseLines([{itemId:itemId.toUpperCase(),locationId:locationId.toUpperCase(),quantity:"3"}])).toEqual([{itemId,locationId,quantity:"3"}]);
+});
