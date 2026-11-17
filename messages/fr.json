@@ -7605,5 +7605,53 @@
       "stock_held": "Le stock physique ou les réservations empêchent cette opération.",
       "uncertain": "Le résultat reste incertain. Résolvez la demande d’origine."
     }
+  },
+  "InventoryStayConsumption": {
+    "eyebrow": "Stock",
+    "title": "Consommation par séjour",
+    "subtitle": "Comparez les besoins configurés du séjour à sa consommation enregistrée.",
+    "back": "Retour à l’espace de travail",
+    "chooseStay": "Choisir un séjour",
+    "refresh": "Actualiser",
+    "search": "Rechercher un article",
+    "apply": "Appliquer",
+    "unspecified": "Non configuré",
+    "unspecifiedUnit": "Unité non précisée",
+    "privateHidden": "Les informations privées sont masquées. Rouvrez cette vue pour vérifier vos droits actuels.",
+    "planningHelp": "Les quantités prévues s’appliquent une seule fois par séjour, dans l’unité d’origine de chaque article. Cette prévision ne réserve ni ne déduit de stock.",
+    "actualHelp": "Les quantités enregistrées comprennent les consommations liées au séjour et leurs contrepassations d’origine. Les autres mouvements et consommations non affectées sont exclus.",
+    "notApplicable": "Le séjour ou le logement est archivé, annulé ou en non-présentation. Le besoin prévu est indisponible ; l’historique reste visible.",
+    "policyVersion": "Règle à l’arrivée · version {version}",
+    "noPolicy": "Aucune règle de stock n’était effective à l’arrivée. La consommation reste visible sans besoin présumé.",
+    "viewStay": "Ouvrir le séjour",
+    "item": "Article",
+    "unit": "Unité",
+    "expected": "Prévu par séjour",
+    "actual": "Consommation enregistrée",
+    "variance": "Enregistré moins prévu",
+    "movements": "Écritures de stock",
+    "empty": "Aucun article configuré ni consommation enregistrée ne correspond à la recherche.",
+    "firstPage": "Première page",
+    "nextPage": "Page suivante",
+    "movementHistory": "Historique des mouvements",
+    "settings": "Configuration du stock",
+    "applyHelp": "Appliquez la recherche pour charger les informations actuelles.",
+    "chooseHelp": "Choisissez un séjour pour voir ses besoins et sa consommation enregistrée.",
+    "conditions": {
+      "MISSING": "Article non ajouté au catalogue",
+      "RETIRED": "Article retiré",
+      "INCOMPATIBLE": "La catégorie ou l’unité configurée diffère de l’article d’origine"
+    },
+    "states": {
+      "ready": "Prêt",
+      "loading": "Chargement…",
+      "offline": "Reconnectez-vous pour consulter les niveaux de stock actuels.",
+      "forbidden": "Votre accès actuel ne permet plus de consulter ces stocks.",
+      "unavailable": "Les niveaux de stock sont indisponibles. Réessayez.",
+      "validation": "Vérifiez l’article ou l’emplacement d’origine et les filtres.",
+      "conflict": "Le stock ou l’accès a changé. Actualisez les quantités actuelles.",
+      "stock_held": "Les réservations de stock d’origine doivent être conservées.",
+      "uncertain": "Le résultat reste incertain. Actualisez le stock actuel."
+    }
   }
 }
