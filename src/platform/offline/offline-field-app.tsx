@@ -1,8 +1,5 @@
 "use client";
-<<<<<<< HEAD
 import {TransferDetails} from "@/modules/services/ui/transfer-details";
-=======
->>>>>>> feat/F-SVC-07-native-grocery-orders
 
 import { useEffect, useRef, useState } from "react";
 import { liveQuery } from "dexie";
