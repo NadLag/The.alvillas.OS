@@ -211,3 +211,5 @@ prisma/migrations/20261115230000_native_service_order_tenant_policy_names/migrat
 /prisma/migrations/20261117004500_inventory_item_receipt_delivery/migration.sql text eol=lf
 prisma/migrations/20261117010000_inventory_item_negative_receipts/migration.sql text eol=lf
 prisma/migrations/20261117013000_native_inventory_location_receipts/migration.sql text eol=lf
+prisma/migrations/20261117023000_native_inventory_movement_groups/migration.sql text eol=lf
+prisma/migrations/20261117024500_native_inventory_movement_history/migration.sql text eol=lf

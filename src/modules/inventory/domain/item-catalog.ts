@@ -30,8 +30,8 @@ export function inventoryItemDefinition(raw:unknown,existing?:Pick<InventoryItem
 
 /** Inspect each actual location independently: opposite amounts at different
  * locations never mean that physical stock has disappeared. */
-export function assertInventoryItemCanRetire(positions:readonly{quantity:string}[]){
- if(positions.some(row=>BigInt(stockQuantitySchema.parse(row.quantity))!==0n))throw new InventoryItemStockHeldError("Reconcile or dispose of actual remaining stock before retiring its item");
+export function assertInventoryItemCanRetire(positions:readonly{quantity:string;reserved?:string;damaged?:string}[]){
+ if(positions.some(row=>[row.quantity,row.reserved??"0",row.damaged??"0"].some(value=>BigInt(stockQuantitySchema.parse(value))!==0n)))throw new InventoryItemStockHeldError("Reconcile or dispose of actual remaining stock before retiring its item");
 }
 
 export function selectInventoryItems<Row extends{key:string;category:z.infer<typeof inventoryCategorySchema>;name:Record<string,string|undefined>;unit:string|null;archivedAt:Date|null}>(rows:readonly Row[],raw:unknown){

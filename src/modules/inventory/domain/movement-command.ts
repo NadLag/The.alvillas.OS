@@ -1,0 +1,12 @@
+import {z} from "zod";
+import {inventoryMovementDraftSchema} from "./movement";
+import {inventoryItemReasonSchema} from "./item-catalog";
+import {stockQuantitySchema,stockRevisionSchema} from "./stocktake";
+const hash=z.string().regex(/^[a-f0-9]{64}$/u);
+export const inventoryMovementRequestSchema=z.union([inventoryMovementDraftSchema,z.object({kind:z.literal("REVERSAL"),originalGroupId:z.uuid(),reason:inventoryItemReasonSchema}).strict()]);
+export type InventoryMovementRequest=z.infer<typeof inventoryMovementRequestSchema>;
+export const inventoryMovementCommandSchema=z.object({draft:inventoryMovementRequestSchema,reviewFingerprint:hash,idempotencyKey:z.uuid()}).strict();
+export const inventoryMovementLineSchema=z.object({id:z.uuid(),locationId:z.uuid(),itemId:z.uuid(),quantity:stockQuantitySchema,reserved:stockQuantitySchema,damaged:stockQuantitySchema,revision:stockRevisionSchema,reservationId:z.uuid().nullable(),reversesMovementId:z.uuid().nullable(),leg:z.number().int().min(1).max(2)}).strict();
+export const inventoryMovementReceiptSchema=z.object({schemaVersion:z.literal(1),organizationId:z.uuid(),actorId:z.uuid(),groupId:z.uuid(),kind:z.enum(["PURCHASE","TRANSFER","CONSUMPTION","LAUNDRY_SEND","LAUNDRY_RETURN","DAMAGE","LOSS","DISPOSAL","ADJUSTMENT","RESERVATION","RELEASE","REVERSAL"]),commandHash:hash,lines:z.array(inventoryMovementLineSchema).min(1).max(2)}).strict();
+export type InventoryMovementReceipt=z.infer<typeof inventoryMovementReceiptSchema>;
+export const inventoryMovementRecorded="inventory.movement.recorded",inventoryMovementCancelled="inventory.movement.cancelled";

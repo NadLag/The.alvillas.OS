@@ -2,21 +2,26 @@ import { Prisma } from "@prisma/client";
 import type { TenantTransaction } from "@/platform/db/tenant";
 import type { StockPosition } from "../domain/stocktake";
 import type {Scope} from "@/platform/authz/authorize";
+import {inventorySourceSelection} from "./source-scope-sql";
 export type InventoryItemHead={id:string;key:string;category:string;unit:string|null;labels:unknown;sourceConfigRuleId:string|null;createdAt:Date;archivedAt:Date|null;xmin:string;tuple:string};
 export type InventoryLocationHead={id:string;kind:string;propertyId:string|null;label:string;createdAt:Date;archivedAt:Date|null;xmin:string;tuple:string;propertyName:string|null;propertyCity:string|null;propertyRegion:string|null;propertyArchivedAt:Date|null;propertyXmin:string|null;propertyTuple:string|null};
 export type InventoryLocationProperty={id:string;name:string;city:string|null;region:string|null;archivedAt:Date|null;xmin:string;tuple:string};
 
 export class InventoryRepository {
   constructor(private readonly tx: TenantTransaction, private readonly organizationId: string) {}
+  lockMovementCommand(key:string){return this.lock("movement-command:"+key,false);}
+  async lockMovementStreams(item:InventoryItemHead,locations:readonly InventoryLocationHead[]){
+    await this.lock("catalog:"+item.key,true);
+    for(const key of [...new Set(locations.map(row=>row.propertyId??row.id))].sort())await this.lock("location:"+key,true);
+    for(const key of [...new Set(locations.map(row=>"stock:"+(row.propertyId??row.id)+":"+item.key))].sort())await this.lock(key,false);
+  }
   lockLocationCommand(key:string){return this.lock("location-command:"+key,false);}
   lockLocationMetadata(value:{id?:string;propertyId:string|null}){const key=value.propertyId??value.id;return key?this.lock("location:"+key,false):Promise.resolve();}
   async locationCatalogById(id:string):Promise<InventoryLocationHead|null>{return(await this.locationHeads(Prisma.sql`l.id=${id}::uuid`,1))[0]??null;}
   async locationCatalogByProperty(propertyId:string):Promise<InventoryLocationHead|null>{return(await this.locationHeads(Prisma.sql`l.property_id=${propertyId}::uuid`,1))[0]??null;}
   locationCatalogAuditSources(ids:string[]){return ids.length?this.locationHeads(Prisma.sql`l.id IN(${Prisma.join(ids.map(id=>Prisma.sql`${id}::uuid`))})`,ids.length):Promise.resolve([]);}
   private propertyScopeSelection(scopes:readonly Scope[]){
-    const clauses=scopes.flatMap(scope=>{const kind=scope.scopeType??scope.resourceType,id=scope.scopeId??scope.resourceId;if(kind==="organization")return[Prisma.sql`TRUE`];if(!id)return[];
-      if(kind==="property")return[Prisma.sql`p.id::text=${id}`];if(kind==="city")return[Prisma.sql`COALESCE(p.city_id::text,p.city)=${id}`];if(kind==="region")return[Prisma.sql`COALESCE(p.region_id::text,p.region)=${id}`];return[];});
-    return clauses.length?Prisma.sql`(${Prisma.join(clauses," OR ")})`:Prisma.sql`FALSE`;
+    return inventorySourceSelection(scopes);
   }
   locationCatalogPage(input:{query:string;kind?:string;propertyId?:string;archived:boolean;after?:string},held:readonly Scope[],current:readonly Scope[]){
     const pattern="%"+input.query.replace(/[\\%_]/gu,value=>"\\"+value)+"%";
@@ -46,7 +51,7 @@ export class InventoryRepository {
     return this.tx.$executeRaw(Prisma.sql`UPDATE inventory_location SET label=${input.label},archived_at=${input.archivedAt} WHERE organization_id=${this.organizationId}::uuid AND id=${row.id}::uuid AND xmin::text=${row.xmin} AND ctid::text=${row.tuple}`);
   }
   locationCatalogStocks(locationId:string){
-    return this.tx.$queryRaw<Array<{itemId:string;quantity:string}>>(Prisma.sql`SELECT item_id AS "itemId",sum(quantity_delta)::text AS quantity FROM inventory_movement WHERE organization_id=${this.organizationId}::uuid AND location_id=${locationId}::uuid GROUP BY item_id ORDER BY item_id`);
+    return this.tx.$queryRaw<Array<{itemId:string;quantity:string;reserved:string;damaged:string}>>(Prisma.sql`SELECT item_id AS "itemId",sum(quantity_delta)::text AS quantity,sum(reserved_quantity_delta)::text AS reserved,sum(damaged_quantity_delta)::text AS damaged FROM inventory_movement WHERE organization_id=${this.organizationId}::uuid AND location_id=${locationId}::uuid GROUP BY item_id ORDER BY item_id`);
   }
   async catalogClock(){return(await this.tx.$queryRaw<Array<{now:Date}>>(Prisma.sql`SELECT clock_timestamp() AS now`))[0].now;}
   lockCatalogCommand(key:string){return this.lock("catalog-command:"+key,false);}
@@ -70,7 +75,7 @@ export class InventoryRepository {
     return this.tx.$executeRaw(Prisma.sql`UPDATE inventory_item SET labels=${JSON.stringify(input.labels)}::jsonb,archived_at=${input.archivedAt} WHERE organization_id=${this.organizationId}::uuid AND id=${row.id}::uuid AND xmin::text=${row.xmin} AND ctid::text=${row.tuple}`);
   }
   itemStockLocations(itemId:string){
-    return this.tx.$queryRaw<Array<{locationId:string;quantity:string}>>(Prisma.sql`SELECT location_id AS "locationId",sum(quantity_delta)::text AS quantity FROM inventory_movement WHERE organization_id=${this.organizationId}::uuid AND item_id=${itemId}::uuid GROUP BY location_id ORDER BY location_id`);
+    return this.tx.$queryRaw<Array<{locationId:string;quantity:string;reserved:string;damaged:string}>>(Prisma.sql`SELECT location_id AS "locationId",sum(quantity_delta)::text AS quantity,sum(reserved_quantity_delta)::text AS reserved,sum(damaged_quantity_delta)::text AS damaged FROM inventory_movement WHERE organization_id=${this.organizationId}::uuid AND item_id=${itemId}::uuid GROUP BY location_id ORDER BY location_id`);
   }
 
   private async lock(key: string, shared: boolean) {
@@ -163,8 +168,10 @@ export class InventoryRepository {
       LEFT JOIN inventory_item i ON i.organization_id=${this.organizationId}::uuid AND i.key=p.item_key
       LEFT JOIN LATERAL (SELECT sum(quantity_delta) AS quantity FROM inventory_movement m
        WHERE m.organization_id=${this.organizationId}::uuid AND m.location_id=l.id AND m.item_id=i.id AND m.created_at<${before}) q ON true
-      LEFT JOIN LATERAL (SELECT max(revision) AS revision FROM inventory_stocktake s
-       WHERE s.organization_id=${this.organizationId}::uuid AND s.location_id=l.id AND s.item_id=i.id AND s.received_at<${before}) v ON true
+      LEFT JOIN LATERAL (SELECT max(revision) AS revision FROM (
+       SELECT s.revision FROM inventory_stocktake s WHERE s.organization_id=${this.organizationId}::uuid AND s.location_id=l.id AND s.item_id=i.id AND s.received_at<${before}
+       UNION ALL SELECT m.revision FROM inventory_movement m WHERE m.organization_id=${this.organizationId}::uuid AND m.location_id=l.id AND m.item_id=i.id AND m.created_at<${before}
+      ) revisions) v ON true
       ORDER BY p.property_id,p.item_key`);
   }
 }

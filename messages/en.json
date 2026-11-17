@@ -7305,5 +7305,103 @@
       "stock_held": "Stock remains for one or more items here. Reconcile its actual movements before retiring the location.",
       "uncertain": "The result is uncertain. Recover the original request before submitting another change."
     }
+  },
+  "InventoryMovements": {
+    "eyebrow": "INVENTORY",
+    "title": "Stock movements",
+    "subtitle": "Record purchases, transfers, use, laundry and stock commitments.",
+    "back": "Workspace",
+    "refresh": "Refresh",
+    "retry": "Try again",
+    "create": "Record movement",
+    "reverse": "Reverse movement",
+    "reversed": "Reversed by an original correction",
+    "reverseHelp": "This records the exact opposite of every original movement. Quantities already used or committed may prevent reversal.",
+    "kind": "Movement type",
+    "quantity": "Quantity in original item units",
+    "condition": "Stock condition",
+    "direction": "Adjustment direction",
+    "reason": "Reason",
+    "review": "Review movement",
+    "reviewTitle": "Review quantities",
+    "reviewHelp": "Check every location before saving this permanent movement.",
+    "publish": "Record reviewed movement",
+    "saving": "Recording…",
+    "changeReview": "Change review",
+    "close": "Close",
+    "search": "Search original records",
+    "searchAction": "Search",
+    "firstPage": "First page",
+    "nextPage": "Next page",
+    "noChoices": "No accessible records match.",
+    "unselected": "Choose a record",
+    "clearReservation": "Use unreserved stock",
+    "unspecifiedUnit": "Original counting unit",
+    "dimension": "Stock dimension",
+    "before": "Before",
+    "movement": "Movement",
+    "after": "After",
+    "available": "Available after movement",
+    "shortage": "Outstanding stock shortage",
+    "empty": "No stock movements are visible.",
+    "privateHidden": "Private inventory is hidden. Refresh when you return.",
+    "saved": "The original movement was recorded.",
+    "notRecorded": "The original request was not recorded. A new reviewed movement can be created.",
+    "unconfirmed": "Resolve the original request before recording another movement.",
+    "fields": {
+      "item": "Item",
+      "location": "Source location",
+      "destination": "Destination location",
+      "reservation": "Reservation"
+    },
+    "choose": {
+      "item": "Choose item",
+      "location": "Choose source",
+      "destination": "Choose destination",
+      "reservation": "Choose reservation"
+    },
+    "choices": {
+      "items": "Choose an original item",
+      "locations": "Choose a physical location",
+      "reservations": "Choose an original reservation"
+    },
+    "conditions": {
+      "USABLE": "Usable",
+      "DAMAGED": "Damaged"
+    },
+    "directions": {
+      "ADD": "Add counted units",
+      "REMOVE": "Remove counted units"
+    },
+    "dimensions": {
+      "quantity": "Physical quantity",
+      "reserved": "Reserved quantity",
+      "damaged": "Damaged quantity"
+    },
+    "kinds": {
+      "PURCHASE": "Purchase",
+      "TRANSFER": "Transfer",
+      "CONSUMPTION": "Consumption",
+      "LAUNDRY_SEND": "Send to laundry",
+      "LAUNDRY_RETURN": "Return from laundry",
+      "DAMAGE": "Damage",
+      "LOSS": "Loss",
+      "DISPOSAL": "Disposal",
+      "ADJUSTMENT": "Adjustment",
+      "RESERVATION": "Reserve stock",
+      "RELEASE": "Release stock",
+      "REVERSAL": "Reversal"
+    },
+    "states": {
+      "ready": "Ready",
+      "loading": "Loading…",
+      "offline": "Reconnect to review or record stock movements.",
+      "forbidden": "Your current access no longer permits this inventory.",
+      "unavailable": "Inventory is unavailable. Try again.",
+      "validation": "Check the original records, quantities and reason.",
+      "conflict": "Stock or access changed. Review the current quantities again.",
+      "stock_held": "Original physical stock or commitments prevent this operation.",
+      "uncertain": "The result is unconfirmed. Resolve the original request."
+    }
   }
 }

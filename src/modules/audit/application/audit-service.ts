@@ -92,6 +92,12 @@ export function presentAuditHistoryRow(
   action: "view" | "export" = "view",
   financialResource?: FinancialAuditResource
 ): AuditHistoryRow {
+  if(row.resourceType==="inventory_movement"||row.resourceType==="inventory_movement_command"){
+    const now=new Date(),command=row.resourceType==="inventory_movement_command",source=financialResource;
+    const allowed=["inventory_movement","inventory_item","inventory_location"].every(type=>(["view",action]as const).every(permission=>authorizeOrganizationSource(ctx.authContext,permission,{type,organizationId:ctx.organizationId,dataClass:"operational"},now)))&&
+      (command||source?.type==="inventory_movement"&&source.id===row.resourceId&&source.organizationId===ctx.organizationId&&Boolean(source.sourceRecordId)&&Boolean(source.inventorySources)&&source.inventorySources!.every(original=>original.organizationId===ctx.organizationId&&(["view",action]as const).every(permission=>authorizeUnconditionalSource(ctx.authContext,permission,original,now))));
+    return present({...ctx.authContext,visibleDataClasses:new Set(allowed?["operational"]:[])},action,{type:auditLogResource,organizationId:ctx.organizationId,propertyId:row.propertyScopeId,data:row},{before:{dataClass:"operational"},after:{dataClass:"operational"},reason:{dataClass:"operational"}})as AuditHistoryRow;
+  }
   if(row.resourceType==="inventory_location"||row.resourceType==="inventory_location_command"){
     const now=new Date(),source={type:"inventory_location",organizationId:ctx.organizationId,dataClass:"operational"as const},location=row.resourceType==="inventory_location"?financialResource:undefined,propertyId=location?.propertyId??undefined;
     const allowed=authorizeOrganizationSource(ctx.authContext,"view",source,now)&&authorizeOrganizationSource(ctx.authContext,action,source,now)&&
@@ -341,6 +347,7 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     repository.propertyFinanceResources([...new Set(settingRows.flatMap(row => row.propertyScopeId ? [row.propertyScopeId] : []))])
   ]);
   const inventoryLocations = await read("inventory_location",ids=>repository.inventoryLocationResources(ids));
+  const inventoryMovements = await read("inventory_movement",ids=>repository.inventoryMovementResources(ids));
   const originalCashIds = [...new Set([...transactions.values()].flatMap(resource => resource.guestPayment?.originalCollectionId ? [resource.guestPayment.originalCollectionId] : []))];
   const originalCash = originalCashIds.length ? await repository.cashResources(originalCashIds) : new Map<string, Resource>();
   for (const [id, resource] of transactions) if (resource.guestPayment?.originalCollectionId) {
@@ -348,6 +355,7 @@ async function financialAuditResources(repository: AuditRepository, rows: AuditH
     transactions.set(id, { ...resource, guestPayment: { ...resource.guestPayment, cashSource: actual ? { ...actual, occurredAt: resource.guestPayment.receivedAt } : undefined } });
   }
   return new Map([
+    ...[...inventoryMovements].map(([id,resource])=>["inventory_movement:"+id,resource]as const),
     ...[...inventoryLocations].map(([id,resource])=>["inventory_location:"+id,resource]as const),
     ...settingRows.flatMap(row => row.resourceId ? [[`${row.resourceType}:${row.resourceId}`, {
       ...settingProperties.get(row.propertyScopeId ?? ""), type: row.resourceType, organizationId, id: row.resourceId, propertyId: row.propertyScopeId
@@ -393,7 +401,8 @@ async function presentCurrentAuditRows(ctx:AuditActorContext,tx:TenantTransactio
   const resources=await financialAuditResources(repository,rows,ctx.organizationId),authContext=await authContextForAccountInTransaction(tx,ctx.organizationId,ctx.actorId),current={...ctx,authContext};
   if(authContext.organizationId!==ctx.organizationId||authContext.userAccountId!==ctx.actorId)throw new AuditAuthorizationError();assertAllowed(ctx,action);assertAllowed(current,action);
   const locationIds=[...new Set(rows.filter(row=>row.resourceType==="inventory_location").flatMap(row=>row.resourceId?[row.resourceId]:[]))],locations=locationIds.length?await repository.inventoryLocationResources(locationIds):new Map<string,FinancialAuditResource>();
-  return rows.map(row=>{let source=row.resourceId?resources.get(`${row.resourceType}:${row.resourceId}`):undefined;if(row.resourceType==="inventory_location"&&!isDeepStrictEqual(source,locations.get(row.resourceId??"")))source=undefined;return presentAuditHistoryRow(current,presentAuditHistoryRow(ctx,row,action,source),action,source);});
+  const movementIds=[...new Set(rows.filter(row=>row.resourceType==="inventory_movement").flatMap(row=>row.resourceId?[row.resourceId]:[]))],movements=movementIds.length?await repository.inventoryMovementResources(movementIds):new Map<string,FinancialAuditResource>();
+  return rows.map(row=>{let source=row.resourceId?resources.get(`${row.resourceType}:${row.resourceId}`):undefined;if(row.resourceType==="inventory_location"&&!isDeepStrictEqual(source,locations.get(row.resourceId??"")))source=undefined;if(row.resourceType==="inventory_movement"&&!isDeepStrictEqual(source,movements.get(row.resourceId??"")))source=undefined;return presentAuditHistoryRow(current,presentAuditHistoryRow(ctx,row,action,source),action,source);});
 }
 
 function csvCell(value: unknown): string {
