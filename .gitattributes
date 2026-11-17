@@ -232,3 +232,5 @@ prisma/migrations/20261117202500_inventory_purchase_original_attachment_id/migra
 prisma/migrations/20261117210000_native_laundry_batch_custody/migration.sql text eol=lf
 prisma/migrations/20261117211500_laundry_batch_condition_handoffs/migration.sql text eol=lf
 prisma/migrations/20261117214500_laundry_original_command_proof/migration.sql text eol=lf
+
+prisma/migrations/20261117220000_native_supplier_price_list_versions/migration.sql text eol=lf
